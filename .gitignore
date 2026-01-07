@@ -1,0 +1,21 @@
+# iOS
+ios/build/
+ios/*.xcworkspace
+ios/Pods/
+ios/.build/
+*.xcuserstate
+
+# Android
+android/build/
+android/.gradle/
+android/local.properties
+android/*.apk
+
+# IDE
+.idea/
+*.swp
+.DS_Store
+
+# Secrets
+*.secret
+*.env

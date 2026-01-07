@@ -19,3 +19,6 @@ android/*.apk
 # Secrets
 *.secret
 *.env
+
+# Local scratch space
+scratch/

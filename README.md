@@ -10,6 +10,7 @@ A native iOS/Android chat app for communicating with your [Clawd](https://clawd.
 
 - `ios/` — Swift/SwiftUI project
 - `android/` — Kotlin/Jetpack Compose project
+- `provider/` — Clawdbot provider (WebSocket connector)
 - `shared/` — Assets, icons, API specs
 - `docs/` — Protocol docs, design notes
 - `prompts/` — LLM translation prompts that work well

@@ -28,6 +28,7 @@ struct RootView: View {
                 PairingView(auth: auth, connection: connection, device: device)
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(backgroundColor.ignoresSafeArea())
         .animation(.easeInOut(duration: 0.3), value: auth.isAuthenticated)
     }

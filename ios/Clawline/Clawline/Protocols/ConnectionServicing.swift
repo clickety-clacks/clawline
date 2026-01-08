@@ -13,5 +13,5 @@ enum PairingResult: Equatable {
 }
 
 protocol ConnectionServicing {
-    func requestPairing(claimedName: String, deviceId: String) async throws -> PairingResult
+    func requestPairing(serverURL: URL, claimedName: String, deviceId: String) async throws -> PairingResult
 }

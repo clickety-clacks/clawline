@@ -11,7 +11,7 @@ final class StubConnectionService: ConnectionServicing {
     var approvalDelay: TimeInterval = 3.0
     var shouldSucceed: Bool = true
 
-    func requestPairing(claimedName: String, deviceId: String) async throws -> PairingResult {
+    func requestPairing(serverURL: URL, claimedName: String, deviceId: String) async throws -> PairingResult {
         try await Task.sleep(for: .seconds(approvalDelay))
 
         if shouldSucceed {

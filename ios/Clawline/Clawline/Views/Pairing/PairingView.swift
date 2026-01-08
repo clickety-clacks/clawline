@@ -34,45 +34,80 @@ struct PairingView: View {
     }
 
     var body: some View {
-        VStack {
-            Spacer()
+        GeometryReader { geometry in
+            VStack {
+                Spacer()
 
-            // Bottom-anchored content
-            VStack(alignment: .leading, spacing: 0) {
-                // App icon
-                Image(systemName: "bubble.left.and.bubble.right.fill")
-                    .font(.system(size: 72, weight: .light))
-                    .foregroundStyle(.tint)
+                // Bottom-anchored content
+                VStack(alignment: .leading, spacing: 0) {
+                    // App icon
+                    Image(systemName: "bubble.left.and.bubble.right.fill")
+                        .font(.system(size: 72, weight: .light))
+                        .foregroundStyle(.tint)
+                        .padding(.bottom, 24)
+
+                    // Title and subtitle
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Clawline")
+                            .font(.system(size: 38, weight: .light))
+                            .tracking(1)
+
+                        Text(subtitleText)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
                     .padding(.bottom, 24)
 
-                // Title and subtitle
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Clawline")
-                        .font(.system(size: 38, weight: .light))
-                        .tracking(1)
-
-                    Text("Connect to get started")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+                    // State-specific content
+                    switch viewModel.state {
+                    case .idle, .enteringName, .enteringAddress:
+                        inputScrollView(width: geometry.size.width - (concentricPadding * 2))
+                    case .waitingForApproval(let code):
+                        waitingContent(code: code)
+                    case .success:
+                        ProgressView()
+                            .controlSize(.large)
+                            .frame(maxWidth: .infinity, alignment: .center)
+                    case .error(let message):
+                        errorContent(message: message)
+                    }
                 }
-                .padding(.bottom, 24)
+                .padding(.horizontal, concentricPadding)
+                .padding(.bottom, concentricPadding)
+            }
+        }
+    }
 
-                // State-specific content
-                switch viewModel.state {
-                case .idle, .enteringName:
+    private var subtitleText: String {
+        switch viewModel.state {
+        case .enteringAddress:
+            return "Enter server address"
+        default:
+            return "Connect to get started"
+        }
+    }
+
+    private func inputScrollView(width: CGFloat) -> some View {
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 0) {
+                    // Page 0: Name input
                     nameInputRow
-                case .waitingForApproval(let code):
-                    waitingContent(code: code)
-                case .success:
-                    ProgressView()
-                        .controlSize(.large)
-                        .frame(maxWidth: .infinity, alignment: .center)
-                case .error(let message):
-                    errorContent(message: message)
+                        .frame(width: width)
+                        .id(0)
+
+                    // Page 1: Address input
+                    addressInputRow
+                        .frame(width: width)
+                        .id(1)
                 }
             }
-            .padding(.horizontal, concentricPadding)
-            .padding(.bottom, concentricPadding)
+            .scrollDisabled(true)
+            .onChange(of: viewModel.currentPage) { _, newPage in
+                withAnimation(.easeInOut(duration: 0.3)) {
+                    proxy.scrollTo(newPage, anchor: .leading)
+                }
+            }
         }
     }
 
@@ -89,26 +124,71 @@ struct PairingView: View {
                 TextField("Your name", text: $viewModel.nameInput)
                     .font(.body)
                     .textFieldStyle(.plain)
-                    .submitLabel(.done)
+                    .submitLabel(.next)
                     .onSubmit {
-                        guard !viewModel.nameInput.trimmingCharacters(in: .whitespaces).isEmpty else { return }
-                        Task { await viewModel.submitName() }
+                        viewModel.submitName()
                     }
             }
             .padding(.horizontal, 20)
             .frame(height: inputHeight)
             .glassEffect(.regular, in: Capsule())
 
-            // Checkmark submit button
+            // Checkmark to proceed to address
             Button {
-                Task { await viewModel.submitName() }
+                viewModel.submitName()
             } label: {
                 Image(systemName: "checkmark")
                     .font(.system(size: 18, weight: .semibold))
             }
             .frame(width: inputHeight, height: inputHeight)
             .glassEffect(.regular.interactive(), in: Circle())
-            .disabled(viewModel.nameInput.trimmingCharacters(in: .whitespaces).isEmpty)
+            .disabled(!viewModel.isNameValid)
+        }
+    }
+
+    private var addressInputRow: some View {
+        HStack(spacing: 12) {
+            // Back button
+            Button {
+                viewModel.goBackToName()
+            } label: {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: 18, weight: .semibold))
+            }
+            .frame(width: inputHeight, height: inputHeight)
+            .glassEffect(.regular.interactive(), in: Circle())
+
+            // Text field with server icon
+            HStack(spacing: 12) {
+                Image(systemName: "server.rack")
+                    .font(.system(size: 18))
+                    .foregroundStyle(.secondary)
+
+                TextField("Server address", text: $viewModel.addressInput)
+                    .font(.body)
+                    .textFieldStyle(.plain)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .keyboardType(.URL)
+                    .submitLabel(.go)
+                    .onSubmit {
+                        Task { await viewModel.submitAddress() }
+                    }
+            }
+            .padding(.horizontal, 20)
+            .frame(height: inputHeight)
+            .glassEffect(.regular, in: Capsule())
+
+            // Checkmark to submit
+            Button {
+                Task { await viewModel.submitAddress() }
+            } label: {
+                Image(systemName: "checkmark")
+                    .font(.system(size: 18, weight: .semibold))
+            }
+            .frame(width: inputHeight, height: inputHeight)
+            .glassEffect(.regular.interactive(), in: Circle())
+            .disabled(!viewModel.isAddressValid)
         }
     }
 
@@ -160,7 +240,7 @@ private final class PreviewAuthManager: AuthManaging {
 }
 
 private final class PreviewConnectionService: ConnectionServicing {
-    func requestPairing(claimedName: String, deviceId: String) async throws -> PairingResult {
+    func requestPairing(serverURL: URL, claimedName: String, deviceId: String) async throws -> PairingResult {
         try await Task.sleep(for: .seconds(2))
         return .success(token: "preview-token", userId: claimedName)
     }

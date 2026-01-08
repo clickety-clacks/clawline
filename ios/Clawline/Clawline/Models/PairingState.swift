@@ -10,6 +10,7 @@ import Foundation
 enum PairingState: Equatable {
     case idle
     case enteringName
+    case enteringAddress
     case waitingForApproval(code: String?)
     case success
     case error(String)

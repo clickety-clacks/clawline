@@ -154,6 +154,7 @@ struct PairingView: View {
             .opacity(viewModel.isNameValid ? 1 : 0.4)
             .disabled(!viewModel.isNameValid)
         }
+        .background(.clear)
     }
 
     private var addressInputRow: some View {
@@ -198,11 +199,11 @@ struct PairingView: View {
                     .foregroundStyle(.white)
             }
             .frame(width: inputHeight, height: inputHeight)
-            .background(Color.accentColor)
-            .clipShape(Circle())
+            .background(Color.accentColor, in: Circle())
             .opacity(viewModel.isAddressValid ? 1 : 0.4)
             .disabled(!viewModel.isAddressValid)
         }
+        .background(.clear)
     }
 
     private var waitingInputRow: some View {
@@ -231,9 +232,9 @@ struct PairingView: View {
                     .foregroundStyle(.white)
             }
             .frame(width: inputHeight, height: inputHeight)
-            .background(Color.accentColor)
-            .clipShape(Circle())
+            .background(Color.accentColor, in: Circle())
         }
+        .background(.clear)
     }
 
     private func errorContent(message: String) -> some View {

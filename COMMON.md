@@ -46,9 +46,16 @@ find ~/Library/Developer/Xcode/DerivedData/Clawline-*/Build/Products/Debug-iphon
 # 4) Install & launch via MCP
 ```
 
-## Architecture: Protocol-Based DI
+## Architecture: Protocol-Based DI + Modern Swift Concurrency
 
 **CRITICAL**: No singletons. All services are protocol-based and injected for testability.
+
+### Modern Concurrency Rules
+
+1. **Use `@Observable` (iOS 17+)**, NOT `ObservableObject` + `@Published`
+2. **Use `AsyncStream`** for service → ViewModel data flow
+3. **Only use Combine** for multicast, complex operators, or backpressure
+4. **Be consistent** - don't mix paradigms (no AsyncStream + @Published)
 
 ### Core Protocols
 
@@ -56,27 +63,33 @@ find ~/Library/Developer/Xcode/DerivedData/Clawline-*/Build/Products/Debug-iphon
 |----------|---------|
 | `AuthManaging` | Auth state, token storage |
 | `ConnectionServicing` | WebSocket connection, pairing flow |
-| `ChatServicing` | Message list, sending |
+| `ChatServicing` | Message streaming via AsyncStream |
 
 ### Injection Pattern
 
 ```swift
+import Observation
+
 // Dependencies created at app root
 @main
 struct ClawlineApp: App {
-    @StateObject private var authManager = AuthManager()
+    @State private var authManager = AuthManager()
 
     var body: some Scene {
         WindowGroup {
             RootView()
-                .environmentObject(authManager)
+                .environment(authManager)
         }
     }
 }
 
-// ViewModels take dependencies via init
+// ViewModels use @Observable, take dependencies via init
+@Observable
 @MainActor
-final class PairingViewModel: ObservableObject {
+final class PairingViewModel {
+    var state: PairingState = .idle
+    var nameInput = ""
+
     private let auth: any AuthManaging
     private let connection: any ConnectionServicing
 
@@ -84,6 +97,12 @@ final class PairingViewModel: ObservableObject {
         self.auth = auth
         self.connection = connection
     }
+}
+
+// Services expose AsyncStream for async data
+protocol ChatServicing {
+    var incomingMessages: AsyncStream<Message> { get }
+    func send(content: String) async throws
 }
 ```
 

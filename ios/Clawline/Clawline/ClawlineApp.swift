@@ -9,9 +9,19 @@ import SwiftUI
 
 @main
 struct ClawlineApp: App {
+    @State private var authManager = AuthManager()
+
+    private let connectionService: any ConnectionServicing = StubConnectionService()
+    private let deviceIdentifier: any DeviceIdentifying = DeviceIdentifier()
+    private let chatService: any ChatServicing = StubChatService()
+
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            RootView()
+                .environment(authManager)
+                .environment(\.connectionService, connectionService)
+                .environment(\.deviceIdentifier, deviceIdentifier)
+                .environment(\.chatService, chatService)
         }
     }
 }

@@ -74,40 +74,37 @@ struct MessageInputBar: View {
 }
 
 #Preview("Empty") {
-    ZStack(alignment: .bottom) {
-        Color.clear
-        MessageInputBar(
-            text: .constant(""),
-            isSending: false,
-            onSend: {},
-            onAdd: {}
-        )
-    }
-    .ignoresSafeArea(edges: .bottom)
+    Color.clear
+        .safeAreaInset(edge: .bottom) {
+            MessageInputBar(
+                text: .constant(""),
+                isSending: false,
+                onSend: {},
+                onAdd: {}
+            )
+        }
 }
 
 #Preview("With Text") {
-    ZStack(alignment: .bottom) {
-        Color.clear
-        MessageInputBar(
-            text: .constant("Hello there!"),
-            isSending: false,
-            onSend: {},
-            onAdd: {}
-        )
-    }
-    .ignoresSafeArea(edges: .bottom)
+    Color.clear
+        .safeAreaInset(edge: .bottom) {
+            MessageInputBar(
+                text: .constant("Hello there!"),
+                isSending: false,
+                onSend: {},
+                onAdd: {}
+            )
+        }
 }
 
 #Preview("Sending") {
-    ZStack(alignment: .bottom) {
-        Color.clear
-        MessageInputBar(
-            text: .constant("Sending message..."),
-            isSending: true,
-            onSend: {},
-            onAdd: {}
-        )
-    }
-    .ignoresSafeArea(edges: .bottom)
+    Color.clear
+        .safeAreaInset(edge: .bottom) {
+            MessageInputBar(
+                text: .constant("Sending message..."),
+                isSending: true,
+                onSend: {},
+                onAdd: {}
+            )
+        }
 }

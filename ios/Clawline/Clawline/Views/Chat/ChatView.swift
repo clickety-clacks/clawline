@@ -18,15 +18,14 @@ struct ChatView: View {
     }
 
     var body: some View {
-        ZStack(alignment: .bottom) {
-            VStack(spacing: 0) {
-                messageList
+        VStack(spacing: 0) {
+            messageList
 
-                if let error = viewModel.error {
-                    errorBanner(error)
-                }
+            if let error = viewModel.error {
+                errorBanner(error)
             }
-
+        }
+        .safeAreaInset(edge: .bottom) {
             MessageInputBar(
                 text: $viewModel.messageInput,
                 isSending: viewModel.isSending,
@@ -34,7 +33,6 @@ struct ChatView: View {
                 onAdd: { }
             )
         }
-        .ignoresSafeArea(edges: .bottom)
         .task { await viewModel.onAppear() }
         .onDisappear { viewModel.onDisappear() }
     }

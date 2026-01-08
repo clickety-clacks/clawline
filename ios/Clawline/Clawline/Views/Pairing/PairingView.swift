@@ -109,6 +109,7 @@ struct PairingView: View {
             }
             .scrollDisabled(true)
             .scrollContentBackground(.hidden)
+            .background(.clear)
             .onChange(of: viewModel.currentPage) { _, newPage in
                 withAnimation(.easeInOut(duration: 0.3)) {
                     proxy.scrollTo(newPage, anchor: .leading)
@@ -145,9 +146,12 @@ struct PairingView: View {
             } label: {
                 Image(systemName: "checkmark")
                     .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(.white)
             }
             .frame(width: inputHeight, height: inputHeight)
-            .glassEffect(.regular.interactive(), in: Circle())
+            .background(Color.accentColor)
+            .clipShape(Circle())
+            .opacity(viewModel.isNameValid ? 1 : 0.4)
             .disabled(!viewModel.isNameValid)
         }
     }
@@ -185,15 +189,18 @@ struct PairingView: View {
             .frame(height: inputHeight)
             .glassEffect(.regular, in: Capsule())
 
-            // Send arrow to submit
+            // Send button to submit
             Button {
                 Task { await viewModel.submitAddress() }
             } label: {
-                Image(systemName: "arrow.up")
+                Image(systemName: "paperplane.fill")
                     .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(.white)
             }
             .frame(width: inputHeight, height: inputHeight)
-            .glassEffect(.regular.interactive(), in: Circle())
+            .background(Color.accentColor)
+            .clipShape(Circle())
+            .opacity(viewModel.isAddressValid ? 1 : 0.4)
             .disabled(!viewModel.isAddressValid)
         }
     }
@@ -221,9 +228,11 @@ struct PairingView: View {
             } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(.white)
             }
             .frame(width: inputHeight, height: inputHeight)
-            .glassEffect(.regular.interactive(), in: Circle())
+            .background(Color.accentColor)
+            .clipShape(Circle())
         }
     }
 

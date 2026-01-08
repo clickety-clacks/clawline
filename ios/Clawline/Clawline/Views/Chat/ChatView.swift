@@ -9,6 +9,7 @@ import SwiftUI
 
 struct ChatView: View {
     @State private var viewModel: ChatViewModel
+    @State private var keyboard = KeyboardObserver()
 
     init(auth: any AuthManaging, chatService: any ChatServicing) {
         _viewModel = State(initialValue: ChatViewModel(
@@ -24,8 +25,9 @@ struct ChatView: View {
             if let error = viewModel.error {
                 errorBanner(error)
             }
-        }
-        .safeAreaInset(edge: .bottom) {
+
+            Spacer(minLength: 0)
+
             MessageInputBar(
                 text: $viewModel.messageInput,
                 isSending: viewModel.isSending,
@@ -33,6 +35,7 @@ struct ChatView: View {
                 onAdd: { }
             )
         }
+        .padding(.bottom, keyboard.keyboardHeight > 0 ? keyboard.keyboardHeight - 34 : 0)
         .task { await viewModel.onAppear() }
         .onDisappear { viewModel.onDisappear() }
     }

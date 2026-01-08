@@ -15,12 +15,16 @@ final class PairingViewModel {
     var nameInput: String = ""
     var addressInput: String = ""
 
-    /// Current page index for the horizontal scroll (0 = name, 1 = address)
+    /// Current page index for the horizontal scroll (0 = name, 1 = address, 2 = waiting)
     var currentPage: Int = 0
+
+    /// Direction of the last page transition (true = forward/right, false = backward/left)
+    var isNavigatingForward: Bool = true
 
     private let auth: any AuthManaging
     private let connection: any ConnectionServicing
     private let deviceId: String
+    private var pairingTask: Task<Void, Never>?
 
     init(auth: any AuthManaging, connection: any ConnectionServicing, device: any DeviceIdentifying) {
         self.auth = auth
@@ -40,11 +44,12 @@ final class PairingViewModel {
     func submitName() {
         guard isNameValid else { return }
         state = .enteringAddress
+        isNavigatingForward = true
         currentPage = 1
     }
 
     /// Called when user submits the server address - initiates pairing
-    func submitAddress() async {
+    func submitAddress() {
         guard isAddressValid else {
             state = .error("Server address cannot be empty")
             return
@@ -66,35 +71,50 @@ final class PairingViewModel {
         }
 
         state = .waitingForApproval(code: nil)
+        isNavigatingForward = true
         currentPage = 2
 
-        do {
-            let result = try await connection.requestPairing(
-                serverURL: serverURL,
-                claimedName: nameInput,
-                deviceId: deviceId
-            )
-            switch result {
-            case .success(let token, let userId):
-                auth.storeCredentials(token: token, userId: userId)
-                state = .success
-            case .denied(let reason):
-                state = .error(reason)
+        // Cancel any existing task and start a new one
+        pairingTask?.cancel()
+        pairingTask = Task {
+            do {
+                let result = try await connection.requestPairing(
+                    serverURL: serverURL,
+                    claimedName: nameInput,
+                    deviceId: deviceId
+                )
+
+                // Check if cancelled before processing result
+                guard !Task.isCancelled else { return }
+
+                switch result {
+                case .success(let token, let userId):
+                    auth.storeCredentials(token: token, userId: userId)
+                    state = .success
+                case .denied(let reason):
+                    state = .error(reason)
+                }
+            } catch {
+                // Don't show error if task was cancelled
+                guard !Task.isCancelled else { return }
+                state = .error(error.localizedDescription)
             }
-        } catch {
-            state = .error(error.localizedDescription)
         }
     }
 
     /// Go back to name input page
     func goBackToName() {
         state = .enteringName
+        isNavigatingForward = false
         currentPage = 0
     }
 
     /// Cancel the pairing request and go back to address input
     func cancelPairing() {
+        pairingTask?.cancel()
+        pairingTask = nil
         state = .enteringAddress
+        isNavigatingForward = false
         currentPage = 1
     }
 }

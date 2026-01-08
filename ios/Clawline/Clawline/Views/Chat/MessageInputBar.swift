@@ -61,7 +61,6 @@ struct MessageInputBar: View {
                 }
                 .frame(width: sendButtonSize, height: sendButtonSize)
                 .disabled(isSending || text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                .glassEffect(.regular.interactive(), in: Circle())
                 .padding(.trailing, (inputBarHeight - sendButtonSize) / 2)
             }
             .frame(height: inputBarHeight)

@@ -34,45 +34,48 @@ struct PairingView: View {
     }
 
     var body: some View {
-        GeometryReader { geometry in
-            VStack {
-                Spacer()
+        VStack {
+            Spacer()
 
-                // Bottom-anchored content
-                VStack(alignment: .leading, spacing: 0) {
-                    // App icon
-                    Image(systemName: "bubble.left.and.bubble.right.fill")
-                        .font(.system(size: 72, weight: .light))
-                        .foregroundStyle(.tint)
-                        .padding(.bottom, 24)
-
-                    // Title and subtitle
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Clawline")
-                            .font(.system(size: 38, weight: .light))
-                            .tracking(1)
-
-                        Text(subtitleText)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
+            // Bottom-anchored content
+            VStack(spacing: 0) {
+                // App icon
+                Image(systemName: "bubble.left.and.bubble.right.fill")
+                    .font(.system(size: 72, weight: .light))
+                    .foregroundStyle(.tint)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.bottom, 24)
 
-                    // State-specific content
-                    switch viewModel.state {
-                    case .idle, .enteringName, .enteringAddress, .waitingForApproval:
-                        inputScrollView(width: geometry.size.width - (concentricPadding * 2))
-                    case .success:
-                        ProgressView()
-                            .controlSize(.large)
-                            .frame(maxWidth: .infinity, alignment: .center)
-                    case .error(let message):
-                        errorContent(message: message)
-                    }
+                // Title and subtitle
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Clawline")
+                        .font(.system(size: 38, weight: .light))
+                        .tracking(1)
+
+                    Text(subtitleText)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
                 }
-                .padding(.horizontal, concentricPadding)
-                .padding(.bottom, concentricPadding)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.bottom, 24)
+
+                // State-specific content
+                switch viewModel.state {
+                case .idle, .enteringName, .enteringAddress, .waitingForApproval:
+                    GeometryReader { geometry in
+                        inputScrollView(width: geometry.size.width)
+                    }
+                    .frame(height: inputHeight)
+                case .success:
+                    ProgressView()
+                        .controlSize(.large)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                case .error(let message):
+                    errorContent(message: message)
+                }
             }
+            .padding(.horizontal, concentricPadding)
+            .padding(.bottom, concentricPadding)
         }
     }
 
@@ -91,25 +94,27 @@ struct PairingView: View {
         ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 0) {
-                    // Page 0: Name input
                     nameInputRow
                         .frame(width: width)
+                        .opacity(viewModel.currentPage == 0 ? 1 : 0)
+                        .animation(.easeInOut(duration: 0.3), value: viewModel.currentPage)
                         .id(0)
 
-                    // Page 1: Address input
                     addressInputRow
                         .frame(width: width)
+                        .opacity(viewModel.currentPage == 1 ? 1 : 0)
+                        .animation(.easeInOut(duration: 0.3), value: viewModel.currentPage)
                         .id(1)
 
-                    // Page 2: Waiting for approval
                     waitingInputRow
                         .frame(width: width)
+                        .opacity(viewModel.currentPage == 2 ? 1 : 0)
+                        .animation(.easeInOut(duration: 0.3), value: viewModel.currentPage)
                         .id(2)
                 }
             }
             .scrollDisabled(true)
-            .scrollContentBackground(.hidden)
-            .background(.clear)
+            .scrollClipDisabled()
             .onChange(of: viewModel.currentPage) { _, newPage in
                 withAnimation(.easeInOut(duration: 0.3)) {
                     proxy.scrollTo(newPage, anchor: .leading)
@@ -138,6 +143,7 @@ struct PairingView: View {
             }
             .padding(.horizontal, 20)
             .frame(height: inputHeight)
+            .frame(maxWidth: .infinity)
             .glassEffect(.regular, in: Capsule())
 
             // Checkmark to proceed to address
@@ -149,12 +155,10 @@ struct PairingView: View {
                     .foregroundStyle(.white)
             }
             .frame(width: inputHeight, height: inputHeight)
-            .background(Color.accentColor)
-            .clipShape(Circle())
+            .background(Color.accentColor, in: Circle())
             .opacity(viewModel.isNameValid ? 1 : 0.4)
             .disabled(!viewModel.isNameValid)
         }
-        .background(.clear)
     }
 
     private var addressInputRow: some View {
@@ -183,16 +187,17 @@ struct PairingView: View {
                     .keyboardType(.URL)
                     .submitLabel(.go)
                     .onSubmit {
-                        Task { await viewModel.submitAddress() }
+                        viewModel.submitAddress()
                     }
             }
             .padding(.horizontal, 20)
             .frame(height: inputHeight)
+            .frame(maxWidth: .infinity)
             .glassEffect(.regular, in: Capsule())
 
             // Send button to submit
             Button {
-                Task { await viewModel.submitAddress() }
+                viewModel.submitAddress()
             } label: {
                 Image(systemName: "paperplane.fill")
                     .font(.system(size: 18, weight: .semibold))
@@ -203,7 +208,6 @@ struct PairingView: View {
             .opacity(viewModel.isAddressValid ? 1 : 0.4)
             .disabled(!viewModel.isAddressValid)
         }
-        .background(.clear)
     }
 
     private var waitingInputRow: some View {
@@ -221,6 +225,7 @@ struct PairingView: View {
             }
             .padding(.horizontal, 20)
             .frame(height: inputHeight)
+            .frame(maxWidth: .infinity)
             .glassEffect(.regular, in: Capsule())
 
             // X button to cancel
@@ -232,9 +237,8 @@ struct PairingView: View {
                     .foregroundStyle(.white)
             }
             .frame(width: inputHeight, height: inputHeight)
-            .background(Color.accentColor, in: Circle())
+            .background(Color.red, in: Circle())
         }
-        .background(.clear)
     }
 
     private func errorContent(message: String) -> some View {

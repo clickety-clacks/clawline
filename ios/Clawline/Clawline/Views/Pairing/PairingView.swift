@@ -60,10 +60,8 @@ struct PairingView: View {
 
                     // State-specific content
                     switch viewModel.state {
-                    case .idle, .enteringName, .enteringAddress:
+                    case .idle, .enteringName, .enteringAddress, .waitingForApproval:
                         inputScrollView(width: geometry.size.width - (concentricPadding * 2))
-                    case .waitingForApproval(let code):
-                        waitingContent(code: code)
                     case .success:
                         ProgressView()
                             .controlSize(.large)
@@ -82,6 +80,8 @@ struct PairingView: View {
         switch viewModel.state {
         case .enteringAddress:
             return "Enter server address"
+        case .waitingForApproval:
+            return "Awaiting approval"
         default:
             return "Connect to get started"
         }
@@ -100,9 +100,15 @@ struct PairingView: View {
                     addressInputRow
                         .frame(width: width)
                         .id(1)
+
+                    // Page 2: Waiting for approval
+                    waitingInputRow
+                        .frame(width: width)
+                        .id(2)
                 }
             }
             .scrollDisabled(true)
+            .scrollContentBackground(.hidden)
             .onChange(of: viewModel.currentPage) { _, newPage in
                 withAnimation(.easeInOut(duration: 0.3)) {
                     proxy.scrollTo(newPage, anchor: .leading)
@@ -179,11 +185,11 @@ struct PairingView: View {
             .frame(height: inputHeight)
             .glassEffect(.regular, in: Capsule())
 
-            // Checkmark to submit
+            // Send arrow to submit
             Button {
                 Task { await viewModel.submitAddress() }
             } label: {
-                Image(systemName: "checkmark")
+                Image(systemName: "arrow.up")
                     .font(.system(size: 18, weight: .semibold))
             }
             .frame(width: inputHeight, height: inputHeight)
@@ -192,23 +198,32 @@ struct PairingView: View {
         }
     }
 
-    private func waitingContent(code: String?) -> some View {
-        VStack(alignment: .leading, spacing: 20) {
-            HStack(spacing: 16) {
-                ProgressView()
-                    .controlSize(.regular)
-
-                Text("Waiting for approval")
+    private var waitingInputRow: some View {
+        HStack(spacing: 12) {
+            // Status bubble with text and spinner
+            HStack(spacing: 12) {
+                Text("Waiting for owner")
                     .font(.body)
                     .foregroundStyle(.secondary)
-            }
 
-            if let code {
-                Text(code)
-                    .font(.system(size: 36, weight: .medium, design: .monospaced))
-                    .tracking(6)
-                    .padding(.top, 8)
+                Spacer()
+
+                ProgressView()
+                    .controlSize(.small)
             }
+            .padding(.horizontal, 20)
+            .frame(height: inputHeight)
+            .glassEffect(.regular, in: Capsule())
+
+            // X button to cancel
+            Button {
+                viewModel.cancelPairing()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 18, weight: .semibold))
+            }
+            .frame(width: inputHeight, height: inputHeight)
+            .glassEffect(.regular.interactive(), in: Circle())
         }
     }
 

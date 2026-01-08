@@ -66,6 +66,7 @@ final class PairingViewModel {
         }
 
         state = .waitingForApproval(code: nil)
+        currentPage = 2
 
         do {
             let result = try await connection.requestPairing(
@@ -89,5 +90,11 @@ final class PairingViewModel {
     func goBackToName() {
         state = .enteringName
         currentPage = 0
+    }
+
+    /// Cancel the pairing request and go back to address input
+    func cancelPairing() {
+        state = .enteringAddress
+        currentPage = 1
     }
 }

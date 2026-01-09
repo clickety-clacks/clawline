@@ -13,6 +13,7 @@ import UIKit
 struct MessageInputBar: View {
     @Binding var text: String
     let isSending: Bool
+    let isKeyboardOnScreen: Bool
     let onSend: () -> Void
     let onAdd: () -> Void
 
@@ -35,6 +36,12 @@ struct MessageInputBar: View {
     // For 48pt Circle/Capsule elements, radius = 24pt
     private var concentricPadding: CGFloat {
         max(deviceCornerRadius - (inputBarHeight / 2), 8)
+    }
+
+    // When keyboard on screen: 12pt gap (SwiftUI handles keyboard safe area)
+    // When keyboard off screen: concentric padding from screen edge
+    private var bottomPadding: CGFloat {
+        isKeyboardOnScreen ? 12 : concentricPadding
     }
 
     var body: some View {
@@ -66,9 +73,9 @@ struct MessageInputBar: View {
             .frame(height: inputBarHeight)
             .glassEffect(.regular, in: Capsule())
         }
-        // Equal padding on horizontal and bottom for concentricity
         .padding(.horizontal, concentricPadding)
-        .padding(.bottom, concentricPadding)
+        .padding(.bottom, bottomPadding)
+        .animation(.easeInOut(duration: 0.25), value: isKeyboardOnScreen)
     }
 }
 
@@ -78,6 +85,7 @@ struct MessageInputBar: View {
             MessageInputBar(
                 text: .constant(""),
                 isSending: false,
+                isKeyboardOnScreen: false,
                 onSend: {},
                 onAdd: {}
             )
@@ -90,6 +98,7 @@ struct MessageInputBar: View {
             MessageInputBar(
                 text: .constant("Hello there!"),
                 isSending: false,
+                isKeyboardOnScreen: false,
                 onSend: {},
                 onAdd: {}
             )
@@ -102,6 +111,7 @@ struct MessageInputBar: View {
             MessageInputBar(
                 text: .constant("Sending message..."),
                 isSending: true,
+                isKeyboardOnScreen: false,
                 onSend: {},
                 onAdd: {}
             )

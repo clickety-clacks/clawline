@@ -6,9 +6,11 @@
 //
 
 import SwiftUI
+import UIKit
 
 struct ChatView: View {
     @State private var viewModel: ChatViewModel
+    @State private var isKeyboardOnScreen: Bool = false
 
     init(auth: any AuthManaging, chatService: any ChatServicing) {
         _viewModel = State(initialValue: ChatViewModel(
@@ -30,13 +32,36 @@ struct ChatView: View {
             MessageInputBar(
                 text: $viewModel.messageInput,
                 isSending: viewModel.isSending,
+                isKeyboardOnScreen: isKeyboardOnScreen,
                 onSend: { Task { await viewModel.send() } },
                 onAdd: { }
             )
         }
         .ignoresSafeArea(.container, edges: .bottom)
+        .onAppear {
+            updateKeyboardState()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { notification in
+            guard let userInfo = notification.userInfo,
+                  let endFrame = userInfo[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else {
+                return
+            }
+
+            let screenHeight = UIApplication.shared.connectedScenes
+                .compactMap { $0 as? UIWindowScene }
+                .first?.screen.bounds.height ?? UIScreen.main.bounds.height
+            isKeyboardOnScreen = endFrame.origin.y < screenHeight
+        }
         .task { await viewModel.onAppear() }
         .onDisappear { viewModel.onDisappear() }
+    }
+
+    private func updateKeyboardState() {
+        let keyboardWindow = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap { $0.windows }
+            .first { String(describing: type(of: $0)).contains("Keyboard") }
+        isKeyboardOnScreen = keyboardWindow != nil
     }
 
     private var messageList: some View {
@@ -50,7 +75,7 @@ struct ChatView: View {
                 }
                 .padding()
             }
-            .onChange(of: viewModel.messages.count) { _ in
+            .onChange(of: viewModel.messages.count) {
                 if let last = viewModel.messages.last {
                     withAnimation {
                         proxy.scrollTo(last.id, anchor: .bottom)

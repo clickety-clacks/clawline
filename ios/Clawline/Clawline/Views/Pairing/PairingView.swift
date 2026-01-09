@@ -98,8 +98,9 @@ struct PairingView: View {
                 return
             }
 
-            let screenHeight = UIScreen.main.bounds.height
-            // Keyboard is on screen if its top edge is above the screen bottom
+            let screenHeight = UIApplication.shared.connectedScenes
+                .compactMap { $0 as? UIWindowScene }
+                .first?.screen.bounds.height ?? UIScreen.main.bounds.height
             isKeyboardOnScreen = endFrame.origin.y < screenHeight
         }
     }

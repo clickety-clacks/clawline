@@ -19,11 +19,13 @@ final class ChatViewModel {
 
     private let auth: any AuthManaging
     private let chatService: any ChatServicing
+    private let settings: SettingsManager
     private var observationTask: Task<Void, Never>?
 
-    init(auth: any AuthManaging, chatService: any ChatServicing) {
+    init(auth: any AuthManaging, chatService: any ChatServicing, settings: SettingsManager) {
         self.auth = auth
         self.chatService = chatService
+        self.settings = settings
     }
 
     func onAppear() async {
@@ -76,10 +78,15 @@ final class ChatViewModel {
         let content = messageInput.trimmingCharacters(in: .whitespaces)
         guard !content.isEmpty else { return }
 
-        // Handle /logout command
+        // Handle slash commands
         if content.lowercased() == "/logout" {
             messageInput = ""
             logout()
+            return
+        }
+        if content.lowercased() == "/settings" {
+            messageInput = ""
+            settings.toggleSettings()
             return
         }
 

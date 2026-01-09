@@ -24,7 +24,7 @@ struct RootView: View {
     var body: some View {
         Group {
             if auth.isAuthenticated {
-                ChatView(auth: auth, chatService: chatService)
+                ChatView(auth: auth, chatService: chatService, settings: settings)
             } else {
                 PairingView(auth: auth, connection: connection, device: device)
             }

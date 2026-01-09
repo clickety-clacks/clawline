@@ -12,10 +12,11 @@ struct ChatView: View {
     @State private var viewModel: ChatViewModel
     @State private var isKeyboardOnScreen: Bool = false
 
-    init(auth: any AuthManaging, chatService: any ChatServicing) {
+    init(auth: any AuthManaging, chatService: any ChatServicing, settings: SettingsManager) {
         _viewModel = State(initialValue: ChatViewModel(
             auth: auth,
-            chatService: chatService
+            chatService: chatService,
+            settings: settings
         ))
     }
 
@@ -126,13 +127,15 @@ private final class PreviewChatService: ChatServicing {
 #Preview("Empty Chat") {
     ChatView(
         auth: PreviewAuthManager(),
-        chatService: PreviewChatService()
+        chatService: PreviewChatService(),
+        settings: SettingsManager()
     )
 }
 
 #Preview("With Messages") {
     ChatView(
         auth: PreviewAuthManager(),
-        chatService: PreviewChatService()
+        chatService: PreviewChatService(),
+        settings: SettingsManager()
     )
 }

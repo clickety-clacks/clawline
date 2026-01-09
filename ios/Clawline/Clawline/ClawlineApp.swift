@@ -10,6 +10,7 @@ import SwiftUI
 @main
 struct ClawlineApp: App {
     @State private var authManager = AuthManager()
+    @State private var settingsManager = SettingsManager()
 
     private let connectionService: any ConnectionServicing = StubConnectionService()
     private let deviceIdentifier: any DeviceIdentifying = DeviceIdentifier()
@@ -22,6 +23,18 @@ struct ClawlineApp: App {
                 .environment(\.connectionService, connectionService)
                 .environment(\.deviceIdentifier, deviceIdentifier)
                 .environment(\.chatService, chatService)
+                .environment(\.settingsManager, settingsManager)
+                .sheet(isPresented: $settingsManager.isSettingsPresented) {
+                    SettingsView(settings: settingsManager)
+                }
+        }
+        .commands {
+            CommandGroup(replacing: .appSettings) {
+                Button("Settings...") {
+                    settingsManager.toggleSettings()
+                }
+                .keyboardShortcut(",", modifiers: .command)
+            }
         }
     }
 }

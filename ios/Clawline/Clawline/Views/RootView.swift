@@ -12,6 +12,7 @@ struct RootView: View {
     @Environment(\.connectionService) private var connection
     @Environment(\.deviceIdentifier) private var device
     @Environment(\.chatService) private var chatService
+    @Environment(\.settingsManager) private var settings
     @Environment(\.colorScheme) private var colorScheme
 
     private var backgroundColor: Color {
@@ -28,7 +29,11 @@ struct RootView: View {
                 PairingView(auth: auth, connection: connection, device: device)
             }
         }
-        .background(backgroundColor.ignoresSafeArea())
+        .background {
+            backgroundColor
+                .plasmaEffect(settings.plasmaConfig)
+                .ignoresSafeArea()
+        }
         .animation(.easeInOut(duration: 0.3), value: auth.isAuthenticated)
     }
 }

@@ -44,7 +44,7 @@ struct SettingsView: View {
 
                         VStack(alignment: .leading) {
                             Text("Scale: \(settings.plasmaConfig.scale, specifier: "%.1f")")
-                            Slider(value: $settings.plasmaConfig.scale, in: 1...10)
+                            Slider(value: $settings.plasmaConfig.scale, in: 0.1...10)
                         }
                     } header: {
                         Text("Animation")

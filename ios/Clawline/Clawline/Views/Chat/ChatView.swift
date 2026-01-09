@@ -18,24 +18,23 @@ struct ChatView: View {
     }
 
     var body: some View {
-        GeometryReader { geometry in
-            VStack(spacing: 0) {
-                messageList
+        VStack(spacing: 0) {
+            messageList
 
-                if let error = viewModel.error {
-                    errorBanner(error)
-                }
-
-                Spacer(minLength: 0)
-
-                MessageInputBar(
-                    text: $viewModel.messageInput,
-                    isSending: viewModel.isSending,
-                    onSend: { Task { await viewModel.send() } },
-                    onAdd: { }
-                )
+            if let error = viewModel.error {
+                errorBanner(error)
             }
+
+            Spacer(minLength: 0)
+
+            MessageInputBar(
+                text: $viewModel.messageInput,
+                isSending: viewModel.isSending,
+                onSend: { Task { await viewModel.send() } },
+                onAdd: { }
+            )
         }
+        .ignoresSafeArea(.container, edges: .bottom)
         .task { await viewModel.onAppear() }
         .onDisappear { viewModel.onDisappear() }
     }

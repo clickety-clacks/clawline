@@ -58,6 +58,8 @@ struct MessageInputBar: View {
                     .textFieldStyle(.plain)
                     .padding(.leading, inputBarHeight / 2)
                     .lineLimit(1...4)
+                    .submitLabel(.send)
+                    .onSubmit(onSend)
 
                 Button(action: onSend) {
                     if isSending {

@@ -10,8 +10,11 @@ import UIKit
 
 struct PairingView: View {
     @State private var viewModel: PairingViewModel
-    @State private var isKeyboardOnScreen: Bool = false
-    @FocusState private var isTextFieldFocused: Bool
+
+    private enum FocusedField {
+        case name, address
+    }
+    @FocusState private var focusedField: FocusedField?
 
     init(auth: any AuthManaging, connection: any ConnectionServicing, device: any DeviceIdentifying) {
         _viewModel = State(initialValue: PairingViewModel(
@@ -21,7 +24,8 @@ struct PairingView: View {
         ))
     }
 
-    // Concentric padding for bottom button
+    // Device corner radius for concentric alignment.
+    // Face ID devices have ~50pt corner radius, home button devices have 0.
     private var deviceCornerRadius: CGFloat {
         let window = UIApplication.shared.connectedScenes
             .compactMap { $0 as? UIWindowScene }
@@ -35,83 +39,53 @@ struct PairingView: View {
         max(deviceCornerRadius - 24, 8)  // 48pt button height / 2 = 24
     }
 
-    private var bottomPadding: CGFloat {
-        // When keyboard on screen: 12pt gap (SwiftUI handles keyboard safe area)
-        // When keyboard off screen: concentric padding from screen edge
-        isKeyboardOnScreen ? 12 : concentricPadding
-    }
-
     var body: some View {
-        VStack {
-            Spacer()
+        // GeometryReader needed for inputScrollView width calculation
+        GeometryReader { geometry in
+            VStack {
+                Spacer()
 
-            // Bottom-anchored content
-            VStack(spacing: 0) {
-                // App icon
-                Image(systemName: "bubble.left.and.bubble.right.fill")
-                    .font(.system(size: 72, weight: .light))
-                    .foregroundStyle(.tint)
+                // Bottom-anchored content
+                VStack(spacing: 0) {
+                    // App icon
+                    Image(systemName: "bubble.left.and.bubble.right.fill")
+                        .font(.system(size: 72, weight: .light))
+                        .foregroundStyle(.tint)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.bottom, 24)
+
+                    // Title and subtitle
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Clawline")
+                            .font(.system(size: 38, weight: .light))
+                            .tracking(1)
+
+                        Text(subtitleText)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.bottom, 24)
 
-                // Title and subtitle
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Clawline")
-                        .font(.system(size: 38, weight: .light))
-                        .tracking(1)
-
-                    Text(subtitleText)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.bottom, 24)
-
-                // State-specific content
-                switch viewModel.state {
-                case .idle, .enteringName, .enteringAddress, .waitingForApproval:
-                    // GeometryReader only here to measure width for paging
-                    GeometryReader { geometry in
-                        inputScrollView(width: geometry.size.width)
+                    // State-specific content
+                    switch viewModel.state {
+                    case .idle, .enteringName, .enteringAddress, .waitingForApproval:
+                        // Subtract horizontal padding from width since inputScrollView sizes
+                        // its content to fill the width, but padding is applied outside it
+                        inputScrollView(width: geometry.size.width - (2 * concentricPadding))
+                            .frame(height: inputHeight)
+                    case .success:
+                        ProgressView()
+                            .controlSize(.large)
+                            .frame(maxWidth: .infinity, alignment: .center)
+                    case .error(let message):
+                        errorContent(message: message)
                     }
-                    .frame(height: inputHeight)
-                case .success:
-                    ProgressView()
-                        .controlSize(.large)
-                        .frame(maxWidth: .infinity, alignment: .center)
-                case .error(let message):
-                    errorContent(message: message)
                 }
+                .padding(.horizontal, concentricPadding)
+                .padding(.bottom, concentricPadding)
             }
-            .padding(.horizontal, concentricPadding)
-            .padding(.bottom, bottomPadding)
-            .animation(.easeInOut(duration: 0.25), value: isKeyboardOnScreen)
         }
-        .ignoresSafeArea(.container, edges: .bottom)
-        .onAppear {
-            // Check keyboard state synchronously on appear to avoid race condition
-            updateKeyboardState()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { notification in
-            guard let userInfo = notification.userInfo,
-                  let endFrame = userInfo[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else {
-                return
-            }
-
-            let screenHeight = UIApplication.shared.connectedScenes
-                .compactMap { $0 as? UIWindowScene }
-                .first?.screen.bounds.height ?? UIScreen.main.bounds.height
-            isKeyboardOnScreen = endFrame.origin.y < screenHeight
-        }
-    }
-
-    private func updateKeyboardState() {
-        // Check if keyboard is currently visible by looking for keyboard window
-        let keyboardWindow = UIApplication.shared.connectedScenes
-            .compactMap { $0 as? UIWindowScene }
-            .flatMap { $0.windows }
-            .first { String(describing: type(of: $0)).contains("Keyboard") }
-        isKeyboardOnScreen = keyboardWindow != nil
     }
 
     private var subtitleText: String {
@@ -154,6 +128,14 @@ struct PairingView: View {
                 withAnimation(.easeInOut(duration: 0.3)) {
                     proxy.scrollTo(newPage, anchor: .leading)
                 }
+                // Auto-focus the appropriate field after page transition
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                    switch newPage {
+                    case 0: focusedField = .name
+                    case 1: focusedField = .address
+                    default: focusedField = nil
+                    }
+                }
             }
         }
     }
@@ -171,8 +153,10 @@ struct PairingView: View {
                 TextField("Your name", text: $viewModel.nameInput)
                     .font(.body)
                     .textFieldStyle(.plain)
+                    .textContentType(.none)
+                    .autocorrectionDisabled()
                     .submitLabel(.next)
-                    .focused($isTextFieldFocused)
+                    .focused($focusedField, equals: .name)
                     .onSubmit {
                         viewModel.submitName()
                     }
@@ -222,7 +206,7 @@ struct PairingView: View {
                     .autocorrectionDisabled()
                     .keyboardType(.URL)
                     .submitLabel(.go)
-                    .focused($isTextFieldFocused)
+                    .focused($focusedField, equals: .address)
                     .onSubmit {
                         viewModel.submitAddress()
                     }

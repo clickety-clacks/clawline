@@ -22,3 +22,7 @@ android/*.apk
 
 # Local scratch space
 scratch/
+
+# Node.js
+node_modules/
+provider/node_modules/

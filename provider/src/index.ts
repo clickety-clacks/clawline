@@ -2,12 +2,13 @@ import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import fs from "node:fs/promises";
-import { watchFile, unwatchFile } from "node:fs";
+import { watchFile, unwatchFile, createWriteStream } from "node:fs";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 
 import WebSocket, { WebSocketServer } from "ws";
 import Database from "better-sqlite3";
 import jwt from "jsonwebtoken";
+import Busboy from "busboy";
 
 export const PROTOCOL_VERSION = 1;
 
@@ -107,6 +108,27 @@ type DeviceInfo = {
 const CONTROL_CHARS_REGEX = /[\u0000-\u001F\u007F]/g;
 const UUID_V4_REGEX = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-4[0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$/;
 const SERVER_EVENT_ID_REGEX = /^s_[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+const ASSET_ID_REGEX = /^a_[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+const USER_ID_PREFIX = "user_";
+const INLINE_IMAGE_MIME_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/heic"]);
+const MAX_ATTACHMENTS_COUNT = 4;
+const MAX_TOTAL_PAYLOAD_BYTES = 320 * 1024;
+
+type NormalizedAttachment =
+  | { type: "image"; mimeType: string; data: string }
+  | { type: "asset"; assetId: string };
+
+class ClientMessageError extends Error {
+  constructor(public code: string, message: string) {
+    super(message);
+  }
+}
+
+class HttpError extends Error {
+  constructor(public status: number, public code: string, message: string) {
+    super(message);
+  }
+}
 
 class SlidingWindowRateLimiter {
   private readonly history = new Map<string, number[]>();
@@ -194,6 +216,65 @@ function sanitizeDeviceInfo(info: DeviceInfo): DeviceInfo {
     osVersion: sanitizeField(info.osVersion),
     appVersion: sanitizeField(info.appVersion)
   };
+}
+
+function normalizeAttachmentsInput(
+  raw: unknown,
+  mediaConfig: ProviderConfig["media"]
+): { attachments: NormalizedAttachment[]; inlineBytes: number; assetIds: string[] } {
+  if (raw === undefined) {
+    return { attachments: [], inlineBytes: 0, assetIds: [] };
+  }
+  if (!Array.isArray(raw)) {
+    throw new ClientMessageError("invalid_message", "attachments must be an array");
+  }
+  if (raw.length > MAX_ATTACHMENTS_COUNT) {
+    throw new ClientMessageError("payload_too_large", "Too many attachments");
+  }
+  let inlineBytes = 0;
+  const attachments: NormalizedAttachment[] = [];
+  const assetIds: string[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") {
+      throw new ClientMessageError("invalid_message", "Invalid attachment");
+    }
+    const typed = entry as any;
+    if (typed.type === "image") {
+      if (typeof typed.mimeType !== "string" || typeof typed.data !== "string") {
+        throw new ClientMessageError("invalid_message", "Invalid inline attachment");
+      }
+      const mime = typed.mimeType.toLowerCase();
+      if (!INLINE_IMAGE_MIME_TYPES.has(mime)) {
+        throw new ClientMessageError("invalid_message", "Unsupported image type");
+      }
+      let decoded: Buffer;
+      try {
+        decoded = Buffer.from(typed.data, "base64");
+      } catch {
+        throw new ClientMessageError("invalid_message", "Invalid base64 data");
+      }
+      if (decoded.length === 0) {
+        throw new ClientMessageError("invalid_message", "Empty attachment data");
+      }
+      if (decoded.length > mediaConfig.maxInlineBytes) {
+        throw new ClientMessageError("payload_too_large", "Inline attachment too large");
+      }
+      inlineBytes += decoded.length;
+      attachments.push({ type: "image", mimeType: mime, data: typed.data });
+    } else if (typed.type === "asset") {
+      if (typeof typed.assetId !== "string" || !ASSET_ID_REGEX.test(typed.assetId)) {
+        throw new ClientMessageError("invalid_message", "Invalid assetId");
+      }
+      attachments.push({ type: "asset", assetId: typed.assetId });
+      assetIds.push(typed.assetId);
+    } else {
+      throw new ClientMessageError("invalid_message", "Unknown attachment type");
+    }
+  }
+  if (inlineBytes > mediaConfig.maxInlineBytes) {
+    throw new ClientMessageError("payload_too_large", "Inline attachments exceed limit");
+  }
+  return { attachments, inlineBytes, assetIds };
 }
 
 function timingSafeStringEqual(a: string, b: string): boolean {
@@ -337,6 +418,13 @@ function isLocalhost(address: string): boolean {
   return ["127.0.0.1", "::1", "localhost"].includes(address);
 }
 
+function validateUserId(value: unknown): value is string {
+  if (typeof value !== "string" || !value.startsWith(USER_ID_PREFIX)) {
+    return false;
+  }
+  return UUID_V4_REGEX.test(value.slice(USER_ID_PREFIX.length));
+}
+
 async function ensureDir(dir: string) {
   await fs.mkdir(dir, { recursive: true });
 }
@@ -401,8 +489,17 @@ function sha256(input: string): string {
   return createHash("sha256").update(input).digest("hex");
 }
 
-function normalizeAttachmentsHash(): string {
-  return sha256("[]");
+function hashAttachments(attachments: NormalizedAttachment[]): string {
+  const quote = (value: string) => JSON.stringify(value);
+  if (attachments.length === 0) {
+    return sha256("[]");
+  }
+  const parts = attachments.map((attachment) =>
+    attachment.type === "image"
+      ? `{"type":"image","mimeType":${quote(attachment.mimeType)},"data":${quote(attachment.data)}}`
+      : `{"type":"asset","assetId":${quote(attachment.assetId)}}`
+  );
+  return sha256(`[${parts.join(",")}]`);
 }
 
 type AdapterExecutionResult = { exitCode?: number; output?: string } | string;
@@ -463,6 +560,11 @@ export async function createProviderServer(options: ProviderOptions): Promise<Pr
 
   await ensureDir(config.statePath);
   await ensureDir(config.media.storagePath);
+  const assetsDir = path.join(config.media.storagePath, "assets");
+  const tmpDir = path.join(config.media.storagePath, "tmp");
+  await ensureDir(assetsDir);
+  await ensureDir(tmpDir);
+  await cleanupTmpDirectory();
 
   const allowlistPath = path.join(config.statePath, ALLOWLIST_FILENAME);
   const denylistPath = path.join(config.statePath, DENYLIST_FILENAME);
@@ -508,6 +610,25 @@ export async function createProviderServer(options: ProviderOptions): Promise<Pr
     );
     CREATE INDEX IF NOT EXISTS idx_messages_userId ON messages(userId);
     CREATE INDEX IF NOT EXISTS idx_messages_serverEventId ON messages(serverEventId);
+    CREATE TABLE IF NOT EXISTS assets (
+      assetId TEXT PRIMARY KEY,
+      userId TEXT NOT NULL,
+      mimeType TEXT NOT NULL,
+      size INTEGER NOT NULL,
+      createdAt INTEGER NOT NULL,
+      uploaderDeviceId TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_assets_userId ON assets(userId);
+    CREATE INDEX IF NOT EXISTS idx_assets_createdAt ON assets(createdAt);
+    CREATE TABLE IF NOT EXISTS message_assets (
+      deviceId TEXT NOT NULL,
+      clientId TEXT NOT NULL,
+      assetId TEXT NOT NULL,
+      PRIMARY KEY (deviceId, clientId, assetId),
+      FOREIGN KEY (deviceId, clientId) REFERENCES messages(deviceId, clientId) ON DELETE CASCADE,
+      FOREIGN KEY (assetId) REFERENCES assets(assetId) ON DELETE RESTRICT
+    );
+    CREATE INDEX IF NOT EXISTS idx_message_assets_assetId ON message_assets(assetId);
   `);
 
   const sequenceStatement = userSequenceStmt(db);
@@ -525,8 +646,46 @@ export async function createProviderServer(options: ProviderOptions): Promise<Pr
      FROM messages WHERE deviceId = ? AND clientId = ?`
   );
   const updateMessageStreamingStmt = db.prepare(`UPDATE messages SET streaming = ? WHERE deviceId = ? AND clientId = ?`);
+  const insertMessageAssetStmt = db.prepare(
+    `INSERT INTO message_assets (deviceId, clientId, assetId) VALUES (?, ?, ?)`
+  );
+  const insertAssetStmt = db.prepare(
+    `INSERT INTO assets (assetId, userId, mimeType, size, createdAt, uploaderDeviceId) VALUES (?, ?, ?, ?, ?, ?)`
+  );
+  const selectAssetStmt = db.prepare(
+    `SELECT assetId, userId, mimeType, size, createdAt FROM assets WHERE assetId = ?`
+  );
+  const selectExpiredAssetsStmt = db.prepare(
+    `SELECT assetId FROM assets
+     WHERE createdAt <= ?
+       AND NOT EXISTS (
+         SELECT 1 FROM message_assets WHERE message_assets.assetId = assets.assetId
+       )`
+  );
+  const deleteAssetStmt = db.prepare(
+    `DELETE FROM assets
+     WHERE assetId = ?
+       AND NOT EXISTS (
+         SELECT 1 FROM message_assets WHERE message_assets.assetId = assets.assetId
+       )`
+  );
+  await cleanupOrphanedAssetFiles();
   const insertUserMessageTx = db.transaction(
-    (session: Session, messageId: string, content: string, timestamp: number) => {
+    (
+      session: Session,
+      messageId: string,
+      content: string,
+      timestamp: number,
+      attachments: NormalizedAttachment[],
+      attachmentsHash: string,
+      assetIds: string[]
+    ) => {
+      for (const assetId of assetIds) {
+        const asset = selectAssetStmt.get(assetId) as { assetId: string; userId: string } | undefined;
+        if (!asset || asset.userId !== session.userId) {
+          throw new ClientMessageError("asset_not_found", "Asset not found");
+        }
+      }
       const serverMessageId = generateServerMessageId();
       const event: ServerMessage = {
         type: "message",
@@ -535,7 +694,8 @@ export async function createProviderServer(options: ProviderOptions): Promise<Pr
         content,
         timestamp,
         streaming: false,
-        deviceId: session.deviceId
+        deviceId: session.deviceId,
+        attachments: attachments.length > 0 ? attachments : undefined
       };
       const payloadJson = JSON.stringify(event);
       const payloadBytes = Buffer.byteLength(payloadJson, "utf8");
@@ -557,9 +717,12 @@ export async function createProviderServer(options: ProviderOptions): Promise<Pr
         sequenceRow.sequence,
         content,
         sha256(content),
-        normalizeAttachmentsHash(),
+        attachmentsHash,
         timestamp
       );
+      for (const assetId of assetIds) {
+        insertMessageAssetStmt.run(session.deviceId, messageId, assetId);
+      }
       return { event, sequence: sequenceRow.sequence };
     }
   );
@@ -580,17 +743,36 @@ export async function createProviderServer(options: ProviderOptions): Promise<Pr
   });
 
   const httpServer = http.createServer(async (req, res) => {
-    if (!req.url) {
+    try {
+      if (!req.url) {
+        res.writeHead(404).end();
+        return;
+      }
+      const parsedUrl = new URL(req.url, "http://localhost");
+      if (req.method === "GET" && parsedUrl.pathname === "/version") {
+        res.setHeader("Content-Type", "application/json");
+        res.writeHead(200);
+        res.end(JSON.stringify({ protocolVersion: PROTOCOL_VERSION }));
+        return;
+      }
+      if (req.method === "POST" && parsedUrl.pathname === "/upload") {
+        await handleUpload(req, res);
+        return;
+      }
+      if (req.method === "GET" && parsedUrl.pathname.startsWith("/download/")) {
+        const assetId = parsedUrl.pathname.slice("/download/".length);
+        await handleDownload(req, res, assetId);
+        return;
+      }
       res.writeHead(404).end();
-      return;
+    } catch (err) {
+      logger.error("http_request_failed", err);
+      if (!res.headersSent) {
+        sendHttpError(res, 500, "server_error", "Internal error");
+      } else {
+        res.end();
+      }
     }
-    if (req.method === "GET" && req.url === "/version") {
-      res.setHeader("Content-Type", "application/json");
-      res.writeHead(200);
-      res.end(JSON.stringify({ protocolVersion: PROTOCOL_VERSION }));
-      return;
-    }
-    res.writeHead(404).end();
   });
 
   const wss = new WebSocketServer({ noServer: true });
@@ -615,15 +797,27 @@ export async function createProviderServer(options: ProviderOptions): Promise<Pr
 
   const connectionState = new WeakMap<WebSocket, ConnectionState>();
   const pendingPairs = new Map<string, PendingPairRequest>();
+  const deniedDevices = new Map<string, number>();
   const sessionsByDevice = new Map<string, Session>();
   const userSessions = new Map<string, Set<Session>>();
   const perUserQueue = new Map<string, Promise<unknown>>();
   const pairRateLimiter = new SlidingWindowRateLimiter(config.pairing.maxRequestsPerMinute, 60_000);
   const authRateLimiter = new SlidingWindowRateLimiter(config.auth.maxAttemptsPerMinute, 60_000);
   const messageRateLimiter = new SlidingWindowRateLimiter(config.sessions.maxMessagesPerSecond, 1_000);
+  let writeQueue: Promise<void> = Promise.resolve();
   const pendingCleanupInterval = setInterval(() => expirePendingPairs(), 1_000);
   if (typeof pendingCleanupInterval.unref === "function") {
     pendingCleanupInterval.unref();
+  }
+  const maintenanceIntervalMs = Math.min(60_000, Math.max(1_000, config.media.unreferencedUploadTtlSeconds * 250));
+  const assetCleanupInterval =
+    config.media.unreferencedUploadTtlSeconds > 0
+      ? setInterval(() => {
+          cleanupUnreferencedAssets().catch((err) => logger.warn("asset_cleanup_failed", err));
+        }, maintenanceIntervalMs)
+      : null;
+  if (assetCleanupInterval && typeof assetCleanupInterval.unref === "function") {
+    assetCleanupInterval.unref();
   }
   const denylistWatcher = () => {
     refreshDenylist();
@@ -639,6 +833,16 @@ export async function createProviderServer(options: ProviderOptions): Promise<Pr
     });
     perUserQueue.set(userId, next);
     return next;
+  }
+
+  function enqueueWriteTask<T>(task: () => T | Promise<T>): Promise<T> {
+    const run = () => Promise.resolve().then(task);
+    const result = writeQueue.then(run, run);
+    writeQueue = result.then(
+      () => undefined,
+      () => undefined
+    );
+    return result;
   }
 
   async function persistAllowlist() {
@@ -731,6 +935,263 @@ export async function createProviderServer(options: ProviderOptions): Promise<Pr
     updateMessageAckStmt.run(deviceId, clientId);
   }
 
+  function sendHttpError(res: http.ServerResponse, status: number, code: string, message: string) {
+    res.setHeader("Content-Type", "application/json");
+    res.writeHead(status);
+    res.end(JSON.stringify({ type: "error", code, message }));
+  }
+
+  function authenticateHttpRequest(req: http.IncomingMessage) {
+    const header = req.headers.authorization;
+    if (!header || !header.startsWith("Bearer ")) {
+      throw new HttpError(401, "auth_failed", "Missing authorization");
+    }
+    const token = header.slice(7).trim();
+    if (!token) {
+      throw new HttpError(401, "auth_failed", "Missing token");
+    }
+    let decoded: jwt.JwtPayload;
+    try {
+      decoded = jwt.verify(token, jwtKey, { algorithms: ["HS256"] }) as jwt.JwtPayload;
+    } catch {
+      throw new HttpError(401, "auth_failed", "Invalid token");
+    }
+    const deviceId = decoded.deviceId;
+    if (typeof deviceId !== "string" || !validateDeviceId(deviceId)) {
+      throw new HttpError(401, "auth_failed", "Invalid token device");
+    }
+    if (isDenylisted(deviceId)) {
+      throw new HttpError(403, "token_revoked", "Device revoked");
+    }
+    const entry = findAllowlistEntry(deviceId);
+    if (!entry) {
+      throw new HttpError(401, "auth_failed", "Unknown device");
+    }
+    if (typeof decoded.sub !== "string" || !timingSafeStringEqual(decoded.sub, entry.userId)) {
+      throw new HttpError(401, "auth_failed", "Invalid token subject");
+    }
+    if (typeof decoded.exp === "number" && decoded.exp * 1000 < Date.now()) {
+      throw new HttpError(401, "auth_failed", "Token expired");
+    }
+    return { deviceId, userId: entry.userId };
+  }
+
+  async function safeUnlink(filePath: string) {
+    try {
+      await fs.unlink(filePath);
+    } catch (err: any) {
+      if (!err || err.code === "ENOENT") {
+        return;
+      }
+      logger.warn("file_unlink_failed", err);
+    }
+  }
+
+  async function cleanupTmpDirectory() {
+    try {
+      const entries = await fs.readdir(tmpDir);
+      await Promise.all(entries.map((entry) => safeUnlink(path.join(tmpDir, entry))));
+    } catch (err) {
+      logger.warn("tmp_cleanup_failed", err);
+    }
+  }
+
+  async function cleanupOrphanedAssetFiles() {
+    const startedAt = nowMs();
+    try {
+      const entries = await fs.readdir(assetsDir);
+      const now = nowMs();
+      const batchSize = 10_000;
+      for (let i = 0; i < entries.length; i += batchSize) {
+        const batch = entries.slice(i, i + batchSize);
+        for (const entry of batch) {
+          if (!ASSET_ID_REGEX.test(entry)) continue;
+          const asset = selectAssetStmt.get(entry);
+          if (asset) continue;
+          const filePath = path.join(assetsDir, entry);
+          if (config.media.unreferencedUploadTtlSeconds > 0) {
+            try {
+              const stats = await fs.stat(filePath);
+              const ageMs = now - stats.mtimeMs;
+              if (ageMs < config.media.unreferencedUploadTtlSeconds * 1000) {
+                continue;
+              }
+            } catch {
+              continue;
+            }
+          }
+          await safeUnlink(filePath);
+        }
+      }
+    } catch (err) {
+      logger.warn("asset_orphan_scan_failed", err);
+    } finally {
+      const elapsedMs = nowMs() - startedAt;
+      if (elapsedMs > 30_000) {
+        logger.warn("asset_orphan_scan_slow", { elapsedMs });
+      }
+    }
+  }
+
+  async function cleanupUnreferencedAssets() {
+    if (config.media.unreferencedUploadTtlSeconds <= 0) {
+      return;
+    }
+    const cutoff = nowMs() - config.media.unreferencedUploadTtlSeconds * 1000;
+    const deletedAssetIds = (await enqueueWriteTask(() => {
+      const rows = selectExpiredAssetsStmt.all(cutoff) as { assetId: string }[];
+      const deleted: string[] = [];
+      for (const row of rows) {
+        const result = deleteAssetStmt.run(row.assetId);
+        if (result.changes > 0) {
+          deleted.push(row.assetId);
+        }
+      }
+      return deleted;
+    })) as string[];
+    for (const assetId of deletedAssetIds) {
+      const assetPath = path.join(assetsDir, assetId);
+      await safeUnlink(assetPath);
+    }
+  }
+
+  async function handleUpload(req: http.IncomingMessage, res: http.ServerResponse) {
+    let tmpPath: string | undefined;
+    try {
+      const auth = authenticateHttpRequest(req);
+      const assetId = `a_${randomUUID()}`;
+      tmpPath = path.join(tmpDir, `${assetId}.tmp`);
+      let detectedMime = "application/octet-stream";
+      let size = 0;
+      await new Promise<void>((resolve, reject) => {
+        const busboy = Busboy({
+          headers: req.headers,
+          limits: { files: 1, fileSize: config.media.maxUploadBytes }
+        });
+        let handled = false;
+        busboy.on("file", (fieldname, file, info) => {
+          if (handled || fieldname !== "file") {
+            handled = true;
+            file.resume();
+            reject(new ClientMessageError("invalid_message", "Invalid upload field"));
+            return;
+          }
+          handled = true;
+          detectedMime = info.mimeType || "application/octet-stream";
+          const writeStream = createWriteStream(tmpPath!);
+          let aborted = false;
+          file.on("data", (chunk) => {
+            size += chunk.length;
+            if (!aborted && size > config.media.maxUploadBytes) {
+              aborted = true;
+              file.unpipe(writeStream);
+              writeStream.destroy();
+              file.resume();
+              reject(new ClientMessageError("payload_too_large", "Upload too large"));
+            }
+          });
+          file.on("limit", () => reject(new ClientMessageError("payload_too_large", "Upload too large")));
+          file.on("error", reject);
+          writeStream.on("error", reject);
+          file.pipe(writeStream);
+          file.on("end", () => writeStream.end());
+        });
+        busboy.on("finish", () => {
+          if (!handled) {
+            reject(new ClientMessageError("invalid_message", "Missing file field"));
+            return;
+          }
+          resolve();
+        });
+        busboy.on("error", reject);
+        req.pipe(busboy);
+      });
+      if (size === 0) {
+        throw new ClientMessageError("invalid_message", "Empty upload");
+      }
+      const finalPath = path.join(assetsDir, assetId);
+      await fs.rename(tmpPath, finalPath);
+      await enqueueWriteTask(() => insertAssetStmt.run(assetId, auth.userId, detectedMime, size, nowMs(), auth.deviceId));
+      res.setHeader("Content-Type", "application/json");
+      res.writeHead(200);
+      res.end(JSON.stringify({ assetId, mimeType: detectedMime, size }));
+    } catch (err) {
+      if (tmpPath) {
+        await safeUnlink(tmpPath);
+      }
+      if (err instanceof HttpError) {
+        sendHttpError(res, err.status, err.code, err.message);
+        return;
+      }
+      if (err instanceof ClientMessageError) {
+        const status = err.code === "payload_too_large" ? 413 : 400;
+        sendHttpError(res, status, err.code, err.message);
+        return;
+      }
+      logger.error("upload_failed", err);
+      sendHttpError(res, 503, "upload_failed_retryable", "Upload failed");
+    }
+  }
+
+  async function handleDownload(req: http.IncomingMessage, res: http.ServerResponse, assetId: string) {
+    try {
+      const auth = authenticateHttpRequest(req);
+      if (!ASSET_ID_REGEX.test(assetId)) {
+        sendHttpError(res, 400, "invalid_message", "Invalid assetId");
+        return;
+      }
+      const asset = selectAssetStmt.get(assetId) as
+        | { assetId: string; userId: string; mimeType: string; size: number }
+        | undefined;
+      if (!asset) {
+        sendHttpError(res, 404, "asset_not_found", "Asset not found");
+        return;
+      }
+      if (asset.userId !== auth.userId) {
+        sendHttpError(res, 404, "asset_not_found", "Asset not found");
+        return;
+      }
+      const filePath = path.join(assetsDir, assetId);
+      let fileHandle: fs.FileHandle;
+      try {
+        fileHandle = await fs.open(filePath, "r");
+      } catch (err: any) {
+        if (err && err.code === "ENOENT") {
+          await enqueueWriteTask(() => deleteAssetStmt.run(assetId));
+          sendHttpError(res, 404, "asset_not_found", "Asset not found");
+          return;
+        }
+        throw err;
+      }
+      res.writeHead(200, {
+        "Content-Type": asset.mimeType || "application/octet-stream",
+        "Content-Length": asset.size
+      });
+      const stream = fileHandle.createReadStream();
+      stream.on("error", (err) => {
+        logger.error("download_stream_failed", err);
+        if (!res.headersSent) {
+          sendHttpError(res, 500, "server_error", "Download failed");
+        } else {
+          res.end();
+        }
+      });
+      stream.on("close", () => {
+        fileHandle
+          .close()
+          .catch(() => {});
+      });
+      stream.pipe(res);
+    } catch (err) {
+      if (err instanceof HttpError) {
+        sendHttpError(res, err.status, err.code, err.message);
+        return;
+      }
+      logger.error("download_failed", err);
+      sendHttpError(res, 500, "server_error", "Download failed");
+    }
+  }
+
   function selectEventsAfter(userId: string, lastMessageId: string | null) {
     if (!lastMessageId) {
       const rows = selectEventsTailStmt.all(userId, config.sessions.maxReplayMessages);
@@ -778,16 +1239,28 @@ export async function createProviderServer(options: ProviderOptions): Promise<Pr
   }
 
   async function appendEvent(event: ServerMessage, userId: string, originatingDeviceId?: string) {
-    return insertEventTx(event, userId, originatingDeviceId);
+    return enqueueWriteTask(() => insertEventTx(event, userId, originatingDeviceId));
   }
 
-  function persistUserMessage(
+  async function persistUserMessage(
     session: Session,
     messageId: string,
-    content: string
-  ): { event: ServerMessage; sequence: number } {
+    content: string,
+    attachments: NormalizedAttachment[],
+    attachmentsHash: string,
+    assetIds: string[]
+  ): Promise<{ event: ServerMessage; sequence: number }> {
     const timestamp = nowMs();
-    return insertUserMessageTx(session, messageId, content, timestamp);
+    try {
+      return await enqueueWriteTask(() =>
+        insertUserMessageTx(session, messageId, content, timestamp, attachments, attachmentsHash, assetIds)
+      );
+    } catch (err: any) {
+      if (err && typeof err.message === "string" && err.message.includes("FOREIGN KEY")) {
+        throw new ClientMessageError("asset_not_found", "Asset not found");
+      }
+      throw err;
+    }
   }
 
   async function persistAssistantMessage(
@@ -840,105 +1313,118 @@ export async function createProviderServer(options: ProviderOptions): Promise<Pr
   }
 
   async function processClientMessage(session: Session, payload: any) {
-    if (payload.type !== "message") {
-      await sendJson(session.socket, { type: "error", code: "invalid_message", message: "Unsupported type" });
-      return;
-    }
-    if (typeof payload.id !== "string" || !payload.id.startsWith("c_")) {
-      await sendJson(session.socket, { type: "error", code: "invalid_message", message: "Invalid id" });
-      return;
-    }
-    if (typeof payload.content !== "string" || payload.content.length === 0) {
-      await sendJson(session.socket, { type: "error", code: "invalid_message", message: "Missing content" });
-      return;
-    }
-    const contentBytes = Buffer.byteLength(payload.content, "utf8");
-    if (contentBytes > config.sessions.maxMessageBytes) {
-      await sendJson(session.socket, { type: "error", code: "payload_too_large", message: "Message too large" });
-      return;
-    }
+    try {
+      if (payload.type !== "message") {
+        throw new ClientMessageError("invalid_message", "Unsupported type");
+      }
+      if (typeof payload.id !== "string" || !payload.id.startsWith("c_")) {
+        throw new ClientMessageError("invalid_message", "Invalid id");
+      }
+      if (typeof payload.content !== "string" || payload.content.length === 0) {
+        throw new ClientMessageError("invalid_message", "Missing content");
+      }
+      const contentBytes = Buffer.byteLength(payload.content, "utf8");
+      if (contentBytes > config.sessions.maxMessageBytes) {
+        throw new ClientMessageError("payload_too_large", "Message too large");
+      }
+      const attachmentsInfo = normalizeAttachmentsInput(payload.attachments, config.media);
+      if (contentBytes + attachmentsInfo.inlineBytes > MAX_TOTAL_PAYLOAD_BYTES) {
+        throw new ClientMessageError("payload_too_large", "Message too large");
+      }
+      const attachmentsHash = hashAttachments(attachmentsInfo.attachments);
 
-    await runPerUserTask(session.userId, async () => {
-      const existing = selectMessageStmt.get(session.deviceId, payload.id) as
-        | {
-            deviceId: string;
-            contentHash: string;
-            attachmentsHash: string;
-            streaming: number;
-            ackSent: number;
+      await runPerUserTask(session.userId, async () => {
+        const existing = selectMessageStmt.get(session.deviceId, payload.id) as
+          | {
+              deviceId: string;
+              contentHash: string;
+              attachmentsHash: string;
+              streaming: number;
+              ackSent: number;
+            }
+          | undefined;
+        const incomingHash = sha256(payload.content);
+        if (existing) {
+          if (existing.contentHash !== incomingHash || existing.attachmentsHash !== attachmentsHash) {
+            throw new ClientMessageError("invalid_message", "Duplicate mismatch");
           }
-        | undefined;
-      const incomingHash = sha256(payload.content);
-      if (existing) {
-        if (existing.contentHash !== incomingHash || existing.attachmentsHash !== normalizeAttachmentsHash()) {
-          await sendJson(session.socket, { type: "error", code: "invalid_message", message: "Duplicate mismatch" });
+          if (existing.streaming === MessageStreamingState.Failed) {
+            throw new ClientMessageError("invalid_message", "Message failed");
+          }
+          if (existing.ackSent === 0) {
+            session.socket.send(JSON.stringify({ type: "ack", id: payload.id }), (err) => {
+              if (!err) {
+                markAckSent(session.deviceId, payload.id);
+              }
+            });
+          } else {
+            session.socket.send(JSON.stringify({ type: "ack", id: payload.id }), () => {});
+          }
           return;
         }
-        if (existing.streaming === MessageStreamingState.Failed) {
-          await sendJson(session.socket, { type: "error", code: "invalid_message", message: "Message failed" });
-          return;
+
+        if (!messageRateLimiter.attempt(session.deviceId)) {
+          throw new ClientMessageError("rate_limited", "Too many messages");
         }
-        if (existing.ackSent === 0) {
+
+        const { event } = await persistUserMessage(
+          session,
+          payload.id,
+          payload.content,
+          attachmentsInfo.attachments,
+          attachmentsHash,
+          attachmentsInfo.assetIds
+        );
+        await new Promise<void>((resolve) => {
           session.socket.send(JSON.stringify({ type: "ack", id: payload.id }), (err) => {
             if (!err) {
               markAckSent(session.deviceId, payload.id);
             }
+            resolve();
           });
-        } else {
-          session.socket.send(JSON.stringify({ type: "ack", id: payload.id }), () => {});
-        }
-        return;
-      }
-
-      if (!messageRateLimiter.attempt(session.deviceId)) {
-        await sendJson(session.socket, { type: "error", code: "rate_limited", message: "Too many messages" });
-        return;
-      }
-
-      const { event } = persistUserMessage(session, payload.id, payload.content);
-      await new Promise<void>((resolve) => {
-        session.socket.send(JSON.stringify({ type: "ack", id: payload.id }), (err) => {
-          if (!err) {
-            markAckSent(session.deviceId, payload.id);
-          }
-          resolve();
         });
-      });
-      broadcastToUser(session.userId, event);
+        broadcastToUser(session.userId, event);
 
-      const priorEvents = getConversationEvents(session.userId);
-      const prompt = buildPromptFromEvents(priorEvents, config.sessions.maxPromptMessages, payload.content);
-      try {
-        const adapterResult = await Promise.race<AdapterExecutionResult>([
-          options.adapter.execute(prompt),
-          new Promise((_, reject) =>
-            setTimeout(() => reject(new Error("adapter_timeout")), config.sessions.adapterExecuteTimeoutSeconds * 1000)
-          )
-        ]);
-        const normalizedResult = normalizeAdapterResult(adapterResult);
-        if ((normalizedResult.exitCode ?? 0) !== 0) {
+        const priorEvents = getConversationEvents(session.userId);
+        const prompt = buildPromptFromEvents(priorEvents, config.sessions.maxPromptMessages, payload.content);
+        try {
+          const adapterResult = await Promise.race<AdapterExecutionResult>([
+            options.adapter.execute(prompt),
+            new Promise((_, reject) =>
+              setTimeout(() => reject(new Error("adapter_timeout")), config.sessions.adapterExecuteTimeoutSeconds * 1000)
+            )
+          ]);
+          const normalizedResult = normalizeAdapterResult(adapterResult);
+          if ((normalizedResult.exitCode ?? 0) !== 0) {
+            updateMessageStreamingStmt.run(MessageStreamingState.Failed, session.deviceId, payload.id);
+            await sendJson(session.socket, {
+              type: "error",
+              code: "server_error",
+              message: "Adapter error",
+              messageId: payload.id
+            });
+            return;
+          }
+          const assistantEvent = await persistAssistantMessage(session, normalizedResult.output ?? "");
+          broadcastToUser(session.userId, assistantEvent);
+          updateMessageStreamingStmt.run(MessageStreamingState.Finalized, session.deviceId, payload.id);
+        } catch (err) {
           updateMessageStreamingStmt.run(MessageStreamingState.Failed, session.deviceId, payload.id);
           await sendJson(session.socket, {
             type: "error",
             code: "server_error",
-            message: "Adapter error",
+            message: "Adapter failure",
             messageId: payload.id
           });
-          return;
         }
-        const assistantEvent = await persistAssistantMessage(session, normalizedResult.output ?? "");
-        broadcastToUser(session.userId, assistantEvent);
-        updateMessageStreamingStmt.run(MessageStreamingState.Finalized, session.deviceId, payload.id);
-      } catch (err) {
-        updateMessageStreamingStmt.run(MessageStreamingState.Failed, session.deviceId, payload.id);
-        await sendJson(session.socket, {
-          type: "error",
-          code: "server_error",
-          message: "Adapter failure",
-          messageId: payload.id
-        });
+      });
+    } catch (err) {
+      if (err instanceof ClientMessageError) {
+        await sendJson(session.socket, { type: "error", code: err.code, message: err.message });
+        return;
       }
-    });
+      throw err;
+    }
   }
 
   async function notifyAdminsOfPending() {
@@ -980,11 +1466,6 @@ export async function createProviderServer(options: ProviderOptions): Promise<Pr
       }
     }
 
-    for (const [deviceId, pending] of pendingPairs.entries()) {
-      if (pending.socket === socket) {
-        pendingPairs.delete(deviceId);
-      }
-    }
     connectionState.delete(socket);
   }
 
@@ -1044,6 +1525,12 @@ export async function createProviderServer(options: ProviderOptions): Promise<Pr
       await sendJson(ws, { type: "error", code: "invalid_message", message: "Invalid deviceId" });
       return;
     }
+    if (deniedDevices.has(payload.deviceId)) {
+      deniedDevices.delete(payload.deviceId);
+      await sendJson(ws, { type: "pair_result", success: false, reason: "pair_denied" });
+      ws.close();
+      return;
+    }
     if (!pairRateLimiter.attempt(payload.deviceId)) {
       await sendJson(ws, { type: "error", code: "rate_limited", message: "Pairing rate limited" });
       ws.close(1008);
@@ -1066,6 +1553,32 @@ export async function createProviderServer(options: ProviderOptions): Promise<Pr
     const sanitizedClaimedName = sanitizeLabel(payload.claimedName);
 
     const entry = findAllowlistEntry(payload.deviceId);
+    if (entry && !entry.tokenDelivered) {
+      const token = issueToken(entry);
+      const delivered = await sendJson(ws, { type: "pair_result", success: true, token, userId: entry.userId })
+        .then(() => true)
+        .catch(() => false);
+      if (delivered) {
+        await setTokenDelivered(payload.deviceId, true);
+      }
+      ws.close();
+      return;
+    }
+    if (entry && entry.tokenDelivered && entry.lastSeenAt === null) {
+      const now = nowMs();
+      const graceMs = config.auth.reissueGraceSeconds * 1000;
+      if (now - entry.createdAt <= graceMs) {
+        const token = issueToken(entry);
+        const delivered = await sendJson(ws, { type: "pair_result", success: true, token, userId: entry.userId })
+          .then(() => true)
+          .catch(() => false);
+        if (delivered) {
+          await updateLastSeen(entry.deviceId, now);
+        }
+        ws.close();
+        return;
+      }
+    }
     if (!hasAdmin()) {
       const userId = generateUserId();
       const newEntry: AllowlistEntry = {
@@ -1081,8 +1594,12 @@ export async function createProviderServer(options: ProviderOptions): Promise<Pr
       allowlist.entries.push(newEntry);
       await persistAllowlist();
       const token = issueToken(newEntry);
-      await sendJson(ws, { type: "pair_result", success: true, token, userId });
-      await setTokenDelivered(payload.deviceId, true);
+      const delivered = await sendJson(ws, { type: "pair_result", success: true, token, userId })
+        .then(() => true)
+        .catch(() => false);
+      if (delivered) {
+        await setTokenDelivered(payload.deviceId, true);
+      }
       ws.close();
       return;
     }
@@ -1090,6 +1607,13 @@ export async function createProviderServer(options: ProviderOptions): Promise<Pr
     if (entry && entry.tokenDelivered) {
       await sendJson(ws, { type: "error", code: "invalid_message", message: "Device already paired" });
       ws.close();
+      return;
+    }
+
+    const pending = pendingPairs.get(payload.deviceId);
+    if (pending) {
+      pending.socket = ws;
+      await notifyAdminsOfPending();
       return;
     }
 
@@ -1126,11 +1650,20 @@ export async function createProviderServer(options: ProviderOptions): Promise<Pr
       return;
     }
     if (payload.approve !== true) {
-      await sendJson(pending.socket, { type: "pair_result", success: false, reason: "pair_denied" });
+      const delivered = await sendJson(pending.socket, { type: "pair_result", success: false, reason: "pair_denied" })
+        .then(() => true)
+        .catch(() => false);
+      if (!delivered) {
+        deniedDevices.set(payload.deviceId, nowMs());
+      }
       pendingPairs.delete(payload.deviceId);
       return;
     }
-    const userId = typeof payload.userId === "string" && payload.userId.length > 0 ? payload.userId : generateUserId();
+    if (!validateUserId(payload.userId)) {
+      await sendJson(ws, { type: "error", code: "invalid_message", message: "Invalid userId" });
+      return;
+    }
+    const userId = payload.userId;
     const newEntry: AllowlistEntry = {
       deviceId: pending.deviceId,
       claimedName: pending.claimedName,
@@ -1143,8 +1676,12 @@ export async function createProviderServer(options: ProviderOptions): Promise<Pr
     };
     await upsertAllowlistEntry(newEntry);
     const token = issueToken(newEntry);
-    await sendJson(pending.socket, { type: "pair_result", success: true, token, userId });
-    await setTokenDelivered(pending.deviceId, true);
+    const delivered = await sendJson(pending.socket, { type: "pair_result", success: true, token, userId })
+      .then(() => true)
+      .catch(() => false);
+    if (delivered) {
+      await setTokenDelivered(pending.deviceId, true);
+    }
     pendingPairs.delete(pending.deviceId);
   }
 
@@ -1156,6 +1693,11 @@ export async function createProviderServer(options: ProviderOptions): Promise<Pr
     }
     if (typeof payload.token !== "string" || !validateDeviceId(payload.deviceId)) {
       await sendJson(ws, { type: "auth_result", success: false, reason: "auth_failed" });
+      ws.close();
+      return;
+    }
+    if (pendingPairs.has(payload.deviceId)) {
+      await sendJson(ws, { type: "auth_result", success: false, reason: "device_not_approved" });
       ws.close();
       return;
     }
@@ -1255,6 +1797,9 @@ export async function createProviderServer(options: ProviderOptions): Promise<Pr
       if (!started) return;
       unwatchFile(denylistPath, denylistWatcher);
       clearInterval(pendingCleanupInterval);
+      if (assetCleanupInterval) {
+        clearInterval(assetCleanupInterval);
+      }
       await new Promise<void>((resolve) => wss.close(() => resolve()));
       await new Promise<void>((resolve) => httpServer.close(() => resolve()));
       db.close();

@@ -4,6 +4,7 @@ import { mkdtemp, rm, readFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import WebSocket from "ws";
+import Database from "better-sqlite3";
 
 import { createProviderServer, type Adapter, type ProviderConfig } from "../src/index";
 
@@ -113,6 +114,17 @@ function waitForNoMessage(ws: WebSocket, timeoutMs = 300): Promise<void> {
   });
 }
 
+async function waitForOptionalMessage<T>(ws: WebSocket, timeoutMs = 300): Promise<T | null> {
+  try {
+    return await waitForMessage<T>(ws, timeoutMs);
+  } catch (err: any) {
+    if (err instanceof Error && err.message.includes("Timed out")) {
+      return null;
+    }
+    throw err;
+  }
+}
+
 async function createTmpDir() {
   return mkdtemp(path.join(os.tmpdir(), "clawline-provider-"));
 }
@@ -124,6 +136,157 @@ async function openSocket(port: number): Promise<WebSocket> {
     socket.on("message", (data) => log("socket recv", data.toString()));
   }
   return socket;
+}
+
+async function bootstrapAdminAndUser(port: number) {
+  const adminDeviceId = randomUUID();
+  const adminPairSocket = await openSocket(port);
+  adminPairSocket.send(
+    JSON.stringify({
+      type: "pair_request",
+      protocolVersion: TEST_PROTOCOL_VERSION,
+      deviceId: adminDeviceId,
+      claimedName: "Admin",
+      deviceInfo: {
+        platform: "iOS",
+        model: "iPhone",
+        osVersion: "17.2",
+        appVersion: "1.0"
+      }
+    })
+  );
+  const adminPairResult = await waitForMessage<any>(adminPairSocket);
+  expect(adminPairResult.type).toBe("pair_result");
+  expect(adminPairResult.success).toBe(true);
+  adminPairSocket.close();
+
+  const adminAuthSocket = await openSocket(port);
+  adminAuthSocket.send(
+    JSON.stringify({
+      type: "auth",
+      protocolVersion: TEST_PROTOCOL_VERSION,
+      token: adminPairResult.token,
+      deviceId: adminDeviceId,
+      lastMessageId: null
+    })
+  );
+  const adminAuthResult = await waitForMessage<any>(adminAuthSocket);
+  expect(adminAuthResult.type).toBe("auth_result");
+  expect(adminAuthResult.success).toBe(true);
+
+  const userDeviceId = randomUUID();
+  const userPairSocket = await openSocket(port);
+  userPairSocket.send(
+    JSON.stringify({
+      type: "pair_request",
+      protocolVersion: TEST_PROTOCOL_VERSION,
+      deviceId: userDeviceId,
+      claimedName: "User",
+      deviceInfo: {
+        platform: "iOS",
+        model: "iPhone",
+        osVersion: "17.2",
+        appVersion: "1.0"
+      }
+    })
+  );
+  const approvalRequest = await waitForMessage<any>(adminAuthSocket);
+  expect(approvalRequest.type).toBe("pair_approval_request");
+  expect(approvalRequest.deviceId).toBe(userDeviceId);
+
+  const assignedUserId = `user_${randomUUID()}`;
+  adminAuthSocket.send(
+    JSON.stringify({
+      type: "pair_decision",
+      deviceId: userDeviceId,
+      userId: assignedUserId,
+      approve: true
+    })
+  );
+
+  const userPairResult = await waitForMessage<any>(userPairSocket);
+  expect(userPairResult.type).toBe("pair_result");
+  expect(userPairResult.success).toBe(true);
+  expect(userPairResult.userId).toBe(assignedUserId);
+  userPairSocket.close();
+  adminAuthSocket.close();
+
+  return {
+    admin: { deviceId: adminDeviceId, token: adminPairResult.token, userId: adminPairResult.userId },
+    user: { deviceId: userDeviceId, token: userPairResult.token, userId: assignedUserId }
+  };
+}
+
+async function authenticateDevice(port: number, token: string, deviceId: string, lastMessageId: string | null = null) {
+  const socket = await openSocket(port);
+  socket.send(
+    JSON.stringify({
+      type: "auth",
+      protocolVersion: TEST_PROTOCOL_VERSION,
+      token,
+      deviceId,
+      lastMessageId
+    })
+  );
+  const authResult = await waitForMessage<any>(socket);
+  expect(authResult.type).toBe("auth_result");
+  expect(authResult.success).toBe(true);
+  return { socket, authResult };
+}
+
+async function uploadTestFile(
+  port: number,
+  token: string,
+  bytes: Buffer,
+  mimeType = "application/octet-stream",
+  filename = "file.bin"
+) {
+  const form = new FormData();
+  form.append("file", new Blob([bytes], { type: mimeType }), filename);
+  const resp = await fetch(`http://127.0.0.1:${port}/upload`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`
+    },
+    body: form
+  });
+  return { status: resp.status, body: await resp.json() };
+}
+
+async function pairAdditionalUser(port: number, adminSocket: WebSocket) {
+  const deviceId = randomUUID();
+  const pairSocket = await openSocket(port);
+  pairSocket.send(
+    JSON.stringify({
+      type: "pair_request",
+      protocolVersion: TEST_PROTOCOL_VERSION,
+      deviceId,
+      claimedName: "Secondary",
+      deviceInfo: {
+        platform: "iOS",
+        model: "iPhone",
+        osVersion: "17.2",
+        appVersion: "1.0"
+      }
+    })
+  );
+  const approval = await waitForMessage<any>(adminSocket);
+  expect(approval.type).toBe("pair_approval_request");
+  expect(approval.deviceId).toBe(deviceId);
+  const userId = `user_${randomUUID()}`;
+  adminSocket.send(
+    JSON.stringify({
+      type: "pair_decision",
+      deviceId,
+      userId,
+      approve: true
+    })
+  );
+  const pairResult = await waitForMessage<any>(pairSocket);
+  expect(pairResult.type).toBe("pair_result");
+  expect(pairResult.success).toBe(true);
+  pairSocket.close();
+  return { deviceId, token: pairResult.token as string, userId };
 }
 
 type TestContext = {
@@ -671,5 +834,465 @@ describe.sequential("Clawline provider phase 1", () => {
     expect(entry.deviceInfo.model.length).toBeLessThanOrEqual(64);
     expect(entry.deviceInfo.osVersion.includes("\n")).toBe(false);
     expect(entry.deviceInfo.appVersion.includes("\n")).toBe(false);
+  });
+});
+
+describe.sequential("Clawline provider phase 2", () => {
+  let ctx: TestContext | undefined;
+
+  async function resetServer(overrides?: Partial<ProviderConfig>) {
+    if (ctx) {
+      await ctx.server.stop();
+      await rm(ctx.statePath, { recursive: true, force: true });
+      ctx = undefined;
+    }
+    ctx = await bootServer(overrides);
+  }
+
+  afterEach(async () => {
+    if (ctx) {
+      await ctx.server.stop();
+      await rm(ctx.statePath, { recursive: true, force: true });
+      ctx = undefined;
+    }
+  });
+
+  it("supports asset upload/download and message attachments", async () => {
+    await resetServer();
+    if (!ctx) throw new Error("missing ctx");
+    const port = ctx.server.getPort();
+    const { user } = await bootstrapAdminAndUser(port);
+    const { socket: userSocket } = await authenticateDevice(port, user.token, user.deviceId, null);
+
+    const fileBytes = Buffer.from("phase2-file-bytes");
+    const upload = await uploadTestFile(port, user.token, fileBytes, "text/plain", "note.txt");
+    expect(upload.status).toBe(200);
+    expect(upload.body.assetId).toMatch(/^a_[0-9a-f-]{36}$/);
+    expect(upload.body.mimeType).toBe("text/plain");
+    expect(upload.body.size).toBe(fileBytes.length);
+
+    const downloadResp = await fetch(`http://127.0.0.1:${port}/download/${upload.body.assetId}`, {
+      headers: { Authorization: `Bearer ${user.token}` }
+    });
+    expect(downloadResp.status).toBe(200);
+    const downloaded = Buffer.from(await downloadResp.arrayBuffer());
+    expect(downloaded.equals(fileBytes)).toBe(true);
+    expect(downloadResp.headers.get("content-type")).toBe("text/plain");
+
+    const messageId = `c_${randomUUID()}`;
+    userSocket.send(
+      JSON.stringify({
+        type: "message",
+        id: messageId,
+        content: "asset attached",
+        attachments: [{ type: "asset", assetId: upload.body.assetId }]
+      })
+    );
+    const ack = await waitForMessage<any>(userSocket);
+    expect(ack.type).toBe("ack");
+    expect(ack.id).toBe(messageId);
+
+    const userEcho = await waitForMessage<any>(userSocket);
+    expect(userEcho.type).toBe("message");
+    expect(userEcho.attachments).toEqual([{ type: "asset", assetId: upload.body.assetId }]);
+
+    await waitForMessage<any>(userSocket); // assistant message
+    userSocket.close();
+  });
+
+  it("rejects upload without authorization", async () => {
+    await resetServer();
+    if (!ctx) throw new Error("missing ctx");
+    const port = ctx.server.getPort();
+    const form = new FormData();
+    form.append("file", new Blob([Buffer.from("no auth")], { type: "text/plain" }), "note.txt");
+    const resp = await fetch(`http://127.0.0.1:${port}/upload`, {
+      method: "POST",
+      body: form
+    });
+    expect(resp.status).toBe(401);
+    const error = await resp.json();
+    expect(error.code).toBe("auth_failed");
+  });
+
+  it("enforces inline attachment limits", async () => {
+    await resetServer({
+      media: {
+        maxInlineBytes: 512
+      }
+    });
+    if (!ctx) throw new Error("missing ctx");
+    const port = ctx.server.getPort();
+    const { user } = await bootstrapAdminAndUser(port);
+    const { socket: userSocket } = await authenticateDevice(port, user.token, user.deviceId, null);
+
+    const inlineBytes = Buffer.alloc(513, 1).toString("base64");
+    const messageId = `c_${randomUUID()}`;
+    userSocket.send(
+      JSON.stringify({
+        type: "message",
+        id: messageId,
+        content: "too big inline",
+        attachments: [{ type: "image", mimeType: "image/png", data: inlineBytes }]
+      })
+    );
+    const error = await waitForMessage<any>(userSocket);
+    expect(error.type).toBe("error");
+    expect(error.code).toBe("payload_too_large");
+    userSocket.close();
+  });
+
+  it("returns asset_not_found for unknown downloads", async () => {
+    await resetServer();
+    if (!ctx) throw new Error("missing ctx");
+    const port = ctx.server.getPort();
+    const { user } = await bootstrapAdminAndUser(port);
+    const resp = await fetch(`http://127.0.0.1:${port}/download/a_00000000-0000-0000-0000-000000000000`, {
+      headers: { Authorization: `Bearer ${user.token}` }
+    });
+    expect(resp.status).toBe(404);
+    const body = await resp.json();
+    expect(body.code).toBe("asset_not_found");
+  });
+
+  it("returns asset_not_found when asset file is missing and removes the row", async () => {
+    await resetServer();
+    if (!ctx) throw new Error("missing ctx");
+    const { statePath, mediaPath } = ctx;
+    const port = ctx.server.getPort();
+    const { user } = await bootstrapAdminAndUser(port);
+
+    const upload = await uploadTestFile(port, user.token, Buffer.from("missing-file"));
+    expect(upload.status).toBe(200);
+    const assetId = upload.body.assetId as string;
+    await rm(path.join(mediaPath, "assets", assetId), { force: true });
+
+    const resp = await fetch(`http://127.0.0.1:${port}/download/${assetId}`, {
+      headers: { Authorization: `Bearer ${user.token}` }
+    });
+    expect(resp.status).toBe(404);
+    const body = await resp.json();
+    expect(body.code).toBe("asset_not_found");
+
+    const db = new Database(path.join(statePath, "clawline.sqlite"));
+    const row = db.prepare(`SELECT assetId FROM assets WHERE assetId = ?`).get(assetId);
+    db.close();
+    expect(row).toBeUndefined();
+  });
+
+  it("expires unreferenced uploads after TTL", async () => {
+    await resetServer({
+      media: {
+        unreferencedUploadTtlSeconds: 1
+      }
+    });
+    if (!ctx) throw new Error("missing ctx");
+    const port = ctx.server.getPort();
+    const { user } = await bootstrapAdminAndUser(port);
+    const upload = await uploadTestFile(port, user.token, Buffer.from("transient"));
+    expect(upload.status).toBe(200);
+    await new Promise((resolve) => setTimeout(resolve, 2200));
+    const resp = await fetch(`http://127.0.0.1:${port}/download/${upload.body.assetId}`, {
+      headers: { Authorization: `Bearer ${user.token}` }
+    });
+    expect(resp.status).toBe(404);
+    const body = await resp.json();
+    expect(body.code).toBe("asset_not_found");
+  });
+
+  it("prevents cross-user asset access", async () => {
+    await resetServer();
+    if (!ctx) throw new Error("missing ctx");
+    const port = ctx.server.getPort();
+    const { admin, user } = await bootstrapAdminAndUser(port);
+    const adminAuth = await authenticateDevice(port, admin.token, admin.deviceId, null);
+    const otherUser = await pairAdditionalUser(port, adminAuth.socket);
+
+    const upload = await uploadTestFile(port, user.token, Buffer.from("private data"), "text/plain", "secret.txt");
+    expect(upload.status).toBe(200);
+
+    const unauthorizedDownload = await fetch(`http://127.0.0.1:${port}/download/${upload.body.assetId}`, {
+      headers: { Authorization: `Bearer ${otherUser.token}` }
+    });
+    expect(unauthorizedDownload.status).toBe(404);
+    const unauthorizedBody = await unauthorizedDownload.json();
+    expect(unauthorizedBody.code).toBe("asset_not_found");
+
+    const otherSocket = (await authenticateDevice(port, otherUser.token, otherUser.deviceId, null)).socket;
+    otherSocket.send(
+      JSON.stringify({
+        type: "message",
+        id: `c_${randomUUID()}`,
+        content: "trying to steal",
+        attachments: [{ type: "asset", assetId: upload.body.assetId }]
+      })
+    );
+    const error = await waitForMessage<any>(otherSocket);
+    expect(error.type).toBe("error");
+    expect(error.code).toBe("asset_not_found");
+    otherSocket.close();
+    adminAuth.socket.close();
+  });
+});
+
+describe.sequential("Clawline provider phase 3", () => {
+  let ctx: TestContext | undefined;
+
+  async function resetServer(overrides?: Partial<ProviderConfig>) {
+    if (ctx) {
+      await ctx.server.stop();
+      await rm(ctx.statePath, { recursive: true, force: true });
+      ctx = undefined;
+    }
+    ctx = await bootServer(overrides);
+  }
+
+  afterEach(async () => {
+    if (ctx) {
+      await ctx.server.stop();
+      await rm(ctx.statePath, { recursive: true, force: true });
+      ctx = undefined;
+    }
+  });
+
+  it("returns device_not_approved for auth while pending", async () => {
+    await resetServer();
+    if (!ctx) throw new Error("missing ctx");
+    const port = ctx.server.getPort();
+
+    const { admin } = await bootstrapAdminAndUser(port);
+    const adminAuth = await authenticateDevice(port, admin.token, admin.deviceId, null);
+
+    const pendingDeviceId = randomUUID();
+    const pendingSocket = await openSocket(port);
+    pendingSocket.send(
+      JSON.stringify({
+        type: "pair_request",
+        protocolVersion: TEST_PROTOCOL_VERSION,
+        deviceId: pendingDeviceId,
+        claimedName: "Pending",
+        deviceInfo: {
+          platform: "iOS",
+          model: "iPhone",
+          osVersion: "17.2",
+          appVersion: "1.0"
+        }
+      })
+    );
+    await waitForMessage<any>(adminAuth.socket); // approval request
+
+    const authSocket = await openSocket(port);
+    authSocket.send(
+      JSON.stringify({
+        type: "auth",
+        protocolVersion: TEST_PROTOCOL_VERSION,
+        token: "bad",
+        deviceId: pendingDeviceId,
+        lastMessageId: null
+      })
+    );
+    const authResult = await waitForMessage<any>(authSocket);
+    expect(authResult.type).toBe("auth_result");
+    expect(authResult.success).toBe(false);
+    expect(authResult.reason).toBe("device_not_approved");
+
+    authSocket.close();
+    pendingSocket.close();
+    adminAuth.socket.close();
+  });
+
+  it("treats duplicate pair_request as reconnect and delivers result to latest socket", async () => {
+    await resetServer();
+    if (!ctx) throw new Error("missing ctx");
+    const port = ctx.server.getPort();
+
+    const { admin } = await bootstrapAdminAndUser(port);
+    const adminAuth = await authenticateDevice(port, admin.token, admin.deviceId, null);
+
+    const deviceId = randomUUID();
+    const firstSocket = await openSocket(port);
+    firstSocket.send(
+      JSON.stringify({
+        type: "pair_request",
+        protocolVersion: TEST_PROTOCOL_VERSION,
+        deviceId,
+        claimedName: "First",
+        deviceInfo: {
+          platform: "iOS",
+          model: "iPhone",
+          osVersion: "17.2",
+          appVersion: "1.0"
+        }
+      })
+    );
+    const firstApproval = await waitForMessage<any>(adminAuth.socket);
+    expect(firstApproval.type).toBe("pair_approval_request");
+    expect(firstApproval.deviceId).toBe(deviceId);
+    expect(firstApproval.claimedName).toBe("First");
+    firstSocket.close();
+
+    const secondSocket = await openSocket(port);
+    secondSocket.send(
+      JSON.stringify({
+        type: "pair_request",
+        protocolVersion: TEST_PROTOCOL_VERSION,
+        deviceId,
+        claimedName: "Second",
+        deviceInfo: {
+          platform: "Android",
+          model: "Pixel",
+          osVersion: "15",
+          appVersion: "2.0"
+        }
+      })
+    );
+    const maybeApproval = await waitForOptionalMessage<any>(adminAuth.socket, 300);
+    if (maybeApproval) {
+      expect(maybeApproval.type).toBe("pair_approval_request");
+      expect(maybeApproval.claimedName).toBe("First");
+    }
+
+    const userId = `user_${randomUUID()}`;
+    adminAuth.socket.send(
+      JSON.stringify({
+        type: "pair_decision",
+        deviceId,
+        userId,
+        approve: true
+      })
+    );
+    const pairResult = await waitForMessage<any>(secondSocket);
+    expect(pairResult.type).toBe("pair_result");
+    expect(pairResult.success).toBe(true);
+    expect(pairResult.userId).toBe(userId);
+
+    secondSocket.close();
+    adminAuth.socket.close();
+  });
+
+  it("returns pair_denied on next request when admin denies while requester is disconnected", async () => {
+    await resetServer();
+    if (!ctx) throw new Error("missing ctx");
+    const port = ctx.server.getPort();
+
+    const { admin } = await bootstrapAdminAndUser(port);
+    const adminAuth = await authenticateDevice(port, admin.token, admin.deviceId, null);
+
+    const deviceId = randomUUID();
+    const pendingSocket = await openSocket(port);
+    pendingSocket.send(
+      JSON.stringify({
+        type: "pair_request",
+        protocolVersion: TEST_PROTOCOL_VERSION,
+        deviceId,
+        claimedName: "Denied",
+        deviceInfo: {
+          platform: "iOS",
+          model: "iPhone",
+          osVersion: "17.2",
+          appVersion: "1.0"
+        }
+      })
+    );
+    await waitForMessage<any>(adminAuth.socket);
+    pendingSocket.close();
+
+    adminAuth.socket.send(
+      JSON.stringify({
+        type: "pair_decision",
+        deviceId,
+        approve: false
+      })
+    );
+
+    const retrySocket = await openSocket(port);
+    retrySocket.send(
+      JSON.stringify({
+        type: "pair_request",
+        protocolVersion: TEST_PROTOCOL_VERSION,
+        deviceId,
+        claimedName: "Denied",
+        deviceInfo: {
+          platform: "iOS",
+          model: "iPhone",
+          osVersion: "17.2",
+          appVersion: "1.0"
+        }
+      })
+    );
+    const deniedResult = await waitForMessage<any>(retrySocket);
+    expect(deniedResult.type).toBe("pair_result");
+    expect(deniedResult.success).toBe(false);
+    expect(deniedResult.reason).toBe("pair_denied");
+
+    retrySocket.close();
+    adminAuth.socket.close();
+  });
+
+  it("requires valid userId on approve and keeps admin socket open", async () => {
+    await resetServer();
+    if (!ctx) throw new Error("missing ctx");
+    const port = ctx.server.getPort();
+
+    const { admin } = await bootstrapAdminAndUser(port);
+    const adminAuth = await authenticateDevice(port, admin.token, admin.deviceId, null);
+
+    const deviceId = randomUUID();
+    const pendingSocket = await openSocket(port);
+    pendingSocket.send(
+      JSON.stringify({
+        type: "pair_request",
+        protocolVersion: TEST_PROTOCOL_VERSION,
+        deviceId,
+        claimedName: "NeedsId",
+        deviceInfo: {
+          platform: "iOS",
+          model: "iPhone",
+          osVersion: "17.2",
+          appVersion: "1.0"
+        }
+      })
+    );
+    await waitForMessage<any>(adminAuth.socket);
+
+    adminAuth.socket.send(
+      JSON.stringify({
+        type: "pair_decision",
+        deviceId,
+        approve: true
+      })
+    );
+    const missingUserId = await waitForMessage<any>(adminAuth.socket);
+    expect(missingUserId.type).toBe("error");
+    expect(missingUserId.code).toBe("invalid_message");
+
+    adminAuth.socket.send(
+      JSON.stringify({
+        type: "pair_decision",
+        deviceId,
+        approve: true,
+        userId: "bad"
+      })
+    );
+    const badUserId = await waitForMessage<any>(adminAuth.socket);
+    expect(badUserId.type).toBe("error");
+    expect(badUserId.code).toBe("invalid_message");
+
+    const userId = `user_${randomUUID()}`;
+    adminAuth.socket.send(
+      JSON.stringify({
+        type: "pair_decision",
+        deviceId,
+        approve: true,
+        userId
+      })
+    );
+    const pairResult = await waitForMessage<any>(pendingSocket);
+    expect(pairResult.type).toBe("pair_result");
+    expect(pairResult.success).toBe(true);
+    expect(pairResult.userId).toBe(userId);
+
+    pendingSocket.close();
+    adminAuth.socket.close();
   });
 });

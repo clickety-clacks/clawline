@@ -15,11 +15,13 @@
   "type": "module",
   "dependencies": {
     "better-sqlite3": "^12.6.0",
+    "busboy": "^1.6.0",
     "jsonwebtoken": "^9.0.3",
     "uuid": "^13.0.0",
     "ws": "^8.19.0"
   },
   "devDependencies": {
+    "@types/busboy": "^1.5.4",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^25.0.6",
     "@types/ws": "^8.18.1",

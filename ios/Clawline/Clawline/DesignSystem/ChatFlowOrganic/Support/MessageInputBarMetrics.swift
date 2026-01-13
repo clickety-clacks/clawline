@@ -42,8 +42,10 @@ struct MessageInputBarMetrics {
     /// Spacing between elements in the input bar HStack
     static let elementSpacing: CGFloat = 8
 
+    /// Bottom padding: 0 when keyboard hidden (ChatView uses offset for concentric alignment),
+    /// elementSpacing (8pt) when keyboard visible for comfortable gap above keyboard.
     var bottomPadding: CGFloat {
-        isKeyboardOnScreen ? Self.elementSpacing : concentricPadding
+        isKeyboardOnScreen ? Self.elementSpacing : 0
     }
 
 }

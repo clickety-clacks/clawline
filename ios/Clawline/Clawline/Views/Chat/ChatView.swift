@@ -58,11 +58,8 @@ struct ChatView: View {
                 }
             }
             .safeAreaInset(edge: .bottom) {
-                // Offset pushes bar INTO safe area for concentric alignment (keyboard hidden only).
-                // Safe area ~34pt, concentric padding 26pt, so offset down by 8pt.
-                // When keyboard visible (>40pt), don't offset - let it sit above keyboard.
-                let isKeyboardVisible = geometry.safeAreaInsets.bottom > 40
-                let concentricOffset = isKeyboardVisible ? 0 : max(geometry.safeAreaInsets.bottom - 26, 0)
+                // MessageInputBar handles its own offset for concentric alignment.
+                // Pass raw safe area inset for keyboard detection.
                 MessageInputBar(
                     text: $viewModel.messageInput,
                     isSending: viewModel.isSending,
@@ -71,7 +68,6 @@ struct ChatView: View {
                     onAdd: { },
                     onFocusChange: { focused in isInputFocused = focused }
                 )
-                .offset(y: concentricOffset)
             }
         }
         .ignoresSafeArea(.container, edges: .top)

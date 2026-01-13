@@ -96,6 +96,7 @@ struct MessageInputBar: View {
         }
         .padding(.horizontal, metrics.concentricPadding)
         .padding(.bottom, metrics.bottomPadding)
+        .offset(y: metrics.concentricOffset)
     }
 
     // swiftlint:disable:next unused_declaration

@@ -42,13 +42,26 @@ struct MessageInputBarMetrics {
     /// Spacing between elements in the input bar HStack
     static let elementSpacing: CGFloat = 8
 
-    /// Bottom padding: 0 when keyboard hidden (ChatView uses offset for concentric alignment),
-    /// elementSpacing (8pt) when keyboard visible for comfortable gap above keyboard.
+    /// Offset to push input bar INTO safe area for concentric alignment.
+    /// Face ID devices: safe area ~34pt, concentric 26pt → offset 8pt down.
+    /// Home button devices: safe area 0pt → offset 0 (use bottomPadding instead).
+    var concentricOffset: CGFloat {
+        if isKeyboardOnScreen { return 0 }
+        return max(bottomSafeAreaInset - concentricPadding, 0)
+    }
+
+    /// Bottom padding for positioning:
+    /// - Keyboard visible: 8pt gap above keyboard
+    /// - Keyboard hidden on Face ID: 0 (offset handles positioning)
+    /// - Keyboard hidden on home button: 8pt (no safe area to offset into)
     var bottomPadding: CGFloat {
-        isKeyboardOnScreen ? Self.elementSpacing : 0
+        if isKeyboardOnScreen { return Self.elementSpacing }
+        // If safe area is smaller than concentric padding, we need padding
+        return max(concentricPadding - bottomSafeAreaInset, 0)
     }
 
 }
+
 
 struct MessageInputMotionState {
     let reduceMotionEnabled: Bool

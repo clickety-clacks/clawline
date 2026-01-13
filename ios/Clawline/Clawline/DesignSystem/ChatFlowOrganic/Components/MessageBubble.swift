@@ -604,6 +604,9 @@ private struct ExpandedMessageSheet: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
+    @State private var dragOffset: CGFloat = 0
+    private let dismissThreshold: CGFloat = 100
+
     private var isCompact: Bool { horizontalSizeClass == .compact }
     private var metrics: ChatFlowTheme.Metrics { ChatFlowTheme.Metrics(isCompact: isCompact) }
 
@@ -627,6 +630,23 @@ private struct ExpandedMessageSheet: View {
                 }
             }
         }
+        .offset(x: dragOffset)
+        .opacity(1.0 - Double(abs(dragOffset)) / 300.0)
+        .gesture(
+            DragGesture()
+                .onChanged { value in
+                    dragOffset = value.translation.width
+                }
+                .onEnded { value in
+                    if abs(value.translation.width) > dismissThreshold {
+                        dismiss()
+                    } else {
+                        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                            dragOffset = 0
+                        }
+                    }
+                }
+        )
     }
 
     private var header: some View {

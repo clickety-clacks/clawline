@@ -58,13 +58,13 @@ struct ChatView: View {
                 }
             }
             .safeAreaInset(edge: .bottom) {
-                // Pass a high safe area value to always use keyboard-visible padding (12pt).
-                // This avoids the jump caused by inconsistent safe area detection.
-                // TODO: Find a way to restore concentric alignment when keyboard is hidden.
+                // Pass actual safe area inset for concentric alignment calculation.
+                // When keyboard is hidden (~34pt), uses 26pt padding for concentric alignment.
+                // When keyboard is visible (300+pt), uses 12pt padding.
                 MessageInputBar(
                     text: $viewModel.messageInput,
                     isSending: viewModel.isSending,
-                    bottomSafeAreaInset: 100, // Force keyboard-visible mode (12pt padding)
+                    bottomSafeAreaInset: geometry.safeAreaInsets.bottom,
                     onSend: { Task { await viewModel.send() } },
                     onAdd: { },
                     onFocusChange: { focused in isInputFocused = focused }

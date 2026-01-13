@@ -54,7 +54,7 @@ struct MessageInputBar: View {
     }
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: MessageInputBarMetrics.elementSpacing) {
             Button(action: onAdd) {
                 Image(systemName: "plus")
                     .font(.system(size: 18, weight: .semibold))

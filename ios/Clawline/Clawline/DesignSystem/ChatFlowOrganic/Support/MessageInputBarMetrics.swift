@@ -39,8 +39,11 @@ struct MessageInputBarMetrics {
         max(deviceCornerRadius - (inputBarHeight / 2), 8)
     }
 
+    /// Spacing between elements in the input bar HStack
+    static let elementSpacing: CGFloat = 8
+
     var bottomPadding: CGFloat {
-        isKeyboardOnScreen ? 12 : concentricPadding
+        isKeyboardOnScreen ? Self.elementSpacing : concentricPadding
     }
 
 }

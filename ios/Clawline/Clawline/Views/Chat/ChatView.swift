@@ -6,7 +6,6 @@
 //
 
 import SwiftUI
-import UIKit
 
 // MARK: - ⚠️ IMPORTANT: Keyboard Positioning Fix - READ BEFORE MODIFYING ⚠️
 //
@@ -19,160 +18,92 @@ import UIKit
 // - Keyboard VISIBLE: 12pt (comfortable gap above keyboard)
 //
 // ## Why Standard Approaches FAIL
-// You might think to use @FocusState or keyboard notifications to detect keyboard state.
-// DON'T. Here's why:
-//
-// State-based keyboard detection (@FocusState, UIResponder.keyboardWillChangeFrameNotification)
-// updates ASYNCHRONOUSLY from SwiftUI's layout-based keyboard avoidance. This causes a
-// visible padding jump on BOTH single-line and multiline TextFields:
-//
-//   1. User taps text field
-//   2. SwiftUI's layout system adjusts safe areas and moves content (IMMEDIATE, same frame)
-//   3. @FocusState or keyboard notification updates state (DELAYED, different frame)
-//   4. Our padding depends on state, so it's still 26pt while view has already moved
-//   5. Eventually state updates, padding changes to 12pt
-//   6. Visible jump as padding corrects itself
-//
-// The core issue: SwiftUI's keyboard avoidance operates at the LAYOUT level, but @FocusState
-// and keyboard notifications operate at the STATE level. These are not synchronized.
+// State-based keyboard detection (@FocusState, keyboardWillChangeFrame) is asynchronous
+// relative to SwiftUI’s layout-driven keyboard avoidance and causes visible jumps.
 //
 // ## The Solution: Safe Area Insets as Source of Truth
-// Instead of relying on state-based detection, we track safe area inset changes via
-// GeometryReader. When the keyboard appears, SwiftUI increases safeAreaInsets.bottom.
-// Crucially, this change happens in the SAME LAYOUT PASS as the keyboard animation,
-// so our padding update is perfectly synchronized.
-//
-// We capture the baseline safe area on appear (~34pt for home indicator on Face ID
-// devices) and treat "keyboard visible" as safeAreaInsets.bottom > baseline + threshold.
-//
-// ## What NOT to Change
-// - DO NOT replace isKeyboardVisible with @FocusState - it will break (async with layout)
-// - DO NOT replace isKeyboardVisible with keyboard notifications - it will break (async with layout)
-// - DO NOT remove the GeometryReader - it's essential for tracking safe area
-// - DO NOT change the threshold (10pt) without testing on physical device
-//
-// ## Why This Works
-// Safe area insets are part of SwiftUI's layout system. When the keyboard appears:
-// - SwiftUI adjusts safeAreaInsets.bottom in the layout pass
-// - Our onChange(of: geometry.safeAreaInsets.bottom) fires in the SAME pass
-// - bottomPadding updates synchronously with keyboard avoidance
-// - No jump because everything happens in one frame
+// Track safeAreaInsets.bottom; when it grows, the keyboard is on screen. This fires in
+// the same layout pass as the keyboard animation, so padding updates are in sync.
 //
 // If you need to modify keyboard handling, READ scratch/keyboard-fix-iterations.md first.
-// It documents 6 failed approaches so you don't repeat them.
 
 struct ChatView: View {
     @State private var viewModel: ChatViewModel
+    @State private var isInputFocused = false
 
-    // Note: isInputFocused is used by MessageInputBar for TextField focus binding.
-    // DO NOT use this for keyboard detection - see comment block above for why.
-    @FocusState private var isInputFocused: Bool
-
-    // Safe area inset tracking for keyboard detection.
-    // baselineSafeAreaBottom: The safe area when keyboard is hidden (home indicator, ~34pt)
-    // currentSafeAreaBottom: The current safe area (increases when keyboard appears)
-    // This approach works because safe area changes are synchronized with keyboard animation.
-    @State private var baselineSafeAreaBottom: CGFloat = 0
-    @State private var currentSafeAreaBottom: CGFloat = 0
-
-    init(auth: any AuthManaging, chatService: any ChatServicing, settings: SettingsManager) {
+    init(auth: any AuthManaging,
+         chatService: any ChatServicing,
+         settings: SettingsManager,
+         device: any DeviceIdentifying) {
         _viewModel = State(initialValue: ChatViewModel(
             auth: auth,
             chatService: chatService,
-            settings: settings
+            settings: settings,
+            device: device
         ))
     }
 
-    // Device corner radius for concentric alignment.
-    // Face ID devices have ~50pt corner radius, home button devices have 0.
-    private var deviceCornerRadius: CGFloat {
-        let window = UIApplication.shared.connectedScenes
-            .compactMap { $0 as? UIWindowScene }
-            .flatMap { $0.windows }
-            .first { $0.isKeyWindow }
-        let hasRoundedCorners = (window?.safeAreaInsets.bottom ?? 0) > 0
-        return hasRoundedCorners ? 50 : 0
-    }
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
-    private let inputBarHeight: CGFloat = 48
-
-    // Concentric padding formula: deviceCornerRadius - elementRadius
-    // For 48pt height element, radius = 24pt. So 50pt - 24pt = 26pt.
-    // This aligns the input bar's corners concentrically with the device bezel.
-    private var concentricPadding: CGFloat {
-        max(deviceCornerRadius - (inputBarHeight / 2), 8)
-    }
-
-    // Keyboard detection via safe area insets.
-    // When keyboard appears, safeAreaInsets.bottom increases significantly (keyboard height).
-    // The 10pt threshold prevents false positives from minor safe area fluctuations.
-    // DO NOT replace this with @FocusState or keyboard notifications - see header comment.
-    private var isKeyboardVisible: Bool {
-        currentSafeAreaBottom > baselineSafeAreaBottom + 10
-    }
-
-    // Bottom padding switches based on keyboard visibility:
-    // - Keyboard hidden: Use concentric padding (26pt) for visual alignment with device corners
-    // - Keyboard visible: Use 12pt for comfortable spacing above keyboard
-    private var bottomPadding: CGFloat {
-        isKeyboardVisible ? 12 : concentricPadding
-    }
 
     var body: some View {
-        // GeometryReader is REQUIRED for safe area inset tracking.
-        // This is how we detect keyboard state reliably - DO NOT REMOVE.
         GeometryReader { geometry in
             VStack(spacing: 0) {
-                messageList
+                messageList(topInset: geometry.safeAreaInsets.top + 32)
                     .frame(maxHeight: .infinity)
 
-                VStack(spacing: 0) {
-                    if let error = viewModel.error {
-                        errorBanner(error)
-                    }
-
-                    MessageInputBar(
-                        text: $viewModel.messageInput,
-                        isSending: viewModel.isSending,
-                        isInputFocused: $isInputFocused,
-                        onSend: { Task { await viewModel.send() } },
-                        onAdd: { },
-                        bottomPadding: bottomPadding
-                    )
+                if let error = viewModel.error {
+                    errorBanner(error)
                 }
             }
-            // Track safe area changes - this fires when keyboard appears/disappears.
-            // The update happens in the same frame as keyboard animation, ensuring
-            // our padding change is perfectly synchronized with the keyboard.
-            .onChange(of: geometry.safeAreaInsets.bottom) { _, newValue in
-                currentSafeAreaBottom = newValue
-            }
-            .onAppear {
-                // Capture baseline safe area BEFORE keyboard ever appears.
-                // On Face ID devices, this is ~34pt (home indicator area).
-                // We compare against this to detect when keyboard adds to safe area.
-                baselineSafeAreaBottom = geometry.safeAreaInsets.bottom
-                currentSafeAreaBottom = geometry.safeAreaInsets.bottom
+            .safeAreaInset(edge: .bottom) {
+                // Pass a high safe area value to always use keyboard-visible padding (12pt).
+                // This avoids the jump caused by inconsistent safe area detection.
+                // TODO: Find a way to restore concentric alignment when keyboard is hidden.
+                MessageInputBar(
+                    text: $viewModel.messageInput,
+                    isSending: viewModel.isSending,
+                    bottomSafeAreaInset: 100, // Force keyboard-visible mode (12pt padding)
+                    onSend: { Task { await viewModel.send() } },
+                    onAdd: { },
+                    onFocusChange: { focused in isInputFocused = focused }
+                )
             }
         }
-        // Allow content to extend into the bottom safe area for concentric alignment.
-        // We handle safe area manually via bottomPadding.
-        .ignoresSafeArea(.container, edges: .bottom)
+        .ignoresSafeArea(.container, edges: .top)
+        .background {
+            ChatFlowTheme.pageBackground(colorScheme)
+                .ignoresSafeArea()
+                .overlay(NoiseOverlayView().ignoresSafeArea())
+        }
         .task { await viewModel.onAppear() }
         .onDisappear { viewModel.onDisappear() }
     }
 
-    private var messageList: some View {
+    private func messageList(topInset: CGFloat) -> some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(spacing: 12) {
+                let isCompact = horizontalSizeClass == .compact
+                let metrics = ChatFlowTheme.Metrics(isCompact: isCompact)
+                let maxWidth = ChatFlowTheme.maxLineWidth(bodyFontSize: metrics.bodyFontSize)
+
+                FlowLayout(
+                    itemSpacing: metrics.flowGap,
+                    rowSpacing: metrics.flowGap,
+                    maxLineWidth: maxWidth,
+                    isCompact: isCompact
+                ) {
                     ForEach(viewModel.messages) { message in
                         MessageBubble(message: message)
                             .id(message.id)
                     }
                 }
-                .padding()
+                .padding(metrics.containerPadding)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .contentMargins(.top, topInset, for: .scrollContent)
+            .scrollContentBackground(.hidden)
             .onChange(of: viewModel.messages.count) {
                 if let last = viewModel.messages.last {
                     withAnimation {
@@ -207,6 +138,10 @@ private final class PreviewAuthManager: AuthManaging {
     func clearCredentials() {}
 }
 
+private struct PreviewDevice: DeviceIdentifying {
+    let deviceId = "preview-device"
+}
+
 private final class PreviewChatService: ChatServicing {
     var incomingMessages: AsyncStream<Message> {
         AsyncStream { _ in }
@@ -216,23 +151,27 @@ private final class PreviewChatService: ChatServicing {
             continuation.yield(.connected)
         }
     }
-    func connect(token: String) async throws {}
+    func connect(token: String, lastMessageId: String?) async throws {}
     func disconnect() {}
-    func send(content: String, attachments: [Attachment]) async throws {}
+    func send(id: String, content: String, attachments: [Attachment]) async throws {}
 }
 
 #Preview("Empty Chat") {
-    ChatView(
+    let device = PreviewDevice()
+    return ChatView(
         auth: PreviewAuthManager(),
         chatService: PreviewChatService(),
-        settings: SettingsManager()
+        settings: SettingsManager(),
+        device: device
     )
 }
 
 #Preview("With Messages") {
-    ChatView(
+    let device = PreviewDevice()
+    return ChatView(
         auth: PreviewAuthManager(),
         chatService: PreviewChatService(),
-        settings: SettingsManager()
+        settings: SettingsManager(),
+        device: device
     )
 }

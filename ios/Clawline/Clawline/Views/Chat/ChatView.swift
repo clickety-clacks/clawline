@@ -6,6 +6,10 @@
 //
 
 import SwiftUI
+import Combine
+import os.log
+
+private let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "ChatView")
 
 // MARK: - ⚠️ IMPORTANT: Keyboard Positioning Fix - READ BEFORE MODIFYING ⚠️
 //
@@ -30,6 +34,11 @@ import SwiftUI
 struct ChatView: View {
     @State private var viewModel: ChatViewModel
     @State private var isInputFocused = false
+    @State private var isKeyboardVisible = false
+
+    // UIKit keyboard notifications - owned here to survive geometry changes
+    private let keyboardWillShow = NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)
+    private let keyboardWillHide = NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)
 
     init(auth: any AuthManaging,
          chatService: any ChatServicing,
@@ -58,16 +67,24 @@ struct ChatView: View {
                 }
             }
             .safeAreaInset(edge: .bottom) {
-                // MessageInputBar handles its own offset for concentric alignment.
-                // Pass raw safe area inset for keyboard detection.
+                // Offset applied here in ChatView where @State lives - ensures update on state change.
+                // safeAreaInset content doesn't re-render on parent state change otherwise.
+                // Offset for concentric alignment with device corner radius.
+                // Positive offset pushes bar DOWN into safe area to reduce bottom gap to ~26pt.
+                let rawOffset = calculateConcentricOffset(bottomInset: geometry.safeAreaInsets.bottom)
+                let concentricOffset = isKeyboardVisible ? 0 : rawOffset
+
                 MessageInputBar(
                     text: $viewModel.messageInput,
                     isSending: viewModel.isSending,
                     bottomSafeAreaInset: geometry.safeAreaInsets.bottom,
+                    isKeyboardVisible: isKeyboardVisible,
                     onSend: { Task { await viewModel.send() } },
                     onAdd: { },
                     onFocusChange: { focused in isInputFocused = focused }
                 )
+                .offset(y: concentricOffset)
+                .animation(.easeOut(duration: 0.25), value: concentricOffset)
             }
         }
         .ignoresSafeArea(.container, edges: .top)
@@ -78,6 +95,12 @@ struct ChatView: View {
         }
         .task { await viewModel.onAppear() }
         .onDisappear { viewModel.onDisappear() }
+        .onReceive(keyboardWillShow) { _ in
+            isKeyboardVisible = true
+        }
+        .onReceive(keyboardWillHide) { _ in
+            isKeyboardVisible = false
+        }
     }
 
     private func messageList(topInset: CGFloat) -> some View {
@@ -123,6 +146,29 @@ struct ChatView: View {
         }
         .padding()
         .background(Color.red)
+    }
+
+    /// Calculate concentric offset to align input bar with device corner radius.
+    /// Returns ~16pt when keyboard hidden, 0pt when keyboard visible (handled by caller).
+    private func calculateConcentricOffset(bottomInset: CGFloat) -> CGFloat {
+        // Device corner radius: ~50pt for Face ID devices, 0pt for home button devices
+        let window = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap { $0.windows }
+            .first { $0.isKeyWindow }
+        let hasRoundedCorners = (window?.safeAreaInsets.bottom ?? 0) > 0
+        let deviceCornerRadius: CGFloat = hasRoundedCorners ? 50 : 0
+
+        let inputBarHeight: CGFloat = 48
+        let elementSpacing: CGFloat = 8
+        let concentricPadding = max(deviceCornerRadius - (inputBarHeight / 2), 8)
+
+        let minSafeArea: CGFloat = 34
+        let maxSafeArea: CGFloat = 100
+        let maxOffset = max(minSafeArea - concentricPadding + elementSpacing, 0)
+        let t = (bottomInset - minSafeArea) / (maxSafeArea - minSafeArea)
+        let clampedT = max(0, min(1, t))
+        return maxOffset * (1 - clampedT)
     }
 }
 

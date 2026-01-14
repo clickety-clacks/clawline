@@ -7,6 +7,9 @@
 
 import SwiftUI
 import UIKit
+import os.log
+
+private let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "MessageInputBar")
 
 /// Input bar with concentric corner alignment.
 /// Calculates padding to align element corners with device bezel corners.
@@ -21,6 +24,8 @@ struct MessageInputBar: View {
     let isSending: Bool
     /// Pass geometry.safeAreaInsets.bottom directly - DO NOT pass a computed Bool.
     let bottomSafeAreaInset: CGFloat
+    /// Keyboard visibility state owned by parent view to survive geometry changes.
+    let isKeyboardVisible: Bool
     let onSend: () -> Void
     let onAdd: () -> Void
     let onFocusChange: (Bool) -> Void
@@ -28,15 +33,19 @@ struct MessageInputBar: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
     @FocusState private var fieldFocused: Bool
-    @FocusState private var isInputFocused: Bool
 
     private var metrics: MessageInputBarMetrics {
         MessageInputBarMetrics(
             horizontalSizeClass: horizontalSizeClass,
             bottomSafeAreaInset: bottomSafeAreaInset,
-            deviceCornerRadius: deviceCornerRadius
+            deviceCornerRadius: deviceCornerRadius,
+            isFieldFocused: fieldFocused
         )
     }
+
+    // NOTE: Concentric offset is now applied in ChatView where @State lives.
+    // This ensures offset updates when keyboard state changes (safeAreaInset content
+    // doesn't re-render on parent state change otherwise).
 
     // swiftlint:disable:next unused_declaration
     private var motionState: MessageInputMotionState {
@@ -63,22 +72,15 @@ struct MessageInputBar: View {
             .glassEffect(.regular.interactive(), in: Circle())
 
             HStack(spacing: 8) {
-                TextField("Message", text: $text, axis: .vertical)
+                TextField("Message", text: $text)
                     .textFieldStyle(.plain)
                     .padding(.leading, metrics.inputBarHeight / 2)
-                    .lineLimit(1...4)
                     .submitLabel(.send)
                     .onSubmit(onSend)
                     .focused($fieldFocused)
                     .onChange(of: fieldFocused) { _, newValue in
                         onFocusChange(newValue)
                     }
-                    .simultaneousGesture(
-                        TapGesture().onEnded {
-                            fieldFocused = true
-                            onFocusChange(true)
-                        }
-                    )
 
                 Button(action: onSend) {
                     if isSending {
@@ -96,7 +98,9 @@ struct MessageInputBar: View {
         }
         .padding(.horizontal, metrics.concentricPadding)
         .padding(.bottom, metrics.bottomPadding)
-        .safeAreaPadding(.bottom, -metrics.concentricOffset)
+        // NOTE: Offset is now applied in ChatView where @State lives - see ChatView.swift
+        // This ensures the offset updates when keyboard state changes (safeAreaInset content
+        // doesn't re-render on parent state change otherwise).
     }
 
     // swiftlint:disable:next unused_declaration
@@ -144,6 +148,7 @@ private struct GlassCausticsOverlay<S: Shape>: View {
                 text: .constant(""),
                 isSending: false,
                 bottomSafeAreaInset: 34, // Simulates home indicator (keyboard hidden)
+                isKeyboardVisible: false,
                 onSend: {},
                 onAdd: {},
                 onFocusChange: { _ in }
@@ -158,6 +163,7 @@ private struct GlassCausticsOverlay<S: Shape>: View {
                 text: .constant("Hello there!"),
                 isSending: false,
                 bottomSafeAreaInset: 34, // Simulates home indicator (keyboard hidden)
+                isKeyboardVisible: false,
                 onSend: {},
                 onAdd: {},
                 onFocusChange: { _ in }
@@ -172,6 +178,7 @@ private struct GlassCausticsOverlay<S: Shape>: View {
                 text: .constant("Sending message..."),
                 isSending: true,
                 bottomSafeAreaInset: 34, // Simulates home indicator (keyboard hidden)
+                isKeyboardVisible: false,
                 onSend: {},
                 onAdd: {},
                 onFocusChange: { _ in }

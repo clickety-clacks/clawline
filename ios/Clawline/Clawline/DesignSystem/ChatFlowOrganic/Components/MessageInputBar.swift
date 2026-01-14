@@ -11,14 +11,40 @@ import os.log
 
 private let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "MessageInputBar")
 
+// MARK: - ⚠️⚠️⚠️ CRITICAL: READ ChatView.swift HEADER BEFORE MODIFYING ⚠️⚠️⚠️
+//
+// This view is used inside .safeAreaInset in ChatView. That context has special behavior:
+//
+// 1. THIS VIEW GETS RECREATED when geometry changes (e.g., keyboard appears)
+// 2. Any @State defined HERE will be RESET when that happens
+// 3. onChange handlers HERE may NEVER FIRE because the view recreates before they trigger
+//
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// WHAT THIS MEANS FOR YOU
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+//
+// ❌ DO NOT add @State here for keyboard/focus tracking - it will reset
+// ❌ DO NOT expect onChange to fire reliably - view may recreate first
+// ❌ DO NOT apply positioning offsets here - they won't update on parent state change
+//
+// ✅ DO use callbacks (like onFocusChange) to report state to parent
+// ✅ DO let parent (ChatView) own state that needs to survive geometry changes
+// ✅ DO let parent apply offset/positioning modifiers
+//
+// The @FocusState here works ONLY because we immediately report changes via onFocusChange
+// callback to the parent. The parent's @State survives; ours does not.
+//
+// See ChatView.swift header comment for the full explanation of why this is necessary.
+// Working solution tagged: `working-keyboard-behaviors`
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+
 /// Input bar with concentric corner alignment.
 /// Calculates padding to align element corners with device bezel corners.
 ///
-/// ## Keyboard Detection
-/// Takes `bottomSafeAreaInset` (from GeometryReader) and computes keyboard visibility
-/// using a threshold. This is CRITICAL for avoiding position jumps - passing a Bool
-/// computed from state causes timing issues. The raw inset value is available in the
-/// same layout pass as the keyboard animation.
+/// ## State Ownership
+/// This view is inside `.safeAreaInset` which causes view recreation on geometry changes.
+/// State that must survive keyboard show/hide is owned by the PARENT (ChatView), not here.
+/// Focus changes are reported via `onFocusChange` callback.
 struct MessageInputBar: View {
     @Binding var text: String
     let isSending: Bool
@@ -32,6 +58,12 @@ struct MessageInputBar: View {
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
+
+    // ⚠️ This @FocusState DOES get reset when view recreates, but that's OK because:
+    // 1. We immediately report changes to parent via onFocusChange callback
+    // 2. Parent's @State survives the recreation
+    // 3. The callback fires BEFORE the view fully recreates
+    // DO NOT try to use this state directly for positioning - use parent's state instead.
     @FocusState private var fieldFocused: Bool
 
     private var metrics: MessageInputBarMetrics {
@@ -78,6 +110,9 @@ struct MessageInputBar: View {
                     .submitLabel(.send)
                     .onSubmit(onSend)
                     .focused($fieldFocused)
+                    // ⚠️ CRITICAL: This onChange reports focus to parent IMMEDIATELY.
+                    // Parent (ChatView) owns the state that survives view recreation.
+                    // DO NOT try to use fieldFocused directly for positioning calculations.
                     .onChange(of: fieldFocused) { _, newValue in
                         onFocusChange(newValue)
                     }

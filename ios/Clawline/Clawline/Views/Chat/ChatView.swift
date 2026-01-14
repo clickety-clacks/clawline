@@ -6,39 +6,76 @@
 //
 
 import SwiftUI
-import Combine
 import os.log
 
 private let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "ChatView")
 
-// MARK: - ⚠️ IMPORTANT: Keyboard Positioning Fix - READ BEFORE MODIFYING ⚠️
+// MARK: - ⚠️⚠️⚠️ CRITICAL: DO NOT MODIFY WITHOUT READING ⚠️⚠️⚠️
 //
-// This view contains a non-obvious fix for keyboard positioning. The fix took 7 iterations
-// to get right. Full history documented in: scratch/keyboard-fix-iterations.md
+// This file contains a non-obvious keyboard positioning fix that took 7+ iterations to solve.
+// If you are an AI agent or developer planning to modify keyboard/focus/state handling here,
+// STOP and read this entire comment block first.
 //
-// ## The Problem
-// The MessageInputBar needs different bottom padding depending on keyboard state:
-// - Keyboard HIDDEN: 26pt (concentric alignment with device corner radius)
-// - Keyboard VISIBLE: 12pt (comfortable gap above keyboard)
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// THE PROBLEM
+// ═══════════════════════════════════════════════════════════════════════════════════════════
 //
-// ## Why Standard Approaches FAIL
-// State-based keyboard detection (@FocusState, keyboardWillChangeFrame) is asynchronous
-// relative to SwiftUI’s layout-driven keyboard avoidance and causes visible jumps.
+// MessageInputBar needs to reposition when keyboard appears:
+// - Keyboard HIDDEN: Concentric alignment with device corners (~26pt from edges)
+// - Keyboard VISIBLE: Positioned above keyboard with smaller gap
 //
-// ## The Solution: Safe Area Insets as Source of Truth
-// Track safeAreaInsets.bottom; when it grows, the keyboard is on screen. This fires in
-// the same layout pass as the keyboard animation, so padding updates are in sync.
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// WHY "OBVIOUS" SOLUTIONS FAIL
+// ═══════════════════════════════════════════════════════════════════════════════════════════
 //
-// If you need to modify keyboard handling, READ scratch/keyboard-fix-iterations.md first.
+// SwiftUI ties @State, @FocusState, and onChange to a view's IDENTITY. When identity changes,
+// ALL state resets silently. Views inside .safeAreaInset get RECREATED when geometry changes
+// (like keyboard appearing), which resets their state.
+//
+// THESE APPROACHES WERE TRIED AND FAILED:
+//
+// 1. @FocusState in MessageInputBar
+//    → View recreated on keyboard appear → @FocusState resets → onChange never fires
+//
+// 2. @State in MessageInputBar for keyboard tracking
+//    → Same problem: view recreation resets state
+//
+// 3. UIKit keyboard notifications in MessageInputBar
+//    → onReceive fires, but @State mutation is lost when view recreates
+//
+// 4. Passing computed Bool from parent
+//    → .safeAreaInset content doesn't re-render on parent state change
+//
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// THE SOLUTION (DO NOT CHANGE WITHOUT UNDERSTANDING)
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+//
+// 1. @State isInputFocused lives HERE in ChatView (stable parent, survives geometry changes)
+// 2. MessageInputBar reports focus via callback: onFocusChange: { isInputFocused = $0 }
+// 3. Offset modifier applied HERE in ChatView (modifiers on .safeAreaInset content DO update)
+//
+// KEY INSIGHT: .safeAreaInset content body doesn't re-render on parent state change,
+// BUT modifiers applied TO that content from the parent DO update.
+//
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+// IF YOU MUST MODIFY THIS CODE
+// ═══════════════════════════════════════════════════════════════════════════════════════════
+//
+// 1. Understand SwiftUI view identity and state lifetime
+// 2. Understand why .safeAreaInset causes view recreation
+// 3. Test on device with keyboard show/hide cycling
+// 4. Verify concentric alignment visually (equal padding on all sides when keyboard hidden)
+// 5. The working solution is tagged: `working-keyboard-behaviors`
+//
+// ═══════════════════════════════════════════════════════════════════════════════════════════
 
 struct ChatView: View {
     @State private var viewModel: ChatViewModel
-    @State private var isInputFocused = false
-    @State private var isKeyboardVisible = false
 
-    // UIKit keyboard notifications - owned here to survive geometry changes
-    private let keyboardWillShow = NotificationCenter.default.publisher(for: UIResponder.keyboardWillShowNotification)
-    private let keyboardWillHide = NotificationCenter.default.publisher(for: UIResponder.keyboardWillHideNotification)
+    // ⚠️ CRITICAL: This state MUST live here in ChatView, NOT in MessageInputBar.
+    // MessageInputBar is inside .safeAreaInset and gets recreated on geometry changes.
+    // State in recreated views resets silently. See header comment for full explanation.
+    @State private var isInputFocused = false
 
     init(auth: any AuthManaging,
          chatService: any ChatServicing,
@@ -66,23 +103,42 @@ struct ChatView: View {
                     errorBanner(error)
                 }
             }
+            // ═══════════════════════════════════════════════════════════════════════════════
+            // ⚠️ CRITICAL SECTION - READ HEADER COMMENT BEFORE MODIFYING ⚠️
+            // ═══════════════════════════════════════════════════════════════════════════════
+            //
+            // This .safeAreaInset block is where the keyboard positioning fix is implemented.
+            // The content inside gets RECREATED when geometry changes (keyboard show/hide).
+            //
+            // WHY THE OFFSET IS APPLIED HERE (not in MessageInputBar):
+            // - MessageInputBar's body won't re-render when parent state changes
+            // - BUT modifiers applied TO MessageInputBar from here DO update
+            // - So we calculate offset here using parent's @State isInputFocused
+            //
+            // WHY onFocusChange CALLBACK (not @FocusState in MessageInputBar):
+            // - @FocusState in MessageInputBar resets when view recreates
+            // - Callback allows MessageInputBar to report focus to stable parent
+            // - Parent's @State survives the geometry change
+            //
             .safeAreaInset(edge: .bottom) {
-                // Offset applied here in ChatView where @State lives - ensures update on state change.
-                // safeAreaInset content doesn't re-render on parent state change otherwise.
-                // Offset for concentric alignment with device corner radius.
-                // Positive offset pushes bar DOWN into safe area to reduce bottom gap to ~26pt.
+                // Positive offset pushes bar DOWN into safe area for concentric alignment.
+                // When focused (keyboard visible), offset is 0 (bar sits above keyboard).
                 let rawOffset = calculateConcentricOffset(bottomInset: geometry.safeAreaInsets.bottom)
-                let concentricOffset = isKeyboardVisible ? 0 : rawOffset
+                let concentricOffset = isInputFocused ? 0 : rawOffset
 
                 MessageInputBar(
                     text: $viewModel.messageInput,
                     isSending: viewModel.isSending,
                     bottomSafeAreaInset: geometry.safeAreaInsets.bottom,
-                    isKeyboardVisible: isKeyboardVisible,
+                    isKeyboardVisible: isInputFocused,
                     onSend: { Task { await viewModel.send() } },
                     onAdd: { },
+                    // ⚠️ This callback is how focus state survives view recreation.
+                    // DO NOT replace with @Binding or try to use @FocusState directly.
                     onFocusChange: { focused in isInputFocused = focused }
                 )
+                // ⚠️ Offset MUST be applied here, not inside MessageInputBar.
+                // See header comment for why.
                 .offset(y: concentricOffset)
                 .animation(.easeOut(duration: 0.25), value: concentricOffset)
             }
@@ -95,12 +151,6 @@ struct ChatView: View {
         }
         .task { await viewModel.onAppear() }
         .onDisappear { viewModel.onDisappear() }
-        .onReceive(keyboardWillShow) { _ in
-            isKeyboardVisible = true
-        }
-        .onReceive(keyboardWillHide) { _ in
-            isKeyboardVisible = false
-        }
     }
 
     private func messageList(topInset: CGFloat) -> some View {

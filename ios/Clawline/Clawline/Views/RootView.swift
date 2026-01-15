@@ -24,14 +24,14 @@ struct RootView: View {
     var body: some View {
         Group {
             if auth.isAuthenticated {
-                ChatView(auth: auth, chatService: chatService, settings: settings)
+                ChatView(auth: auth, chatService: chatService, settings: settings, device: device)
             } else {
                 PairingView(auth: auth, connection: connection, device: device)
             }
         }
         .background {
             backgroundColor
-                .plasmaEffect(settings.plasmaConfig)
+                .backgroundEffect(settings.effectConfig)
                 .ignoresSafeArea()
         }
         .animation(.easeInOut(duration: 0.3), value: auth.isAuthenticated)

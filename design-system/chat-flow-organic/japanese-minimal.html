@@ -1,0 +1,1098 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Japanese Minimalist Chat</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@200;300;400;500&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            /*
+             * Muji aesthetic: warmth through natural materials
+             * Kraft paper, linen, wood — not clinical white
+             */
+
+            --paper: #F5F1EA;          /* kraft paper white */
+            --paper-warm: #EBE6DC;     /* aged paper */
+            --linen: #E8E3D8;          /* natural linen */
+            --wood-light: #DDD5C8;     /* light birch */
+            --wood: #C4B8A5;           /* natural wood */
+            --wood-medium: #A89880;    /* darker wood */
+            --ink-light: #9A8E7F;      /* faded ink */
+            --ink-medium: #6B5D4D;     /* warm brown */
+            --ink: #4A3F32;            /* deep brown ink */
+            --ink-deep: #3A3028;       /* darkest */
+
+            /* Earthy accent */
+            --accent: #B07D62;         /* terracotta/clay */
+            --accent-soft: #C9A892;    /* soft clay */
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        /* Subtle paper texture */
+        .paper-texture {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            pointer-events: none;
+            z-index: 9999;
+            opacity: 0.4;
+            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--linen);
+            min-height: 100vh;
+            padding: 60px;
+            display: flex;
+            gap: 80px;
+            justify-content: center;
+            align-items: flex-start;
+            flex-wrap: wrap;
+        }
+
+        .device-frame {
+            background: var(--paper);
+            overflow: hidden;
+            flex-shrink: 0;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+            border-radius: 4px;
+            /* Soft shadow like paper on desk */
+            box-shadow:
+                0 1px 2px rgba(74, 63, 50, 0.04),
+                0 4px 12px rgba(74, 63, 50, 0.06),
+                0 12px 32px rgba(74, 63, 50, 0.06);
+        }
+
+        .device-frame.ipad {
+            width: 820px;
+            height: 1100px;
+        }
+
+        .device-frame.iphone {
+            width: 390px;
+            height: 844px;
+        }
+
+        .device-header {
+            padding: 28px 40px;
+            border-bottom: 1px solid var(--wood-light);
+            flex-shrink: 0;
+            background: var(--paper-warm);
+        }
+
+        .device-header h2 {
+            font-size: 10px;
+            font-weight: 400;
+            color: var(--ink-medium);
+            text-transform: uppercase;
+            letter-spacing: 3px;
+        }
+
+        .chat-container {
+            padding: 40px;
+            flex: 1;
+            overflow-y: auto;
+            background: var(--paper);
+            min-height: 0;
+            position: relative;
+        }
+
+        .message-flow {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 32px;
+            align-items: flex-start;
+            align-content: flex-start;
+        }
+
+        /*
+         * Messages: warmth through subtle material feel
+         * Like cards or paper scraps on a surface
+         */
+        .message-bubble {
+            background: var(--paper-warm);
+            padding: 20px 24px;
+            max-width: 100%;
+            min-width: 120px;
+            position: relative;
+            border-radius: 12px;
+            /* Soft shadow like paper lifting slightly */
+            box-shadow: 0 1px 3px rgba(74, 63, 50, 0.05);
+        }
+
+        .message-bubble.self {
+            background: var(--linen);
+            border-radius: 12px 12px 4px 12px;
+        }
+
+        .message-bubble.other {
+            background: var(--paper-warm);
+            border-radius: 12px 12px 12px 4px;
+            /* Subtle left accent */
+            border-left: 2px solid var(--wood);
+        }
+
+        .message-bubble.short {
+            flex: 0 1 auto;
+        }
+
+        .message-bubble.medium {
+            flex: 1 1 40%;
+            min-width: 200px;
+        }
+
+        .message-bubble.long {
+            flex: 1 1 100%;
+            max-width: 60ch;
+        }
+
+        .message-bubble.truncated {
+            max-width: 60ch;
+        }
+
+        .message-bubble.image-only {
+            padding: 12px;
+            background: var(--paper-warm);
+            box-shadow: 0 1px 3px rgba(74, 63, 50, 0.05);
+        }
+
+        .message-bubble.image-only.self {
+            background: var(--linen);
+        }
+
+        .message-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 12px;
+        }
+
+        /* Warm, material avatars */
+        .avatar {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+            font-weight: 500;
+            letter-spacing: 0.3px;
+            flex-shrink: 0;
+        }
+
+        .avatar.maya {
+            background: var(--wood-light);
+            color: var(--ink-medium);
+        }
+
+        .avatar.kai {
+            background: var(--accent-soft);
+            color: var(--ink-medium);
+        }
+
+        .sender-name {
+            font-size: 10px;
+            font-weight: 400;
+            color: var(--ink-light);
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+
+        .message-content {
+            color: var(--ink);
+            line-height: 1.7;
+            max-width: 55ch;
+            font-weight: 400;
+        }
+
+        .message-content.short-text {
+            font-size: 17px;
+            font-weight: 400;
+            line-height: 1.4;
+        }
+
+        .message-content.medium-text {
+            font-size: 15px;
+            font-weight: 400;
+        }
+
+        .message-content.body-text {
+            font-size: 14px;
+            font-weight: 400;
+        }
+
+        .message-image {
+            font-size: 48px;
+            line-height: 1;
+            display: block;
+            margin: 12px 0;
+            opacity: 0.9;
+        }
+
+        .message-image.inline {
+            float: left;
+            font-size: 32px;
+            margin: 4px 16px 8px 0;
+            shape-outside: circle(50%);
+        }
+
+        .message-image.large {
+            font-size: 64px;
+            text-align: center;
+            opacity: 0.85;
+        }
+
+        .message-image.gallery {
+            display: flex;
+            gap: 16px;
+            font-size: 40px;
+        }
+
+        /* Photos - warm, contained treatment */
+        .message-photo {
+            display: block;
+            max-width: 100%;
+            width: auto;
+            height: auto;
+            margin-top: 16px;
+            max-height: 280px;
+            object-fit: cover;
+            border-radius: 8px;
+            /* Slight warmth overlay and shadow */
+            box-shadow: 0 2px 8px rgba(74, 63, 50, 0.1);
+        }
+
+        .message-bubble:has(.message-photo) {
+            flex: 0 1 auto;
+            max-width: 340px;
+        }
+
+        .message-bubble.image-only .message-photo {
+            margin-top: 12px;
+        }
+
+        .message-bubble.image-only {
+            max-width: 260px;
+        }
+
+        /* Code block - warm parchment feel */
+        .code-block {
+            background: var(--wood-light);
+            padding: 20px 24px;
+            margin-top: 16px;
+            overflow-x: auto;
+            font-family: 'SF Mono', 'Menlo', monospace;
+            font-size: 12px;
+            line-height: 1.7;
+            border-radius: 8px;
+        }
+
+        .code-block code {
+            color: var(--ink);
+            white-space: pre;
+            font-weight: 400;
+        }
+
+        /* Warm syntax highlighting */
+        .code-block .keyword { color: var(--ink-medium); }
+        .code-block .string { color: var(--accent); }
+        .code-block .comment { color: var(--wood-medium); }
+        .code-block .function { color: var(--ink); }
+        .code-block .number { color: var(--accent); }
+        .code-block .type { color: var(--ink-medium); }
+        .code-block .property { color: var(--ink); }
+
+        .code-header {
+            margin-bottom: 12px;
+        }
+
+        .code-lang {
+            font-family: 'Inter', sans-serif;
+            font-size: 9px;
+            font-weight: 500;
+            color: var(--ink-light);
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+
+        /* Markdown - warm refinement */
+        .message-content.markdown h3 {
+            font-size: 12px;
+            font-weight: 500;
+            color: var(--ink);
+            margin: 20px 0 10px 0;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+        }
+
+        .message-content.markdown h3:first-child {
+            margin-top: 0;
+        }
+
+        .message-content.markdown p {
+            margin-bottom: 12px;
+        }
+
+        .message-content.markdown strong {
+            font-weight: 500;
+            color: var(--ink-deep);
+        }
+
+        .message-content.markdown em {
+            font-style: italic;
+            color: var(--accent);
+        }
+
+        .message-content.markdown ul {
+            margin: 12px 0;
+            padding-left: 20px;
+            list-style: none;
+        }
+
+        .message-content.markdown li {
+            margin-bottom: 6px;
+            position: relative;
+        }
+
+        .message-content.markdown li::before {
+            content: '–';
+            position: absolute;
+            left: -16px;
+            color: var(--wood);
+        }
+
+        .message-content.markdown code {
+            background: var(--wood-light);
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'SF Mono', monospace;
+            font-size: 0.9em;
+            color: var(--ink-medium);
+        }
+
+        .message-content.markdown blockquote {
+            border-left: 2px solid var(--wood);
+            padding: 8px 0 8px 16px;
+            margin: 16px 0;
+            color: var(--ink-light);
+            font-style: italic;
+        }
+
+        /* Link preview - subtle card */
+        .link-preview {
+            margin-top: 16px;
+            padding: 14px 16px;
+            background: var(--paper);
+            border-radius: 8px;
+            border-left: 2px solid var(--accent-soft);
+        }
+
+        .link-preview .link-domain {
+            font-size: 9px;
+            color: var(--ink-light);
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            margin-bottom: 4px;
+        }
+
+        .link-preview .link-title {
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--ink);
+        }
+
+        .link-preview .link-desc {
+            font-size: 12px;
+            font-weight: 400;
+            color: var(--ink-light);
+            margin-top: 4px;
+        }
+
+        /* Truncated message */
+        .message-bubble.truncated {
+            flex: 1 1 100%;
+            cursor: pointer;
+        }
+
+        .message-bubble.truncated .message-content {
+            max-height: 180px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .message-bubble.truncated .message-content::after {
+            content: "";
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 80px;
+            background: linear-gradient(to bottom, transparent 0%, var(--paper-warm) 100%);
+            pointer-events: none;
+        }
+
+        .message-bubble.truncated.self .message-content::after {
+            background: linear-gradient(to bottom, transparent 0%, var(--linen) 100%);
+        }
+
+        .truncated-indicator {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding-top: 12px;
+            margin-top: 8px;
+            border-top: 1px solid var(--wood-light);
+        }
+
+        .truncated-indicator span {
+            font-size: 10px;
+            font-weight: 400;
+            color: var(--ink-light);
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+        }
+
+        .truncated-indicator .expand-icon {
+            font-size: 10px;
+            color: var(--wood);
+        }
+
+        .message-bubble.truncated:hover .truncated-indicator span {
+            color: var(--accent);
+        }
+
+        /* iPhone adjustments */
+        .iphone .chat-container {
+            padding: 32px;
+        }
+
+        .iphone .message-flow {
+            gap: 24px;
+        }
+
+        .iphone .message-bubble.medium {
+            flex: 1 1 100%;
+        }
+
+        .iphone .message-bubble.self {
+            padding: 20px 24px;
+        }
+
+        .iphone .message-bubble.other {
+            padding-left: 24px;
+        }
+
+        .iphone .message-bubble.truncated .message-content {
+            max-height: 140px;
+        }
+
+        .iphone .message-content.short-text {
+            font-size: 16px;
+        }
+
+        .iphone .message-image.large {
+            font-size: 48px;
+        }
+
+        .iphone .message-image.gallery {
+            font-size: 32px;
+        }
+
+        .message-content::after {
+            content: "";
+            display: table;
+            clear: both;
+        }
+
+        /* Scrollbar - warm and subtle */
+        .chat-container::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .chat-container::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .chat-container::-webkit-scrollbar-thumb {
+            background: var(--wood-light);
+            border-radius: 3px;
+        }
+
+        .chat-container::-webkit-scrollbar-thumb:hover {
+            background: var(--wood);
+        }
+
+        /* Input bar - warm, grounded */
+        .input-bar {
+            position: absolute;
+            bottom: 24px;
+            left: 40px;
+            right: 40px;
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            z-index: 10;
+            background: var(--paper-warm);
+            padding: 12px 16px;
+            border-radius: 12px;
+            box-shadow: 0 1px 4px rgba(74, 63, 50, 0.06);
+        }
+
+        .input-field {
+            flex: 1;
+            background: transparent;
+            border: none;
+            padding: 8px 0;
+            font-family: inherit;
+            font-size: 14px;
+            font-weight: 400;
+            color: var(--ink);
+            outline: none;
+        }
+
+        .input-field::placeholder {
+            color: var(--wood-medium);
+            font-weight: 400;
+        }
+
+        .send-button {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            border: none;
+            background: var(--wood-light);
+            color: var(--ink-medium);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s ease;
+            flex-shrink: 0;
+        }
+
+        .send-button svg {
+            stroke: var(--ink-medium);
+            width: 15px;
+            height: 15px;
+        }
+
+        .send-button:hover {
+            background: var(--wood);
+        }
+
+        .send-button:hover svg {
+            stroke: var(--ink);
+        }
+
+        /* iPhone input adjustments */
+        .iphone .input-bar {
+            bottom: 20px;
+            left: 24px;
+            right: 24px;
+            padding: 10px 14px;
+        }
+
+        .iphone .input-field {
+            font-size: 14px;
+            padding: 6px 0;
+        }
+
+        .iphone .send-button {
+            width: 32px;
+            height: 32px;
+        }
+
+        .iphone .send-button svg {
+            width: 14px;
+            height: 14px;
+        }
+
+        .chat-container {
+            padding-bottom: 100px;
+        }
+
+        .iphone .chat-container {
+            padding-bottom: 80px;
+        }
+    </style>
+</head>
+<body>
+    <!-- Subtle paper texture -->
+    <div class="paper-texture"></div>
+
+    <!-- iPad Frame -->
+    <div class="device-frame ipad">
+        <div class="device-header">
+            <h2>Conversation</h2>
+        </div>
+        <div class="chat-container">
+            <div class="message-flow">
+                <!-- Message 1: Short greeting -->
+                <div class="message-bubble self short">
+                    <div class="message-header">
+                        <div class="avatar maya">M</div>
+                        <span class="sender-name">Maya</span>
+                    </div>
+                    <div class="message-content short-text">
+                        Hey
+                    </div>
+                </div>
+
+                <!-- Message 2: Short response -->
+                <div class="message-bubble other short">
+                    <div class="message-header">
+                        <div class="avatar kai">K</div>
+                        <span class="sender-name">Kai</span>
+                    </div>
+                    <div class="message-content short-text">
+                        What's up?
+                    </div>
+                </div>
+
+                <!-- Message 3: Medium with inline image -->
+                <div class="message-bubble self medium">
+                    <div class="message-header">
+                        <div class="avatar maya">M</div>
+                        <span class="sender-name">Maya</span>
+                    </div>
+                    <div class="message-content medium-text">
+                        <span class="message-image inline">🌿</span>
+                        Found this amazing plant shop downtown. They have the most beautiful monstera I've ever seen.
+                    </div>
+                </div>
+
+                <!-- Message 4: Long text -->
+                <div class="message-bubble other long">
+                    <div class="message-header">
+                        <div class="avatar kai">K</div>
+                        <span class="sender-name">Kai</span>
+                    </div>
+                    <div class="message-content body-text">
+                        Oh nice. I've been looking for a good plant shop. My apartment is feeling a bit empty lately and I think some greenery would really help. Is it the one on Oak Street? I heard they also do pottery workshops on weekends.
+                    </div>
+                </div>
+
+                <!-- Real photo message -->
+                <div class="message-bubble other medium">
+                    <div class="message-header">
+                        <div class="avatar kai">K</div>
+                        <span class="sender-name">Kai</span>
+                    </div>
+                    <div class="message-content medium-text">
+                        The view from my hike yesterday
+                    </div>
+                    <img class="message-photo" src="img/IMG_0319.jpeg" alt="Photo from hike">
+                </div>
+
+                <!-- Photo-only message -->
+                <div class="message-bubble image-only self short">
+                    <div class="message-header">
+                        <div class="avatar maya">M</div>
+                        <span class="sender-name">Maya</span>
+                    </div>
+                    <img class="message-photo" src="img/IMG_0369.PNG" alt="Shared photo">
+                </div>
+
+                <!-- Screenshot share -->
+                <div class="message-bubble other medium">
+                    <div class="message-header">
+                        <div class="avatar kai">K</div>
+                        <span class="sender-name">Kai</span>
+                    </div>
+                    <div class="message-content body-text">
+                        Look at this
+                    </div>
+                    <img class="message-photo" src="img/screenshot.png" alt="Screenshot">
+                </div>
+
+                <!-- Code block message -->
+                <div class="message-bubble self long">
+                    <div class="message-header">
+                        <div class="avatar maya">M</div>
+                        <span class="sender-name">Maya</span>
+                    </div>
+                    <div class="message-content body-text">
+                        Here's that plant watering reminder I made
+                    </div>
+                    <div class="code-block">
+                        <div class="code-header">
+                            <span class="code-lang">Swift</span>
+                        </div>
+                        <code><span class="keyword">struct</span> <span class="type">Plant</span> {
+    <span class="keyword">let</span> <span class="property">name</span>: <span class="type">String</span>
+    <span class="keyword">let</span> <span class="property">wateringInterval</span>: <span class="type">TimeInterval</span>
+
+    <span class="keyword">func</span> <span class="function">needsWatering</span>(<span class="property">lastWatered</span>: <span class="type">Date</span>) -> <span class="type">Bool</span> {
+        <span class="keyword">let</span> <span class="property">elapsed</span> = <span class="type">Date</span>().<span class="function">timeIntervalSince</span>(lastWatered)
+        <span class="keyword">return</span> elapsed >= wateringInterval
+    }
+}</code>
+                    </div>
+                </div>
+
+                <!-- Truncated long paste with markdown -->
+                <div class="message-bubble truncated other">
+                    <div class="message-header">
+                        <div class="avatar kai">K</div>
+                        <span class="sender-name">Kai</span>
+                    </div>
+                    <div class="message-content body-text markdown">
+                        <h3>The Science of Biophilic Design</h3>
+                        <p>Found this article about why we love plants so much. Here are the key points:</p>
+                        <h3>Key Findings</h3>
+                        <ul>
+                            <li><strong>Attention Restoration Theory</strong> – Natural environments capture attention without mental effort</li>
+                            <li><strong>Stress Reduction</strong> – Even brief plant exposure reduces cortisol levels</li>
+                            <li><strong>Productivity Boost</strong> – Office plants can increase productivity by <em>15%</em></li>
+                        </ul>
+                        <blockquote>The biophilia hypothesis suggests humans possess an innate tendency to seek connections with nature.</blockquote>
+                        <p>The research spans <strong>three decades</strong> and shows consistent results across cultures. The <code>soft fascination</code> effect allows cognitive resources to replenish naturally...</p>
+                    </div>
+                    <div class="truncated-indicator">
+                        <span>Continue reading</span>
+                        <span class="expand-icon">→</span>
+                    </div>
+                </div>
+
+                <!-- Message 6: Short reaction -->
+                <div class="message-bubble self short">
+                    <div class="message-header">
+                        <div class="avatar maya">M</div>
+                        <span class="sender-name">Maya</span>
+                    </div>
+                    <div class="message-content short-text">
+                        That's a lot
+                    </div>
+                </div>
+
+                <!-- Message 7: Link preview -->
+                <div class="message-bubble self medium">
+                    <div class="message-header">
+                        <div class="avatar maya">M</div>
+                        <span class="sender-name">Maya</span>
+                    </div>
+                    <div class="message-content medium-text">
+                        Here's their website
+                    </div>
+                    <div class="link-preview">
+                        <div class="link-domain">botanicahome.com</div>
+                        <div class="link-title">Botanica Home & Garden</div>
+                        <div class="link-desc">Curated plants, pots, and botanical accessories for mindful living</div>
+                    </div>
+                </div>
+
+                <!-- Message 8: Image gallery -->
+                <div class="message-bubble other medium">
+                    <div class="message-header">
+                        <div class="avatar kai">K</div>
+                        <span class="sender-name">Kai</span>
+                    </div>
+                    <div class="message-content medium-text">
+                        Look what I just got for my balcony
+                    </div>
+                    <div class="message-image gallery">
+                        <span>🌻</span><span>🌺</span><span>🌸</span>
+                    </div>
+                </div>
+
+                <!-- Message 9: Short -->
+                <div class="message-bubble self short">
+                    <div class="message-header">
+                        <div class="avatar maya">M</div>
+                        <span class="sender-name">Maya</span>
+                    </div>
+                    <div class="message-content short-text">
+                        Love it
+                    </div>
+                </div>
+
+                <!-- Message 10: Medium with wrapped text around image -->
+                <div class="message-bubble other long">
+                    <div class="message-header">
+                        <div class="avatar kai">K</div>
+                        <span class="sender-name">Kai</span>
+                    </div>
+                    <div class="message-content body-text">
+                        <span class="message-image inline">☕</span>
+                        We should grab coffee at that new place next to the plant shop. I heard they have amazing oat milk lattes and the interior is all filled with plants. Very cozy. Maybe Saturday afternoon?
+                    </div>
+                </div>
+
+                <!-- Message 11: Short -->
+                <div class="message-bubble self short">
+                    <div class="message-header">
+                        <div class="avatar maya">M</div>
+                        <span class="sender-name">Maya</span>
+                    </div>
+                    <div class="message-content short-text">
+                        Yes please
+                    </div>
+                </div>
+
+                <!-- Message 12: Short -->
+                <div class="message-bubble other short">
+                    <div class="message-header">
+                        <div class="avatar kai">K</div>
+                        <span class="sender-name">Kai</span>
+                    </div>
+                    <div class="message-content short-text">
+                        2pm?
+                    </div>
+                </div>
+
+                <!-- Message 13: Medium -->
+                <div class="message-bubble self medium">
+                    <div class="message-header">
+                        <div class="avatar maya">M</div>
+                        <span class="sender-name">Maya</span>
+                    </div>
+                    <div class="message-content medium-text">
+                        Perfect. I'll bring that book I mentioned.
+                    </div>
+                </div>
+
+                <!-- Message 14: Image -->
+                <div class="message-bubble other short">
+                    <div class="message-header">
+                        <div class="avatar kai">K</div>
+                        <span class="sender-name">Kai</span>
+                    </div>
+                    <div class="message-image large">📚</div>
+                </div>
+
+                <!-- Message 15: Long -->
+                <div class="message-bubble self long">
+                    <div class="message-header">
+                        <div class="avatar maya">M</div>
+                        <span class="sender-name">Maya</span>
+                    </div>
+                    <div class="message-content body-text">
+                        It's that one about Japanese ceramics and wabi-sabi philosophy. The photography is incredible and I think you'd really appreciate the sections on handmade imperfection. There's a whole chapter on tea ceremony bowls.
+                    </div>
+                </div>
+
+                <!-- Message 16: Short excited -->
+                <div class="message-bubble other short">
+                    <div class="message-header">
+                        <div class="avatar kai">K</div>
+                        <span class="sender-name">Kai</span>
+                    </div>
+                    <div class="message-content short-text">
+                        Oh
+                    </div>
+                </div>
+
+                <!-- Message 17: Link -->
+                <div class="message-bubble other medium">
+                    <div class="message-header">
+                        <div class="avatar kai">K</div>
+                        <span class="sender-name">Kai</span>
+                    </div>
+                    <div class="message-content medium-text">
+                        Speaking of ceramics
+                    </div>
+                    <div class="link-preview">
+                        <div class="link-domain">localcraftguild.com</div>
+                        <div class="link-title">Weekend Pottery Workshop</div>
+                        <div class="link-desc">Learn hand-building techniques in a relaxed studio environment</div>
+                    </div>
+                </div>
+
+                <!-- Message 18 -->
+                <div class="message-bubble self short">
+                    <div class="message-header">
+                        <div class="avatar maya">M</div>
+                        <span class="sender-name">Maya</span>
+                    </div>
+                    <div class="message-content short-text">
+                        I'm in
+                    </div>
+                </div>
+            </div>
+        </div>
+        <!-- Input Bar -->
+        <div class="input-bar">
+            <input type="text" class="input-field" placeholder="Write a message">
+            <button class="send-button">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M22 2L11 13"></path>
+                    <path d="M22 2L15 22L11 13L2 9L22 2Z"></path>
+                </svg>
+            </button>
+        </div>
+    </div>
+
+    <!-- iPhone Frame -->
+    <div class="device-frame iphone">
+        <div class="device-header">
+            <h2>Conversation</h2>
+        </div>
+        <div class="chat-container">
+            <div class="message-flow">
+                <!-- Message 1: Short greeting -->
+                <div class="message-bubble self short">
+                    <div class="message-header">
+                        <div class="avatar maya">M</div>
+                        <span class="sender-name">Maya</span>
+                    </div>
+                    <div class="message-content short-text">
+                        Hey
+                    </div>
+                </div>
+
+                <!-- Message 2: Short response -->
+                <div class="message-bubble other short">
+                    <div class="message-header">
+                        <div class="avatar kai">K</div>
+                        <span class="sender-name">Kai</span>
+                    </div>
+                    <div class="message-content short-text">
+                        What's up?
+                    </div>
+                </div>
+
+                <!-- Message 3: Medium with inline image -->
+                <div class="message-bubble self medium">
+                    <div class="message-header">
+                        <div class="avatar maya">M</div>
+                        <span class="sender-name">Maya</span>
+                    </div>
+                    <div class="message-content medium-text">
+                        <span class="message-image inline">🌿</span>
+                        Found this amazing plant shop downtown. The most beautiful monstera.
+                    </div>
+                </div>
+
+                <!-- Message 4: Long text -->
+                <div class="message-bubble other long">
+                    <div class="message-header">
+                        <div class="avatar kai">K</div>
+                        <span class="sender-name">Kai</span>
+                    </div>
+                    <div class="message-content body-text">
+                        Oh nice. I've been looking for a good plant shop. My apartment could use some greenery. Is it the one on Oak Street?
+                    </div>
+                </div>
+
+                <!-- Code block message -->
+                <div class="message-bubble self long">
+                    <div class="message-header">
+                        <div class="avatar maya">M</div>
+                        <span class="sender-name">Maya</span>
+                    </div>
+                    <div class="message-content body-text">
+                        Here's that plant watering reminder
+                    </div>
+                    <div class="code-block">
+                        <div class="code-header">
+                            <span class="code-lang">Swift</span>
+                        </div>
+                        <code><span class="keyword">struct</span> <span class="type">Plant</span> {
+    <span class="keyword">let</span> <span class="property">name</span>: <span class="type">String</span>
+    <span class="keyword">func</span> <span class="function">needsWater</span>() -> <span class="type">Bool</span>
+}</code>
+                    </div>
+                </div>
+
+                <!-- Message 6: Short reaction -->
+                <div class="message-bubble other short">
+                    <div class="message-header">
+                        <div class="avatar kai">K</div>
+                        <span class="sender-name">Kai</span>
+                    </div>
+                    <div class="message-content short-text">
+                        Nice
+                    </div>
+                </div>
+
+                <!-- Message 7: Link preview -->
+                <div class="message-bubble self medium">
+                    <div class="message-header">
+                        <div class="avatar maya">M</div>
+                        <span class="sender-name">Maya</span>
+                    </div>
+                    <div class="message-content medium-text">
+                        Their website
+                    </div>
+                    <div class="link-preview">
+                        <div class="link-domain">botanicahome.com</div>
+                        <div class="link-title">Botanica Home & Garden</div>
+                        <div class="link-desc">Curated plants and botanical accessories</div>
+                    </div>
+                </div>
+
+                <!-- Message 8: Image gallery -->
+                <div class="message-bubble other medium">
+                    <div class="message-header">
+                        <div class="avatar kai">K</div>
+                        <span class="sender-name">Kai</span>
+                    </div>
+                    <div class="message-content medium-text">
+                        Look what I got
+                    </div>
+                    <div class="message-image gallery">
+                        <span>🌻</span><span>🌺</span><span>🌸</span>
+                    </div>
+                </div>
+
+                <!-- Message 9: Short -->
+                <div class="message-bubble self short">
+                    <div class="message-header">
+                        <div class="avatar maya">M</div>
+                        <span class="sender-name">Maya</span>
+                    </div>
+                    <div class="message-content short-text">
+                        Love it
+                    </div>
+                </div>
+
+                <!-- Message 10 -->
+                <div class="message-bubble other short">
+                    <div class="message-header">
+                        <div class="avatar kai">K</div>
+                        <span class="sender-name">Kai</span>
+                    </div>
+                    <div class="message-content short-text">
+                        Saturday 2pm?
+                    </div>
+                </div>
+
+                <!-- Message 11 -->
+                <div class="message-bubble self short">
+                    <div class="message-header">
+                        <div class="avatar maya">M</div>
+                        <span class="sender-name">Maya</span>
+                    </div>
+                    <div class="message-content short-text">
+                        I'm in
+                    </div>
+                </div>
+            </div>
+        </div>
+        <!-- Input Bar -->
+        <div class="input-bar">
+            <input type="text" class="input-field" placeholder="Write a message">
+            <button class="send-button">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M22 2L11 13"></path>
+                    <path d="M22 2L15 22L11 13L2 9L22 2Z"></path>
+                </svg>
+            </button>
+        </div>
+    </div>
+</body>
+</html>

@@ -1,0 +1,1533 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cyberpunk Chat UI</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --neon-pink: #FF0080;
+            --neon-pink-dim: #CC0066;
+            --neon-cyan: #00FFFF;
+            --neon-cyan-dim: #00CCCC;
+            --neon-purple: #BF00FF;
+            --neon-yellow: #FFFF00;
+            --neon-orange: #FF6600;
+            --dark-bg: #0A0A0F;
+            --dark-surface: #12121A;
+            --dark-panel: #1A1A25;
+            --dark-elevated: #222230;
+            --text-primary: #E0E0E8;
+            --text-secondary: #8888AA;
+            --text-muted: #555566;
+            --grid-color: rgba(0, 255, 255, 0.03);
+
+            /* Glow effects */
+            --glow-pink: 0 0 10px rgba(255, 0, 128, 0.5), 0 0 20px rgba(255, 0, 128, 0.3), 0 0 40px rgba(255, 0, 128, 0.2);
+            --glow-cyan: 0 0 10px rgba(0, 255, 255, 0.5), 0 0 20px rgba(0, 255, 255, 0.3), 0 0 40px rgba(0, 255, 255, 0.2);
+            --glow-pink-intense: 0 0 15px rgba(255, 0, 128, 0.8), 0 0 30px rgba(255, 0, 128, 0.5), 0 0 60px rgba(255, 0, 128, 0.3);
+            --glow-cyan-intense: 0 0 15px rgba(0, 255, 255, 0.8), 0 0 30px rgba(0, 255, 255, 0.5), 0 0 60px rgba(0, 255, 255, 0.3);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        /* Scanline overlay */
+        .scanlines {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            pointer-events: none;
+            z-index: 9999;
+            background: repeating-linear-gradient(
+                0deg,
+                transparent,
+                transparent 2px,
+                rgba(0, 0, 0, 0.1) 2px,
+                rgba(0, 0, 0, 0.1) 4px
+            );
+        }
+
+        /* Grid background */
+        .grid-bg {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            pointer-events: none;
+            z-index: 0;
+            background-image:
+                linear-gradient(var(--grid-color) 1px, transparent 1px),
+                linear-gradient(90deg, var(--grid-color) 1px, transparent 1px);
+            background-size: 40px 40px;
+        }
+
+        body {
+            font-family: 'Share Tech Mono', monospace;
+            background: var(--dark-bg);
+            min-height: 100vh;
+            padding: 40px;
+            display: flex;
+            gap: 40px;
+            justify-content: center;
+            align-items: flex-start;
+            flex-wrap: wrap;
+            position: relative;
+        }
+
+        .device-frame {
+            background: var(--dark-surface);
+            border: 1px solid var(--neon-cyan-dim);
+            box-shadow:
+                var(--glow-cyan),
+                inset 0 0 60px rgba(0, 255, 255, 0.03);
+            overflow: hidden;
+            flex-shrink: 0;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+        }
+
+        /* Corner brackets decoration */
+        .device-frame::before,
+        .device-frame::after {
+            content: '';
+            position: absolute;
+            width: 30px;
+            height: 30px;
+            border: 2px solid var(--neon-pink);
+            z-index: 100;
+            pointer-events: none;
+        }
+
+        .device-frame::before {
+            top: 8px;
+            left: 8px;
+            border-right: none;
+            border-bottom: none;
+            box-shadow: var(--glow-pink);
+        }
+
+        .device-frame::after {
+            bottom: 8px;
+            right: 8px;
+            border-left: none;
+            border-top: none;
+            box-shadow: var(--glow-pink);
+        }
+
+        .device-frame.ipad {
+            width: 820px;
+            height: 1100px;
+        }
+
+        .device-frame.iphone {
+            width: 390px;
+            height: 844px;
+        }
+
+        .device-header {
+            background: linear-gradient(180deg, var(--dark-panel) 0%, var(--dark-surface) 100%);
+            padding: 20px 24px;
+            border-bottom: 1px solid var(--neon-cyan-dim);
+            flex-shrink: 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .device-header h2 {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--neon-cyan);
+            text-transform: uppercase;
+            letter-spacing: 3px;
+            text-shadow: var(--glow-cyan);
+        }
+
+        .header-status {
+            font-size: 10px;
+            color: var(--neon-pink);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            animation: blink 2s infinite;
+        }
+
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .chat-container {
+            padding: 24px;
+            flex: 1;
+            overflow-y: auto;
+            background: var(--dark-surface);
+            min-height: 0;
+            position: relative;
+        }
+
+        .dust-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 1;
+        }
+
+        .message-flow {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 16px;
+            align-items: flex-start;
+            align-content: flex-start;
+        }
+
+        /* Cyberpunk message bubbles - angled corners */
+        .message-bubble {
+            background: linear-gradient(135deg, rgba(0, 255, 255, 0.08) 0%, rgba(0, 255, 255, 0.03) 100%);
+            border: 1px solid var(--neon-cyan-dim);
+            padding: 16px 20px;
+            box-shadow: var(--glow-cyan);
+            max-width: 100%;
+            min-width: 120px;
+            position: relative;
+            transition: all 0.2s ease;
+            /* Angled corner cut */
+            clip-path: polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 12px 100%, 0 calc(100% - 12px));
+        }
+
+        .message-bubble:hover {
+            box-shadow: var(--glow-cyan-intense);
+            border-color: var(--neon-cyan);
+        }
+
+        .message-bubble.other {
+            background: linear-gradient(135deg, rgba(255, 0, 128, 0.08) 0%, rgba(255, 0, 128, 0.03) 100%);
+            border-color: var(--neon-pink-dim);
+            box-shadow: var(--glow-pink);
+            clip-path: polygon(12px 0, 100% 0, 100% calc(100% - 12px), calc(100% - 12px) 100%, 0 100%, 0 12px);
+        }
+
+        .message-bubble.other:hover {
+            box-shadow: var(--glow-pink-intense);
+            border-color: var(--neon-pink);
+        }
+
+        .message-bubble.short {
+            flex: 0 1 auto;
+        }
+
+        .message-bubble.medium {
+            flex: 1 1 45%;
+            min-width: 200px;
+        }
+
+        .message-bubble.long {
+            flex: 1 1 100%;
+            max-width: calc(65ch + 40px);
+        }
+
+        .message-bubble.truncated {
+            max-width: calc(65ch + 40px);
+        }
+
+        .message-bubble.image-only {
+            padding: 12px;
+            background: transparent;
+            border: none;
+            box-shadow: none;
+            clip-path: none;
+        }
+
+        .message-bubble.image-only:hover {
+            box-shadow: none;
+        }
+
+        .message-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+
+        /* Hexagonal avatars with neon glow */
+        .avatar {
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: 'Orbitron', sans-serif;
+            font-size: 12px;
+            font-weight: 600;
+            flex-shrink: 0;
+            position: relative;
+            clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+        }
+
+        .avatar.maya {
+            background: linear-gradient(180deg, var(--neon-cyan) 0%, var(--neon-cyan-dim) 100%);
+            color: var(--dark-bg);
+            box-shadow: var(--glow-cyan);
+        }
+
+        .avatar.kai {
+            background: linear-gradient(180deg, var(--neon-pink) 0%, var(--neon-pink-dim) 100%);
+            color: var(--dark-bg);
+            box-shadow: var(--glow-pink);
+        }
+
+        .sender-name {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 10px;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+
+        .message-bubble .sender-name {
+            color: var(--neon-cyan);
+        }
+
+        .message-bubble.other .sender-name {
+            color: var(--neon-pink);
+        }
+
+        .message-content {
+            color: var(--text-primary);
+            line-height: 1.6;
+            max-width: 65ch;
+        }
+
+        .message-content.short-text {
+            font-size: 20px;
+            font-weight: 500;
+            line-height: 1.3;
+        }
+
+        .message-content.medium-text {
+            font-size: 16px;
+        }
+
+        .message-content.body-text {
+            font-size: 14px;
+        }
+
+        .message-image {
+            font-size: 80px;
+            line-height: 1;
+            display: block;
+            margin: 8px 0;
+            filter: saturate(1.5) brightness(1.2);
+        }
+
+        .message-image.inline {
+            float: left;
+            font-size: 48px;
+            margin: 0 12px 8px 0;
+            shape-outside: circle(50%);
+        }
+
+        .message-image.large {
+            font-size: 120px;
+            text-align: center;
+        }
+
+        .message-image.gallery {
+            display: flex;
+            gap: 8px;
+            font-size: 60px;
+        }
+
+        /* Photos with neon border */
+        .message-photo {
+            display: block;
+            max-width: 100%;
+            width: auto;
+            height: auto;
+            margin-top: 12px;
+            max-height: 300px;
+            object-fit: cover;
+            border: 1px solid var(--neon-cyan-dim);
+            box-shadow: var(--glow-cyan);
+        }
+
+        .message-bubble.other .message-photo {
+            border-color: var(--neon-pink-dim);
+            box-shadow: var(--glow-pink);
+        }
+
+        .message-bubble:has(.message-photo) {
+            flex: 0 1 auto;
+            max-width: 360px;
+        }
+
+        .message-bubble.image-only .message-photo {
+            margin-top: 8px;
+        }
+
+        .message-bubble.image-only {
+            max-width: 280px;
+        }
+
+        /* Code block - terminal style */
+        .code-block {
+            background: rgba(0, 0, 0, 0.6);
+            border: 1px solid var(--neon-purple);
+            padding: 16px;
+            margin-top: 12px;
+            overflow-x: auto;
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 13px;
+            line-height: 1.5;
+            box-shadow: 0 0 10px rgba(191, 0, 255, 0.3);
+        }
+
+        .code-block code {
+            color: var(--text-primary);
+            white-space: pre;
+        }
+
+        .code-block .keyword { color: var(--neon-pink); }
+        .code-block .string { color: var(--neon-yellow); }
+        .code-block .comment { color: var(--text-muted); }
+        .code-block .function { color: var(--neon-cyan); }
+        .code-block .number { color: var(--neon-orange); }
+        .code-block .type { color: var(--neon-purple); }
+        .code-block .property { color: var(--neon-cyan); }
+
+        .code-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .code-lang {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 10px;
+            font-weight: 600;
+            color: var(--neon-purple);
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            text-shadow: 0 0 10px rgba(191, 0, 255, 0.5);
+        }
+
+        /* Markdown in messages */
+        .message-content.markdown h3 {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--neon-cyan);
+            margin: 16px 0 8px 0;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .message-bubble.other .message-content.markdown h3 {
+            color: var(--neon-pink);
+        }
+
+        .message-content.markdown h3:first-child {
+            margin-top: 0;
+        }
+
+        .message-content.markdown p {
+            margin-bottom: 10px;
+        }
+
+        .message-content.markdown strong {
+            font-weight: 600;
+            color: var(--neon-yellow);
+        }
+
+        .message-content.markdown em {
+            font-style: italic;
+            color: var(--neon-cyan);
+        }
+
+        .message-bubble.other .message-content.markdown em {
+            color: var(--neon-pink);
+        }
+
+        .message-content.markdown ul {
+            margin: 10px 0;
+            padding-left: 20px;
+        }
+
+        .message-content.markdown li {
+            margin-bottom: 4px;
+        }
+
+        .message-content.markdown li::marker {
+            color: var(--neon-cyan);
+        }
+
+        .message-bubble.other .message-content.markdown li::marker {
+            color: var(--neon-pink);
+        }
+
+        .message-content.markdown code {
+            background: rgba(191, 0, 255, 0.2);
+            padding: 2px 6px;
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 0.9em;
+            color: var(--neon-purple);
+            border: 1px solid rgba(191, 0, 255, 0.3);
+        }
+
+        .message-content.markdown blockquote {
+            background: rgba(255, 0, 128, 0.1);
+            border-left: 2px solid var(--neon-pink);
+            padding: 12px 16px;
+            margin: 10px 0;
+            color: var(--text-secondary);
+            font-style: italic;
+        }
+
+        /* Link preview - tech panel style */
+        .link-preview {
+            background: rgba(0, 0, 0, 0.4);
+            border: 1px solid var(--neon-purple);
+            padding: 14px 18px;
+            margin-top: 10px;
+            position: relative;
+            box-shadow: 0 0 10px rgba(191, 0, 255, 0.2);
+        }
+
+        .link-preview .link-indicator {
+            width: 6px;
+            height: 6px;
+            background: var(--neon-purple);
+            display: inline-block;
+            margin-right: 8px;
+            vertical-align: middle;
+            box-shadow: 0 0 10px var(--neon-purple);
+            animation: pulse 1.5s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.7; transform: scale(1.2); }
+        }
+
+        .link-preview .link-domain {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 9px;
+            color: var(--neon-purple);
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            margin-bottom: 6px;
+        }
+
+        .link-preview .link-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .link-preview .link-desc {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-top: 4px;
+        }
+
+        /* Truncated message */
+        .message-bubble.truncated {
+            flex: 1 1 100%;
+            cursor: pointer;
+            position: relative;
+        }
+
+        .message-bubble.truncated .message-content {
+            max-height: 200px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .message-bubble.truncated .message-content::after {
+            content: "";
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 100px;
+            background: linear-gradient(to bottom, transparent 0%, var(--dark-surface) 100%);
+            pointer-events: none;
+        }
+
+        .truncated-indicator {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            padding-top: 12px;
+            margin-top: 8px;
+            border-top: 1px solid rgba(0, 255, 255, 0.2);
+        }
+
+        .message-bubble.other .truncated-indicator {
+            border-top-color: rgba(255, 0, 128, 0.2);
+        }
+
+        .truncated-indicator span {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 10px;
+            font-weight: 500;
+            color: var(--neon-cyan);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .message-bubble.other .truncated-indicator span {
+            color: var(--neon-pink);
+        }
+
+        .truncated-indicator .expand-icon {
+            font-size: 12px;
+        }
+
+        .message-bubble.truncated:hover .truncated-indicator span {
+            text-shadow: var(--glow-cyan);
+        }
+
+        .message-bubble.other.truncated:hover .truncated-indicator span {
+            text-shadow: var(--glow-pink);
+        }
+
+        /* iPhone adjustments */
+        .iphone .message-bubble.medium {
+            flex: 1 1 100%;
+        }
+
+        .iphone .message-bubble {
+            padding: 14px 16px;
+        }
+
+        .iphone .message-bubble.truncated .message-content {
+            max-height: 160px;
+        }
+
+        .iphone .message-content.short-text {
+            font-size: 18px;
+        }
+
+        .iphone .message-image.large {
+            font-size: 80px;
+        }
+
+        .iphone .message-image.gallery {
+            font-size: 44px;
+        }
+
+        .iphone .chat-container {
+            padding: 16px;
+        }
+
+        .iphone .message-flow {
+            gap: 12px;
+        }
+
+        .message-content::after {
+            content: "";
+            display: table;
+            clear: both;
+        }
+
+        /* Scrollbar - neon style */
+        .chat-container::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .chat-container::-webkit-scrollbar-track {
+            background: var(--dark-bg);
+        }
+
+        .chat-container::-webkit-scrollbar-thumb {
+            background: var(--neon-cyan-dim);
+            box-shadow: 0 0 6px var(--neon-cyan);
+        }
+
+        .chat-container::-webkit-scrollbar-thumb:hover {
+            background: var(--neon-cyan);
+        }
+
+        /* Input bar - tech panel */
+        .input-bar {
+            position: absolute;
+            bottom: 20px;
+            left: 16px;
+            right: 16px;
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            z-index: 10;
+        }
+
+        .input-field {
+            flex: 1;
+            background: rgba(0, 0, 0, 0.6);
+            border: 1px solid var(--neon-cyan-dim);
+            padding: 14px 20px;
+            font-family: 'Share Tech Mono', monospace;
+            font-size: 14px;
+            color: var(--text-primary);
+            outline: none;
+            box-shadow: var(--glow-cyan);
+            transition: all 0.2s ease;
+            clip-path: polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 8px 100%, 0 calc(100% - 8px));
+        }
+
+        .input-field::placeholder {
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .input-field:focus {
+            border-color: var(--neon-cyan);
+            box-shadow: var(--glow-cyan-intense);
+        }
+
+        .send-button {
+            width: 48px;
+            height: 48px;
+            border: 1px solid var(--neon-pink-dim);
+            background: rgba(255, 0, 128, 0.1);
+            color: var(--neon-pink);
+            font-size: 18px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: var(--glow-pink);
+            transition: all 0.2s ease;
+            flex-shrink: 0;
+            clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+        }
+
+        .send-button svg {
+            stroke: var(--neon-pink);
+            filter: drop-shadow(0 0 4px var(--neon-pink));
+        }
+
+        .send-button:hover {
+            background: rgba(255, 0, 128, 0.2);
+            border-color: var(--neon-pink);
+            box-shadow: var(--glow-pink-intense);
+        }
+
+        .send-button:active {
+            transform: scale(0.95);
+        }
+
+        /* iPhone input adjustments */
+        .iphone .input-bar {
+            bottom: 16px;
+            left: 12px;
+            right: 12px;
+            gap: 10px;
+        }
+
+        .iphone .input-field {
+            padding: 12px 16px;
+            font-size: 13px;
+        }
+
+        .iphone .send-button {
+            width: 44px;
+            height: 44px;
+        }
+
+        .chat-container {
+            padding-bottom: 80px;
+        }
+
+        .iphone .chat-container {
+            padding-bottom: 72px;
+        }
+
+        /* Glitch effect on hover (optional flourish) */
+        @keyframes glitch {
+            0%, 100% { transform: translate(0); }
+            20% { transform: translate(-2px, 1px); }
+            40% { transform: translate(2px, -1px); }
+            60% { transform: translate(-1px, -1px); }
+            80% { transform: translate(1px, 1px); }
+        }
+
+        .device-header h2:hover {
+            animation: glitch 0.3s ease;
+        }
+
+        /* Japanese decoration */
+        .jp-decoration {
+            position: absolute;
+            font-size: 10px;
+            color: var(--text-muted);
+            opacity: 0.4;
+            font-family: sans-serif;
+            writing-mode: vertical-rl;
+            letter-spacing: 4px;
+        }
+
+        .device-frame .jp-decoration.left {
+            left: 16px;
+            top: 50%;
+            transform: translateY(-50%);
+        }
+
+        .device-frame .jp-decoration.right {
+            right: 16px;
+            top: 50%;
+            transform: translateY(-50%);
+        }
+    </style>
+</head>
+<body>
+    <!-- Grid background -->
+    <div class="grid-bg"></div>
+
+    <!-- Scanline overlay -->
+    <div class="scanlines"></div>
+
+    <!-- iPad Frame -->
+    <div class="device-frame ipad">
+        <span class="jp-decoration left">ネオン都市</span>
+        <span class="jp-decoration right">サイバー</span>
+        <div class="device-header">
+            <h2>Terminal_01</h2>
+            <span class="header-status">● Online</span>
+        </div>
+        <div class="chat-container">
+            <canvas class="dust-canvas" id="dust-ipad"></canvas>
+            <div class="message-flow">
+                <!-- Message 1: Short greeting -->
+                <div class="message-bubble short">
+                    <div class="message-header">
+                        <div class="avatar maya">M</div>
+                        <span class="sender-name">Maya</span>
+                    </div>
+                    <div class="message-content short-text">
+                        Hey!
+                    </div>
+                </div>
+
+                <!-- Message 2: Short response -->
+                <div class="message-bubble other short">
+                    <div class="message-header">
+                        <div class="avatar kai">K</div>
+                        <span class="sender-name">Kai</span>
+                    </div>
+                    <div class="message-content short-text">
+                        What's up?
+                    </div>
+                </div>
+
+                <!-- Message 3: Medium with inline image -->
+                <div class="message-bubble medium">
+                    <div class="message-header">
+                        <div class="avatar maya">M</div>
+                        <span class="sender-name">Maya</span>
+                    </div>
+                    <div class="message-content medium-text">
+                        <span class="message-image inline">🌿</span>
+                        Found this amazing plant shop downtown. They have the most beautiful monstera I've ever seen!
+                    </div>
+                </div>
+
+                <!-- Message 4: Long text -->
+                <div class="message-bubble other long">
+                    <div class="message-header">
+                        <div class="avatar kai">K</div>
+                        <span class="sender-name">Kai</span>
+                    </div>
+                    <div class="message-content body-text">
+                        Oh nice! I've been looking for a good plant shop. My apartment is feeling a bit empty lately and I think some greenery would really help. Is it the one on Oak Street? I heard they also do pottery workshops on weekends which sounds pretty cool.
+                    </div>
+                </div>
+
+                <!-- Real photo message -->
+                <div class="message-bubble other medium">
+                    <div class="message-header">
+                        <div class="avatar kai">K</div>
+                        <span class="sender-name">Kai</span>
+                    </div>
+                    <div class="message-content medium-text">
+                        Check out this view from my hike yesterday
+                    </div>
+                    <img class="message-photo" src="img/IMG_0319.jpeg" alt="Photo from hike">
+                </div>
+
+                <!-- Photo-only message -->
+                <div class="message-bubble image-only short">
+                    <div class="message-header">
+                        <div class="avatar maya">M</div>
+                        <span class="sender-name">Maya</span>
+                    </div>
+                    <img class="message-photo" src="img/IMG_0369.PNG" alt="Shared photo">
+                </div>
+
+                <!-- Screenshot share -->
+                <div class="message-bubble other medium">
+                    <div class="message-header">
+                        <div class="avatar kai">K</div>
+                        <span class="sender-name">Kai</span>
+                    </div>
+                    <div class="message-content body-text">
+                        lol look at this mess
+                    </div>
+                    <img class="message-photo" src="img/screenshot.png" alt="Screenshot">
+                </div>
+
+                <!-- Code block message -->
+                <div class="message-bubble long">
+                    <div class="message-header">
+                        <div class="avatar maya">M</div>
+                        <span class="sender-name">Maya</span>
+                    </div>
+                    <div class="message-content body-text">
+                        Here's that plant watering reminder I made:
+                    </div>
+                    <div class="code-block">
+                        <div class="code-header">
+                            <span class="code-lang">Swift</span>
+                        </div>
+                        <code><span class="keyword">struct</span> <span class="type">Plant</span> {
+    <span class="keyword">let</span> <span class="property">name</span>: <span class="type">String</span>
+    <span class="keyword">let</span> <span class="property">wateringInterval</span>: <span class="type">TimeInterval</span>
+
+    <span class="keyword">func</span> <span class="function">needsWatering</span>(<span class="property">lastWatered</span>: <span class="type">Date</span>) -> <span class="type">Bool</span> {
+        <span class="keyword">let</span> <span class="property">elapsed</span> = <span class="type">Date</span>().<span class="function">timeIntervalSince</span>(lastWatered)
+        <span class="keyword">return</span> elapsed >= wateringInterval
+    }
+}</code>
+                    </div>
+                </div>
+
+                <!-- Truncated long paste with markdown -->
+                <div class="message-bubble truncated other">
+                    <div class="message-header">
+                        <div class="avatar kai">K</div>
+                        <span class="sender-name">Kai</span>
+                    </div>
+                    <div class="message-content body-text markdown">
+                        <h3>The Science of Biophilic Design</h3>
+                        <p>Found this article about why we love plants so much! Here are the key points:</p>
+                        <h3>Key Findings</h3>
+                        <ul>
+                            <li><strong>Attention Restoration Theory</strong> — Natural environments capture attention without mental effort</li>
+                            <li><strong>Stress Reduction</strong> — Even brief plant exposure reduces cortisol levels</li>
+                            <li><strong>Productivity Boost</strong> — Office plants can increase productivity by <em>15%</em></li>
+                        </ul>
+                        <blockquote>The biophilia hypothesis suggests humans possess an innate tendency to seek connections with nature.</blockquote>
+                        <p>The research spans <strong>three decades</strong> and shows consistent results across cultures. The <code>soft fascination</code> effect allows cognitive resources to replenish naturally...</p>
+                    </div>
+                    <div class="truncated-indicator">
+                        <span>Expand Data</span>
+                        <span class="expand-icon">▼</span>
+                    </div>
+                </div>
+
+                <!-- Message 6: Short reaction -->
+                <div class="message-bubble short">
+                    <div class="message-header">
+                        <div class="avatar maya">M</div>
+                        <span class="sender-name">Maya</span>
+                    </div>
+                    <div class="message-content short-text">
+                        Whoa that's a lot!
+                    </div>
+                </div>
+
+                <!-- Message 7: Link preview -->
+                <div class="message-bubble medium">
+                    <div class="message-header">
+                        <div class="avatar maya">M</div>
+                        <span class="sender-name">Maya</span>
+                    </div>
+                    <div class="message-content medium-text">
+                        Here's their website
+                    </div>
+                    <div class="link-preview">
+                        <div class="link-domain"><span class="link-indicator"></span>botanicahome.com</div>
+                        <div class="link-title">Botanica Home & Garden</div>
+                        <div class="link-desc">Curated plants, pots, and botanical accessories for mindful living</div>
+                    </div>
+                </div>
+
+                <!-- Message 8: Image gallery -->
+                <div class="message-bubble other medium">
+                    <div class="message-header">
+                        <div class="avatar kai">K</div>
+                        <span class="sender-name">Kai</span>
+                    </div>
+                    <div class="message-content medium-text">
+                        Look what I just got for my balcony!
+                    </div>
+                    <div class="message-image gallery">
+                        <span>🌻</span><span>🌺</span><span>🌸</span>
+                    </div>
+                </div>
+
+                <!-- Message 9: Short -->
+                <div class="message-bubble short">
+                    <div class="message-header">
+                        <div class="avatar maya">M</div>
+                        <span class="sender-name">Maya</span>
+                    </div>
+                    <div class="message-content short-text">
+                        Love it!
+                    </div>
+                </div>
+
+                <!-- Message 10: Medium with wrapped text around image -->
+                <div class="message-bubble long">
+                    <div class="message-header">
+                        <div class="avatar kai">K</div>
+                        <span class="sender-name">Kai</span>
+                    </div>
+                    <div class="message-content body-text">
+                        <span class="message-image inline">☕</span>
+                        We should grab coffee at that new place next to the plant shop. I heard they have amazing oat milk lattes and the interior is all filled with plants. Very cozy vibes. Maybe Saturday afternoon?
+                    </div>
+                </div>
+
+                <!-- Message 11: Short -->
+                <div class="message-bubble short">
+                    <div class="message-header">
+                        <div class="avatar maya">M</div>
+                        <span class="sender-name">Maya</span>
+                    </div>
+                    <div class="message-content short-text">
+                        Yes please!
+                    </div>
+                </div>
+
+                <!-- Message 12: Short -->
+                <div class="message-bubble other short">
+                    <div class="message-header">
+                        <div class="avatar kai">K</div>
+                        <span class="sender-name">Kai</span>
+                    </div>
+                    <div class="message-content short-text">
+                        2pm?
+                    </div>
+                </div>
+
+                <!-- Message 13: Medium -->
+                <div class="message-bubble medium">
+                    <div class="message-header">
+                        <div class="avatar maya">M</div>
+                        <span class="sender-name">Maya</span>
+                    </div>
+                    <div class="message-content medium-text">
+                        Perfect. I'll bring that book I mentioned too!
+                    </div>
+                </div>
+
+                <!-- Message 14: Image -->
+                <div class="message-bubble other short">
+                    <div class="message-header">
+                        <div class="avatar kai">K</div>
+                        <span class="sender-name">Kai</span>
+                    </div>
+                    <div class="message-image large">📚</div>
+                </div>
+
+                <!-- Message 15: Long -->
+                <div class="message-bubble long">
+                    <div class="message-header">
+                        <div class="avatar maya">M</div>
+                        <span class="sender-name">Maya</span>
+                    </div>
+                    <div class="message-content body-text">
+                        It's that one about Japanese ceramics and wabi-sabi philosophy. The photography is incredible and I think you'd really appreciate the sections on handmade imperfection. There's a whole chapter on tea ceremony bowls that made me want to start collecting pottery.
+                    </div>
+                </div>
+
+                <!-- Message 16: Short excited -->
+                <div class="message-bubble other short">
+                    <div class="message-header">
+                        <div class="avatar kai">K</div>
+                        <span class="sender-name">Kai</span>
+                    </div>
+                    <div class="message-content short-text">
+                        Oh wow!
+                    </div>
+                </div>
+
+                <!-- Message 17: Link -->
+                <div class="message-bubble other medium">
+                    <div class="message-header">
+                        <div class="avatar kai">K</div>
+                        <span class="sender-name">Kai</span>
+                    </div>
+                    <div class="message-content medium-text">
+                        Speaking of ceramics...
+                    </div>
+                    <div class="link-preview">
+                        <div class="link-domain"><span class="link-indicator"></span>localcraftguild.com</div>
+                        <div class="link-title">Weekend Pottery Workshop</div>
+                        <div class="link-desc">Learn hand-building techniques in a relaxed studio environment</div>
+                    </div>
+                </div>
+
+                <!-- Message 18 -->
+                <div class="message-bubble short">
+                    <div class="message-header">
+                        <div class="avatar maya">M</div>
+                        <span class="sender-name">Maya</span>
+                    </div>
+                    <div class="message-content short-text">
+                        I'm in!
+                    </div>
+                </div>
+            </div>
+        </div>
+        <!-- Input Bar -->
+        <div class="input-bar">
+            <input type="text" class="input-field" placeholder="Enter message...">
+            <button class="send-button">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M22 2L11 13"></path>
+                    <path d="M22 2L15 22L11 13L2 9L22 2Z"></path>
+                </svg>
+            </button>
+        </div>
+    </div>
+
+    <!-- iPhone Frame -->
+    <div class="device-frame iphone">
+        <span class="jp-decoration left">通信</span>
+        <div class="device-header">
+            <h2>Terminal_02</h2>
+            <span class="header-status">● Online</span>
+        </div>
+        <div class="chat-container">
+            <canvas class="dust-canvas" id="dust-iphone"></canvas>
+            <div class="message-flow">
+                <!-- Message 1: Short greeting -->
+                <div class="message-bubble short">
+                    <div class="message-header">
+                        <div class="avatar maya">M</div>
+                        <span class="sender-name">Maya</span>
+                    </div>
+                    <div class="message-content short-text">
+                        Hey!
+                    </div>
+                </div>
+
+                <!-- Message 2: Short response -->
+                <div class="message-bubble other short">
+                    <div class="message-header">
+                        <div class="avatar kai">K</div>
+                        <span class="sender-name">Kai</span>
+                    </div>
+                    <div class="message-content short-text">
+                        What's up?
+                    </div>
+                </div>
+
+                <!-- Message 3: Medium with inline image -->
+                <div class="message-bubble medium">
+                    <div class="message-header">
+                        <div class="avatar maya">M</div>
+                        <span class="sender-name">Maya</span>
+                    </div>
+                    <div class="message-content medium-text">
+                        <span class="message-image inline">🌿</span>
+                        Found this amazing plant shop downtown. They have the most beautiful monstera I've ever seen!
+                    </div>
+                </div>
+
+                <!-- Message 4: Long text -->
+                <div class="message-bubble other long">
+                    <div class="message-header">
+                        <div class="avatar kai">K</div>
+                        <span class="sender-name">Kai</span>
+                    </div>
+                    <div class="message-content body-text">
+                        Oh nice! I've been looking for a good plant shop. My apartment is feeling a bit empty lately and I think some greenery would really help. Is it the one on Oak Street?
+                    </div>
+                </div>
+
+                <!-- Code block message -->
+                <div class="message-bubble long">
+                    <div class="message-header">
+                        <div class="avatar maya">M</div>
+                        <span class="sender-name">Maya</span>
+                    </div>
+                    <div class="message-content body-text">
+                        Here's that plant watering reminder:
+                    </div>
+                    <div class="code-block">
+                        <div class="code-header">
+                            <span class="code-lang">Swift</span>
+                        </div>
+                        <code><span class="keyword">struct</span> <span class="type">Plant</span> {
+    <span class="keyword">let</span> <span class="property">name</span>: <span class="type">String</span>
+    <span class="keyword">func</span> <span class="function">needsWater</span>() -> <span class="type">Bool</span>
+}</code>
+                    </div>
+                </div>
+
+                <!-- Message 6: Short reaction -->
+                <div class="message-bubble other short">
+                    <div class="message-header">
+                        <div class="avatar kai">K</div>
+                        <span class="sender-name">Kai</span>
+                    </div>
+                    <div class="message-content short-text">
+                        Nice code!
+                    </div>
+                </div>
+
+                <!-- Message 7: Link preview -->
+                <div class="message-bubble medium">
+                    <div class="message-header">
+                        <div class="avatar maya">M</div>
+                        <span class="sender-name">Maya</span>
+                    </div>
+                    <div class="message-content medium-text">
+                        Here's their website
+                    </div>
+                    <div class="link-preview">
+                        <div class="link-domain"><span class="link-indicator"></span>botanicahome.com</div>
+                        <div class="link-title">Botanica Home & Garden</div>
+                        <div class="link-desc">Curated plants and botanical accessories</div>
+                    </div>
+                </div>
+
+                <!-- Message 8: Image gallery -->
+                <div class="message-bubble other medium">
+                    <div class="message-header">
+                        <div class="avatar kai">K</div>
+                        <span class="sender-name">Kai</span>
+                    </div>
+                    <div class="message-content medium-text">
+                        Look what I got!
+                    </div>
+                    <div class="message-image gallery">
+                        <span>🌻</span><span>🌺</span><span>🌸</span>
+                    </div>
+                </div>
+
+                <!-- Message 9: Short -->
+                <div class="message-bubble short">
+                    <div class="message-header">
+                        <div class="avatar maya">M</div>
+                        <span class="sender-name">Maya</span>
+                    </div>
+                    <div class="message-content short-text">
+                        Love it!
+                    </div>
+                </div>
+
+                <!-- Message 10 -->
+                <div class="message-bubble other short">
+                    <div class="message-header">
+                        <div class="avatar kai">K</div>
+                        <span class="sender-name">Kai</span>
+                    </div>
+                    <div class="message-content short-text">
+                        2pm Saturday?
+                    </div>
+                </div>
+
+                <!-- Message 11 -->
+                <div class="message-bubble short">
+                    <div class="message-header">
+                        <div class="avatar maya">M</div>
+                        <span class="sender-name">Maya</span>
+                    </div>
+                    <div class="message-content short-text">
+                        I'm in!
+                    </div>
+                </div>
+            </div>
+        </div>
+        <!-- Input Bar -->
+        <div class="input-bar">
+            <input type="text" class="input-field" placeholder="Enter message...">
+            <button class="send-button">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M22 2L11 13"></path>
+                    <path d="M22 2L15 22L11 13L2 9L22 2Z"></path>
+                </svg>
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // Neon Dust Motes Animation - Cyberpunk variant
+        (function() {
+            const canvases = [
+                { id: 'dust-ipad', canvas: null, ctx: null, particles: [], lightBeam: null, turbulence: 0, lastScrollY: 0 },
+                { id: 'dust-iphone', canvas: null, ctx: null, particles: [], lightBeam: null, turbulence: 0, lastScrollY: 0 }
+            ];
+
+            const settings = {
+                density: 50,
+                speed: 4,
+                size: 2,
+                opacity: 25,
+                beamChance: 0.004,
+                beamDuration: 3000,
+                beamFade: 800,
+                beamBoost: 5,
+                brownianStrength: 2,
+                turbulenceDecay: 0.96
+            };
+
+            // Neon colors - pink and cyan
+            const neonColors = [
+                [255, 0, 128],   // hot pink
+                [0, 255, 255],   // cyan
+                [191, 0, 255],   // purple
+                [255, 255, 0],   // yellow (rare)
+            ];
+
+            function createParticle(width, height) {
+                // Bias toward pink and cyan
+                const colorIndex = Math.random() < 0.8
+                    ? (Math.random() < 0.5 ? 0 : 1)  // pink or cyan
+                    : (Math.random() < 0.5 ? 2 : 3); // purple or yellow
+                const color = neonColors[colorIndex];
+
+                return {
+                    x: Math.random() * width,
+                    y: Math.random() * height,
+                    size: Math.random() * settings.size + 0.5,
+                    speedX: (Math.random() - 0.5) * settings.speed * 0.06,
+                    speedY: (Math.random() - 0.5) * settings.speed * 0.06,
+                    opacity: (Math.random() * 0.5 + 0.5) * (settings.opacity / 100),
+                    color: color,
+                    twinkleSpeed: Math.random() * 0.025 + 0.008, // faster flicker
+                    twinklePhase: Math.random() * Math.PI * 2,
+                    driftPhase: Math.random() * Math.PI * 2,
+                    driftSpeed: Math.random() * 0.012 + 0.004,
+                };
+            }
+
+            function createLightBeam(width, height) {
+                const angle = (Math.random() * 40 - 20) * (Math.PI / 180);
+                const beamWidth = 80 + Math.random() * 60;
+                const centerX = Math.random() * width;
+                // Randomly pick pink or cyan for the beam
+                const beamColor = Math.random() < 0.5 ? [255, 0, 128] : [0, 255, 255];
+
+                return {
+                    centerX: centerX,
+                    angle: angle,
+                    width: beamWidth,
+                    startTime: Date.now(),
+                    duration: settings.beamDuration,
+                    fadeTime: settings.beamFade,
+                    color: beamColor
+                };
+            }
+
+            function getBeamIntensity(beam) {
+                const elapsed = Date.now() - beam.startTime;
+                const remaining = beam.duration - elapsed;
+
+                if (elapsed < beam.fadeTime) {
+                    return elapsed / beam.fadeTime;
+                } else if (remaining < beam.fadeTime) {
+                    return remaining / beam.fadeTime;
+                }
+                return 1;
+            }
+
+            function isParticleInBeam(p, beam, height) {
+                const beamCenterAtY = beam.centerX + (p.y - height/2) * Math.tan(beam.angle);
+                const distance = Math.abs(p.x - beamCenterAtY);
+                return distance < beam.width / 2;
+            }
+
+            function initCanvas(item) {
+                item.canvas = document.getElementById(item.id);
+                if (!item.canvas) return;
+
+                item.ctx = item.canvas.getContext('2d');
+                resizeCanvas(item);
+
+                item.particles = [];
+                for (let i = 0; i < settings.density; i++) {
+                    item.particles.push(createParticle(item.canvas.width, item.canvas.height));
+                }
+            }
+
+            function resizeCanvas(item) {
+                if (!item.canvas) return;
+                const container = item.canvas.parentElement;
+                const dpr = window.devicePixelRatio || 1;
+                item.canvas.width = container.clientWidth * dpr;
+                item.canvas.height = container.clientHeight * dpr;
+                item.ctx.scale(dpr, dpr);
+            }
+
+            function updateParticle(p, width, height, turbulence) {
+                p.x += p.speedX;
+                p.y += p.speedY;
+
+                p.driftPhase += p.driftSpeed;
+                p.x += Math.sin(p.driftPhase) * 0.2;
+                p.y += Math.cos(p.driftPhase * 0.7) * 0.15;
+
+                // Brownian motion when turbulent
+                if (turbulence > 0.01) {
+                    const strength = settings.brownianStrength * turbulence;
+                    p.x += (Math.random() - 0.5) * strength;
+                    p.y += (Math.random() - 0.5) * strength;
+                }
+
+                // Faster, more digital flicker
+                p.twinklePhase += p.twinkleSpeed;
+                const twinkle = (Math.sin(p.twinklePhase) + 1) / 2;
+                p.currentOpacity = p.opacity * (0.1 + twinkle * 0.9);
+
+                const padding = 20;
+                if (p.x < -padding) p.x = width + padding;
+                if (p.x > width + padding) p.x = -padding;
+                if (p.y < -padding) p.y = height + padding;
+                if (p.y > height + padding) p.y = -padding;
+            }
+
+            function drawParticle(ctx, p, opacityMultiplier = 1) {
+                const [r, g, b] = p.color;
+                const finalOpacity = Math.min(p.currentOpacity * opacityMultiplier, 0.9);
+
+                // Draw glow
+                const gradient = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, p.size * 3);
+                gradient.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${finalOpacity})`);
+                gradient.addColorStop(0.3, `rgba(${r}, ${g}, ${b}, ${finalOpacity * 0.4})`);
+                gradient.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
+
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.size * 3, 0, Math.PI * 2);
+                ctx.fillStyle = gradient;
+                ctx.fill();
+
+                // Draw bright core
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.size * 0.5, 0, Math.PI * 2);
+                ctx.fillStyle = `rgba(255, 255, 255, ${finalOpacity * 0.8})`;
+                ctx.fill();
+            }
+
+            function drawLightBeam(ctx, beam, width, height, intensity) {
+                const [r, g, b] = beam.color;
+                const gradient = ctx.createLinearGradient(
+                    beam.centerX - beam.width, 0,
+                    beam.centerX + beam.width, 0
+                );
+
+                const alpha = 0.04 * intensity;
+                gradient.addColorStop(0, `rgba(${r}, ${g}, ${b}, 0)`);
+                gradient.addColorStop(0.3, `rgba(${r}, ${g}, ${b}, ${alpha})`);
+                gradient.addColorStop(0.5, `rgba(${r}, ${g}, ${b}, ${alpha * 1.5})`);
+                gradient.addColorStop(0.7, `rgba(${r}, ${g}, ${b}, ${alpha})`);
+                gradient.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
+
+                ctx.save();
+                ctx.translate(beam.centerX, height / 2);
+                ctx.rotate(beam.angle);
+                ctx.translate(-beam.centerX, -height / 2);
+
+                ctx.fillStyle = gradient;
+                ctx.fillRect(beam.centerX - beam.width, 0, beam.width * 2, height);
+                ctx.restore();
+            }
+
+            function animate() {
+                const now = Date.now();
+
+                for (const item of canvases) {
+                    if (!item.canvas || !item.ctx) continue;
+
+                    const width = item.canvas.parentElement.clientWidth;
+                    const height = item.canvas.parentElement.clientHeight;
+
+                    if (!item.lightBeam && Math.random() < settings.beamChance) {
+                        item.lightBeam = createLightBeam(width, height);
+                    }
+
+                    if (item.lightBeam) {
+                        const elapsed = now - item.lightBeam.startTime;
+                        if (elapsed > item.lightBeam.duration) {
+                            item.lightBeam = null;
+                        }
+                    }
+
+                    item.ctx.clearRect(0, 0, width, height);
+
+                    if (item.lightBeam) {
+                        const intensity = getBeamIntensity(item.lightBeam);
+                        drawLightBeam(item.ctx, item.lightBeam, width, height, intensity);
+                    }
+
+                    item.turbulence *= settings.turbulenceDecay;
+
+                    for (const p of item.particles) {
+                        updateParticle(p, width, height, item.turbulence);
+
+                        let opacityMultiplier = 1;
+                        if (item.lightBeam) {
+                            const intensity = getBeamIntensity(item.lightBeam);
+                            if (isParticleInBeam(p, item.lightBeam, height)) {
+                                opacityMultiplier = 1 + (settings.beamBoost - 1) * intensity;
+                            }
+                        }
+
+                        drawParticle(item.ctx, p, opacityMultiplier);
+                    }
+                }
+                requestAnimationFrame(animate);
+            }
+
+            // Initialize
+            for (const item of canvases) {
+                initCanvas(item);
+            }
+
+            // Scroll turbulence
+            for (const item of canvases) {
+                if (!item.canvas) continue;
+                const container = item.canvas.parentElement;
+
+                container.addEventListener('scroll', () => {
+                    const scrollY = container.scrollTop;
+                    const delta = Math.abs(scrollY - item.lastScrollY);
+                    item.lastScrollY = scrollY;
+
+                    const scrollTurbulence = Math.min(delta / 25, 1);
+                    item.turbulence = Math.min(item.turbulence + scrollTurbulence * 0.6, 1);
+                }, { passive: true });
+            }
+
+            window.addEventListener('resize', () => {
+                for (const item of canvases) {
+                    resizeCanvas(item);
+                }
+            });
+
+            animate();
+        })();
+    </script>
+</body>
+</html>

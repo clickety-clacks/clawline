@@ -10,22 +10,15 @@ import SwiftUI
 
 struct MessageInputBarMetrics {
     let horizontalSizeClass: UserInterfaceSizeClass?
-    /// Raw bottom safe area inset from GeometryReader - used to detect keyboard.
+    /// Raw bottom safe area inset from GeometryReader.
     let bottomSafeAreaInset: CGFloat
     let deviceCornerRadius: CGFloat
+    /// Focus state from @FocusState - fires BEFORE keyboard animation.
+    /// Used as leading indicator for keyboard presence.
+    let isFieldFocused: Bool
 
     let addButtonSize: CGFloat = 48
     let inputBarHeight: CGFloat = 48
-
-    /// Threshold for detecting keyboard presence.
-    /// Home indicator is ~34pt; keyboard visibility adds ~300pt to safe area.
-    /// Using 40pt detects keyboard even during animation transition.
-    private static let keyboardThreshold: CGFloat = 40
-
-    /// Computed keyboard visibility - no state involved, evaluated in same layout pass.
-    var isKeyboardOnScreen: Bool {
-        bottomSafeAreaInset > Self.keyboardThreshold
-    }
 
     var sendButtonSize: CGFloat {
         horizontalSizeClass == .compact ? 44 : 48
@@ -42,22 +35,25 @@ struct MessageInputBarMetrics {
     /// Spacing between elements in the input bar HStack
     static let elementSpacing: CGFloat = 8
 
-    /// Offset to push input bar INTO safe area for concentric alignment.
-    /// Face ID devices: safe area ~34pt, concentric 26pt → offset 8pt down.
-    /// Home button devices: safe area 0pt → offset 0 (use bottomPadding instead).
-    var concentricOffset: CGFloat {
-        if isKeyboardOnScreen { return 0 }
-        return max(bottomSafeAreaInset - concentricPadding, 0)
+    /// 8pt gap is ALWAYS present in layout.
+    /// This ensures the gap is visible from the first frame when keyboard appears.
+    var bottomPadding: CGFloat {
+        Self.elementSpacing  // Always 8pt
     }
 
-    /// Bottom padding for positioning:
-    /// - Keyboard visible: 8pt gap above keyboard
-    /// - Keyboard hidden on Face ID: 0 (offset handles positioning)
-    /// - Keyboard hidden on home button: 8pt (no safe area to offset into)
-    var bottomPadding: CGFloat {
-        if isKeyboardOnScreen { return Self.elementSpacing }
-        // If safe area is smaller than concentric padding, we need padding
-        return max(concentricPadding - bottomSafeAreaInset, 0)
+    /// Concentric offset using focus as leading indicator.
+    /// @FocusState updates BEFORE body renders - use it directly, not via onChange/@State mirror.
+    var concentricOffset: CGFloat {
+        // Focus state is the LEADING indicator - fires before keyboard animation
+        if isFieldFocused { return 0 }
+
+        // Geometry-based smooth return when keyboard dismisses
+        let minSafeArea: CGFloat = 34
+        let maxSafeArea: CGFloat = 100
+        let maxOffset = max(minSafeArea - concentricPadding + Self.elementSpacing, 0)
+        let t = (bottomSafeAreaInset - minSafeArea) / (maxSafeArea - minSafeArea)
+        let clampedT = max(0, min(1, t))
+        return maxOffset * (1 - clampedT)
     }
 
 }

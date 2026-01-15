@@ -1,0 +1,1666 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Organic Flow Chat - Design System</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300..700;1,9..40,300..700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            /* Light mode (default) */
+            --cream: #F7F3EB;
+            --terracotta: #C4785C;
+            --terracotta-light: #E8C4B4;
+            --sage: #8FA68A;
+            --sage-light: #C5D5C0;
+            --warm-brown: #5C4A3D;
+            --soft-coral: #E8A89C;
+            --muted-gold: #D4B896;
+            --stone: #A69B8D;
+            --ink: #3D3429;
+
+            /* Semantic tokens - Light */
+            --bg-page: linear-gradient(135deg, #E8E0D4 0%, #D4C8BC 100%);
+            --bg-surface: var(--cream);
+            --bg-surface-gradient: linear-gradient(180deg, #F0EAE0 0%, #E8E0D4 100%);
+            --bg-bubble-self: linear-gradient(135deg, #B8CEAF 0%, #C8D9C0 100%); /* sage - home */
+            --bg-bubble-other: linear-gradient(180deg, #FFFDF9 0%, #FDF6EE 100%); /* cream - arriving */
+            --bg-bubble-other-solid: #FDF6EE;
+            --text-primary: var(--ink);
+            --text-secondary: var(--warm-brown);
+            --text-muted: var(--stone);
+            --border-subtle: rgba(93, 74, 61, 0.1);
+            --shadow-bubble: 0 4px 20px rgba(60, 45, 30, 0.08), 0 1px 3px rgba(60, 45, 30, 0.05);
+            --shadow-bubble-hover: 0 8px 30px rgba(60, 45, 30, 0.12), 0 2px 6px rgba(60, 45, 30, 0.08);
+            --shadow-device: 0 25px 80px rgba(60, 45, 30, 0.2), 0 10px 30px rgba(60, 45, 30, 0.1);
+        }
+
+        [data-theme="dark"] {
+            /* Dark mode palette */
+            --cream: #1C1917;
+            --terracotta: #E07A5F;
+            --terracotta-light: #8B4D3B;
+            --sage: #7BA376;
+            --sage-light: #2D3B2A;
+            --warm-brown: #D4C4B0;
+            --soft-coral: #C47A6E;
+            --muted-gold: #A69070;
+            --stone: #8B8078;
+            --ink: #E8E4E0;
+
+            /* Semantic tokens - Dark */
+            --bg-page: linear-gradient(135deg, #0F0E0D 0%, #1A1816 100%);
+            --bg-surface: #1C1917;
+            --bg-surface-gradient: linear-gradient(180deg, #1C1917 0%, #141210 100%);
+            --bg-bubble-self: linear-gradient(135deg, #2D3B2A 0%, #243322 100%); /* deep sage - home */
+            --bg-bubble-other: #292524; /* warm charcoal - arriving */
+            --bg-bubble-other-solid: #292524;
+            --text-primary: #E8E4E0;
+            --text-secondary: #D4C4B0;
+            --text-muted: #8B8078;
+            --border-subtle: rgba(255, 255, 255, 0.08);
+            --shadow-bubble: 0 4px 20px rgba(0, 0, 0, 0.3), 0 1px 3px rgba(0, 0, 0, 0.2);
+            --shadow-bubble-hover: 0 8px 30px rgba(0, 0, 0, 0.4), 0 2px 6px rgba(0, 0, 0, 0.3);
+            --shadow-device: 0 25px 80px rgba(0, 0, 0, 0.5), 0 10px 30px rgba(0, 0, 0, 0.3);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'DM Sans', system-ui, -apple-system, sans-serif;
+            background: var(--bg-page);
+            min-height: 100vh;
+            color: var(--text-primary);
+            line-height: 1.6;
+            transition: background 0.3s ease;
+        }
+
+        /* Theme toggle */
+        .theme-toggle {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 1000;
+            background: var(--bg-bubble-self);
+            border: 1px solid var(--border-subtle);
+            border-radius: 20px;
+            padding: 8px 16px;
+            font-family: inherit;
+            font-size: 14px;
+            font-weight: 500;
+            color: var(--text-primary);
+            cursor: pointer;
+            box-shadow: var(--shadow-bubble);
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .theme-toggle:hover {
+            box-shadow: var(--shadow-bubble-hover);
+            transform: translateY(-1px);
+        }
+
+        /* Layout */
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 60px 40px;
+        }
+
+        /* Header */
+        .header {
+            text-align: center;
+            margin-bottom: 80px;
+        }
+
+        .header h1 {
+            font-size: 48px;
+            font-weight: 700;
+            color: var(--text-primary);
+            margin-bottom: 16px;
+        }
+
+        .header .subtitle {
+            font-size: 20px;
+            color: var(--text-muted);
+            max-width: 600px;
+            margin: 0 auto;
+        }
+
+        /* Sections */
+        .section {
+            background: var(--bg-surface);
+            border-radius: 24px;
+            padding: 48px;
+            margin-bottom: 40px;
+            box-shadow: var(--shadow-bubble);
+        }
+
+        .section h2 {
+            font-size: 28px;
+            font-weight: 700;
+            color: var(--text-primary);
+            margin-bottom: 24px;
+            padding-bottom: 16px;
+            border-bottom: 2px solid var(--terracotta);
+        }
+
+        .section h3 {
+            font-size: 20px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            margin: 32px 0 16px 0;
+        }
+
+        .section p {
+            color: var(--text-primary);
+            margin-bottom: 16px;
+            max-width: 65ch;
+        }
+
+        .section ul, .section ol {
+            margin: 16px 0;
+            padding-left: 24px;
+        }
+
+        .section li {
+            margin-bottom: 8px;
+            color: var(--text-primary);
+        }
+
+        .section strong {
+            color: var(--terracotta);
+        }
+
+        /* Spec table */
+        .spec-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 24px 0;
+        }
+
+        .spec-table th,
+        .spec-table td {
+            text-align: left;
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--border-subtle);
+        }
+
+        .spec-table th {
+            font-weight: 600;
+            color: var(--text-secondary);
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .spec-table td {
+            font-family: 'SF Mono', monospace;
+            font-size: 14px;
+        }
+
+        .spec-table code {
+            background: var(--border-subtle);
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 13px;
+        }
+
+        /* Color swatches */
+        .color-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 20px;
+            margin: 24px 0;
+        }
+
+        .color-swatch {
+            border-radius: 16px;
+            overflow: hidden;
+            box-shadow: var(--shadow-bubble);
+        }
+
+        .color-swatch .preview {
+            height: 100px;
+        }
+
+        .color-swatch .info {
+            padding: 16px;
+            background: var(--bg-bubble-self);
+        }
+
+        .color-swatch .name {
+            font-weight: 600;
+            font-size: 14px;
+            color: var(--text-primary);
+            margin-bottom: 4px;
+        }
+
+        .color-swatch .value {
+            font-family: 'SF Mono', monospace;
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        .color-swatch .token {
+            font-family: 'SF Mono', monospace;
+            font-size: 11px;
+            color: var(--terracotta);
+            margin-top: 4px;
+        }
+
+        /* Typography examples */
+        .type-example {
+            margin: 24px 0;
+            padding: 24px;
+            background: var(--bg-bubble-self);
+            border-radius: 16px;
+        }
+
+        .type-example .sample {
+            margin-bottom: 12px;
+        }
+
+        .type-example .meta {
+            font-size: 12px;
+            color: var(--text-muted);
+            font-family: 'SF Mono', monospace;
+        }
+
+        /* Spacing scale */
+        .spacing-scale {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            margin: 24px 0;
+        }
+
+        .spacing-item {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .spacing-bar {
+            background: var(--terracotta);
+            height: 24px;
+            border-radius: 4px;
+        }
+
+        .spacing-label {
+            font-family: 'SF Mono', monospace;
+            font-size: 13px;
+            color: var(--text-muted);
+            min-width: 80px;
+        }
+
+        /* Live examples */
+        .example-container {
+            background: var(--bg-surface-gradient);
+            border-radius: 16px;
+            padding: 32px;
+            margin: 24px 0;
+        }
+
+        .example-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+
+        .example-row:last-child {
+            margin-bottom: 0;
+        }
+
+        /* Message bubble styles (copied from main) */
+        .message-bubble {
+            background: var(--bg-bubble-self);
+            border-radius: 24px 24px 3px 24px; /* bottom-right sharp - iMessage convention */
+            padding: 16px 20px;
+            box-shadow: var(--shadow-bubble);
+            max-width: 100%;
+            min-width: 120px;
+            position: relative;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .message-bubble:hover {
+            transform: translateY(-2px);
+            box-shadow: var(--shadow-bubble-hover);
+        }
+
+        .message-bubble.other {
+            background: var(--bg-bubble-other);
+            border-radius: 24px 24px 24px 3px; /* bottom-left sharp - iMessage convention */
+        }
+
+        .message-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+
+        .avatar {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            font-weight: 600;
+            color: white;
+            flex-shrink: 0;
+        }
+
+        .avatar.maya {
+            /* Dark sage - self's quieter stepping stone */
+            background: radial-gradient(circle at 50% 25%, #6B9B6A 0%, #4A7A4E 60%, #2D5A32 100%);
+        }
+
+        .avatar.kai {
+            /* Terracotta - other's warm beacon */
+            background: radial-gradient(circle at 50% 25%, var(--soft-coral) 0%, var(--terracotta) 60%, #A85A42 100%);
+        }
+
+        .sender-name {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            opacity: 0.7;
+        }
+
+        .message-content {
+            color: var(--text-primary);
+            line-height: 1.5;
+        }
+
+        .message-content.short-text {
+            font-size: 22px;
+            font-weight: 600;
+            line-height: 1.3;
+        }
+
+        .message-content.medium-text {
+            font-size: 17px;
+            font-weight: 500;
+        }
+
+        .message-content.body-text {
+            font-size: 15px;
+            font-weight: 400;
+        }
+
+        /* Link Preview */
+        .link-preview-card {
+            background: rgba(255, 255, 255, 0.7);
+            border-radius: 16px;
+            padding: 14px 18px;
+            margin-top: 10px;
+            box-shadow: 0 2px 8px rgba(60, 45, 30, 0.06);
+        }
+
+        [data-theme="dark"] .link-preview-card {
+            background: rgba(0, 0, 0, 0.25);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+        }
+
+        .link-preview-card .link-domain {
+            font-size: 11px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 6px;
+        }
+
+        .link-preview-card .link-indicator {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--terracotta);
+            display: inline-block;
+            margin-right: 8px;
+            vertical-align: middle;
+        }
+
+        .link-preview-card .link-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .link-preview-card .link-desc {
+            font-size: 13px;
+            color: var(--text-secondary);
+            margin-top: 4px;
+        }
+
+        /* Do's and Don'ts */
+        .dos-donts {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 24px;
+            margin: 24px 0;
+        }
+
+        .dos-donts .column {
+            padding: 24px;
+            border-radius: 16px;
+        }
+
+        .dos-donts .do {
+            background: rgba(143, 166, 138, 0.15);
+            border: 2px solid var(--sage);
+        }
+
+        .dos-donts .dont {
+            background: rgba(196, 120, 92, 0.15);
+            border: 2px solid var(--terracotta);
+        }
+
+        .dos-donts h4 {
+            font-size: 14px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            margin-bottom: 16px;
+        }
+
+        .dos-donts .do h4 {
+            color: var(--sage);
+        }
+
+        .dos-donts .dont h4 {
+            color: var(--terracotta);
+        }
+
+        .dos-donts ul {
+            list-style: none;
+            padding: 0;
+        }
+
+        .dos-donts li {
+            padding-left: 24px;
+            position: relative;
+            margin-bottom: 8px;
+        }
+
+        .dos-donts .do li::before {
+            content: "✓";
+            position: absolute;
+            left: 0;
+            color: var(--sage);
+            font-weight: bold;
+        }
+
+        .dos-donts .dont li::before {
+            content: "✗";
+            position: absolute;
+            left: 0;
+            color: var(--terracotta);
+            font-weight: bold;
+        }
+
+        /* Callout */
+        .callout {
+            background: rgba(196, 120, 92, 0.08);
+            padding: 20px 24px;
+            border-radius: 16px;
+            margin: 24px 0;
+        }
+
+        [data-theme="dark"] .callout {
+            background: rgba(224, 122, 95, 0.12);
+        }
+
+        .callout p {
+            margin: 0;
+            font-style: italic;
+        }
+
+        /* Code block */
+        .code-block {
+            background: #1e1e1e;
+            border-radius: 12px;
+            padding: 20px;
+            margin: 16px 0;
+            overflow-x: auto;
+        }
+
+        .code-block code {
+            font-family: 'SF Mono', 'Fira Code', monospace;
+            font-size: 13px;
+            color: #d4d4d4;
+            white-space: pre;
+        }
+
+        .code-block .comment { color: #6a9955; }
+        .code-block .keyword { color: #569cd6; }
+        .code-block .string { color: #ce9178; }
+        .code-block .property { color: #9cdcfe; }
+
+        /* Side by side examples */
+        .side-by-side {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 24px;
+            margin: 24px 0;
+        }
+
+        .side-by-side .panel {
+            background: var(--bg-surface-gradient);
+            border-radius: 16px;
+            padding: 24px;
+        }
+
+        .side-by-side .panel-title {
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--text-muted);
+            margin-bottom: 16px;
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 40px 20px;
+            }
+            .section {
+                padding: 32px 24px;
+            }
+            .dos-donts, .side-by-side {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <button class="theme-toggle" onclick="toggleTheme()">
+        <span class="icon">☀️</span>
+        <span class="label">Light</span>
+    </button>
+
+    <div class="container">
+        <header class="header">
+            <h1>Organic Flow Chat</h1>
+            <p class="subtitle">A design system for conversational interfaces that prioritizes visual rhythm, navigation landmarks, and content-aware layout.</p>
+        </header>
+
+        <!-- PHILOSOPHY SECTION -->
+        <section class="section" id="philosophy">
+            <h2>Philosophy & Core Idea</h2>
+
+            <h3>Organic Modernism</h3>
+            <p>This design system follows an <strong>organic modernist</strong> philosophy. That's not hippie or rustic — it's Eero Saarinen's Tulip chair, Alvar Aalto's bent wood, the curves of a Tesla interior, Apple's rounded rectangles. Modern materials and clean forms, but with shapes the eye wants to follow and proportions that feel right.</p>
+
+            <p>We don't shy away from glass and metal. We embrace them. Glass is sand, transformed. Metal is earth, refined. The key is using these materials with <strong>organic forms</strong> — soft curves, natural color temperatures, and compositions that feel settled rather than forced.</p>
+
+            <div class="callout">
+                <p>Organic modernism is a high-end restaurant with warm lighting and curved booths, not a cabin in the woods. Sophisticated and contemporary, but never cold.</p>
+            </div>
+
+            <h3>How It Should Feel</h3>
+            <p>A conversation in this interface should feel like <strong>sitting across from someone in a comfortable space</strong> — unhurried, present, human. Not like operating a machine. Not like scrolling a feed. The bubbles have weight. The avatars mark moments. There's rhythm and breath between exchanges.</p>
+
+            <h3>Why Not iMessage?</h3>
+            <p>Traditional chat interfaces use left/right alignment: their messages on the left, yours on the right. While this creates instant spatial recognition, it comes with trade-offs:</p>
+
+            <ul>
+                <li><strong>Wasted horizontal space</strong> — Bubbles only use half the available width</li>
+                <li><strong>No visual landmarks</strong> — Messages float in a void with nothing to anchor the eye</li>
+                <li><strong>Monotonous rhythm</strong> — Every message looks the same regardless of content</li>
+                <li><strong>Mechanical feel</strong> — The strict alternation feels like a protocol, not a conversation</li>
+            </ul>
+
+            <h3>The Organic Flow Approach</h3>
+            <p>This design system takes a fundamentally different approach based on three core principles:</p>
+
+            <h3>1. Avatar Waypoints</h3>
+            <p>Every message includes a small circular avatar with the sender's initial. These colorful circles act as <strong>visual stepping stones</strong> — your eye can hop from circle to circle like navigation landmarks.</p>
+
+            <p>Each avatar is a little "I was here" marker. The conversation feels <em>populated</em>, not just transcribed. Two people were present. Their presence is recorded.</p>
+
+            <div class="callout">
+                <p>"The little circles bring my eyes to where conversation points happen. They're not noise — they're landmarks."</p>
+            </div>
+
+            <h3>2. Flow Layout</h3>
+            <p>Messages use a <strong>wrapping flow layout</strong> rather than strict vertical stacking. Short messages can sit side-by-side; longer content takes more space. Reading order remains natural: left-to-right, top-to-bottom.</p>
+
+            <p>The conversation has <em>breath</em>. Messages aren't marching in lockstep — they settle where they fit, like stones arranged in a garden. Unhurried and organic, not mechanical and regimented.</p>
+
+            <h3>3. Content-Aware Typography</h3>
+            <p>Message length determines visual treatment:</p>
+            <ul>
+                <li><strong>Short messages</strong> (1-3 words) — Large, bold type</li>
+                <li><strong>Medium messages</strong> — Comfortable reading size with medium weight</li>
+                <li><strong>Long messages</strong> — Body text size with proper line length (65ch max)</li>
+            </ul>
+
+            <p>Short messages are <em>utterances</em> — exclamations, reactions, verbal nods. Long messages are <em>thoughts</em> — considered, complete. The typography mirrors how we naturally modulate our voice in conversation.</p>
+
+            <h3>The Teardrop Indicator</h3>
+            <p>Each bubble has rounded corners on three sides, but one corner is <strong>sharply pointed (3-4px radius)</strong>. This sharp corner indicates the speaker, following iMessage convention:</p>
+            <ul>
+                <li><strong>Bottom-right sharp</strong> — Self (your messages)</li>
+                <li><strong>Bottom-left sharp</strong> — Other (their messages)</li>
+            </ul>
+            <p>The contrast between soft curves (~24-28px) and the sharp indicator creates a subtle directional cue — organic form with purposeful precision.</p>
+        </section>
+
+        <!-- COLOR PALETTE SECTION -->
+        <section class="section" id="colors">
+            <h2>Color Palette</h2>
+
+            <h3>How It Should Feel</h3>
+            <p>The palette should feel like <strong>a warm afternoon in a well-designed space</strong> — a ceramics studio with good light, a Scandinavian café, a room with leather and linen. Refined but approachable. Never sterile, never kitschy.</p>
+
+            <p>These aren't "earthy" colors in a rustic sense. Terracotta isn't "clay pot" — it's a sophisticated warm accent that <em>happens</em> to reference natural material. Sage isn't "houseplant green" — it's a cool counterpoint that <em>happens</em> to feel alive. The colors hint at nature without depicting it.</p>
+
+            <h3>Light Mode — Core Palette</h3>
+            <p>The light mode palette uses warm neutrals with a split-complementary accent pair. The warmth comes from undertones, not saturation.</p>
+
+            <div class="color-grid">
+                <div class="color-swatch">
+                    <div class="preview" style="background: #F7F3EB;"></div>
+                    <div class="info">
+                        <div class="name">Cream</div>
+                        <div class="value">#F7F3EB</div>
+                        <div class="token">--cream</div>
+                    </div>
+                </div>
+                <div class="color-swatch">
+                    <div class="preview" style="background: #C4785C;"></div>
+                    <div class="info">
+                        <div class="name">Terracotta</div>
+                        <div class="value">#C4785C</div>
+                        <div class="token">--terracotta</div>
+                    </div>
+                </div>
+                <div class="color-swatch">
+                    <div class="preview" style="background: #8FA68A;"></div>
+                    <div class="info">
+                        <div class="name">Sage</div>
+                        <div class="value">#8FA68A</div>
+                        <div class="token">--sage</div>
+                    </div>
+                </div>
+                <div class="color-swatch">
+                    <div class="preview" style="background: #C5D5C0;"></div>
+                    <div class="info">
+                        <div class="name">Sage Light</div>
+                        <div class="value">#C5D5C0</div>
+                        <div class="token">--sage-light</div>
+                    </div>
+                </div>
+                <div class="color-swatch">
+                    <div class="preview" style="background: #5C4A3D;"></div>
+                    <div class="info">
+                        <div class="name">Warm Brown</div>
+                        <div class="value">#5C4A3D</div>
+                        <div class="token">--warm-brown</div>
+                    </div>
+                </div>
+                <div class="color-swatch">
+                    <div class="preview" style="background: #E8A89C;"></div>
+                    <div class="info">
+                        <div class="name">Soft Coral</div>
+                        <div class="value">#E8A89C</div>
+                        <div class="token">--soft-coral</div>
+                    </div>
+                </div>
+                <div class="color-swatch">
+                    <div class="preview" style="background: #D4B896;"></div>
+                    <div class="info">
+                        <div class="name">Muted Gold</div>
+                        <div class="value">#D4B896</div>
+                        <div class="token">--muted-gold</div>
+                    </div>
+                </div>
+                <div class="color-swatch">
+                    <div class="preview" style="background: #A69B8D;"></div>
+                    <div class="info">
+                        <div class="name">Stone</div>
+                        <div class="value">#A69B8D</div>
+                        <div class="token">--stone</div>
+                    </div>
+                </div>
+                <div class="color-swatch">
+                    <div class="preview" style="background: #3D3429;"></div>
+                    <div class="info">
+                        <div class="name">Ink</div>
+                        <div class="value">#3D3429</div>
+                        <div class="token">--ink</div>
+                    </div>
+                </div>
+            </div>
+
+            <h3>Dark Mode — Core Palette</h3>
+            <p>Dark mode maintains the organic feel with deep, warm blacks and adjusted accent colors that retain their character while providing proper contrast.</p>
+
+            <div class="color-grid">
+                <div class="color-swatch">
+                    <div class="preview" style="background: #1C1917;"></div>
+                    <div class="info">
+                        <div class="name">Cream (Dark)</div>
+                        <div class="value">#1C1917</div>
+                        <div class="token">--cream</div>
+                    </div>
+                </div>
+                <div class="color-swatch">
+                    <div class="preview" style="background: #E07A5F;"></div>
+                    <div class="info">
+                        <div class="name">Terracotta (Dark)</div>
+                        <div class="value">#E07A5F</div>
+                        <div class="token">--terracotta</div>
+                    </div>
+                </div>
+                <div class="color-swatch">
+                    <div class="preview" style="background: #7BA376;"></div>
+                    <div class="info">
+                        <div class="name">Sage (Dark)</div>
+                        <div class="value">#7BA376</div>
+                        <div class="token">--sage</div>
+                    </div>
+                </div>
+                <div class="color-swatch">
+                    <div class="preview" style="background: #2D3B2A;"></div>
+                    <div class="info">
+                        <div class="name">Sage Light (Dark)</div>
+                        <div class="value">#2D3B2A</div>
+                        <div class="token">--sage-light</div>
+                    </div>
+                </div>
+                <div class="color-swatch">
+                    <div class="preview" style="background: #E8E4E0;"></div>
+                    <div class="info">
+                        <div class="name">Ink (Dark)</div>
+                        <div class="value">#E8E4E0</div>
+                        <div class="token">--ink</div>
+                    </div>
+                </div>
+            </div>
+
+            <h3>Semantic Color Tokens</h3>
+            <p>Use semantic tokens rather than raw colors to ensure proper theming:</p>
+
+            <table class="spec-table">
+                <thead>
+                    <tr>
+                        <th>Token</th>
+                        <th>Purpose</th>
+                        <th>Light Value</th>
+                        <th>Dark Value</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><code>--bg-surface-gradient</code></td>
+                        <td>Chat container surface</td>
+                        <td>#F0EAE0 → #E8E0D4 (richer cream)</td>
+                        <td>#1C1917 → #141210</td>
+                    </tr>
+                    <tr>
+                        <td><code>--bg-bubble-self</code></td>
+                        <td>User's message bubble (home)</td>
+                        <td>#B8CEAF → #C8D9C0 (sage, your territory)</td>
+                        <td>#2D3B2A → #243322 (deep sage)</td>
+                    </tr>
+                    <tr>
+                        <td><code>--bg-bubble-other</code></td>
+                        <td>Other's message bubble (arriving)</td>
+                        <td>#FFFDF9 → #FDF6EE (cream, neutral threshold)</td>
+                        <td>#292524 (warm charcoal)</td>
+                    </tr>
+                    <tr>
+                        <td><code>--text-primary</code></td>
+                        <td>Main body text</td>
+                        <td>#3D3429</td>
+                        <td>#E8E4E0</td>
+                    </tr>
+                    <tr>
+                        <td><code>--text-secondary</code></td>
+                        <td>Labels, sender names</td>
+                        <td>#5C4A3D</td>
+                        <td>#D4C4B0</td>
+                    </tr>
+                    <tr>
+                        <td><code>--text-muted</code></td>
+                        <td>Timestamps, metadata</td>
+                        <td>#A69B8D</td>
+                        <td>#8B8078</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h3>Color Harmony</h3>
+            <p>The palette uses a <strong>split-complementary</strong> scheme with terracotta (warm) and sage (cool) as the primary accent pair. This creates visual interest without conflict. The neutral cream/stone/ink family provides grounding.</p>
+
+            <h3>Following iMessage Convention</h3>
+            <p>iMessage established the defacto standard for chat bubbles: your messages on the right with a bottom-right sharp corner, their messages on the left with a bottom-left sharp corner. Your messages get the strong color (blue), theirs get the neutral (gray). Millions of people have internalized this pattern.</p>
+
+            <p>We follow this convention to <strong>minimize cognitive friction</strong>. Users shouldn't have to relearn which messages are theirs. Sharp corners match iMessage. Position in flow layout is more fluid, but the corner orientation still signals ownership.</p>
+
+            <p>Where we diverge is in <strong>what we do with color</strong>. iMessage uses a bright, attention-grabbing blue for your messages. We use a calmer sage. This is where emotional intent layers on top of convention.</p>
+
+            <h3>Home and Arriving</h3>
+            <p>The color system is built around two feelings: <strong>home</strong> and <strong>arriving</strong>. These are design metaphors — useful mental models for explaining our choices, not scientifically validated claims.</p>
+
+            <p><strong>Your messages are home.</strong> Sage bubble, sage avatar — everything in the same color family. This isn't about contrast mechanics; it's about cohesion. Your color surrounds you. The bubble is your space, the avatar is your mark in that space. It's all one piece, settled and grounded. You don't need your own messages to demand attention — you already know what you said.</p>
+
+            <p><strong>Their messages are arriving.</strong> Cream bubble, terracotta avatar — a warm presence carried on a neutral vessel. The cream isn't "their color" — it's the neutral threshold between your sage world and their terracotta identity. They bring their warmth into this neutral space, which then sits within your larger sage environment. Like a guest arriving at your door.</p>
+
+            <h3>Why Color Families Stay Intact</h3>
+            <p>Each sender has a coherent color identity. We don't mix terracotta avatars into sage bubbles or sage avatars into cream bubbles. This would fragment the identity of each message — is it yours or theirs? The color family answers that question instantly.</p>
+
+            <ul>
+                <li><strong>Self</strong>: Sage bubble + sage avatar (unified, your territory)</li>
+                <li><strong>Other</strong>: Cream bubble + terracotta avatar (neutral ground + their warm presence)</li>
+            </ul>
+
+            <h3>Avatar Contrast Asymmetry</h3>
+            <p>The terracotta avatars are more visually prominent than sage-on-sage avatars. This is a subtle asymmetry in the <em>stepping stones</em>, not the bubbles themselves.</p>
+
+            <p><strong>Bubble colors follow iMessage logic:</strong> Your sage bubbles are the strong, saturated color (like iMessage blue). Their cream bubbles are neutral (like iMessage gray). The overall message prominence matches convention — your territory is clearly marked.</p>
+
+            <p><strong>Avatar contrast serves navigation:</strong> The terracotta dots on their neutral cream bubbles pop as warm beacons — easy to spot when scanning for responses. Your dark sage avatars on sage bubbles are more subtle, blending into your home territory. You can still navigate by them, but they don't compete for attention with incoming messages.</p>
+
+            <p><strong>Why this works:</strong> Their messages contain new information you need to find and process. The warm terracotta stepping stones help you locate their responses quickly. Your messages are context you already know — the quieter sage-on-sage marks your presence without demanding attention.</p>
+
+            <h3>Bubbles as Landmarks</h3>
+            <p>Beyond avatars, the sage bubbles themselves act as landmarks. Your green messages stand out against the surface — cream in light mode, dark field in dark mode — while their neutral bubbles recede into the environment.</p>
+
+            <p>Think of it as a garden path: your sage bubbles are <strong>hedges lining the way</strong>, their neutral messages are <strong>the path itself</strong>. You walk through their words, guided by your own green presence framing the journey. The hedges define your territory — the conversation is a stroll through a space you've shaped.</p>
+
+            <h3>Sharp Corners Follow Convention</h3>
+            <p>Following iMessage convention to reduce cognitive friction:</p>
+            <ul>
+                <li><strong>Self</strong>: Bottom-right sharp corner (your messages, pointing "toward you")</li>
+                <li><strong>Other</strong>: Bottom-left sharp corner (their messages, pointing "toward them")</li>
+            </ul>
+            <p>Familiarity, not philosophy.</p>
+        </section>
+
+        <!-- TYPOGRAPHY SECTION -->
+        <section class="section" id="typography">
+            <h2>Typography</h2>
+
+            <h3>How It Should Feel</h3>
+            <p>Typography should feel like <strong>natural speech rendered visible</strong>. Short exclamations should hit with the weight of spoken emphasis. Long thoughts should flow easily, inviting you to settle in and read. The type should never feel monotonous or robotic.</p>
+
+            <h3>Typeface</h3>
+            <p><strong>DM Sans</strong> — A geometric sans-serif with warm, friendly characteristics. Variable weight from 300-700. It's modern and clean (organic modernist) without being cold or clinical.</p>
+
+            <h3>Type Scale</h3>
+
+            <div class="type-example">
+                <div class="sample" style="font-size: 22px; font-weight: 600; line-height: 1.3;">Short Text — Hey!</div>
+                <div class="meta">22px / 600 weight / 1.3 line-height — For messages 1-3 words</div>
+            </div>
+
+            <div class="type-example">
+                <div class="sample" style="font-size: 17px; font-weight: 500;">Medium Text — Found this amazing plant shop downtown. They have the most beautiful monstera!</div>
+                <div class="meta">17px / 500 weight / 1.5 line-height — For medium-length messages</div>
+            </div>
+
+            <div class="type-example">
+                <div class="sample" style="font-size: 15px; font-weight: 400;">Body Text — Oh nice! I've been looking for a good plant shop. My apartment is feeling a bit empty lately and I think some greenery would really help. Is it the one on Oak Street?</div>
+                <div class="meta">15px / 400 weight / 1.5 line-height — For longer messages, max-width 65ch</div>
+            </div>
+
+            <div class="type-example">
+                <div class="sample" style="font-size: 12px; font-weight: 600; opacity: 0.7; letter-spacing: 0.3px;">Sender Name</div>
+                <div class="meta">12px / 600 weight / 0.3px letter-spacing / 70% opacity</div>
+            </div>
+
+            <h3>Line Length</h3>
+            <p>Body text is constrained to <strong>65 characters per line</strong> (65ch) for optimal readability. This follows the typographic best practice of 45-75 characters per line, with 66 being ideal.</p>
+
+            <div class="callout">
+                <p>Lines too long cause eye fatigue when tracking back to the next line. Lines too short create choppy reading rhythm. 65ch is the sweet spot.</p>
+            </div>
+        </section>
+
+        <!-- SPACING SECTION -->
+        <section class="section" id="spacing">
+            <h2>Spacing System</h2>
+
+            <p>Spacing uses a base unit of <strong>4px</strong> with a scale that doubles progressively:</p>
+
+            <div class="spacing-scale">
+                <div class="spacing-item">
+                    <div class="spacing-label">4px</div>
+                    <div class="spacing-bar" style="width: 4px;"></div>
+                    <span style="color: var(--text-muted); font-size: 13px;">Tiny — icon gaps</span>
+                </div>
+                <div class="spacing-item">
+                    <div class="spacing-label">8px</div>
+                    <div class="spacing-bar" style="width: 8px;"></div>
+                    <span style="color: var(--text-muted); font-size: 13px;">Small — tight element spacing</span>
+                </div>
+                <div class="spacing-item">
+                    <div class="spacing-label">12px</div>
+                    <div class="spacing-bar" style="width: 12px;"></div>
+                    <span style="color: var(--text-muted); font-size: 13px;">Compact — iPhone flow gap</span>
+                </div>
+                <div class="spacing-item">
+                    <div class="spacing-label">16px</div>
+                    <div class="spacing-bar" style="width: 16px;"></div>
+                    <span style="color: var(--text-muted); font-size: 13px;">Base — iPad flow gap, bubble padding vertical</span>
+                </div>
+                <div class="spacing-item">
+                    <div class="spacing-label">20px</div>
+                    <div class="spacing-bar" style="width: 20px;"></div>
+                    <span style="color: var(--text-muted); font-size: 13px;">Comfortable — bubble padding horizontal</span>
+                </div>
+                <div class="spacing-item">
+                    <div class="spacing-label">24px</div>
+                    <div class="spacing-bar" style="width: 24px;"></div>
+                    <span style="color: var(--text-muted); font-size: 13px;">Generous — container padding</span>
+                </div>
+                <div class="spacing-item">
+                    <div class="spacing-label">40px</div>
+                    <div class="spacing-bar" style="width: 40px;"></div>
+                    <span style="color: var(--text-muted); font-size: 13px;">Large — page-level spacing</span>
+                </div>
+            </div>
+
+            <h3>Key Spacing Values</h3>
+            <table class="spec-table">
+                <thead>
+                    <tr>
+                        <th>Element</th>
+                        <th>Property</th>
+                        <th>Value</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Message bubble</td>
+                        <td>padding</td>
+                        <td>16px 20px</td>
+                    </tr>
+                    <tr>
+                        <td>Message flow (iPad)</td>
+                        <td>gap</td>
+                        <td>16px</td>
+                    </tr>
+                    <tr>
+                        <td>Message flow (iPhone)</td>
+                        <td>gap</td>
+                        <td>12px</td>
+                    </tr>
+                    <tr>
+                        <td>Avatar to sender name</td>
+                        <td>gap</td>
+                        <td>10px</td>
+                    </tr>
+                    <tr>
+                        <td>Message header to content</td>
+                        <td>margin-bottom</td>
+                        <td>10px</td>
+                    </tr>
+                    <tr>
+                        <td>Chat container</td>
+                        <td>padding</td>
+                        <td>24px (iPad) / 16px (iPhone)</td>
+                    </tr>
+                </tbody>
+            </table>
+        </section>
+
+        <!-- FLOW LAYOUT SECTION -->
+        <section class="section" id="flow-layout">
+            <h2>Flow Layout System</h2>
+
+            <p>The flow layout is the core innovation of this design system. Instead of strict vertical stacking, messages flow like words in a paragraph — wrapping to the next line when needed.</p>
+
+            <h3>How It Works</h3>
+            <p>In SwiftUI terms, this is similar to a <code>LazyVGrid</code> with <code>.adaptive</code> columns, or a custom <code>Layout</code> that wraps items. The key behaviors:</p>
+
+            <ul>
+                <li>Items are placed left-to-right</li>
+                <li>When an item doesn't fit, it wraps to the next row</li>
+                <li>Items can have different widths based on content</li>
+                <li>Gap between items is consistent (16px iPad, 12px iPhone)</li>
+            </ul>
+
+            <h3>Message Sizing Classes</h3>
+            <table class="spec-table">
+                <thead>
+                    <tr>
+                        <th>Class</th>
+                        <th>Behavior</th>
+                        <th>Use Case</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><code>.short</code></td>
+                        <td>Shrinks to fit content</td>
+                        <td>Quick reactions, 1-3 words</td>
+                    </tr>
+                    <tr>
+                        <td><code>.medium</code></td>
+                        <td>Grows to ~45% width, min 200px</td>
+                        <td>Standard messages</td>
+                    </tr>
+                    <tr>
+                        <td><code>.long</code></td>
+                        <td>Takes full width, max 65ch + padding</td>
+                        <td>Extended text, code blocks</td>
+                    </tr>
+                    <tr>
+                        <td><code>.truncated</code></td>
+                        <td>Full width, content clipped with fade</td>
+                        <td>Very long pasted content</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <h3>Responsive Behavior</h3>
+            <p>On narrower screens (iPhone width), <code>.medium</code> messages expand to full width since there isn't room for two side-by-side. <code>.short</code> messages can still pair up.</p>
+        </section>
+
+        <!-- ELEMENT PAIRING SECTION -->
+        <section class="section" id="element-pairing">
+            <h2>Element Pairing & Composition</h2>
+
+            <p>Elements are designed to work together in specific combinations. Understanding these pairings helps maintain visual harmony.</p>
+
+            <h3>Avatar + Bubble Pairing</h3>
+            <p>Each sender has a distinct avatar color that creates a visual thread through the conversation:</p>
+
+            <div class="side-by-side">
+                <div class="panel">
+                    <div class="panel-title">Self (User)</div>
+                    <div class="example-row">
+                        <div class="message-bubble">
+                            <div class="message-header">
+                                <div class="avatar maya">M</div>
+                                <span class="sender-name">Maya</span>
+                            </div>
+                            <div class="message-content short-text">Hey!</div>
+                        </div>
+                    </div>
+                    <p style="font-size: 13px; color: var(--text-muted); margin-top: 12px;">
+                        Sage bubble + Sage avatar + Bottom-right sharp corner (home)
+                    </p>
+                </div>
+                <div class="panel">
+                    <div class="panel-title">Other</div>
+                    <div class="example-row">
+                        <div class="message-bubble other">
+                            <div class="message-header">
+                                <div class="avatar kai">K</div>
+                                <span class="sender-name">Kai</span>
+                            </div>
+                            <div class="message-content short-text">What's up?</div>
+                        </div>
+                    </div>
+                    <p style="font-size: 13px; color: var(--text-muted); margin-top: 12px;">
+                        Cream bubble + Terracotta avatar + Bottom-left sharp corner (arriving)
+                    </p>
+                </div>
+            </div>
+
+            <h3>Short Messages Side-by-Side</h3>
+            <p>When two short messages appear consecutively, they sit on the same row, creating a rapid-fire conversational feel:</p>
+
+            <div class="example-container">
+                <div class="example-row">
+                    <div class="message-bubble">
+                        <div class="message-header">
+                            <div class="avatar maya">M</div>
+                            <span class="sender-name">Maya</span>
+                        </div>
+                        <div class="message-content short-text">Yes please!</div>
+                    </div>
+                    <div class="message-bubble other">
+                        <div class="message-header">
+                            <div class="avatar kai">K</div>
+                            <span class="sender-name">Kai</span>
+                        </div>
+                        <div class="message-content short-text">2pm?</div>
+                    </div>
+                </div>
+            </div>
+
+            <h3>Mixed Content Flow</h3>
+            <p>Different content types naturally find their place in the flow:</p>
+
+            <div class="example-container">
+                <div class="example-row">
+                    <div class="message-bubble">
+                        <div class="message-header">
+                            <div class="avatar maya">M</div>
+                            <span class="sender-name">Maya</span>
+                        </div>
+                        <div class="message-content short-text">Love it!</div>
+                    </div>
+                    <div class="message-bubble other" style="flex: 1 1 45%; min-width: 200px;">
+                        <div class="message-header">
+                            <div class="avatar kai">K</div>
+                            <span class="sender-name">Kai</span>
+                        </div>
+                        <div class="message-content medium-text">Speaking of ceramics, I found this workshop!</div>
+                    </div>
+                </div>
+            </div>
+
+            <h3>Color Harmony in Composition</h3>
+            <p>The terracotta/sage pairing creates a natural warm/cool contrast that's pleasing without being jarring. When bubbles sit side-by-side, the colors complement rather than compete.</p>
+        </section>
+
+        <!-- ELEMENT SPECS SECTION -->
+        <section class="section" id="elements">
+            <h2>Element Specifications</h2>
+
+            <h3>Message Bubble</h3>
+            <div class="example-container">
+                <div class="message-bubble" style="max-width: 400px;">
+                    <div class="message-header">
+                        <div class="avatar maya">M</div>
+                        <span class="sender-name">Maya</span>
+                    </div>
+                    <div class="message-content body-text">This is a standard message bubble with body text styling.</div>
+                </div>
+            </div>
+
+            <table class="spec-table">
+                <thead>
+                    <tr><th>Property</th><th>Value</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>Background (self)</td><td><code>var(--bg-bubble-self)</code></td></tr>
+                    <tr><td>Background (other)</td><td><code>var(--bg-bubble-other)</code></td></tr>
+                    <tr><td>Border radius (self)</td><td><code>24px 24px 3px 24px</code> (bottom-right sharp)</td></tr>
+                    <tr><td>Border radius (other)</td><td><code>24px 24px 24px 3px</code> (bottom-left sharp)</td></tr>
+                    <tr><td>Padding</td><td><code>16px 20px</code></td></tr>
+                    <tr><td>Box shadow</td><td><code>var(--shadow-bubble)</code></td></tr>
+                    <tr><td>Min width</td><td><code>120px</code></td></tr>
+                    <tr><td>Hover transform</td><td><code>translateY(-2px)</code></td></tr>
+                    <tr><td>Transition</td><td><code>0.2s ease</code></td></tr>
+                </tbody>
+            </table>
+
+            <h3>Avatar</h3>
+            <div class="example-container">
+                <div style="display: flex; gap: 16px; align-items: center;">
+                    <div class="avatar maya">M</div>
+                    <div class="avatar kai">K</div>
+                </div>
+            </div>
+
+            <table class="spec-table">
+                <thead>
+                    <tr><th>Property</th><th>Value</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>Size</td><td><code>32px × 32px</code></td></tr>
+                    <tr><td>Border radius</td><td><code>50%</code> (circle)</td></tr>
+                    <tr><td>Font size</td><td><code>14px</code></td></tr>
+                    <tr><td>Font weight</td><td><code>600</code></td></tr>
+                    <tr><td>Background (self)</td><td><code>radial-gradient(at 50% 25%, #6B9B6A, #4A7A4E, #2D5A32)</code> (dark sage for contrast on sage bubble)</td></tr>
+                    <tr><td>Background (other)</td><td><code>radial-gradient(at 50% 25%, soft-coral, terracotta, #A85A42)</code> (warm terracotta beacon)</td></tr>
+                </tbody>
+            </table>
+
+            <h3>Link Preview</h3>
+            <p>Link previews use an organic card style with a small circular indicator. The card floats above the bubble content with a semi-transparent background.</p>
+
+            <div class="example-container">
+                <div class="message-bubble" style="max-width: 400px;">
+                    <div class="message-header">
+                        <div class="avatar maya">M</div>
+                        <span class="sender-name">Maya</span>
+                    </div>
+                    <div class="message-content medium-text">Check this out</div>
+                    <div class="link-preview-card">
+                        <div class="link-domain"><span class="link-indicator"></span>example.com</div>
+                        <div class="link-title">Article Title Here</div>
+                        <div class="link-desc">A brief description of the linked content.</div>
+                    </div>
+                </div>
+            </div>
+
+            <table class="spec-table">
+                <thead>
+                    <tr><th>Property</th><th>Value</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>Background (light)</td><td><code>rgba(255, 255, 255, 0.7)</code></td></tr>
+                    <tr><td>Background (dark)</td><td><code>rgba(0, 0, 0, 0.25)</code></td></tr>
+                    <tr><td>Border radius</td><td><code>16px</code></td></tr>
+                    <tr><td>Padding</td><td><code>14px 18px</code></td></tr>
+                    <tr><td>Margin top</td><td><code>10px</code></td></tr>
+                    <tr><td>Box shadow (light)</td><td><code>0 2px 8px rgba(60, 45, 30, 0.06)</code></td></tr>
+                    <tr><td>Box shadow (dark)</td><td><code>0 2px 8px rgba(0, 0, 0, 0.15)</code></td></tr>
+                    <tr><td>Indicator</td><td><code>6px circle, terracotta</code></td></tr>
+                </tbody>
+            </table>
+
+            <div class="callout">
+                <p>The circular indicator echoes the avatar waypoints, keeping the visual language consistent. Circles and rounded forms throughout — no sharp edges.</p>
+            </div>
+
+            <h3>Code Block</h3>
+            <table class="spec-table">
+                <thead>
+                    <tr><th>Property</th><th>Value</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>Background</td><td><code>#1e1e1e</code></td></tr>
+                    <tr><td>Border radius</td><td><code>12px</code></td></tr>
+                    <tr><td>Padding</td><td><code>16px</code></td></tr>
+                    <tr><td>Font family</td><td><code>'SF Mono', 'Fira Code', monospace</code></td></tr>
+                    <tr><td>Font size</td><td><code>13px</code></td></tr>
+                    <tr><td>Line height</td><td><code>1.5</code></td></tr>
+                </tbody>
+            </table>
+
+            <h3>Truncated Message</h3>
+            <table class="spec-table">
+                <thead>
+                    <tr><th>Property</th><th>Value</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>Max content height</td><td><code>200px</code> (iPad) / <code>160px</code> (iPhone)</td></tr>
+                    <tr><td>Fade gradient height</td><td><code>100px</code></td></tr>
+                    <tr><td>Indicator font size</td><td><code>12px</code></td></tr>
+                    <tr><td>Indicator border top</td><td><code>1px solid var(--border-subtle)</code></td></tr>
+                </tbody>
+            </table>
+        </section>
+
+        <!-- STATES & INTERACTIONS SECTION -->
+        <section class="section" id="states">
+            <h2>States & Interactions</h2>
+
+            <h3>Hover State</h3>
+            <p>Message bubbles lift slightly on hover to indicate interactivity:</p>
+            <ul>
+                <li>Transform: <code>translateY(-2px)</code></li>
+                <li>Shadow: Deepens from <code>--shadow-bubble</code> to <code>--shadow-bubble-hover</code></li>
+                <li>Transition: <code>0.2s ease</code></li>
+            </ul>
+
+            <h3>Truncated Message Hover</h3>
+            <p>The "Show more" indicator changes color on hover:</p>
+            <ul>
+                <li>Self messages: Text turns <code>var(--terracotta)</code></li>
+                <li>Other messages: Text turns <code>var(--warm-brown)</code></li>
+            </ul>
+
+            <h3>Theme Toggle</h3>
+            <p>All color transitions use <code>0.3s ease</code> for smooth theme switching.</p>
+        </section>
+
+        <!-- RESPONSIVE SECTION -->
+        <section class="section" id="responsive">
+            <h2>Responsive Behavior</h2>
+
+            <h3>iPad vs iPhone Adaptations</h3>
+            <table class="spec-table">
+                <thead>
+                    <tr><th>Property</th><th>iPad</th><th>iPhone</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>Flow gap</td><td>16px</td><td>12px</td></tr>
+                    <tr><td>Container padding</td><td>24px</td><td>16px</td></tr>
+                    <tr><td>Bubble padding</td><td>16px 20px</td><td>14px 16px</td></tr>
+                    <tr><td>Short text size</td><td>22px</td><td>18px</td></tr>
+                    <tr><td>Medium message width</td><td>~45%</td><td>100%</td></tr>
+                    <tr><td>Truncated max-height</td><td>200px</td><td>160px</td></tr>
+                </tbody>
+            </table>
+
+            <h3>Key Principle</h3>
+            <p>On iPhone, <code>.medium</code> messages expand to full width because the screen isn't wide enough for two meaningful bubbles side-by-side. <code>.short</code> messages can still pair up since they're compact by nature.</p>
+        </section>
+
+        <!-- ACCESSIBILITY SECTION -->
+        <section class="section" id="accessibility">
+            <h2>Accessibility Considerations</h2>
+
+            <h3>Color Contrast</h3>
+            <ul>
+                <li>Primary text on surface: Meets WCAG AA (4.5:1 minimum)</li>
+                <li>Muted text: Used only for supplementary info, not critical content</li>
+                <li>Avatar colors: Don't rely solely on color — initials provide redundant identification</li>
+            </ul>
+
+            <h3>Touch Targets</h3>
+            <ul>
+                <li>Minimum bubble size: 120px wide, ~60px tall (well above 44px minimum)</li>
+                <li>Avatar: 32px (acceptable as it's not the primary tap target)</li>
+                <li>Truncated "Show more": Full-width tap area</li>
+            </ul>
+
+            <h3>Motion</h3>
+            <ul>
+                <li>Hover animations are subtle (2px lift)</li>
+                <li>Theme transitions are 0.3s — not jarring</li>
+                <li>Consider <code>prefers-reduced-motion</code> to disable transforms</li>
+            </ul>
+
+            <h3>Screen Readers</h3>
+            <ul>
+                <li>Messages should include sender name in accessible label</li>
+                <li>Truncated content should indicate "collapsed" state</li>
+                <li>Images need alt text</li>
+            </ul>
+        </section>
+
+        <!-- DO'S AND DON'TS SECTION -->
+        <section class="section" id="dos-donts">
+            <h2>Do's and Don'ts</h2>
+
+            <div class="dos-donts">
+                <div class="column do">
+                    <h4>Do</h4>
+                    <ul>
+                        <li>Use avatar circles on every message for consistent landmarks</li>
+                        <li>Let short messages flow side-by-side naturally</li>
+                        <li>Keep long text within 65ch line length</li>
+                        <li>Use the sharp corner to indicate speaker direction</li>
+                        <li>Apply larger/bolder type to short exclamations</li>
+                        <li>Maintain consistent spacing with the 4px base unit</li>
+                        <li>Use semantic color tokens for theme compatibility</li>
+                    </ul>
+                </div>
+                <div class="column dont">
+                    <h4>Don't</h4>
+                    <ul>
+                        <li>Omit avatars to "save space" — they're navigation landmarks</li>
+                        <li>Force all messages to full width — let content determine size</li>
+                        <li>Use raw color values instead of tokens</li>
+                        <li>Make the teardrop corner rounded — it's intentionally sharp (3px)</li>
+                        <li>Use the same text size for all message lengths</li>
+                        <li>Let text span the full viewport width on iPad</li>
+                        <li>Rely solely on color to distinguish senders</li>
+                    </ul>
+                </div>
+            </div>
+
+            <h3>Photo Handling</h3>
+            <div class="dos-donts">
+                <div class="column do">
+                    <h4>Do</h4>
+                    <ul>
+                        <li>Constrain photo bubbles to max-width 360px</li>
+                        <li>Round photo corners (16px) to match organic feel</li>
+                        <li>Allow photos with captions in bubbled containers</li>
+                    </ul>
+                </div>
+                <div class="column dont">
+                    <h4>Don't</h4>
+                    <ul>
+                        <li>Let photos expand to full flow width</li>
+                        <li>Use sharp corners on photos</li>
+                        <li>Float rectangular photos borderless (save floating for transparent stickers/emoji)</li>
+                    </ul>
+                </div>
+            </div>
+        </section>
+
+        <!-- LIQUID GLASS SECTION -->
+        <section class="section" id="liquid-glass">
+            <h2>Liquid Glass Input</h2>
+
+            <h3>How It Should Feel</h3>
+            <p>The input area should feel like <strong>the threshold between thought and record</strong>. Above it, messages are permanent — they've been said, they exist in the conversation's history. Below (or within) the glass, words are still forming, still transient. The glass marks this boundary.</p>
+
+            <p>There's intentional symbolism: you're looking <em>through</em> the input at the conversation behind it. Your next message will join that flow. The blur shows the history continuing beneath — you're not starting from nothing, you're adding to something ongoing.</p>
+
+            <h3>Why Glass Fits Organic Modernism</h3>
+            <p>Glass isn't the opposite of organic — it <em>is</em> organic. Sand transformed by heat. It's a fundamentally modern material that still follows natural principles: transparency, fluidity, light refraction. The liquid glass input field is as "organic modernist" as the warm terracotta bubbles. They're complementary opposites: <strong>earth and water, solid and fluid, permanent and transient.</strong></p>
+
+            <div class="callout">
+                <p>Think of it like a ceramic vase with water in it. Different materials, different states — but they belong together. The warm, solid message bubbles float above a cool, fluid input surface.</p>
+            </div>
+
+            <h3>Visual Characteristics</h3>
+            <ul>
+                <li><strong>Translucency</strong> — The glass is semi-transparent (30% opacity in light mode, 25% in dark). Content bleeds through.</li>
+                <li><strong>Blur</strong> — Moderate backdrop blur (16px) softens what's behind without completely obscuring it. You should still see colors and shapes.</li>
+                <li><strong>Saturation boost</strong> — 180% saturation enhancement makes the colors that bleed through feel vibrant, not muddy.</li>
+                <li><strong>Light edge</strong> — Subtle white border (60% opacity) creates the "glass edge" refraction effect.</li>
+                <li><strong>Neutral tint</strong> — The glass itself has no color tint. It picks up ambient color from whatever's behind it.</li>
+            </ul>
+
+            <h3>Why Neutral?</h3>
+            <p>The glass should <strong>adapt to its context</strong>. When a warm photo scrolls behind it, the input takes on warm tones. When sage bubbles are behind, it gets a cool cast. This creates visual continuity — the input feels like part of the interface, not a separate layer dropped on top.</p>
+
+            <p>If we tinted the glass (e.g., terracotta), it would fight with content that doesn't match. Neutral glass is a chameleon. It belongs everywhere.</p>
+
+            <h3>Specifications</h3>
+            <table class="spec-table">
+                <thead>
+                    <tr><th>Property</th><th>Light Mode</th><th>Dark Mode</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>Background opacity</td><td>30%</td><td>25%</td></tr>
+                    <tr><td>Background color</td><td>white</td><td>gray (rgb 60,60,60)</td></tr>
+                    <tr><td>Backdrop blur</td><td>16px</td><td>16px</td></tr>
+                    <tr><td>Saturation</td><td>180%</td><td>180%</td></tr>
+                    <tr><td>Border</td><td>1px solid white @ 60%</td><td>1px solid white @ 12%</td></tr>
+                    <tr><td>Border radius (field)</td><td>24px</td><td>24px</td></tr>
+                    <tr><td>Border radius (button)</td><td>50% (circle)</td><td>50% (circle)</td></tr>
+                    <tr><td>Padding (field)</td><td>14px 20px</td><td>14px 20px</td></tr>
+                    <tr><td>Position</td><td colspan="2">Floating, absolute positioned over content</td></tr>
+                </tbody>
+            </table>
+
+            <h3>Critical: No Background Panel</h3>
+            <p>The glass widget floats <strong>directly on the content</strong>. There is no opaque background panel, no toolbar, no separator line. The input field and send button are themselves the glass elements — the blur happens through them, not behind them.</p>
+
+            <div class="callout">
+                <p>Wrong: Glass input inside a frosted panel.<br>
+                Right: Glass input floating directly over messages, distorting what's beneath.</p>
+            </div>
+
+            <h3>The Send Button</h3>
+            <p>The send button uses the same glass treatment as the input field — same blur, same opacity, same border. The icon inside is terracotta-colored, connecting it visually to "your" messages. It's a small but intentional detail: the button you tap to send is colored like the bubbles you create.</p>
+
+            <h3>Animated Caustics (Metal Shader)</h3>
+            <p>For the native implementation, the liquid glass input should have <strong>animated caustic patterns</strong> — the subtle, shifting light patterns you see when sunlight refracts through water or glass.</p>
+
+            <p>This reinforces the "liquid" in liquid glass. The effect should be:</p>
+            <ul>
+                <li><strong>Subtle</strong> — barely visible, like light dappling on the bottom of a pool</li>
+                <li><strong>Slow</strong> — gentle, meditative movement (2-4 second cycles)</li>
+                <li><strong>Warm-tinted</strong> — the caustics should pick up ambient color from what's behind, not be pure white</li>
+                <li><strong>Layered under the blur</strong> — the caustics are part of the glass, not on top of it</li>
+            </ul>
+
+            <div class="callout">
+                <p>The caustics make the glass feel alive without being distracting. It's ambient motion — something you notice subconsciously rather than consciously. Like watching water, it has a calming effect.</p>
+            </div>
+
+            <p>Implementation: Use a Metal shader with animated Perlin noise or Voronoi patterns, composited at low opacity (10-15%) beneath the blur layer. The shader should respond to the content behind it — brighter caustics over bright content, dimmer over dark.</p>
+        </section>
+
+        <!-- ORGANIC MODERNIST REFINEMENTS -->
+        <section class="section" id="refinements">
+            <h2>Organic Modernist Refinements</h2>
+
+            <p>These details separate organic modernist design from generic "rounded corners with shadows." Each reinforces the sense of physical, crafted objects in natural light.</p>
+
+            <h3>Top-Lit Shadows</h3>
+            <p>Following Apple HIG, light comes from <strong>directly above</strong>. This means:</p>
+            <ul>
+                <li>Shadows fall downward, heavier at the bottom of objects</li>
+                <li>Multiple shadow layers create depth (near shadow + ambient shadow)</li>
+                <li>Shadow color is <strong>warm-tinted</strong> (using warm-brown, not pure black) — like afternoon light, not fluorescent</li>
+            </ul>
+
+            <table class="spec-table">
+                <thead>
+                    <tr><th>Shadow Layer</th><th>Offset</th><th>Blur</th><th>Color</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>Near</td><td>0 2px</td><td>4px</td><td>warm-brown @ 4%</td></tr>
+                    <tr><td>Mid</td><td>0 8px</td><td>24px</td><td>warm-brown @ 8%</td></tr>
+                    <tr><td>Ambient</td><td>0 16px</td><td>40px</td><td>warm-brown @ 6%</td></tr>
+                </tbody>
+            </table>
+
+            <h3>Surface Texture</h3>
+            <p>The background surface has <strong>subtle noise grain</strong> — like quality paper stock or a matte photograph. This breaks the "digital flatness" that makes interfaces feel sterile.</p>
+            <ul>
+                <li>Noise opacity: 2.5% (light mode), 4% (dark mode)</li>
+                <li>Applied as a fixed overlay across the entire viewport</li>
+                <li>Bubbles remain smooth — they're objects sitting on the textured surface</li>
+            </ul>
+
+            <p>The texture is something you sense more than see. It adds warmth and materiality without being visible at a glance.</p>
+
+            <h3>Squircle Corners</h3>
+            <p>Standard CSS border-radius creates circular arc corners with abrupt curvature transitions. <strong>Squircle</strong> (superellipse) corners have continuous curvature — the curve accelerates smoothly rather than snapping to a circle.</p>
+
+            <p>Apple uses squircles throughout iOS. We approximate this with larger border-radius values (28-32px) and organic variation between corners:</p>
+
+            <table class="spec-table">
+                <thead>
+                    <tr><th>Element</th><th>Border Radius</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>Message bubble (base)</td><td>28px 28px 28px 4px (self) / 28px 28px 4px 28px (other)</td></tr>
+                    <tr><td>Bubble variation 1</td><td>32px 24px 26px 4px</td></tr>
+                    <tr><td>Bubble variation 2</td><td>24px 32px 28px 4px</td></tr>
+                    <tr><td>Bubble variation 3</td><td>26px 30px 28px 4px</td></tr>
+                    <tr><td>Indicator corner</td><td>4px (sharp, consistent)</td></tr>
+                </tbody>
+            </table>
+
+            <h3>Spherical Avatars</h3>
+            <p>Avatar circles use a <strong>radial gradient with top lighting</strong> to feel like 3D pebbles or marbles, not flat colored discs.</p>
+            <ul>
+                <li>Gradient center: 50% horizontal, 25% vertical (light from above)</li>
+                <li>Color progression: highlight → base → shadow</li>
+                <li>Inner shadow: bottom-heavy to reinforce spherical form</li>
+                <li>Subtle outer shadow for lift</li>
+            </ul>
+
+            <p>The avatars are small, precious objects. Tactile. Something you could pick up.</p>
+
+            <h3>Bubble Dimensionality</h3>
+            <p>Message bubbles have a <strong>very subtle inner highlight</strong> at the top edge — barely perceptible, but it adds a hint of curved-surface lighting:</p>
+            <ul>
+                <li>Top inner highlight: 1px inset white @ 15%</li>
+            </ul>
+            <p>This should be felt more than seen. The avatars are the primary dimensional elements; bubbles should support them, not compete.</p>
+        </section>
+
+        <!-- IMPLEMENTATION NOTES -->
+        <section class="section" id="implementation">
+            <h2>Implementation Notes</h2>
+
+            <h3>SwiftUI Translation</h3>
+            <p>Key concepts map to SwiftUI as follows:</p>
+
+            <table class="spec-table">
+                <thead>
+                    <tr><th>Design System Concept</th><th>SwiftUI Equivalent</th></tr>
+                </thead>
+                <tbody>
+                    <tr><td>Flow layout</td><td>Custom <code>Layout</code> or <code>LazyVGrid</code> with <code>.adaptive</code></td></tr>
+                    <tr><td>CSS variables</td><td><code>@Environment(\.colorScheme)</code> + custom theme object</td></tr>
+                    <tr><td>Semantic tokens</td><td>Computed properties that switch on color scheme</td></tr>
+                    <tr><td>Hover states</td><td><code>.hoverEffect()</code> or custom gesture</td></tr>
+                    <tr><td>Box shadow</td><td><code>.shadow()</code> modifier</td></tr>
+                    <tr><td>Transitions</td><td><code>.animation()</code> with <code>.easeInOut</code></td></tr>
+                    <tr><td>Liquid glass blur</td><td><code>.background(.ultraThinMaterial)</code> or custom <code>Material</code></td></tr>
+                    <tr><td>Backdrop blur</td><td><code>.blur()</code> on background + <code>.saturation()</code></td></tr>
+                </tbody>
+            </table>
+
+            <h3>Flow Layout in SwiftUI</h3>
+            <p>For the wrapping flow behavior, consider:</p>
+            <ul>
+                <li><strong>WrappingHStack</strong> from community packages</li>
+                <li>Custom <code>Layout</code> protocol implementation (iOS 16+)</li>
+                <li><code>LazyVGrid</code> with <code>GridItem(.adaptive(minimum: 120))</code></li>
+            </ul>
+
+            <div class="callout">
+                <p>The flow layout is the most complex part to translate. Test thoroughly with varying content lengths to ensure proper wrapping behavior.</p>
+            </div>
+
+            <h3>Liquid Glass in SwiftUI</h3>
+            <p>SwiftUI's <code>Material</code> types provide built-in glass effects:</p>
+            <ul>
+                <li><code>.ultraThinMaterial</code> — Most transparent, closest to our 30% opacity</li>
+                <li><code>.thinMaterial</code> — Slightly more opaque</li>
+                <li><code>.regularMaterial</code> — Standard system blur</li>
+            </ul>
+            <p>For finer control, layer a semi-transparent color over a blurred background view. The key is ensuring the glass element floats <em>over</em> scrollable content using <code>.overlay()</code> positioned with alignment or a <code>ZStack</code>.</p>
+        </section>
+
+        <!-- Appendix: Disqualified Variations -->
+        <section>
+            <h2>Appendix: Explored Variations</h2>
+            <p>During development, we explored alternative aesthetic directions. These experiments clarified why organic modernism works for chat interfaces with mixed content.</p>
+
+            <h3>Cyberpunk Neon</h3>
+            <p><a href="cyberpunk.html">View mockup</a></p>
+            <p>Hot pink and cyan neon, angular clip-path corners, scanline overlays, glowing borders, hexagonal avatars, grid backgrounds.</p>
+            <p><strong>Why it fails:</strong> The aesthetic is visually aggressive. Neon glows compete with content for attention. The high contrast and sharp angles create tension rather than comfort. Works for game UIs or dashboards where "cool factor" matters more than readability. Completely wrong for a conversational interface where the content should breathe.</p>
+
+            <h3>Japanese Minimalism (Muji-inspired)</h3>
+            <p><a href="japanese-minimal.html">View mockup</a></p>
+            <p>Kraft paper tones, natural linen textures, wood accents, extreme whitespace, hairline borders, ultra-light typography.</p>
+            <p><strong>Why it fails:</strong> The aesthetic requires controlled content. It works beautifully with text, line illustrations, or graphics designed in the same muted palette. But chat apps have user-generated photos and screenshots with their own color stories and visual weight. These punch through the carefully curated palette and look out of place. The paper texture fights with photographic detail.</p>
+            <p>This style would excel in a notes app, reading app, or anything with curated illustrations — but not a chat interface with arbitrary media.</p>
+
+            <h3>The Lesson</h3>
+            <p>Organic modernism works for chat because:</p>
+            <ul>
+                <li><strong>Visual structure without aggression</strong> — Soft shadows and bubble backgrounds create containment without competing for attention</li>
+                <li><strong>Warmth from color, not texture</strong> — The sage and cream palette feels warm without requiring paper grain that fights with photos</li>
+                <li><strong>Resilience to varied content</strong> — Photos, code blocks, links, and emoji all sit comfortably within the system</li>
+            </ul>
+            <p>Minimal aesthetics have content requirements. Maximal aesthetics steal focus from content. The middle ground — considered warmth with structural clarity — handles the chaos of real conversations.</p>
+        </section>
+
+    </div>
+
+    <script>
+        function toggleTheme() {
+            const html = document.documentElement;
+            const toggle = document.querySelector('.theme-toggle');
+            const icon = toggle.querySelector('.icon');
+            const label = toggle.querySelector('.label');
+
+            if (html.getAttribute('data-theme') === 'dark') {
+                html.removeAttribute('data-theme');
+                icon.textContent = '☀️';
+                label.textContent = 'Light';
+            } else {
+                html.setAttribute('data-theme', 'dark');
+                icon.textContent = '🌙';
+                label.textContent = 'Dark';
+            }
+        }
+
+        // Check for system preference
+        if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+            document.documentElement.setAttribute('data-theme', 'dark');
+            document.querySelector('.theme-toggle .icon').textContent = '🌙';
+            document.querySelector('.theme-toggle .label').textContent = 'Dark';
+        }
+    </script>
+</body>
+</html>

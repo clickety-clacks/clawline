@@ -33,7 +33,11 @@ protocol ChatServicing {
     var incomingMessages: AsyncStream<Message> { get }
     var connectionState: AsyncStream<ConnectionState> { get }
 
-    func connect(token: String) async throws
+    func connect(token: String, lastMessageId: String?) async throws
     func disconnect()
-    func send(content: String, attachments: [Attachment]) async throws
+    func send(
+        id: String,
+        content: String,
+        attachments: [Attachment]
+    ) async throws
 }

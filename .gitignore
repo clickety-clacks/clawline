@@ -26,3 +26,11 @@ scratch/
 # Node.js
 node_modules/
 provider/node_modules/
+
+# Build artifacts
+*.log
+tmp/
+tmp_patch.patch
+provider/dist/
+provider/.bun-cache/
+provider/bun.lock

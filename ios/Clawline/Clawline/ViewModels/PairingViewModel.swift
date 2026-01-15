@@ -37,7 +37,7 @@ final class PairingViewModel {
     }
 
     var isAddressValid: Bool {
-        !addressInput.trimmingCharacters(in: .whitespaces).isEmpty
+        normalizedWebSocketURL(from: addressInput) != nil
     }
 
     /// Called when user submits their name - scrolls to address page
@@ -50,24 +50,13 @@ final class PairingViewModel {
 
     /// Called when user submits the server address - initiates pairing
     func submitAddress() {
-        guard isAddressValid else {
-            state = .error("Server address cannot be empty")
-            return
-        }
-
-        // Build the WebSocket URL
-        let addressString = addressInput.trimmingCharacters(in: .whitespaces)
-        let urlString: String
-        if addressString.hasPrefix("ws://") || addressString.hasPrefix("wss://") {
-            urlString = addressString
-        } else {
-            // Default to wss:// with default port
-            urlString = "wss://\(addressString):18792"
-        }
-
-        guard let serverURL = URL(string: urlString) else {
+        guard let serverURL = normalizedWebSocketURL(from: addressInput) else {
             state = .error("Invalid server address")
             return
+        }
+
+        if let baseURL = providerBaseURL(from: serverURL) {
+            ProviderBaseURLStore.setBaseURL(baseURL)
         }
 
         state = .waitingForApproval(code: nil)
@@ -116,5 +105,75 @@ final class PairingViewModel {
         state = .enteringAddress
         isNavigatingForward = false
         currentPage = 1
+    }
+
+    /// Dismiss error and return to address input for retry
+    func dismissError() {
+        state = .enteringAddress
+        isNavigatingForward = false
+        currentPage = 1
+    }
+
+    private func providerBaseURL(from websocketURL: URL) -> URL? {
+        guard var components = URLComponents(url: websocketURL, resolvingAgainstBaseURL: false) else {
+            return nil
+        }
+        switch components.scheme?.lowercased() {
+        case "wss":
+            components.scheme = "https"
+        case "ws":
+            components.scheme = "http"
+        default:
+            break
+        }
+        components.path = ""
+        components.query = nil
+        components.fragment = nil
+        return components.url
+    }
+
+    /// Accepts very forgiving input (host, host:port, http/https/ws/wss URLs, with/without path)
+    /// and normalizes it to a ws://…/ws (or wss://) URL, defaulting port 18792 and path /ws.
+    private func normalizedWebSocketURL(from raw: String) -> URL? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        // Try to parse; if no scheme supplied, prepend ws:// to allow host:port/path parsing
+        let initialString = trimmed.contains("://") ? trimmed : "ws://\(trimmed)"
+        guard var components = URLComponents(string: initialString) else { return nil }
+
+        // Normalize scheme
+        switch components.scheme?.lowercased() {
+        case "http":
+            components.scheme = "ws"
+        case "https":
+            components.scheme = "wss"
+        case "ws", "wss":
+            break
+        default:
+            components.scheme = "ws"
+        }
+
+        // Default port
+        if components.port == nil {
+            components.port = 18792
+        }
+
+        // Ensure host exists
+        guard components.host?.isEmpty == false else { return nil }
+
+        // Normalize path to /ws
+        let path = components.path
+        if path.isEmpty || path == "/" {
+            components.path = "/ws"
+        } else if !path.hasSuffix("/ws") {
+            components.path = path.hasSuffix("/") ? path + "ws" : path + "/ws"
+        }
+
+        // Strip query/fragment (not used by provider)
+        components.query = nil
+        components.fragment = nil
+
+        return components.url
     }
 }

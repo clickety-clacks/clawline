@@ -1,5 +1,5 @@
 //
-//  PlasmaEffect.swift
+//  BackgroundEffect.swift
 //  Clawline
 //
 //  Created by Codex on 1/8/26.
@@ -7,8 +7,15 @@
 
 import SwiftUI
 
-/// Configuration for the plasma effect
-struct PlasmaConfiguration: Equatable, Codable {
+/// Effect type selection
+enum ShaderEffectType: String, Codable, CaseIterable {
+    case plasma = "Plasma"
+    case caustics = "Caustics"
+}
+
+/// Configuration for background shader effects
+struct BackgroundEffectConfiguration: Equatable, Codable {
+    var effectType: ShaderEffectType
     var color1: CodableColor
     var color2: CodableColor
     var color3: CodableColor
@@ -18,12 +25,15 @@ struct PlasmaConfiguration: Equatable, Codable {
     var isEnabled: Bool
 
     /// Off-white pastel defaults - subtle shimmer on background
-    static let `default` = PlasmaConfiguration(
-        color1: CodableColor(color: Color(red: 1.0, green: 0.97, blue: 0.94)),   // Warm cream
+    /// For caustics: brighter warm white simulates sunlight through water
+    /// For plasma: off-white pastels create subtle color flow
+    static let `default` = BackgroundEffectConfiguration(
+        effectType: .caustics,
+        color1: CodableColor(color: Color(red: 1.0, green: 0.95, blue: 0.85)),   // Warm golden white (sunlight)
         color2: CodableColor(color: Color(red: 0.94, green: 0.97, blue: 1.0)),   // Cool ice
         color3: CodableColor(color: Color(red: 0.97, green: 0.94, blue: 1.0)),   // Soft lavender
-        intensity: 0.25,
-        speed: 0.2,
+        intensity: 0.35,
+        speed: 0.25,
         scale: 2.0,
         isEnabled: true
     )
@@ -56,9 +66,9 @@ struct CodableColor: Equatable, Codable {
     }
 }
 
-/// View modifier that applies animated plasma effect
-struct PlasmaEffectModifier: ViewModifier {
-    let configuration: PlasmaConfiguration
+/// View modifier that applies animated shader effect (plasma or caustics)
+struct BackgroundEffectModifier: ViewModifier {
+    let configuration: BackgroundEffectConfiguration
     @State private var startTime: Date = .now
 
     func body(content: Content) -> some View {
@@ -67,53 +77,35 @@ struct PlasmaEffectModifier: ViewModifier {
                 let elapsed = timeline.date.timeIntervalSince(startTime)
 
                 content
-                    .colorEffect(
-                        ShaderLibrary.plasmaEffect(
-                            .float(elapsed),
-                            .float2(400, 400),
-                            .color(configuration.color1.color),
-                            .color(configuration.color2.color),
-                            .color(configuration.color3.color),
-                            .float(configuration.intensity),
-                            .float(configuration.speed),
-                            .float(configuration.scale)
-                        )
-                    )
+                    .colorEffect(shaderForEffect(elapsed: elapsed))
             }
         } else {
             content
         }
     }
-}
 
-/// View modifier for simpler glow effect
-struct PlasmaGlowModifier: ViewModifier {
-    let glowColor: Color
-    let intensity: Double
-    let speed: Double
-    let scale: Double
-    let isEnabled: Bool
-    @State private var startTime: Date = .now
-
-    func body(content: Content) -> some View {
-        if isEnabled {
-            TimelineView(.animation) { timeline in
-                let elapsed = timeline.date.timeIntervalSince(startTime)
-
-                content
-                    .colorEffect(
-                        ShaderLibrary.plasmaGlow(
-                            .float(elapsed),
-                            .float2(400, 400),
-                            .color(glowColor),
-                            .float(intensity),
-                            .float(speed),
-                            .float(scale)
-                        )
-                    )
-            }
-        } else {
-            content
+    private func shaderForEffect(elapsed: TimeInterval) -> Shader {
+        switch configuration.effectType {
+        case .plasma:
+            return ShaderLibrary.plasmaEffect(
+                .float(elapsed),
+                .float2(400, 400),
+                .color(configuration.color1.color),
+                .color(configuration.color2.color),
+                .color(configuration.color3.color),
+                .float(configuration.intensity),
+                .float(configuration.speed),
+                .float(configuration.scale)
+            )
+        case .caustics:
+            return ShaderLibrary.causticsEffect(
+                .float(elapsed),
+                .float2(400, 400),
+                .color(configuration.color1.color),
+                .float(configuration.intensity),
+                .float(configuration.speed),
+                .float(configuration.scale)
+            )
         }
     }
 }
@@ -121,25 +113,8 @@ struct PlasmaGlowModifier: ViewModifier {
 // MARK: - View Extensions
 
 extension View {
-    /// Applies an animated plasma color effect
-    func plasmaEffect(_ configuration: PlasmaConfiguration = .default) -> some View {
-        modifier(PlasmaEffectModifier(configuration: configuration))
-    }
-
-    /// Applies a simpler animated glow effect
-    func plasmaGlow(
-        color: Color = .white.opacity(0.3),
-        intensity: Double = 0.2,
-        speed: Double = 0.5,
-        scale: Double = 2.0,
-        isEnabled: Bool = true
-    ) -> some View {
-        modifier(PlasmaGlowModifier(
-            glowColor: color,
-            intensity: intensity,
-            speed: speed,
-            scale: scale,
-            isEnabled: isEnabled
-        ))
+    /// Applies an animated background shader effect (plasma or caustics)
+    func backgroundEffect(_ configuration: BackgroundEffectConfiguration = .default) -> some View {
+        modifier(BackgroundEffectModifier(configuration: configuration))
     }
 }

@@ -12,7 +12,9 @@ struct Message: Identifiable, Equatable {
     let role: Role
     let content: String
     let timestamp: Date
-    var isStreaming: Bool
+    var streaming: Bool
+    let attachments: [Attachment]
+    let deviceId: String?
 
     enum Role: String, Codable {
         case user

@@ -11,31 +11,31 @@ import Observation
 @Observable
 @MainActor
 final class SettingsManager {
-    var plasmaConfig: PlasmaConfiguration {
+    var effectConfig: BackgroundEffectConfiguration {
         didSet { save() }
     }
 
     var isSettingsPresented: Bool = false
 
-    private static let plasmaConfigKey = "plasmaConfiguration"
+    private static let effectConfigKey = "backgroundEffectConfiguration"
 
     init() {
-        if let data = UserDefaults.standard.data(forKey: Self.plasmaConfigKey),
-           let config = try? JSONDecoder().decode(PlasmaConfiguration.self, from: data) {
-            self.plasmaConfig = config
+        if let data = UserDefaults.standard.data(forKey: Self.effectConfigKey),
+           let config = try? JSONDecoder().decode(BackgroundEffectConfiguration.self, from: data) {
+            self.effectConfig = config
         } else {
-            self.plasmaConfig = .default
+            self.effectConfig = .default
         }
     }
 
     private func save() {
-        if let data = try? JSONEncoder().encode(plasmaConfig) {
-            UserDefaults.standard.set(data, forKey: Self.plasmaConfigKey)
+        if let data = try? JSONEncoder().encode(effectConfig) {
+            UserDefaults.standard.set(data, forKey: Self.effectConfigKey)
         }
     }
 
     func resetToDefaults() {
-        plasmaConfig = .default
+        effectConfig = .default
     }
 
     func toggleSettings() {

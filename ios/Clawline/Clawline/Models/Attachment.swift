@@ -7,13 +7,16 @@
 
 import Foundation
 
-struct Attachment: Identifiable {
+struct Attachment: Identifiable, Equatable, Codable {
     let id: String
     let type: AttachmentType
-    let data: Data
+    let mimeType: String?
+    let data: Data?
+    let assetId: String?
+}
 
-    enum AttachmentType {
-        case image
-        case document
-    }
+enum AttachmentType: String, Codable, Equatable {
+    case image
+    case asset
+    case document
 }

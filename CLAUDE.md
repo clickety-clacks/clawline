@@ -2,6 +2,20 @@
 
 Follow the shared instructions in [COMMON.md](./COMMON.md).
 
+## Editing and Viewing Text Files
+
+If I ask you to view or edit a text file, use tmux to create a new pane to the right, and open the text file using nvim:
+
+```bash
+tmux split-window -h "nvim <file>"
+```
+
+Look out for these key phrases which mean to open the file for editing:
+- "Edit [filename]"
+- "Edit this file"
+- "Edit it"
+- "Open [filename]"
+
 ## Code Reviews
 
 Use **Codex** for code reviews (cross-validation with GPT):

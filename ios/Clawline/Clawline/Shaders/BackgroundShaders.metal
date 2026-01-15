@@ -71,6 +71,42 @@ using namespace metal;
     return result;
 }
 
+// Caustics effect - light patterns like sunlight through water
+[[ stitchable ]] half4 causticsEffect(
+    float2 position,
+    half4 color,
+    float time,
+    float2 size,
+    half4 lightColor,
+    float intensity,
+    float speed,
+    float scale
+) {
+    float2 uv = position / size;
+    float2 scaledUV = uv * scale;
+    float t = time * speed;
+
+    // Create multiple wave layers at different angles
+    float wave1 = sin(scaledUV.x * 12.0 + t) * cos(scaledUV.y * 12.0 + t * 0.7);
+    float wave2 = sin((scaledUV.x + scaledUV.y) * 8.0 - t * 0.8) * cos((scaledUV.x - scaledUV.y) * 8.0 + t * 0.6);
+    float wave3 = sin(scaledUV.x * 6.0 - t * 1.2) * cos(scaledUV.y * 10.0 + t * 0.5);
+
+    // Combine waves and create sharp bright lines (caustic effect)
+    float caustic = wave1 + wave2 + wave3;
+    caustic = pow(abs(caustic), 0.5); // Sharp bright lines
+    caustic = caustic * 0.5; // Normalize
+
+    // Boost the bright areas
+    caustic = pow(caustic, 2.0) * 3.0;
+    caustic = clamp(caustic, 0.0, 1.0);
+
+    // Add caustic light to the color
+    half4 result = color + lightColor * half(caustic * intensity) * color.a;
+    result.a = color.a;
+
+    return clamp(result, 0.0h, 1.0h);
+}
+
 // Simpler additive glow variant for subtle shine
 [[ stitchable ]] half4 plasmaGlow(
     float2 position,
@@ -99,4 +135,52 @@ using namespace metal;
     result.a = color.a;
 
     return clamp(result, 0.0h, 1.0h);
+}
+
+// Fractal noise for subtle grain overlay
+float noiseHash(float2 p) {
+    return fract(sin(dot(p, float2(12.9898, 78.233))) * 43758.5453);
+}
+
+float valueNoise(float2 p) {
+    float2 i = floor(p);
+    float2 f = fract(p);
+
+    float a = noiseHash(i);
+    float b = noiseHash(i + float2(1.0, 0.0));
+    float c = noiseHash(i + float2(0.0, 1.0));
+    float d = noiseHash(i + float2(1.0, 1.0));
+
+    float2 u = f * f * (3.0 - 2.0 * f);
+    return mix(a, b, u.x) + (c - a) * u.y * (1.0 - u.x) + (d - b) * u.x * u.y;
+}
+
+float fbm(float2 p) {
+    float value = 0.0;
+    float amplitude = 0.5;
+    float frequency = 1.0;
+    for (int i = 0; i < 4; i++) {
+        value += amplitude * valueNoise(p * frequency);
+        frequency *= 2.0;
+        amplitude *= 0.5;
+    }
+    return value;
+}
+
+[[ stitchable ]] half4 grainNoise(
+    float2 position,
+    half4 color,
+    float time,
+    float2 size,
+    float intensity,
+    float scale
+) {
+    float2 uv = position / size;
+    float baseFrequency = 0.9;
+    float n = fbm(uv * scale * baseFrequency + time * 0.02);
+    half grain = half(n);
+    half4 result = color;
+    result.rgb = mix(color.rgb, half3(grain), half(intensity));
+    result.a = color.a;
+    return result;
 }

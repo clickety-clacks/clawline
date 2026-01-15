@@ -1,0 +1,1742 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Organic Flow Chat UI</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300..700;1,9..40,300..700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            /* Light mode (default) */
+            --cream: #F7F3EB;
+            --terracotta: #C4785C;
+            --terracotta-light: #E8C4B4;
+            --sage: #8FA68A;
+            --sage-light: #C5D5C0;
+            --warm-brown: #5C4A3D;
+            --soft-coral: #E8A89C;
+            --muted-gold: #D4B896;
+            --stone: #A69B8D;
+            --ink: #3D3429;
+
+            /* Semantic tokens - Light */
+            --bg-page: linear-gradient(135deg, #E8E0D4 0%, #D4C8BC 100%);
+            --bg-surface: var(--cream);
+            --bg-surface-gradient: linear-gradient(180deg, #F0EAE0 0%, #E8E0D4 100%); /* richer cream surface */
+            --bg-bubble-self: linear-gradient(135deg, #B8CEAF 0%, #C8D9C0 100%); /* sage - your home */
+            --bg-bubble-self-solid: #C8D9C0;
+            --bg-bubble-other: linear-gradient(180deg, #FFFDF9 0%, #FDF6EE 100%); /* cream - neutral threshold */
+            --bg-bubble-other-solid: #FDF6EE;
+            --text-primary: var(--ink);
+            --text-secondary: var(--warm-brown);
+            --text-muted: var(--stone);
+            --border-subtle: rgba(93, 74, 61, 0.1);
+            /* Top-lit shadows - warm tinted, heavier at bottom, visible on cream */
+            --shadow-bubble:
+                0 2px 4px rgba(92, 74, 61, 0.06),
+                0 8px 24px rgba(92, 74, 61, 0.10),
+                0 16px 40px rgba(92, 74, 61, 0.08);
+            --shadow-bubble-hover:
+                0 4px 8px rgba(92, 74, 61, 0.08),
+                0 12px 32px rgba(92, 74, 61, 0.12),
+                0 24px 56px rgba(92, 74, 61, 0.10);
+            --shadow-device: 0 30px 90px rgba(92, 74, 61, 0.22), 0 12px 40px rgba(92, 74, 61, 0.15);
+        }
+
+        [data-theme="dark"] {
+            /* Dark mode palette */
+            --cream: #1C1917;
+            --terracotta: #E07A5F;
+            --terracotta-light: #8B4D3B;
+            --sage: #7BA376;
+            --sage-light: #2D3B2A;
+            --warm-brown: #D4C4B0;
+            --soft-coral: #C47A6E;
+            --muted-gold: #A69070;
+            --stone: #8B8078;
+            --ink: #E8E4E0;
+
+            /* Semantic tokens - Dark */
+            --bg-page: linear-gradient(135deg, #0F0E0D 0%, #1A1816 100%);
+            --bg-surface: #1C1917;
+            --bg-surface-gradient: linear-gradient(180deg, #1C1917 0%, #141210 100%);
+            --bg-bubble-self: linear-gradient(135deg, #2D3B2A 0%, #243322 100%); /* deep sage - your home */
+            --bg-bubble-self-solid: #243322;
+            --bg-bubble-other: #292524; /* warm charcoal - neutral threshold */
+            --bg-bubble-other-solid: #292524;
+            --text-primary: #E8E4E0;
+            --text-secondary: #D4C4B0;
+            --text-muted: #8B8078;
+            --border-subtle: rgba(255, 255, 255, 0.08);
+            /* Top-lit shadows - dark mode */
+            --shadow-bubble:
+                0 2px 4px rgba(0, 0, 0, 0.15),
+                0 8px 24px rgba(0, 0, 0, 0.25),
+                0 16px 40px rgba(0, 0, 0, 0.20);
+            --shadow-bubble-hover:
+                0 4px 8px rgba(0, 0, 0, 0.20),
+                0 12px 32px rgba(0, 0, 0, 0.30),
+                0 24px 56px rgba(0, 0, 0, 0.25);
+            --shadow-device: 0 30px 90px rgba(0, 0, 0, 0.5), 0 12px 40px rgba(0, 0, 0, 0.35);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        /* Noise texture overlay */
+        .noise-texture {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            pointer-events: none;
+            z-index: 9999;
+            opacity: 0.025;
+            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+        }
+
+        [data-theme="dark"] .noise-texture {
+            opacity: 0.04;
+        }
+
+        body {
+            font-family: 'DM Sans', system-ui, -apple-system, sans-serif;
+            background: var(--bg-page);
+            min-height: 100vh;
+            padding: 40px;
+            display: flex;
+            gap: 40px;
+            justify-content: center;
+            align-items: flex-start;
+            flex-wrap: wrap;
+            transition: background 0.3s ease;
+        }
+
+        /* Theme toggle */
+        .theme-toggle {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 1000;
+            background: var(--bg-bubble-self);
+            border: 1px solid var(--border-subtle);
+            border-radius: 20px;
+            padding: 8px 16px;
+            font-family: inherit;
+            font-size: 14px;
+            font-weight: 500;
+            color: var(--text-primary);
+            cursor: pointer;
+            box-shadow: var(--shadow-bubble);
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .theme-toggle:hover {
+            box-shadow: var(--shadow-bubble-hover);
+            transform: translateY(-1px);
+        }
+
+        .theme-toggle .icon {
+            font-size: 16px;
+        }
+
+        .device-frame {
+            background: var(--bg-surface);
+            border-radius: 40px;
+            box-shadow: var(--shadow-device);
+            overflow: hidden;
+            flex-shrink: 0;
+            display: flex;
+            flex-direction: column;
+            transition: background 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .device-frame.ipad {
+            width: 820px;
+            height: 1100px;
+        }
+
+        .device-frame.iphone {
+            width: 390px;
+            height: 844px;
+        }
+
+        .device-header {
+            background: var(--bg-surface);
+            padding: 20px 24px;
+            border-bottom: 1px solid var(--border-subtle);
+            backdrop-filter: blur(20px);
+            flex-shrink: 0;
+        }
+
+        .device-header h2 {
+            font-size: 15px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            opacity: 0.7;
+        }
+
+        .chat-container {
+            padding: 24px;
+            flex: 1;
+            overflow-y: auto;
+            background: var(--bg-surface-gradient);
+            min-height: 0;
+            position: relative;
+        }
+
+        .dust-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 1;
+        }
+
+        .message-flow {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 16px;
+            align-items: flex-start;
+            align-content: flex-start;
+        }
+
+        .message-bubble {
+            background: var(--bg-bubble-self);
+            /* Squircle-like corners: larger, smoother curves */
+            /* Self = bottom-right sharp (iMessage convention) */
+            border-radius: 28px 28px 4px 28px;
+            padding: 16px 20px;
+            box-shadow:
+                var(--shadow-bubble),
+                /* Very subtle inner highlight - barely perceptible */
+                inset 0 1px 1px rgba(255, 255, 255, 0.15);
+            max-width: 100%;
+            min-width: 120px;
+            position: relative;
+            transition: transform 0.2s ease, box-shadow 0.2s ease, background 0.3s ease;
+        }
+
+        .message-bubble:hover {
+            transform: translateY(-2px);
+            box-shadow:
+                var(--shadow-bubble-hover),
+                inset 0 1px 1px rgba(255, 255, 255, 0.15);
+        }
+
+        .message-bubble.other {
+            background: var(--bg-bubble-other);
+            /* Other = bottom-left sharp (iMessage convention) */
+            border-radius: 28px 28px 28px 4px;
+        }
+
+        .message-bubble.short {
+            flex: 0 1 auto;
+        }
+
+        .message-bubble.other.short {
+            background: var(--bg-bubble-other);
+        }
+
+        .message-bubble.medium {
+            flex: 1 1 45%;
+            min-width: 200px;
+        }
+
+        .message-bubble.long {
+            flex: 1 1 100%;
+            max-width: calc(65ch + 40px); /* content + padding */
+        }
+
+        .message-bubble.truncated {
+            max-width: calc(65ch + 40px);
+        }
+
+        .message-bubble.image-only {
+            padding: 12px;
+            background: transparent;
+            box-shadow: none;
+        }
+
+        .message-bubble.image-only:hover {
+            transform: translateY(-2px);
+            box-shadow: none;
+        }
+
+        /* Truncated long message */
+        .message-bubble.truncated {
+            flex: 1 1 100%;
+            cursor: pointer;
+            position: relative;
+        }
+
+        .message-bubble.truncated .message-content {
+            max-height: 200px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .message-bubble.truncated .message-content::after {
+            content: "";
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 100px;
+            background: linear-gradient(to bottom, transparent 0%, var(--bg-bubble-self) 100%);
+            pointer-events: none;
+        }
+
+        .message-bubble.truncated.other .message-content::after {
+            background: linear-gradient(to bottom, transparent 0%, var(--bg-bubble-other-solid) 100%);
+        }
+
+        .truncated-indicator {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            padding-top: 12px;
+            margin-top: 8px;
+            border-top: 1px solid var(--border-subtle);
+        }
+
+        .truncated-indicator span {
+            font-size: 12px;
+            font-weight: 500;
+            color: var(--stone);
+        }
+
+        .truncated-indicator .expand-icon {
+            font-size: 12px;
+            color: var(--stone);
+        }
+
+        .message-bubble.truncated:hover .truncated-indicator span,
+        .message-bubble.truncated:hover .truncated-indicator .expand-icon {
+            color: var(--terracotta);
+        }
+
+        .message-bubble.truncated.other:hover .truncated-indicator span,
+        .message-bubble.truncated.other:hover .truncated-indicator .expand-icon {
+            color: var(--warm-brown);
+        }
+
+        .message-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+
+        .avatar {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            font-weight: 600;
+            color: white;
+            flex-shrink: 0;
+            /* Spherical 3D effect with inner shadow */
+            box-shadow:
+                inset 0 -8px 12px rgba(0, 0, 0, 0.15),
+                inset 0 4px 8px rgba(255, 255, 255, 0.2),
+                0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .avatar.maya {
+            /* Dark sage - quieter stepping stone for self, contrasts with sage bubble */
+            background: radial-gradient(circle at 50% 25%, #6B9B6A 0%, #4A7A4E 60%, #2D5A32 100%);
+        }
+
+        .avatar.kai {
+            /* Terracotta - warm beacon for arriving messages */
+            background: radial-gradient(circle at 50% 25%, var(--soft-coral) 0%, var(--terracotta) 60%, #A85A42 100%);
+        }
+
+        .sender-name {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            opacity: 0.7;
+            letter-spacing: 0.3px;
+        }
+
+        .message-content {
+            color: var(--text-primary);
+            line-height: 1.5;
+            max-width: 65ch;
+        }
+
+        .message-content.short-text {
+            font-size: 22px;
+            font-weight: 600;
+            line-height: 1.3;
+        }
+
+        .message-content.medium-text {
+            font-size: 17px;
+            font-weight: 500;
+        }
+
+        .message-content.body-text {
+            font-size: 15px;
+            font-weight: 400;
+        }
+
+        .message-image {
+            font-size: 80px;
+            line-height: 1;
+            display: block;
+            margin: 8px 0;
+            border-radius: 16px;
+            overflow: hidden;
+        }
+
+        .message-image.inline {
+            float: left;
+            font-size: 48px;
+            margin: 0 12px 8px 0;
+            shape-outside: circle(50%);
+        }
+
+        .message-image.large {
+            font-size: 120px;
+            text-align: center;
+        }
+
+        .message-image.gallery {
+            display: flex;
+            gap: 8px;
+            font-size: 60px;
+        }
+
+        /* Real photo images */
+        .message-photo {
+            display: block;
+            max-width: 100%;
+            width: auto;
+            height: auto;
+            border-radius: 16px;
+            margin-top: 12px;
+            max-height: 300px;
+            object-fit: cover;
+        }
+
+        .message-bubble:has(.message-photo) {
+            flex: 0 1 auto;
+            max-width: 360px;
+        }
+
+        .message-bubble.image-only .message-photo {
+            margin-top: 8px;
+            border-radius: 20px;
+        }
+
+        .message-bubble.image-only {
+            max-width: 280px;
+        }
+
+        /* Code block styling */
+        .code-block {
+            background: #1e1e1e;
+            border-radius: 12px;
+            padding: 16px;
+            margin-top: 12px;
+            overflow-x: auto;
+            font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+            font-size: 13px;
+            line-height: 1.5;
+        }
+
+        .code-block code {
+            color: #d4d4d4;
+            white-space: pre;
+        }
+
+        .code-block .keyword { color: #569cd6; }
+        .code-block .string { color: #ce9178; }
+        .code-block .comment { color: #6a9955; }
+        .code-block .function { color: #dcdcaa; }
+        .code-block .number { color: #b5cea8; }
+        .code-block .type { color: #4ec9b0; }
+        .code-block .property { color: #9cdcfe; }
+        .code-block .operator { color: #d4d4d4; }
+
+        .code-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .code-lang {
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--stone);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        /* Rendered markdown in messages */
+        .message-content.markdown h3 {
+            font-size: 15px;
+            font-weight: 700;
+            color: var(--text-primary);
+            margin: 16px 0 8px 0;
+        }
+
+        .message-content.markdown h3:first-child {
+            margin-top: 0;
+        }
+
+        .message-content.markdown p {
+            margin-bottom: 10px;
+        }
+
+        .message-content.markdown strong {
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .message-content.markdown em {
+            font-style: italic;
+        }
+
+        .message-content.markdown ul {
+            margin: 10px 0;
+            padding-left: 20px;
+        }
+
+        .message-content.markdown li {
+            margin-bottom: 4px;
+        }
+
+        .message-content.markdown code {
+            background: var(--border-subtle);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: 'SF Mono', monospace;
+            font-size: 0.9em;
+        }
+
+        .message-content.markdown blockquote {
+            background: rgba(196, 120, 92, 0.08);
+            border-radius: 12px;
+            padding: 12px 16px;
+            margin: 10px 0;
+            color: var(--text-secondary);
+            font-style: italic;
+        }
+
+        [data-theme="dark"] .message-content.markdown blockquote {
+            background: rgba(224, 122, 95, 0.12);
+        }
+
+        .link-preview {
+            background: rgba(255, 255, 255, 0.7);
+            border-radius: 16px;
+            padding: 14px 18px;
+            margin-top: 10px;
+            position: relative;
+            box-shadow: 0 2px 8px rgba(60, 45, 30, 0.06);
+        }
+
+        [data-theme="dark"] .link-preview {
+            background: rgba(0, 0, 0, 0.25);
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+        }
+
+        .link-preview .link-indicator {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--terracotta);
+            display: inline-block;
+            margin-right: 8px;
+            vertical-align: middle;
+        }
+
+        .link-preview .link-domain {
+            font-size: 11px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 6px;
+        }
+
+        .link-preview .link-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .link-preview .link-desc {
+            font-size: 13px;
+            color: var(--text-secondary);
+            margin-top: 4px;
+        }
+
+        /* Organic shape variations - self keeps bottom-right sharp */
+        .message-bubble:nth-child(3n) {
+            border-radius: 32px 24px 4px 26px;
+        }
+
+        .message-bubble:nth-child(5n) {
+            border-radius: 24px 32px 4px 28px;
+        }
+
+        .message-bubble:nth-child(7n) {
+            border-radius: 26px 30px 4px 28px;
+        }
+
+        /* Organic shape variations - other keeps bottom-left sharp */
+        .message-bubble.other:nth-child(3n) {
+            border-radius: 32px 24px 26px 4px;
+        }
+
+        .message-bubble.other:nth-child(5n) {
+            border-radius: 24px 32px 28px 4px;
+        }
+
+        .message-bubble.other:nth-child(7n) {
+            border-radius: 26px 30px 28px 4px;
+        }
+
+        /* iPhone specific adjustments */
+        .iphone .message-bubble.medium {
+            flex: 1 1 100%;
+        }
+
+        .iphone .message-bubble {
+            padding: 14px 16px;
+        }
+
+        /* iPhone truncated message adjustments */
+        .iphone .message-bubble.truncated .message-content {
+            max-height: 160px;
+        }
+
+        .iphone .message-content.short-text {
+            font-size: 18px;
+        }
+
+        .iphone .message-image.large {
+            font-size: 80px;
+        }
+
+        .iphone .message-image.gallery {
+            font-size: 44px;
+        }
+
+        .iphone .chat-container {
+            padding: 16px;
+        }
+
+        .iphone .message-flow {
+            gap: 12px;
+        }
+
+        /* Clear float after messages with inline images */
+        .message-content::after {
+            content: "";
+            display: table;
+            clear: both;
+        }
+
+        /* Scrollbar styling */
+        .chat-container::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .chat-container::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .chat-container::-webkit-scrollbar-thumb {
+            background: var(--stone);
+            border-radius: 4px;
+            opacity: 0.5;
+        }
+
+        /* Liquid Glass Input Bar - floats over content */
+        .input-bar {
+            position: absolute;
+            bottom: 20px;
+            left: 16px;
+            right: 16px;
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            z-index: 10;
+        }
+
+        .input-field {
+            flex: 1;
+            background: rgba(255, 255, 255, 0.3);
+            backdrop-filter: blur(16px) saturate(180%);
+            -webkit-backdrop-filter: blur(16px) saturate(180%);
+            border: 1px solid rgba(255, 255, 255, 0.6);
+            border-radius: 24px;
+            padding: 14px 20px;
+            font-family: inherit;
+            font-size: 16px;
+            color: var(--ink);
+            outline: none;
+            box-shadow:
+                0 8px 32px rgba(0, 0, 0, 0.1),
+                0 2px 8px rgba(0, 0, 0, 0.05),
+                inset 0 1px 1px rgba(255, 255, 255, 0.8);
+            transition: all 0.2s ease;
+        }
+
+        .input-field::placeholder {
+            color: var(--warm-brown);
+            opacity: 0.7;
+        }
+
+        .input-field:focus {
+            background: rgba(255, 255, 255, 0.45);
+            border-color: rgba(255, 255, 255, 0.8);
+            box-shadow:
+                0 8px 32px rgba(0, 0, 0, 0.12),
+                0 2px 8px rgba(0, 0, 0, 0.06),
+                inset 0 1px 1px rgba(255, 255, 255, 0.9);
+        }
+
+        .send-button {
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            border: 1px solid rgba(255, 255, 255, 0.6);
+            background: rgba(255, 255, 255, 0.3);
+            backdrop-filter: blur(16px) saturate(180%);
+            -webkit-backdrop-filter: blur(16px) saturate(180%);
+            color: var(--terracotta);
+            font-size: 18px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow:
+                0 8px 32px rgba(0, 0, 0, 0.1),
+                0 2px 8px rgba(0, 0, 0, 0.05),
+                inset 0 1px 1px rgba(255, 255, 255, 0.8);
+            transition: all 0.2s ease;
+            flex-shrink: 0;
+        }
+
+        .send-button svg {
+            stroke: var(--terracotta);
+        }
+
+        .send-button:hover {
+            background: rgba(255, 255, 255, 0.45);
+            transform: scale(1.05);
+        }
+
+        .send-button:active {
+            transform: scale(0.95);
+        }
+
+        /* Dark mode liquid glass */
+        [data-theme="dark"] .input-field {
+            background: rgba(60, 60, 60, 0.25);
+            border-color: rgba(255, 255, 255, 0.12);
+            box-shadow:
+                0 8px 32px rgba(0, 0, 0, 0.3),
+                0 2px 8px rgba(0, 0, 0, 0.2),
+                inset 0 1px 1px rgba(255, 255, 255, 0.08);
+        }
+
+        [data-theme="dark"] .input-field::placeholder {
+            color: var(--stone);
+        }
+
+        [data-theme="dark"] .input-field:focus {
+            background: rgba(80, 80, 80, 0.35);
+            border-color: rgba(255, 255, 255, 0.2);
+        }
+
+        [data-theme="dark"] .send-button {
+            background: rgba(60, 60, 60, 0.25);
+            border-color: rgba(255, 255, 255, 0.12);
+            box-shadow:
+                0 8px 32px rgba(0, 0, 0, 0.3),
+                0 2px 8px rgba(0, 0, 0, 0.2),
+                inset 0 1px 1px rgba(255, 255, 255, 0.08);
+        }
+
+        [data-theme="dark"] .send-button:hover {
+            background: rgba(80, 80, 80, 0.35);
+        }
+
+        /* iPhone input adjustments */
+        .iphone .input-bar {
+            bottom: 16px;
+            left: 12px;
+            right: 12px;
+            gap: 10px;
+        }
+
+        .iphone .input-field {
+            padding: 12px 16px;
+            font-size: 15px;
+            border-radius: 22px;
+        }
+
+        .iphone .send-button {
+            width: 44px;
+            height: 44px;
+        }
+
+        /* Adjust chat container for floating input */
+        .chat-container {
+            padding-bottom: 80px;
+        }
+
+        .iphone .chat-container {
+            padding-bottom: 72px;
+        }
+
+        /* Device frame needs relative positioning for absolute input bar */
+        .device-frame {
+            position: relative;
+        }
+    </style>
+</head>
+<body>
+    <!-- Subtle noise texture overlay -->
+    <div class="noise-texture"></div>
+
+    <!-- iPad Frame -->
+    <div class="device-frame ipad">
+        <div class="device-header">
+            <h2>iPad View</h2>
+        </div>
+        <div class="chat-container">
+            <canvas class="dust-canvas" id="dust-ipad"></canvas>
+            <div class="message-flow">
+                <!-- Message 1: Short greeting -->
+                <div class="message-bubble short">
+                    <div class="message-header">
+                        <div class="avatar maya">M</div>
+                        <span class="sender-name">Maya</span>
+                    </div>
+                    <div class="message-content short-text">
+                        Hey!
+                    </div>
+                </div>
+
+                <!-- Message 2: Short response -->
+                <div class="message-bubble other short">
+                    <div class="message-header">
+                        <div class="avatar kai">K</div>
+                        <span class="sender-name">Kai</span>
+                    </div>
+                    <div class="message-content short-text">
+                        What's up?
+                    </div>
+                </div>
+
+                <!-- Message 3: Medium with inline image -->
+                <div class="message-bubble medium">
+                    <div class="message-header">
+                        <div class="avatar maya">M</div>
+                        <span class="sender-name">Maya</span>
+                    </div>
+                    <div class="message-content medium-text">
+                        <span class="message-image inline">🌿</span>
+                        Found this amazing plant shop downtown. They have the most beautiful monstera I've ever seen!
+                    </div>
+                </div>
+
+                <!-- Message 4: Long text -->
+                <div class="message-bubble other long">
+                    <div class="message-header">
+                        <div class="avatar kai">K</div>
+                        <span class="sender-name">Kai</span>
+                    </div>
+                    <div class="message-content body-text">
+                        Oh nice! I've been looking for a good plant shop. My apartment is feeling a bit empty lately and I think some greenery would really help. Is it the one on Oak Street? I heard they also do pottery workshops on weekends which sounds pretty cool.
+                    </div>
+                </div>
+
+                <!-- Real photo message -->
+                <div class="message-bubble other medium">
+                    <div class="message-header">
+                        <div class="avatar kai">K</div>
+                        <span class="sender-name">Kai</span>
+                    </div>
+                    <div class="message-content medium-text">
+                        Check out this view from my hike yesterday
+                    </div>
+                    <img class="message-photo" src="img/IMG_0319.jpeg" alt="Photo from hike">
+                </div>
+
+                <!-- Photo-only message -->
+                <div class="message-bubble image-only short">
+                    <div class="message-header">
+                        <div class="avatar maya">M</div>
+                        <span class="sender-name">Maya</span>
+                    </div>
+                    <img class="message-photo" src="img/IMG_0369.PNG" alt="Shared photo">
+                </div>
+
+                <!-- Screenshot share -->
+                <div class="message-bubble other medium">
+                    <div class="message-header">
+                        <div class="avatar kai">K</div>
+                        <span class="sender-name">Kai</span>
+                    </div>
+                    <div class="message-content body-text">
+                        lol look at this mess
+                    </div>
+                    <img class="message-photo" src="img/screenshot.png" alt="Screenshot">
+                </div>
+
+                <!-- Code block message -->
+                <div class="message-bubble long">
+                    <div class="message-header">
+                        <div class="avatar maya">M</div>
+                        <span class="sender-name">Maya</span>
+                    </div>
+                    <div class="message-content body-text">
+                        Here's that plant watering reminder I made:
+                    </div>
+                    <div class="code-block">
+                        <div class="code-header">
+                            <span class="code-lang">Swift</span>
+                        </div>
+                        <code><span class="keyword">struct</span> <span class="type">Plant</span> {
+    <span class="keyword">let</span> <span class="property">name</span>: <span class="type">String</span>
+    <span class="keyword">let</span> <span class="property">wateringInterval</span>: <span class="type">TimeInterval</span>
+
+    <span class="keyword">func</span> <span class="function">needsWatering</span>(<span class="property">lastWatered</span>: <span class="type">Date</span>) -> <span class="type">Bool</span> {
+        <span class="keyword">let</span> <span class="property">elapsed</span> = <span class="type">Date</span>().<span class="function">timeIntervalSince</span>(lastWatered)
+        <span class="keyword">return</span> elapsed >= wateringInterval
+    }
+}</code>
+                    </div>
+                </div>
+
+                <!-- Truncated long paste with markdown -->
+                <div class="message-bubble truncated other">
+                    <div class="message-header">
+                        <div class="avatar kai">K</div>
+                        <span class="sender-name">Kai</span>
+                    </div>
+                    <div class="message-content body-text markdown">
+                        <h3>The Science of Biophilic Design</h3>
+                        <p>Found this article about why we love plants so much! Here are the key points:</p>
+                        <h3>Key Findings</h3>
+                        <ul>
+                            <li><strong>Attention Restoration Theory</strong> — Natural environments capture attention without mental effort</li>
+                            <li><strong>Stress Reduction</strong> — Even brief plant exposure reduces cortisol levels</li>
+                            <li><strong>Productivity Boost</strong> — Office plants can increase productivity by <em>15%</em></li>
+                        </ul>
+                        <blockquote>The biophilia hypothesis suggests humans possess an innate tendency to seek connections with nature.</blockquote>
+                        <p>The research spans <strong>three decades</strong> and shows consistent results across cultures. The <code>soft fascination</code> effect allows cognitive resources to replenish naturally...</p>
+                    </div>
+                    <div class="truncated-indicator">
+                        <span>Show more</span>
+                        <span class="expand-icon">↓</span>
+                    </div>
+                </div>
+
+                <!-- Message 6: Short reaction -->
+                <div class="message-bubble short">
+                    <div class="message-header">
+                        <div class="avatar maya">M</div>
+                        <span class="sender-name">Maya</span>
+                    </div>
+                    <div class="message-content short-text">
+                        Whoa that's a lot!
+                    </div>
+                </div>
+
+                <!-- Message 7: Link preview -->
+                <div class="message-bubble medium">
+                    <div class="message-header">
+                        <div class="avatar maya">M</div>
+                        <span class="sender-name">Maya</span>
+                    </div>
+                    <div class="message-content medium-text">
+                        Here's their website
+                    </div>
+                    <div class="link-preview">
+                        <div class="link-domain"><span class="link-indicator"></span>botanicahome.com</div>
+                        <div class="link-title">Botanica Home & Garden</div>
+                        <div class="link-desc">Curated plants, pots, and botanical accessories for mindful living</div>
+                    </div>
+                </div>
+
+                <!-- Message 8: Image gallery -->
+                <div class="message-bubble other medium">
+                    <div class="message-header">
+                        <div class="avatar kai">K</div>
+                        <span class="sender-name">Kai</span>
+                    </div>
+                    <div class="message-content medium-text">
+                        Look what I just got for my balcony!
+                    </div>
+                    <div class="message-image gallery">
+                        <span>🌻</span><span>🌺</span><span>🌸</span>
+                    </div>
+                </div>
+
+                <!-- Message 9: Short -->
+                <div class="message-bubble short">
+                    <div class="message-header">
+                        <div class="avatar maya">M</div>
+                        <span class="sender-name">Maya</span>
+                    </div>
+                    <div class="message-content short-text">
+                        Love it!
+                    </div>
+                </div>
+
+                <!-- Message 10: Medium with wrapped text around image -->
+                <div class="message-bubble long">
+                    <div class="message-header">
+                        <div class="avatar kai">K</div>
+                        <span class="sender-name">Kai</span>
+                    </div>
+                    <div class="message-content body-text">
+                        <span class="message-image inline">☕</span>
+                        We should grab coffee at that new place next to the plant shop. I heard they have amazing oat milk lattes and the interior is all filled with plants. Very cozy vibes. Maybe Saturday afternoon?
+                    </div>
+                </div>
+
+                <!-- Message 11: Short -->
+                <div class="message-bubble short">
+                    <div class="message-header">
+                        <div class="avatar maya">M</div>
+                        <span class="sender-name">Maya</span>
+                    </div>
+                    <div class="message-content short-text">
+                        Yes please!
+                    </div>
+                </div>
+
+                <!-- Message 12: Short -->
+                <div class="message-bubble other short">
+                    <div class="message-header">
+                        <div class="avatar kai">K</div>
+                        <span class="sender-name">Kai</span>
+                    </div>
+                    <div class="message-content short-text">
+                        2pm?
+                    </div>
+                </div>
+
+                <!-- Message 13: Medium -->
+                <div class="message-bubble medium">
+                    <div class="message-header">
+                        <div class="avatar maya">M</div>
+                        <span class="sender-name">Maya</span>
+                    </div>
+                    <div class="message-content medium-text">
+                        Perfect. I'll bring that book I mentioned too!
+                    </div>
+                </div>
+
+                <!-- Message 14: Image -->
+                <div class="message-bubble other short">
+                    <div class="message-header">
+                        <div class="avatar kai">K</div>
+                        <span class="sender-name">Kai</span>
+                    </div>
+                    <div class="message-image large">📚</div>
+                </div>
+
+                <!-- Message 15: Long -->
+                <div class="message-bubble long">
+                    <div class="message-header">
+                        <div class="avatar maya">M</div>
+                        <span class="sender-name">Maya</span>
+                    </div>
+                    <div class="message-content body-text">
+                        It's that one about Japanese ceramics and wabi-sabi philosophy. The photography is incredible and I think you'd really appreciate the sections on handmade imperfection. There's a whole chapter on tea ceremony bowls that made me want to start collecting pottery.
+                    </div>
+                </div>
+
+                <!-- Message 16: Short excited -->
+                <div class="message-bubble other short">
+                    <div class="message-header">
+                        <div class="avatar kai">K</div>
+                        <span class="sender-name">Kai</span>
+                    </div>
+                    <div class="message-content short-text">
+                        Oh wow!
+                    </div>
+                </div>
+
+                <!-- Message 17: Link -->
+                <div class="message-bubble other medium">
+                    <div class="message-header">
+                        <div class="avatar kai">K</div>
+                        <span class="sender-name">Kai</span>
+                    </div>
+                    <div class="message-content medium-text">
+                        Speaking of ceramics...
+                    </div>
+                    <div class="link-preview">
+                        <div class="link-domain"><span class="link-indicator"></span>localcraftguild.com</div>
+                        <div class="link-title">Weekend Pottery Workshop</div>
+                        <div class="link-desc">Learn hand-building techniques in a relaxed studio environment</div>
+                    </div>
+                </div>
+
+                <!-- Message 18 -->
+                <div class="message-bubble short">
+                    <div class="message-header">
+                        <div class="avatar maya">M</div>
+                        <span class="sender-name">Maya</span>
+                    </div>
+                    <div class="message-content short-text">
+                        I'm in!
+                    </div>
+                </div>
+            </div>
+        </div>
+        <!-- Liquid Glass Input Bar -->
+        <div class="input-bar">
+            <input type="text" class="input-field" placeholder="Message...">
+            <button class="send-button">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M22 2L11 13"></path>
+                    <path d="M22 2L15 22L11 13L2 9L22 2Z"></path>
+                </svg>
+            </button>
+        </div>
+    </div>
+
+    <!-- iPhone Frame -->
+    <div class="device-frame iphone">
+        <div class="device-header">
+            <h2>iPhone View</h2>
+        </div>
+        <div class="chat-container">
+            <canvas class="dust-canvas" id="dust-iphone"></canvas>
+            <div class="message-flow">
+                <!-- Message 1: Short greeting -->
+                <div class="message-bubble short">
+                    <div class="message-header">
+                        <div class="avatar maya">M</div>
+                        <span class="sender-name">Maya</span>
+                    </div>
+                    <div class="message-content short-text">
+                        Hey!
+                    </div>
+                </div>
+
+                <!-- Message 2: Short response -->
+                <div class="message-bubble other short">
+                    <div class="message-header">
+                        <div class="avatar kai">K</div>
+                        <span class="sender-name">Kai</span>
+                    </div>
+                    <div class="message-content short-text">
+                        What's up?
+                    </div>
+                </div>
+
+                <!-- Message 3: Medium with inline image -->
+                <div class="message-bubble medium">
+                    <div class="message-header">
+                        <div class="avatar maya">M</div>
+                        <span class="sender-name">Maya</span>
+                    </div>
+                    <div class="message-content medium-text">
+                        <span class="message-image inline">🌿</span>
+                        Found this amazing plant shop downtown. They have the most beautiful monstera I've ever seen!
+                    </div>
+                </div>
+
+                <!-- Message 4: Long text -->
+                <div class="message-bubble other long">
+                    <div class="message-header">
+                        <div class="avatar kai">K</div>
+                        <span class="sender-name">Kai</span>
+                    </div>
+                    <div class="message-content body-text">
+                        Oh nice! I've been looking for a good plant shop. My apartment is feeling a bit empty lately and I think some greenery would really help. Is it the one on Oak Street? I heard they also do pottery workshops on weekends which sounds pretty cool.
+                    </div>
+                </div>
+
+                <!-- Real photo message -->
+                <div class="message-bubble other medium">
+                    <div class="message-header">
+                        <div class="avatar kai">K</div>
+                        <span class="sender-name">Kai</span>
+                    </div>
+                    <div class="message-content medium-text">
+                        Check out this view from my hike yesterday
+                    </div>
+                    <img class="message-photo" src="img/IMG_0319.jpeg" alt="Photo from hike">
+                </div>
+
+                <!-- Photo-only message -->
+                <div class="message-bubble image-only short">
+                    <div class="message-header">
+                        <div class="avatar maya">M</div>
+                        <span class="sender-name">Maya</span>
+                    </div>
+                    <img class="message-photo" src="img/IMG_0369.PNG" alt="Shared photo">
+                </div>
+
+                <!-- Screenshot share -->
+                <div class="message-bubble other medium">
+                    <div class="message-header">
+                        <div class="avatar kai">K</div>
+                        <span class="sender-name">Kai</span>
+                    </div>
+                    <div class="message-content body-text">
+                        lol look at this mess
+                    </div>
+                    <img class="message-photo" src="img/screenshot.png" alt="Screenshot">
+                </div>
+
+                <!-- Code block message -->
+                <div class="message-bubble long">
+                    <div class="message-header">
+                        <div class="avatar maya">M</div>
+                        <span class="sender-name">Maya</span>
+                    </div>
+                    <div class="message-content body-text">
+                        Here's that plant watering reminder I made:
+                    </div>
+                    <div class="code-block">
+                        <div class="code-header">
+                            <span class="code-lang">Swift</span>
+                        </div>
+                        <code><span class="keyword">struct</span> <span class="type">Plant</span> {
+    <span class="keyword">let</span> <span class="property">name</span>: <span class="type">String</span>
+    <span class="keyword">let</span> <span class="property">wateringInterval</span>: <span class="type">TimeInterval</span>
+
+    <span class="keyword">func</span> <span class="function">needsWatering</span>(<span class="property">lastWatered</span>: <span class="type">Date</span>) -> <span class="type">Bool</span> {
+        <span class="keyword">let</span> <span class="property">elapsed</span> = <span class="type">Date</span>().<span class="function">timeIntervalSince</span>(lastWatered)
+        <span class="keyword">return</span> elapsed >= wateringInterval
+    }
+}</code>
+                    </div>
+                </div>
+
+                <!-- Truncated long paste with markdown -->
+                <div class="message-bubble truncated other">
+                    <div class="message-header">
+                        <div class="avatar kai">K</div>
+                        <span class="sender-name">Kai</span>
+                    </div>
+                    <div class="message-content body-text markdown">
+                        <h3>The Science of Biophilic Design</h3>
+                        <p>Found this article about why we love plants so much! Here are the key points:</p>
+                        <h3>Key Findings</h3>
+                        <ul>
+                            <li><strong>Attention Restoration Theory</strong> — Natural environments capture attention without mental effort</li>
+                            <li><strong>Stress Reduction</strong> — Even brief plant exposure reduces cortisol levels</li>
+                            <li><strong>Productivity Boost</strong> — Office plants can increase productivity by <em>15%</em></li>
+                        </ul>
+                        <blockquote>The biophilia hypothesis suggests humans possess an innate tendency to seek connections with nature.</blockquote>
+                        <p>The research spans <strong>three decades</strong> and shows consistent results across cultures. The <code>soft fascination</code> effect allows cognitive resources to replenish naturally...</p>
+                    </div>
+                    <div class="truncated-indicator">
+                        <span>Show more</span>
+                        <span class="expand-icon">↓</span>
+                    </div>
+                </div>
+
+                <!-- Message 6: Short reaction -->
+                <div class="message-bubble short">
+                    <div class="message-header">
+                        <div class="avatar maya">M</div>
+                        <span class="sender-name">Maya</span>
+                    </div>
+                    <div class="message-content short-text">
+                        Whoa that's a lot!
+                    </div>
+                </div>
+
+                <!-- Message 7: Link preview -->
+                <div class="message-bubble medium">
+                    <div class="message-header">
+                        <div class="avatar maya">M</div>
+                        <span class="sender-name">Maya</span>
+                    </div>
+                    <div class="message-content medium-text">
+                        Here's their website
+                    </div>
+                    <div class="link-preview">
+                        <div class="link-domain"><span class="link-indicator"></span>botanicahome.com</div>
+                        <div class="link-title">Botanica Home & Garden</div>
+                        <div class="link-desc">Curated plants, pots, and botanical accessories for mindful living</div>
+                    </div>
+                </div>
+
+                <!-- Message 8: Image gallery -->
+                <div class="message-bubble other medium">
+                    <div class="message-header">
+                        <div class="avatar kai">K</div>
+                        <span class="sender-name">Kai</span>
+                    </div>
+                    <div class="message-content medium-text">
+                        Look what I just got for my balcony!
+                    </div>
+                    <div class="message-image gallery">
+                        <span>🌻</span><span>🌺</span><span>🌸</span>
+                    </div>
+                </div>
+
+                <!-- Message 9: Short -->
+                <div class="message-bubble short">
+                    <div class="message-header">
+                        <div class="avatar maya">M</div>
+                        <span class="sender-name">Maya</span>
+                    </div>
+                    <div class="message-content short-text">
+                        Love it!
+                    </div>
+                </div>
+
+                <!-- Message 10: Medium with wrapped text around image -->
+                <div class="message-bubble long">
+                    <div class="message-header">
+                        <div class="avatar kai">K</div>
+                        <span class="sender-name">Kai</span>
+                    </div>
+                    <div class="message-content body-text">
+                        <span class="message-image inline">☕</span>
+                        We should grab coffee at that new place next to the plant shop. I heard they have amazing oat milk lattes and the interior is all filled with plants. Very cozy vibes. Maybe Saturday afternoon?
+                    </div>
+                </div>
+
+                <!-- Message 11: Short -->
+                <div class="message-bubble short">
+                    <div class="message-header">
+                        <div class="avatar maya">M</div>
+                        <span class="sender-name">Maya</span>
+                    </div>
+                    <div class="message-content short-text">
+                        Yes please!
+                    </div>
+                </div>
+
+                <!-- Message 12: Short -->
+                <div class="message-bubble other short">
+                    <div class="message-header">
+                        <div class="avatar kai">K</div>
+                        <span class="sender-name">Kai</span>
+                    </div>
+                    <div class="message-content short-text">
+                        2pm?
+                    </div>
+                </div>
+
+                <!-- Message 13: Medium -->
+                <div class="message-bubble medium">
+                    <div class="message-header">
+                        <div class="avatar maya">M</div>
+                        <span class="sender-name">Maya</span>
+                    </div>
+                    <div class="message-content medium-text">
+                        Perfect. I'll bring that book I mentioned too!
+                    </div>
+                </div>
+
+                <!-- Message 14: Image -->
+                <div class="message-bubble other short">
+                    <div class="message-header">
+                        <div class="avatar kai">K</div>
+                        <span class="sender-name">Kai</span>
+                    </div>
+                    <div class="message-image large">📚</div>
+                </div>
+
+                <!-- Message 15: Long -->
+                <div class="message-bubble long">
+                    <div class="message-header">
+                        <div class="avatar maya">M</div>
+                        <span class="sender-name">Maya</span>
+                    </div>
+                    <div class="message-content body-text">
+                        It's that one about Japanese ceramics and wabi-sabi philosophy. The photography is incredible and I think you'd really appreciate the sections on handmade imperfection. There's a whole chapter on tea ceremony bowls that made me want to start collecting pottery.
+                    </div>
+                </div>
+
+                <!-- Message 16: Short excited -->
+                <div class="message-bubble other short">
+                    <div class="message-header">
+                        <div class="avatar kai">K</div>
+                        <span class="sender-name">Kai</span>
+                    </div>
+                    <div class="message-content short-text">
+                        Oh wow!
+                    </div>
+                </div>
+
+                <!-- Message 17: Link -->
+                <div class="message-bubble other medium">
+                    <div class="message-header">
+                        <div class="avatar kai">K</div>
+                        <span class="sender-name">Kai</span>
+                    </div>
+                    <div class="message-content medium-text">
+                        Speaking of ceramics...
+                    </div>
+                    <div class="link-preview">
+                        <div class="link-domain"><span class="link-indicator"></span>localcraftguild.com</div>
+                        <div class="link-title">Weekend Pottery Workshop</div>
+                        <div class="link-desc">Learn hand-building techniques in a relaxed studio environment</div>
+                    </div>
+                </div>
+
+                <!-- Message 18 -->
+                <div class="message-bubble short">
+                    <div class="message-header">
+                        <div class="avatar maya">M</div>
+                        <span class="sender-name">Maya</span>
+                    </div>
+                    <div class="message-content short-text">
+                        I'm in!
+                    </div>
+                </div>
+            </div>
+        </div>
+        <!-- Liquid Glass Input Bar -->
+        <div class="input-bar">
+            <input type="text" class="input-field" placeholder="Message...">
+            <button class="send-button">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M22 2L11 13"></path>
+                    <path d="M22 2L15 22L11 13L2 9L22 2Z"></path>
+                </svg>
+            </button>
+        </div>
+    </div>
+    <!-- Theme Toggle Button -->
+    <button class="theme-toggle" onclick="toggleTheme()">
+        <span class="icon">☀️</span>
+        <span class="label">Light</span>
+    </button>
+
+    <script>
+        function toggleTheme() {
+            const html = document.documentElement;
+            const toggle = document.querySelector('.theme-toggle');
+            const icon = toggle.querySelector('.icon');
+            const label = toggle.querySelector('.label');
+
+            if (html.getAttribute('data-theme') === 'dark') {
+                html.removeAttribute('data-theme');
+                icon.textContent = '☀️';
+                label.textContent = 'Light';
+            } else {
+                html.setAttribute('data-theme', 'dark');
+                icon.textContent = '🌙';
+                label.textContent = 'Dark';
+            }
+        }
+
+        // Check for system preference
+        if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+            document.documentElement.setAttribute('data-theme', 'dark');
+            document.querySelector('.theme-toggle .icon').textContent = '🌙';
+            document.querySelector('.theme-toggle .label').textContent = 'Dark';
+        }
+
+        // Dust Motes Animation
+        (function() {
+            const canvases = [
+                { id: 'dust-ipad', canvas: null, ctx: null, particles: [], lightBeam: null, turbulence: 0, lastScrollY: 0 },
+                { id: 'dust-iphone', canvas: null, ctx: null, particles: [], lightBeam: null, turbulence: 0, lastScrollY: 0 }
+            ];
+
+            const settings = {
+                density: 40,      // particles per canvas
+                speed: 3,         // drift speed
+                size: 1.5,        // max particle size
+                opacity: 15,      // max opacity percentage
+                beamChance: 0.003, // chance per frame to spawn a beam
+                beamDuration: 4000, // ms
+                beamFade: 1000,    // ms fade in/out
+                beamBoost: 4,      // opacity multiplier in beam
+                brownianStrength: 1.5, // max brownian displacement
+                turbulenceDecay: 0.97  // how fast turbulence settles (0-1)
+            };
+
+            // Warm dust colors
+            const lightColors = [
+                [180, 140, 100],
+                [200, 160, 120],
+                [160, 130, 100],
+                [220, 180, 140],
+            ];
+
+            const darkColors = [
+                [200, 180, 160],
+                [180, 160, 140],
+                [160, 140, 120],
+                [220, 200, 180],
+            ];
+
+            function isDarkMode() {
+                return document.documentElement.getAttribute('data-theme') === 'dark';
+            }
+
+            function getColors() {
+                return isDarkMode() ? darkColors : lightColors;
+            }
+
+            function createParticle(width, height, colors) {
+                const color = colors[Math.floor(Math.random() * colors.length)];
+                return {
+                    x: Math.random() * width,
+                    y: Math.random() * height,
+                    size: Math.random() * settings.size + 0.5,
+                    speedX: (Math.random() - 0.5) * settings.speed * 0.05,
+                    speedY: (Math.random() - 0.5) * settings.speed * 0.05,
+                    opacity: (Math.random() * 0.5 + 0.5) * (settings.opacity / 100),
+                    color: color,
+                    twinkleSpeed: Math.random() * 0.015 + 0.003,
+                    twinklePhase: Math.random() * Math.PI * 2,
+                    driftPhase: Math.random() * Math.PI * 2,
+                    driftSpeed: Math.random() * 0.008 + 0.003,
+                };
+            }
+
+            function createLightBeam(width, height) {
+                // Create a diagonal beam at a random position
+                const angle = (Math.random() * 30 - 15) * (Math.PI / 180); // -15 to +15 degrees from vertical
+                const beamWidth = 60 + Math.random() * 40; // 60-100px wide
+                const centerX = Math.random() * width;
+
+                return {
+                    centerX: centerX,
+                    angle: angle,
+                    width: beamWidth,
+                    startTime: Date.now(),
+                    duration: settings.beamDuration,
+                    fadeTime: settings.beamFade
+                };
+            }
+
+            function getBeamIntensity(beam) {
+                const elapsed = Date.now() - beam.startTime;
+                const remaining = beam.duration - elapsed;
+
+                if (elapsed < beam.fadeTime) {
+                    // Fade in
+                    return elapsed / beam.fadeTime;
+                } else if (remaining < beam.fadeTime) {
+                    // Fade out
+                    return remaining / beam.fadeTime;
+                }
+                return 1;
+            }
+
+            function isParticleInBeam(p, beam, height) {
+                // Project particle position onto beam axis
+                const beamCenterAtY = beam.centerX + (p.y - height/2) * Math.tan(beam.angle);
+                const distance = Math.abs(p.x - beamCenterAtY);
+                return distance < beam.width / 2;
+            }
+
+            function initCanvas(item) {
+                item.canvas = document.getElementById(item.id);
+                if (!item.canvas) return;
+
+                item.ctx = item.canvas.getContext('2d');
+                resizeCanvas(item);
+
+                const colors = getColors();
+                item.particles = [];
+                for (let i = 0; i < settings.density; i++) {
+                    item.particles.push(createParticle(item.canvas.width, item.canvas.height, colors));
+                }
+            }
+
+            function resizeCanvas(item) {
+                if (!item.canvas) return;
+                const container = item.canvas.parentElement;
+                const dpr = window.devicePixelRatio || 1;
+                item.canvas.width = container.clientWidth * dpr;
+                item.canvas.height = container.clientHeight * dpr;
+                item.ctx.scale(dpr, dpr);
+            }
+
+            function updateParticle(p, width, height, turbulence) {
+                p.x += p.speedX;
+                p.y += p.speedY;
+
+                p.driftPhase += p.driftSpeed;
+                p.x += Math.sin(p.driftPhase) * 0.15;
+                p.y += Math.cos(p.driftPhase * 0.7) * 0.1;
+
+                // Brownian motion when turbulent (scroll-induced)
+                if (turbulence > 0.01) {
+                    const strength = settings.brownianStrength * turbulence;
+                    p.x += (Math.random() - 0.5) * strength;
+                    p.y += (Math.random() - 0.5) * strength;
+                }
+
+                p.twinklePhase += p.twinkleSpeed;
+                const twinkle = (Math.sin(p.twinklePhase) + 1) / 2;
+                p.currentOpacity = p.opacity * (0.2 + twinkle * 0.8);
+
+                const padding = 20;
+                if (p.x < -padding) p.x = width + padding;
+                if (p.x > width + padding) p.x = -padding;
+                if (p.y < -padding) p.y = height + padding;
+                if (p.y > height + padding) p.y = -padding;
+            }
+
+            function drawParticle(ctx, p, opacityMultiplier = 1) {
+                const [r, g, b] = p.color;
+                const finalOpacity = Math.min(p.currentOpacity * opacityMultiplier, 0.8);
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+                ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${finalOpacity})`;
+                ctx.fill();
+            }
+
+            function drawLightBeam(ctx, beam, width, height, intensity) {
+                // Draw a very subtle gradient for the beam
+                const gradient = ctx.createLinearGradient(
+                    beam.centerX - beam.width, 0,
+                    beam.centerX + beam.width, 0
+                );
+
+                // Warm golden light in light mode, cooler silver light in dark mode
+                const alpha = (isDarkMode() ? 0.025 : 0.02) * intensity;
+                const r = isDarkMode() ? 220 : 255;
+                const g = isDarkMode() ? 210 : 240;
+                const b = isDarkMode() ? 200 : 220;
+
+                gradient.addColorStop(0, `rgba(${r}, ${g}, ${b}, 0)`);
+                gradient.addColorStop(0.3, `rgba(${r}, ${g}, ${b}, ${alpha})`);
+                gradient.addColorStop(0.5, `rgba(${r}, ${g + 5}, ${b + 10}, ${alpha * 1.5})`);
+                gradient.addColorStop(0.7, `rgba(${r}, ${g}, ${b}, ${alpha})`);
+                gradient.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
+
+                ctx.save();
+                ctx.translate(beam.centerX, height / 2);
+                ctx.rotate(beam.angle);
+                ctx.translate(-beam.centerX, -height / 2);
+
+                ctx.fillStyle = gradient;
+                ctx.fillRect(beam.centerX - beam.width, 0, beam.width * 2, height);
+                ctx.restore();
+            }
+
+            function animate() {
+                const now = Date.now();
+
+                for (const item of canvases) {
+                    if (!item.canvas || !item.ctx) continue;
+
+                    const width = item.canvas.parentElement.clientWidth;
+                    const height = item.canvas.parentElement.clientHeight;
+
+                    // Maybe spawn a new light beam
+                    if (!item.lightBeam && Math.random() < settings.beamChance) {
+                        item.lightBeam = createLightBeam(width, height);
+                    }
+
+                    // Check if current beam has expired
+                    if (item.lightBeam) {
+                        const elapsed = now - item.lightBeam.startTime;
+                        if (elapsed > item.lightBeam.duration) {
+                            item.lightBeam = null;
+                        }
+                    }
+
+                    item.ctx.clearRect(0, 0, width, height);
+
+                    // Draw the light beam background first
+                    if (item.lightBeam) {
+                        const intensity = getBeamIntensity(item.lightBeam);
+                        drawLightBeam(item.ctx, item.lightBeam, width, height, intensity);
+                    }
+
+                    // Decay turbulence each frame
+                    item.turbulence *= settings.turbulenceDecay;
+
+                    // Draw particles
+                    for (const p of item.particles) {
+                        updateParticle(p, width, height, item.turbulence);
+
+                        let opacityMultiplier = 1;
+                        if (item.lightBeam) {
+                            const intensity = getBeamIntensity(item.lightBeam);
+                            if (isParticleInBeam(p, item.lightBeam, height)) {
+                                opacityMultiplier = 1 + (settings.beamBoost - 1) * intensity;
+                            }
+                        }
+
+                        drawParticle(item.ctx, p, opacityMultiplier);
+                    }
+                }
+                requestAnimationFrame(animate);
+            }
+
+            // Initialize
+            for (const item of canvases) {
+                initCanvas(item);
+            }
+
+            // Set up scroll listeners for turbulence
+            for (const item of canvases) {
+                if (!item.canvas) continue;
+                const container = item.canvas.parentElement;
+
+                container.addEventListener('scroll', () => {
+                    const scrollY = container.scrollTop;
+                    const delta = Math.abs(scrollY - item.lastScrollY);
+                    item.lastScrollY = scrollY;
+
+                    // Convert scroll delta to turbulence (0-1 range)
+                    // Faster scrolling = more turbulence
+                    const scrollTurbulence = Math.min(delta / 30, 1);
+                    item.turbulence = Math.min(item.turbulence + scrollTurbulence * 0.5, 1);
+                }, { passive: true });
+            }
+
+            window.addEventListener('resize', () => {
+                for (const item of canvases) {
+                    resizeCanvas(item);
+                }
+            });
+
+            // Update colors when theme changes
+            const observer = new MutationObserver(() => {
+                const colors = getColors();
+                for (const item of canvases) {
+                    for (const p of item.particles) {
+                        p.color = colors[Math.floor(Math.random() * colors.length)];
+                    }
+                }
+            });
+            observer.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+
+            animate();
+        })();
+    </script>
+</body>
+</html>

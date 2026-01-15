@@ -124,6 +124,10 @@ struct PairingView: View {
             }
             .scrollDisabled(true)
             .scrollClipDisabled()
+            .onAppear {
+                // Scroll to correct page when view appears (e.g., returning from error state)
+                proxy.scrollTo(viewModel.currentPage, anchor: .leading)
+            }
             .onChange(of: viewModel.currentPage) { _, newPage in
                 withAnimation(.easeInOut(duration: 0.3)) {
                     proxy.scrollTo(newPage, anchor: .leading)
@@ -273,7 +277,7 @@ struct PairingView: View {
                 .foregroundStyle(.secondary)
         }
         .onTapGesture {
-            viewModel.state = .idle
+            viewModel.dismissError()
         }
     }
 }

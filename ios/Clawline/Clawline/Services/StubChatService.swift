@@ -29,7 +29,7 @@ final class StubChatService: ChatServicing {
         }
     }()
 
-    func connect(token: String) async throws {
+    func connect(token: String, lastMessageId: String?) async throws {
         stateContinuation?.yield(.connecting)
         try await Task.sleep(for: .milliseconds(500))
         stateContinuation?.yield(.connected)
@@ -39,7 +39,7 @@ final class StubChatService: ChatServicing {
         stateContinuation?.yield(.disconnected)
     }
 
-    func send(content: String, attachments: [Attachment]) async throws {
+    func send(id: String, content: String, attachments: [Attachment]) async throws {
         try await Task.sleep(for: .seconds(responseDelay))
 
         let response = Message(
@@ -47,7 +47,9 @@ final class StubChatService: ChatServicing {
             role: .assistant,
             content: "You said: \(content)",
             timestamp: Date(),
-            isStreaming: false
+            streaming: false,
+            attachments: [],
+            deviceId: nil
         )
 
         messageContinuation?.yield(response)

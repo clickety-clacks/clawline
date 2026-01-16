@@ -43,7 +43,11 @@ struct ProviderServiceTests {
     @Test("Pairing request times out when connect never completes")
     func pairingTimesOutWhenConnectHangs() async {
         let connector = HangingWebSocketConnector(mode: .connect)
-        let service = ProviderConnectionService(connector: connector, timeout: .milliseconds(100))
+        let service = ProviderConnectionService(
+            connector: connector,
+            connectionTimeout: .milliseconds(100),
+            pendingTimeout: .milliseconds(150)
+        )
         let serverURL = URL(string: "wss://example.com/ws")!
 
         do {
@@ -68,7 +72,11 @@ struct ProviderServiceTests {
     @Test("Pairing request times out when send never completes")
     func pairingTimesOutWhenSendHangs() async {
         let connector = HangingWebSocketConnector(mode: .send)
-        let service = ProviderConnectionService(connector: connector, timeout: .milliseconds(100))
+        let service = ProviderConnectionService(
+            connector: connector,
+            connectionTimeout: .milliseconds(100),
+            pendingTimeout: .milliseconds(150)
+        )
         let serverURL = URL(string: "wss://example.com/ws")!
 
         do {

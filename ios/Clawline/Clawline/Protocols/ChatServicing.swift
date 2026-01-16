@@ -31,6 +31,7 @@ enum ConnectionState: Equatable {
 
 enum ChatServiceEvent: Equatable {
     case messageError(messageId: String?, code: String, message: String?)
+    case connectionInterrupted(reason: String?)
 }
 
 protocol ChatServicing {

@@ -242,14 +242,29 @@ final class PairingViewModel {
     private func isPendingSocketClosure(error: Error) -> Bool {
         guard case .waitingForApproval(_, _) = state else { return false }
         if let providerError = error as? ProviderConnectionService.Error {
-            if case .socketClosed = providerError {
+            switch providerError {
+            case .socketClosed, .timeout:
                 return true
+            default:
+                break
             }
         }
-        if let urlError = error as? URLError,
-           urlError.code == .networkConnectionLost {
+        if let urlError = error as? URLError {
+            switch urlError.code {
+            case .networkConnectionLost,
+                 .notConnectedToInternet,
+                 .cannotConnectToHost,
+                 .cannotFindHost,
+                 .timedOut:
+                return true
+            default:
+                break
+            }
+        }
+        if (error as NSError).domain == NSCocoaErrorDomain &&
+            error._code == CocoaError.fileReadUnknown.rawValue {
             return true
         }
-        return false
+        return true
     }
 }

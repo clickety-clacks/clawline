@@ -253,12 +253,13 @@ final class ChatViewModel: ChatViewModelHosting {
             clearConnectionAlert()
             error = nil
         case .disconnected:
+            beginConnectionAlert(message: "Not connected to provider.")
             scheduleReconnect()
         case .failed(let err):
             handleConnectionFailure(err)
             scheduleReconnect()
         case .connecting, .reconnecting:
-            break
+            beginConnectionAlert(message: "Reconnecting…", shouldAnnounce: false)
         }
     }
 
@@ -327,12 +328,15 @@ final class ChatViewModel: ChatViewModelHosting {
         }
     }
 
-    private func beginConnectionAlert(message: String) {
+    private func beginConnectionAlert(message: String, shouldAnnounce: Bool = true) {
         let resolvedMessage = message.isEmpty ? "Connection interrupted." : message
         pendingConnectionErrorMessage = resolvedMessage
         if connectionAlert != .critical {
             connectionAlert = .caution
             error = nil
+        }
+        if shouldAnnounce {
+            toastManager.show(resolvedMessage)
         }
         connectionAlertTask?.cancel()
         connectionAlertTask = Task { [weak self] in
@@ -342,6 +346,7 @@ final class ChatViewModel: ChatViewModelHosting {
                 guard self.connectionAlert == .caution else { return }
                 self.connectionAlert = .critical
                 self.error = self.pendingConnectionErrorMessage
+                self.toastManager.show(self.pendingConnectionErrorMessage ?? resolvedMessage)
             }
         }
     }
@@ -353,6 +358,7 @@ final class ChatViewModel: ChatViewModelHosting {
         pendingConnectionErrorMessage = resolvedMessage
         connectionAlert = .critical
         error = resolvedMessage
+        toastManager.show(resolvedMessage)
     }
 
     private func clearConnectionAlert() {
@@ -464,6 +470,8 @@ final class ChatViewModel: ChatViewModelHosting {
                 activeClientMessageId = nil
             }
             isSending = false
+        case .connectionInterrupted(let reason):
+            beginConnectionAlert(message: reason ?? "Connection interrupted.")
         }
     }
 
@@ -516,6 +524,10 @@ final class ChatViewModel: ChatViewModelHosting {
 #if DEBUG
     func debugConnectionSnapshot() -> (token: String?, lastMessageId: String?) {
         connectionSnapshot()
+    }
+
+    func debugConnectionAlert() -> ConnectionAlertSeverity? {
+        connectionAlert
     }
 #endif
 }

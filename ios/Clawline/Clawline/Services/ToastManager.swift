@@ -18,10 +18,16 @@ final class ToastManager {
 
     private(set) var toast: Toast?
     private var dismissTask: Task<Void, Never>?
+#if DEBUG
+    private(set) var debugMessages: [String] = []
+#endif
 
     func show(_ message: String, duration: Duration = .seconds(3)) {
         guard !message.isEmpty else { return }
         toast = Toast(message: message)
+#if DEBUG
+        debugMessages.append(message)
+#endif
         dismissTask?.cancel()
         dismissTask = Task { [weak self] in
             try? await Task.sleep(for: duration)
@@ -39,4 +45,10 @@ final class ToastManager {
         dismissTask = nil
         toast = nil
     }
+
+#if DEBUG
+    func debugLastMessage() -> String? {
+        debugMessages.last
+    }
+#endif
 }

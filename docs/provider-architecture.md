@@ -510,7 +510,7 @@ Rate-limit counters are in-memory per provider process, so a restart clears the 
 {
   "clawline": {
     "enabled": true,
-    "port": 18792,
+    "port": 18800,
     "pairing": {}
   }
 }
@@ -521,7 +521,7 @@ Rate-limit counters are in-memory per provider process, so a restart clears the 
 Authoritative defaults (provider uses defaults if omitted):
 - `statePath` (default `~/.clawd/clawline/`) for allowlist/denylist/metadata
 - `network` block: `bindAddress` (default `127.0.0.1`), `allowInsecurePublic` (default `false`)
-- `port` (default `18792`) is a top-level `clawline` config key (not inside `network`)
+- `port` (default `18800`) is a top-level `clawline` config key (not inside `network`)
 - `adapter` (optional string; if set, selects the clawd adapter by name, otherwise use clawd default)
 - `auth` block: `jwtSigningKey` (optional; HS256 key auto-generated on first run if omitted), `tokenTtlSeconds` (default 31,536,000 seconds / 1 year; set `null` to disable expiry; expired tokens must return `auth_failed`), `maxAttemptsPerMinute` (default 5), `reissueGraceSeconds` (default 600; crash-only reissue window described above)
 - `pairing` block: `maxPendingRequests` (default 100), `maxRequestsPerMinute` (default 5), `pendingTtlSeconds` (default 300)

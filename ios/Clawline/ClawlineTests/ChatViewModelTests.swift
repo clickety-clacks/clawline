@@ -124,7 +124,38 @@ struct ChatViewModelTests {
 
         let failure = viewModel.failureMessage(for: messageId)
         #expect(failure == "bad content")
-        #expect(toastManager.toast?.message == "bad content")
+        let lastMessage = await MainActor.run { toastManager.debugLastMessage() }
+        #expect(lastMessage == "bad content")
+    }
+
+    @Test("Connection interruptions surface alert state")
+    @MainActor
+    func connectionInterruptionTriggersAlert() async throws {
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let toastManager = ToastManager()
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: toastManager,
+            connectionAlertGracePeriod: .milliseconds(500)
+        )
+
+        await viewModel.onAppear()
+        chatService.emitConnectionState(.connected)
+        try await Task.sleep(for: .milliseconds(10))
+
+        chatService.emitServiceEvent(.connectionInterrupted(reason: "Connection lost"))
+        try await Task.sleep(for: .milliseconds(10))
+
+        let alert = await MainActor.run { viewModel.debugConnectionAlert() }
+        #expect(alert == .caution)
+        let lastMessage = await MainActor.run { toastManager.debugLastMessage() }
+        #expect(lastMessage == "Connection lost")
     }
 
     @Test("canSend becomes true when attachments exist even without text")

@@ -108,6 +108,8 @@ final class ProviderChatService: ChatServicing {
     private var receiveTask: Task<Void, Never>?
     private var authContinuation: CheckedContinuation<Void, Swift.Error>?
     private var pendingMessages: [String: PendingMessage] = [:]
+    private var shouldNotifyDisconnect = true
+    private var pendingDisconnectReason: String?
 
     init(connector: any WebSocketConnecting,
          deviceId: String,
@@ -132,6 +134,8 @@ final class ProviderChatService: ChatServicing {
         }
 
         try await teardownConnection()
+        shouldNotifyDisconnect = true
+        pendingDisconnectReason = nil
 
         stateContinuation?.yield(.connecting)
         let client = try await connector.connect(to: wsURL)
@@ -161,6 +165,12 @@ final class ProviderChatService: ChatServicing {
         }
 
     func disconnect() {
+        performDisconnect(shouldNotify: false)
+    }
+
+    private func performDisconnect(shouldNotify: Bool, reason: String? = nil) {
+        shouldNotifyDisconnect = shouldNotify
+        pendingDisconnectReason = reason
         receiveTask?.cancel()
         receiveTask = nil
         socket?.close(with: .normalClosure)
@@ -240,9 +250,10 @@ final class ProviderChatService: ChatServicing {
             stateContinuation?.yield(.connected)
         } else {
             let reason = result.reason ?? "Unknown error"
-            resolveAuthContinuation(with: .failure(Error.authFailed(reason)))
-            stateContinuation?.yield(.failed(Error.authFailed(reason)))
-            disconnect()
+            let error = Error.authFailed(reason)
+            resolveAuthContinuation(with: .failure(error))
+            stateContinuation?.yield(.failed(error))
+            performDisconnect(shouldNotify: false, reason: error.localizedDescription)
         }
     }
 
@@ -276,16 +287,16 @@ final class ProviderChatService: ChatServicing {
             let error = Error.authFailed(message)
             resolveAuthContinuation(with: .failure(error))
             stateContinuation?.yield(.failed(error))
-            disconnect()
+            performDisconnect(shouldNotify: false, reason: error.localizedDescription)
         case "token_revoked":
             let error = Error.tokenRevoked(message)
             resolveAuthContinuation(with: .failure(error))
             stateContinuation?.yield(.failed(error))
-            disconnect()
+            performDisconnect(shouldNotify: false, reason: error.localizedDescription)
         case "session_replaced":
             let error = Error.sessionReplaced
             stateContinuation?.yield(.failed(error))
-            disconnect()
+            performDisconnect(shouldNotify: false, reason: error.localizedDescription)
         default:
             stateContinuation?.yield(.failed(Error.serverError(code: payload.code, message: payload.message)))
         }
@@ -296,10 +307,15 @@ final class ProviderChatService: ChatServicing {
         pendingMessages.values.forEach { $0.retryTask?.cancel() }
         pendingMessages.removeAll()
         stateContinuation?.yield(.disconnected)
+        if shouldNotifyDisconnect {
+            serviceEventContinuation?.yield(.connectionInterrupted(reason: pendingDisconnectReason))
+        }
+        shouldNotifyDisconnect = true
+        pendingDisconnectReason = nil
     }
 
     private func teardownConnection() async throws {
-        disconnect()
+        performDisconnect(shouldNotify: false)
     }
 
     private func scheduleRetry(for payload: ClientMessagePayload) -> Task<Void, Never> {

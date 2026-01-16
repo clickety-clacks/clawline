@@ -90,6 +90,18 @@ struct MessageInputBar: View {
         }
     }
 
+    private var isSingleLine: Bool {
+        editorHeight <= metrics.inputBarHeight + 0.5
+    }
+
+    private var inputShape: AnyShape {
+        if isSingleLine {
+            return AnyShape(Capsule())
+        } else {
+            return AnyShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        }
+    }
+
     private var connectionAlertHint: String? {
         switch connectionAlert {
         case .caution:
@@ -102,7 +114,7 @@ struct MessageInputBar: View {
     }
 
     var body: some View {
-        HStack(spacing: MessageInputBarMetrics.elementSpacing) {
+        HStack(alignment: .bottom, spacing: MessageInputBarMetrics.elementSpacing) {
             Button(action: onAdd) {
                 Image(systemName: "plus")
                     .font(.system(size: 18, weight: .semibold))
@@ -131,7 +143,8 @@ struct MessageInputBar: View {
                 }
             }
             .frame(height: inputHeight)
-            .glassEffect(.regular, in: Capsule())
+            .frame(maxWidth: .infinity, alignment: .bottom)
+            .glassEffect(.regular, in: inputShape)
 
             let buttonShape: AnyShape = isSending ? AnyShape(Capsule()) : AnyShape(Circle())
 

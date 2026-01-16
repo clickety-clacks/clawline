@@ -11,7 +11,7 @@ enum PairingState: Equatable {
     case idle
     case enteringName
     case enteringAddress
-    case waitingForApproval(code: String?)
+    case waitingForApproval(code: String?, stalled: Bool)
     case success
     case error(String)
 }

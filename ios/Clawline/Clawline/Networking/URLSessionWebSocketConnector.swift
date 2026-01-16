@@ -6,22 +6,31 @@
 //
 
 import Foundation
+import OSLog
+
+private let webSocketLogger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "WebSocketConnector")
 
 final class URLSessionWebSocketConnector: WebSocketConnecting {
     private let session: URLSession
-    private let timeout: TimeInterval
+    private let connectTimeout: TimeInterval
+    private let resourceTimeout: TimeInterval
 
-    init(timeout: TimeInterval = 8) {
-        self.timeout = timeout
+    init(connectTimeout: TimeInterval = 20, resourceTimeout: TimeInterval = 360) {
+        self.connectTimeout = connectTimeout
+        self.resourceTimeout = resourceTimeout
         let configuration = URLSessionConfiguration.default
-        configuration.timeoutIntervalForRequest = timeout
-        configuration.timeoutIntervalForResource = timeout
+        configuration.timeoutIntervalForRequest = connectTimeout
+        configuration.timeoutIntervalForResource = resourceTimeout
         self.session = URLSession(configuration: configuration)
     }
 
     func connect(to url: URL) async throws -> any WebSocketClient {
+        webSocketLogger.debug("URLSessionWebSocketConnector connecting to \(url.absoluteString, privacy: .public)")
         var request = URLRequest(url: url)
-        request.timeoutInterval = timeout
+        request.timeoutInterval = connectTimeout
+        if request.value(forHTTPHeaderField: "Origin") == nil {
+            request.setValue("https://clawline.app", forHTTPHeaderField: "Origin")
+        }
         let task = session.webSocketTask(with: request)
         task.resume()
         return URLSessionWebSocketClient(task: task)
@@ -71,6 +80,7 @@ private final class URLSessionWebSocketClient: WebSocketClient {
                         break
                     }
                 } catch {
+                    webSocketLogger.error("WebSocket receive loop error: \(error.localizedDescription, privacy: .public)")
                     continuation.finish()
                     break
                 }

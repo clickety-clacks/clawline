@@ -36,7 +36,7 @@ struct ClawlineApp: App {
         let settingsManager = SettingsManager()
         _settingsManager = State(initialValue: settingsManager)
         let device = DeviceIdentifier()
-        let connector = URLSessionWebSocketConnector()
+        let connector = URLSessionWebSocketConnector(connectTimeout: 20, resourceTimeout: 360)
         self.deviceIdentifier = device
         self.connectionService = ProviderConnectionService(connector: connector)
         self.chatService = ProviderChatService(

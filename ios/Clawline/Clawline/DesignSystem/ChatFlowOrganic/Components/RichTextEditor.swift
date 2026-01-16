@@ -21,7 +21,7 @@ struct RichTextEditor: UIViewRepresentable {
         textView.delegate = context.coordinator
         textView.isScrollEnabled = false
         textView.backgroundColor = .clear
-        textView.textContainerInset = UIEdgeInsets(top: 10, left: 12, bottom: 10, right: 12)
+        textView.textContainerInset = UIEdgeInsets(top: 14, left: 20, bottom: 14, right: 20)
         textView.textContainer.lineFragmentPadding = 0
         textView.adjustsFontForContentSizeCategory = true
         textView.font = UIFont.preferredFont(forTextStyle: .body)
@@ -33,6 +33,8 @@ struct RichTextEditor: UIViewRepresentable {
         textView.smartDashesType = .yes
         textView.smartInsertDeleteType = .yes
         textView.attributedText = attributedText
+        textView.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        textView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         return textView
     }
 
@@ -82,11 +84,13 @@ struct RichTextEditor: UIViewRepresentable {
             parent.attributedText = textView.attributedText
             parent.selectionRange = textView.selectedRange
             updateHeight(for: textView)
+            ensureCaretVisible(in: textView)
         }
 
         func textViewDidChangeSelection(_ textView: UITextView) {
             guard textView.selectedRange.location != NSNotFound else { return }
             parent.selectionRange = textView.selectedRange
+            ensureCaretVisible(in: textView)
         }
 
         func updateHeight(for textView: UITextView) {
@@ -101,6 +105,9 @@ struct RichTextEditor: UIViewRepresentable {
                 parent.calculatedHeight = clamped
             }
             textView.isScrollEnabled = size.height > maxHeight
+            if textView.isScrollEnabled {
+                ensureCaretVisible(in: textView)
+            }
         }
 
         func applyFocusIfNeeded(on textView: UITextView, trigger: Int) {
@@ -109,6 +116,14 @@ struct RichTextEditor: UIViewRepresentable {
             guard trigger > 0 else { return }
             guard parent.isEditable else { return }
             textView.becomeFirstResponder()
+        }
+
+        private func ensureCaretVisible(in textView: UITextView) {
+            guard textView.isScrollEnabled else { return }
+            let range = textView.selectedRange
+            DispatchQueue.main.async {
+                textView.scrollRangeToVisible(range)
+            }
         }
     }
 }

@@ -69,7 +69,7 @@ struct PairingView: View {
 
                     // State-specific content
                     switch viewModel.state {
-                    case .idle, .enteringName, .enteringAddress, .waitingForApproval:
+                    case .idle, .enteringName, .enteringAddress, .waitingForApproval(_, _):
                         // Subtract horizontal padding from width since inputScrollView sizes
                         // its content to fill the width, but padding is applied outside it
                         inputScrollView(width: geometry.size.width - (2 * concentricPadding))
@@ -92,7 +92,7 @@ struct PairingView: View {
         switch viewModel.state {
         case .enteringAddress:
             return "Enter server address"
-        case .waitingForApproval:
+        case .waitingForApproval(_, _):
             return "Awaiting approval"
         default:
             return "Connect to get started"
@@ -236,33 +236,70 @@ struct PairingView: View {
     }
 
     private var waitingInputRow: some View {
-        HStack(spacing: 12) {
+        let isStalled: Bool = {
+            if case .waitingForApproval(_, let stalled) = viewModel.state {
+                return stalled
+            }
+            return false
+        }()
+
+        return HStack(spacing: 12) {
             // Status bubble with text and spinner
-            HStack(spacing: 12) {
-                Text("Waiting for owner")
-                    .font(.body)
-                    .foregroundStyle(.secondary)
+            HStack(alignment: .center, spacing: 12) {
+                if isStalled {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("This might take a while, check back soon")
+                            .font(.body)
+                            .foregroundStyle(.secondary)
+                        Text("Tap retry to resubmit the request.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
 
-                Spacer()
+                    Spacer()
 
-                ProgressView()
-                    .controlSize(.small)
+                    Image(systemName: "clock.arrow.circlepath")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("Waiting for owner")
+                        .font(.body)
+                        .foregroundStyle(.secondary)
+
+                    Spacer()
+
+                    ProgressView()
+                        .controlSize(.small)
+                }
             }
             .padding(.horizontal, 20)
             .frame(height: inputHeight)
             .frame(maxWidth: .infinity)
             .glassEffect(.regular, in: Capsule())
 
-            // X button to cancel
-            Button {
-                viewModel.cancelPairing()
-            } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(.white)
+            if isStalled {
+                Button {
+                    viewModel.retryPendingPairing()
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(.white)
+                }
+                .frame(width: inputHeight, height: inputHeight)
+                .background(Color.accentColor, in: Circle())
+                .accessibilityLabel("Retry pairing request")
+            } else {
+                // X button to cancel
+                Button {
+                    viewModel.cancelPairing()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(.white)
+                }
+                .frame(width: inputHeight, height: inputHeight)
+                .background(Color.red, in: Circle())
             }
-            .frame(width: inputHeight, height: inputHeight)
-            .background(Color.red, in: Circle())
         }
     }
 

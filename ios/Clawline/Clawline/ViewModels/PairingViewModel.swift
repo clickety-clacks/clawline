@@ -7,6 +7,9 @@
 
 import Foundation
 import Observation
+import OSLog
+
+private let pairingLogger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "PairingViewModel")
 
 @Observable
 @MainActor
@@ -61,7 +64,16 @@ final class PairingViewModel {
 
     /// Called when user submits the server address - initiates pairing
     func submitAddress() {
+        if case .waitingForApproval(_, let stalled) = state,
+           !stalled,
+           pairingTask != nil {
+            pairingLogger.debug("submitAddress ignored: pairing already in progress")
+            return
+        }
+
+        pairingLogger.debug("submitAddress called (name: \(self.nameInput, privacy: .public), address: \(self.addressInput, privacy: .public))")
         guard let serverURL = normalizedWebSocketURL(from: addressInput) else {
+            pairingLogger.error("submitAddress failed: invalid server URL from input \(self.addressInput, privacy: .public)")
             state = .error("Invalid server address")
             return
         }
@@ -70,18 +82,20 @@ final class PairingViewModel {
             ProviderBaseURLStore.setBaseURL(baseURL)
         }
 
-        state = .waitingForApproval(code: nil)
+        state = .waitingForApproval(code: nil, stalled: false)
         isNavigatingForward = true
         currentPage = 2
 
         // Cancel any existing task and start a new one
         pairingTask?.cancel()
-        pairingTask = Task {
+        pairingTask = Task { [weak self] in
+            guard let self else { return }
+            defer { self.pairingTask = nil }
             do {
-                let result = try await connection.requestPairing(
+                let result = try await self.connection.requestPairing(
                     serverURL: serverURL,
-                    claimedName: nameInput,
-                    deviceId: deviceId
+                    claimedName: self.nameInput,
+                    deviceId: self.deviceId
                 )
 
                 // Check if cancelled before processing result
@@ -89,15 +103,29 @@ final class PairingViewModel {
 
                 switch result {
                 case .success(let token, let userId):
-                    auth.storeCredentials(token: token, userId: userId)
-                    state = .success
+                    pairingLogger.debug("submitAddress success with userId \(userId, privacy: .public)")
+                    self.auth.storeCredentials(token: token, userId: userId)
+                    self.state = .success
                 case .denied(let reason):
-                    state = .error(reason)
+                    pairingLogger.warning("submitAddress denied: \(reason, privacy: .public)")
+                    self.state = .error(reason)
                 }
             } catch {
                 // Don't show error if task was cancelled
                 guard !Task.isCancelled else { return }
-                state = .error(error.localizedDescription)
+                if isPendingSocketClosure(error: error) {
+                    pairingLogger.warning("submitAddress stalled while waiting: \(error.localizedDescription, privacy: .public)")
+                    let code: String?
+                    if case .waitingForApproval(let existingCode, _) = self.state {
+                        code = existingCode
+                    } else {
+                        code = nil
+                    }
+                    self.state = .waitingForApproval(code: code, stalled: true)
+                } else {
+                    pairingLogger.error("submitAddress caught error: \(error.localizedDescription, privacy: .public)")
+                    self.state = .error(error.localizedDescription)
+                }
             }
         }
     }
@@ -123,6 +151,11 @@ final class PairingViewModel {
         state = .enteringAddress
         isNavigatingForward = false
         currentPage = 1
+    }
+
+    func retryPendingPairing() {
+        guard case .waitingForApproval(_, _) = state else { return }
+        submitAddress()
     }
 
     private func providerBaseURL(from websocketURL: URL) -> URL? {
@@ -199,5 +232,19 @@ final class PairingViewModel {
     private enum StorageKeys {
         static let savedName = "pairing.nameInput"
         static let savedAddress = "pairing.addressInput"
+    }
+
+    private func isPendingSocketClosure(error: Error) -> Bool {
+        guard case .waitingForApproval(_, _) = state else { return false }
+        if let providerError = error as? ProviderConnectionService.Error {
+            if case .socketClosed = providerError {
+                return true
+            }
+        }
+        if let urlError = error as? URLError,
+           urlError.code == .networkConnectionLost {
+            return true
+        }
+        return false
     }
 }

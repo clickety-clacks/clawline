@@ -6,11 +6,13 @@
 //
 
 import Foundation
+import OSLog
 #if canImport(UIKit)
 import UIKit
 #endif
 
 final class ProviderConnectionService: ConnectionServicing {
+    private let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "ProviderConnectionService")
     private struct PairRequestPayload: Encodable {
         let type = "pair_request"
         let protocolVersion = 1
@@ -55,24 +57,28 @@ final class ProviderConnectionService: ConnectionServicing {
     private let connector: any WebSocketConnecting
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
-    private let timeout: Duration
+    private let operationTimeout: Duration
+    private let pendingTimeout: Duration
 
     init(connector: any WebSocketConnecting,
          encoder: JSONEncoder = JSONEncoder(),
          decoder: JSONDecoder = JSONDecoder(),
-         timeout: Duration = .seconds(20)) {
+         connectionTimeout: Duration = .seconds(20),
+         pendingTimeout: Duration = .seconds(300)) {
         self.connector = connector
         self.encoder = encoder
         self.decoder = decoder
-        self.timeout = timeout
+        self.operationTimeout = connectionTimeout
+        self.pendingTimeout = pendingTimeout
     }
 
     func requestPairing(serverURL: URL, claimedName: String, deviceId: String) async throws -> PairingResult {
+        logger.debug("requestPairing invoked (url: \(serverURL.absoluteString, privacy: .public), claimedName: \(claimedName, privacy: .public))")
         guard serverURL.scheme?.hasPrefix("ws") == true else {
             throw Error.unsupportedURL
         }
 
-        let socket = try await runWithTimeout { [self] in
+        let socket = try await runWithTimeout(timeout: operationTimeout) { [self] in
             try await connector.connect(to: serverURL)
         }
         defer { socket.close(with: .normalClosure) }
@@ -89,25 +95,33 @@ final class ProviderConnectionService: ConnectionServicing {
             throw Error.invalidResponse
         }
 
-        try await runWithTimeout {
+        try await runWithTimeout(timeout: operationTimeout) {
             try await socket.send(text: json)
         }
 
-        let text = try await waitForMessage(stream: socket.incomingTextMessages)
-        let response = try decoder.decode(PairResultPayload.self, from: Data(text.utf8))
+        while true {
+            let text = try await waitForMessage(stream: socket.incomingTextMessages)
+            let response = try decoder.decode(PairResultPayload.self, from: Data(text.utf8))
 
-        guard response.type == "pair_result" else {
-            throw Error.invalidResponse
+            guard response.type == "pair_result" else {
+                logger.warning("Ignoring unexpected payload type \(response.type, privacy: .public)")
+                continue
+            }
+
+            if response.reason == "pair_pending" {
+                logger.debug("Pairing still pending approval...")
+                continue
+            }
+
+            if response.success,
+               let token = response.token,
+               let userId = response.userId {
+                return .success(token: token, userId: userId)
+            }
+
+            let reason = response.reason ?? "Pairing request denied"
+            return .denied(reason: reason)
         }
-
-        if response.success,
-           let token = response.token,
-           let userId = response.userId {
-            return .success(token: token, userId: userId)
-        }
-
-        let reason = response.reason ?? "Pairing request denied"
-        return .denied(reason: reason)
     }
 
     private func waitForMessage(stream: AsyncStream<String>) async throws -> String {
@@ -120,8 +134,8 @@ final class ProviderConnectionService: ConnectionServicing {
                 return text
             }
 
-            group.addTask { [timeout] in
-                try await Task.sleep(for: timeout)
+            group.addTask { [pendingTimeout] in
+                try await Task.sleep(for: pendingTimeout)
                 throw Error.timeout
             }
 
@@ -133,13 +147,13 @@ final class ProviderConnectionService: ConnectionServicing {
         }
     }
 
-    private func runWithTimeout<T>(_ operation: @escaping () async throws -> T) async throws -> T {
+    private func runWithTimeout<T>(timeout: Duration, _ operation: @escaping () async throws -> T) async throws -> T {
         try await withThrowingTaskGroup(of: T.self) { group in
             group.addTask {
                 try await operation()
             }
 
-            group.addTask { [timeout] in
+            group.addTask {
                 try await Task.sleep(for: timeout)
                 throw Error.timeout
             }

@@ -144,7 +144,7 @@ final class PairingViewModel {
     }
 
     /// Accepts very forgiving input (host, host:port, http/https/ws/wss URLs, with/without path)
-    /// and normalizes it to a ws://…/ws (or wss://) URL, defaulting port 18792 and path /ws.
+    /// and normalizes it to a ws://…/ws (or wss://) URL, defaulting port 18800 and path /ws.
     private func normalizedWebSocketURL(from raw: String) -> URL? {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
@@ -167,7 +167,7 @@ final class PairingViewModel {
 
         // Default port
         if components.port == nil {
-            components.port = 18792
+            components.port = 18800
         }
 
         // Ensure host exists

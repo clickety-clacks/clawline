@@ -7,7 +7,6 @@
 
 import SwiftUI
 
-@MainActor
 struct FlowLayout: Layout {
     var itemSpacing: CGFloat
     var rowSpacing: CGFloat
@@ -21,9 +20,11 @@ struct FlowLayout: Layout {
         var totalHeight: CGFloat = 0
 
         for subview in subviews {
-            let sizeClass = subview[MessageSizeClassKey.self]
+            let sizeClass = readOnMainActor { subview[MessageSizeClassKey.self] }
             let maxWidth = maxItemWidth(for: sizeClass, containerWidth: containerWidth)
-            let size = subview.sizeThatFits(ProposedViewSize(width: maxWidth, height: nil))
+            let size = readOnMainActor {
+                subview.sizeThatFits(ProposedViewSize(width: maxWidth, height: nil))
+            }
 
             if rowWidth > 0 && rowWidth + size.width > containerWidth {
                 totalHeight += rowHeight + rowSpacing
@@ -45,9 +46,11 @@ struct FlowLayout: Layout {
         var rowHeight: CGFloat = 0
 
         for subview in subviews {
-            let sizeClass = subview[MessageSizeClassKey.self]
+            let sizeClass = readOnMainActor { subview[MessageSizeClassKey.self] }
             let maxWidth = maxItemWidth(for: sizeClass, containerWidth: bounds.width)
-            let size = subview.sizeThatFits(ProposedViewSize(width: maxWidth, height: nil))
+            let size = readOnMainActor {
+                subview.sizeThatFits(ProposedViewSize(width: maxWidth, height: nil))
+            }
 
             if x > bounds.minX && x + size.width > bounds.maxX {
                 x = bounds.minX
@@ -77,5 +80,9 @@ struct FlowLayout: Layout {
         case .long:
             return min(containerWidth, maxLineWidth)
         }
+    }
+
+    private func readOnMainActor<T>(_ work: () -> T) -> T {
+        MainActor.assumeIsolated(work)
     }
 }

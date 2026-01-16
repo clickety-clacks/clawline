@@ -217,14 +217,31 @@ final class ChatViewModel: ChatViewModelHosting {
 
     private func handleIncoming(_ message: Message) {
         if message.role == .user,
-           message.deviceId == deviceId,
-           let pendingId = pendingLocalMessageIds.first,
-           let placeholderIndex = messages.firstIndex(where: { $0.id == pendingId }) {
-            pendingLocalMessageIds.removeFirst()
-            messages[placeholderIndex] = message
-            activeClientMessageId = nil
-            updateLastServerMessageIdIfNeeded(with: message)
-            return
+           message.deviceId == deviceId {
+            if let placeholderIndex = messages.firstIndex(where: { placeholder in
+                placeholder.id.hasPrefix("c_") &&
+                placeholder.deviceId == deviceId &&
+                placeholder.content == message.content &&
+                placeholder.attachments == message.attachments
+            }) {
+                let placeholderId = messages[placeholderIndex].id
+                messages[placeholderIndex] = message
+                if let pendingIndex = pendingLocalMessageIds.firstIndex(of: placeholderId) {
+                    pendingLocalMessageIds.remove(at: pendingIndex)
+                }
+                if activeClientMessageId == placeholderId {
+                    activeClientMessageId = nil
+                }
+                updateLastServerMessageIdIfNeeded(with: message)
+                return
+            } else if let pendingId = pendingLocalMessageIds.first,
+                      let placeholderIndex = messages.firstIndex(where: { $0.id == pendingId }) {
+                pendingLocalMessageIds.removeFirst()
+                messages[placeholderIndex] = message
+                activeClientMessageId = nil
+                updateLastServerMessageIdIfNeeded(with: message)
+                return
+            }
         }
 
         if let existingIndex = messages.firstIndex(where: { $0.id == message.id }) {
@@ -296,14 +313,14 @@ final class ChatViewModel: ChatViewModelHosting {
                     if let providerError = error as? ProviderChatService.Error {
                         switch providerError {
                         case .authFailed:
-                            self.enterCriticalConnectionAlert(message: providerError.localizedDescription ?? "Authentication failed.")
+                            self.enterCriticalConnectionAlert(message: providerError.errorDescription ?? "Authentication failed.")
                             self.reconnectTask = nil
                             self.logout()
                             return
                         case .missingBaseURL:
-                            self.enterCriticalConnectionAlert(message: providerError.localizedDescription ?? "No provider configured.")
+                            self.enterCriticalConnectionAlert(message: providerError.errorDescription ?? "No provider configured.")
                         default:
-                            self.beginConnectionAlert(message: providerError.localizedDescription ?? "Connection interrupted.")
+                            self.beginConnectionAlert(message: providerError.errorDescription ?? "Connection interrupted.")
                         }
                     } else {
                         self.beginConnectionAlert(message: "Failed to connect: \(error.localizedDescription)")

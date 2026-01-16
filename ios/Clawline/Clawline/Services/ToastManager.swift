@@ -31,7 +31,9 @@ final class ToastManager {
         dismissTask?.cancel()
         dismissTask = Task { [weak self] in
             try? await Task.sleep(for: duration)
-            await self?.dismiss()
+            await MainActor.run {
+                self?.dismiss()
+            }
         }
     }
 

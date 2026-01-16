@@ -55,7 +55,7 @@ struct MessageInputBar: View {
 
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
-    @State private var editorHeight: CGFloat = 48
+    @State private var editorHeight: CGFloat = 44
 
     private var metrics: MessageInputBarMetrics {
         MessageInputBarMetrics(
@@ -124,6 +124,27 @@ struct MessageInputBar: View {
         }
     }
 
+    private var sendButtonShape: AnyShape {
+        isSending ? AnyShape(Capsule()) : AnyShape(Circle())
+    }
+
+    private var sendButtonBackground: Color {
+        if isSending {
+            return Color(.systemGray5)
+        }
+        if !canSend {
+            return Color(.systemGray4)
+        }
+        return Color.accentColor
+    }
+
+    private var sendButtonForeground: Color {
+        if isSending {
+            return Color.primary
+        }
+        return Color.white
+    }
+
     var body: some View {
         HStack(alignment: .bottom, spacing: MessageInputBarMetrics.elementSpacing) {
             Button(action: onAdd) {
@@ -135,22 +156,24 @@ struct MessageInputBar: View {
             .glassEffect(.regular.interactive(), in: Circle())
             .disabled(isSending)
 
-            ZStack(alignment: .topLeading) {
+            ZStack(alignment: .leading) {
                 RichTextEditor(
                     attributedText: $content,
                     calculatedHeight: $editorHeight,
                     selectionRange: $selectionRange,
                     focusTrigger: focusTrigger,
                     isEditable: !isSending,
-                    onFocusChange: onFocusChange
+                    onFocusChange: onFocusChange,
+                    trailingPadding: metrics.editorTrailingInset(isSending: isSending)
                 )
                 .opacity(isSending ? 0.5 : 1)
 
                 if content.length == 0 {
                     Text("Message")
                         .foregroundColor(.secondary)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                        .frame(maxHeight: .infinity, alignment: .center)
                         .padding(.leading, 20)
-                        .padding(.top, 14)
                 }
 
                 if let alertMessage = connectionAlertMessage,
@@ -180,9 +203,10 @@ struct MessageInputBar: View {
                         .stroke(alertColor.opacity(0.4), lineWidth: 1)
                 }
             }
-
-            let buttonShape: AnyShape = isSending ? AnyShape(Capsule()) : AnyShape(Circle())
-
+        }
+        .padding(.horizontal, metrics.concentricPadding)
+        .padding(.bottom, metrics.bottomPadding)
+        .overlay(alignment: .bottomTrailing) {
             Button(action: isSending ? onCancel : onSend) {
                 if isSending {
                     Text("Cancel")
@@ -193,21 +217,15 @@ struct MessageInputBar: View {
                         .font(.system(size: 16, weight: .semibold))
                 }
             }
-            .frame(width: isSending ? 88 : metrics.sendButtonSize, height: metrics.sendButtonSize)
+            .frame(width: isSending ? 92 : metrics.sendButtonSize, height: metrics.sendButtonSize)
+            .background(sendButtonShape.fill(sendButtonBackground))
+            .foregroundStyle(sendButtonForeground)
             .disabled(!isSending && !canSend)
-            .glassEffect(.regular.interactive(), in: buttonShape)
-            .overlay {
-                if let alertColor = connectionAlertColor, !isSending {
-                    Circle()
-                        .fill(alertColor.opacity(0.35))
-                }
-            }
             .opacity(connectionAlertColor == nil ? 1 : 0.65)
+            .padding(.trailing, 10)
+            .padding(.bottom, 8)
             .accessibilityHint(connectionAlertHint ?? "")
         }
-        .padding(.horizontal, metrics.concentricPadding)
-        .padding(.bottom, metrics.bottomPadding)
-        .padding(.trailing, metrics.sendButtonPadding)
     }
 }
 

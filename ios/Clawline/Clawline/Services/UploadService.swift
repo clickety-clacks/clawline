@@ -14,10 +14,10 @@ final class UploadService: UploadServicing {
 
     private let session: URLSession
     private let auth: any AuthManaging
-    private let baseURLProvider: @Sendable () -> URL?
+    private let baseURLProvider: () -> URL?
 
     init(auth: any AuthManaging,
-         baseURLProvider: @escaping @Sendable () -> URL? = { ProviderBaseURLStore.baseURL },
+         baseURLProvider: @escaping () -> URL? = { ProviderBaseURLStore.baseURL },
          session: URLSession = .shared) {
         self.auth = auth
         self.baseURLProvider = baseURLProvider

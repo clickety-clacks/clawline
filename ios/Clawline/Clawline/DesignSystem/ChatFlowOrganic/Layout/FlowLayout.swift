@@ -7,6 +7,7 @@
 
 import SwiftUI
 
+@MainActor
 struct FlowLayout: Layout {
     var itemSpacing: CGFloat
     var rowSpacing: CGFloat

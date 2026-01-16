@@ -17,16 +17,20 @@ struct MessageInputBarMetrics {
     /// Used as leading indicator for keyboard presence.
     let isFieldFocused: Bool
 
-    let addButtonSize: CGFloat = 48
-    let inputBarHeight: CGFloat = 48
+    let addButtonSize: CGFloat = 44
+    let inputBarHeight: CGFloat = 44
 
     var sendButtonSize: CGFloat {
-        horizontalSizeClass == .compact ? 44 : 48
+        horizontalSizeClass == .compact ? 40 : 44
     }
 
-    var sendButtonPadding: CGFloat {
-        max((inputBarHeight - sendButtonSize) / 2, 0)
+    let sendingButtonWidth: CGFloat = 92
+
+    func editorTrailingInset(isSending: Bool) -> CGFloat {
+        (isSending ? sendingButtonWidth : sendButtonSize) + 32
     }
+
+    var sendButtonInnerPadding: CGFloat { 8 }
 
     var concentricPadding: CGFloat {
         max(deviceCornerRadius - (inputBarHeight / 2), 8)

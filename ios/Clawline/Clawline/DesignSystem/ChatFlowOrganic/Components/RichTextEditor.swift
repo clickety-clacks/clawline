@@ -15,13 +15,14 @@ struct RichTextEditor: UIViewRepresentable {
     var focusTrigger: Int
     var isEditable: Bool
     var onFocusChange: (Bool) -> Void
+    var trailingPadding: CGFloat = 20
 
     func makeUIView(context: Context) -> UITextView {
         let textView = UITextView()
         textView.delegate = context.coordinator
         textView.isScrollEnabled = false
         textView.backgroundColor = .clear
-        textView.textContainerInset = UIEdgeInsets(top: 14, left: 20, bottom: 14, right: 20)
+        textView.textContainerInset = UIEdgeInsets(top: 10, left: 20, bottom: 10, right: trailingPadding)
         textView.textContainer.lineFragmentPadding = 0
         textView.adjustsFontForContentSizeCategory = true
         textView.font = UIFont.preferredFont(forTextStyle: .body)
@@ -56,8 +57,17 @@ struct RichTextEditor: UIViewRepresentable {
             }
         }
 
+        let currentInset = textView.textContainerInset
+        if abs(currentInset.right - trailingPadding) > 0.5 {
+            textView.textContainerInset = UIEdgeInsets(top: currentInset.top,
+                                                       left: currentInset.left,
+                                                       bottom: currentInset.bottom,
+                                                       right: trailingPadding)
+        }
+
         context.coordinator.applyFocusIfNeeded(on: textView, trigger: focusTrigger)
         context.coordinator.updateHeight(for: textView)
+        context.coordinator.ensureTypingAttributes(on: textView)
     }
 
     func makeCoordinator() -> Coordinator {
@@ -85,17 +95,22 @@ struct RichTextEditor: UIViewRepresentable {
             parent.selectionRange = textView.selectedRange
             updateHeight(for: textView)
             ensureCaretVisible(in: textView)
+            ensureTypingAttributes(on: textView)
         }
 
         func textViewDidChangeSelection(_ textView: UITextView) {
             guard textView.selectedRange.location != NSNotFound else { return }
             parent.selectionRange = textView.selectedRange
             ensureCaretVisible(in: textView)
+            ensureTypingAttributes(on: textView)
         }
 
         func updateHeight(for textView: UITextView) {
             let targetWidth = textView.bounds.width
-            let fittingSize = CGSize(width: targetWidth > 0 ? targetWidth : UIScreen.main.bounds.width - 48,
+            let screenWidth = textView.window?.windowScene?.screen.bounds.width ?? textView.bounds.width
+            let fallbackWidth = screenWidth > 0 ? screenWidth : 390
+            let referenceWidth = targetWidth > 0 ? targetWidth : fallbackWidth - 48
+            let fittingSize = CGSize(width: referenceWidth,
                                      height: .greatestFiniteMagnitude)
             let size = textView.sizeThatFits(fittingSize)
             let minHeight: CGFloat = 44
@@ -124,6 +139,13 @@ struct RichTextEditor: UIViewRepresentable {
             DispatchQueue.main.async {
                 textView.scrollRangeToVisible(range)
             }
+        }
+
+        func ensureTypingAttributes(on textView: UITextView) {
+            var attributes = textView.typingAttributes
+            attributes[.font] = UIFont.preferredFont(forTextStyle: .body)
+            attributes[.foregroundColor] = UIColor.label
+            textView.typingAttributes = attributes
         }
     }
 }

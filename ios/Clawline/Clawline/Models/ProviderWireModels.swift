@@ -73,15 +73,39 @@ struct ServerMessagePayload: Codable, Equatable {
 }
 
 struct ClientMessagePayload: Codable, Equatable {
-    let type: String = "message"
+    let type: String
     let id: String
     let content: String
     let attachments: [WireAttachment]
 
-    init(id: String, content: String, attachments: [WireAttachment]) {
+    enum CodingKeys: String, CodingKey {
+        case type
+        case id
+        case content
+        case attachments
+    }
+
+    init(id: String, content: String, attachments: [WireAttachment], type: String = "message") {
+        self.type = type
         self.id = id
         self.content = content
         self.attachments = attachments
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.type = try container.decodeIfPresent(String.self, forKey: .type) ?? "message"
+        self.id = try container.decode(String.self, forKey: .id)
+        self.content = try container.decode(String.self, forKey: .content)
+        self.attachments = try container.decodeIfPresent([WireAttachment].self, forKey: .attachments) ?? []
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(type, forKey: .type)
+        try container.encode(id, forKey: .id)
+        try container.encode(content, forKey: .content)
+        try container.encode(attachments, forKey: .attachments)
     }
 }
 

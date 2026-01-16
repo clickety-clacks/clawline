@@ -26,11 +26,12 @@ struct MessageInputBarMetrics {
 
     let sendingButtonWidth: CGFloat = 92
 
-    func editorTrailingInset(isSending: Bool) -> CGFloat {
-        (isSending ? sendingButtonWidth : sendButtonSize) + 32
+    func textTrailingInset(isSending: Bool) -> CGFloat {
+        (isSending ? sendingButtonWidth : sendButtonSize) + (sendButtonInnerPadding * 2) + 4
     }
 
     var sendButtonInnerPadding: CGFloat { 8 }
+    var sendButtonBottomInset: CGFloat { 6 }
 
     var concentricPadding: CGFloat {
         max(deviceCornerRadius - (inputBarHeight / 2), 8)

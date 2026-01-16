@@ -91,7 +91,7 @@ enum ChatFlowTheme {
         var mediumFontSize: CGFloat { 17 }
         var bodyFontSize: CGFloat { 15 }
         var senderFontSize: CGFloat { 12 }
-        var truncationHeight: CGFloat { isCompact ? 160 : 200 }
+        var truncationHeight: CGFloat { isCompact ? 320 : 400 }
     }
 
     // MARK: - Typography helpers

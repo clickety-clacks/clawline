@@ -93,6 +93,48 @@ struct ChatViewModelTests {
         #expect(finalState.first?.streaming == false)
     }
 
+    @Test("Server echoes without device id still replace placeholder")
+    @MainActor
+    func userEchoWithoutDeviceIdDoesNotDuplicate() async throws {
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let toastManager = ToastManager()
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: toastManager
+        )
+
+        await viewModel.onAppear()
+        viewModel.inputContent = NSAttributedString(string: "Hello!")
+        viewModel.send()
+
+        try await Task.sleep(for: .milliseconds(10))
+        let placeholderId = await MainActor.run { viewModel.messages.first?.id }
+        #expect(placeholderId?.hasPrefix("c_") == true)
+
+        chatService.emit(
+            Message(
+                id: "s_user_echo",
+                role: .user,
+                content: "Hello!",
+                timestamp: Date(),
+                streaming: false,
+                attachments: [],
+                deviceId: nil
+            )
+        )
+
+        try await Task.sleep(for: .milliseconds(10))
+        let messages = await MainActor.run { viewModel.messages }
+        #expect(messages.count == 1)
+        #expect(messages.first?.id == "s_user_echo")
+    }
+
     @Test("Message-level errors annotate placeholders and show toast")
     @MainActor
     func messageErrorsMarkFailedMessages() async throws {
@@ -179,7 +221,7 @@ struct ChatViewModelTests {
         #expect(viewModel.canSend)
     }
 
-    @Test("send uploads large attachments and inlines small ones")
+    @Test("send uploads attachments that require persistence")
     @MainActor
     func sendProcessesAttachments() async throws {
         let auth = TestAuthManager()
@@ -206,24 +248,19 @@ struct ChatViewModelTests {
         viewModel.send()
         try await viewModel.sendTask?.value
 
-        #expect(uploadService.uploadedPayloads.count == 1)
+        #expect(uploadService.uploadedPayloads.count == 2)
         #expect(chatService.lastSentAttachments.count == 2)
 
         let first = chatService.lastSentAttachments[0]
         let second = chatService.lastSentAttachments[1]
 
-        switch first {
-        case .image(let mimeType, let data):
-            #expect(mimeType == inlineAttachment.mimeType)
-            #expect(data.count == inlineAttachment.data.count)
-        default:
-            Issue.record("Expected inline image attachment")
-        }
-        switch second {
-        case .asset(let assetId):
-            #expect(assetId == "asset_0")
-        default:
-            Issue.record("Expected asset attachment")
+        for attachment in [first, second] {
+            switch attachment {
+            case .asset(let assetId):
+                #expect(assetId.hasPrefix("asset_"))
+            default:
+                Issue.record("Expected asset attachment")
+            }
         }
 
         #expect(viewModel.attachmentData.isEmpty)

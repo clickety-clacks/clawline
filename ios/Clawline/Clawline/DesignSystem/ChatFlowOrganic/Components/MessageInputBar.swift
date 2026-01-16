@@ -124,6 +124,10 @@ struct MessageInputBar: View {
         }
     }
 
+    private var sendButtonWidth: CGFloat {
+        isSending ? metrics.sendingButtonWidth : metrics.sendButtonSize
+    }
+
     private var sendButtonShape: AnyShape {
         isSending ? AnyShape(Capsule()) : AnyShape(Circle())
     }
@@ -164,7 +168,7 @@ struct MessageInputBar: View {
                     focusTrigger: focusTrigger,
                     isEditable: !isSending,
                     onFocusChange: onFocusChange,
-                    trailingPadding: metrics.editorTrailingInset(isSending: isSending)
+                    trailingPadding: metrics.textTrailingInset(isSending: isSending)
                 )
                 .opacity(isSending ? 0.5 : 1)
 
@@ -174,6 +178,7 @@ struct MessageInputBar: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
                         .frame(maxHeight: .infinity, alignment: .center)
                         .padding(.leading, 20)
+                        .padding(.trailing, metrics.textTrailingInset(isSending: isSending))
                 }
 
                 if let alertMessage = connectionAlertMessage,
@@ -203,29 +208,29 @@ struct MessageInputBar: View {
                         .stroke(alertColor.opacity(0.4), lineWidth: 1)
                 }
             }
+            .overlay(alignment: .bottomTrailing) {
+                Button(action: isSending ? onCancel : onSend) {
+                    if isSending {
+                        Text("Cancel")
+                            .font(.system(size: 15, weight: .semibold))
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else {
+                        Image(systemName: "paperplane.fill")
+                            .font(.system(size: 16, weight: .semibold))
+                    }
+                }
+                .frame(width: sendButtonWidth, height: metrics.sendButtonSize)
+                .background(sendButtonShape.fill(sendButtonBackground))
+                .foregroundStyle(sendButtonForeground)
+                .disabled(!isSending && !canSend)
+                .opacity(connectionAlertColor == nil ? 1 : 0.65)
+                .padding(.trailing, metrics.sendButtonInnerPadding)
+                .padding(.bottom, metrics.sendButtonBottomInset)
+                .accessibilityHint(connectionAlertHint ?? "")
+            }
         }
         .padding(.horizontal, metrics.concentricPadding)
         .padding(.bottom, metrics.bottomPadding)
-        .overlay(alignment: .bottomTrailing) {
-            Button(action: isSending ? onCancel : onSend) {
-                if isSending {
-                    Text("Cancel")
-                        .font(.system(size: 15, weight: .semibold))
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    Image(systemName: "paperplane.fill")
-                        .font(.system(size: 16, weight: .semibold))
-                }
-            }
-            .frame(width: isSending ? 92 : metrics.sendButtonSize, height: metrics.sendButtonSize)
-            .background(sendButtonShape.fill(sendButtonBackground))
-            .foregroundStyle(sendButtonForeground)
-            .disabled(!isSending && !canSend)
-            .opacity(connectionAlertColor == nil ? 1 : 0.65)
-            .padding(.trailing, 10)
-            .padding(.bottom, 8)
-            .accessibilityHint(connectionAlertHint ?? "")
-        }
     }
 }
 

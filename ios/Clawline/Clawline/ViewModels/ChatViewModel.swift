@@ -216,8 +216,7 @@ final class ChatViewModel: ChatViewModelHosting {
     }
 
     private func handleIncoming(_ message: Message) {
-        if message.role == .user,
-           message.deviceId == deviceId {
+        if message.role == .user {
             if let placeholderIndex = messages.firstIndex(where: { placeholder in
                 placeholder.id.hasPrefix("c_") &&
                 placeholder.deviceId == deviceId &&

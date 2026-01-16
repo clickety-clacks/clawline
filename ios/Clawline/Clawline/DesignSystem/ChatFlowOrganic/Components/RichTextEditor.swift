@@ -44,6 +44,7 @@ struct RichTextEditor: UIViewRepresentable {
 
         if !(textView.attributedText?.isEqual(attributedText) ?? false) {
             textView.attributedText = attributedText
+            context.coordinator.enforceBaseAttributes(on: textView)
         }
 
         if textView.selectedRange != selectionRange && selectionRange.location != NSNotFound {
@@ -52,9 +53,6 @@ struct RichTextEditor: UIViewRepresentable {
 
         if textView.isEditable != isEditable {
             textView.isEditable = isEditable
-            if !isEditable {
-                textView.resignFirstResponder()
-            }
         }
 
         let currentInset = textView.textContainerInset
@@ -146,6 +144,18 @@ struct RichTextEditor: UIViewRepresentable {
             attributes[.font] = UIFont.preferredFont(forTextStyle: .body)
             attributes[.foregroundColor] = UIColor.label
             textView.typingAttributes = attributes
+        }
+
+        func enforceBaseAttributes(on textView: UITextView) {
+            let baseFont = UIFont.preferredFont(forTextStyle: .body)
+            let baseColor = UIColor.label
+            let fullRange = NSRange(location: 0, length: textView.textStorage.length)
+            guard fullRange.length > 0 else { return }
+
+            textView.textStorage.enumerateAttribute(.attachment, in: fullRange, options: []) { value, range, _ in
+                guard value == nil else { return }
+                textView.textStorage.addAttributes([.font: baseFont, .foregroundColor: baseColor], range: range)
+            }
         }
     }
 }

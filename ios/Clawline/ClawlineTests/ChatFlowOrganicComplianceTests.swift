@@ -203,8 +203,8 @@ struct ChatFlowOrganicComplianceTests {
 
     @Test("Doc §6: Truncation height varies by device class")
     func truncationHeightMatchesMetrics() {
-        #expect(ChatFlowTheme.Metrics(isCompact: false).truncationHeight == 200)
-        #expect(ChatFlowTheme.Metrics(isCompact: true).truncationHeight == 160)
+        #expect(ChatFlowTheme.Metrics(isCompact: false).truncationHeight == 400)
+        #expect(ChatFlowTheme.Metrics(isCompact: true).truncationHeight == 320)
     }
 
     // MARK: Provider contract (§7)

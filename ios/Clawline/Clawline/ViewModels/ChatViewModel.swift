@@ -47,6 +47,8 @@ final class ChatViewModel: ChatViewModelHosting {
     private var pendingLocalMessageIds: [String] = []
     private var reconnectTask: Task<Void, Never>?
     private var reconnectBackoff: Duration = .seconds(1)
+    private var lastForegroundReconnectTrigger: Date?
+    private let foregroundReconnectDebounceInterval: TimeInterval = 5
     private var activeClientMessageId: String?
     private let connectionAlertGracePeriod: Duration
     private var connectionAlertTask: Task<Void, Never>?
@@ -91,9 +93,14 @@ final class ChatViewModel: ChatViewModelHosting {
         case .connected, .connecting, .reconnecting:
             break
         default:
-            reconnectTask?.cancel()
-            reconnectTask = nil
-            scheduleReconnect(immediate: true)
+            guard reconnectTask == nil else { return }
+            let now = Date()
+            if let last = lastForegroundReconnectTrigger,
+               now.timeIntervalSince(last) < foregroundReconnectDebounceInterval {
+                return
+            }
+            lastForegroundReconnectTrigger = now
+            scheduleReconnect(immediate: false)
         }
     }
 
@@ -252,6 +259,7 @@ final class ChatViewModel: ChatViewModelHosting {
             reconnectTask = nil
             clearConnectionAlert()
             error = nil
+            lastForegroundReconnectTrigger = nil
         case .disconnected:
             beginConnectionAlert(message: "Not connected to provider.")
             scheduleReconnect()

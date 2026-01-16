@@ -12,8 +12,12 @@ import Observation
 @MainActor
 final class PairingViewModel {
     var state: PairingState = .idle
-    var nameInput: String = ""
-    var addressInput: String = ""
+    var nameInput: String = "" {
+        didSet { persistNameInput() }
+    }
+    var addressInput: String = "" {
+        didSet { persistAddressInput() }
+    }
 
     /// Current page index for the horizontal scroll (0 = name, 1 = address, 2 = waiting)
     var currentPage: Int = 0
@@ -24,12 +28,19 @@ final class PairingViewModel {
     private let auth: any AuthManaging
     private let connection: any ConnectionServicing
     private let deviceId: String
+    private let storage: UserDefaults
     private var pairingTask: Task<Void, Never>?
 
-    init(auth: any AuthManaging, connection: any ConnectionServicing, device: any DeviceIdentifying) {
+    init(auth: any AuthManaging,
+         connection: any ConnectionServicing,
+         device: any DeviceIdentifying,
+         storage: UserDefaults = .standard) {
         self.auth = auth
         self.connection = connection
         self.deviceId = device.deviceId
+        self.storage = storage
+        self.nameInput = storage.string(forKey: StorageKeys.savedName) ?? ""
+        self.addressInput = storage.string(forKey: StorageKeys.savedAddress) ?? ""
     }
 
     var isNameValid: Bool {
@@ -175,5 +186,18 @@ final class PairingViewModel {
         components.fragment = nil
 
         return components.url
+    }
+
+    private func persistNameInput() {
+        storage.set(nameInput, forKey: StorageKeys.savedName)
+    }
+
+    private func persistAddressInput() {
+        storage.set(addressInput, forKey: StorageKeys.savedAddress)
+    }
+
+    private enum StorageKeys {
+        static let savedName = "pairing.nameInput"
+        static let savedAddress = "pairing.addressInput"
     }
 }

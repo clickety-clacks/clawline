@@ -259,8 +259,17 @@ struct ChatFlowOrganicComplianceTests {
         )
         let payload = message.toClientPayload()
         let decoded = try! JSONDecoder().decode(ClientMessagePayload.self, from: try! JSONEncoder().encode(payload))
-        #expect(decoded.attachments.first?.id == "img")
-        #expect(decoded.attachments.first?.mimeType == "image/png")
+        guard let first = decoded.attachments.first else {
+            Issue.record("Expected attachment entry")
+            return
+        }
+        switch first {
+        case .image(let mimeType, let data):
+            #expect(mimeType == "image/png")
+            #expect(Array(data) == [0x01, 0x02])
+        default:
+            Issue.record("Expected inline image attachment")
+        }
     }
 
     @Test("Doc §7: Message mirrors provider schema")

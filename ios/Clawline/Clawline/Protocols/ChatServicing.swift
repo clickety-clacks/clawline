@@ -29,15 +29,20 @@ enum ConnectionState: Equatable {
     }
 }
 
+enum ChatServiceEvent: Equatable {
+    case messageError(messageId: String?, code: String, message: String?)
+}
+
 protocol ChatServicing {
     var incomingMessages: AsyncStream<Message> { get }
     var connectionState: AsyncStream<ConnectionState> { get }
+    var serviceEvents: AsyncStream<ChatServiceEvent> { get }
 
     func connect(token: String, lastMessageId: String?) async throws
     func disconnect()
     func send(
         id: String,
         content: String,
-        attachments: [Attachment]
+        attachments: [WireAttachment]
     ) async throws
 }

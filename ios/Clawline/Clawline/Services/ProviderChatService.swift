@@ -12,7 +12,10 @@ final class ProviderChatService: ChatServicing {
         case missingBaseURL
         case notConnected
         case authFailed(String)
+        case tokenRevoked(String)
+        case sessionReplaced
         case invalidMessageId
+        case serverError(code: String, message: String?)
 
         var errorDescription: String? {
             switch self {
@@ -22,8 +25,17 @@ final class ProviderChatService: ChatServicing {
                 return "Not connected to provider."
             case .authFailed(let reason):
                 return "Authentication failed: \(reason)"
+            case .tokenRevoked(let reason):
+                return "Access revoked: \(reason)"
+            case .sessionReplaced:
+                return "Session replaced by another device."
             case .invalidMessageId:
                 return "Client message IDs must start with c_."
+            case .serverError(let code, let message):
+                if let message, !message.isEmpty {
+                    return message
+                }
+                return "Server error (\(code))."
             }
         }
     }
@@ -55,6 +67,7 @@ final class ProviderChatService: ChatServicing {
         let type: String
         let code: String
         let message: String?
+        let messageId: String?
     }
 
     private struct PendingMessage {
@@ -64,7 +77,7 @@ final class ProviderChatService: ChatServicing {
 
     private let connector: any WebSocketConnecting
     private let deviceId: String
-    private let baseURLProvider: @Sendable () -> URL?
+    private let baseURLProvider: () -> URL?
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
     private let ackInterval: Duration = .seconds(5)
@@ -82,8 +95,15 @@ final class ProviderChatService: ChatServicing {
         }
     }()
 
+    private lazy var serviceEventStream: AsyncStream<ChatServiceEvent> = {
+        AsyncStream { continuation in
+            self.serviceEventContinuation = continuation
+        }
+    }()
+
     private var messageContinuation: AsyncStream<Message>.Continuation?
     private var stateContinuation: AsyncStream<ConnectionState>.Continuation?
+    private var serviceEventContinuation: AsyncStream<ChatServiceEvent>.Continuation?
     private var socket: (any WebSocketClient)?
     private var receiveTask: Task<Void, Never>?
     private var authContinuation: CheckedContinuation<Void, Swift.Error>?
@@ -91,7 +111,7 @@ final class ProviderChatService: ChatServicing {
 
     init(connector: any WebSocketConnecting,
          deviceId: String,
-         baseURLProvider: @escaping @Sendable () -> URL? = ProviderChatService.resolveBaseURL,
+         baseURLProvider: @escaping () -> URL? = { ProviderBaseURLStore.baseURL },
          encoder: JSONEncoder = JSONEncoder(),
          decoder: JSONDecoder = JSONDecoder()) {
         self.connector = connector
@@ -103,6 +123,7 @@ final class ProviderChatService: ChatServicing {
 
     var incomingMessages: AsyncStream<Message> { messageStream }
     var connectionState: AsyncStream<ConnectionState> { stateStream }
+    var serviceEvents: AsyncStream<ChatServiceEvent> { serviceEventStream }
 
     func connect(token: String, lastMessageId: String?) async throws {
         guard let baseURL = baseURLProvider(),
@@ -149,7 +170,7 @@ final class ProviderChatService: ChatServicing {
         stateContinuation?.yield(.disconnected)
     }
 
-    func send(id: String, content: String, attachments: [Attachment]) async throws {
+    func send(id: String, content: String, attachments: [WireAttachment]) async throws {
         guard let socket else {
             throw Error.notConnected
         }
@@ -240,7 +261,34 @@ final class ProviderChatService: ChatServicing {
 
     private func handleServerError(data: Data) {
         guard let payload = try? decoder.decode(ErrorPayload.self, from: data) else { return }
-        stateContinuation?.yield(.failed(Error.authFailed(payload.message ?? payload.code)))
+
+        if let messageId = payload.messageId {
+            if let pending = pendingMessages.removeValue(forKey: messageId) {
+                pending.retryTask?.cancel()
+            }
+            serviceEventContinuation?.yield(.messageError(messageId: messageId, code: payload.code, message: payload.message))
+            return
+        }
+
+        let message = payload.message ?? payload.code
+        switch payload.code {
+        case "auth_failed":
+            let error = Error.authFailed(message)
+            resolveAuthContinuation(with: .failure(error))
+            stateContinuation?.yield(.failed(error))
+            disconnect()
+        case "token_revoked":
+            let error = Error.tokenRevoked(message)
+            resolveAuthContinuation(with: .failure(error))
+            stateContinuation?.yield(.failed(error))
+            disconnect()
+        case "session_replaced":
+            let error = Error.sessionReplaced
+            stateContinuation?.yield(.failed(error))
+            disconnect()
+        default:
+            stateContinuation?.yield(.failed(Error.serverError(code: payload.code, message: payload.message)))
+        }
     }
 
     private func handleSocketClose() {
@@ -267,10 +315,6 @@ final class ProviderChatService: ChatServicing {
                 }
             }
         }
-    }
-
-    private static func resolveBaseURL() -> URL? {
-        ProviderBaseURLStore.baseURL
     }
 
     private func resolveAuthContinuation(with result: Result<Void, Swift.Error>) {

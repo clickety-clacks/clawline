@@ -76,9 +76,9 @@ struct ClientMessagePayload: Codable, Equatable {
     let type: String = "message"
     let id: String
     let content: String
-    let attachments: [Attachment]
+    let attachments: [WireAttachment]
 
-    init(id: String, content: String, attachments: [Attachment]) {
+    init(id: String, content: String, attachments: [WireAttachment]) {
         self.id = id
         self.content = content
         self.attachments = attachments
@@ -99,6 +99,15 @@ extension Message {
     }
 
     func toClientPayload() -> ClientMessagePayload {
-        ClientMessagePayload(id: id, content: content, attachments: attachments)
+        let wireAttachments: [WireAttachment] = attachments.compactMap { attachment in
+            if let assetId = attachment.assetId {
+                return .asset(assetId: assetId)
+            }
+            if let data = attachment.data, let mimeType = attachment.mimeType {
+                return .image(mimeType: mimeType, data: data)
+            }
+            return nil
+        }
+        return ClientMessagePayload(id: id, content: content, attachments: wireAttachments)
     }
 }

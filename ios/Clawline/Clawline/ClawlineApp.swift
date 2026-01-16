@@ -8,15 +8,17 @@
 import SwiftUI
 import UIKit
 import os
+import Observation
 
 @main
 struct ClawlineApp: App {
-    @State private var authManager = AuthManager()
-    @State private var settingsManager = SettingsManager()
+    @State private var authManager: AuthManager
+    @State private var settingsManager: SettingsManager
 
     private let deviceIdentifier: any DeviceIdentifying
     private let connectionService: any ConnectionServicing
     private let chatService: any ChatServicing
+    private let uploadService: any UploadServicing
 
     init() {
         if #available(iOS 13.0, *) {
@@ -29,6 +31,10 @@ struct ClawlineApp: App {
 #endif
         clearHostingBackgrounds()
 
+        let authManager = AuthManager()
+        _authManager = State(initialValue: authManager)
+        let settingsManager = SettingsManager()
+        _settingsManager = State(initialValue: settingsManager)
         let device = DeviceIdentifier()
         let connector = URLSessionWebSocketConnector()
         self.deviceIdentifier = device
@@ -37,11 +43,13 @@ struct ClawlineApp: App {
             connector: connector,
             deviceId: device.deviceId
         )
+        self.uploadService = UploadService(auth: authManager)
     }
 
     var body: some Scene {
         WindowGroup {
-            RootView()
+            @Bindable var settingsManager = settingsManager
+            RootView(uploadService: uploadService)
                 .environment(authManager)
                 .environment(\.connectionService, connectionService)
                 .environment(\.deviceIdentifier, deviceIdentifier)

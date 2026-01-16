@@ -52,5 +52,9 @@
 			</dict>
 		</dict>
 	</dict>
+	<key>NSCameraUsageDescription</key>
+	<string>Clawline needs camera access to take photos for chat.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Clawline needs access to your photos to send images in chat.</string>
 </dict>
 </plist>

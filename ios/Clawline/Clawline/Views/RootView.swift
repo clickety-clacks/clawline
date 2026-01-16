@@ -8,6 +8,8 @@
 import SwiftUI
 
 struct RootView: View {
+    let uploadService: any UploadServicing
+    @State private var toastManager = ToastManager()
     @Environment(AuthManager.self) private var auth
     @Environment(\.connectionService) private var connection
     @Environment(\.deviceIdentifier) private var device
@@ -24,7 +26,14 @@ struct RootView: View {
     var body: some View {
         Group {
             if auth.isAuthenticated {
-                ChatView(auth: auth, chatService: chatService, settings: settings, device: device)
+                ChatView(
+                    auth: auth,
+                    chatService: chatService,
+                    settings: settings,
+                    device: device,
+                    uploadService: uploadService,
+                    toastManager: toastManager
+                )
             } else {
                 PairingView(auth: auth, connection: connection, device: device)
             }
@@ -41,7 +50,7 @@ struct RootView: View {
 // MARK: - Previews
 
 #Preview("Unauthenticated") {
-    RootView()
+    RootView(uploadService: PreviewUploadService())
         .environment(AuthManager())
         .environment(\.connectionService, StubConnectionService())
         .environment(\.deviceIdentifier, DeviceIdentifier())
@@ -51,9 +60,14 @@ struct RootView: View {
 #Preview("Authenticated") {
     let auth = AuthManager()
     auth.storeCredentials(token: "preview-token", userId: "preview-user")
-    return RootView()
+    return RootView(uploadService: PreviewUploadService())
         .environment(auth)
         .environment(\.connectionService, StubConnectionService())
         .environment(\.deviceIdentifier, DeviceIdentifier())
         .environment(\.chatService, StubChatService())
+}
+
+private struct PreviewUploadService: UploadServicing {
+    func upload(data: Data, mimeType: String, filename: String?) async throws -> String { "preview-asset" }
+    func download(assetId: String) async throws -> Data { Data() }
 }

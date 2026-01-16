@@ -29,6 +29,10 @@ final class StubChatService: ChatServicing {
         }
     }()
 
+    private(set) lazy var serviceEvents: AsyncStream<ChatServiceEvent> = {
+        AsyncStream { _ in }
+    }()
+
     func connect(token: String, lastMessageId: String?) async throws {
         stateContinuation?.yield(.connecting)
         try await Task.sleep(for: .milliseconds(500))
@@ -39,7 +43,7 @@ final class StubChatService: ChatServicing {
         stateContinuation?.yield(.disconnected)
     }
 
-    func send(id: String, content: String, attachments: [Attachment]) async throws {
+    func send(id: String, content: String, attachments: [WireAttachment]) async throws {
         try await Task.sleep(for: .seconds(responseDelay))
 
         let response = Message(

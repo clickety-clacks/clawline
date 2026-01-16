@@ -48,7 +48,7 @@ find ~/Library/Developer/Xcode/DerivedData/Clawline-*/Build/Products/Debug-iphon
 
 ## Architecture: Protocol-Based DI + Modern Swift Concurrency
 
-**CRITICAL**: No singletons. All services are protocol-based and injected for testability.
+**CRITICAL: NO SINGLETONS.** No `shared` instances, no static `instance` properties, no global state. All dependencies must be injected via protocols for testability.
 
 ### Modern Concurrency Rules
 
@@ -74,10 +74,15 @@ import Observation
 @main
 struct ClawlineApp: App {
     @State private var authManager = AuthManager()
+    private let uploadService: any UploadServicing
+
+    init() {
+        self.uploadService = UploadService(auth: authManager)
+    }
 
     var body: some Scene {
         WindowGroup {
-            RootView()
+            RootView(uploadService: uploadService)
                 .environment(authManager)
         }
     }

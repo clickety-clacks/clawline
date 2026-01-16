@@ -534,16 +534,25 @@ struct ChatView: View {
 
 ```swift
 struct RootView: View {
+    let uploadService: any UploadServicing
     // With @Observable, use @Environment for all dependencies
     @Environment(AuthManager.self) private var auth
     @Environment(\.connectionService) private var connection
     @Environment(\.deviceIdentifier) private var device
     @Environment(\.chatService) private var chatService
+    @Environment(\.settingsManager) private var settings
 
     var body: some View {
         Group {
             if auth.isAuthenticated {
-                ChatView(auth: auth, chatService: chatService)
+                ChatView(
+                    auth: auth,
+                    chatService: chatService,
+                    settings: settings,
+                    device: device,
+                    uploadService: uploadService,
+                    toastManager: ToastManager()
+                )
             } else {
                 PairingView(auth: auth, connection: connection, device: device)
             }
@@ -564,15 +573,20 @@ struct RootView: View {
 struct ClawlineApp: App {
     // With @Observable, use @State instead of @StateObject
     @State private var authManager = AuthManager()
+    private let uploadService: any UploadServicing
 
     // Non-observable services as plain properties
     private let connectionService: any ConnectionServicing = StubConnectionService()
     private let deviceIdentifier: any DeviceIdentifying = DeviceIdentifier()
     private let chatService: any ChatServicing = StubChatService()
 
+    init() {
+        self.uploadService = UploadService(auth: authManager)
+    }
+
     var body: some Scene {
         WindowGroup {
-            RootView()
+            RootView(uploadService: uploadService)
                 .environment(authManager)  // @Observable uses .environment(), not .environmentObject()
                 .environment(\.connectionService, connectionService)
                 .environment(\.deviceIdentifier, deviceIdentifier)

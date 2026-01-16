@@ -10,6 +10,7 @@ import UIKit
 
 struct PairingView: View {
     @State private var viewModel: PairingViewModel
+    @Environment(\.scenePhase) private var scenePhase
 
     private enum FocusedField {
         case name, address
@@ -85,6 +86,10 @@ struct PairingView: View {
                 .padding(.horizontal, concentricPadding)
                 .padding(.bottom, concentricPadding)
             }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active else { return }
+            viewModel.retryPendingIfNeeded()
         }
     }
 

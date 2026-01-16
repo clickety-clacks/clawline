@@ -158,6 +158,11 @@ final class PairingViewModel {
         submitAddress()
     }
 
+    func retryPendingIfNeeded() {
+        guard case .waitingForApproval(_, let stalled) = state, stalled else { return }
+        submitAddress()
+    }
+
     private func providerBaseURL(from websocketURL: URL) -> URL? {
         guard var components = URLComponents(url: websocketURL, resolvingAgainstBaseURL: false) else {
             return nil

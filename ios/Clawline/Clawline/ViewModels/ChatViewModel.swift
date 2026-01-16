@@ -13,9 +13,13 @@ enum ConnectionAlertSeverity: Equatable {
     case critical
 }
 
+protocol ChatViewModelHosting: AnyObject {
+    func handleSceneDidBecomeActive()
+}
+
 @Observable
 @MainActor
-final class ChatViewModel {
+final class ChatViewModel: ChatViewModelHosting {
     private(set) var messages: [Message] = []
     private(set) var lastServerMessageId: String?
     var inputContent: NSAttributedString = NSAttributedString() {
@@ -79,6 +83,18 @@ final class ChatViewModel {
         reconnectTask = nil
         cancelSend()
         chatService.disconnect()
+    }
+
+    func handleSceneDidBecomeActive() {
+        guard auth.token != nil else { return }
+        switch connectionState {
+        case .connected, .connecting, .reconnecting:
+            break
+        default:
+            reconnectTask?.cancel()
+            reconnectTask = nil
+            scheduleReconnect(immediate: true)
+        }
     }
 
     private func startObserving() {

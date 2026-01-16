@@ -90,6 +90,17 @@ struct MessageInputBar: View {
         }
     }
 
+    private var connectionAlertMessage: String? {
+        switch connectionAlert {
+        case .caution:
+            return "Reconnecting…"
+        case .critical:
+            return "Disconnected"
+        case nil:
+            return nil
+        }
+    }
+
     private var isSingleLine: Bool {
         editorHeight <= metrics.inputBarHeight + 0.5
     }
@@ -141,10 +152,34 @@ struct MessageInputBar: View {
                         .padding(.leading, 20)
                         .padding(.top, 14)
                 }
+
+                if let alertMessage = connectionAlertMessage,
+                   let alertColor = connectionAlertColor {
+                    RoundedRectangle(cornerRadius: isSingleLine ? inputHeight / 2 : 22, style: .continuous)
+                        .fill(alertColor.opacity(0.08))
+                        .allowsHitTesting(false)
+
+                    HStack(spacing: 8) {
+                        Image(systemName: "wifi.slash")
+                            .font(.system(size: 14, weight: .semibold))
+                        Text(alertMessage)
+                            .font(.system(size: 14, weight: .semibold))
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 12)
+                    .foregroundColor(alertColor)
+                    .allowsHitTesting(false)
+                }
             }
             .frame(height: inputHeight)
             .frame(maxWidth: .infinity, alignment: .bottom)
             .glassEffect(.regular, in: inputShape)
+            .overlay {
+                if let alertColor = connectionAlertColor {
+                    inputShape
+                        .stroke(alertColor.opacity(0.4), lineWidth: 1)
+                }
+            }
 
             let buttonShape: AnyShape = isSending ? AnyShape(Capsule()) : AnyShape(Circle())
 

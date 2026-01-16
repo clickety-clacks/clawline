@@ -75,6 +75,7 @@ private let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "
 struct ChatView: View {
     @State private var viewModel: ChatViewModel
     @State private var toastManager: ToastManager
+    @Environment(\.scenePhase) private var scenePhase
 
     // ⚠️ CRITICAL: This state MUST live here in ChatView, NOT in MessageInputBar.
     // MessageInputBar is inside .safeAreaInset and gets recreated on geometry changes.
@@ -116,7 +117,7 @@ struct ChatView: View {
         GeometryReader { geometry in
             ZStack(alignment: .top) {
                 VStack(spacing: 0) {
-                    messageList(topInset: geometry.safeAreaInsets.top + 32)
+                    messageList(topInset: geometry.safeAreaInsets.top + 60)
                         .frame(maxHeight: .infinity)
 
                     if let error = viewModel.error {
@@ -181,7 +182,6 @@ struct ChatView: View {
                 }
             }
         }
-        .ignoresSafeArea(.container, edges: .top)
         .background {
             ChatFlowTheme.pageBackground(colorScheme)
                 .ignoresSafeArea()
@@ -189,6 +189,10 @@ struct ChatView: View {
         }
         .task { await viewModel.onAppear() }
         .onDisappear { viewModel.onDisappear() }
+        .onChange(of: scenePhase) { _, phase in
+            guard phase == .active else { return }
+            viewModel.handleSceneDidBecomeActive()
+        }
         .sheet(isPresented: $showAttachmentMenu) {
             AttachmentSourceSheet(
                 onCamera: {

@@ -160,6 +160,11 @@ final class PairingViewModel {
 
     func retryPendingIfNeeded() {
         guard case .waitingForApproval(_, let stalled) = state, stalled else { return }
+        guard pairingTask == nil else {
+            pairingLogger.debug("retryPendingIfNeeded skipped: retry already running")
+            return
+        }
+        pairingLogger.debug("retryPendingIfNeeded resubmitting stalled pairing request")
         submitAddress()
     }
 

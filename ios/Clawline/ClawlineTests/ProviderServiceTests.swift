@@ -40,6 +40,56 @@ struct ProviderServiceTests {
         }
     }
 
+    @Test("Pairing request times out when connect never completes")
+    func pairingTimesOutWhenConnectHangs() async {
+        let connector = HangingWebSocketConnector(mode: .connect)
+        let service = ProviderConnectionService(connector: connector, timeout: .milliseconds(100))
+        let serverURL = URL(string: "wss://example.com/ws")!
+
+        do {
+            _ = try await service.requestPairing(
+                serverURL: serverURL,
+                claimedName: "Test",
+                deviceId: "device_123"
+            )
+            Issue.record("Expected timeout error but requestPairing succeeded")
+        } catch let error as ProviderConnectionService.Error {
+            switch error {
+            case .timeout:
+                break
+            default:
+                Issue.record("Expected timeout error, got \(error)")
+            }
+        } catch {
+            Issue.record("Unexpected error: \(error)")
+        }
+    }
+
+    @Test("Pairing request times out when send never completes")
+    func pairingTimesOutWhenSendHangs() async {
+        let connector = HangingWebSocketConnector(mode: .send)
+        let service = ProviderConnectionService(connector: connector, timeout: .milliseconds(100))
+        let serverURL = URL(string: "wss://example.com/ws")!
+
+        do {
+            _ = try await service.requestPairing(
+                serverURL: serverURL,
+                claimedName: "Test",
+                deviceId: "device_123"
+            )
+            Issue.record("Expected timeout error but requestPairing succeeded")
+        } catch let error as ProviderConnectionService.Error {
+            switch error {
+            case .timeout:
+                break
+            default:
+                Issue.record("Expected timeout error, got \(error)")
+            }
+        } catch {
+            Issue.record("Unexpected error: \(error)")
+        }
+    }
+
     @Test("Chat connect sends auth payload and yields server messages")
     func chatConnectAndReceive() async throws {
         let mockSocket = MockWebSocketClient()
@@ -135,4 +185,46 @@ private final class MockWebSocketClient: WebSocketClient {
     func enqueue(text: String) {
         continuation.yield(text)
     }
+}
+
+private final class HangingWebSocketConnector: WebSocketConnecting {
+    enum Mode {
+        case connect
+        case send
+    }
+
+    private let mode: Mode
+    private let client: HangingWebSocketClient
+
+    init(mode: Mode) {
+        self.mode = mode
+        self.client = HangingWebSocketClient(hangOnSend: mode == .send)
+    }
+
+    func connect(to url: URL) async throws -> any WebSocketClient {
+        if mode == .connect {
+            try await Task.sleep(for: .seconds(60))
+        }
+        return client
+    }
+}
+
+private final class HangingWebSocketClient: WebSocketClient {
+    private let hangOnSend: Bool
+    private let stream: AsyncStream<String>
+
+    init(hangOnSend: Bool) {
+        self.hangOnSend = hangOnSend
+        self.stream = AsyncStream { _ in }
+    }
+
+    var incomingTextMessages: AsyncStream<String> { stream }
+
+    func send(text: String) async throws {
+        if hangOnSend {
+            try await Task.sleep(for: .seconds(60))
+        }
+    }
+
+    func close(with code: URLSessionWebSocketTask.CloseCode?) {}
 }

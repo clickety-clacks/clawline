@@ -72,7 +72,9 @@ final class ProviderConnectionService: ConnectionServicing {
             throw Error.unsupportedURL
         }
 
-        let socket = try await connector.connect(to: serverURL)
+        let socket = try await runWithTimeout { [self] in
+            try await connector.connect(to: serverURL)
+        }
         defer { socket.close(with: .normalClosure) }
 
         let trimmedName = String(claimedName.prefix(64))
@@ -87,7 +89,9 @@ final class ProviderConnectionService: ConnectionServicing {
             throw Error.invalidResponse
         }
 
-        try await socket.send(text: json)
+        try await runWithTimeout {
+            try await socket.send(text: json)
+        }
 
         let text = try await waitForMessage(stream: socket.incomingTextMessages)
         let response = try decoder.decode(PairResultPayload.self, from: Data(text.utf8))
@@ -114,6 +118,25 @@ final class ProviderConnectionService: ConnectionServicing {
                     throw Error.socketClosed
                 }
                 return text
+            }
+
+            group.addTask { [timeout] in
+                try await Task.sleep(for: timeout)
+                throw Error.timeout
+            }
+
+            guard let value = try await group.next() else {
+                throw Error.invalidResponse
+            }
+            group.cancelAll()
+            return value
+        }
+    }
+
+    private func runWithTimeout<T>(_ operation: @escaping () async throws -> T) async throws -> T {
+        try await withThrowingTaskGroup(of: T.self) { group in
+            group.addTask {
+                try await operation()
             }
 
             group.addTask { [timeout] in

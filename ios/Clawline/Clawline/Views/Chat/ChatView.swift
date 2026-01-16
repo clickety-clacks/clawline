@@ -117,7 +117,7 @@ struct ChatView: View {
         GeometryReader { geometry in
             ZStack(alignment: .top) {
                 VStack(spacing: 0) {
-                    messageList(topInset: geometry.safeAreaInsets.top + 60)
+                    messageList(topInset: 60)
                         .frame(maxHeight: .infinity)
 
                     if let error = viewModel.error {

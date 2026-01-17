@@ -70,6 +70,12 @@ final class ProviderChatService: ChatServicing {
         let messageId: String?
     }
 
+    private struct UserInfoPayload: Decodable {
+        let type: String
+        let userId: String
+        let isAdmin: Bool
+    }
+
     private struct PendingMessage {
         let payload: ClientMessagePayload
         var retryTask: Task<Void, Never>?
@@ -180,7 +186,7 @@ final class ProviderChatService: ChatServicing {
         stateContinuation?.yield(.disconnected)
     }
 
-    func send(id: String, content: String, attachments: [WireAttachment]) async throws {
+    func send(id: String, content: String, attachments: [WireAttachment], channelType: ChatChannelType) async throws {
         guard let socket else {
             throw Error.notConnected
         }
@@ -188,7 +194,7 @@ final class ProviderChatService: ChatServicing {
             throw Error.invalidMessageId
         }
 
-        let payload = ClientMessagePayload(id: id, content: content, attachments: attachments)
+        let payload = ClientMessagePayload(id: id, content: content, attachments: attachments, channelType: channelType)
         let data = try encoder.encode(payload)
         guard let text = String(data: data, encoding: .utf8) else { return }
 
@@ -237,6 +243,8 @@ final class ProviderChatService: ChatServicing {
                 handleAck(data: data)
             case "error":
                 handleServerError(data: data)
+            case "user_info":
+                handleUserInfo(data: data)
             default:
                 break
             }
@@ -300,6 +308,12 @@ final class ProviderChatService: ChatServicing {
         default:
             stateContinuation?.yield(.failed(Error.serverError(code: payload.code, message: payload.message)))
         }
+    }
+
+    private func handleUserInfo(data: Data) {
+        guard let payload = try? decoder.decode(UserInfoPayload.self, from: data) else { return }
+        let info = ChatUserInfo(userId: payload.userId, isAdmin: payload.isAdmin)
+        serviceEventContinuation?.yield(.userInfo(info))
     }
 
     private func handleSocketClose() {

@@ -76,6 +76,7 @@ struct ChatView: View {
     @State private var viewModel: ChatViewModel
     @State private var toastManager: ToastManager
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(AuthManager.self) private var authManager
 
     // ⚠️ CRITICAL: This state MUST live here in ChatView, NOT in MessageInputBar.
     // MessageInputBar is inside .safeAreaInset and gets recreated on geometry changes.
@@ -117,7 +118,20 @@ struct ChatView: View {
         GeometryReader { geometry in
             ZStack(alignment: .top) {
                 VStack(spacing: 0) {
-                    messageList(topInset: 60)
+                    if authManager.isAdmin {
+                        ChannelSwitcherView(
+                            activeChannel: viewModel.activeChannel,
+                            onSelect: { channel in
+                                viewModel.setActiveChannel(channel)
+                            }
+                        )
+                        .padding(.horizontal, 24)
+                        .padding(.top, 16)
+                        .padding(.bottom, 12)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                    }
+                    let topInset: CGFloat = authManager.isAdmin ? 24 : 60
+                    messageList(topInset: topInset)
                         .frame(maxHeight: .infinity)
 
                     if let error = viewModel.error {
@@ -185,9 +199,13 @@ struct ChatView: View {
         .background {
             ChatFlowTheme.pageBackground(colorScheme)
                 .ignoresSafeArea()
+                .overlay(adminBackgroundOverlay)
                 .overlay(NoiseOverlayView().ignoresSafeArea())
         }
         .task { await viewModel.onAppear() }
+#if DEBUG && targetEnvironment(simulator)
+        .task { authManager.updateAdminStatus(true) }
+#endif
         .onDisappear { viewModel.onDisappear() }
         .onChange(of: scenePhase) { _, phase in
             guard phase == .active else { return }
@@ -260,6 +278,21 @@ struct ChatView: View {
             )
         }
         .animation(.spring(response: 0.4, dampingFraction: 0.85), value: toastManager.toast)
+    }
+
+    @ViewBuilder
+    private var adminBackgroundOverlay: some View {
+        if authManager.isAdmin && viewModel.activeChannel == .admin {
+            LinearGradient(
+                colors: [
+                    ChatFlowTheme.adminAccent(colorScheme).opacity(colorScheme == .dark ? 0.3 : 0.18),
+                    Color.clear
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .ignoresSafeArea()
+        }
     }
 
     private func messageList(topInset: CGFloat) -> some View {
@@ -623,15 +656,6 @@ private extension View {
 
 // MARK: - Previews
 
-@Observable
-private final class PreviewAuthManager: AuthManaging {
-    var isAuthenticated = true
-    var currentUserId: String? = "preview-user"
-    var token: String? = "preview-token"
-    func storeCredentials(token: String, userId: String) {}
-    func clearCredentials() {}
-}
-
 private struct PreviewDevice: DeviceIdentifying {
     let deviceId = "preview-device"
 }
@@ -650,7 +674,7 @@ private final class PreviewChatService: ChatServicing {
     }
     func connect(token: String, lastMessageId: String?) async throws {}
     func disconnect() {}
-    func send(id: String, content: String, attachments: [WireAttachment]) async throws {}
+    func send(id: String, content: String, attachments: [WireAttachment], channelType: ChatChannelType) async throws {}
 }
 
 private struct AttachmentSourceSheet: View {
@@ -721,24 +745,31 @@ private final class PreviewUploadService: UploadServicing {
 
 #Preview("Empty Chat") {
     let device = PreviewDevice()
+    let auth = AuthManager()
+    auth.storeCredentials(token: "preview-token", userId: "preview-user")
     return ChatView(
-        auth: PreviewAuthManager(),
+        auth: auth,
         chatService: PreviewChatService(),
         settings: SettingsManager(),
         device: device,
         uploadService: PreviewUploadService(),
         toastManager: ToastManager()
     )
+    .environment(auth)
 }
 
 #Preview("With Messages") {
     let device = PreviewDevice()
+    let auth = AuthManager()
+    auth.storeCredentials(token: "preview-token", userId: "preview-user")
+    auth.updateAdminStatus(true)
     return ChatView(
-        auth: PreviewAuthManager(),
+        auth: auth,
         chatService: PreviewChatService(),
         settings: SettingsManager(),
         device: device,
         uploadService: PreviewUploadService(),
         toastManager: ToastManager()
     )
+    .environment(auth)
 }

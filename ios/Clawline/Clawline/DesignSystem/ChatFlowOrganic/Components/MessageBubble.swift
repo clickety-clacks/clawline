@@ -66,6 +66,7 @@ struct MessageBubble: View {
         .shadow(color: bubbleShadowNear, radius: 2, x: 0, y: 2)
         .shadow(color: bubbleShadowMid, radius: 12, x: 0, y: 8)
         .shadow(color: bubbleShadowFar, radius: 20, x: 0, y: 16)
+        .overlay(adminOutline)
         .accessibilityLabel(MessageAccessibilityFormatter.label(for: message, presentation: presentation))
     }
 
@@ -115,8 +116,8 @@ struct MessageBubble: View {
             AvatarView(role: message.role)
             Text(senderName)
                 .font(.system(size: metrics.senderFontSize, weight: .semibold))
-                .foregroundColor(ChatFlowTheme.warmBrown(colorScheme))
-                .opacity(0.7)
+                .foregroundColor(message.channelType == .admin ? ChatFlowTheme.adminAccent(colorScheme) : ChatFlowTheme.warmBrown(colorScheme))
+                .opacity(message.channelType == .admin ? 1 : 0.7)
                 .tracking(0.3)
         }
     }
@@ -255,6 +256,14 @@ struct MessageBubble: View {
             endPoint: .bottom
         )
         .clipShape(bubbleShape)
+    }
+
+    @ViewBuilder
+    private var adminOutline: some View {
+        if message.channelType == .admin {
+            bubbleShape
+                .stroke(ChatFlowTheme.adminAccent(colorScheme).opacity(0.6), lineWidth: 1.5)
+        }
     }
 
     private var bubbleShape: UnevenRoundedRectangle {

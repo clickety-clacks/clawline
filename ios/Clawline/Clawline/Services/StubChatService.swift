@@ -12,6 +12,7 @@ final class StubChatService: ChatServicing {
 
     private var messageContinuation: AsyncStream<Message>.Continuation?
     private var stateContinuation: AsyncStream<ConnectionState>.Continuation?
+    private var serviceEventContinuation: AsyncStream<ChatServiceEvent>.Continuation?
 
     private(set) lazy var incomingMessages: AsyncStream<Message> = {
         AsyncStream { continuation in
@@ -30,7 +31,12 @@ final class StubChatService: ChatServicing {
     }()
 
     private(set) lazy var serviceEvents: AsyncStream<ChatServiceEvent> = {
-        AsyncStream { _ in }
+        AsyncStream { continuation in
+            self.serviceEventContinuation = continuation
+            continuation.onTermination = { @Sendable _ in
+                // No cleanup needed for stub.
+            }
+        }
     }()
 
     func connect(token: String, lastMessageId: String?) async throws {
@@ -43,7 +49,7 @@ final class StubChatService: ChatServicing {
         stateContinuation?.yield(.disconnected)
     }
 
-    func send(id: String, content: String, attachments: [WireAttachment]) async throws {
+    func send(id: String, content: String, attachments: [WireAttachment], channelType: ChatChannelType) async throws {
         try await Task.sleep(for: .seconds(responseDelay))
 
         let response = Message(
@@ -53,9 +59,14 @@ final class StubChatService: ChatServicing {
             timestamp: Date(),
             streaming: false,
             attachments: [],
-            deviceId: nil
+            deviceId: nil,
+            channelType: channelType
         )
 
         messageContinuation?.yield(response)
+    }
+
+    func emitServiceEvent(_ event: ChatServiceEvent) {
+        serviceEventContinuation?.yield(event)
     }
 }

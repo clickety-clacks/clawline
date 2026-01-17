@@ -331,7 +331,10 @@ private final class PreviewAuthManager: AuthManaging {
     var isAuthenticated = false
     var currentUserId: String?
     var token: String?
+    var isAdmin: Bool = false
     func storeCredentials(token: String, userId: String) {}
+    func updateAdminStatus(_ isAdmin: Bool) {}
+    func refreshAdminStatusFromToken() {}
     func clearCredentials() {}
 }
 

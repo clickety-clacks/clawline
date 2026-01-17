@@ -21,6 +21,7 @@ protocol ChatViewModelHosting: AnyObject {
 @MainActor
 final class ChatViewModel: ChatViewModelHosting {
     private(set) var messages: [Message] = []
+    private(set) var activeChannel: ChatChannelType = .personal
     private(set) var lastServerMessageId: String?
     var inputContent: NSAttributedString = NSAttributedString() {
         didSet { pruneAttachmentData() }
@@ -44,7 +45,8 @@ final class ChatViewModel: ChatViewModelHosting {
     private let settings: SettingsManager
     private let deviceId: String
     private var observationTask: Task<Void, Never>?
-    private var pendingLocalMessageIds: [String] = []
+    private var channelMessages: [ChatChannelType: [Message]] = [.personal: []]
+    private var pendingLocalMessages: [PendingLocalMessage] = []
     private var reconnectTask: Task<Void, Never>?
     private var reconnectBackoff: Duration = .seconds(1)
     private var lastForegroundReconnectTrigger: Date?
@@ -54,6 +56,11 @@ final class ChatViewModel: ChatViewModelHosting {
     private var connectionAlertTask: Task<Void, Never>?
     private var pendingConnectionErrorMessage: String?
     private var messageFailures: [String: MessageFailure] = [:]
+
+    private struct PendingLocalMessage: Equatable {
+        let id: String
+        let channel: ChatChannelType
+    }
 
     init(auth: any AuthManaging,
          chatService: any ChatServicing,
@@ -85,6 +92,16 @@ final class ChatViewModel: ChatViewModelHosting {
         reconnectTask = nil
         cancelSend()
         chatService.disconnect()
+    }
+
+    func setActiveChannel(_ channel: ChatChannelType) {
+        if channel == .admin, auth.isAdmin == false {
+            return
+        }
+        guard activeChannel != channel else { return }
+        activeChannel = channel
+        ensureChannelStorage(for: channel)
+        messages = channelMessages[channel] ?? []
     }
 
     func handleSceneDidBecomeActive() {
@@ -160,6 +177,7 @@ final class ChatViewModel: ChatViewModelHosting {
         let clientId = "c_\(UUID().uuidString)"
         activeClientMessageId = clientId
 
+        let channel = activeChannel
         let placeholder = Message(
             id: clientId,
             role: .user,
@@ -167,10 +185,11 @@ final class ChatViewModel: ChatViewModelHosting {
             timestamp: Date(),
             streaming: false,
             attachments: makeDisplayAttachments(from: pendingAttachments),
-            deviceId: deviceId
+            deviceId: deviceId,
+            channelType: channel
         )
-        messages.append(placeholder)
-        pendingLocalMessageIds.append(clientId)
+        appendMessage(placeholder)
+        pendingLocalMessages.append(PendingLocalMessage(id: clientId, channel: channel))
 
         isSending = true
         error = nil
@@ -179,7 +198,8 @@ final class ChatViewModel: ChatViewModelHosting {
             await self?.performSend(
                 clientId: clientId,
                 content: text,
-                pendingAttachments: pendingAttachments
+                pendingAttachments: pendingAttachments,
+                channelType: channel
             )
         }
     }
@@ -209,6 +229,10 @@ final class ChatViewModel: ChatViewModelHosting {
         messageFailures.removeAll()
         error = nil
         clearInput()
+        channelMessages = [.personal: []]
+        messages = []
+        activeChannel = .personal
+        pendingLocalMessages.removeAll()
     }
 
     func clearError() {
@@ -216,24 +240,66 @@ final class ChatViewModel: ChatViewModelHosting {
     }
 
     private func handleIncoming(_ message: Message) {
-        if message.role == .user,
-           message.deviceId == deviceId,
-           let pendingId = pendingLocalMessageIds.first,
-           let placeholderIndex = messages.firstIndex(where: { $0.id == pendingId }) {
-            pendingLocalMessageIds.removeFirst()
-            messages[placeholderIndex] = message
-            activeClientMessageId = nil
+        if replacePendingMessageIfNeeded(with: message) {
             updateLastServerMessageIdIfNeeded(with: message)
             return
         }
 
-        if let existingIndex = messages.firstIndex(where: { $0.id == message.id }) {
-            messages[existingIndex] = message
+        ensureChannelStorage(for: message.channelType)
+        var channelList = channelMessages[message.channelType] ?? []
+        if let existingIndex = channelList.firstIndex(where: { $0.id == message.id }) {
+            channelList[existingIndex] = message
         } else {
-            messages.append(message)
+            channelList.append(message)
         }
+        setMessages(channelList, for: message.channelType)
 
         updateLastServerMessageIdIfNeeded(with: message)
+    }
+
+    private func replacePendingMessageIfNeeded(with message: Message) -> Bool {
+        guard message.role == .user,
+              message.deviceId == deviceId else {
+            return false
+        }
+
+        guard let pendingIndex = pendingLocalMessages.firstIndex(where: { $0.channel == message.channelType }) else {
+            return false
+        }
+
+        let pending = pendingLocalMessages.remove(at: pendingIndex)
+        ensureChannelStorage(for: pending.channel)
+        var channelList = channelMessages[pending.channel] ?? []
+        guard let placeholderIndex = channelList.firstIndex(where: { $0.id == pending.id }) else {
+            return false
+        }
+
+        channelList[placeholderIndex] = message
+        setMessages(channelList, for: pending.channel)
+        if activeClientMessageId == pending.id {
+            activeClientMessageId = nil
+        }
+        return true
+    }
+
+    private func appendMessage(_ message: Message) {
+        ensureChannelStorage(for: message.channelType)
+        var channelList = channelMessages[message.channelType] ?? []
+        channelList.append(message)
+        setMessages(channelList, for: message.channelType)
+    }
+
+    private func setMessages(_ newMessages: [Message], for channel: ChatChannelType) {
+        channelMessages[channel] = newMessages
+        if channel == activeChannel {
+            messages = newMessages
+        }
+    }
+
+    private func ensureChannelStorage(for channel: ChatChannelType) {
+        if channelMessages[channel] == nil {
+            channelMessages[channel] = []
+        }
     }
 
     private func updateLastServerMessageIdIfNeeded(with message: Message) {
@@ -242,11 +308,17 @@ final class ChatViewModel: ChatViewModelHosting {
     }
 
     private func removePlaceholder(withId id: String) {
-        if let index = messages.firstIndex(where: { $0.id == id }) {
-            messages.remove(at: index)
+        let channels = Array(channelMessages.keys)
+        for channel in channels {
+            var list = channelMessages[channel] ?? []
+            if let index = list.firstIndex(where: { $0.id == id }) {
+                list.remove(at: index)
+                setMessages(list, for: channel)
+                break
+            }
         }
-        if let pendingIndex = pendingLocalMessageIds.firstIndex(of: id) {
-            pendingLocalMessageIds.remove(at: pendingIndex)
+        if let pendingIndex = pendingLocalMessages.firstIndex(where: { $0.id == id }) {
+            pendingLocalMessages.remove(at: pendingIndex)
         }
         messageFailures.removeValue(forKey: id)
     }
@@ -283,6 +355,9 @@ final class ChatViewModel: ChatViewModelHosting {
             }
             let snapshot = await MainActor.run { self.connectionSnapshot() }
             guard let token = snapshot.token else { return }
+            await MainActor.run {
+                self.auth.refreshAdminStatusFromToken()
+            }
 
             do {
                 try await self.chatService.connect(token: token, lastMessageId: snapshot.lastMessageId)
@@ -378,12 +453,18 @@ final class ChatViewModel: ChatViewModelHosting {
 
     private func performSend(clientId: String,
                               content: String,
-                              pendingAttachments: [PendingAttachment]) async {
+                              pendingAttachments: [PendingAttachment],
+                              channelType: ChatChannelType) async {
         defer { sendTask = nil }
         do {
             let wireAttachments = try await buildWireAttachments(from: pendingAttachments)
             try Task.checkCancellation()
-            try await chatService.send(id: clientId, content: content, attachments: wireAttachments)
+            try await chatService.send(
+                id: clientId,
+                content: content,
+                attachments: wireAttachments,
+                channelType: channelType
+            )
             await MainActor.run {
                 clearInput()
                 isSending = false
@@ -471,8 +552,8 @@ final class ChatViewModel: ChatViewModelHosting {
             toastManager.show(resolved)
             guard let messageId else { return }
             messageFailures[messageId] = MessageFailure(code: code, message: message)
-            if let pendingIndex = pendingLocalMessageIds.firstIndex(of: messageId) {
-                pendingLocalMessageIds.remove(at: pendingIndex)
+            if let pendingIndex = pendingLocalMessages.firstIndex(where: { $0.id == messageId }) {
+                pendingLocalMessages.remove(at: pendingIndex)
             }
             if activeClientMessageId == messageId {
                 activeClientMessageId = nil
@@ -480,6 +561,20 @@ final class ChatViewModel: ChatViewModelHosting {
             isSending = false
         case .connectionInterrupted(let reason):
             beginConnectionAlert(message: reason ?? "Connection interrupted.")
+        case .userInfo(let info):
+            let wasAdmin = auth.isAdmin
+            auth.updateAdminStatus(info.isAdmin)
+            if info.isAdmin {
+                ensureChannelStorage(for: .admin)
+                if !wasAdmin {
+                    toastManager.show("Admin channel unlocked")
+                }
+            } else if wasAdmin {
+                toastManager.show("Admin access revoked")
+                if activeChannel == .admin {
+                    setActiveChannel(.personal)
+                }
+            }
         }
     }
 

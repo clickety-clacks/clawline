@@ -146,9 +146,13 @@ struct ProviderServiceTests {
         }
 
         try await service.connect(token: "jwt", lastMessageId: nil)
-        try await service.send(id: "c_test", content: "Hello", attachments: [])
+        try await service.send(id: "c_test", content: "Hello", attachments: [], channelType: .personal)
 
-        #expect(mockSocket.sentTexts.contains { $0.contains("\"type\":\"message\"") && $0.contains("\"content\":\"Hello\"") })
+        #expect(mockSocket.sentTexts.contains {
+            $0.contains("\"type\":\"message\"")
+            && $0.contains("\"content\":\"Hello\"")
+            && $0.contains("\"channelType\":\"personal\"")
+        })
     }
 }
 

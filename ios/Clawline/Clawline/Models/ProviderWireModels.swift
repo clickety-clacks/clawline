@@ -16,6 +16,7 @@ struct ServerMessagePayload: Codable, Equatable {
     let streaming: Bool
     let deviceId: String?
     let attachments: [Attachment]
+    let channelType: ChatChannelType
 
     enum CodingKeys: String, CodingKey {
         case type
@@ -26,6 +27,7 @@ struct ServerMessagePayload: Codable, Equatable {
         case streaming
         case deviceId
         case attachments
+        case channelType
     }
 
     init(type: String = "message",
@@ -35,7 +37,8 @@ struct ServerMessagePayload: Codable, Equatable {
          timestamp: Date,
          streaming: Bool,
          deviceId: String?,
-         attachments: [Attachment]) {
+         attachments: [Attachment],
+         channelType: ChatChannelType = .personal) {
         self.type = type
         self.id = id
         self.role = role
@@ -44,6 +47,7 @@ struct ServerMessagePayload: Codable, Equatable {
         self.streaming = streaming
         self.deviceId = deviceId
         self.attachments = attachments
+        self.channelType = channelType
     }
 
     init(from decoder: Decoder) throws {
@@ -57,6 +61,7 @@ struct ServerMessagePayload: Codable, Equatable {
         streaming = try container.decode(Bool.self, forKey: .streaming)
         deviceId = try container.decodeIfPresent(String.self, forKey: .deviceId)
         attachments = try container.decodeIfPresent([Attachment].self, forKey: .attachments) ?? []
+        channelType = (try? container.decode(ChatChannelType.self, forKey: .channelType)) ?? .personal
     }
 
     func encode(to encoder: Encoder) throws {
@@ -69,6 +74,7 @@ struct ServerMessagePayload: Codable, Equatable {
         try container.encode(streaming, forKey: .streaming)
         try container.encodeIfPresent(deviceId, forKey: .deviceId)
         try container.encode(attachments, forKey: .attachments)
+        try container.encode(channelType, forKey: .channelType)
     }
 }
 
@@ -77,11 +83,13 @@ struct ClientMessagePayload: Codable, Equatable {
     let id: String
     let content: String
     let attachments: [WireAttachment]
+    let channelType: ChatChannelType
 
-    init(id: String, content: String, attachments: [WireAttachment]) {
+    init(id: String, content: String, attachments: [WireAttachment], channelType: ChatChannelType) {
         self.id = id
         self.content = content
         self.attachments = attachments
+        self.channelType = channelType
     }
 }
 
@@ -94,7 +102,8 @@ extension Message {
             timestamp: payload.timestamp,
             streaming: payload.streaming,
             attachments: payload.attachments,
-            deviceId: payload.deviceId
+            deviceId: payload.deviceId,
+            channelType: payload.channelType
         )
     }
 
@@ -108,6 +117,6 @@ extension Message {
             }
             return nil
         }
-        return ClientMessagePayload(id: id, content: content, attachments: wireAttachments)
+        return ClientMessagePayload(id: id, content: content, attachments: wireAttachments, channelType: channelType)
     }
 }

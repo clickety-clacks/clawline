@@ -74,7 +74,8 @@ struct ChatFlowOrganicComplianceTests {
             timestamp: Date(),
             streaming: false,
             attachments: [sampleAttachment(id: "img1"), sampleAttachment(id: "img2")],
-            deviceId: nil
+            deviceId: nil,
+            channelType: .personal
         )
         let presentation = MessagePresentationBuilder.build(from: message)
         #expect(presentation.parts.contains(where: { part in
@@ -110,7 +111,8 @@ struct ChatFlowOrganicComplianceTests {
             timestamp: Date(),
             streaming: false,
             attachments: [sampleAttachment(id: "img")],
-            deviceId: nil
+            deviceId: nil,
+            channelType: .personal
         )
         let presentation = MessagePresentationBuilder.build(from: message)
         #expect(presentation.inferredSizeClass() == .long)
@@ -230,6 +232,7 @@ struct ChatFlowOrganicComplianceTests {
         #expect(message.content == "Hello")
         #expect(message.timestamp.timeIntervalSince1970 == 1704672000)
         #expect(message.streaming == false)
+        #expect(message.channelType == .personal)
     }
 
     @Test("Doc §7: Client payload excludes role/timestamp")
@@ -240,6 +243,7 @@ struct ChatFlowOrganicComplianceTests {
         #expect(json?["id"] != nil)
         #expect(json?["content"] as? String == "Hello world")
         #expect(json?["attachments"] != nil)
+        #expect(json?["channelType"] as? String == "personal")
         #expect(json?["role"] == nil)
         #expect(json?["timestamp"] == nil)
         #expect(json?["streaming"] == nil)
@@ -255,7 +259,8 @@ struct ChatFlowOrganicComplianceTests {
             timestamp: Date(),
             streaming: false,
             attachments: [attachment],
-            deviceId: nil
+            deviceId: nil,
+            channelType: .personal
         )
         let payload = message.toClientPayload()
         let decoded = try! JSONDecoder().decode(ClientMessagePayload.self, from: try! JSONEncoder().encode(payload))
@@ -263,6 +268,7 @@ struct ChatFlowOrganicComplianceTests {
             Issue.record("Expected attachment entry")
             return
         }
+        #expect(decoded.channelType == .personal)
         switch first {
         case .image(let mimeType, let data):
             #expect(mimeType == "image/png")
@@ -288,6 +294,7 @@ struct ChatFlowOrganicComplianceTests {
         #expect(message.role == payload.role)
         #expect(message.streaming == payload.streaming)
         #expect(message.attachments == payload.attachments)
+        #expect(message.channelType == payload.channelType)
     }
 
     @Test("Doc §5: MessagePart.isTextual lives with model")
@@ -310,7 +317,8 @@ struct ChatFlowOrganicComplianceTests {
             timestamp: Date(),
             streaming: false,
             attachments: [sampleAttachment(id: "img1"), sampleAttachment(id: "img2")],
-            deviceId: nil
+            deviceId: nil,
+            channelType: .personal
         )
         let presentation = MessagePresentationBuilder.build(from: message)
         let label = MessageAccessibilityFormatter.label(for: message, presentation: presentation)
@@ -336,7 +344,8 @@ struct ChatFlowOrganicComplianceTests {
             timestamp: Date(),
             streaming: false,
             attachments: [],
-            deviceId: nil
+            deviceId: nil,
+            channelType: .personal
         )
     }
 

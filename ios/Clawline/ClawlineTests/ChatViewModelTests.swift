@@ -29,7 +29,8 @@ struct ChatViewModelTests {
                 timestamp: Date(),
                 streaming: false,
                 attachments: [],
-                deviceId: nil
+                deviceId: nil,
+                channelType: .personal
             )
         )
 
@@ -66,7 +67,8 @@ struct ChatViewModelTests {
                 timestamp: Date(),
                 streaming: true,
                 attachments: [],
-                deviceId: nil
+                deviceId: nil,
+                channelType: .personal
             )
         )
 
@@ -82,7 +84,8 @@ struct ChatViewModelTests {
                 timestamp: Date(),
                 streaming: false,
                 attachments: [],
-                deviceId: nil
+                deviceId: nil,
+                channelType: .personal
             )
         )
 
@@ -252,7 +255,100 @@ struct ChatViewModelTests {
         viewModel.inputContent = NSAttributedString(string: "hello")
         #expect(viewModel.attachmentData.isEmpty)
     }
+    
+    @Test("Outbound sends respect active channel selection")
+    @MainActor
+    func sendUsesActiveChannelType() async throws {
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        auth.updateAdminStatus(true)
+        let chatService = TestChatService()
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager()
+        )
 
+        viewModel.setActiveChannel(.admin)
+        viewModel.inputContent = NSAttributedString(string: "Admin ping")
+        viewModel.send()
+        try await Task.sleep(for: .milliseconds(10))
+
+        #expect(chatService.lastChannelType == .admin)
+    }
+
+    @Test("Incoming messages route to matching channel")
+    @MainActor
+    func incomingMessagesRoutePerChannel() async throws {
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        auth.updateAdminStatus(true)
+        let chatService = TestChatService()
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager()
+        )
+
+        await viewModel.onAppear()
+
+        let adminMessage = Message(
+            id: "s_admin",
+            role: .assistant,
+            content: "Admin hello",
+            timestamp: Date(),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            channelType: .admin
+        )
+
+        chatService.emit(adminMessage)
+        try await Task.sleep(for: .milliseconds(10))
+
+        #expect(viewModel.messages.isEmpty)
+        viewModel.setActiveChannel(.admin)
+        #expect(viewModel.messages.count == 1)
+        #expect(viewModel.messages.first?.id == "s_admin")
+    }
+
+    @Test("user_info event updates admin state and surfaces toast")
+    @MainActor
+    func userInfoEventUpdatesAdminState() async throws {
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let toastManager = ToastManager()
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: toastManager
+        )
+
+        await viewModel.onAppear()
+
+        chatService.emitServiceEvent(.userInfo(ChatUserInfo(userId: "user", isAdmin: true)))
+        try await Task.sleep(for: .milliseconds(10))
+
+        #expect(auth.isAdmin)
+        let unlockToast = await MainActor.run { toastManager.debugLastMessage() }
+        #expect(unlockToast == "Admin channel unlocked")
+
+        chatService.emitServiceEvent(.userInfo(ChatUserInfo(userId: "user", isAdmin: false)))
+        try await Task.sleep(for: .milliseconds(10))
+        #expect(auth.isAdmin == false)
+        let revokeToast = await MainActor.run { toastManager.debugLastMessage() }
+        #expect(revokeToast == "Admin access revoked")
+    }
 }
 
 @MainActor
@@ -260,6 +356,7 @@ private final class TestAuthManager: AuthManaging {
     var isAuthenticated: Bool = false
     var currentUserId: String?
     var token: String?
+    var isAdmin: Bool = false
 
     func storeCredentials(token: String, userId: String) {
         self.token = token
@@ -271,7 +368,15 @@ private final class TestAuthManager: AuthManaging {
         token = nil
         currentUserId = nil
         isAuthenticated = false
+        isAdmin = false
     }
+
+    func updateAdminStatus(_ isAdmin: Bool) {
+        self.isAdmin = isAdmin
+    }
+
+    func refreshAdminStatusFromToken() {}
+}
 }
 
 private final class TestChatService: ChatServicing {
@@ -281,6 +386,7 @@ private final class TestChatService: ChatServicing {
     private var bufferedMessages: [Message] = []
     private(set) var lastSentAttachments: [WireAttachment] = []
     private(set) var lastSentId: String?
+    private(set) var lastChannelType: ChatChannelType?
 
     private(set) lazy var incomingMessages: AsyncStream<Message> = {
         AsyncStream { continuation in
@@ -311,9 +417,10 @@ private final class TestChatService: ChatServicing {
         stateContinuation?.yield(.disconnected)
     }
 
-    func send(id: String, content: String, attachments: [WireAttachment]) async throws {
+    func send(id: String, content: String, attachments: [WireAttachment], channelType: ChatChannelType) async throws {
         lastSentId = id
         lastSentAttachments = attachments
+        lastChannelType = channelType
     }
 
     func emit(_ message: Message) {

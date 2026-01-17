@@ -30,6 +30,12 @@ enum ChatFlowTheme {
         scheme == .dark ? Color(red: 0.831, green: 0.769, blue: 0.690) : Color(red: 0.361, green: 0.290, blue: 0.239)
     }
 
+    static func adminAccent(_ scheme: ColorScheme) -> Color {
+        scheme == .dark
+            ? Color(red: 0.549, green: 0.756, blue: 0.996)
+            : Color(red: 0.141, green: 0.420, blue: 0.831)
+    }
+
     static func stone(_ scheme: ColorScheme) -> Color {
         scheme == .dark ? Color(red: 0.545, green: 0.502, blue: 0.471) : Color(red: 0.651, green: 0.608, blue: 0.553)
     }

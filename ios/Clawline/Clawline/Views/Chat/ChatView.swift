@@ -534,7 +534,6 @@ struct ChatView: View {
         let resolvedInputHeight = max(inputBarHeight, MessageInputBarMetrics.minInputBarHeight)
         let keyboardVisibleHeight = max(0, keyboardHeight - geometry.safeAreaInsets.bottom)
         let isKeyboardVisible = keyboardVisibleHeight > 0.5
-        let keyboardInset: CGFloat = isKeyboardVisible ? keyboardHeight : 0
         let showsStreamPager = !viewModel.orderedSessionKeys.isEmpty
         let stackTopInsetFromInputBarTop: CGFloat = (!isCompactLayout && showsStreamPager)
             ? (floatingPageDotsBottomGap + StreamPageDotsView.controlHeight)
@@ -545,21 +544,37 @@ struct ChatView: View {
         let bottomInsetFlowGap = stackTopInsetFromInputBarTop + bottomFlowGap
         // Gap below input bar: version label area (keyboard hidden) or minimal gap (keyboard up)
         let belowBarGap: CGFloat = isKeyboardVisible ? 12 : 24
-        let inputBarTopFromScreenBottom: CGFloat = {
+        let usesExternalKeyboardInsets: Bool = {
 #if os(visionOS)
-            // On visionOS the input bar is pinned directly to container bottom + belowBarGap,
-            // so keyboardHeight can overestimate and incorrectly push floating overlays upward.
-            return belowBarGap + resolvedInputHeight
+            // visionOS keyboard geometry can over-report and cause content overlap drift after
+            // keyboard transitions. The input bar is pinned from container geometry instead.
+            return true
 #else
-            return keyboardInset + belowBarGap + resolvedInputHeight
+            return false
 #endif
         }()
-        // The flow layout's sectionInset.bottom (containerPadding) already provides padding below
-        // the last cell. Subtract it so the effective gap between the last bubble and the top of
-        // the message bar stack (pager + input bar on regular layouts) equals the desired flow gap.
-        let listBottomInset = keyboardInset + belowBarGap + resolvedInputHeight
-            + bottomInsetFlowGap - metrics.containerPadding
-        let cachedKeyboardHeight = max(keyboardHeight, lastNonZeroKeyboardHeight)
+        let layoutInputs = ChatLayoutInputs(
+            keyboardHeight: keyboardHeight,
+            keyboardVisible: isKeyboardVisible,
+            isInputFocused: isInputFocused,
+            keyboardAnimationDuration: keyboardAnimationDuration,
+            keyboardAnimationCurve: keyboardAnimationCurve,
+            safeAreaBottom: geometry.safeAreaInsets.bottom,
+            usesExternalKeyboardInsets: usesExternalKeyboardInsets
+        )
+        let layoutMetrics = ChatLayoutMetrics(
+            belowBarGap: belowBarGap,
+            flowGap: bottomInsetFlowGap,
+            containerPadding: metrics.containerPadding
+        )
+        let insetLayout = layoutCoordinator.runtimeInsetLayoutState(
+            inputs: layoutInputs,
+            metrics: layoutMetrics,
+            fallbackBarHeight: resolvedInputHeight
+        )
+        let inputBarTopFromScreenBottom = insetLayout.inputBarTopFromScreenBottom
+        let listBottomInset = insetLayout.listBottomInset
+        let cachedKeyboardHeight = max(layoutInputs.effectiveKeyboardInset, lastNonZeroKeyboardHeight)
         let isLandscape = geometry.size.width > geometry.size.height
         let estimatedKeyboardHeight: CGFloat = {
             if horizontalSizeClass == .regular {
@@ -570,20 +585,6 @@ struct ChatView: View {
         let truncationKeyboardHeight = cachedKeyboardHeight > 0.5 ? cachedKeyboardHeight : estimatedKeyboardHeight
         let truncationBottomInset = truncationKeyboardHeight + 12 + resolvedInputHeight
             + bottomInsetFlowGap - metrics.containerPadding
-        let layoutInputs = ChatLayoutInputs(
-            keyboardHeight: keyboardHeight,
-            keyboardVisible: isKeyboardVisible,
-            isInputFocused: isInputFocused,
-            keyboardAnimationDuration: keyboardAnimationDuration,
-            keyboardAnimationCurve: keyboardAnimationCurve,
-            safeAreaBottom: geometry.safeAreaInsets.bottom,
-            usesExternalKeyboardInsets: false
-        )
-        let layoutMetrics = ChatLayoutMetrics(
-            belowBarGap: belowBarGap,
-            flowGap: bottomInsetFlowGap,
-            containerPadding: metrics.containerPadding
-        )
         let layoutKey = ChatLayoutKey(
             revision: layoutRevision,
             keyboardHeight: keyboardHeight,
@@ -617,10 +618,7 @@ struct ChatView: View {
                 .mask(statusBarFadeMask(topInset: topInset))
 
             streamToastView(
-                geometry: geometry,
-                belowBarGap: belowBarGap,
-                resolvedInputHeight: resolvedInputHeight,
-                keyboardHeight: keyboardHeight
+                inputBarTopFromScreenBottom: inputBarTopFromScreenBottom
             )
             errorBannerView(viewModel: viewModel, listBottomInset: listBottomInset)
             toastBannerView(geometry: geometry, toastManager: toastManager)
@@ -734,13 +732,8 @@ struct ChatView: View {
     }
 
     @ViewBuilder
-    private func streamToastView(geometry: GeometryProxy,
-                                 belowBarGap: CGFloat,
-                                 resolvedInputHeight: CGFloat,
-                                 keyboardHeight: CGFloat) -> some View {
+    private func streamToastView(inputBarTopFromScreenBottom: CGFloat) -> some View {
         if streamToastManager.isVisible {
-            let inputBarTopFromScreenBottom = max(keyboardHeight, geometry.safeAreaInsets.bottom)
-                + belowBarGap + resolvedInputHeight
             StreamToast(
                 displayName: streamToastManager.displayName,
                 sessionKey: streamToastManager.sessionKey

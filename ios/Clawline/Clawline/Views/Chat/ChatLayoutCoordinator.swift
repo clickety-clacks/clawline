@@ -16,12 +16,24 @@ struct ChatLayoutInputs: Equatable {
     let keyboardAnimationCurve: UIView.AnimationCurve
     let safeAreaBottom: CGFloat
     let usesExternalKeyboardInsets: Bool
+
+    var effectiveKeyboardInset: CGFloat {
+        guard keyboardVisible, !usesExternalKeyboardInsets else { return 0 }
+        return max(0, keyboardHeight)
+    }
 }
 
 struct ChatLayoutMetrics: Equatable {
     let belowBarGap: CGFloat
     let flowGap: CGFloat
     let containerPadding: CGFloat
+}
+
+struct ChatInsetLayoutState: Equatable {
+    let barHeight: CGFloat
+    let keyboardInset: CGFloat
+    let inputBarTopFromScreenBottom: CGFloat
+    let listBottomInset: CGFloat
 }
 
 struct ChatLayoutTransition: Equatable {
@@ -93,6 +105,7 @@ final class ChatLayoutCoordinator {
     @ObservationIgnored private var lastAppliedBelowBarGap: CGFloat = 0
     @ObservationIgnored private var lastAppliedKeyboardVisible: Bool = false
     @ObservationIgnored private var barHeightCache: CGFloat = 0
+    @ObservationIgnored private var lastKnownGoodBarHeight: CGFloat = 0
     @ObservationIgnored private var barHeightCandidate: CGFloat = 0
     @ObservationIgnored private var barHeightCandidateApplyIndex: Int = 0
     @ObservationIgnored private var hasStableBarHeight: Bool = false
@@ -324,8 +337,16 @@ final class ChatLayoutCoordinator {
 
     func updateBarHeight(_ height: CGFloat) {
         dispatchPrecondition(condition: .onQueue(.main))
-        guard abs(barHeightCache - height) > 0.5 else { return }
-        barHeightCache = height
+        let sanitizedHeight = max(0, height)
+        if sanitizedHeight > 0.5 {
+            lastKnownGoodBarHeight = sanitizedHeight
+        } else if hasStableBarHeight, lastKnownGoodBarHeight > 0.5 {
+            // Ignore transient zero-height reports during keyboard transitions.
+            // The input bar remains mounted; collapsing to zero causes inset underfill/overlap.
+            return
+        }
+        guard abs(barHeightCache - sanitizedHeight) > 0.5 else { return }
+        barHeightCache = sanitizedHeight
         // The initial inset application often runs before the input bar has a measured height,
         // so we bootstrap with `minInputBarHeight`. Once the real height is known (layoutSubviews),
         // schedule a re-apply so the bottom inset includes the true bar height + flow gap.
@@ -351,15 +372,47 @@ final class ChatLayoutCoordinator {
             }
         }
         if hasStableBarHeight {
-            return barHeightCache
+            if barHeightCache > 0.5 {
+                return barHeightCache
+            }
+            if lastKnownGoodBarHeight > 0.5 {
+                return lastKnownGoodBarHeight
+            }
         }
         return MessageInputBarMetrics.minInputBarHeight
     }
 
     private func targetBottomInset(for inputs: ChatLayoutInputs, metrics: ChatLayoutMetrics, barHeight: CGFloat) -> CGFloat {
-        let baseInset = metrics.belowBarGap + barHeight + metrics.flowGap - metrics.containerPadding
-        guard !inputs.usesExternalKeyboardInsets else { return baseInset }
-        return baseInset + inputs.keyboardHeight
+        Self.insetLayoutState(inputs: inputs, metrics: metrics, barHeight: barHeight).listBottomInset
+    }
+
+    static func insetLayoutState(inputs: ChatLayoutInputs, metrics: ChatLayoutMetrics, barHeight: CGFloat) -> ChatInsetLayoutState {
+        let resolvedBarHeight = max(0, barHeight)
+        let keyboardInset = inputs.effectiveKeyboardInset
+        let inputBarTopFromScreenBottom = keyboardInset + metrics.belowBarGap + resolvedBarHeight
+        let listBottomInset = inputBarTopFromScreenBottom + metrics.flowGap - metrics.containerPadding
+        return ChatInsetLayoutState(
+            barHeight: resolvedBarHeight,
+            keyboardInset: keyboardInset,
+            inputBarTopFromScreenBottom: inputBarTopFromScreenBottom,
+            listBottomInset: listBottomInset
+        )
+    }
+
+    func runtimeInsetLayoutState(inputs: ChatLayoutInputs,
+                                 metrics: ChatLayoutMetrics,
+                                 fallbackBarHeight: CGFloat) -> ChatInsetLayoutState {
+        dispatchPrecondition(condition: .onQueue(.main))
+        let barHeight = {
+            if barHeightCache > 0.5 {
+                return barHeightCache
+            }
+            if lastKnownGoodBarHeight > 0.5 {
+                return lastKnownGoodBarHeight
+            }
+            return max(fallbackBarHeight, MessageInputBarMetrics.minInputBarHeight)
+        }()
+        return Self.insetLayoutState(inputs: inputs, metrics: metrics, barHeight: barHeight)
     }
 
     private func animationOptions(from curve: UIView.AnimationCurve) -> UIView.AnimationOptions {

@@ -17,6 +17,7 @@ struct StreamSelectorLayoutTests {
             itemCount: 3,
             showsCreateInlineRow: false,
             rowHeight: CGFloat(44),
+            rowSpacing: CGFloat(0),
             functionBarHeight: CGFloat(52),
             outerVerticalPadding: CGFloat(16),
             maxAvailableHeight: CGFloat(640),
@@ -32,6 +33,7 @@ struct StreamSelectorLayoutTests {
             itemCount: 22,
             showsCreateInlineRow: false,
             rowHeight: CGFloat(44),
+            rowSpacing: CGFloat(0),
             functionBarHeight: CGFloat(52),
             outerVerticalPadding: CGFloat(16),
             maxAvailableHeight: CGFloat(340),
@@ -39,5 +41,37 @@ struct StreamSelectorLayoutTests {
         )
 
         #expect(height == CGFloat(340))
+    }
+
+    @Test("Overflow detection stays false when content fits")
+    func overflowDetectionRespectsFitContent() {
+        let isOverflowing = StreamSelectorLayout.isOverflowing(
+            itemCount: 3,
+            showsCreateInlineRow: false,
+            rowHeight: CGFloat(52),
+            rowSpacing: CGFloat(8),
+            functionBarHeight: CGFloat(58),
+            outerVerticalPadding: CGFloat(16),
+            maxAvailableHeight: CGFloat(480),
+            minimumPopoverHeight: CGFloat(140)
+        )
+
+        #expect(isOverflowing == false)
+    }
+
+    @Test("Overflow detection turns on only when capped")
+    func overflowDetectionRespectsCap() {
+        let isOverflowing = StreamSelectorLayout.isOverflowing(
+            itemCount: 8,
+            showsCreateInlineRow: false,
+            rowHeight: CGFloat(52),
+            rowSpacing: CGFloat(8),
+            functionBarHeight: CGFloat(58),
+            outerVerticalPadding: CGFloat(16),
+            maxAvailableHeight: CGFloat(320),
+            minimumPopoverHeight: CGFloat(140)
+        )
+
+        #expect(isOverflowing == true)
     }
 }

@@ -193,4 +193,66 @@ struct ChatLayoutCoordinatorTests {
         let resolvedHeight = coordinator.currentInsetBarHeight(for: inputs, metrics: metrics)
         #expect(abs(resolvedHeight - 88) <= 0.5)
     }
+
+    @Test("T071: Hidden keyboard height does not inflate bottom inset")
+    @MainActor
+    func hiddenKeyboardHeightIgnoredForInsets() {
+        let inputs = ChatLayoutInputs(
+            keyboardHeight: 34,
+            keyboardVisible: false,
+            isInputFocused: false,
+            keyboardAnimationDuration: 0.25,
+            keyboardAnimationCurve: .easeInOut,
+            safeAreaBottom: 34,
+            usesExternalKeyboardInsets: false
+        )
+        let metrics = ChatLayoutMetrics(
+            belowBarGap: 24,
+            flowGap: 10,
+            containerPadding: 12
+        )
+
+        let state = ChatLayoutCoordinator.insetLayoutState(inputs: inputs, metrics: metrics, barHeight: 88)
+        #expect(abs(state.keyboardInset) <= 0.5)
+        #expect(abs(state.listBottomInset - 110) <= 0.5)
+    }
+
+    @Test("T071: Transient zero bar height does not collapse inset after stabilization")
+    @MainActor
+    func transientZeroBarHeightIsIgnoredAfterStabilization() {
+        let coordinator = ChatLayoutCoordinator()
+        let metrics = ChatLayoutMetrics(
+            belowBarGap: 24,
+            flowGap: 10,
+            containerPadding: 12
+        )
+        let inputs = ChatLayoutInputs(
+            keyboardHeight: 0,
+            keyboardVisible: false,
+            isInputFocused: false,
+            keyboardAnimationDuration: 0.25,
+            keyboardAnimationCurve: .easeInOut,
+            safeAreaBottom: 0,
+            usesExternalKeyboardInsets: false
+        )
+
+        coordinator.updateBarHeight(88)
+        _ = coordinator.currentInsetBarHeight(for: inputs, metrics: metrics)
+        let before = coordinator.runtimeInsetLayoutState(
+            inputs: inputs,
+            metrics: metrics,
+            fallbackBarHeight: MessageInputBarMetrics.minInputBarHeight
+        )
+
+        coordinator.updateBarHeight(0)
+        let after = coordinator.runtimeInsetLayoutState(
+            inputs: inputs,
+            metrics: metrics,
+            fallbackBarHeight: MessageInputBarMetrics.minInputBarHeight
+        )
+
+        #expect(abs(before.barHeight - 88) <= 0.5)
+        #expect(abs(after.barHeight - 88) <= 0.5)
+        #expect(abs(after.listBottomInset - before.listBottomInset) <= 0.5)
+    }
 }

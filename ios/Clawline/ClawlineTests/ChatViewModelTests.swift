@@ -843,6 +843,175 @@ struct ChatViewModelTests {
         #expect(viewModel.stream(for: customKey) == nil)
     }
 
+    @Test("Synthetic child stream remains deletable when snapshot omits it")
+    @MainActor
+    func syntheticChildStreamStillDeletable() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        let customKey = "agent:main:clawline:user:s_11223344"
+        chatService.streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: customKey, displayName: "Research", kind: "custom", orderIndex: 1, isBuiltIn: false),
+        ]
+        await viewModel.onAppear()
+        chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
+        try await Task.sleep(for: .milliseconds(30))
+
+        chatService.emit(
+            Message(
+                id: "s_custom_1",
+                role: .assistant,
+                content: "Cached custom content",
+                timestamp: Date(),
+                streaming: false,
+                attachments: [],
+                deviceId: nil,
+                sessionKey: customKey
+            )
+        )
+        try await Task.sleep(for: .milliseconds(30))
+
+        chatService.emitServiceEvent(.streamSnapshot([
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+        ]))
+        try await Task.sleep(for: .milliseconds(40))
+
+        #expect(viewModel.stream(for: customKey) != nil)
+        #expect(viewModel.canDeleteStream(sessionKey: customKey))
+
+        let deleted = await viewModel.deleteStream(sessionKey: customKey)
+        #expect(deleted)
+        #expect(viewModel.stream(for: customKey) == nil)
+    }
+
+    @Test("Create and delete child stream remains consistent")
+    @MainActor
+    func createDeleteChildStreamFlow() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        chatService.streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+        ]
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
+        try await Task.sleep(for: .milliseconds(30))
+
+        let created = await viewModel.createStream(displayName: "Research Flow")
+        #expect(created)
+        let customKeys = viewModel.orderedSessionKeys.filter { $0 != personalSessionKey }
+        #expect(customKeys.count == 1)
+        guard let customKey = customKeys.first else { return }
+
+        #expect(viewModel.canDeleteStream(sessionKey: customKey))
+        let deleted = await viewModel.deleteStream(sessionKey: customKey)
+        #expect(deleted)
+        #expect(viewModel.stream(for: customKey) == nil)
+        #expect(viewModel.activeSessionKey == personalSessionKey)
+    }
+
+    @Test("Create failure can reconcile later via socket streamCreated event")
+    @MainActor
+    func createFailureLaterSocketReconcile() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        chatService.streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+        ]
+        chatService.createStreamError = StreamAPIError(code: "timeout", message: "timeout", statusCode: 504)
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
+        try await Task.sleep(for: .milliseconds(30))
+
+        let created = await viewModel.createStream(displayName: "Late Create")
+        #expect(!created)
+
+        let customKey = "agent:main:clawline:user:s_reconciled"
+        chatService.emitServiceEvent(.streamCreated(
+            makeStreamSession(sessionKey: customKey, displayName: "Late Create", kind: "custom", orderIndex: 2, isBuiltIn: false)
+        ))
+        try await Task.sleep(for: .milliseconds(40))
+
+        #expect(viewModel.stream(for: customKey) != nil)
+    }
+
+    @Test("Delete failure can reconcile later via socket streamDeleted event")
+    @MainActor
+    func deleteFailureLaterSocketReconcile() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let customKey = "agent:main:clawline:user:s_delayed"
+        chatService.streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: customKey, displayName: "Delayed Delete", kind: "custom", orderIndex: 1, isBuiltIn: false),
+        ]
+        chatService.deleteStreamError = StreamAPIError(code: "timeout", message: "timeout", statusCode: 504)
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
+        try await Task.sleep(for: .milliseconds(30))
+        #expect(viewModel.stream(for: customKey) != nil)
+
+        let deleted = await viewModel.deleteStream(sessionKey: customKey)
+        #expect(!deleted)
+        #expect(viewModel.stream(for: customKey) != nil)
+
+        chatService.emitServiceEvent(.streamDeleted(sessionKey: customKey))
+        try await Task.sleep(for: .milliseconds(40))
+
+        #expect(viewModel.stream(for: customKey) == nil)
+    }
+
     @Test("user_info event updates admin state")
     @MainActor
     func userInfoEventUpdatesAdminState() async throws {
@@ -911,6 +1080,8 @@ private final class TestChatService: ChatServicing {
     private(set) var lastSentAttachments: [WireAttachment] = []
     private(set) var lastSentId: String?
     private(set) var lastSessionKey: String?
+    var createStreamError: Error?
+    var deleteStreamError: Error?
     var streams: [StreamSession] = []
 
     private(set) lazy var incomingMessages: AsyncStream<Message> = {
@@ -979,6 +1150,7 @@ private final class TestChatService: ChatServicing {
     }
 
     func createStream(displayName: String, idempotencyKey: String) async throws -> StreamSession {
+        if let createStreamError { throw createStreamError }
         let stream = StreamSession(
             sessionKey: "agent:main:clawline:user:s_\(UUID().uuidString.prefix(8).lowercased())",
             displayName: displayName,
@@ -1003,6 +1175,7 @@ private final class TestChatService: ChatServicing {
     }
 
     func deleteStream(sessionKey: String, idempotencyKey: String?) async throws -> String {
+        if let deleteStreamError { throw deleteStreamError }
         streams.removeAll { $0.sessionKey == sessionKey }
         return sessionKey
     }

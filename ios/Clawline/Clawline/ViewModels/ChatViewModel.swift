@@ -508,7 +508,8 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
 
     func canDeleteStream(sessionKey: String) -> Bool {
         guard let stream = streamsBySessionKey[sessionKey] else { return false }
-        return !stream.isBuiltIn && !syntheticSessionKeys.contains(sessionKey)
+        guard !stream.isBuiltIn else { return false }
+        return !isProtectedNonDeletableStream(stream)
     }
 
     func createStream(displayName: String) async -> Bool {
@@ -1792,6 +1793,18 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
                 return lhs.orderIndex < rhs.orderIndex
             }
             .map(\.sessionKey)
+    }
+
+    private func isProtectedNonDeletableStream(_ stream: StreamSession) -> Bool {
+        switch stream.kind {
+        case "main", "dm", "global_dm":
+            return true
+        default:
+            break
+        }
+        if stream.sessionKey == SessionKey.admin { return true }
+        if SessionKey.isClawlinePersonalDM(stream.sessionKey) { return true }
+        return false
     }
 
     private func streamOrderingPriority(_ stream: StreamSession) -> Int {

@@ -16,23 +16,49 @@ struct StreamManagerSheet: View {
     @State private var draftName = ""
     @State private var activeEditor: EditorMode?
     @State private var isWorking = false
+    @State private var deletingSessionKeys: Set<String> = []
+    @State private var pendingCreateRows: [PendingCreateRow] = []
     @FocusState private var focusedEditor: EditorMode?
 
     private enum EditorMode: Hashable {
         case renaming(String)
     }
 
+    private struct PendingCreateRow: Identifiable, Hashable {
+        let id: UUID
+        let displayName: String
+    }
+
     private let listRowHeight: CGFloat = 52
+    private let listRowSpacing: CGFloat = 8
     private let functionBarHeight: CGFloat = 58
     private let listOuterVerticalPadding: CGFloat = 16
     private let minimumPopoverHeight: CGFloat = 140
     private let popupCornerRadius: CGFloat = 20
 
-    private var cappedContainerHeight: CGFloat {
-        StreamSelectorLayout.containerHeight(
-            itemCount: viewModel.orderedStreams.count,
+    private var listItemCount: Int {
+        viewModel.orderedStreams.count + pendingCreateRows.count
+    }
+
+    private var allowsListScrolling: Bool {
+        StreamSelectorLayout.isOverflowing(
+            itemCount: listItemCount,
             showsCreateInlineRow: false,
             rowHeight: listRowHeight,
+            rowSpacing: listRowSpacing,
+            functionBarHeight: functionBarHeight,
+            outerVerticalPadding: listOuterVerticalPadding,
+            maxAvailableHeight: maxAvailableHeight,
+            minimumPopoverHeight: minimumPopoverHeight
+        )
+    }
+
+    private var cappedContainerHeight: CGFloat {
+        StreamSelectorLayout.containerHeight(
+            itemCount: listItemCount,
+            showsCreateInlineRow: false,
+            rowHeight: listRowHeight,
+            rowSpacing: listRowSpacing,
             functionBarHeight: functionBarHeight,
             outerVerticalPadding: listOuterVerticalPadding,
             maxAvailableHeight: maxAvailableHeight,
@@ -45,6 +71,7 @@ struct StreamManagerSheet: View {
             List {
                 ForEach(viewModel.orderedStreams) { stream in
                     rowContent(for: stream)
+                        .frame(minHeight: listRowHeight, alignment: .center)
                         .listRowSeparator(.hidden)
                         .listRowBackground(Color.clear)
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
@@ -65,8 +92,31 @@ struct StreamManagerSheet: View {
                             .tint(canPerformDeleteAction(for: stream) ? .red : Color.gray.opacity(0.35))
                         }
                 }
+
+                ForEach(pendingCreateRows) { pendingRow in
+                    HStack(spacing: 10) {
+                        Circle()
+                            .fill(Color.primary.opacity(0.18))
+                            .frame(width: 8, height: 8)
+                        Text(pendingRow.displayName)
+                            .font(.system(size: 28, weight: .regular))
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        ProgressView()
+                            .controlSize(.small)
+                            .tint(.secondary)
+                    }
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+                    .frame(minHeight: listRowHeight, alignment: .center)
+                    .contentShape(Rectangle())
+                }
             }
             .listStyle(.plain)
+            .listRowSpacing(listRowSpacing)
+            .scrollDisabled(!allowsListScrolling)
+            .scrollBounceBehavior(.basedOnSize)
+            .contentMargins(.vertical, 0, for: .scrollContent)
             .scrollContentBackground(.hidden)
             .background(Color.clear)
             .padding(.vertical, listOuterVerticalPadding)
@@ -75,16 +125,16 @@ struct StreamManagerSheet: View {
             // Keep add affordance vertically centered regardless of keyboard/layout changes.
             ZStack {
                 Button {
-                    Task { await addStreamDirectly() }
+                    addStreamDirectly()
                 } label: {
                     Image(systemName: "plus")
                         .font(.system(size: 26, weight: .medium))
                         .foregroundStyle(.primary)
-                        .frame(width: 44, height: 44, alignment: .center)
-                        .contentShape(Rectangle())
+                    .frame(width: 44, height: 44, alignment: .center)
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .disabled(isWorking)
+                .disabled(activeEditor != nil)
                 .accessibilityLabel("Add stream")
                 .accessibilityHint("Creates a new stream")
             }
@@ -145,9 +195,15 @@ struct StreamManagerSheet: View {
                     Text(stream.displayName)
                         .font(.system(size: 28, weight: stream.sessionKey == viewModel.activeSessionKey ? .semibold : .regular))
                         .frame(maxWidth: .infinity, alignment: .leading)
+                    if isDeletingStream(stream.sessionKey) {
+                        ProgressView()
+                            .controlSize(.small)
+                            .tint(.secondary)
+                    }
                 }
             }
             .buttonStyle(.plain)
+            .disabled(isWorking || isDeletingStream(stream.sessionKey))
             .contentShape(Rectangle())
         }
     }
@@ -164,32 +220,40 @@ struct StreamManagerSheet: View {
         activeEditor = nil
         draftName = ""
         focusedEditor = nil
+        deletingSessionKeys.removeAll()
+        pendingCreateRows.removeAll()
     }
 
     private func canPerformRenameAction(for stream: StreamSession) -> Bool {
         guard !isWorking else { return false }
+        guard !isDeletingStream(stream.sessionKey) else { return false }
         guard activeEditor != .renaming(stream.sessionKey) else { return false }
         return viewModel.canRenameStream(sessionKey: stream.sessionKey)
     }
 
     private func canPerformDeleteAction(for stream: StreamSession) -> Bool {
         guard !isWorking else { return false }
+        guard !isDeletingStream(stream.sessionKey) else { return false }
         guard activeEditor != .renaming(stream.sessionKey) else { return false }
         return viewModel.canDeleteStream(sessionKey: stream.sessionKey)
     }
 
-    private func addStreamDirectly() async {
-        let existingCount = viewModel.orderedStreams.count
+    private func isDeletingStream(_ sessionKey: String) -> Bool {
+        deletingSessionKeys.contains(sessionKey)
+    }
+
+    private func addStreamDirectly() {
+        let existingCount = viewModel.orderedStreams.count + pendingCreateRows.count
         let name = "Stream \(existingCount + 1)"
-        isWorking = true
-        let succeeded = await viewModel.createStream(displayName: name)
-        isWorking = false
-        guard succeeded else { return }
-        // Switch to the new stream and dismiss
-        if let newStream = viewModel.orderedStreams.last {
-            onSelectStream(newStream.sessionKey)
+        let pendingID = UUID()
+        pendingCreateRows.append(PendingCreateRow(id: pendingID, displayName: name))
+
+        Task {
+            _ = await viewModel.createStream(displayName: name)
+            await MainActor.run {
+                pendingCreateRows.removeAll { $0.id == pendingID }
+            }
         }
-        isPresented = false
     }
 
     private func renameStream(_ stream: StreamSession) async {
@@ -203,9 +267,12 @@ struct StreamManagerSheet: View {
     }
 
     private func deleteStream(_ stream: StreamSession) async {
-        isWorking = true
-        _ = await viewModel.deleteStream(sessionKey: stream.sessionKey)
-        isWorking = false
+        guard !isDeletingStream(stream.sessionKey) else { return }
+        deletingSessionKeys.insert(stream.sessionKey)
+        let succeeded = await viewModel.deleteStream(sessionKey: stream.sessionKey)
+        if !succeeded {
+            deletingSessionKeys.remove(stream.sessionKey)
+        }
         if activeEditor == .renaming(stream.sessionKey) {
             resetInlineEditing()
         }
@@ -217,14 +284,57 @@ enum StreamSelectorLayout {
         itemCount: Int,
         showsCreateInlineRow: Bool,
         rowHeight: CGFloat,
+        rowSpacing: CGFloat,
         functionBarHeight: CGFloat,
         outerVerticalPadding: CGFloat,
         maxAvailableHeight: CGFloat,
         minimumPopoverHeight: CGFloat
     ) -> CGFloat {
-        let rows = max(1, itemCount + (showsCreateInlineRow ? 1 : 0))
-        let desired = CGFloat(rows) * rowHeight + functionBarHeight + (outerVerticalPadding * 2)
+        let desired = desiredHeight(
+            itemCount: itemCount,
+            showsCreateInlineRow: showsCreateInlineRow,
+            rowHeight: rowHeight,
+            rowSpacing: rowSpacing,
+            functionBarHeight: functionBarHeight,
+            outerVerticalPadding: outerVerticalPadding
+        )
         let cap = max(minimumPopoverHeight, maxAvailableHeight)
         return min(desired, cap)
+    }
+
+    static func isOverflowing(
+        itemCount: Int,
+        showsCreateInlineRow: Bool,
+        rowHeight: CGFloat,
+        rowSpacing: CGFloat,
+        functionBarHeight: CGFloat,
+        outerVerticalPadding: CGFloat,
+        maxAvailableHeight: CGFloat,
+        minimumPopoverHeight: CGFloat
+    ) -> Bool {
+        let desired = desiredHeight(
+            itemCount: itemCount,
+            showsCreateInlineRow: showsCreateInlineRow,
+            rowHeight: rowHeight,
+            rowSpacing: rowSpacing,
+            functionBarHeight: functionBarHeight,
+            outerVerticalPadding: outerVerticalPadding
+        )
+        let cap = max(minimumPopoverHeight, maxAvailableHeight)
+        return desired > cap + 0.5
+    }
+
+    private static func desiredHeight(
+        itemCount: Int,
+        showsCreateInlineRow: Bool,
+        rowHeight: CGFloat,
+        rowSpacing: CGFloat,
+        functionBarHeight: CGFloat,
+        outerVerticalPadding: CGFloat
+    ) -> CGFloat {
+        let rows = max(1, itemCount + (showsCreateInlineRow ? 1 : 0))
+        let interRowSpacing = CGFloat(max(0, rows - 1)) * rowSpacing
+        let listHeight = CGFloat(rows) * rowHeight + interRowSpacing + (outerVerticalPadding * 2)
+        return listHeight + functionBarHeight
     }
 }

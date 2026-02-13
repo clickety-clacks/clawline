@@ -41,8 +41,11 @@ protocol DictationFeedbackProviding {
 
 @MainActor
 final class UIKitDictationFeedbackProvider: DictationFeedbackProviding {
+#if os(visionOS)
+#else
     private let impact = UIImpactFeedbackGenerator(style: .light)
     private let notifications = UINotificationFeedbackGenerator()
+#endif
 
     var isVoiceOverRunning: Bool {
         UIAccessibility.isVoiceOverRunning
@@ -57,15 +60,25 @@ final class UIKitDictationFeedbackProvider: DictationFeedbackProviding {
     }
 
     func impactLight() {
+#if os(visionOS)
+        // Haptics generators are unavailable on visionOS devices.
+#else
         impact.impactOccurred()
+#endif
     }
 
     func notifySuccess() {
+#if os(visionOS)
+#else
         notifications.notificationOccurred(.success)
+#endif
     }
 
     func notifyError() {
+#if os(visionOS)
+#else
         notifications.notificationOccurred(.error)
+#endif
     }
 }
 

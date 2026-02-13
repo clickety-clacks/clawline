@@ -118,6 +118,11 @@ struct ChatView: View {
     init(viewModel: ChatViewModel, toastManager: ToastManager) {
         self._viewModel = Bindable(wrappedValue: viewModel)
         self.toastManager = toastManager
+        _dictationCoordinator = State(
+            initialValue: DictationCoordinator(
+                bridge: ComposeInputDictationBridge(host: viewModel)
+            )
+        )
     }
 
     @Environment(\.colorScheme) private var colorScheme
@@ -126,6 +131,7 @@ struct ChatView: View {
 
     @State private var inputBarHeight: CGFloat = 0
     @State private var streamToastManager = StreamToastManager()
+    @State private var dictationCoordinator: DictationCoordinator
 
     private var isKeyboardVisible: Bool {
         keyboardHeight > 0.5
@@ -450,13 +456,17 @@ struct ChatView: View {
         }
         .task { await viewModel.onAppear() }
         .onDisappear {
+            dictationCoordinator.handleAppBackgrounded()
             viewModel.onDisappear()
             resetScrollButtonInteractionState()
         }
         .onChange(of: scenePhase) { _, phase in
-            guard phase == .active else { return }
-            viewModel.handleSceneDidBecomeActive()
-            keyboardRefreshToken &+= 1
+            if phase == .active {
+                viewModel.handleSceneDidBecomeActive()
+                keyboardRefreshToken &+= 1
+            } else {
+                dictationCoordinator.handleAppBackgrounded()
+            }
         }
         .background(
             KeyboardLayoutGuideReader(refreshToken: keyboardRefreshToken) { height, duration, curve in
@@ -631,6 +641,7 @@ struct ChatView: View {
             layoutCoordinator.setActiveSessionKey(viewModel.activeSessionKey)
             layoutCoordinator.updateInputs(layoutInputs, metrics: layoutMetrics)
             layoutCoordinator.markInputsChanged()
+            updateDictationContext(viewModel: viewModel)
         }
         .onChange(of: keyboardHeight) { _, _ in layoutRevision &+= 1 }
         .onChange(of: keyboardAnimationDuration) { _, _ in layoutRevision &+= 1 }
@@ -639,6 +650,21 @@ struct ChatView: View {
         .onChange(of: isInputFocused) { _, _ in layoutRevision &+= 1 }
         .onChange(of: geometry.safeAreaInsets.bottom) { _, _ in layoutRevision &+= 1 }
         .onChange(of: horizontalSizeClass) { _, _ in layoutRevision &+= 1 }
+        .onChange(of: viewModel.activeSessionKey) { _, _ in
+            updateDictationContext(viewModel: viewModel)
+        }
+        .onChange(of: viewModel.inputContent.length) { _, _ in
+            updateDictationContext(viewModel: viewModel)
+        }
+        .onChange(of: isInputFocused) { _, _ in
+            updateDictationContext(viewModel: viewModel)
+        }
+        .onChange(of: selectionRange) { _, _ in
+            updateDictationContext(viewModel: viewModel)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIAccessibility.reduceMotionStatusDidChangeNotification)) { _ in
+            updateDictationContext(viewModel: viewModel)
+        }
         .overlay(alignment: .bottom) {
 #if os(visionOS)
             floatingPageDotsView(
@@ -695,6 +721,16 @@ struct ChatView: View {
             return AttributedString("v\(version) (build ") + buildText + AttributedString(")")
         }
         return AttributedString("v\(version)")
+    }
+
+    private func updateDictationContext(viewModel: ChatViewModel) {
+        dictationCoordinator.updateContext(
+            sessionKey: viewModel.activeSessionKey,
+            composeIsEmpty: viewModel.inputContent.isEffectivelyEmpty,
+            textFieldFocused: isInputFocused,
+            selectionLength: selectionRange.length,
+            reduceMotionEnabled: UIAccessibility.isReduceMotionEnabled
+        )
     }
 
     @ViewBuilder
@@ -806,16 +842,20 @@ struct ChatView: View {
                 content: $viewModel.inputContent,
                 selectionRange: $selectionRange,
                 pendingInsertions: $pendingInputInsertions,
+                dictation: dictationCoordinator,
                 placeholderText: viewModel.activeSessionDisplayName,
                 resetToken: viewModel.inputResetToken,
                 canSend: viewModel.canSend,
                 isSending: viewModel.isSending,
                 connectionAlert: viewModel.connectionAlert,
                 focusTrigger: focusRequestID,
+                isTextFieldFocused: isInputFocused,
                 bottomSafeAreaInset: geometry.safeAreaInsets.bottom,
                 isKeyboardVisible: isKeyboardVisible,
                 onSend: {
-                    viewModel.send()
+                    dictationCoordinator.handleSendTapped {
+                        viewModel.send()
+                    }
                 },
                 onCancel: { viewModel.cancelSend() },
                 onAdd: {

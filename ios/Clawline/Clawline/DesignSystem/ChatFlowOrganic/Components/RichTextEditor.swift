@@ -24,6 +24,8 @@ struct RichTextEditor: UIViewRepresentable {
     var textColor: UIColor = .label
     var onFocusChange: (Bool) -> Void
     var onSubmit: (() -> Void)?
+    var onEscape: (() -> Void)?
+    var onEscapeLongPress: (() -> Void)?
     var onPasteImages: (([UIImage]) -> Void)?
     var trailingPadding: CGFloat = 20
 
@@ -33,6 +35,12 @@ struct RichTextEditor: UIViewRepresentable {
         let coordinator = context.coordinator
         textView.onPasteImages = { images in
             coordinator.parent.onPasteImages?(images)
+        }
+        textView.onEscape = {
+            coordinator.parent.onEscape?()
+        }
+        textView.onEscapeLongPress = {
+            coordinator.parent.onEscapeLongPress?()
         }
         textView.onLayout = { _ in
             coordinator.updateHeight(for: textView, allowAutoScroll: false)
@@ -69,6 +77,12 @@ struct RichTextEditor: UIViewRepresentable {
         textView.onPasteImages = { images in
             coordinator.parent.onPasteImages?(images)
         }
+        textView.onEscape = {
+            coordinator.parent.onEscape?()
+        }
+        textView.onEscapeLongPress = {
+            coordinator.parent.onEscapeLongPress?()
+        }
         textView.onLayout = { _ in
             coordinator.updateHeight(for: textView, allowAutoScroll: false)
         }
@@ -84,6 +98,14 @@ struct RichTextEditor: UIViewRepresentable {
             logger.info("[trace] updateUIView applied reset len=\(attributedText.length)")
         }
         context.coordinator.isApplyingLocalEdit = false
+
+        if !isComposing,
+           !context.coordinator.isApplyingLocalEdit,
+           !((textView.attributedText?.isEqual(attributedText)) ?? false) {
+            textView.attributedText = attributedText
+            context.coordinator.enforceBaseAttributes(on: textView)
+            context.coordinator.ensureTypingAttributes(on: textView)
+        }
 
         if textView.isInputEnabled != isEditable {
             textView.isInputEnabled = isEditable
@@ -298,6 +320,8 @@ struct RichTextEditor: UIViewRepresentable {
 ///      image items before they can be converted to text
 final class PastableTextView: UITextView, UITextPasteDelegate {
     var onPasteImages: (([UIImage]) -> Void)?
+    var onEscape: (() -> Void)?
+    var onEscapeLongPress: (() -> Void)?
     var onLayout: ((CGFloat) -> Void)?
     var isInputEnabled: Bool = true {
         didSet {
@@ -317,6 +341,10 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
     /// Text providers collected during the delegate's `transforming` calls,
     /// flushed after the run-loop tick so all items from a single drop are batched.
     private var _delegateTextProviders: [NSItemProvider] = []
+    private var escapeLongPressTask: Task<Void, Never>?
+    private var isEscapePressed = false
+    private var didFireEscapeLongPress = false
+    private let escapeLongPressDuration: Duration = .milliseconds(700)
 
     override init(frame: CGRect, textContainer: NSTextContainer?) {
         super.init(frame: frame, textContainer: textContainer)
@@ -414,6 +442,57 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
         guard canHandleInputShortcut else { return }
         guard let fullRange = textRange(from: beginningOfDocument, to: endOfDocument) else { return }
         replace(fullRange, withText: "")
+    }
+
+    override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        guard presses.contains(where: isEscapePress(_:)) else {
+            super.pressesBegan(presses, with: event)
+            return
+        }
+        guard canHandleInputShortcut else { return }
+        guard !isEscapePressed else { return }
+        isEscapePressed = true
+        didFireEscapeLongPress = false
+        escapeLongPressTask?.cancel()
+        escapeLongPressTask = Task { [weak self] in
+            guard let self else { return }
+            try? await Task.sleep(for: escapeLongPressDuration)
+            await MainActor.run {
+                guard self.isEscapePressed else { return }
+                self.didFireEscapeLongPress = true
+                self.onEscapeLongPress?()
+            }
+        }
+    }
+
+    override func pressesEnded(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        guard presses.contains(where: isEscapePress(_:)) else {
+            super.pressesEnded(presses, with: event)
+            return
+        }
+        escapeLongPressTask?.cancel()
+        escapeLongPressTask = nil
+        if !didFireEscapeLongPress {
+            onEscape?()
+        }
+        isEscapePressed = false
+        didFireEscapeLongPress = false
+    }
+
+    override func pressesCancelled(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        guard presses.contains(where: isEscapePress(_:)) else {
+            super.pressesCancelled(presses, with: event)
+            return
+        }
+        escapeLongPressTask?.cancel()
+        escapeLongPressTask = nil
+        isEscapePressed = false
+        didFireEscapeLongPress = false
+    }
+
+    private func isEscapePress(_ press: UIPress) -> Bool {
+        guard press.key != nil else { return false }
+        return press.key?.charactersIgnoringModifiers == UIKeyCommand.inputEscape
     }
 
     // MARK: - Paste action gating

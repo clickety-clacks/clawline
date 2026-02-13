@@ -40,15 +40,18 @@ private let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "
 struct MessageInputBar: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.settingsManager) private var settings
+    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
     @Binding var content: NSAttributedString
     @Binding var selectionRange: NSRange
     @Binding var pendingInsertions: [PendingAttachment]
+    let dictation: DictationCoordinator
     var placeholderText: String = "Message"
     var resetToken: Int
     let canSend: Bool
     let isSending: Bool
     let connectionAlert: ConnectionAlertSeverity?
     let focusTrigger: Int
+    let isTextFieldFocused: Bool
     /// Pass geometry.safeAreaInsets.bottom directly - DO NOT pass a computed Bool.
     let bottomSafeAreaInset: CGFloat
     /// Keyboard visibility state owned by parent view to survive geometry changes.
@@ -60,6 +63,16 @@ struct MessageInputBar: View {
     var onPasteImages: (([UIImage]) -> Void)?
 
     @State private var editorHeight: CGFloat = 44
+    @State private var micPressTask: Task<Void, Never>?
+    @State private var micDidStartWalkieTalkie = false
+    @State private var swipeGestureStart: Date?
+    @State private var swipeThresholdTime: Date?
+    @State private var swipeBlockedForEditing = false
+    @State private var swipeStartedWalkieTalkie = false
+    @State private var micTransientVisible = false
+    @State private var micTransientOpacity: Double = 0
+    @State private var micTransientOffset: CGFloat = 0
+    @State private var micFadeTask: Task<Void, Never>?
     let isCompact: Bool
 
     private var metrics: MessageInputBarMetrics {
@@ -119,6 +132,22 @@ struct MessageInputBar: View {
         } else {
             return AnyShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
         }
+    }
+
+    private var inputCornerRadius: CGFloat {
+        isSingleLine ? inputHeight / 2 : 22
+    }
+
+    private var reduceMotionForDictation: Bool {
+        accessibilityReduceMotion || dictation.reduceMotionEnabled
+    }
+
+    private var shouldRenderMic: Bool {
+        dictation.micVisible || micTransientVisible
+    }
+
+    private var micTrailingPadding: CGFloat {
+        shouldRenderMic ? 52 : 20
     }
 
     private var connectionAlertHint: String? {
@@ -302,8 +331,14 @@ struct MessageInputBar: View {
                         guard !isSending, canSend else { return }
                         onSend()
                     },
+                    onEscape: {
+                        dictation.stopFromEscapeKey()
+                    },
+                    onEscapeLongPress: {
+                        dictation.discardFromEscapeLongPress()
+                    },
                     onPasteImages: onPasteImages,
-                    trailingPadding: 20
+                    trailingPadding: micTrailingPadding
                 )
                 .opacity(isSending ? 0.5 : 1)
 
@@ -316,12 +351,12 @@ struct MessageInputBar: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
                         .frame(maxHeight: .infinity, alignment: .center)
                         .padding(.leading, 20)
-                        .padding(.trailing, 20)
+                        .padding(.trailing, micTrailingPadding)
                 }
 
                 if let alertMessage = connectionAlertMessage,
                    let alertColor = connectionAlertColor {
-                    RoundedRectangle(cornerRadius: isSingleLine ? inputHeight / 2 : 22, style: .continuous)
+                    RoundedRectangle(cornerRadius: inputCornerRadius, style: .continuous)
                         .fill(alertColor.opacity(0.08))
                         .allowsHitTesting(false)
 
@@ -336,10 +371,43 @@ struct MessageInputBar: View {
                     .foregroundColor(alertColor)
                     .allowsHitTesting(false)
                 }
+
+                if dictation.state == .error,
+                   let message = dictation.errorMessage {
+                    RoundedRectangle(cornerRadius: inputCornerRadius, style: .continuous)
+                        .fill(Color.red.opacity(0.1))
+                        .allowsHitTesting(false)
+
+                    HStack(spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 14, weight: .semibold))
+                        Text(message)
+                            .font(.system(size: 13, weight: .semibold))
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 12)
+                    .foregroundColor(.red)
+                    .allowsHitTesting(false)
+                }
+
+                if shouldRenderMic {
+                    micButton
+                        .padding(.trailing, 8)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+                        .opacity(dictation.micVisible ? 1 : micTransientOpacity)
+                        .offset(x: dictation.micVisible ? 0 : micTransientOffset)
+                        .allowsHitTesting(dictation.micVisible)
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
+                        .animation(.easeOut(duration: isTextFieldFocused ? 0.7 : 0.35), value: dictation.micVisible)
+                }
             }
             .tint(inputTintColor)
             .frame(height: inputHeight)
             .frame(maxWidth: .infinity, alignment: .bottom)
+            .contentShape(Rectangle())
+            .simultaneousGesture(swipeDictationGesture)
 #if os(visionOS)
             .background(.regularMaterial, in: inputShape)
 #else
@@ -355,7 +423,31 @@ struct MessageInputBar: View {
                         inputShape
                             .stroke(alertColor.opacity(0.4), lineWidth: 1)
                     }
+                    if dictation.isWaveformVisible {
+                        DictationWaveformBorder(
+                            isActive: true,
+                            amplitude: dictation.waveformDisplacement,
+                            cornerRadius: inputCornerRadius,
+                            reduceMotionEnabled: reduceMotionForDictation
+                        )
+                    }
                 }
+            }
+            .accessibilityAction(named: Text("Start Sticky Dictation")) {
+                guard dictation.micVisible || dictation.swipeActivationEnabled else { return }
+                dictation.startStickyDictation()
+                beginMicFadeOut(fromSwipe: !dictation.micVisible)
+            }
+            .accessibilityAction(named: Text("Start Walkie-Talkie Dictation")) {
+                guard dictation.micVisible || dictation.swipeActivationEnabled else { return }
+                dictation.startWalkieTalkieDictation()
+                beginMicFadeOut(fromSwipe: !dictation.micVisible)
+            }
+            .accessibilityAction(named: Text("Stop Dictation")) {
+                dictation.stopFromVoiceOverAction()
+            }
+            .accessibilityAction(named: Text("Cancel and Discard Dictation")) {
+                dictation.discardFromVoiceOverAction()
             }
 
             // Send button - stable container + stable glass background
@@ -407,23 +499,193 @@ struct MessageInputBar: View {
             guard newValue == 0 else { return }
             editorHeight = metrics.inputBarHeight
         }
+        .onDisappear {
+            micPressTask?.cancel()
+            micFadeTask?.cancel()
+        }
+    }
+
+    private var micButton: some View {
+        Image(systemName: "mic.fill")
+            .font(.system(size: 16, weight: .semibold))
+            .foregroundStyle(inputTintColor.opacity(0.9))
+            .frame(width: metrics.inputBarHeight, height: metrics.inputBarHeight)
+            .contentShape(Rectangle())
+            .highPriorityGesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { _ in
+                        guard !isSending else { return }
+                        handleMicPressChanged()
+                    }
+                    .onEnded { _ in
+                        handleMicPressEnded()
+                    }
+            )
+            .accessibilityLabel("Start dictation")
+    }
+
+    private var swipeDictationGesture: some Gesture {
+        DragGesture(minimumDistance: 0)
+            .onChanged { value in
+                handleSwipeChanged(value)
+            }
+            .onEnded { value in
+                handleSwipeEnded(value)
+            }
+    }
+
+    private func handleMicPressChanged() {
+        guard dictation.micVisible else { return }
+        guard micPressTask == nil else { return }
+
+        micDidStartWalkieTalkie = false
+        micPressTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(350))
+            guard dictation.micVisible else { return }
+            micDidStartWalkieTalkie = true
+            dictation.startWalkieTalkieDictation()
+            beginMicFadeOut(fromSwipe: false)
+        }
+    }
+
+    private func handleMicPressEnded() {
+        let holdTask = micPressTask
+        micPressTask = nil
+        holdTask?.cancel()
+
+        if micDidStartWalkieTalkie {
+            micDidStartWalkieTalkie = false
+            dictation.endWalkieTalkieIfNeeded()
+            return
+        }
+
+        guard dictation.micVisible else { return }
+        dictation.startStickyDictation()
+        beginMicFadeOut(fromSwipe: false)
+    }
+
+    private func handleSwipeChanged(_ value: DragGesture.Value) {
+        let dx = value.translation.width
+        let dy = value.translation.height
+
+        if swipeGestureStart == nil {
+            swipeGestureStart = Date()
+            swipeThresholdTime = nil
+            swipeBlockedForEditing = false
+            swipeStartedWalkieTalkie = false
+        }
+
+        if dictation.isDictationActive {
+            return
+        }
+
+        guard dictation.swipeActivationEnabled else { return }
+        guard !swipeBlockedForEditing else { return }
+
+        if let swipeGestureStart,
+           Date().timeIntervalSince(swipeGestureStart) >= 0.3,
+           abs(dx) < 28 {
+            swipeBlockedForEditing = true
+            return
+        }
+
+        guard abs(dx) >= 28 else { return }
+        guard abs(dx) >= 1.4 * abs(dy) else { return }
+        guard dx <= -28 else { return }
+
+        if swipeThresholdTime == nil {
+            swipeThresholdTime = Date()
+            return
+        }
+
+        if let swipeThresholdTime,
+           !swipeStartedWalkieTalkie,
+           Date().timeIntervalSince(swipeThresholdTime) >= 0.35 {
+            swipeStartedWalkieTalkie = true
+            dictation.startWalkieTalkieDictation()
+            beginMicFadeOut(fromSwipe: true)
+        }
+    }
+
+    private func handleSwipeEnded(_ value: DragGesture.Value) {
+        defer {
+            swipeGestureStart = nil
+            swipeThresholdTime = nil
+            swipeBlockedForEditing = false
+            swipeStartedWalkieTalkie = false
+        }
+
+        let dx = value.translation.width
+        let dy = value.translation.height
+        let isHorizontal = abs(dx) >= 28 && abs(dx) >= 1.4 * abs(dy)
+
+        if dictation.isDictationActive {
+            if isHorizontal, dx >= 28 {
+                dictation.stopDictationFromSwipeRight()
+            } else if dictation.isWalkieTalkieActive {
+                dictation.endWalkieTalkieIfNeeded()
+            }
+            return
+        }
+
+        guard dictation.swipeActivationEnabled else { return }
+        guard isHorizontal, dx <= -28 else { return }
+
+        if swipeStartedWalkieTalkie {
+            dictation.endWalkieTalkieIfNeeded()
+            return
+        }
+
+        dictation.startStickyDictation()
+        beginMicFadeOut(fromSwipe: true)
+    }
+
+    private func beginMicFadeOut(fromSwipe: Bool) {
+        micFadeTask?.cancel()
+        micTransientVisible = true
+        micTransientOpacity = 1
+        micTransientOffset = fromSwipe ? 24 : 0
+
+        if fromSwipe {
+            withAnimation(.easeOut(duration: 0.35)) {
+                micTransientOffset = 0
+            }
+        }
+
+        withAnimation(.easeOut(duration: 1.2)) {
+            micTransientOpacity = 0
+        }
+
+        micFadeTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(1_250))
+            micTransientVisible = false
+            micTransientOpacity = 0
+            micTransientOffset = 0
+        }
     }
 }
 
 #Preview("Message Input") {
     @Previewable @State var content = NSAttributedString(string: "Hello")
     @Previewable @State var selection = NSRange(location: 5, length: 0)
+    let draftHost = PreviewDictationDraftHost()
+    let dictation = DictationCoordinator(
+        bridge: ComposeInputDictationBridge(host: draftHost),
+        configuredAPIKey: { nil }
+    )
     Color.clear
         .safeAreaInset(edge: .bottom) {
             MessageInputBar(
                 content: $content,
                 selectionRange: $selection,
                 pendingInsertions: .constant([]),
+                dictation: dictation,
                 resetToken: 0,
                 canSend: true,
                 isSending: false,
                 connectionAlert: nil,
                 focusTrigger: 0,
+                isTextFieldFocused: false,
                 bottomSafeAreaInset: 34,
                 isKeyboardVisible: false,
                 onSend: {},
@@ -434,4 +696,18 @@ struct MessageInputBar: View {
                 isCompact: true
             )
         }
+}
+
+@MainActor
+private final class PreviewDictationDraftHost: DictationComposeDraftHosting {
+    var activeSessionKey: String = "preview"
+
+    func captureComposeDraftSnapshot(for sessionKey: String) -> ComposeDraftSnapshot {
+        .empty
+    }
+
+    func applyComposeDraftSnapshot(_ snapshot: ComposeDraftSnapshot,
+                                   to sessionKey: String,
+                                   moveCursorToEnd: Bool,
+                                   announceEditorReset: Bool) {}
 }

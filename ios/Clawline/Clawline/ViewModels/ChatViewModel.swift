@@ -21,7 +21,7 @@ protocol ChatViewModelHosting: AnyObject {
 
 @Observable
 @MainActor
-final class ChatViewModel: ChatViewModelHosting {
+final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
     private let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "MessagePipeline")
     private let instanceId = UUID().uuidString
     private(set) var messages: [Message] = []
@@ -30,6 +30,8 @@ final class ChatViewModel: ChatViewModelHosting {
     private(set) var orderedSessionKeys: [String] = []
     private var syntheticSessionKeys: Set<String> = []
     private var didRestoreActiveSessionKey = false
+    private var draftContentBySession: [String: NSAttributedString] = [:]
+    private var draftAttachmentsBySession: [String: [UUID: PendingAttachment]] = [:]
 
     func messages(for sessionKey: String) -> [Message] {
         sessionMessages[sessionKey] ?? []
@@ -50,7 +52,12 @@ final class ChatViewModel: ChatViewModelHosting {
     func setActiveSessionKey(_ sessionKey: String) {
         guard orderedSessionKeys.contains(sessionKey) else { return }
         guard activeSessionKey != sessionKey else { return }
+        let previousSessionKey = activeSessionKey
+        if !previousSessionKey.isEmpty {
+            persistDraft(for: previousSessionKey)
+        }
         activeSessionKey = sessionKey
+        restoreDraft(for: sessionKey, announceEditorReset: true)
         restoreLastServerMessageIdIfNeeded(for: sessionKey)
         restoreCachedMessagesIfNeeded(for: sessionKey)
         ensureSessionStorage(for: sessionKey)
@@ -66,10 +73,15 @@ final class ChatViewModel: ChatViewModelHosting {
     var inputContent: NSAttributedString = NSAttributedString() {
         didSet {
             pruneAttachmentData()
+            persistDraftContentForActiveSessionIfNeeded()
             logger.info("[trace] inputContent len=\(self.inputContent.length) empty=\(self.inputContent.isEffectivelyEmpty) canSend=\(self.canSend) alert=\(String(describing: self.connectionAlert))")
         }
     }
-    var attachmentData: [UUID: PendingAttachment] = [:]
+    var attachmentData: [UUID: PendingAttachment] = [:] {
+        didSet {
+            persistDraftAttachmentsForActiveSessionIfNeeded()
+        }
+    }
     private(set) var isSending: Bool = false
     private(set) var isAssistantTyping: Bool = false
     private(set) var typingSessionKey: String?
@@ -477,6 +489,8 @@ final class ChatViewModel: ChatViewModelHosting {
         restoredSessionKeys.removeAll()
         restoredStreamMetadataForUserId = nil
         resetSessionProvisioningState(clearPendingSend: true)
+        draftContentBySession.removeAll()
+        draftAttachmentsBySession.removeAll()
         clearMessageCache()
         clearStreamMetadataCache()
     }
@@ -1208,7 +1222,62 @@ final class ChatViewModel: ChatViewModelHosting {
         inputContent = NSAttributedString(string: "")
         attachmentData.removeAll()
         uploadedAssetIds.removeAll()
+        persistDraft(for: activeSessionKey)
         inputResetToken &+= 1
+    }
+
+    private func persistDraft(for sessionKey: String) {
+        guard !sessionKey.isEmpty else { return }
+        draftContentBySession[sessionKey] = inputContent
+        draftAttachmentsBySession[sessionKey] = attachmentData
+    }
+
+    private func restoreDraft(for sessionKey: String, announceEditorReset: Bool) {
+        guard !sessionKey.isEmpty else { return }
+        let content = draftContentBySession[sessionKey] ?? NSAttributedString(string: "")
+        let attachments = draftAttachmentsBySession[sessionKey] ?? [:]
+        inputContent = content
+        attachmentData = attachments
+        if announceEditorReset {
+            inputResetToken &+= 1
+        }
+    }
+
+    private func persistDraftContentForActiveSessionIfNeeded() {
+        guard !activeSessionKey.isEmpty else { return }
+        draftContentBySession[activeSessionKey] = inputContent
+    }
+
+    private func persistDraftAttachmentsForActiveSessionIfNeeded() {
+        guard !activeSessionKey.isEmpty else { return }
+        draftAttachmentsBySession[activeSessionKey] = attachmentData
+    }
+
+    func captureComposeDraftSnapshot(for sessionKey: String) -> ComposeDraftSnapshot {
+        guard !sessionKey.isEmpty else { return .empty }
+        if sessionKey == activeSessionKey {
+            return ComposeDraftSnapshot(content: inputContent, attachments: attachmentData)
+        }
+        return ComposeDraftSnapshot(
+            content: draftContentBySession[sessionKey] ?? NSAttributedString(string: ""),
+            attachments: draftAttachmentsBySession[sessionKey] ?? [:]
+        )
+    }
+
+    func applyComposeDraftSnapshot(_ snapshot: ComposeDraftSnapshot,
+                                   to sessionKey: String,
+                                   moveCursorToEnd: Bool,
+                                   announceEditorReset: Bool) {
+        guard !sessionKey.isEmpty else { return }
+        draftContentBySession[sessionKey] = snapshot.content
+        draftAttachmentsBySession[sessionKey] = snapshot.attachments
+
+        guard sessionKey == activeSessionKey else { return }
+        inputContent = snapshot.content
+        attachmentData = snapshot.attachments
+        if announceEditorReset {
+            inputResetToken &+= 1
+        }
     }
 
 
@@ -1596,6 +1665,7 @@ final class ChatViewModel: ChatViewModelHosting {
                 activeSessionKey = first
             }
             if !activeSessionKey.isEmpty {
+                restoreDraft(for: activeSessionKey, announceEditorReset: true)
                 ensureSessionStorage(for: activeSessionKey)
                 messages = sessionMessages[activeSessionKey] ?? []
                 lastServerMessageId = lastServerMessageIdBySession[activeSessionKey]
@@ -1674,6 +1744,8 @@ final class ChatViewModel: ChatViewModelHosting {
         syntheticSessionKeys.remove(sessionKey)
         recalculateOrderedSessionKeys()
         sessionMessages.removeValue(forKey: sessionKey)
+        draftContentBySession.removeValue(forKey: sessionKey)
+        draftAttachmentsBySession.removeValue(forKey: sessionKey)
         lastServerMessageIdBySession.removeValue(forKey: sessionKey)
         persistLastServerMessageId(nil, for: sessionKey)
         persistMessages([], for: sessionKey)
@@ -1694,6 +1766,9 @@ final class ChatViewModel: ChatViewModelHosting {
                 activeSessionKey = ""
                 messages = []
                 lastServerMessageId = nil
+                inputContent = NSAttributedString(string: "")
+                attachmentData.removeAll()
+                inputResetToken &+= 1
             }
         } else if !activeSessionKey.isEmpty {
             messages = sessionMessages[activeSessionKey] ?? []

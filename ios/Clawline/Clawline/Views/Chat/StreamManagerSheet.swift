@@ -35,7 +35,7 @@ struct StreamManagerSheet: View {
     private let listRowSpacing: CGFloat = 2
     private let listRowHorizontalInset: CGFloat = 12
     private let functionBarHeight: CGFloat = 40
-    private let listOuterVerticalPadding: CGFloat = 10
+    private let listOuterVerticalPadding: CGFloat = 20
     private let minimumPopoverHeight: CGFloat = 140
     private let popupCornerRadius: CGFloat = 20
 
@@ -168,6 +168,7 @@ struct StreamManagerSheet: View {
             .disabled(activeEditor != nil)
             .accessibilityLabel("Add stream")
             .accessibilityHint("Creates a new stream")
+            .frame(maxHeight: .infinity, alignment: .center)
             .frame(maxWidth: .infinity, alignment: .center)
             .frame(height: functionBarHeight, alignment: .center)
         }

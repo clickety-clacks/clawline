@@ -9,6 +9,7 @@ import SwiftUI
 
 struct StreamManagerSheet: View {
     @Bindable var viewModel: ChatViewModel
+    let streams: [StreamSession]
     @Binding var isPresented: Bool
     let maxAvailableHeight: CGFloat
     let onSelectStream: (String) -> Void
@@ -18,6 +19,7 @@ struct StreamManagerSheet: View {
     @State private var isWorking = false
     @State private var deletingSessionKeys: Set<String> = []
     @State private var pendingCreateRows: [PendingCreateRow] = []
+    @State private var renderedContainerHeight: CGFloat = 0
     @FocusState private var focusedEditor: EditorMode?
 
     private enum EditorMode: Hashable {
@@ -30,27 +32,40 @@ struct StreamManagerSheet: View {
     }
 
     private let listRowHeight: CGFloat = 52
-    private let listRowSpacing: CGFloat = 8
-    private let functionBarHeight: CGFloat = 58
-    private let listOuterVerticalPadding: CGFloat = 16
+    private let listRowSpacing: CGFloat = 2
+    private let listRowHorizontalInset: CGFloat = 12
+    private let functionBarHeight: CGFloat = 40
+    private let listOuterVerticalPadding: CGFloat = 10
     private let minimumPopoverHeight: CGFloat = 140
     private let popupCornerRadius: CGFloat = 20
 
     private var listItemCount: Int {
-        viewModel.orderedStreams.count + pendingCreateRows.count
+        streams.count + pendingCreateRows.count
     }
 
-    private var allowsListScrolling: Bool {
-        StreamSelectorLayout.isOverflowing(
+    private var listContentHeight: CGFloat {
+        StreamSelectorLayout.listContentHeight(
             itemCount: listItemCount,
             showsCreateInlineRow: false,
             rowHeight: listRowHeight,
             rowSpacing: listRowSpacing,
-            functionBarHeight: functionBarHeight,
-            outerVerticalPadding: listOuterVerticalPadding,
-            maxAvailableHeight: maxAvailableHeight,
-            minimumPopoverHeight: minimumPopoverHeight
+            outerVerticalPadding: listOuterVerticalPadding
         )
+    }
+
+    private var effectiveContainerHeight: CGFloat {
+        if renderedContainerHeight > 0 {
+            return renderedContainerHeight
+        }
+        return cappedContainerHeight
+    }
+
+    private var listViewportHeight: CGFloat {
+        max(0, effectiveContainerHeight - functionBarHeight)
+    }
+
+    private var allowsListScrolling: Bool {
+        listContentHeight > listViewportHeight + 0.5
     }
 
     private var cappedContainerHeight: CGFloat {
@@ -69,9 +84,17 @@ struct StreamManagerSheet: View {
     var body: some View {
         VStack(spacing: 0) {
             List {
-                ForEach(viewModel.orderedStreams) { stream in
+                ForEach(streams) { stream in
                     rowContent(for: stream)
-                        .frame(minHeight: listRowHeight, alignment: .center)
+                        .frame(height: listRowHeight, alignment: .center)
+                        .listRowInsets(
+                            EdgeInsets(
+                                top: 0,
+                                leading: listRowHorizontalInset,
+                                bottom: 0,
+                                trailing: listRowHorizontalInset
+                            )
+                        )
                         .listRowSeparator(.hidden)
                         .listRowBackground(Color.clear)
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
@@ -108,11 +131,20 @@ struct StreamManagerSheet: View {
                     }
                     .listRowSeparator(.hidden)
                     .listRowBackground(Color.clear)
-                    .frame(minHeight: listRowHeight, alignment: .center)
+                    .frame(height: listRowHeight, alignment: .center)
+                    .listRowInsets(
+                        EdgeInsets(
+                            top: 0,
+                            leading: listRowHorizontalInset,
+                            bottom: 0,
+                            trailing: listRowHorizontalInset
+                        )
+                    )
                     .contentShape(Rectangle())
                 }
             }
             .listStyle(.plain)
+            .environment(\.defaultMinListRowHeight, listRowHeight)
             .listRowSpacing(listRowSpacing)
             .scrollDisabled(!allowsListScrolling)
             .scrollBounceBehavior(.basedOnSize)
@@ -122,23 +154,21 @@ struct StreamManagerSheet: View {
             .padding(.vertical, listOuterVerticalPadding)
             .disabled(isWorking)
 
-            // Keep add affordance vertically centered regardless of keyboard/layout changes.
-            ZStack {
-                Button {
-                    addStreamDirectly()
-                } label: {
-                    Image(systemName: "plus")
-                        .font(.system(size: 26, weight: .medium))
-                        .foregroundStyle(.primary)
-                    .frame(width: 44, height: 44, alignment: .center)
+            // Keep add affordance optically centered in a fixed-height toolbar regardless of keyboard changes.
+            Button {
+                addStreamDirectly()
+            } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: 27, weight: .regular))
+                    .foregroundStyle(.primary)
+                    .frame(width: functionBarHeight, height: functionBarHeight, alignment: .center)
                     .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .disabled(activeEditor != nil)
-                .accessibilityLabel("Add stream")
-                .accessibilityHint("Creates a new stream")
             }
-            .frame(maxWidth: .infinity)
+            .buttonStyle(.plain)
+            .disabled(activeEditor != nil)
+            .accessibilityLabel("Add stream")
+            .accessibilityHint("Creates a new stream")
+            .frame(maxWidth: .infinity, alignment: .center)
             .frame(height: functionBarHeight, alignment: .center)
         }
         .frame(minWidth: 280, idealWidth: 320, maxWidth: 360)
@@ -146,23 +176,20 @@ struct StreamManagerSheet: View {
 #if !os(visionOS)
         .glassEffect(.regular, in: RoundedRectangle(cornerRadius: popupCornerRadius, style: .continuous))
 #endif
-        .background(
-            RoundedRectangle(cornerRadius: popupCornerRadius, style: .continuous)
-                .fill(Color.white.opacity(0.08))
-        )
         .overlay(
             RoundedRectangle(cornerRadius: popupCornerRadius, style: .continuous)
-                .stroke(
-                    LinearGradient(
-                        colors: [
-                            Color.white.opacity(0.35),
-                            Color.white.opacity(0.12)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ),
-                    lineWidth: 0.8
-                )
+                .stroke(Color.white.opacity(0.10), lineWidth: 0.5)
+        )
+        .background(
+            GeometryReader { proxy in
+                Color.clear
+                    .onAppear {
+                        renderedContainerHeight = proxy.size.height
+                    }
+                    .onChange(of: proxy.size.height) { _, newValue in
+                        renderedContainerHeight = newValue
+                    }
+            }
         )
         .onChange(of: isPresented) { _, presented in
             if !presented {
@@ -243,7 +270,7 @@ struct StreamManagerSheet: View {
     }
 
     private func addStreamDirectly() {
-        let existingCount = viewModel.orderedStreams.count + pendingCreateRows.count
+        let existingCount = streams.count + pendingCreateRows.count
         let name = "Stream \(existingCount + 1)"
         let pendingID = UUID()
         pendingCreateRows.append(PendingCreateRow(id: pendingID, displayName: name))
@@ -280,6 +307,18 @@ struct StreamManagerSheet: View {
 }
 
 enum StreamSelectorLayout {
+    static func listContentHeight(
+        itemCount: Int,
+        showsCreateInlineRow: Bool,
+        rowHeight: CGFloat,
+        rowSpacing: CGFloat,
+        outerVerticalPadding: CGFloat
+    ) -> CGFloat {
+        let rows = max(1, itemCount + (showsCreateInlineRow ? 1 : 0))
+        let interRowSpacing = CGFloat(max(0, rows - 1)) * rowSpacing
+        return CGFloat(rows) * rowHeight + interRowSpacing + (outerVerticalPadding * 2)
+    }
+
     static func containerHeight(
         itemCount: Int,
         showsCreateInlineRow: Bool,
@@ -332,9 +371,13 @@ enum StreamSelectorLayout {
         functionBarHeight: CGFloat,
         outerVerticalPadding: CGFloat
     ) -> CGFloat {
-        let rows = max(1, itemCount + (showsCreateInlineRow ? 1 : 0))
-        let interRowSpacing = CGFloat(max(0, rows - 1)) * rowSpacing
-        let listHeight = CGFloat(rows) * rowHeight + interRowSpacing + (outerVerticalPadding * 2)
+        let listHeight = listContentHeight(
+            itemCount: itemCount,
+            showsCreateInlineRow: showsCreateInlineRow,
+            rowHeight: rowHeight,
+            rowSpacing: rowSpacing,
+            outerVerticalPadding: outerVerticalPadding
+        )
         return listHeight + functionBarHeight
     }
 }

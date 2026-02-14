@@ -421,9 +421,12 @@ struct ChatView: View {
         inputBarTopFromScreenBottom: CGFloat,
         streamSelectorMaxHeight: CGFloat
     ) -> some View {
-        if !viewModel.orderedSessionKeys.isEmpty {
+        let effectiveStreams = viewModel.orderedStreams
+        let effectiveSessionKeys = effectiveStreams.map(\.sessionKey)
+        if !effectiveSessionKeys.isEmpty {
             streamPageDotsControl(
                 viewModel: viewModel,
+                effectiveStreams: effectiveStreams,
                 streamSelectorMaxHeight: streamSelectorMaxHeight
             )
             .padding(.bottom, inputBarTopFromScreenBottom + floatingPageDotsBottomGap)
@@ -538,7 +541,9 @@ struct ChatView: View {
         let resolvedInputHeight = max(inputBarHeight, MessageInputBarMetrics.minInputBarHeight)
         let keyboardVisibleHeight = max(0, keyboardHeight - geometry.safeAreaInsets.bottom)
         let isKeyboardVisible = keyboardVisibleHeight > 0.5
-        let showsStreamPager = !viewModel.orderedSessionKeys.isEmpty
+        let effectiveStreams = viewModel.orderedStreams
+        let effectiveSessionKeys = effectiveStreams.map(\.sessionKey)
+        let showsStreamPager = !effectiveSessionKeys.isEmpty
         let stackTopInsetFromInputBarTop: CGFloat = (!isCompactLayout && showsStreamPager)
             ? (floatingPageDotsBottomGap + StreamPageDotsView.controlHeight)
             : 0
@@ -610,7 +615,11 @@ struct ChatView: View {
         )
 
         let messageLayer: AnyView = AnyView(
-            pagedStreamView(topInset: topInset, truncationBottomInset: truncationBottomInset)
+            pagedStreamView(
+                topInset: topInset,
+                truncationBottomInset: truncationBottomInset,
+                effectiveSessionKeys: effectiveSessionKeys
+            )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .ignoresSafeArea(.container, edges: [.top, .bottom])
         )
@@ -682,6 +691,7 @@ struct ChatView: View {
             inputBarOverlay(
                 geometry: geometry,
                 viewModel: viewModel,
+                effectiveStreams: effectiveStreams,
                 belowBarGap: belowBarGap,
                 isKeyboardVisible: isKeyboardVisible,
                 layoutKey: layoutKey,
@@ -777,11 +787,13 @@ struct ChatView: View {
 
     private func inputBarOverlay(geometry: GeometryProxy,
                                  viewModel: ChatViewModel,
+                                 effectiveStreams: [StreamSession],
                                  belowBarGap: CGFloat,
                                  isKeyboardVisible: Bool,
                                  layoutKey: ChatLayoutKey,
                                  streamSelectorMaxHeight: CGFloat) -> some View {
         let sessionKey = viewModel.activeSessionKey
+        let effectiveSessionKeys = effectiveStreams.map(\.sessionKey)
         let state = scrollButtonState(for: sessionKey)
         let scrollButtonView: AnyView = AnyView(
             scrollButtonControl(
@@ -792,11 +804,12 @@ struct ChatView: View {
                 }
             )
         )
-        let pageDotsView: AnyView? = viewModel.orderedSessionKeys.isEmpty
+        let pageDotsView: AnyView? = effectiveSessionKeys.isEmpty
             ? nil
             : AnyView(
                 streamPageDotsControl(
                     viewModel: viewModel,
+                    effectiveStreams: effectiveStreams,
                     streamSelectorMaxHeight: streamSelectorMaxHeight
                 )
             )
@@ -1040,9 +1053,13 @@ struct ChatView: View {
 
     /// Paged TabView for horizontal swipe between streams.
     @ViewBuilder
-    private func pagedStreamView(topInset: CGFloat, truncationBottomInset: CGFloat) -> some View {
+    private func pagedStreamView(
+        topInset: CGFloat,
+        truncationBottomInset: CGFloat,
+        effectiveSessionKeys: [String]
+    ) -> some View {
         TabView(selection: streamBinding) {
-            ForEach(viewModel.orderedSessionKeys, id: \.self) { sessionKey in
+            ForEach(effectiveSessionKeys, id: \.self) { sessionKey in
                 messageList(
                     topInset: topInset,
                     truncationBottomInset: truncationBottomInset,
@@ -1068,7 +1085,13 @@ struct ChatView: View {
     /// Binding that syncs TabView selection with viewModel.activeSessionKey.
     private var streamBinding: Binding<String> {
         Binding(
-            get: { viewModel.activeSessionKey },
+            get: {
+                let effectiveSessionKeys = viewModel.orderedStreams.map(\.sessionKey)
+                if effectiveSessionKeys.contains(viewModel.activeSessionKey) {
+                    return viewModel.activeSessionKey
+                }
+                return effectiveSessionKeys.first ?? viewModel.activeSessionKey
+            },
             set: { newSessionKey in
                 selectStream(newSessionKey)
             }
@@ -1077,10 +1100,12 @@ struct ChatView: View {
 
     private func streamPageDotsControl(
         viewModel: ChatViewModel,
+        effectiveStreams: [StreamSession],
         streamSelectorMaxHeight: CGFloat
     ) -> some View {
-        StreamPageDotsView(
-            sessionKeys: viewModel.orderedSessionKeys,
+        let effectiveSessionKeys = effectiveStreams.map(\.sessionKey)
+        return StreamPageDotsView(
+            sessionKeys: effectiveSessionKeys,
             activeSessionKey: viewModel.activeSessionKey,
             onTap: { isStreamManagerPopoverPresented = true }
         )
@@ -1091,6 +1116,7 @@ struct ChatView: View {
         ) {
             StreamManagerSheet(
                 viewModel: viewModel,
+                streams: effectiveStreams,
                 isPresented: $isStreamManagerPopoverPresented,
                 maxAvailableHeight: streamSelectorMaxHeight,
                 onSelectStream: selectStream

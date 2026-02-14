@@ -174,9 +174,9 @@ struct DictationCoordinatorTests {
         }
     }
 
-    @Test("Attempting dictation without a validated key shows inline prompt and keeps mic visibility rules")
+    @Test("Attempting dictation without a validated key shows modal prompt and keeps mic visibility rules")
     @MainActor
-    func missingOrUnverifiedKeyRoutesToInlinePrompt() {
+    func missingOrUnverifiedKeyRoutesToModalPrompt() {
         let harness = DictationTestHarness(apiKey: nil, keyStatus: .missing)
         let coordinator = harness.makeCoordinator()
 
@@ -191,15 +191,15 @@ struct DictationCoordinatorTests {
         #expect(coordinator.micVisible)
         coordinator.startStickyDictation()
 
-        #expect(coordinator.state == .keyPromptInline)
-        #expect(coordinator.showsInlineKeyPrompt)
+        #expect(coordinator.state == .keyPromptModal)
+        #expect(coordinator.showsComposeKeyPromptModal)
         #expect(coordinator.micVisible)
         #expect(!coordinator.isDictationActive)
     }
 
-    @Test("Inline key CTA opens Soniox key page when key is empty")
+    @Test("Modal key CTA opens Soniox key page when key is empty")
     @MainActor
-    func inlineGetKeyWhenEmpty() async {
+    func modalGetKeyWhenEmpty() async {
         let harness = DictationTestHarness(apiKey: nil, keyStatus: .missing)
         let coordinator = harness.makeCoordinator()
 
@@ -211,23 +211,23 @@ struct DictationCoordinatorTests {
             reduceMotionEnabled: false
         )
         coordinator.startStickyDictation()
-        #expect(coordinator.state == .keyPromptInline)
+        #expect(coordinator.state == .keyPromptModal)
         #expect(coordinator.inlineKeyActionTitle == "Get Key")
 
         var openedURL: URL?
-        await coordinator.handleInlineKeyPrimaryAction { url in
+        await coordinator.handleComposeKeyPrimaryAction { url in
             openedURL = url
         }
 
         #expect(openedURL == SonioxConfigurationStore.keyManagementURL)
-        #expect(coordinator.state == .keyPromptInline)
+        #expect(coordinator.state == .keyPromptModal)
         #expect(coordinator.inlineKeyStatus == .missing)
         #expect(harness.keyStatus == .missing)
     }
 
-    @Test("Inline verify failure shows Invalid and keeps prompt visible")
+    @Test("Modal verify failure shows Invalid and keeps prompt visible")
     @MainActor
-    func inlineVerifyFailureShowsInvalid() async {
+    func modalVerifyFailureShowsInvalid() async {
         let harness = DictationTestHarness(apiKey: "bad-key", keyStatus: .unverified)
         harness.keyVerifier.results = [false]
         let coordinator = harness.makeCoordinator()
@@ -241,21 +241,21 @@ struct DictationCoordinatorTests {
         )
 
         coordinator.startStickyDictation()
-        #expect(coordinator.state == .keyPromptInline)
+        #expect(coordinator.state == .keyPromptModal)
         #expect(coordinator.inlineKeyActionTitle == "Verify")
 
-        await coordinator.handleInlineKeyPrimaryAction { _ in }
+        await coordinator.handleComposeKeyPrimaryAction { _ in }
 
-        #expect(coordinator.state == .keyPromptInline)
+        #expect(coordinator.state == .keyPromptModal)
         #expect(coordinator.inlineKeyStatus == .invalid)
         #expect(coordinator.inlineKeyStatusText == "Invalid")
         #expect(harness.keyStatus == .invalid)
         #expect(!coordinator.isDictationActive)
     }
 
-    @Test("Inline verify success immediately enters pending requested dictation mode")
+    @Test("Modal verify success immediately enters pending requested dictation mode")
     @MainActor
-    func inlineVerifySuccessStartsRequestedModeImmediately() async {
+    func modalVerifySuccessStartsRequestedModeImmediately() async {
         let harness = DictationTestHarness(apiKey: "good-key", keyStatus: .unverified)
         harness.keyVerifier.results = [true]
         let coordinator = harness.makeCoordinator()
@@ -269,10 +269,10 @@ struct DictationCoordinatorTests {
         )
 
         coordinator.startWalkieTalkieDictation()
-        #expect(coordinator.state == .keyPromptInline)
+        #expect(coordinator.state == .keyPromptModal)
         #expect(!coordinator.isDictationActive)
 
-        await coordinator.handleInlineKeyPrimaryAction { _ in }
+        await coordinator.handleComposeKeyPrimaryAction { _ in }
         await waitUntil {
             harness.client.connected
         }
@@ -282,6 +282,31 @@ struct DictationCoordinatorTests {
         #expect(coordinator.inlineKeyStatus == .validated)
         #expect(harness.keyStatus == .validated)
         #expect(harness.client.connected)
+    }
+
+    @Test("Dismiss modal key prompt returns to normal compose state")
+    @MainActor
+    func dismissModalPromptReturnsToIdle() {
+        let harness = DictationTestHarness(apiKey: nil, keyStatus: .missing)
+        let coordinator = harness.makeCoordinator()
+
+        coordinator.updateContext(
+            sessionKey: harness.host.activeSessionKey,
+            composeIsEmpty: true,
+            textFieldFocused: false,
+            selectionLength: 0,
+            reduceMotionEnabled: false
+        )
+        coordinator.startStickyDictation()
+        #expect(coordinator.state == .keyPromptModal)
+        #expect(coordinator.showsComposeKeyPromptModal)
+
+        coordinator.dismissComposeKeyPrompt()
+
+        #expect(coordinator.state == .idleMicVisible)
+        #expect(!coordinator.showsComposeKeyPromptModal)
+        #expect(coordinator.micVisible)
+        #expect(!coordinator.isDictationActive)
     }
 }
 

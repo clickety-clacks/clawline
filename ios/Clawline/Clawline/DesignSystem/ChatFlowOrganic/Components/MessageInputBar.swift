@@ -40,7 +40,6 @@ private let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "
 struct MessageInputBar: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.settingsManager) private var settings
-    @Environment(\.openURL) private var openURL
     @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
     @Binding var content: NSAttributedString
     @Binding var selectionRange: NSRange
@@ -251,37 +250,8 @@ struct MessageInputBar: View {
         UIColor(inputTintColor)
     }
 
-    private var inlineKeyTextBinding: Binding<String> {
-        Binding(
-            get: { dictation.inlineKeyText },
-            set: { dictation.updateInlineKeyText($0) }
-        )
-    }
-
-    @ViewBuilder
-    private var inlineKeyPrompt: some View {
-        if dictation.showsInlineKeyPrompt {
-            SonioxKeyConfigurationRow(
-                keyText: inlineKeyTextBinding,
-                status: dictation.inlineKeyStatus,
-                actionTitle: dictation.inlineKeyActionTitle,
-                onAction: {
-                    Task { @MainActor in
-                        await dictation.handleInlineKeyPrimaryAction { url in
-                            openURL(url)
-                        }
-                    }
-                },
-                placeholder: "soniox.apiKey",
-                showsBackground: true
-            )
-        }
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            inlineKeyPrompt
-
             HStack(alignment: .bottom, spacing: MessageInputBarMetrics.elementSpacing) {
 #if os(visionOS)
                 // Appearance toggle button

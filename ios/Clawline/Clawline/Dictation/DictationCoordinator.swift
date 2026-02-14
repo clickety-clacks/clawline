@@ -12,8 +12,8 @@ import UIKit
 enum DictationState: Equatable {
     case idleMicVisible
     case idleMicHidden
-    case keyPromptInline
-    case keyVerifyingInline
+    case keyPromptModal
+    case keyVerifyingModal
     case dictatingSticky
     case dictatingWalkieTalkie
     case stoppingKeep
@@ -102,15 +102,15 @@ final class DictationCoordinator {
         inlineKeyStatus.inlineStatusText
     }
 
-    var showsInlineKeyPrompt: Bool {
-        state == .keyPromptInline || state == .keyVerifyingInline
+    var showsComposeKeyPromptModal: Bool {
+        state == .keyPromptModal || state == .keyVerifyingModal
     }
 
     var isDictationActive: Bool {
         switch state {
         case .dictatingSticky, .dictatingWalkieTalkie, .stoppingKeep, .stoppingDiscard:
             return true
-        case .idleMicVisible, .idleMicHidden, .keyPromptInline, .keyVerifyingInline, .error:
+        case .idleMicVisible, .idleMicHidden, .keyPromptModal, .keyVerifyingModal, .error:
             return false
         }
     }
@@ -127,7 +127,7 @@ final class DictationCoordinator {
         switch state {
         case .dictatingSticky, .dictatingWalkieTalkie, .stoppingKeep, .stoppingDiscard:
             return true
-        case .idleMicVisible, .idleMicHidden, .keyPromptInline, .keyVerifyingInline, .error:
+        case .idleMicVisible, .idleMicHidden, .keyPromptModal, .keyVerifyingModal, .error:
             return false
         }
     }
@@ -229,7 +229,7 @@ final class DictationCoordinator {
         self.selectionLength = selectionLength
         self.reduceMotionEnabled = reduceMotionEnabled
 
-        if state != .keyVerifyingInline {
+        if state != .keyVerifyingModal {
             refreshInlineKeyFromStore()
         }
 
@@ -251,8 +251,8 @@ final class DictationCoordinator {
 
         if !isDictationActive,
            state != .error,
-           state != .keyPromptInline,
-           state != .keyVerifyingInline {
+           state != .keyPromptModal,
+           state != .keyVerifyingModal {
             state = idleStateForCurrentContext()
         }
     }
@@ -279,18 +279,18 @@ final class DictationCoordinator {
         }
     }
 
-    func handleInlineKeyPrimaryAction(openKeyURL: (URL) -> Void) async {
+    func handleComposeKeyPrimaryAction(openKeyURL: (URL) -> Void) async {
         let trimmed = inlineKeyText.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty {
             inlineKeyStatus = .missing
             setConfiguredAPIKey(nil)
             setKeyStatus(.missing)
-            state = .keyPromptInline
+            state = .keyPromptModal
             openKeyURL(SonioxConfigurationStore.keyManagementURL)
             return
         }
 
-        state = .keyVerifyingInline
+        state = .keyVerifyingModal
         inlineKeyStatus = .validating
         setKeyStatus(.validating)
         setConfiguredAPIKey(trimmed)
@@ -309,8 +309,14 @@ final class DictationCoordinator {
         } else {
             inlineKeyStatus = .invalid
             setKeyStatus(.invalid)
-            state = .keyPromptInline
+            state = .keyPromptModal
         }
+    }
+
+    func dismissComposeKeyPrompt() {
+        guard state == .keyPromptModal || state == .keyVerifyingModal else { return }
+        pendingActivationMode = nil
+        state = idleStateForCurrentContext()
     }
 
     func stopDictationFromSwipeRight() {
@@ -381,7 +387,7 @@ final class DictationCoordinator {
               let apiKey = configuredAPIKey(),
               !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             pendingActivationMode = mode
-            state = .keyPromptInline
+            state = .keyPromptModal
             return
         }
 

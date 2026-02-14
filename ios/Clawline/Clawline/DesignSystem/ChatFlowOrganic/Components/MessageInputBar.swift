@@ -643,27 +643,69 @@ struct MessageInputBar: View {
     }
 
     private func beginMicFadeOut(fromSwipe: Bool) {
+        let animationPlan = DictationMicAffordanceAnimationPlan.make(fromSwipe: fromSwipe)
+
         micFadeTask?.cancel()
         micTransientVisible = true
         micTransientOpacity = 1
-        micTransientOffset = fromSwipe ? 24 : 0
+        micTransientOffset = animationPlan.initialOffset
 
-        if fromSwipe {
-            withAnimation(.easeOut(duration: 0.35)) {
-                micTransientOffset = 0
+        if let slideDurationMs = animationPlan.slideDurationMs {
+            Task { @MainActor in
+                // Ensure first frame renders at the right-edge offset before sliding inward.
+                await Task.yield()
+                withAnimation(.easeOut(duration: Double(slideDurationMs) / 1_000)) {
+                    micTransientOffset = 0
+                }
             }
-        }
-
-        withAnimation(.easeOut(duration: 1.2)) {
-            micTransientOpacity = 0
+        } else {
+            micTransientOffset = 0
         }
 
         micFadeTask = Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(1_250))
+            if animationPlan.fadeDelayMs > 0 {
+                try? await Task.sleep(for: .milliseconds(animationPlan.fadeDelayMs))
+            }
+
+            withAnimation(.easeOut(duration: Double(animationPlan.fadeDurationMs) / 1_000)) {
+                micTransientOpacity = 0
+            }
+
+            let cleanupDelayMs = animationPlan.fadeDurationMs + animationPlan.cleanupTailMs
+            try? await Task.sleep(for: .milliseconds(cleanupDelayMs))
             micTransientVisible = false
             micTransientOpacity = 0
             micTransientOffset = 0
         }
+    }
+}
+
+struct DictationMicAffordanceAnimationPlan {
+    let initialOffset: CGFloat
+    let slideDurationMs: Int?
+    let fadeDelayMs: Int
+    let fadeDurationMs: Int
+    let cleanupTailMs: Int
+
+    static func make(fromSwipe: Bool) -> Self {
+        if fromSwipe {
+            // Spec: swipe-left retrieval should visibly re-enter from the right over 350ms.
+            return Self(
+                initialOffset: 28,
+                slideDurationMs: 350,
+                fadeDelayMs: 350,
+                fadeDurationMs: 850,
+                cleanupTailMs: 80
+            )
+        }
+
+        return Self(
+            initialOffset: 0,
+            slideDurationMs: nil,
+            fadeDelayMs: 0,
+            fadeDurationMs: 1_200,
+            cleanupTailMs: 80
+        )
     }
 }
 

@@ -264,6 +264,37 @@ struct ChatViewModelTests {
         #expect(toastManager.debugMessages.isEmpty)
     }
 
+    @Test("Disconnected transport maps to disconnected send-button state")
+    @MainActor
+    func disconnectedMapsToDisconnectedSendButtonState() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        try await setConnected(chatService: chatService, viewModel: viewModel)
+        chatService.emitConnectionState(.disconnected)
+
+        var state: SendButtonConnectionState?
+        for _ in 0..<100 {
+            state = await MainActor.run { viewModel.sendButtonConnectionState }
+            if state == .disconnected { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(state == .disconnected)
+    }
+
     @Test("canSend becomes true when attachments exist even without text")
     @MainActor
     func canSendWithAttachmentOnly() async throws {

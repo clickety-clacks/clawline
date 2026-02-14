@@ -91,7 +91,7 @@ final class TerminalBubbleUIKitView: UIView, TerminalViewDelegate {
         self.hasEverBeenLive = false
 
         titleLabel.text = descriptor.title?.isEmpty == false ? descriptor.title : "Terminal"
-        statusLabel.text = "CONNECTING"
+        statusLabel.text = "Connecting"
 
         terminalHeightConstraint?.constant = style.height
 
@@ -299,7 +299,7 @@ final class TerminalBubbleUIKitView: UIView, TerminalViewDelegate {
         guard let descriptor else { return }
 
         hasAttemptedConnection = true
-        statusLabel.text = "CONNECTING"
+        statusLabel.text = "Connecting"
 
         let service = TerminalSessionService(descriptor: descriptor)
         self.service = service
@@ -327,28 +327,28 @@ final class TerminalBubbleUIKitView: UIView, TerminalViewDelegate {
                 await MainActor.run {
                     switch state {
                     case .disconnected:
-                        self.statusLabel.text = self.hasAttemptedConnection ? "DISCONNECTED" : "CONNECTING"
+                        self.statusLabel.text = self.hasAttemptedConnection ? "Disconnected" : "Connecting"
                         if self.hasAttemptedConnection {
                             self.requiresUserReconnect = true
                             self.showDeadState(reason: self.titleLabel.text ?? "Terminal")
                         }
                     case .connecting:
-                        self.statusLabel.text = "CONNECTING"
+                        self.statusLabel.text = "Connecting"
                         self.showTerminal()
                     case .ready:
                         self.hasEverBeenLive = true
-                        self.statusLabel.text = "LIVE"
+                        self.statusLabel.text = "Live"
                         self.showTerminal()
                     case .exited(let code):
                         if let code {
-                            self.statusLabel.text = "EXIT \(code)"
+                            self.statusLabel.text = "Exit \(code)"
                         } else {
-                            self.statusLabel.text = "EXIT"
+                            self.statusLabel.text = "Exit"
                         }
                         self.requiresUserReconnect = true
                         self.showDeadState(reason: self.titleLabel.text ?? "Terminal")
                     case .failed(let message):
-                        self.statusLabel.text = "ERROR"
+                        self.statusLabel.text = "Error"
                         self.requiresUserReconnect = true
                         self.showDeadState(reason: message)
                     }

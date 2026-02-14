@@ -114,7 +114,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
         case .connecting, .reconnecting:
             return .reconnecting
         case .disconnected, .failed:
-            return reconnectTask == nil ? .disconnected : .reconnecting
+            return .disconnected
         }
     }
 

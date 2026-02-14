@@ -308,6 +308,33 @@ struct DictationCoordinatorTests {
         #expect(coordinator.micVisible)
         #expect(!coordinator.isDictationActive)
     }
+
+    @Test("Audio capture start failure surfaces graceful dictation error")
+    @MainActor
+    func audioStartFailureShowsError() async {
+        let harness = DictationTestHarness()
+        harness.audio.startError = DictationAudioCaptureError.outputFormatUnavailable
+        let coordinator = harness.makeCoordinator()
+
+        coordinator.updateContext(
+            sessionKey: harness.host.activeSessionKey,
+            composeIsEmpty: true,
+            textFieldFocused: false,
+            selectionLength: 0,
+            reduceMotionEnabled: false
+        )
+
+        coordinator.startStickyDictation()
+
+        await waitUntil {
+            coordinator.state == .error
+        }
+
+        #expect(coordinator.state == .error)
+        #expect(coordinator.errorMessage == "Dictation failed")
+        #expect(!coordinator.isDictationActive)
+        #expect(harness.analytics.stopEvents.contains(where: { $0.reason == "transport_failure" }))
+    }
 }
 
 // MARK: - Test Harness
@@ -396,6 +423,7 @@ private final class MockDictationAudioCapture: DictationAudioCapturing {
 
     private(set) var started = false
     private(set) var stopped = false
+    var startError: Error?
 
     let frameStream: AsyncStream<Data>
     let levelStream: AsyncStream<Float>
@@ -411,6 +439,9 @@ private final class MockDictationAudioCapture: DictationAudioCapturing {
     }
 
     func start() throws {
+        if let startError {
+            throw startError
+        }
         started = true
     }
 

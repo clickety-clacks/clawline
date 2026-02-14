@@ -19,12 +19,15 @@ protocol DictationAudioCapturing: AnyObject {
 
 enum DictationAudioCaptureError: LocalizedError {
     case missingInputNode
+    case outputFormatUnavailable
     case converterCreationFailed
 
     var errorDescription: String? {
         switch self {
         case .missingInputNode:
             return "No audio input node available."
+        case .outputFormatUnavailable:
+            return "Failed to allocate Soniox output format."
         case .converterCreationFailed:
             return "Failed to create PCM converter for dictation."
         }
@@ -41,17 +44,14 @@ final class DictationAudioCapture: DictationAudioCapturing {
     private let _frameStream: AsyncStream<Data>
     private let _levelStream: AsyncStream<Float>
 
-    private let outputFormat: AVAudioFormat
+    private let outputFormat: AVAudioFormat?
     private var converter: AVAudioConverter?
     private var frameAccumulator = Data()
     private var lastLevelEmitTime = CFAbsoluteTimeGetCurrent()
     private var isRunning = false
 
-    init() {
-        guard let output = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 16_000, channels: 1, interleaved: true) else {
-            fatalError("Failed to allocate Soniox output format")
-        }
-        self.outputFormat = output
+    init(outputFormat: AVAudioFormat? = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 16_000, channels: 1, interleaved: true)) {
+        self.outputFormat = outputFormat
 
         var frameContinuation: AsyncStream<Data>.Continuation?
         self._frameStream = AsyncStream { frameContinuation = $0 }
@@ -67,8 +67,11 @@ final class DictationAudioCapture: DictationAudioCapturing {
 
     func start() throws {
         guard !isRunning else { return }
-        isRunning = true
         frameAccumulator.removeAll(keepingCapacity: true)
+
+        guard let outputFormat else {
+            throw DictationAudioCaptureError.outputFormatUnavailable
+        }
 
         try configureAudioSession()
 
@@ -85,7 +88,17 @@ final class DictationAudioCapture: DictationAudioCapturing {
         }
 
         engine.prepare()
-        try engine.start()
+        isRunning = true
+        do {
+            try engine.start()
+        } catch {
+            isRunning = false
+            inputNode.removeTap(onBus: 0)
+            engine.stop()
+            converter = nil
+            deactivateAudioSession()
+            throw error
+        }
     }
 
     func stop() {
@@ -100,11 +113,7 @@ final class DictationAudioCapture: DictationAudioCapturing {
             self.frameAccumulator.removeAll(keepingCapacity: false)
         }
 
-        do {
-            try AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
-        } catch {
-            logger.error("Failed to deactivate AVAudioSession: \(error.localizedDescription, privacy: .public)")
-        }
+        deactivateAudioSession()
     }
 
     private func configureAudioSession() throws {
@@ -189,6 +198,7 @@ final class DictationAudioCapture: DictationAudioCapturing {
     private func processBuffer(_ inputBuffer: AVAudioPCMBuffer) {
         guard isRunning else { return }
         guard let converter else { return }
+        guard let outputFormat else { return }
 
         let ratio = outputFormat.sampleRate / inputBuffer.format.sampleRate
         let frameCapacity = AVAudioFrameCount(Double(inputBuffer.frameLength) * ratio + 16)
@@ -229,5 +239,15 @@ final class DictationAudioCapture: DictationAudioCapturing {
         let audioBuffer = buffer.audioBufferList.pointee.mBuffers
         guard let data = audioBuffer.mData else { return nil }
         return Data(bytes: data, count: Int(audioBuffer.mDataByteSize))
+    }
+
+    private func deactivateAudioSession() {
+#if os(iOS)
+        do {
+            try AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        } catch {
+            logger.error("Failed to deactivate AVAudioSession: \(error.localizedDescription, privacy: .public)")
+        }
+#endif
     }
 }

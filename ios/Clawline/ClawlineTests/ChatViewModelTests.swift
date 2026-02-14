@@ -264,6 +264,46 @@ struct ChatViewModelTests {
         #expect(toastManager.debugMessages.isEmpty)
     }
 
+    @Test("Passive connection_lost message errors do not show toasts")
+    @MainActor
+    func passiveConnectionLostErrorsStaySilent() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let toastManager = ToastManager()
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: toastManager,
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        try await setReadyToSend(chatService: chatService, viewModel: viewModel)
+        viewModel.inputContent = NSAttributedString(string: "Pending")
+        viewModel.send()
+        try await Task.sleep(forDuration: .milliseconds(10))
+
+        guard let messageId = chatService.lastSentId else {
+            Issue.record("Expected a sent message id")
+            return
+        }
+
+        chatService.emitServiceEvent(.messageError(messageId: messageId, code: "connection_lost", message: nil))
+        for _ in 0..<50 {
+            if viewModel.failureMessage(for: messageId) != nil { break }
+            try await Task.sleep(forDuration: .milliseconds(20))
+        }
+
+        #expect(viewModel.failureMessage(for: messageId) == "Message not delivered — connection lost.")
+        #expect(toastManager.debugMessages.isEmpty)
+    }
+
     @Test("Disconnected transport maps to disconnected send-button state")
     @MainActor
     func disconnectedMapsToDisconnectedSendButtonState() async throws {
@@ -293,6 +333,38 @@ struct ChatViewModelTests {
             try await Task.sleep(for: .milliseconds(20))
         }
         #expect(state == .disconnected)
+    }
+
+    @Test("Manual reconnect triggers immediate connect attempt")
+    @MainActor
+    func manualReconnectIsImmediate() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        let initialConnectCalls = chatService.connectCallCount
+        chatService.emitConnectionState(.disconnected)
+        try await Task.sleep(for: .milliseconds(30))
+        viewModel.reconnect()
+
+        for _ in 0..<40 {
+            if chatService.connectCallCount > initialConnectCalls { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(chatService.connectCallCount > initialConnectCalls)
     }
 
     @Test("canSend becomes true when attachments exist even without text")
@@ -548,13 +620,14 @@ struct ChatViewModelTests {
         let auth = TestAuthManager()
         auth.storeCredentials(token: "jwt", userId: "user")
         let chatService = TestChatService()
+        let toastManager = ToastManager()
         let viewModel = ChatViewModel(
             auth: auth,
             chatService: chatService,
             settings: SettingsManager(),
             device: TestDevice(),
             uploadService: TestUploadService(),
-            toastManager: ToastManager(),
+            toastManager: toastManager,
             salientHighlightService: SalientHighlightService()
         )
         defer { viewModel.onDisappear() }
@@ -572,6 +645,7 @@ struct ChatViewModelTests {
         viewModel.send()
         try await Task.sleep(for: .milliseconds(40))
         #expect(chatService.lastSentId == nil)
+        #expect(toastManager.debugMessages.contains("Connecting to stream…") == false)
 
         chatService.emitServiceEvent(.sessionInfo(
             SessionInfo(
@@ -587,6 +661,59 @@ struct ChatViewModelTests {
             try await Task.sleep(for: .milliseconds(20))
         }
         #expect(chatService.lastSessionKey == personalSessionKey)
+    }
+
+    @Test("Resend keeps replacement bubble if retry send fails immediately")
+    @MainActor
+    func resendFailureRetainsReplacementBubble() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let toastManager = ToastManager()
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: toastManager,
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        try await setReadyToSend(chatService: chatService, viewModel: viewModel)
+        viewModel.inputContent = NSAttributedString(string: "Retry me")
+        viewModel.send()
+        try await Task.sleep(forDuration: .milliseconds(10))
+
+        guard let originalId = chatService.lastSentId else {
+            Issue.record("Expected sent message id")
+            return
+        }
+        chatService.emitServiceEvent(.messageError(messageId: originalId, code: "invalid_message", message: "bad"))
+        for _ in 0..<50 {
+            if viewModel.failureMessage(for: originalId) != nil { break }
+            try await Task.sleep(forDuration: .milliseconds(20))
+        }
+
+        chatService.sendError = ProviderChatService.Error.notConnected
+        viewModel.resendFailedMessage(messageId: originalId)
+        for _ in 0..<50 {
+            if !viewModel.isSending { break }
+            try await Task.sleep(forDuration: .milliseconds(20))
+        }
+
+        let messages = viewModel.messages
+        #expect(messages.count == 1)
+        guard let replacement = messages.first else {
+            Issue.record("Expected replacement bubble")
+            return
+        }
+        #expect(replacement.id != originalId)
+        #expect(replacement.content == "Retry me")
+        #expect(viewModel.failureMessage(for: replacement.id) != nil)
     }
 
     @Test("Send blocks stale synthetic session keys after provisioning")
@@ -1165,6 +1292,8 @@ private final class TestChatService: ChatServicing {
     private(set) var lastSentAttachments: [WireAttachment] = []
     private(set) var lastSentId: String?
     private(set) var lastSessionKey: String?
+    private(set) var connectCallCount: Int = 0
+    var sendError: Swift.Error?
     var createStreamError: Error?
     var deleteStreamError: Error?
     var streams: [StreamSession] = []
@@ -1193,6 +1322,7 @@ private final class TestChatService: ChatServicing {
     }()
 
     func connect(token: String, lastMessageId: String?) async throws {
+        connectCallCount += 1
         stateContinuation?.yield(.connected)
     }
 
@@ -1201,6 +1331,9 @@ private final class TestChatService: ChatServicing {
     }
 
     func send(id: String, content: String, attachments: [WireAttachment], sessionKey: String?) async throws {
+        if let sendError {
+            throw sendError
+        }
         lastSentId = id
         lastSentAttachments = attachments
         lastSessionKey = sessionKey

@@ -337,7 +337,7 @@ final class ProviderChatService: ChatServicing {
                 emitServiceEvent(.messageError(
                     messageId: messageId,
                     code: "connection_lost",
-                    message: "Message not delivered - connection lost"
+                    message: nil
                 ))
             }
         }
@@ -750,7 +750,7 @@ final class ProviderChatService: ChatServicing {
             emitServiceEvent(.messageError(
                 messageId: messageId,
                 code: "connection_lost",
-                message: "Message not delivered - connection lost"
+                message: nil
             ))
         }
         pendingMessages.removeAll()

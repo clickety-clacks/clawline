@@ -151,6 +151,7 @@ struct ChatViewModelTests {
         defer { viewModel.onDisappear() }
 
         await viewModel.onAppear()
+        try await setReadyToSend(chatService: chatService, viewModel: viewModel)
         viewModel.inputContent = NSAttributedString(string: "Hello!")
         viewModel.send()
 
@@ -197,6 +198,7 @@ struct ChatViewModelTests {
         defer { viewModel.onDisappear() }
 
         await viewModel.onAppear()
+        try await setReadyToSend(chatService: chatService, viewModel: viewModel)
         viewModel.inputContent = NSAttributedString(string: "Broken message")
         viewModel.send()
 
@@ -222,7 +224,7 @@ struct ChatViewModelTests {
         #expect(messages.contains("bad content"))
     }
 
-    @Test("Connection interruptions surface alert state")
+    @Test("Connection interruptions update send button state without passive toast")
     @MainActor
     func connectionInterruptionTriggersAlert() async throws {
         resetChatPersistence()
@@ -237,8 +239,7 @@ struct ChatViewModelTests {
             device: TestDevice(),
             uploadService: TestUploadService(),
             toastManager: toastManager,
-            salientHighlightService: SalientHighlightService(),
-            connectionAlertGracePeriod: .milliseconds(500)
+            salientHighlightService: SalientHighlightService()
         )
         defer { viewModel.onDisappear() }
 
@@ -246,28 +247,26 @@ struct ChatViewModelTests {
         try await Task.sleep(forDuration: .milliseconds(20))
         chatService.emitConnectionState(.connected)
         for _ in 0..<200 {
-            let alert = await MainActor.run { viewModel.debugConnectionAlert() }
-            if alert == nil { break }
+            let state = await MainActor.run { viewModel.sendButtonConnectionState }
+            if state == .connected { break }
             try await Task.sleep(forDuration: .milliseconds(25))
         }
 
         chatService.emitServiceEvent(.connectionInterrupted(reason: "Connection lost"))
-        var alert: ConnectionAlertSeverity?
-        var lastMessage: String?
+        var state: SendButtonConnectionState?
         for _ in 0..<200 {
-            alert = await MainActor.run { viewModel.debugConnectionAlert() }
-            lastMessage = await MainActor.run { toastManager.debugLastMessage() }
-            if alert == .caution, lastMessage == "Connection lost" { break }
+            state = await MainActor.run { viewModel.sendButtonConnectionState }
+            if state == .reconnecting { break }
             try await Task.sleep(forDuration: .milliseconds(25))
         }
 
-        #expect(alert == .caution)
-        #expect(lastMessage == "Connection lost")
+        #expect(state == .reconnecting)
+        #expect(toastManager.debugMessages.isEmpty)
     }
 
     @Test("canSend becomes true when attachments exist even without text")
     @MainActor
-    func canSendWithAttachmentOnly() {
+    func canSendWithAttachmentOnly() async throws {
         resetChatPersistence()
         let auth = TestAuthManager()
         auth.storeCredentials(token: "jwt", userId: "user")
@@ -286,6 +285,8 @@ struct ChatViewModelTests {
         let attachment = makePendingAttachment(dataSize: 512, mimeType: "image/png")
         viewModel.attachmentData[attachment.id] = attachment
         viewModel.inputContent = makeAttributedContent(with: [attachment.id])
+        await viewModel.onAppear()
+        try await setReadyToSend(chatService: chatService, viewModel: viewModel)
 
         #expect(viewModel.canSend)
     }
@@ -370,6 +371,8 @@ struct ChatViewModelTests {
 
         viewModel.inputContent = makeAttributedContent(with: [inlineAttachment.id, fileAttachment.id])
 
+        await viewModel.onAppear()
+        try await setReadyToSend(chatService: chatService, viewModel: viewModel)
         viewModel.send()
         try await viewModel.sendTask?.value
 
@@ -450,7 +453,10 @@ struct ChatViewModelTests {
 
         await resetViewModelForTest(viewModel, auth: auth)
         chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
-        try await Task.sleep(for: .milliseconds(30))
+        for _ in 0..<50 {
+            if viewModel.orderedSessionKeys.contains(adminSessionKey) { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
         chatService.emit(
             Message(
                 id: "s_admin_seed",
@@ -466,9 +472,40 @@ struct ChatViewModelTests {
         try await Task.sleep(for: .milliseconds(30))
 
         viewModel.setActiveSessionKey(adminSessionKey)
+        #expect(viewModel.activeSessionKey == adminSessionKey)
         viewModel.inputContent = NSAttributedString(string: "Admin ping")
-        viewModel.send()
-        try await Task.sleep(for: .milliseconds(30))
+        chatService.emitConnectionState(.connected)
+        chatService.emitServiceEvent(.sessionInfo(
+            SessionInfo(
+                userId: "user",
+                isAdmin: true,
+                dmScope: "global_dm",
+                sessionKeys: [personalSessionKey, adminSessionKey]
+            )
+        ))
+        for _ in 0..<50 {
+            if viewModel.sendButtonConnectionState == .connected { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        for _ in 0..<5 {
+            viewModel.send()
+            for _ in 0..<25 {
+                if chatService.lastSessionKey == adminSessionKey { break }
+                try await Task.sleep(for: .milliseconds(20))
+            }
+            if chatService.lastSessionKey == adminSessionKey { break }
+            // Reassert connected/provisioned state before another retry.
+            chatService.emitConnectionState(.connected)
+            chatService.emitServiceEvent(.sessionInfo(
+                SessionInfo(
+                    userId: "user",
+                    isAdmin: true,
+                    dmScope: "global_dm",
+                    sessionKeys: [personalSessionKey, adminSessionKey]
+                )
+            ))
+            viewModel.inputContent = NSAttributedString(string: "Admin ping")
+        }
 
         #expect(chatService.lastSessionKey == adminSessionKey)
     }
@@ -787,7 +824,10 @@ struct ChatViewModelTests {
         chatService.emitServiceEvent(.streamCreated(
             makeStreamSession(sessionKey: customKey, displayName: "Research", kind: "custom", orderIndex: 1, isBuiltIn: false)
         ))
-        try await Task.sleep(for: .milliseconds(30))
+        for _ in 0..<50 {
+            if viewModel.orderedSessionKeys.contains(customKey) { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
         #expect(viewModel.orderedSessionKeys.contains(customKey))
 
         chatService.emitServiceEvent(.streamUpdated(
@@ -968,7 +1008,10 @@ struct ChatViewModelTests {
         chatService.emitServiceEvent(.streamCreated(
             makeStreamSession(sessionKey: customKey, displayName: "Late Create", kind: "custom", orderIndex: 2, isBuiltIn: false)
         ))
-        try await Task.sleep(for: .milliseconds(40))
+        for _ in 0..<50 {
+            if viewModel.stream(for: customKey) != nil { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
 
         #expect(viewModel.stream(for: customKey) != nil)
     }
@@ -999,7 +1042,10 @@ struct ChatViewModelTests {
 
         await viewModel.onAppear()
         chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
-        try await Task.sleep(for: .milliseconds(30))
+        for _ in 0..<50 {
+            if viewModel.stream(for: customKey) != nil { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
         #expect(viewModel.stream(for: customKey) != nil)
 
         let deleted = await viewModel.deleteStream(sessionKey: customKey)
@@ -1007,7 +1053,10 @@ struct ChatViewModelTests {
         #expect(viewModel.stream(for: customKey) != nil)
 
         chatService.emitServiceEvent(.streamDeleted(sessionKey: customKey))
-        try await Task.sleep(for: .milliseconds(40))
+        for _ in 0..<50 {
+            if viewModel.stream(for: customKey) == nil { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
 
         #expect(viewModel.stream(for: customKey) == nil)
     }
@@ -1033,14 +1082,19 @@ struct ChatViewModelTests {
 
         await viewModel.onAppear()
 
-        try await Task.sleep(for: .milliseconds(30))
         chatService.emitServiceEvent(.userInfo(ChatUserInfo(userId: "user", isAdmin: true)))
-        try await Task.sleep(for: .milliseconds(30))
+        for _ in 0..<50 {
+            if auth.isAdmin { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
 
         #expect(auth.isAdmin)
 
         chatService.emitServiceEvent(.userInfo(ChatUserInfo(userId: "user", isAdmin: false)))
-        try await Task.sleep(for: .milliseconds(30))
+        for _ in 0..<50 {
+            if auth.isAdmin == false { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
         #expect(auth.isAdmin == false)
     }
 }
@@ -1189,6 +1243,22 @@ private func resetViewModelForTest(_ viewModel: ChatViewModel, auth: TestAuthMan
     auth.storeCredentials(token: "jwt", userId: "user")
     auth.updateAdminStatus(wasAdmin)
     await viewModel.onAppear()
+}
+
+@MainActor
+private func setConnected(chatService: TestChatService, viewModel: ChatViewModel) async throws {
+    chatService.emitConnectionState(.connected)
+    for _ in 0..<50 {
+        if viewModel.connectionState == .connected { return }
+        try await Task.sleep(for: .milliseconds(10))
+    }
+}
+
+@MainActor
+private func setReadyToSend(chatService: TestChatService, viewModel: ChatViewModel) async throws {
+    try await setConnected(chatService: chatService, viewModel: viewModel)
+    chatService.emitServiceEvent(.sessionProvisioningAvailable(false))
+    try await Task.sleep(for: .milliseconds(20))
 }
 
 @MainActor

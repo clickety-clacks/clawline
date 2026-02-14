@@ -1131,8 +1131,8 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                         data: data
                     )
                 },
-                onRetry: { [weak self] in
-                    self?.viewModel?.retryMessage(messageId: message.id)
+                onResend: { [weak self] in
+                    self?.viewModel?.resendFailedMessage(messageId: message.id)
                 }
             )
             return cell
@@ -1598,9 +1598,6 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             if let minHeight = minHeightOverride {
                 height = max(height, minHeight)
             }
-            if failureReason != nil {
-                height += 32
-            }
             let minWidth: CGFloat = minWidthOverride ?? 120
             let clamped = CGSize(
                 width: min(effectiveMaxWidth, max(minWidth, preferredWidth)),
@@ -1620,12 +1617,9 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         if let minHeight = minHeightOverride {
             height = max(height, minHeight)
         }
-        if failureReason != nil {
-            height += 32
-        }
         if let truncationHeightOverride, prefersScreenAwareHeightCap {
             // For wide content, cap at truncation max (but don't force-max).
-            height = min(height, truncationHeightOverride + (failureReason != nil ? 32 : 0))
+            height = min(height, truncationHeightOverride)
         }
         let clamped = CGSize(
             width: min(effectiveMaxWidth, max(minWidth, measured.width)),
@@ -1937,16 +1931,15 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         )
         let dynamicHeight2 = uiKitBubbleSizer.measuredDynamicContentHeight(fittingWidth: contentWidth)
 
-        let badgeExtra: CGFloat = (failureReason != nil) ? 32 : 0
         let outerScrollEnabled = plan.allowsOuterScroll && measured2.height > plan.heightCap
         let cellHeight: CGFloat = {
             if plan.isSingleLinkPreview {
-                return plan.heightCap + badgeExtra
+                return plan.heightCap
             }
             if plan.allowsOuterScroll {
-                return min(measured2.height, plan.heightCap) + badgeExtra
+                return min(measured2.height, plan.heightCap)
             }
-            return measured2.height + badgeExtra
+            return measured2.height
         }()
 
         let snappedSize = snapToPixel(CGSize(width: measuredBubbleWidth, height: max(1, cellHeight)))
@@ -2450,9 +2443,8 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         )
         var snapped = snapToPixel(clamped)
         if let truncationHeightOverride {
-            // Cap height to the truncation max. For failures, the badge adds extra vertical space.
-            let badgeExtra: CGFloat = (failureReason != nil) ? 32 : 0
-            snapped.height = min(snapped.height, truncationHeightOverride + badgeExtra)
+            // Cap height to the truncation max.
+            snapped.height = min(snapped.height, truncationHeightOverride)
         }
         if let previous = lastMeasuredSizes[messageId] {
             let heightDelta = abs(previous.height - snapped.height)

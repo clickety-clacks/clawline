@@ -10,6 +10,12 @@ import Observation
 import OSLog
 import UIKit
 
+enum SendButtonConnectionState: Equatable {
+    case connected
+    case reconnecting
+    case disconnected
+}
+
 enum ConnectionAlertSeverity: Equatable {
     case caution
     case critical
@@ -99,6 +105,17 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
 
     var canSend: Bool {
         connectionAlert == nil && !inputContent.isEffectivelyEmpty
+    }
+
+    var sendButtonConnectionState: SendButtonConnectionState {
+        switch connectionState {
+        case .connected:
+            return .connected
+        case .connecting, .reconnecting:
+            return .reconnecting
+        case .disconnected, .failed:
+            return reconnectTask == nil ? .disconnected : .reconnecting
+        }
     }
 
     let toastManager: ToastManager
@@ -218,6 +235,13 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
         connectionStableTask = nil
         cancelSend()
         chatService.disconnect()
+    }
+
+    func reconnect() {
+        guard auth.token != nil else { return }
+        guard sendButtonConnectionState == .disconnected else { return }
+        connectionState = .reconnecting
+        scheduleReconnect(immediate: true, reason: .manualReconnect)
     }
 
     @objc private func handleAuthStateChangeNotification() {
@@ -440,6 +464,10 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
                 sessionKey: sessionKey
             )
         }
+    }
+
+    func resendFailedMessage(messageId: String) {
+        retryMessage(messageId: messageId)
     }
 
     func cancelSend() {
@@ -855,6 +883,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
 
     private enum ReconnectTrigger: String {
         case onAppear
+        case manualReconnect
         case sceneDidBecomeActive
         case connectionStateDisconnected
         case connectionStateFailed

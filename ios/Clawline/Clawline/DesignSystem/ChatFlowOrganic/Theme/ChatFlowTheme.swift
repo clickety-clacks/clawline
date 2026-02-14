@@ -26,6 +26,14 @@ enum ChatFlowTheme {
         scheme == .dark ? Color(red: 0.482, green: 0.639, blue: 0.463) : Color(red: 0.561, green: 0.651, blue: 0.541)
     }
 
+    static func connectionReconnecting(_ scheme: ColorScheme) -> Color {
+        scheme == .dark ? Color(red: 0.92, green: 0.76, blue: 0.30) : Color(red: 0.89, green: 0.67, blue: 0.08)
+    }
+
+    static func connectionDisconnected(_ scheme: ColorScheme) -> Color {
+        scheme == .dark ? Color(red: 0.88, green: 0.30, blue: 0.30) : Color(red: 0.78, green: 0.19, blue: 0.17)
+    }
+
     static var sageAdaptive: Color {
         Color(uiColor: UIColor { traits in
             if traits.userInterfaceStyle == .dark {

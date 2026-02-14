@@ -49,7 +49,7 @@ struct MessageInputBar: View {
     var resetToken: Int
     let canSend: Bool
     let isSending: Bool
-    let connectionAlert: ConnectionAlertSeverity?
+    let connectionState: SendButtonConnectionState
     let focusTrigger: Int
     let isTextFieldFocused: Bool
     /// Pass geometry.safeAreaInsets.bottom directly - DO NOT pass a computed Bool.
@@ -58,6 +58,7 @@ struct MessageInputBar: View {
     let isKeyboardVisible: Bool
     let onSend: () -> Void
     let onCancel: () -> Void
+    let onReconnect: () -> Void
     let onAdd: () -> Void
     let onFocusChange: (Bool) -> Void
     var onPasteImages: (([UIImage]) -> Void)?
@@ -73,6 +74,7 @@ struct MessageInputBar: View {
     @State private var micTransientOpacity: Double = 0
     @State private var micTransientOffset: CGFloat = 0
     @State private var micFadeTask: Task<Void, Never>?
+    @State private var reconnectPulseOn: Bool = false
     let isCompact: Bool
 
     private var metrics: MessageInputBarMetrics {
@@ -101,23 +103,23 @@ struct MessageInputBar: View {
     }
 
     private var connectionAlertColor: Color? {
-        switch connectionAlert {
-        case .caution:
+        switch connectionState {
+        case .reconnecting:
             return Color.yellow
-        case .critical:
+        case .disconnected:
             return Color.red
-        case nil:
+        case .connected:
             return nil
         }
     }
 
     private var connectionAlertMessage: String? {
-        switch connectionAlert {
-        case .caution:
+        switch connectionState {
+        case .reconnecting:
             return "Reconnecting…"
-        case .critical:
+        case .disconnected:
             return "Disconnected"
-        case nil:
+        case .connected:
             return nil
         }
     }
@@ -151,14 +153,22 @@ struct MessageInputBar: View {
     }
 
     private var connectionAlertHint: String? {
-        switch connectionAlert {
-        case .caution:
+        switch connectionState {
+        case .reconnecting:
             return "Waiting for connection to return."
-        case .critical:
+        case .disconnected:
             return "Connection lost. Try again soon."
-        case nil:
+        case .connected:
             return nil
         }
+    }
+
+    private var isReconnecting: Bool {
+        connectionState == .reconnecting
+    }
+
+    private var isDisconnected: Bool {
+        connectionState == .disconnected
     }
 
     private var sendButtonWidth: CGFloat {
@@ -221,11 +231,19 @@ struct MessageInputBar: View {
     private var sendIconColor: Color { .white }
 
     private var sendBackgroundColor: Color {
+        let scheme = inputBarColorScheme
+        switch connectionState {
+        case .connected:
 #if os(visionOS)
-        return ChatFlowTheme.sage(inputBarColorScheme)
+            return ChatFlowTheme.sage(scheme)
 #else
-        return ChatFlowTheme.sage(colorScheme)
+            return ChatFlowTheme.sage(colorScheme)
 #endif
+        case .reconnecting:
+            return ChatFlowTheme.connectionReconnecting(scheme)
+        case .disconnected:
+            return ChatFlowTheme.connectionDisconnected(scheme)
+        }
     }
 
     private var placeholderColor: Color {
@@ -451,42 +469,83 @@ struct MessageInputBar: View {
                     dictation.discardFromVoiceOverAction()
                 }
 
-                // Send button - stable container + stable glass background
-                let isSendEnabled = isSending || canSend
-                let sendIconOpacity = (connectionAlertColor == nil ? 1 : 0.65) * (isSendEnabled ? 1 : 0.4)
-                Button(action: isSending ? onCancel : onSend) {
+                // Send button - morphs with connection state, keeps frame/anchor stable.
+                let sendActionEnabled = isSending || canSend || isDisconnected
+                let sendIconOpacity = (connectionAlertColor == nil ? 1 : 0.65)
+                    * ((sendActionEnabled || isReconnecting) ? 1 : 0.4)
+                Button(action: {
+                    if isSending {
+                        onCancel()
+                        return
+                    }
+                    switch connectionState {
+                    case .connected:
+                        onSend()
+                    case .disconnected:
+                        onReconnect()
+                    case .reconnecting:
+                        break
+                    }
+                }) {
                     ZStack {
-                        Image(systemName: "stop.fill")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(sendIconColor)
-                            .opacity(isSending ? 1 : 0)
-                        Image(systemName: "paperplane.fill")
-                            .font(.system(size: 18, weight: .semibold))
-                            .foregroundStyle(sendIconColor)
-                            .opacity(isSending ? 0 : 1)
+                        if isReconnecting {
+                            Circle()
+                                .fill(sendBackgroundColor)
+                                .frame(
+                                    width: min(12, sendButtonWidth * 0.4),
+                                    height: min(12, sendButtonWidth * 0.4)
+                                )
+                                .opacity(reconnectPulseOn ? 1 : 0.4)
+                        } else {
+                            Image(systemName: "stop.fill")
+                                .font(.system(size: 16, weight: .semibold))
+                                .foregroundStyle(sendIconColor)
+                                .opacity(isSending ? 1 : 0)
+                            Image(systemName: isDisconnected ? "arrow.clockwise" : "paperplane.fill")
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundStyle(sendIconColor)
+                                .opacity(isSending ? 0 : 1)
+                        }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .contentShape(Rectangle())
                 }
                 .frame(width: sendButtonWidth, height: metrics.inputBarHeight)
 #if os(visionOS)
-                .background(Circle().fill(sendBackgroundColor.opacity(isSendEnabled ? 1 : 0.35)))
+                .background(
+                    Circle().fill(
+                        isReconnecting
+                            ? .clear
+                            : sendBackgroundColor.opacity(sendActionEnabled ? 1 : 0.35)
+                    )
+                )
                 .overlay(Circle().stroke(visionOSBorderColor, lineWidth: 1))
 #else
-                .background(Capsule().fill(sendBackgroundColor.opacity(isSendEnabled ? 1 : 0.35)))
+                .background(
+                    Capsule().fill(
+                        isReconnecting
+                            ? .clear
+                            : sendBackgroundColor.opacity(sendActionEnabled ? 1 : 0.35)
+                    )
+                )
 #endif
                 .buttonStyle(.plain)
 #if os(visionOS)
                 .tint(sendIconColor)
                 .foregroundStyle(sendIconColor)
 #endif
-                .allowsHitTesting(isSendEnabled)
+                .allowsHitTesting(sendActionEnabled && !isReconnecting)
                 .opacity(sendIconOpacity)
+                .accessibilityLabel(
+                    isReconnecting ? "Reconnecting" :
+                        (isDisconnected ? "Disconnected. Tap to reconnect." : "Send message")
+                )
                 .accessibilityHint(connectionAlertHint ?? "")
                 .id("send-button")
                 .transaction { $0.animation = nil }
                 .animation(nil, value: isSending)
                 .animation(nil, value: canSend)
+                .animation(nil, value: connectionState)
             }
         }
         .padding(.horizontal, containerPadding)
@@ -504,6 +563,24 @@ struct MessageInputBar: View {
         .onDisappear {
             micPressTask?.cancel()
             micFadeTask?.cancel()
+            reconnectPulseOn = false
+        }
+        .onAppear {
+            reconnectPulseOn = false
+            guard isReconnecting else { return }
+            withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) {
+                reconnectPulseOn = true
+            }
+        }
+        .onChange(of: connectionState) { _, newValue in
+            if newValue == .reconnecting {
+                reconnectPulseOn = false
+                withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) {
+                    reconnectPulseOn = true
+                }
+            } else {
+                reconnectPulseOn = false
+            }
         }
     }
 
@@ -727,13 +804,14 @@ struct DictationMicAffordanceAnimationPlan {
                 resetToken: 0,
                 canSend: true,
                 isSending: false,
-                connectionAlert: nil,
+                connectionState: .connected,
                 focusTrigger: 0,
                 isTextFieldFocused: false,
                 bottomSafeAreaInset: 34,
                 isKeyboardVisible: false,
                 onSend: {},
                 onCancel: {},
+                onReconnect: {},
                 onAdd: {},
                 onFocusChange: { _ in },
                 onPasteImages: nil,

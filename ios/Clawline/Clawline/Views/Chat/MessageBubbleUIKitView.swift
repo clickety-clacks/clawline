@@ -46,8 +46,8 @@ final class MessageBubbleUIKitContainerView: UIView {
     private let badgeView = MessageFailureBadgeView()
     private var bubbleBottomConstraint: NSLayoutConstraint!
     private var badgeBottomConstraint: NSLayoutConstraint!
-    private var badgeLeadingConstraint: NSLayoutConstraint!
-    private var onRetry: (() -> Void)?
+    private var badgeTrailingConstraint: NSLayoutConstraint!
+    private var onResend: (() -> Void)?
     private var onRequestLayout: ((String) -> Void)?
 
     override init(frame: CGRect) {
@@ -67,16 +67,13 @@ final class MessageBubbleUIKitContainerView: UIView {
 
         badgeView.translatesAutoresizingMaskIntoConstraints = false
         addSubview(badgeView)
-        badgeLeadingConstraint = badgeView.leadingAnchor.constraint(equalTo: bubbleView.leadingAnchor)
+        badgeTrailingConstraint = badgeView.trailingAnchor.constraint(equalTo: bubbleView.trailingAnchor, constant: -6)
         badgeBottomConstraint = badgeView.bottomAnchor.constraint(equalTo: bubbleView.bottomAnchor)
         NSLayoutConstraint.activate([
-            badgeLeadingConstraint,
+            badgeTrailingConstraint,
             badgeBottomConstraint
         ])
         badgeView.isHidden = true
-        badgeView.isUserInteractionEnabled = true
-        let badgeTap = UITapGestureRecognizer(target: self, action: #selector(handleBadgeTap))
-        badgeView.addGestureRecognizer(badgeTap)
     }
 
     required init?(coder: NSCoder) {
@@ -100,7 +97,7 @@ final class MessageBubbleUIKitContainerView: UIView {
                    onRequestExpand: (() -> Void)?,
                    onRequestLayout: ((String) -> Void)?,
                    onInteractiveCallback: ((String, String, JSONValue?) -> Void)?,
-                   onRetry: (() -> Void)?) {
+                   onResend: (() -> Void)?) {
         let metrics = ChatFlowTheme.Metrics(isCompact: isCompact)
         let sizeClass = MessageFlowRules.sizeClass(for: presentation)
         bubbleView.configure(
@@ -127,19 +124,22 @@ final class MessageBubbleUIKitContainerView: UIView {
 
 
         )
-        self.onRetry = onRetry
+        self.onResend = onResend
         self.onRequestLayout = onRequestLayout
 
-        if let reason = failureReason {
+        if failureReason != nil {
             badgeView.isHidden = false
-            badgeView.configure(reason: reason)
-            bubbleBottomConstraint.constant = -32
-            badgeBottomConstraint.constant = 18
-            badgeLeadingConstraint.constant = 0
+            badgeView.configure(onResend: { [weak self] in
+                self?.onResend?()
+            })
+            bubbleBottomConstraint.constant = 0
+            badgeBottomConstraint.constant = -6
+            badgeTrailingConstraint.constant = -6
         } else {
             badgeView.isHidden = true
             bubbleBottomConstraint.constant = 0
             badgeBottomConstraint.constant = 0
+            badgeTrailingConstraint.constant = 0
         }
     }
 
@@ -148,19 +148,15 @@ final class MessageBubbleUIKitContainerView: UIView {
         // reused cells from inheriting a non-zero contentOffset (GitHub #56).
         bubbleView.prepareForReuse()
         badgeView.isHidden = true
-        onRetry = nil
+        onResend = nil
         onRequestLayout = nil
         bubbleBottomConstraint.constant = 0
         badgeBottomConstraint.constant = 0
-        badgeLeadingConstraint.constant = 0
+        badgeTrailingConstraint.constant = 0
     }
 
     func setCenteredOverlayView(_ view: UIView?) {
         bubbleView.setCenteredOverlayView(view)
-    }
-
-    @objc private func handleBadgeTap() {
-        onRetry?()
     }
 
     func bubbleFrameInContainer() -> CGRect {
@@ -1803,41 +1799,47 @@ final class AvatarCircleView: UIView {
 }
 
 final class MessageFailureBadgeView: UIView {
-    private let label = UILabel()
+    private let button = UIButton(type: .system)
 
     override init(frame: CGRect) {
         super.init(frame: frame)
+        translatesAutoresizingMaskIntoConstraints = false
         backgroundColor = .clear
-        layer.cornerRadius = 12
-        layer.masksToBounds = true
+        isAccessibilityElement = false
 
-        label.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(label)
+        button.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(button)
         NSLayoutConstraint.activate([
-            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
-            label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
-            label.topAnchor.constraint(equalTo: topAnchor, constant: 6),
-            label.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -6)
+            button.leadingAnchor.constraint(equalTo: leadingAnchor),
+            button.trailingAnchor.constraint(equalTo: trailingAnchor),
+            button.topAnchor.constraint(equalTo: topAnchor),
+            button.bottomAnchor.constraint(equalTo: bottomAnchor),
+            button.widthAnchor.constraint(equalToConstant: 24),
+            button.heightAnchor.constraint(equalToConstant: 24)
         ])
-
-        label.font = UIFont.systemFont(ofSize: 12, weight: .semibold)
-        label.numberOfLines = 2
-        label.textColor = ChatFlowUIKitTheme.failureText(isDark: traitCollection.userInterfaceStyle == .dark)
+        button.tintColor = ChatFlowUIKitTheme.failureText(isDark: traitCollection.userInterfaceStyle == .dark)
+        button.setImage(UIImage(systemName: "exclamationmark.circle.fill"), for: .normal)
+        button.backgroundColor = .clear
+        button.showsMenuAsPrimaryAction = true
+        button.accessibilityLabel = "Message failed to send. Tap for options."
+        button.accessibilityTraits = [.button]
     }
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
-    func configure(reason: String) {
-        if reason.isEmpty {
-            label.text = "Message failed. Tap to retry."
-        } else {
-            label.text = "\(reason)\nTap to retry."
-        }
+    func configure(onResend: @escaping () -> Void) {
         let isDark = traitCollection.userInterfaceStyle == .dark
-        backgroundColor = ChatFlowUIKitTheme.failureBackground(isDark: isDark)
-        label.textColor = ChatFlowUIKitTheme.failureText(isDark: isDark)
+        button.tintColor = ChatFlowUIKitTheme.failureText(isDark: isDark)
+        button.menu = UIMenu(
+            options: .displayInline,
+            children: [
+                UIAction(title: "Resend", image: UIImage(systemName: "arrow.clockwise")) { _ in
+                    onResend()
+                }
+            ]
+        )
     }
 }
 
@@ -2010,7 +2012,7 @@ final class MessageBubbleUIKitCell: UICollectionViewCell {
                    onRequestExpand: (() -> Void)?,
                    onRequestLayout: ((String) -> Void)?,
                    onInteractiveCallback: ((String, String, JSONValue?) -> Void)?,
-                   onRetry: (() -> Void)?) {
+                   onResend: (() -> Void)?) {
         messageId = message.id
         messageSnippet = String(message.content.prefix(80))
         let guardedRequestLayout: (String) -> Void = { [weak self] requestedId in
@@ -2031,7 +2033,7 @@ final class MessageBubbleUIKitCell: UICollectionViewCell {
             onRequestExpand: onRequestExpand,
             onRequestLayout: guardedRequestLayout,
             onInteractiveCallback: onInteractiveCallback,
-            onRetry: onRetry
+            onResend: onResend
         )
     }
 

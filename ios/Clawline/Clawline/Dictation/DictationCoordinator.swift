@@ -12,6 +12,8 @@ import UIKit
 enum DictationState: Equatable {
     case idleMicVisible
     case idleMicHidden
+    case keyPromptInline
+    case keyVerifyingInline
     case dictatingSticky
     case dictatingWalkieTalkie
     case stoppingKeep
@@ -89,16 +91,26 @@ final class DictationCoordinator {
     private(set) var errorMessage: String?
     private(set) var waveformDisplacement: CGFloat = 1
     private(set) var reduceMotionEnabled: Bool = UIAccessibility.isReduceMotionEnabled
+    private(set) var inlineKeyText: String = SonioxConfigurationStore.editableAPIKey
+    private(set) var inlineKeyStatus: SonioxKeyVerificationStatus = SonioxConfigurationStore.keyStatus
 
-    var isConfigured: Bool {
-        configuredAPIKey() != nil
+    var inlineKeyActionTitle: String {
+        inlineKeyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Get Key" : "Verify"
+    }
+
+    var inlineKeyStatusText: String? {
+        inlineKeyStatus.inlineStatusText
+    }
+
+    var showsInlineKeyPrompt: Bool {
+        state == .keyPromptInline || state == .keyVerifyingInline
     }
 
     var isDictationActive: Bool {
         switch state {
         case .dictatingSticky, .dictatingWalkieTalkie, .stoppingKeep, .stoppingDiscard:
             return true
-        case .idleMicVisible, .idleMicHidden, .error:
+        case .idleMicVisible, .idleMicHidden, .keyPromptInline, .keyVerifyingInline, .error:
             return false
         }
     }
@@ -115,27 +127,30 @@ final class DictationCoordinator {
         switch state {
         case .dictatingSticky, .dictatingWalkieTalkie, .stoppingKeep, .stoppingDiscard:
             return true
-        case .idleMicVisible, .idleMicHidden, .error:
+        case .idleMicVisible, .idleMicHidden, .keyPromptInline, .keyVerifyingInline, .error:
             return false
         }
     }
 
     var micVisible: Bool {
-        isConfigured
-            && !isDictationActive
+        !isDictationActive
             && !isTextFieldFocused
             && composeIsEmpty
     }
 
     var swipeActivationEnabled: Bool {
-        isConfigured
-            && !isDictationActive
+        !isDictationActive
             && state == .idleMicHidden
             && selectionLength == 0
     }
 
     private let bridge: ComposeInputDictationBridge
     private let configuredAPIKey: () -> String?
+    private let editableAPIKeyProvider: () -> String
+    private let keyStatusProvider: () -> SonioxKeyVerificationStatus
+    private let setConfiguredAPIKey: (String?) -> Void
+    private let setKeyStatus: (SonioxKeyVerificationStatus) -> Void
+    private let keyVerifier: any SonioxKeyVerifying
     private let languageHintProvider: () -> String
     private let audioCaptureFactory: () -> any DictationAudioCapturing
     private let streamingClientFactory: () -> any SonioxStreamingClienting
@@ -151,6 +166,7 @@ final class DictationCoordinator {
     private var originSessionKey: String?
     private var preDictationSnapshot: ComposeDraftSnapshot = .empty
     private var transcriptBuffer = DictationTranscriptBuffer()
+    private var pendingActivationMode: DictationMode?
     private var mode: DictationMode?
     private var sessionStartedAt: Date?
     private var lastTokenAt: Date?
@@ -170,6 +186,11 @@ final class DictationCoordinator {
     init(
         bridge: ComposeInputDictationBridge,
         configuredAPIKey: @escaping () -> String? = { SonioxConfigurationStore.apiKey },
+        editableAPIKeyProvider: @escaping () -> String = { SonioxConfigurationStore.editableAPIKey },
+        keyStatusProvider: @escaping () -> SonioxKeyVerificationStatus = { SonioxConfigurationStore.keyStatus },
+        setConfiguredAPIKey: @escaping (String?) -> Void = { SonioxConfigurationStore.setAPIKey($0) },
+        setKeyStatus: @escaping (SonioxKeyVerificationStatus) -> Void = { SonioxConfigurationStore.setKeyStatus($0) },
+        keyVerifier: any SonioxKeyVerifying = SonioxKeyVerifier(),
         languageHintProvider: @escaping () -> String = { DictationLanguageHintResolver.resolve() },
         audioCaptureFactory: @escaping () -> any DictationAudioCapturing = { DictationAudioCapture() },
         streamingClientFactory: @escaping () -> any SonioxStreamingClienting = { SonioxStreamingClient() },
@@ -179,6 +200,11 @@ final class DictationCoordinator {
     ) {
         self.bridge = bridge
         self.configuredAPIKey = configuredAPIKey
+        self.editableAPIKeyProvider = editableAPIKeyProvider
+        self.keyStatusProvider = keyStatusProvider
+        self.setConfiguredAPIKey = setConfiguredAPIKey
+        self.setKeyStatus = setKeyStatus
+        self.keyVerifier = keyVerifier
         self.languageHintProvider = languageHintProvider
         self.audioCaptureFactory = audioCaptureFactory
         self.streamingClientFactory = streamingClientFactory
@@ -186,6 +212,7 @@ final class DictationCoordinator {
         self.feedback = feedback ?? UIKitDictationFeedbackProvider()
         self.timing = timing
         reduceMotionEnabled = self.feedback.isReduceMotionEnabled
+        refreshInlineKeyFromStore()
     }
 
     func updateContext(
@@ -201,6 +228,10 @@ final class DictationCoordinator {
         self.isTextFieldFocused = textFieldFocused
         self.selectionLength = selectionLength
         self.reduceMotionEnabled = reduceMotionEnabled
+
+        if state != .keyVerifyingInline {
+            refreshInlineKeyFromStore()
+        }
 
         if isDictationActive,
            let originSessionKey,
@@ -218,7 +249,10 @@ final class DictationCoordinator {
             }
         }
 
-        if !isDictationActive, state != .error {
+        if !isDictationActive,
+           state != .error,
+           state != .keyPromptInline,
+           state != .keyVerifyingInline {
             state = idleStateForCurrentContext()
         }
     }
@@ -229,6 +263,54 @@ final class DictationCoordinator {
 
     func startWalkieTalkieDictation() {
         start(mode: .walkieTalkie)
+    }
+
+    func updateInlineKeyText(_ value: String) {
+        inlineKeyText = value
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        setConfiguredAPIKey(trimmed.isEmpty ? nil : trimmed)
+
+        if trimmed.isEmpty {
+            inlineKeyStatus = .missing
+            setKeyStatus(.missing)
+        } else if inlineKeyStatus != .validating {
+            inlineKeyStatus = .unverified
+            setKeyStatus(.unverified)
+        }
+    }
+
+    func handleInlineKeyPrimaryAction(openKeyURL: (URL) -> Void) async {
+        let trimmed = inlineKeyText.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            inlineKeyStatus = .missing
+            setConfiguredAPIKey(nil)
+            setKeyStatus(.missing)
+            state = .keyPromptInline
+            openKeyURL(SonioxConfigurationStore.keyManagementURL)
+            return
+        }
+
+        state = .keyVerifyingInline
+        inlineKeyStatus = .validating
+        setKeyStatus(.validating)
+        setConfiguredAPIKey(trimmed)
+
+        let isValid = await keyVerifier.verify(apiKey: trimmed)
+        if isValid {
+            inlineKeyStatus = .validated
+            setKeyStatus(.validated)
+            let requestedMode = pendingActivationMode
+            pendingActivationMode = nil
+            if let requestedMode {
+                start(mode: requestedMode)
+            } else {
+                state = idleStateForCurrentContext()
+            }
+        } else {
+            inlineKeyStatus = .invalid
+            setKeyStatus(.invalid)
+            state = .keyPromptInline
+        }
     }
 
     func stopDictationFromSwipeRight() {
@@ -292,9 +374,18 @@ final class DictationCoordinator {
 
     private func start(mode: DictationMode) {
         guard !isDictationActive else { return }
-        guard let apiKey = configuredAPIKey() else { return }
         guard !currentSessionKey.isEmpty else { return }
+        refreshInlineKeyFromStore()
 
+        guard inlineKeyStatus == .validated,
+              let apiKey = configuredAPIKey(),
+              !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            pendingActivationMode = mode
+            state = .keyPromptInline
+            return
+        }
+
+        pendingActivationMode = nil
         self.mode = mode
         self.originSessionKey = currentSessionKey
         self.preDictationSnapshot = bridge.captureSnapshot(for: currentSessionKey)
@@ -566,6 +657,7 @@ final class DictationCoordinator {
 
         originSessionKey = nil
         preDictationSnapshot = .empty
+        pendingActivationMode = nil
 
         if state != .error {
             state = idleStateForCurrentContext()
@@ -596,8 +688,7 @@ final class DictationCoordinator {
     }
 
     private func idleStateForCurrentContext() -> DictationState {
-        if isConfigured,
-           !isTextFieldFocused,
+        if !isTextFieldFocused,
            composeIsEmpty,
            !isDictationActive {
             return .idleMicVisible
@@ -615,5 +706,10 @@ final class DictationCoordinator {
     private func elapsedSessionMilliseconds() -> Int {
         guard let sessionStartedAt else { return 0 }
         return Int(Date().timeIntervalSince(sessionStartedAt) * 1000)
+    }
+
+    private func refreshInlineKeyFromStore() {
+        inlineKeyText = editableAPIKeyProvider()
+        inlineKeyStatus = keyStatusProvider()
     }
 }

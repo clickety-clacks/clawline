@@ -40,6 +40,7 @@ private let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "
 struct MessageInputBar: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.settingsManager) private var settings
+    @Environment(\.openURL) private var openURL
     @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
     @Binding var content: NSAttributedString
     @Binding var selectionRange: NSRange
@@ -250,242 +251,273 @@ struct MessageInputBar: View {
         UIColor(inputTintColor)
     }
 
-    var body: some View {
-        HStack(alignment: .bottom, spacing: MessageInputBarMetrics.elementSpacing) {
-#if os(visionOS)
-            // Appearance toggle button
-            Button(action: {
-                settings.toggleAppearanceMode()
-            }) {
-                Image(systemName: appearanceIconName)
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(appearanceIconColor)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .frame(width: metrics.inputBarHeight, height: metrics.inputBarHeight)
-#if os(visionOS)
-            .background(.regularMaterial, in: Circle())
-            .overlay {
-                Circle()
-                    .stroke(visionOSBorderColor, lineWidth: 1)
-            }
-#else
-            .glassEffect(.regular.interactive(), in: Circle())
-            .background {
-                if isLightMode {
-                    Circle()
-                        .fill(Color.primary.opacity(0.15))
-                }
-            }
-#endif
-            .accessibilityLabel("Toggle appearance")
-#endif
+    private var inlineKeyTextBinding: Binding<String> {
+        Binding(
+            get: { dictation.inlineKeyText },
+            set: { dictation.updateInlineKeyText($0) }
+        )
+    }
 
-            // Add button - send-style for reliable hit testing (left side)
-            Button(action: {
-                onAdd()
-            }) {
-                Image(systemName: "plus")
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(addButtonForeground)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .frame(width: metrics.inputBarHeight, height: metrics.inputBarHeight)
-#if os(visionOS)
-            .background(.regularMaterial, in: Circle())
-            .overlay(
-                Circle()
-                    .stroke(visionOSBorderColor, lineWidth: 1)
+    @ViewBuilder
+    private var inlineKeyPrompt: some View {
+        if dictation.showsInlineKeyPrompt {
+            SonioxKeyConfigurationRow(
+                keyText: inlineKeyTextBinding,
+                status: dictation.inlineKeyStatus,
+                actionTitle: dictation.inlineKeyActionTitle,
+                onAction: {
+                    Task { @MainActor in
+                        await dictation.handleInlineKeyPrimaryAction { url in
+                            openURL(url)
+                        }
+                    }
+                },
+                placeholder: "soniox.apiKey",
+                showsBackground: true
             )
-#else
-            .glassEffect(.regular.interactive(), in: Circle())
-#endif
-            .accessibilityLabel("Add attachment")
-            .disabled(isSending)
+        }
+    }
 
-            // Text field - glass capsule/rounded rect
-            ZStack(alignment: .leading) {
-                RichTextEditor(
-                    attributedText: $content,
-                    calculatedHeight: $editorHeight,
-                    selectionRange: $selectionRange,
-                    pendingInsertions: $pendingInsertions,
-                    resetToken: resetToken,
-                    focusTrigger: focusTrigger,
-                    isEditable: true,
-                    tintColor: inputTintUIColor,
-                    textColor: {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            inlineKeyPrompt
+
+            HStack(alignment: .bottom, spacing: MessageInputBarMetrics.elementSpacing) {
 #if os(visionOS)
-                        // #61: Input bar is forced dark on visionOS; ensure typed text is visible.
-                        return .white
-#else
-                        return .label
-#endif
-                    }(),
-                    onFocusChange: onFocusChange,
-                    onSubmit: {
-                        guard !isSending, canSend else { return }
-                        onSend()
-                    },
-                    onEscape: {
-                        dictation.stopFromEscapeKey()
-                    },
-                    onEscapeLongPress: {
-                        dictation.discardFromEscapeLongPress()
-                    },
-                    onPasteImages: onPasteImages,
-                    trailingPadding: micTrailingPadding
-                )
-                .opacity(isSending ? 0.5 : 1)
-
-                if content.length == 0 {
-                    Text(placeholderText)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .minimumScaleFactor(0.7)
-                        .foregroundColor(placeholderColor)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-                        .frame(maxHeight: .infinity, alignment: .center)
-                        .padding(.leading, 20)
-                        .padding(.trailing, micTrailingPadding)
-                }
-
-                if let alertMessage = connectionAlertMessage,
-                   let alertColor = connectionAlertColor {
-                    RoundedRectangle(cornerRadius: inputCornerRadius, style: .continuous)
-                        .fill(alertColor.opacity(0.08))
-                        .allowsHitTesting(false)
-
-                    HStack(spacing: 8) {
-                        Image(systemName: "wifi.slash")
-                            .font(.system(size: 14, weight: .semibold))
-                        Text(alertMessage)
-                            .font(.system(size: 14, weight: .semibold))
-                    }
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 12)
-                    .foregroundColor(alertColor)
-                    .allowsHitTesting(false)
-                }
-
-                if dictation.state == .error,
-                   let message = dictation.errorMessage {
-                    RoundedRectangle(cornerRadius: inputCornerRadius, style: .continuous)
-                        .fill(Color.red.opacity(0.1))
-                        .allowsHitTesting(false)
-
-                    HStack(spacing: 8) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .font(.system(size: 14, weight: .semibold))
-                        Text(message)
-                            .font(.system(size: 13, weight: .semibold))
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                    }
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 12)
-                    .foregroundColor(.red)
-                    .allowsHitTesting(false)
-                }
-
-                if shouldRenderMic {
-                    micButton
-                        .padding(.trailing, 8)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
-                        .opacity(dictation.micVisible ? 1 : micTransientOpacity)
-                        .offset(x: dictation.micVisible ? 0 : micTransientOffset)
-                        .allowsHitTesting(dictation.micVisible)
-                        .transition(.move(edge: .trailing).combined(with: .opacity))
-                        .animation(.easeOut(duration: isTextFieldFocused ? 0.7 : 0.35), value: dictation.micVisible)
-                }
-            }
-            .tint(inputTintColor)
-            .frame(height: inputHeight)
-            .frame(maxWidth: .infinity, alignment: .bottom)
-            .contentShape(Rectangle())
-            .simultaneousGesture(swipeDictationGesture)
-#if os(visionOS)
-            .background(.regularMaterial, in: inputShape)
-#else
-            .glassEffect(.regular, in: inputShape)
-#endif
-            .overlay {
-                ZStack {
-#if os(visionOS)
-                    inputShape
-                        .stroke(visionOSBorderColor, lineWidth: 1)
-#endif
-                    if let alertColor = connectionAlertColor {
-                        inputShape
-                            .stroke(alertColor.opacity(0.4), lineWidth: 1)
-                    }
-                    if dictation.isWaveformVisible {
-                        DictationWaveformBorder(
-                            isActive: true,
-                            amplitude: dictation.waveformDisplacement,
-                            cornerRadius: inputCornerRadius,
-                            reduceMotionEnabled: reduceMotionForDictation
-                        )
-                    }
-                }
-            }
-            .accessibilityAction(named: Text("Start Sticky Dictation")) {
-                guard dictation.micVisible || dictation.swipeActivationEnabled else { return }
-                dictation.startStickyDictation()
-                beginMicFadeOut(fromSwipe: !dictation.micVisible)
-            }
-            .accessibilityAction(named: Text("Start Walkie-Talkie Dictation")) {
-                guard dictation.micVisible || dictation.swipeActivationEnabled else { return }
-                dictation.startWalkieTalkieDictation()
-                beginMicFadeOut(fromSwipe: !dictation.micVisible)
-            }
-            .accessibilityAction(named: Text("Stop Dictation")) {
-                dictation.stopFromVoiceOverAction()
-            }
-            .accessibilityAction(named: Text("Cancel and Discard Dictation")) {
-                dictation.discardFromVoiceOverAction()
-            }
-
-            // Send button - stable container + stable glass background
-            let isSendEnabled = isSending || canSend
-            let sendIconOpacity = (connectionAlertColor == nil ? 1 : 0.65) * (isSendEnabled ? 1 : 0.4)
-            Button(action: isSending ? onCancel : onSend) {
-                ZStack {
-                    Image(systemName: "stop.fill")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(sendIconColor)
-                        .opacity(isSending ? 1 : 0)
-                    Image(systemName: "paperplane.fill")
+                // Appearance toggle button
+                Button(action: {
+                    settings.toggleAppearanceMode()
+                }) {
+                    Image(systemName: appearanceIconName)
                         .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(sendIconColor)
-                        .opacity(isSending ? 0 : 1)
+                        .foregroundStyle(appearanceIconColor)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .contentShape(Rectangle())
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .contentShape(Rectangle())
-            }
-            .frame(width: sendButtonWidth, height: metrics.inputBarHeight)
+                .buttonStyle(.plain)
+                .frame(width: metrics.inputBarHeight, height: metrics.inputBarHeight)
 #if os(visionOS)
-            .background(Circle().fill(sendBackgroundColor.opacity(isSendEnabled ? 1 : 0.35)))
-            .overlay(Circle().stroke(visionOSBorderColor, lineWidth: 1))
+                .background(.regularMaterial, in: Circle())
+                .overlay {
+                    Circle()
+                        .stroke(visionOSBorderColor, lineWidth: 1)
+                }
 #else
-            .background(Capsule().fill(sendBackgroundColor.opacity(isSendEnabled ? 1 : 0.35)))
+                .glassEffect(.regular.interactive(), in: Circle())
+                .background {
+                    if isLightMode {
+                        Circle()
+                            .fill(Color.primary.opacity(0.15))
+                    }
+                }
 #endif
-            .buttonStyle(.plain)
+                .accessibilityLabel("Toggle appearance")
+#endif
+
+                // Add button - send-style for reliable hit testing (left side)
+                Button(action: {
+                    onAdd()
+                }) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundStyle(addButtonForeground)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .frame(width: metrics.inputBarHeight, height: metrics.inputBarHeight)
 #if os(visionOS)
-            .tint(sendIconColor)
-            .foregroundStyle(sendIconColor)
+                .background(.regularMaterial, in: Circle())
+                .overlay(
+                    Circle()
+                        .stroke(visionOSBorderColor, lineWidth: 1)
+                )
+#else
+                .glassEffect(.regular.interactive(), in: Circle())
 #endif
-            .allowsHitTesting(isSendEnabled)
-            .opacity(sendIconOpacity)
-            .accessibilityHint(connectionAlertHint ?? "")
-            .id("send-button")
-            .transaction { $0.animation = nil }
-            .animation(nil, value: isSending)
-            .animation(nil, value: canSend)
+                .accessibilityLabel("Add attachment")
+                .disabled(isSending)
+
+                // Text field - glass capsule/rounded rect
+                ZStack(alignment: .leading) {
+                    RichTextEditor(
+                        attributedText: $content,
+                        calculatedHeight: $editorHeight,
+                        selectionRange: $selectionRange,
+                        pendingInsertions: $pendingInsertions,
+                        resetToken: resetToken,
+                        focusTrigger: focusTrigger,
+                        isEditable: true,
+                        tintColor: inputTintUIColor,
+                        textColor: {
+#if os(visionOS)
+                            // #61: Input bar is forced dark on visionOS; ensure typed text is visible.
+                            return .white
+#else
+                            return .label
+#endif
+                        }(),
+                        onFocusChange: onFocusChange,
+                        onSubmit: {
+                            guard !isSending, canSend else { return }
+                            onSend()
+                        },
+                        onEscape: {
+                            dictation.stopFromEscapeKey()
+                        },
+                        onEscapeLongPress: {
+                            dictation.discardFromEscapeLongPress()
+                        },
+                        onPasteImages: onPasteImages,
+                        trailingPadding: micTrailingPadding
+                    )
+                    .opacity(isSending ? 0.5 : 1)
+
+                    if content.length == 0 {
+                        Text(placeholderText)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .minimumScaleFactor(0.7)
+                            .foregroundColor(placeholderColor)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                            .frame(maxHeight: .infinity, alignment: .center)
+                            .padding(.leading, 20)
+                            .padding(.trailing, micTrailingPadding)
+                    }
+
+                    if let alertMessage = connectionAlertMessage,
+                       let alertColor = connectionAlertColor {
+                        RoundedRectangle(cornerRadius: inputCornerRadius, style: .continuous)
+                            .fill(alertColor.opacity(0.08))
+                            .allowsHitTesting(false)
+
+                        HStack(spacing: 8) {
+                            Image(systemName: "wifi.slash")
+                                .font(.system(size: 14, weight: .semibold))
+                            Text(alertMessage)
+                                .font(.system(size: 14, weight: .semibold))
+                        }
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 12)
+                        .foregroundColor(alertColor)
+                        .allowsHitTesting(false)
+                    }
+
+                    if dictation.state == .error,
+                       let message = dictation.errorMessage {
+                        RoundedRectangle(cornerRadius: inputCornerRadius, style: .continuous)
+                            .fill(Color.red.opacity(0.1))
+                            .allowsHitTesting(false)
+
+                        HStack(spacing: 8) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .font(.system(size: 14, weight: .semibold))
+                            Text(message)
+                                .font(.system(size: 13, weight: .semibold))
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                        }
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 12)
+                        .foregroundColor(.red)
+                        .allowsHitTesting(false)
+                    }
+
+                    if shouldRenderMic {
+                        micButton
+                            .padding(.trailing, 8)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+                            .opacity(dictation.micVisible ? 1 : micTransientOpacity)
+                            .offset(x: dictation.micVisible ? 0 : micTransientOffset)
+                            .allowsHitTesting(dictation.micVisible)
+                            .transition(.move(edge: .trailing).combined(with: .opacity))
+                            .animation(.easeOut(duration: isTextFieldFocused ? 0.7 : 0.35), value: dictation.micVisible)
+                    }
+                }
+                .tint(inputTintColor)
+                .frame(height: inputHeight)
+                .frame(maxWidth: .infinity, alignment: .bottom)
+                .contentShape(Rectangle())
+                .simultaneousGesture(swipeDictationGesture)
+#if os(visionOS)
+                .background(.regularMaterial, in: inputShape)
+#else
+                .glassEffect(.regular, in: inputShape)
+#endif
+                .overlay {
+                    ZStack {
+#if os(visionOS)
+                        inputShape
+                            .stroke(visionOSBorderColor, lineWidth: 1)
+#endif
+                        if let alertColor = connectionAlertColor {
+                            inputShape
+                                .stroke(alertColor.opacity(0.4), lineWidth: 1)
+                        }
+                        if dictation.isWaveformVisible {
+                            DictationWaveformBorder(
+                                isActive: true,
+                                amplitude: dictation.waveformDisplacement,
+                                cornerRadius: inputCornerRadius,
+                                reduceMotionEnabled: reduceMotionForDictation
+                            )
+                        }
+                    }
+                }
+                .accessibilityAction(named: Text("Start Sticky Dictation")) {
+                    guard dictation.micVisible || dictation.swipeActivationEnabled else { return }
+                    dictation.startStickyDictation()
+                    beginMicFadeOut(fromSwipe: !dictation.micVisible)
+                }
+                .accessibilityAction(named: Text("Start Walkie-Talkie Dictation")) {
+                    guard dictation.micVisible || dictation.swipeActivationEnabled else { return }
+                    dictation.startWalkieTalkieDictation()
+                    beginMicFadeOut(fromSwipe: !dictation.micVisible)
+                }
+                .accessibilityAction(named: Text("Stop Dictation")) {
+                    dictation.stopFromVoiceOverAction()
+                }
+                .accessibilityAction(named: Text("Cancel and Discard Dictation")) {
+                    dictation.discardFromVoiceOverAction()
+                }
+
+                // Send button - stable container + stable glass background
+                let isSendEnabled = isSending || canSend
+                let sendIconOpacity = (connectionAlertColor == nil ? 1 : 0.65) * (isSendEnabled ? 1 : 0.4)
+                Button(action: isSending ? onCancel : onSend) {
+                    ZStack {
+                        Image(systemName: "stop.fill")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(sendIconColor)
+                            .opacity(isSending ? 1 : 0)
+                        Image(systemName: "paperplane.fill")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(sendIconColor)
+                            .opacity(isSending ? 0 : 1)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .contentShape(Rectangle())
+                }
+                .frame(width: sendButtonWidth, height: metrics.inputBarHeight)
+#if os(visionOS)
+                .background(Circle().fill(sendBackgroundColor.opacity(isSendEnabled ? 1 : 0.35)))
+                .overlay(Circle().stroke(visionOSBorderColor, lineWidth: 1))
+#else
+                .background(Capsule().fill(sendBackgroundColor.opacity(isSendEnabled ? 1 : 0.35)))
+#endif
+                .buttonStyle(.plain)
+#if os(visionOS)
+                .tint(sendIconColor)
+                .foregroundStyle(sendIconColor)
+#endif
+                .allowsHitTesting(isSendEnabled)
+                .opacity(sendIconOpacity)
+                .accessibilityHint(connectionAlertHint ?? "")
+                .id("send-button")
+                .transaction { $0.animation = nil }
+                .animation(nil, value: isSending)
+                .animation(nil, value: canSend)
+            }
         }
         .padding(.horizontal, containerPadding)
         .padding(.bottom, metrics.bottomPadding)

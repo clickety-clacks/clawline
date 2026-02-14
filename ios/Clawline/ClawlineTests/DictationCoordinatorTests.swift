@@ -173,6 +173,116 @@ struct DictationCoordinatorTests {
             harness.host.currentText(for: harness.host.activeSessionKey) == "seed text"
         }
     }
+
+    @Test("Attempting dictation without a validated key shows inline prompt and keeps mic visibility rules")
+    @MainActor
+    func missingOrUnverifiedKeyRoutesToInlinePrompt() {
+        let harness = DictationTestHarness(apiKey: nil, keyStatus: .missing)
+        let coordinator = harness.makeCoordinator()
+
+        coordinator.updateContext(
+            sessionKey: harness.host.activeSessionKey,
+            composeIsEmpty: true,
+            textFieldFocused: false,
+            selectionLength: 0,
+            reduceMotionEnabled: false
+        )
+
+        #expect(coordinator.micVisible)
+        coordinator.startStickyDictation()
+
+        #expect(coordinator.state == .keyPromptInline)
+        #expect(coordinator.showsInlineKeyPrompt)
+        #expect(coordinator.micVisible)
+        #expect(!coordinator.isDictationActive)
+    }
+
+    @Test("Inline key CTA opens Soniox key page when key is empty")
+    @MainActor
+    func inlineGetKeyWhenEmpty() async {
+        let harness = DictationTestHarness(apiKey: nil, keyStatus: .missing)
+        let coordinator = harness.makeCoordinator()
+
+        coordinator.updateContext(
+            sessionKey: harness.host.activeSessionKey,
+            composeIsEmpty: true,
+            textFieldFocused: false,
+            selectionLength: 0,
+            reduceMotionEnabled: false
+        )
+        coordinator.startStickyDictation()
+        #expect(coordinator.state == .keyPromptInline)
+        #expect(coordinator.inlineKeyActionTitle == "Get Key")
+
+        var openedURL: URL?
+        await coordinator.handleInlineKeyPrimaryAction { url in
+            openedURL = url
+        }
+
+        #expect(openedURL == SonioxConfigurationStore.keyManagementURL)
+        #expect(coordinator.state == .keyPromptInline)
+        #expect(coordinator.inlineKeyStatus == .missing)
+        #expect(harness.keyStatus == .missing)
+    }
+
+    @Test("Inline verify failure shows Invalid and keeps prompt visible")
+    @MainActor
+    func inlineVerifyFailureShowsInvalid() async {
+        let harness = DictationTestHarness(apiKey: "bad-key", keyStatus: .unverified)
+        harness.keyVerifier.results = [false]
+        let coordinator = harness.makeCoordinator()
+
+        coordinator.updateContext(
+            sessionKey: harness.host.activeSessionKey,
+            composeIsEmpty: true,
+            textFieldFocused: false,
+            selectionLength: 0,
+            reduceMotionEnabled: false
+        )
+
+        coordinator.startStickyDictation()
+        #expect(coordinator.state == .keyPromptInline)
+        #expect(coordinator.inlineKeyActionTitle == "Verify")
+
+        await coordinator.handleInlineKeyPrimaryAction { _ in }
+
+        #expect(coordinator.state == .keyPromptInline)
+        #expect(coordinator.inlineKeyStatus == .invalid)
+        #expect(coordinator.inlineKeyStatusText == "Invalid")
+        #expect(harness.keyStatus == .invalid)
+        #expect(!coordinator.isDictationActive)
+    }
+
+    @Test("Inline verify success immediately enters pending requested dictation mode")
+    @MainActor
+    func inlineVerifySuccessStartsRequestedModeImmediately() async {
+        let harness = DictationTestHarness(apiKey: "good-key", keyStatus: .unverified)
+        harness.keyVerifier.results = [true]
+        let coordinator = harness.makeCoordinator()
+
+        coordinator.updateContext(
+            sessionKey: harness.host.activeSessionKey,
+            composeIsEmpty: true,
+            textFieldFocused: false,
+            selectionLength: 0,
+            reduceMotionEnabled: false
+        )
+
+        coordinator.startWalkieTalkieDictation()
+        #expect(coordinator.state == .keyPromptInline)
+        #expect(!coordinator.isDictationActive)
+
+        await coordinator.handleInlineKeyPrimaryAction { _ in }
+        await waitUntil {
+            harness.client.connected
+        }
+
+        #expect(coordinator.state == .dictatingWalkieTalkie)
+        #expect(coordinator.isDictationActive)
+        #expect(coordinator.inlineKeyStatus == .validated)
+        #expect(harness.keyStatus == .validated)
+        #expect(harness.client.connected)
+    }
 }
 
 // MARK: - Test Harness
@@ -184,23 +294,42 @@ private final class DictationTestHarness {
     let audio = MockDictationAudioCapture()
     let analytics = MockDictationAnalytics()
     let feedback = MockDictationFeedback()
+    let keyVerifier = MockSonioxKeyVerifier()
     let timing: DictationTiming
+    var apiKey: String?
+    var editableAPIKey: String
+    var keyStatus: SonioxKeyVerificationStatus
 
-    init(timing: DictationTiming = DictationTiming(
-        maxSessionDuration: .seconds(30),
-        tokenInactivityTimeout: .seconds(30),
-        stopKeepFinalizeTimeout: .milliseconds(120),
-        sendFinalizeTimeout: .milliseconds(80),
-        errorAutoDismissTimeout: .milliseconds(50),
-        errorAutoDismissVoiceOverTimeout: .milliseconds(50)
-    )) {
+    init(
+        timing: DictationTiming = DictationTiming(
+            maxSessionDuration: .seconds(30),
+            tokenInactivityTimeout: .seconds(30),
+            stopKeepFinalizeTimeout: .milliseconds(120),
+            sendFinalizeTimeout: .milliseconds(80),
+            errorAutoDismissTimeout: .milliseconds(50),
+            errorAutoDismissVoiceOverTimeout: .milliseconds(50)
+        ),
+        apiKey: String? = "test-key",
+        keyStatus: SonioxKeyVerificationStatus = .validated
+    ) {
         self.timing = timing
+        self.apiKey = apiKey
+        self.editableAPIKey = apiKey ?? ""
+        self.keyStatus = keyStatus
     }
 
     func makeCoordinator() -> DictationCoordinator {
         DictationCoordinator(
             bridge: ComposeInputDictationBridge(host: host),
-            configuredAPIKey: { "test-key" },
+            configuredAPIKey: { self.apiKey },
+            editableAPIKeyProvider: { self.editableAPIKey },
+            keyStatusProvider: { self.keyStatus },
+            setConfiguredAPIKey: {
+                self.apiKey = $0
+                self.editableAPIKey = $0 ?? ""
+            },
+            setKeyStatus: { self.keyStatus = $0 },
+            keyVerifier: keyVerifier,
             languageHintProvider: { "en" },
             audioCaptureFactory: { self.audio },
             streamingClientFactory: { self.client },
@@ -268,6 +397,19 @@ private final class MockDictationAudioCapture: DictationAudioCapturing {
 
     func emit(level: Float) {
         levelContinuation?.yield(level)
+    }
+}
+
+private final class MockSonioxKeyVerifier: SonioxKeyVerifying {
+    var results: [Bool] = [true]
+    private(set) var verifiedKeys: [String] = []
+
+    func verify(apiKey: String) async -> Bool {
+        verifiedKeys.append(apiKey)
+        if !results.isEmpty {
+            return results.removeFirst()
+        }
+        return false
     }
 }
 

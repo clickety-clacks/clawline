@@ -24,12 +24,22 @@ final class SettingsManager {
         didSet { saveAppearanceMode() }
     }
 
+    var sonioxAPIKey: String {
+        didSet { handleSonioxKeyChanged(from: oldValue, to: sonioxAPIKey) }
+    }
+
+    private(set) var sonioxKeyStatus: SonioxKeyVerificationStatus {
+        didSet { SonioxConfigurationStore.setKeyStatus(sonioxKeyStatus) }
+    }
+
     var isSettingsPresented: Bool = false
 
     private static let effectConfigKey = "backgroundEffectConfiguration"
     private static let appearanceModeKey = "appearanceMode"
+    private let sonioxVerifier: any SonioxKeyVerifying
 
-    init() {
+    init(sonioxVerifier: any SonioxKeyVerifying = SonioxKeyVerifier()) {
+        self.sonioxVerifier = sonioxVerifier
         if let data = UserDefaults.standard.data(forKey: Self.effectConfigKey),
            let config = try? JSONDecoder().decode(BackgroundEffectConfiguration.self, from: data) {
             self.effectConfig = config
@@ -44,6 +54,8 @@ final class SettingsManager {
             self.appearanceMode = .dark
         }
 
+        self.sonioxAPIKey = SonioxConfigurationStore.editableAPIKey
+        self.sonioxKeyStatus = SonioxConfigurationStore.keyStatus
     }
 
     private func save() {
@@ -71,6 +83,48 @@ final class SettingsManager {
 
     func toggleAppearanceMode() {
         appearanceMode = appearanceMode == .dark ? .light : .dark
+    }
+
+    var sonioxCTATitle: String {
+        sonioxAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Get Key" : "Verify"
+    }
+
+    func handleSonioxPrimaryAction(openURL: (URL) -> Void) async -> Bool {
+        let trimmed = sonioxAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            sonioxKeyStatus = .missing
+            SonioxConfigurationStore.setAPIKey(nil)
+            openURL(SonioxConfigurationStore.keyManagementURL)
+            return false
+        }
+        return await verifySonioxKey()
+    }
+
+    @discardableResult
+    func verifySonioxKey() async -> Bool {
+        let trimmed = sonioxAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            sonioxKeyStatus = .missing
+            SonioxConfigurationStore.setAPIKey(nil)
+            return false
+        }
+
+        sonioxKeyStatus = .validating
+        let isValid = await sonioxVerifier.verify(apiKey: trimmed)
+        sonioxKeyStatus = isValid ? .validated : .invalid
+        return isValid
+    }
+
+    private func handleSonioxKeyChanged(from oldValue: String, to newValue: String) {
+        let oldTrimmed = oldValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        SonioxConfigurationStore.setAPIKey(trimmed.isEmpty ? nil : trimmed)
+        if trimmed.isEmpty {
+            sonioxKeyStatus = .missing
+        } else if oldTrimmed != trimmed, sonioxKeyStatus != .validating {
+            sonioxKeyStatus = .unverified
+        }
     }
 }
 

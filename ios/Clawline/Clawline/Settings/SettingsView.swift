@@ -12,6 +12,7 @@ struct SettingsView: View {
     @Bindable var settings: SettingsManager
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.openURL) private var openURL
 
     private var effectiveColorScheme: ColorScheme {
 #if os(visionOS)
@@ -30,6 +31,24 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
+                Section {
+                    SonioxKeyConfigurationRow(
+                        keyText: $settings.sonioxAPIKey,
+                        status: settings.sonioxKeyStatus,
+                        actionTitle: settings.sonioxCTATitle,
+                        onAction: {
+                            Task {
+                                _ = await settings.handleSonioxPrimaryAction { url in
+                                    openURL(url)
+                                }
+                            }
+                        },
+                        placeholder: "soniox.apiKey"
+                    )
+                } header: {
+                    Text("Voice Dictation")
+                }
+
                 Section {
                     Toggle("Enable Effect", isOn: $settings.effectConfig.isEnabled)
 

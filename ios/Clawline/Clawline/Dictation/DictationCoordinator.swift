@@ -266,6 +266,7 @@ final class DictationCoordinator {
     }
 
     func updateInlineKeyText(_ value: String) {
+        let previousTrimmed = inlineKeyText.trimmingCharacters(in: .whitespacesAndNewlines)
         inlineKeyText = value
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         setConfiguredAPIKey(trimmed.isEmpty ? nil : trimmed)
@@ -273,7 +274,7 @@ final class DictationCoordinator {
         if trimmed.isEmpty {
             inlineKeyStatus = .missing
             setKeyStatus(.missing)
-        } else if inlineKeyStatus != .validating {
+        } else if trimmed != previousTrimmed, inlineKeyStatus != .validating {
             inlineKeyStatus = .unverified
             setKeyStatus(.unverified)
         }

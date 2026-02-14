@@ -197,6 +197,30 @@ struct DictationCoordinatorTests {
         #expect(!coordinator.isDictationActive)
     }
 
+    @Test("Re-entering unchanged key text preserves validated status and allows dictation")
+    @MainActor
+    func unchangedInlineKeyKeepsValidatedStatus() {
+        let harness = DictationTestHarness(apiKey: "good-key", keyStatus: .validated)
+        let coordinator = harness.makeCoordinator()
+
+        coordinator.updateContext(
+            sessionKey: harness.host.activeSessionKey,
+            composeIsEmpty: true,
+            textFieldFocused: false,
+            selectionLength: 0,
+            reduceMotionEnabled: false
+        )
+
+        #expect(coordinator.inlineKeyStatus == .validated)
+        coordinator.updateInlineKeyText("good-key")
+
+        #expect(coordinator.inlineKeyStatus == .validated)
+        #expect(harness.keyStatus == .validated)
+
+        coordinator.startStickyDictation()
+        #expect(coordinator.state == .dictatingSticky)
+    }
+
     @Test("Modal key CTA opens Soniox key page when key is empty")
     @MainActor
     func modalGetKeyWhenEmpty() async {

@@ -27,8 +27,18 @@ See global rules in `~/AGENTS.md`. Summary:
 
 ## iOS Git Workflow (Flynn Rule)
 
-- Do NOT create git worktrees or new branches for iOS work unless Flynn explicitly instructs you to.
-- Work directly on `main` and keep the working tree clean.
+- Use a dedicated git worktree for each agent workspace, with each worktree on its own branch.
+- `~/src/clawline/` stays the canonical deployer baseline; create agent worktrees under `~/src/worktrees/` (for example: `git worktree add ~/src/worktrees/clawline-{agent-name} -b {agent-name}`).
+- Tear down with `git worktree remove <path>` (not `rm -rf`).
+- YOLO on `main` is still allowed; agents can push to `origin/main` from their branch context when directed.
+
+### Legacy Workspace Note (Before 2026-02-14)
+
+- Legacy `cp -r` workspaces may still exist on eezo (for example `~/src/clawline-{name}/`) and are full repo copies rather than worktrees.
+- Do not panic if you encounter one.
+- If unstaged changes are yours, commit and push that work first, then proceed.
+- If unstaged changes were inherited from a different agent, do not commit them; flag it so the owning agent can resolve it.
+- New workspaces are always created with `git worktree add ~/src/worktrees/clawline-{agent-name} -b {agent-name}`.
 
 ## Code Reviews
 

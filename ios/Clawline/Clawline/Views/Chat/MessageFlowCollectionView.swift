@@ -22,6 +22,7 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
     var viewModel: ChatViewModel
     var topInset: CGFloat
     var isCompact: Bool
+    var isActiveSession: Bool
     var truncationBottomInset: CGFloat
     var firstUnreadMessageId: String?
     var unreadCount: Int
@@ -44,6 +45,7 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
         controller.update(
             viewModel: viewModel,
             isCompact: isCompact,
+            isActiveSession: isActiveSession,
             topInset: topInset,
             truncationBottomInset: truncationBottomInset,
             firstUnreadMessageId: firstUnreadMessageId,
@@ -68,6 +70,7 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
         uiViewController.update(
             viewModel: viewModel,
             isCompact: isCompact,
+            isActiveSession: isActiveSession,
             topInset: topInset,
             truncationBottomInset: truncationBottomInset,
             firstUnreadMessageId: firstUnreadMessageId,
@@ -113,6 +116,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     private var lastMessageId: String?
     private var viewModel: ChatViewModel?
     private var isCompact: Bool = true
+    private var isActiveSession: Bool = true
     private var topInset: CGFloat = 0
     private var truncationBottomInset: CGFloat = 0
     private var lastBoundsSize: CGSize = .zero
@@ -267,6 +271,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             update(
                 viewModel: viewModel,
                 isCompact: isCompact,
+                isActiveSession: isActiveSession,
                 topInset: topInset,
                 truncationBottomInset: truncationBottomInset,
                 firstUnreadMessageId: self.firstUnreadMessageId,
@@ -480,6 +485,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     func update(
         viewModel: ChatViewModel,
         isCompact: Bool,
+        isActiveSession: Bool,
         topInset: CGFloat,
         truncationBottomInset: CGFloat,
         firstUnreadMessageId: String?,
@@ -494,8 +500,10 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         let previousLastMessageId = lastMessageId
         let wasUserInteracting = isUserInteracting
         let wasPinnedToBottomIntent = sbbState.isPinnedToBottomIntent
+        let previousSessionKey = self.channelOverride
         self.viewModel = viewModel
         self.channelOverride = sessionKey
+        self.isActiveSession = isActiveSession
         self.onExpand = onExpand
         self.truncationBottomInset = truncationBottomInset
         self.onScrollEvent = onScrollEvent
@@ -505,7 +513,6 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         }
         self.firstUnreadMessageId = firstUnreadMessageId
         self.unreadCount = unreadCount
-        updateScrollPersistenceKeyAndPendingRestoreState()
 
         // Handle appearance change from SwiftUI colorScheme
         if let isDark = isDark, currentIsDark != isDark {
@@ -525,11 +532,20 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         }
 #endif
 
+        let effectiveSessionKey = sessionKey ?? viewModel.activeSessionKey
+        let isOffscreenSession = sessionKey != nil && !isActiveSession
         let needsFullLayout = forceReconfigureAll
             || self.isCompact != isCompact
             || self.topInset != topInset
+            || previousSessionKey != sessionKey
         self.isCompact = isCompact
         self.topInset = topInset
+
+        if isOffscreenSession {
+            return
+        }
+
+        updateScrollPersistenceKeyAndPendingRestoreState()
 
         if needsFullLayout {
             updateLayout()
@@ -558,7 +574,6 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
 
         // Add typing indicator when assistant is typing (server-controlled)
         // Only show on the matching channel page (for paged TabView)
-        let effectiveSessionKey = sessionKey ?? viewModel.activeSessionKey
         let showTypingIndicator = viewModel.isAssistantTyping
             && viewModel.typingSessionKey == effectiveSessionKey
         let typingIndicatorJustAppeared = showTypingIndicator && !wasShowingTypingIndicator
@@ -2499,17 +2514,40 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
 private final class MessageFlowLayout: UICollectionViewFlowLayout {
     private var cachedAttributes: [IndexPath: UICollectionViewLayoutAttributes] = [:]
     private var cachedContentSize: CGSize = .zero
+    private var needsRebuild = true
+    private var cachedLayoutSignature: LayoutSignature?
+
+    private struct LayoutSignature: Equatable {
+        let itemCount: Int
+        let contentWidth: CGFloat
+        let sectionInset: UIEdgeInsets
+        let minimumInteritemSpacing: CGFloat
+        let minimumLineSpacing: CGFloat
+    }
 
     override func prepare() {
         let t0 = CFAbsoluteTimeGetCurrent()
         super.prepare()
         guard let collectionView else { return }
-        cachedAttributes.removeAll(keepingCapacity: true)
 
         let itemCount = collectionView.numberOfItems(inSection: 0)
         let contentWidth = collectionView.bounds.width
+        let signature = LayoutSignature(
+            itemCount: itemCount,
+            contentWidth: contentWidth,
+            sectionInset: sectionInset,
+            minimumInteritemSpacing: minimumInteritemSpacing,
+            minimumLineSpacing: minimumLineSpacing
+        )
+        if !needsRebuild, cachedLayoutSignature == signature {
+            return
+        }
+
+        cachedAttributes.removeAll(keepingCapacity: true)
         guard itemCount > 0, contentWidth > 0 else {
             cachedContentSize = .zero
+            cachedLayoutSignature = signature
+            needsRebuild = false
             return
         }
 
@@ -2539,6 +2577,8 @@ private final class MessageFlowLayout: UICollectionViewFlowLayout {
         }
 
         cachedContentSize = CGSize(width: contentWidth, height: y + rowHeight + sectionInset.bottom)
+        cachedLayoutSignature = signature
+        needsRebuild = false
         NSLog("[KBTIMING] FlowLayout.prepare items=%d dt=%.4f", itemCount, CFAbsoluteTimeGetCurrent() - t0)
     }
 
@@ -2554,7 +2594,21 @@ private final class MessageFlowLayout: UICollectionViewFlowLayout {
         cachedAttributes[indexPath]
     }
 
+    override func invalidateLayout() {
+        needsRebuild = true
+        super.invalidateLayout()
+    }
+
+    override func invalidateLayout(with context: UICollectionViewLayoutInvalidationContext) {
+        needsRebuild = true
+        super.invalidateLayout(with: context)
+    }
+
     override func shouldInvalidateLayout(forBoundsChange newBounds: CGRect) -> Bool {
-        newBounds.size != collectionView?.bounds.size
+        let shouldInvalidate = newBounds.size != collectionView?.bounds.size
+        if shouldInvalidate {
+            needsRebuild = true
+        }
+        return shouldInvalidate
     }
 }

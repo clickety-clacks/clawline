@@ -27,6 +27,7 @@ struct ChatLayoutMetrics: Equatable {
     let belowBarGap: CGFloat
     let flowGap: CGFloat
     let containerPadding: CGFloat
+    let pageIndicatorClearance: CGFloat
 }
 
 struct ChatInsetLayoutState: Equatable {
@@ -61,6 +62,7 @@ struct ChatLayoutKey: Equatable {
     let belowBarGapBucket: Int
     let flowGapBucket: Int
     let containerPaddingBucket: Int
+    let pageIndicatorClearanceBucket: Int
 
     init(revision: Int,
          keyboardHeight: CGFloat,
@@ -70,7 +72,8 @@ struct ChatLayoutKey: Equatable {
          keyboardVisible: Bool,
          belowBarGap: CGFloat,
          flowGap: CGFloat,
-         containerPadding: CGFloat) {
+         containerPadding: CGFloat,
+         pageIndicatorClearance: CGFloat) {
         func bucket(_ value: CGFloat) -> Int { Int((value / 0.5).rounded()) }
         self.revision = revision
         self.keyboardHeightBucket = bucket(keyboardHeight)
@@ -81,6 +84,7 @@ struct ChatLayoutKey: Equatable {
         self.belowBarGapBucket = bucket(belowBarGap)
         self.flowGapBucket = bucket(flowGap)
         self.containerPaddingBucket = bucket(containerPadding)
+        self.pageIndicatorClearanceBucket = bucket(pageIndicatorClearance)
     }
 }
 
@@ -390,7 +394,8 @@ final class ChatLayoutCoordinator {
         let resolvedBarHeight = max(0, barHeight)
         let keyboardInset = inputs.effectiveKeyboardInset
         let inputBarTopFromScreenBottom = keyboardInset + metrics.belowBarGap + resolvedBarHeight
-        let listBottomInset = inputBarTopFromScreenBottom + metrics.flowGap - metrics.containerPadding
+        let listBottomInset = inputBarTopFromScreenBottom + metrics.pageIndicatorClearance
+            + metrics.flowGap - metrics.containerPadding
         return ChatInsetLayoutState(
             barHeight: resolvedBarHeight,
             keyboardInset: keyboardInset,

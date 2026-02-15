@@ -117,10 +117,12 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, coding standards, 
 
 **Trunk-based development** — all work lands on `main` directly.
 
-- Coding agents each get an isolated clone (`cp -r`) of the repo
-- Agents commit and push to `origin/main` as they work
+- Coding agents each get an isolated git worktree (clean from `HEAD`), each on its own branch
+- Agents commit in their worktree and push to `origin/main` as they work
 - Conflicts stay small because everyone integrates continuously
-- Branches are used only when explicitly requested for complex multi-commit work
+- `~/src/clawline/` remains the canonical deployer baseline; create agent worktrees under `~/src/worktrees/` (for example: `git worktree add ~/src/worktrees/clawline-{agent-name} -b {agent-name}`) and tear them down with `git worktree remove`
+
+Legacy note: workspaces created before 2026-02-14 used `cp -r`, so old `~/src/clawline-{name}/` directories may still exist as full repo copies (not worktrees). If you are in one, do not panic. Commit/push unstaged changes only when they are your own work; if they were inherited from a different agent, do not commit them and flag the owner to resolve. Then continue with worktree-based flow.
 
 ### Stability & Tags
 

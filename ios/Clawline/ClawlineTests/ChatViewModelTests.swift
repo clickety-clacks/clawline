@@ -447,6 +447,63 @@ struct ChatViewModelTests {
         #expect(flushedStates == 0)
     }
 
+    @Test("presentation cache trim stays off render hot path for stable message window")
+    @MainActor
+    func presentationCacheTrimNotRepeatedForStableMessageWindow() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        let baseMessage = Message(
+            id: "stable-window-msg",
+            role: .assistant,
+            content: "token-0",
+            timestamp: Date(),
+            streaming: true,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: personalSessionKey
+        )
+
+        await viewModel.onAppear()
+        chatService.emit(baseMessage)
+        try await Task.sleep(forDuration: .milliseconds(10))
+
+        let metrics = ChatFlowTheme.Metrics(isCompact: true)
+        let activeMessage = await MainActor.run { viewModel.messages.first ?? baseMessage }
+        _ = viewModel.presentation(for: activeMessage, metrics: metrics)
+
+        let initialTrimCount = await MainActor.run { viewModel.debugPresentationCacheTrimCount() }
+
+        for index in 1...80 {
+            let updated = Message(
+                id: activeMessage.id,
+                role: activeMessage.role,
+                content: "token-\(index)",
+                timestamp: activeMessage.timestamp,
+                streaming: true,
+                attachments: activeMessage.attachments,
+                deviceId: activeMessage.deviceId,
+                sessionKey: activeMessage.sessionKey
+            )
+            _ = viewModel.presentation(for: updated, metrics: metrics)
+        }
+
+        let finalTrimCount = await MainActor.run { viewModel.debugPresentationCacheTrimCount() }
+        #expect(finalTrimCount == initialTrimCount)
+    }
+
     @Test("send uploads attachments that require persistence")
     @MainActor
     func sendProcessesAttachments() async throws {

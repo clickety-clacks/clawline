@@ -30,7 +30,11 @@ protocol ChatViewModelHosting: AnyObject {
 final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
     private let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "MessagePipeline")
     private let instanceId = UUID().uuidString
-    private(set) var messages: [Message] = []
+    private(set) var messages: [Message] = [] {
+        didSet {
+            handleMessageWindowChange(oldMessages: oldValue, newMessages: messages)
+        }
+    }
     private(set) var activeSessionKey: String = ""
     private(set) var streamsBySessionKey: [String: StreamSession] = [:]
     private(set) var orderedSessionKeys: [String] = []
@@ -154,6 +158,11 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
     private var persistDebounceTasks: [String: Task<Void, Never>] = [:]
     private var pendingPersistPayloads: [String: [Message]] = [:]
     private let messageCacheLimit = 500
+    private let presentationCacheTrimMultiplier = 4
+    private let presentationCacheTrimFloor = 256
+#if DEBUG
+    private var presentationCacheTrimCount = 0
+#endif
     private var restoredSessionKeys: Set<String> = []
     private var restoredStreamMetadataForUserId: String?
     private var supportsSessionProvisioning = false
@@ -1366,7 +1375,6 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
             fingerprint: fingerprint,
             presentation: resolvedPresentation
         )
-        trimPresentationCache()
         trimStreamingStates()
         return resolvedPresentation
     }
@@ -2044,10 +2052,38 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
         appendMessage(ack)
     }
 
-    private func trimPresentationCache() {
-        let activeIds = Set(messages.map(\.id))
-        guard !activeIds.isEmpty else { return }
+    private struct MessageWindowSignature: Equatable {
+        let count: Int
+        let firstID: String?
+        let lastID: String?
+    }
+
+    private func handleMessageWindowChange(oldMessages: [Message], newMessages: [Message]) {
+        guard !presentationCache.isEmpty else { return }
+        let didWindowChange = messageWindowSignature(for: oldMessages) != messageWindowSignature(for: newMessages)
+        let trimThreshold = max(presentationCacheTrimFloor, newMessages.count * presentationCacheTrimMultiplier)
+        guard didWindowChange || presentationCache.count > trimThreshold else { return }
+        trimPresentationCache(keepingOnly: newMessages)
+    }
+
+    private func messageWindowSignature(for messages: [Message]) -> MessageWindowSignature {
+        MessageWindowSignature(
+            count: messages.count,
+            firstID: messages.first?.id,
+            lastID: messages.last?.id
+        )
+    }
+
+    private func trimPresentationCache(keepingOnly activeMessages: [Message]) {
+        if activeMessages.isEmpty {
+            presentationCache.removeAll(keepingCapacity: true)
+            return
+        }
+        let activeIds = Set(activeMessages.map(\.id))
         presentationCache = presentationCache.filter { activeIds.contains($0.key.messageID) }
+#if DEBUG
+        presentationCacheTrimCount += 1
+#endif
     }
 
     private func trimStreamingStates(maxEntries: Int = 120) {
@@ -2125,6 +2161,10 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
 
     func debugPresentationCacheSize() -> Int {
         presentationCache.count
+    }
+
+    func debugPresentationCacheTrimCount() -> Int {
+        presentationCacheTrimCount
     }
 
     func debugTableParseStateSize() -> Int {

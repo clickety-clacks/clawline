@@ -28,7 +28,7 @@ final class DictationTranscriptBuffer: Sendable {
     }
 
     func apply(tokens: [SonioxTranscriptToken], finished: Bool) -> DictationTranscriptSnapshot {
-        let filtered = tokens.filter { $0.text != "<end>" }
+        let filtered = tokens.filter { $0.text != "<end>" && $0.text != "<fin>" }
         let finals = filtered.filter(\.isFinal)
         let nonFinals = filtered.filter { !$0.isFinal }
 

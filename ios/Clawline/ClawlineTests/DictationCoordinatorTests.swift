@@ -15,7 +15,8 @@ struct DictationCoordinatorTests {
         let second = buffer.apply(tokens: [
             SonioxTranscriptToken(text: "hello ", isFinal: true),
             SonioxTranscriptToken(text: "wor", isFinal: false),
-            SonioxTranscriptToken(text: "<end>", isFinal: true)
+            SonioxTranscriptToken(text: "<end>", isFinal: true),
+            SonioxTranscriptToken(text: "<fin>", isFinal: true)
         ], finished: false)
         #expect(second.text == "hello wor")
 
@@ -359,6 +360,94 @@ struct DictationCoordinatorTests {
         #expect(!coordinator.isDictationActive)
         #expect(harness.analytics.stopEvents.contains(where: { $0.reason == "transport_failure" }))
     }
+
+    @Test("Audio interruption does not force dictation stop")
+    @MainActor
+    func interruptionBeganKeepsSessionAlive() async {
+        let harness = DictationTestHarness()
+        let coordinator = harness.makeCoordinator()
+
+        coordinator.updateContext(
+            sessionKey: harness.host.activeSessionKey,
+            composeIsEmpty: true,
+            textFieldFocused: false,
+            selectionLength: 0,
+            reduceMotionEnabled: false
+        )
+
+        coordinator.startStickyDictation()
+        #expect(coordinator.state == .dictatingSticky)
+
+        harness.audio.emit(event: .interruptionBegan)
+        try? await Task.sleep(for: .milliseconds(50))
+
+        #expect(coordinator.state == .dictatingSticky)
+        #expect(harness.client.closeCalls.isEmpty)
+    }
+
+    @Test("Audio capture failure event stops dictation and enters error")
+    @MainActor
+    func audioCaptureFailureStopsSession() async {
+        let harness = DictationTestHarness()
+        let coordinator = harness.makeCoordinator()
+
+        coordinator.updateContext(
+            sessionKey: harness.host.activeSessionKey,
+            composeIsEmpty: true,
+            textFieldFocused: false,
+            selectionLength: 0,
+            reduceMotionEnabled: false
+        )
+
+        coordinator.startStickyDictation()
+        #expect(coordinator.state == .dictatingSticky)
+
+        harness.audio.emit(event: .failed(message: "route-change recovery failed"))
+
+        await waitUntil {
+            coordinator.state == .error
+        }
+
+        #expect(coordinator.errorMessage == "Dictation failed")
+        #expect(harness.analytics.stopEvents.contains(where: { $0.reason == "transport_failure" }))
+    }
+
+    @Test("Protocol error code surfaces in error state when message missing")
+    @MainActor
+    func protocolErrorCodeSurfacesInErrorMessage() async {
+        let harness = DictationTestHarness()
+        let coordinator = harness.makeCoordinator()
+
+        coordinator.updateContext(
+            sessionKey: harness.host.activeSessionKey,
+            composeIsEmpty: true,
+            textFieldFocused: false,
+            selectionLength: 0,
+            reduceMotionEnabled: false
+        )
+
+        coordinator.startStickyDictation()
+        harness.client.emit(
+            .response(
+                SonioxStreamingResponse(
+                    tokens: [],
+                    finished: false,
+                    errorCode: "input_too_slow",
+                    errorMessage: nil
+                )
+            )
+        )
+
+        await waitUntil {
+            coordinator.state == .error
+        }
+
+        #expect(coordinator.errorMessage == "input_too_slow")
+        let sawProtocolError = harness.analytics.errorEvents.contains { event in
+            event.errorCode == "input_too_slow" && event.stage == "protocol"
+        }
+        #expect(sawProtocolError)
+    }
 }
 
 // MARK: - Test Harness
@@ -444,6 +533,7 @@ private final class MockComposeDraftHost: DictationComposeDraftHosting {
 private final class MockDictationAudioCapture: DictationAudioCapturing {
     private var frameContinuation: AsyncStream<Data>.Continuation?
     private var levelContinuation: AsyncStream<Float>.Continuation?
+    private var eventContinuation: AsyncStream<DictationAudioCaptureEvent>.Continuation?
 
     private(set) var started = false
     private(set) var stopped = false
@@ -451,6 +541,7 @@ private final class MockDictationAudioCapture: DictationAudioCapturing {
 
     let frameStream: AsyncStream<Data>
     let levelStream: AsyncStream<Float>
+    let eventStream: AsyncStream<DictationAudioCaptureEvent>
 
     init() {
         var frameCont: AsyncStream<Data>.Continuation?
@@ -460,6 +551,10 @@ private final class MockDictationAudioCapture: DictationAudioCapturing {
         var levelCont: AsyncStream<Float>.Continuation?
         levelStream = AsyncStream { levelCont = $0 }
         levelContinuation = levelCont
+
+        var eventCont: AsyncStream<DictationAudioCaptureEvent>.Continuation?
+        eventStream = AsyncStream { eventCont = $0 }
+        eventContinuation = eventCont
     }
 
     func start() throws {
@@ -473,10 +568,15 @@ private final class MockDictationAudioCapture: DictationAudioCapturing {
         stopped = true
         frameContinuation?.finish()
         levelContinuation?.finish()
+        eventContinuation?.finish()
     }
 
     func emit(level: Float) {
         levelContinuation?.yield(level)
+    }
+
+    func emit(event: DictationAudioCaptureEvent) {
+        eventContinuation?.yield(event)
     }
 }
 
@@ -543,7 +643,13 @@ private final class MockDictationAnalytics: DictationAnalyticsTracking {
         let durationMs: Int
     }
 
+    struct ErrorEvent {
+        let errorCode: String?
+        let stage: String
+    }
+
     private(set) var stopEvents: [StopEvent] = []
+    private(set) var errorEvents: [ErrorEvent] = []
     private(set) var sendWhileActiveEvents: [Bool] = []
 
     func trackStart(mode: DictationMode, sessionKey: String) {}
@@ -552,7 +658,9 @@ private final class MockDictationAnalytics: DictationAnalyticsTracking {
         stopEvents.append(StopEvent(reason: reason, durationMs: durationMs))
     }
 
-    func trackError(errorCode: String?, stage: String) {}
+    func trackError(errorCode: String?, stage: String) {
+        errorEvents.append(ErrorEvent(errorCode: errorCode, stage: stage))
+    }
 
     func trackSendWhileActive(finalizedWithinTimeout: Bool) {
         sendWhileActiveEvents.append(finalizedWithinTimeout)

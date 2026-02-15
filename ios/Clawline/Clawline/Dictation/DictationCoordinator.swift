@@ -7,6 +7,7 @@
 
 import Foundation
 import Observation
+import OSLog
 import UIKit
 
 enum DictationState: Equatable {
@@ -87,6 +88,7 @@ final class UIKitDictationFeedbackProvider: DictationFeedbackProviding {
 @Observable
 @MainActor
 final class DictationCoordinator {
+    private let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "DictationCoordinator")
     private(set) var state: DictationState = .idleMicHidden
     private(set) var errorMessage: String?
     private(set) var waveformDisplacement: CGFloat = 1
@@ -178,6 +180,7 @@ final class DictationCoordinator {
     private var eventTask: Task<Void, Never>?
     private var frameTask: Task<Void, Never>?
     private var levelTask: Task<Void, Never>?
+    private var audioEventTask: Task<Void, Never>?
     private var maxDurationTask: Task<Void, Never>?
     private var tokenInactivityTask: Task<Void, Never>?
     private var errorDismissTask: Task<Void, Never>?
@@ -457,6 +460,14 @@ final class DictationCoordinator {
             }
         }
 
+        audioEventTask?.cancel()
+        audioEventTask = Task { [weak self] in
+            guard let self else { return }
+            for await event in capture.eventStream {
+                await self.handleAudioCaptureEvent(event)
+            }
+        }
+
         Task { [weak self] in
             guard let self else { return }
             do {
@@ -494,7 +505,13 @@ final class DictationCoordinator {
         switch event {
         case .response(let response):
             if let errorCode = response.errorCode, !errorCode.isEmpty {
-                handleProtocolError(code: errorCode, message: response.errorMessage ?? "Dictation failed.")
+                let message: String
+                if let errorMessage = response.errorMessage, !errorMessage.isEmpty {
+                    message = errorMessage
+                } else {
+                    message = errorCode
+                }
+                handleProtocolError(code: errorCode, message: message)
                 return
             }
 
@@ -531,6 +548,25 @@ final class DictationCoordinator {
         case .failed(let stage, let code, let message):
             analytics.trackError(errorCode: code, stage: stage.rawValue)
             await handleTransportFailure(stage: stage, message: message)
+        }
+    }
+
+    private func handleAudioCaptureEvent(_ event: DictationAudioCaptureEvent) async {
+        switch event {
+        case .interruptionBegan:
+            logger.info("Dictation capture interruption began")
+            analytics.trackError(errorCode: nil, stage: "audio_interruption")
+        case .interruptionEnded(let shouldResume):
+            logger.info("Dictation capture interruption ended shouldResume=\(shouldResume, privacy: .public)")
+        case .routeChanged:
+            logger.info("Dictation audio route changed")
+            analytics.trackError(errorCode: nil, stage: "audio_route_change")
+        case .mediaServicesReset:
+            logger.info("Dictation media services reset")
+            analytics.trackError(errorCode: nil, stage: "audio_media_services_reset")
+        case .failed(let message):
+            logger.error("Dictation audio event failed: \(message, privacy: .public)")
+            await handleTransportFailure(stage: .audio, message: message)
         }
     }
 
@@ -646,6 +682,7 @@ final class DictationCoordinator {
         eventTask?.cancel()
         frameTask?.cancel()
         levelTask?.cancel()
+        audioEventTask?.cancel()
         maxDurationTask?.cancel()
         tokenInactivityTask?.cancel()
         errorDismissTask?.cancel()
@@ -654,6 +691,7 @@ final class DictationCoordinator {
         eventTask = nil
         frameTask = nil
         levelTask = nil
+        audioEventTask = nil
         maxDurationTask = nil
         tokenInactivityTask = nil
         errorDismissTask = nil

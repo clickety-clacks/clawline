@@ -13,6 +13,7 @@ enum SonioxStreamingClientStage: String, Sendable {
     case receive
     case send
     case decode
+    case audio
 }
 
 struct SonioxStreamingConfig: Sendable {
@@ -62,18 +63,30 @@ enum SonioxStreamingClientError: LocalizedError {
 
 final class SonioxStreamingClient: SonioxStreamingClienting {
     private static let endpointURL = URL(string: "wss://stt-rt.soniox.com/transcribe-websocket")!
+    private static let keepalivePayload = #"{"type":"keepalive"}"#
 
     private let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "SonioxStreamingClient")
     private let session: URLSession
     private let decoder = JSONDecoder()
+    private let keepaliveInterval: Duration
+    private let sleepFor: @Sendable (Duration) async -> Void
 
     private var socketTask: URLSessionWebSocketTask?
     private var receiveTask: Task<Void, Never>?
+    private var keepaliveTask: Task<Void, Never>?
     private var continuation: AsyncStream<SonioxStreamingEvent>.Continuation?
     private let eventStream: AsyncStream<SonioxStreamingEvent>
 
-    init(session: URLSession = URLSession(configuration: .default)) {
+    init(
+        session: URLSession = URLSession(configuration: .default),
+        keepaliveInterval: Duration = .seconds(5),
+        sleepFor: @escaping @Sendable (Duration) async -> Void = { duration in
+            try? await Task.sleep(for: duration)
+        }
+    ) {
         self.session = session
+        self.keepaliveInterval = keepaliveInterval
+        self.sleepFor = sleepFor
         var continuation: AsyncStream<SonioxStreamingEvent>.Continuation?
         self.eventStream = AsyncStream { continuation = $0 }
         self.continuation = continuation
@@ -111,6 +124,7 @@ final class SonioxStreamingClient: SonioxStreamingClienting {
         }
         try await task.send(.string(text))
 
+        startKeepaliveLoop(task: task)
         startReceiveLoop(task: task)
     }
 
@@ -130,6 +144,7 @@ final class SonioxStreamingClient: SonioxStreamingClienting {
         guard let task = socketTask else {
             throw SonioxStreamingClientError.notConnected
         }
+        stopKeepaliveLoop()
         do {
             try await task.send(.string(#"{"type":"finalize"}"#))
         } catch {
@@ -139,6 +154,7 @@ final class SonioxStreamingClient: SonioxStreamingClienting {
     }
 
     func close(code: URLSessionWebSocketTask.CloseCode = .normalClosure, reason: String?) {
+        stopKeepaliveLoop()
         receiveTask?.cancel()
         receiveTask = nil
 
@@ -175,6 +191,7 @@ final class SonioxStreamingClient: SonioxStreamingClienting {
                         guard let data = task.closeReason, !data.isEmpty else { return nil }
                         return String(data: data, encoding: .utf8) ?? data.base64EncodedString()
                     }()
+                    stopKeepaliveLoop()
                     continuation?.yield(.closed(code: closeCode, reason: closeReason))
                     logger.info("Soniox socket closed code=\(closeCode ?? -1, privacy: .public)")
                     break
@@ -183,22 +200,49 @@ final class SonioxStreamingClient: SonioxStreamingClienting {
         }
     }
 
+    private func startKeepaliveLoop(task: URLSessionWebSocketTask) {
+        stopKeepaliveLoop()
+        keepaliveTask = Task { [weak self] in
+            guard let self else { return }
+            while !Task.isCancelled {
+                await self.sleepFor(self.keepaliveInterval)
+                guard !Task.isCancelled else { return }
+                guard self.socketTask === task else { return }
+                do {
+                    try await task.send(.string(Self.keepalivePayload))
+                } catch {
+                    self.continuation?.yield(.failed(stage: .send, code: nil, message: error.localizedDescription))
+                    return
+                }
+            }
+        }
+    }
+
+    private func stopKeepaliveLoop() {
+        keepaliveTask?.cancel()
+        keepaliveTask = nil
+    }
+
     private func handleIncomingText(_ text: String) {
         do {
-            let decoded = try decoder.decode(SonioxResponseEnvelope.self, from: Data(text.utf8))
-            let tokens = decoded.tokens?.map { token in
-                SonioxTranscriptToken(text: token.text, isFinal: token.isFinal)
-            } ?? []
-            let response = SonioxStreamingResponse(
-                tokens: tokens,
-                finished: decoded.finished ?? false,
-                errorCode: decoded.errorCode,
-                errorMessage: decoded.errorMessage
-            )
+            let response = try decodeResponseText(text)
             continuation?.yield(.response(response))
         } catch {
             continuation?.yield(.failed(stage: .decode, code: nil, message: "Failed to decode Soniox response."))
         }
+    }
+
+    func decodeResponseText(_ text: String) throws -> SonioxStreamingResponse {
+        let decoded = try decoder.decode(SonioxResponseEnvelope.self, from: Data(text.utf8))
+        let tokens = decoded.tokens?.map { token in
+            SonioxTranscriptToken(text: token.text, isFinal: token.isFinal)
+        } ?? []
+        return SonioxStreamingResponse(
+            tokens: tokens,
+            finished: decoded.finished ?? false,
+            errorCode: decoded.errorCode,
+            errorMessage: decoded.errorMessage
+        )
     }
 }
 
@@ -245,5 +289,50 @@ private struct SonioxResponseEnvelope: Decodable {
         case finished
         case errorCode = "error_code"
         case errorMessage = "error_message"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        tokens = try container.decodeIfPresent([Token].self, forKey: .tokens)
+        finished = try container.decodeIfPresent(Bool.self, forKey: .finished)
+        errorMessage = try container.decodeIfPresent(String.self, forKey: .errorMessage)
+        errorCode = try container.decodeIfPresent(SonioxErrorCode.self, forKey: .errorCode)?.asString
+    }
+}
+
+private enum SonioxErrorCode: Decodable {
+    case string(String)
+    case int(Int)
+    case double(Double)
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if let value = try? container.decode(String.self) {
+            self = .string(value)
+            return
+        }
+        if let value = try? container.decode(Int.self) {
+            self = .int(value)
+            return
+        }
+        if let value = try? container.decode(Double.self) {
+            self = .double(value)
+            return
+        }
+        throw DecodingError.typeMismatch(
+            SonioxErrorCode.self,
+            .init(codingPath: decoder.codingPath, debugDescription: "Unsupported Soniox error_code type.")
+        )
+    }
+
+    var asString: String {
+        switch self {
+        case .string(let value):
+            return value
+        case .int(let value):
+            return String(value)
+        case .double(let value):
+            return String(value)
+        }
     }
 }

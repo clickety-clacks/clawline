@@ -228,6 +228,14 @@ struct MessageInputBar: View {
             : Color.white.opacity(0.5)
     }
 
+    private var inputBorderColor: Color {
+#if os(visionOS)
+        return visionOSBorderColor
+#else
+        return ChatFlowTheme.ink(colorScheme).opacity(0.16)
+#endif
+    }
+
     private var sendIconColor: Color { .white }
 
     private var sendBackgroundColor: Color {
@@ -434,14 +442,8 @@ struct MessageInputBar: View {
 #endif
                 .overlay {
                     ZStack {
-#if os(visionOS)
                         inputShape
-                            .stroke(visionOSBorderColor, lineWidth: 1)
-#endif
-                        if let alertColor = connectionAlertColor {
-                            inputShape
-                                .stroke(alertColor.opacity(0.4), lineWidth: 1)
-                        }
+                            .stroke(inputBorderColor, lineWidth: 1)
                         if dictation.isWaveformVisible {
                             DictationWaveformBorder(
                                 isActive: true,

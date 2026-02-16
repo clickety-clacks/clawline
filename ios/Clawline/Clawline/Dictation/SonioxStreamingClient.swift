@@ -19,7 +19,7 @@ enum SonioxStreamingClientStage: String, Sendable {
 struct SonioxStreamingConfig: Sendable {
     var apiKey: String
     var languageHint: String
-    var model: String = "stt-rt-preview"
+    var model: String = "stt-rt-v4"
     var sampleRate: Int = 16_000
     var channels: Int = 1
     var clientReferenceID: String = UUID().uuidString
@@ -79,7 +79,7 @@ final class SonioxStreamingClient: SonioxStreamingClienting {
 
     init(
         session: URLSession = URLSession(configuration: .default),
-        keepaliveInterval: Duration = .seconds(5),
+        keepaliveInterval: Duration = .seconds(10),
         sleepFor: @escaping @Sendable (Duration) async -> Void = { duration in
             try? await Task.sleep(for: duration)
         }
@@ -110,7 +110,7 @@ final class SonioxStreamingClient: SonioxStreamingClienting {
         let payload = SonioxInitialConfigPayload(
             apiKey: config.apiKey,
             model: config.model,
-            audioFormat: "s16le",
+            audioFormat: "pcm_s16le",
             sampleRate: config.sampleRate,
             numChannels: config.channels,
             languageHints: [config.languageHint],

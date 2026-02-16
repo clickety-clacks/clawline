@@ -556,7 +556,6 @@ struct MessageInputBar: View {
         .frame(maxWidth: .infinity, alignment: .center)
         .simultaneousGesture(TapGesture().onEnded {
             logger.info("Input bar tap gesture")
-            NSLog("DIAG: Input bar tap gesture")
         })
         .onChange(of: content.length) { _, newValue in
             guard newValue == 0 else { return }

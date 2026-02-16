@@ -116,6 +116,12 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     private var pendingReconfigureIds: Set<String> = []
     private var dirtySizeIds: Set<String> = []
     private var invalidationScheduled = false
+    private var lastRenderedMessageRevision: Int = -1
+    private var lastRenderedTypingRevision: Int = -1
+    private var lastRenderedSessionOverride: String?
+    private var lastRenderedUnreadCount: Int = 0
+    private var lastRenderedFirstUnreadMessageID: String?
+    private var lastRenderedIsActiveSession: Bool = true
     private var lastMessageId: String?
     private var viewModel: ChatViewModel?
     private var isCompact: Bool = true
@@ -228,7 +234,6 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
-        let t0 = CFAbsoluteTimeGetCurrent()
 
         // iOS: Extend the collection view to fill the entire screen, ignoring safe areas.
         // SwiftUI's UIViewControllerRepresentable doesn't respect .ignoresSafeArea() for UIKit views,
@@ -263,10 +268,8 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         // Handle bounds size changes
         let size = collectionView.bounds.size
         guard size != .zero, size != lastBoundsSize else {
-            NSLog("[KBTIMING] viewDidLayoutSubviews noChange dt=%.4f", CFAbsoluteTimeGetCurrent() - t0)
             return
         }
-        NSLog("[KBTIMING] viewDidLayoutSubviews RELAYOUT old=%@ new=%@", NSCoder.string(for: lastBoundsSize), NSCoder.string(for: size))
         lastBoundsSize = size
         forceReconfigureAll = true
         updateLayout()
@@ -284,7 +287,6 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
 #if os(visionOS)
         updateVisibleCellOpacity()
 #endif
-        NSLog("[KBTIMING] viewDidLayoutSubviews DONE dt=%.4f", CFAbsoluteTimeGetCurrent() - t0)
     }
 
 #if os(visionOS)
@@ -461,7 +463,6 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         // InsetsChanged: pinned intent means we keep the indicator hidden in AT_BOTTOM* states.
         emitHideIndicatorIfChanged()
         handleBottomInsetHeightCapChange(previousBottomInset: previousBottomInset, newBottomInset: totalBottomInset)
-        NSLog("[KBTIMING] setBottomInset total=%.1f anim=%.2f", totalBottomInset, animatedDuration ?? 0)
     }
 
     private func handleBottomInsetHeightCapChange(previousBottomInset: CGFloat, newBottomInset: CGFloat) {
@@ -488,7 +489,6 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     }
 
     func scheduleScrollToBottom(animated: Bool, attempts: Int = 2) {
-        NSLog("[KBTIMING] scheduleScrollToBottom animated=%d attempts=%d", animated ? 1 : 0, attempts)
         pendingScrollToBottomAttempts = max(pendingScrollToBottomAttempts, attempts)
         pendingScrollToBottomAnimated = pendingScrollToBottomAnimated || animated
         performPendingScrollToBottomIfNeeded()
@@ -496,7 +496,6 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
 
     private func performPendingScrollToBottomIfNeeded() {
         guard pendingScrollToBottomAttempts > 0 else { return }
-        NSLog("[KBTIMING] performPendingScrollToBottom remaining=%d", pendingScrollToBottomAttempts)
         let animated = pendingScrollToBottomAnimated
         pendingScrollToBottomAttempts -= 1
         collectionView.layoutIfNeeded()
@@ -524,11 +523,12 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         isDark: Bool? = nil
     ) {
         loadViewIfNeeded()
-        let t0 = CFAbsoluteTimeGetCurrent()
         let previousLastMessageId = lastMessageId
         let wasUserInteracting = isUserInteracting
         let wasPinnedToBottomIntent = sbbState.isPinnedToBottomIntent
         let previousSessionKey = self.channelOverride
+        let previousTruncationBottomInset = self.truncationBottomInset
+        let previousIsActiveSession = self.isActiveSession
         self.viewModel = viewModel
         self.channelOverride = sessionKey
         self.isActiveSession = isActiveSession
@@ -565,6 +565,8 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         let needsFullLayout = forceReconfigureAll
             || self.isCompact != isCompact
             || self.topInset != topInset
+            || abs(previousTruncationBottomInset - truncationBottomInset) > 0.5
+            || previousIsActiveSession != isActiveSession
             || previousSessionKey != sessionKey
         self.isCompact = isCompact
         self.topInset = topInset
@@ -578,7 +580,18 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         if needsFullLayout {
             updateLayout()
         }
-        NSLog("[KBTIMING] MFCV.update layoutDecision fullLayout=%d dt=%.4f", needsFullLayout ? 1 : 0, CFAbsoluteTimeGetCurrent() - t0)
+        let currentMessageRevision = viewModel.activeMessageListRevision
+        let currentTypingRevision = viewModel.typingIndicatorRevision
+        let canSkipContentRefresh = !needsFullLayout
+            && lastRenderedMessageRevision == currentMessageRevision
+            && lastRenderedTypingRevision == currentTypingRevision
+            && lastRenderedSessionOverride == sessionKey
+            && lastRenderedFirstUnreadMessageID == firstUnreadMessageId
+            && lastRenderedUnreadCount == unreadCount
+            && lastRenderedIsActiveSession == isActiveSession
+        if canSkipContentRefresh {
+            return
+        }
 
         // Use session override if provided, otherwise use active session messages.
         let messages = sessionKey.map { viewModel.messages(for: $0) } ?? viewModel.messages
@@ -684,11 +697,16 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             }
 #endif
         }
-        NSLog("[KBTIMING] MFCV.update snapshotApply changed=%d morph=%d dt=%.4f", changedIds.count, shouldMorph ? 1 : 0, CFAbsoluteTimeGetCurrent() - t0)
         logger.info(
             "diffing apply snapshot count=\(messageCount, privacy: .public) changed=\(changedIds.count, privacy: .public) needsLayout=\(needsFullLayout, privacy: .public) morph=\(shouldMorph, privacy: .public)"
         )
         fingerprints = newFingerprints
+        lastRenderedMessageRevision = currentMessageRevision
+        lastRenderedTypingRevision = currentTypingRevision
+        lastRenderedSessionOverride = sessionKey
+        lastRenderedFirstUnreadMessageID = firstUnreadMessageId
+        lastRenderedUnreadCount = unreadCount
+        lastRenderedIsActiveSession = isActiveSession
 
         if lastMessageId != newestMessageId {
             lastMessageId = newestMessageId
@@ -731,7 +749,6 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         }
         syncUnreadStateWithSBBState()
         handleContentUpdateCompletion()
-        NSLog("[KBTIMING] MFCV.update DONE dt=%.4f", CFAbsoluteTimeGetCurrent() - t0)
     }
 
     static func appendedMessageIDs(previousLastMessageId: String?, messageIDs: [String]) -> [String] {
@@ -1273,7 +1290,6 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     }
 
     private func updateLayout() {
-        let t0 = CFAbsoluteTimeGetCurrent()
         let metrics = ChatFlowTheme.Metrics(isCompact: isCompact)
         flowLayout.minimumInteritemSpacing = metrics.flowGap
         flowLayout.minimumLineSpacing = metrics.flowGap
@@ -1296,7 +1312,6 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         bubbleSizingV2KeysByMessageId.removeAll()
         bubbleSizingV2LinkPreviewStateVersionByMessageId.removeAll()
         flowLayout.invalidateLayout()
-        NSLog("[KBTIMING] updateLayout cacheCleared invalidated dt=%.4f", CFAbsoluteTimeGetCurrent() - t0)
     }
 
     private func availableContentWidth() -> CGFloat {
@@ -2155,13 +2170,11 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     }
 
     func scrollToBottom(animated: Bool) {
-        let t0 = CFAbsoluteTimeGetCurrent()
         guard let lastMessageId,
               dataSource.indexPath(for: lastMessageId) != nil else {
             return
         }
         collectionView.layoutIfNeeded()
-        NSLog("[KBTIMING] scrollToBottom.layoutIfNeeded dt=%.4f", CFAbsoluteTimeGetCurrent() - t0)
         let contentInset = collectionView.contentInset
         // Scroll to the bottom of the content (includes section insets/padding).
         // Using contentSize avoids under-scrolling when sectionInset.bottom is non-zero.
@@ -2174,7 +2187,6 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             return
         }
         collectionView.setContentOffset(CGPoint(x: 0, y: clampedY), animated: animated)
-        NSLog("[KBTIMING] scrollToBottom animated=%d targetY=%.1f dt=%.4f", animated ? 1 : 0, clampedY, CFAbsoluteTimeGetCurrent() - t0)
     }
 
     func scrollToMessageCentered(messageId: String, animated: Bool) {
@@ -2211,7 +2223,6 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     }
 
     func adjustContentOffsetForBottomInsetChange(delta: CGFloat) {
-        NSLog("[KBTIMING] adjustContentOffset delta=%.1f", delta)
         guard abs(delta) > 0.5 else { return }
         let contentInset = collectionView.contentInset
         let minY = -contentInset.top
@@ -2658,7 +2669,6 @@ private final class MessageFlowLayout: UICollectionViewFlowLayout {
     }
 
     override func prepare() {
-        let t0 = CFAbsoluteTimeGetCurrent()
         super.prepare()
         guard let collectionView else { return }
 
@@ -2711,7 +2721,6 @@ private final class MessageFlowLayout: UICollectionViewFlowLayout {
         cachedContentSize = CGSize(width: contentWidth, height: y + rowHeight + sectionInset.bottom)
         cachedLayoutSignature = signature
         needsRebuild = false
-        NSLog("[KBTIMING] FlowLayout.prepare items=%d dt=%.4f", itemCount, CFAbsoluteTimeGetCurrent() - t0)
     }
 
     override var collectionViewContentSize: CGSize {

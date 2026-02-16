@@ -36,9 +36,11 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
     ]
     private(set) var messages: [Message] = [] {
         didSet {
+            activeMessageListRevision &+= 1
             handleMessageWindowChange(oldMessages: oldValue, newMessages: messages)
         }
     }
+    private(set) var activeMessageListRevision: Int = 0
     private(set) var activeSessionKey: String = ""
     private(set) var streamsBySessionKey: [String: StreamSession] = [:]
     private(set) var orderedSessionKeys: [String] = []
@@ -108,8 +110,19 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
         }
     }
     private(set) var isSending: Bool = false
-    private(set) var isAssistantTyping: Bool = false
-    private(set) var typingSessionKey: String?
+    private(set) var isAssistantTyping: Bool = false {
+        didSet {
+            guard oldValue != isAssistantTyping else { return }
+            typingIndicatorRevision &+= 1
+        }
+    }
+    private(set) var typingSessionKey: String? {
+        didSet {
+            guard oldValue != typingSessionKey else { return }
+            typingIndicatorRevision &+= 1
+        }
+    }
+    private(set) var typingIndicatorRevision: Int = 0
     private(set) var connectionState: ConnectionState = .disconnected
     private(set) var connectionAlert: ConnectionAlertSeverity? {
         didSet {

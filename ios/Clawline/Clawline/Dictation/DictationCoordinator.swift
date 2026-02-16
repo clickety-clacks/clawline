@@ -27,6 +27,7 @@ struct DictationTiming {
     var tokenInactivityTimeout: Duration = .seconds(180)
     var stopKeepFinalizeTimeout: Duration = .milliseconds(1_200)
     var sendFinalizeTimeout: Duration = .milliseconds(500)
+    var composeUpdateCoalescingInterval: Duration = .milliseconds(75)
     var errorAutoDismissTimeout: Duration = .seconds(4)
     var errorAutoDismissVoiceOverTimeout: Duration = .seconds(8)
 }
@@ -168,6 +169,8 @@ final class DictationCoordinator {
     private var originSessionKey: String?
     private var preDictationSnapshot: ComposeDraftSnapshot = .empty
     private var transcriptBuffer = DictationTranscriptBuffer()
+    private var pendingTranscriptText: String?
+    private var lastAppliedTranscriptText: String = ""
     private var pendingActivationMode: DictationMode?
     private var mode: DictationMode?
     private var sessionStartedAt: Date?
@@ -185,6 +188,7 @@ final class DictationCoordinator {
     private var tokenInactivityTask: Task<Void, Never>?
     private var errorDismissTask: Task<Void, Never>?
     private var streamSwitchStopTask: Task<Void, Never>?
+    private var transcriptApplyTask: Task<Void, Never>?
 
     init(
         bridge: ComposeInputDictationBridge,
@@ -400,6 +404,8 @@ final class DictationCoordinator {
         self.originSessionKey = currentSessionKey
         self.preDictationSnapshot = bridge.captureSnapshot(for: currentSessionKey)
         self.transcriptBuffer.reset()
+        self.pendingTranscriptText = nil
+        self.lastAppliedTranscriptText = ""
         self.finishedReceived = false
         self.sessionStartedAt = Date()
         self.lastTokenAt = Date()
@@ -522,9 +528,7 @@ final class DictationCoordinator {
 
             if !response.tokens.isEmpty || response.finished {
                 let snapshot = transcriptBuffer.apply(tokens: response.tokens, finished: response.finished)
-                if let originSessionKey {
-                    bridge.apply(transcript: snapshot.text, baseSnapshot: preDictationSnapshot, to: originSessionKey)
-                }
+                queueTranscriptApply(snapshot.text, immediate: response.finished)
             }
 
             if !response.tokens.isEmpty {
@@ -597,16 +601,22 @@ final class DictationCoordinator {
             return false
         }
 
+        logger.info(
+            "Dictation stopKeep requested reason=\(reason, privacy: .public) gracefulFinalize=\(gracefulFinalize, privacy: .public) state=\(String(describing: self.state), privacy: .public)"
+        )
+
         if state != .stoppingKeep {
             state = .stoppingKeep
         }
 
         maxDurationTask?.cancel()
         tokenInactivityTask?.cancel()
+        flushPendingTranscriptApply()
 
         var finalizedWithinTimeout = false
 
         if gracefulFinalize {
+            logger.info("Dictation stopKeep sendFinalize reason=\(reason, privacy: .public)")
             do {
                 try await streamingClient?.sendFinalize()
             } catch {
@@ -639,6 +649,7 @@ final class DictationCoordinator {
 
         maxDurationTask?.cancel()
         tokenInactivityTask?.cancel()
+        cancelPendingTranscriptApply()
 
         audioCapture?.stop()
         streamingClient?.close(code: .normalClosure, reason: "client_cancelled")
@@ -666,6 +677,9 @@ final class DictationCoordinator {
 
     private func finalizeSessionCleanup(reason: String, announceStop: Bool) {
         let duration = elapsedSessionMilliseconds()
+        logger.info(
+            "Dictation finalizeSessionCleanup reason=\(reason, privacy: .public) announceStop=\(announceStop, privacy: .public) durationMs=\(duration, privacy: .public)"
+        )
         analytics.trackStop(reason: reason, durationMs: duration)
 
         if announceStop {
@@ -687,6 +701,7 @@ final class DictationCoordinator {
         tokenInactivityTask?.cancel()
         errorDismissTask?.cancel()
         streamSwitchStopTask?.cancel()
+        transcriptApplyTask?.cancel()
 
         eventTask = nil
         frameTask = nil
@@ -696,12 +711,15 @@ final class DictationCoordinator {
         tokenInactivityTask = nil
         errorDismissTask = nil
         streamSwitchStopTask = nil
+        transcriptApplyTask = nil
 
         audioCapture = nil
         streamingClient = nil
 
         originSessionKey = nil
         preDictationSnapshot = .empty
+        pendingTranscriptText = nil
+        lastAppliedTranscriptText = ""
         pendingActivationMode = nil
 
         if state != .error {
@@ -756,5 +774,41 @@ final class DictationCoordinator {
     private func refreshInlineKeyFromStore() {
         inlineKeyText = editableAPIKeyProvider()
         inlineKeyStatus = keyStatusProvider()
+    }
+
+    private func queueTranscriptApply(_ transcriptText: String, immediate: Bool) {
+        pendingTranscriptText = transcriptText
+        if immediate {
+            flushPendingTranscriptApply()
+            return
+        }
+        guard transcriptApplyTask == nil else { return }
+        transcriptApplyTask = Task { [weak self] in
+            guard let self else { return }
+            try? await Task.sleep(for: self.timing.composeUpdateCoalescingInterval)
+            guard !Task.isCancelled else { return }
+            await self.flushPendingTranscriptApply()
+        }
+    }
+
+    private func flushPendingTranscriptApply() {
+        transcriptApplyTask?.cancel()
+        transcriptApplyTask = nil
+        guard let transcriptText = pendingTranscriptText else { return }
+        pendingTranscriptText = nil
+        applyTranscriptIfNeeded(transcriptText)
+    }
+
+    private func cancelPendingTranscriptApply() {
+        transcriptApplyTask?.cancel()
+        transcriptApplyTask = nil
+        pendingTranscriptText = nil
+    }
+
+    private func applyTranscriptIfNeeded(_ transcriptText: String) {
+        guard transcriptText != lastAppliedTranscriptText else { return }
+        guard let originSessionKey else { return }
+        lastAppliedTranscriptText = transcriptText
+        bridge.apply(transcript: transcriptText, baseSnapshot: preDictationSnapshot, to: originSessionKey)
     }
 }

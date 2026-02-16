@@ -475,7 +475,6 @@ struct ChatView: View {
         .background(
             KeyboardLayoutGuideReader(refreshToken: keyboardRefreshToken) { height, duration, curve in
                 if abs(height - keyboardHeight) > 0.5 {
-                    NSLog("[KBTIMING] keyboardHeight state set %.1f -> %.1f", keyboardHeight, height)
                     withAnimation(nil) {
                         keyboardHeight = height
                     }
@@ -1491,12 +1490,6 @@ private final class KeyboardLayoutGuideObserverView: UIView {
         if abs(height - lastHeight) > 0.5 {
             lastHeight = height
         }
-        NSLog(
-            "[KBTIMING] keyboardFrameChanged foreground frame=%@ win=%@ floating=%d",
-            NSCoder.string(for: frameInWindow),
-            NSCoder.string(for: windowBounds),
-            result.isFloating ? 1 : 0
-        )
         onChange?(height, lastDuration, lastCurve)
     }
 
@@ -1536,7 +1529,6 @@ private final class KeyboardLayoutGuideObserverView: UIView {
     }
 
     @objc private func keyboardFrameChanged(_ notification: Notification) {
-        let t0 = CFAbsoluteTimeGetCurrent()
         guard let endFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { return }
         let duration = (notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? NSNumber)?.doubleValue ?? 0.3
         let curveRaw = (notification.userInfo?[UIResponder.keyboardAnimationCurveUserInfoKey] as? NSNumber)?.intValue ?? UIView.AnimationCurve.easeInOut.rawValue
@@ -1551,12 +1543,6 @@ private final class KeyboardLayoutGuideObserverView: UIView {
             let windowBounds = window.bounds
             let result = heightFromFrame(frameInWindow, windowBounds: windowBounds)
             height = result.height
-            NSLog(
-                "[KBTIMING] keyboardFrameChanged frame=%@ win=%@ floating=%d",
-                NSCoder.string(for: frameInWindow),
-                NSCoder.string(for: windowBounds),
-                result.isFloating ? 1 : 0
-            )
         } else {
             let screenHeight = window?.windowScene?.screen.bounds.height
                 ?? UIScreen.main.bounds.height
@@ -1573,7 +1559,6 @@ private final class KeyboardLayoutGuideObserverView: UIView {
             lastCurve = curve
         }
         onChange?(height, duration, curve)
-        NSLog("[KBTIMING] keyboardFrameChanged h=%.1f dur=%.2f curve=%d dt=%.4f", height, duration, curve.rawValue, CFAbsoluteTimeGetCurrent() - t0)
     }
 }
 
@@ -1633,7 +1618,6 @@ private struct KeyboardPinnedContainer<Content: View>: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: KeyboardPinnedContainerView<Content>, context: Context) {
-        let t0 = CFAbsoluteTimeGetCurrent()
         uiView.hostingController.rootView = content
         uiView.updateVersionText(versionText)
         uiView.updateScrollButton(
@@ -1661,7 +1645,6 @@ private struct KeyboardPinnedContainer<Content: View>: UIViewRepresentable {
         layoutCoordinator.registerBarView(uiView)
         layoutCoordinator.applyTransitionIfPossible(reason: "KeyboardPinnedContainer.updateUIView")
         _ = layoutKey
-        NSLog("[KBTIMING] KBPinnedContainer.updateUIView gap=%.1f kbVis=%d dt=%.4f", desiredBottomGap, isKeyboardVisible ? 1 : 0, CFAbsoluteTimeGetCurrent() - t0)
     }
 }
 

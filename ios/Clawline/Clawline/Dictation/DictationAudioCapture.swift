@@ -335,6 +335,11 @@ final class DictationAudioCapture: DictationAudioCapturing {
     }
 
     private func processBuffer(_ inputBuffer: AVAudioPCMBuffer) {
+        let startedAt = CFAbsoluteTimeGetCurrent()
+        defer {
+            let elapsedMs = Int((CFAbsoluteTimeGetCurrent() - startedAt) * 1_000)
+            logger.info("[DICTATION-PERF] processBuffer: \(elapsedMs, privacy: .public)ms")
+        }
         guard isRunning else { return }
         guard let converter else { return }
         guard let outputFormat else { return }

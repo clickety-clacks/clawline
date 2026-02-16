@@ -62,6 +62,13 @@ enum SonioxStreamingClientError: LocalizedError {
 }
 
 final class SonioxStreamingClient: SonioxStreamingClienting {
+    private enum SocketLifecycleState: String {
+        case connecting
+        case open
+        case closing
+        case closed
+    }
+
     private static let endpointURL = URL(string: "wss://stt-rt.soniox.com/transcribe-websocket")!
     private static let keepalivePayload = #"{"type":"keepalive"}"#
 
@@ -76,6 +83,9 @@ final class SonioxStreamingClient: SonioxStreamingClienting {
     private var keepaliveTask: Task<Void, Never>?
     private var continuation: AsyncStream<SonioxStreamingEvent>.Continuation?
     private let eventStream: AsyncStream<SonioxStreamingEvent>
+    private var socketLifecycleState: SocketLifecycleState?
+    private var sendSequence: UInt64 = 0
+    private var receiveSequence: UInt64 = 0
 
     init(
         session: URLSession = URLSession(configuration: .default),
@@ -95,6 +105,7 @@ final class SonioxStreamingClient: SonioxStreamingClienting {
     var events: AsyncStream<SonioxStreamingEvent> { eventStream }
 
     func connect(config: SonioxStreamingConfig) async throws {
+        let startedAt = CFAbsoluteTimeGetCurrent()
         close(code: .goingAway, reason: "restart")
 
         var request = URLRequest(url: Self.endpointURL)
@@ -104,6 +115,7 @@ final class SonioxStreamingClient: SonioxStreamingClienting {
         }
 
         let task = session.webSocketTask(with: request)
+        logSocketStateChange(.connecting, task: task, context: "connect")
         task.resume()
         socketTask = task
 
@@ -122,19 +134,33 @@ final class SonioxStreamingClient: SonioxStreamingClienting {
         guard let text = String(data: data, encoding: .utf8) else {
             throw SonioxStreamingClientError.invalidConfigEncoding
         }
-        try await task.send(.string(text))
+        do {
+            try await task.send(.string(text))
+            logSendResult(kind: "initial_config", frameBytes: data.count, success: true, error: nil)
+        } catch {
+            logSendResult(kind: "initial_config", frameBytes: data.count, success: false, error: error)
+            continuation?.yield(.failed(stage: .send, code: nil, message: error.localizedDescription))
+            throw error
+        }
+        logSocketStateChange(.open, task: task, context: "initial_config_sent")
+        logPerfMarker(functionName: "connect", startedAt: startedAt)
 
         startKeepaliveLoop(task: task)
         startReceiveLoop(task: task)
     }
 
     func sendAudioFrame(_ frame: Data) async throws {
+        let startedAt = CFAbsoluteTimeGetCurrent()
         guard let task = socketTask else {
             throw SonioxStreamingClientError.notConnected
         }
         do {
             try await task.send(.data(frame))
+            logSendResult(kind: "audio", frameBytes: frame.count, success: true, error: nil)
+            logPerfMarker(functionName: "sendAudioFrame", startedAt: startedAt)
         } catch {
+            logSendResult(kind: "audio", frameBytes: frame.count, success: false, error: error)
+            logPerfMarker(functionName: "sendAudioFrame", startedAt: startedAt)
             continuation?.yield(.failed(stage: .send, code: nil, message: error.localizedDescription))
             throw error
         }
@@ -145,9 +171,12 @@ final class SonioxStreamingClient: SonioxStreamingClienting {
             throw SonioxStreamingClientError.notConnected
         }
         stopKeepaliveLoop()
+        let finalizePayload = #"{"type":"finalize"}"#
         do {
-            try await task.send(.string(#"{"type":"finalize"}"#))
+            try await task.send(.string(finalizePayload))
+            logSendResult(kind: "finalize", frameBytes: finalizePayload.utf8.count, success: true, error: nil)
         } catch {
+            logSendResult(kind: "finalize", frameBytes: finalizePayload.utf8.count, success: false, error: error)
             continuation?.yield(.failed(stage: .send, code: nil, message: error.localizedDescription))
             throw error
         }
@@ -159,8 +188,10 @@ final class SonioxStreamingClient: SonioxStreamingClienting {
         receiveTask = nil
 
         if let task = socketTask {
+            logSocketStateChange(.closing, task: task, context: "client_close_request")
             let reasonData = reason.map { Data($0.utf8) }
             task.cancel(with: code, reason: reasonData)
+            logSocketStateChange(.closed, task: task, context: "client_close_cancel_sent")
             socketTask = nil
         }
     }
@@ -171,6 +202,7 @@ final class SonioxStreamingClient: SonioxStreamingClienting {
             guard let self else { return }
             while !Task.isCancelled {
                 do {
+                    let iterationStartedAt = CFAbsoluteTimeGetCurrent()
                     let message = try await task.receive()
                     switch message {
                     case .string(let text):
@@ -184,6 +216,7 @@ final class SonioxStreamingClient: SonioxStreamingClienting {
                     @unknown default:
                         continue
                     }
+                    logPerfMarker(functionName: "receiveLoopIteration", startedAt: iterationStartedAt)
                 } catch {
                     let rawCode = task.closeCode
                     let closeCode = rawCode == .invalid ? nil : Int(rawCode.rawValue)
@@ -193,7 +226,7 @@ final class SonioxStreamingClient: SonioxStreamingClienting {
                     }()
                     stopKeepaliveLoop()
                     continuation?.yield(.closed(code: closeCode, reason: closeReason))
-                    logger.info("Soniox socket closed code=\(closeCode ?? -1, privacy: .public)")
+                    logSocketStateChange(.closed, task: task, context: "receive_loop_error")
                     break
                 }
             }
@@ -210,7 +243,19 @@ final class SonioxStreamingClient: SonioxStreamingClienting {
                 guard self.socketTask === task else { return }
                 do {
                     try await task.send(.string(Self.keepalivePayload))
+                    self.logSendResult(
+                        kind: "keepalive",
+                        frameBytes: Self.keepalivePayload.utf8.count,
+                        success: true,
+                        error: nil
+                    )
                 } catch {
+                    self.logSendResult(
+                        kind: "keepalive",
+                        frameBytes: Self.keepalivePayload.utf8.count,
+                        success: false,
+                        error: error
+                    )
                     self.continuation?.yield(.failed(stage: .send, code: nil, message: error.localizedDescription))
                     return
                 }
@@ -224,12 +269,74 @@ final class SonioxStreamingClient: SonioxStreamingClienting {
     }
 
     private func handleIncomingText(_ text: String) {
+        receiveSequence += 1
+        let receiveSeq = receiveSequence
+        logger.info(
+            "Soniox recv seq=\(receiveSeq, privacy: .public) json=\(Self.truncatedLogString(text), privacy: .public)"
+        )
         do {
             let response = try decodeResponseText(text)
+            if let errorCode = response.errorCode, !errorCode.isEmpty {
+                logger.error(
+                    "SONIOX_ERROR_CODE code=\(errorCode, privacy: .public) message=\(response.errorMessage ?? "nil", privacy: .public)"
+                )
+            }
             continuation?.yield(.response(response))
         } catch {
+            logger.error(
+                "Soniox decode_error json=\(Self.truncatedLogString(text), privacy: .public) error=\(error.localizedDescription, privacy: .public)"
+            )
             continuation?.yield(.failed(stage: .decode, code: nil, message: "Failed to decode Soniox response."))
         }
+    }
+
+    private func logSendResult(kind: String, frameBytes: Int, success: Bool, error: Error?) {
+        sendSequence += 1
+        let sendSeq = sendSequence
+        if success {
+            logger.info(
+                "Soniox send seq=\(sendSeq, privacy: .public) kind=\(kind, privacy: .public) frameBytes=\(frameBytes, privacy: .public) result=success"
+            )
+            return
+        }
+        logger.error(
+            "Soniox send seq=\(sendSeq, privacy: .public) kind=\(kind, privacy: .public) frameBytes=\(frameBytes, privacy: .public) result=error error=\(error?.localizedDescription ?? "unknown", privacy: .public)"
+        )
+    }
+
+    private func logSocketStateChange(_ nextState: SocketLifecycleState, task: URLSessionWebSocketTask?, context: String) {
+        if socketLifecycleState == nextState {
+            return
+        }
+        socketLifecycleState = nextState
+        let closeCode: Int = {
+            guard let task else { return -1 }
+            return task.closeCode == .invalid ? -1 : Int(task.closeCode.rawValue)
+        }()
+        let closeReason: String = {
+            guard let task,
+                  let reasonData = task.closeReason,
+                  !reasonData.isEmpty else {
+                return "nil"
+            }
+            return String(data: reasonData, encoding: .utf8) ?? reasonData.base64EncodedString()
+        }()
+        logger.info(
+            "Soniox socket_state=\(nextState.rawValue, privacy: .public) context=\(context, privacy: .public) closeCode=\(closeCode, privacy: .public) closeReason=\(closeReason, privacy: .public)"
+        )
+    }
+
+    private static func truncatedLogString(_ text: String, limit: Int = 200) -> String {
+        if text.count <= limit {
+            return text
+        }
+        let end = text.index(text.startIndex, offsetBy: limit)
+        return String(text[..<end]) + "…"
+    }
+
+    private func logPerfMarker(functionName: String, startedAt: CFAbsoluteTime) {
+        let elapsedMs = Int((CFAbsoluteTimeGetCurrent() - startedAt) * 1_000)
+        logger.info("[DICTATION-PERF] \(functionName, privacy: .public): \(elapsedMs, privacy: .public)ms")
     }
 
     func decodeResponseText(_ text: String) throws -> SonioxStreamingResponse {

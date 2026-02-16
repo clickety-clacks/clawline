@@ -566,7 +566,7 @@ final class DictationCoordinator {
         switch event {
         case .response(let response):
             if let errorCode = response.errorCode, !errorCode.isEmpty {
-                logger.error(
+                logger.notice(
                     "SONIOX_ERROR_CODE code=\(errorCode, privacy: .public) message=\(response.errorMessage ?? errorCode, privacy: .public)"
                 )
                 let message: String
@@ -622,18 +622,18 @@ final class DictationCoordinator {
     private func handleAudioCaptureEvent(_ event: DictationAudioCaptureEvent) async {
         switch event {
         case .interruptionBegan:
-            logger.info("Dictation capture interruption began")
+            logger.notice("Dictation capture interruption began")
             analytics.trackError(errorCode: nil, stage: "audio_interruption")
         case .interruptionEnded(let shouldResume):
-            logger.info("Dictation capture interruption ended shouldResume=\(shouldResume, privacy: .public)")
+            logger.notice("Dictation capture interruption ended shouldResume=\(shouldResume, privacy: .public)")
         case .routeChanged:
-            logger.info("Dictation audio route changed")
+            logger.notice("Dictation audio route changed")
             analytics.trackError(errorCode: nil, stage: "audio_route_change")
         case .mediaServicesReset:
-            logger.info("Dictation media services reset")
+            logger.notice("Dictation media services reset")
             analytics.trackError(errorCode: nil, stage: "audio_media_services_reset")
         case .failed(let message):
-            logger.error("Dictation audio event failed: \(message, privacy: .public)")
+            logger.notice("Dictation audio event failed: \(message, privacy: .public)")
             await handleTransportFailure(stage: .audio, message: message)
         }
     }
@@ -676,14 +676,14 @@ final class DictationCoordinator {
         callSite: String = DictationCoordinator.callSite()
     ) async -> Bool {
         guard state == .dictatingSticky || state == .dictatingWalkieTalkie || state == .stoppingKeep else {
-            logger.info(
+            logger.notice(
                 "Dictation stopKeep ignored reason=\(reason, privacy: .public) trigger=\(trigger, privacy: .public) callSite=\(callSite, privacy: .public) state=\(String(describing: self.state), privacy: .public)"
             )
             return false
         }
 
         pendingStopContext = "trigger=\(trigger) callSite=\(callSite)"
-        logger.info(
+        logger.notice(
             "Dictation stopKeep requested reason=\(reason, privacy: .public) trigger=\(trigger, privacy: .public) callSite=\(callSite, privacy: .public) gracefulFinalize=\(gracefulFinalize, privacy: .public) state=\(String(describing: self.state), privacy: .public)"
         )
 
@@ -698,7 +698,7 @@ final class DictationCoordinator {
         var finalizedWithinTimeout = false
 
         if gracefulFinalize {
-            logger.info("Dictation stopKeep sendFinalize reason=\(reason, privacy: .public)")
+            logger.notice("Dictation stopKeep sendFinalize reason=\(reason, privacy: .public)")
             do {
                 try await streamingClient?.sendFinalize()
             } catch {
@@ -732,7 +732,7 @@ final class DictationCoordinator {
         guard state == .dictatingSticky || state == .dictatingWalkieTalkie || state == .stoppingKeep else { return }
 
         pendingStopContext = "trigger=\(trigger) callSite=\(callSite)"
-        logger.info(
+        logger.notice(
             "Dictation stopDiscard requested reason=\(reason, privacy: .public) trigger=\(trigger, privacy: .public) callSite=\(callSite, privacy: .public) state=\(String(describing: self.state), privacy: .public)"
         )
 
@@ -769,7 +769,7 @@ final class DictationCoordinator {
     private func finalizeSessionCleanup(reason: String, announceStop: Bool) {
         let duration = elapsedSessionMilliseconds()
         let stopContext = pendingStopContext ?? "trigger=unknown callSite=unknown"
-        logger.info(
+        logger.notice(
             "Dictation finalizeSessionCleanup reason=\(reason, privacy: .public) stopContext=\(stopContext, privacy: .public) announceStop=\(announceStop, privacy: .public) durationMs=\(duration, privacy: .public)"
         )
         analytics.trackStop(reason: reason, durationMs: duration)
@@ -905,6 +905,6 @@ final class DictationCoordinator {
         lastAppliedTranscriptText = transcriptText
         bridge.apply(transcript: transcriptText, baseSnapshot: preDictationSnapshot, to: originSessionKey)
         let elapsedMs = Int((CFAbsoluteTimeGetCurrent() - startedAt) * 1_000)
-        logger.info("[DICTATION-PERF] applyTranscriptIfNeeded: \(elapsedMs, privacy: .public)ms")
+        logger.notice("[DICTATION-PERF] applyTranscriptIfNeeded: \(elapsedMs, privacy: .public)ms")
     }
 }

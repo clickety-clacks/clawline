@@ -338,7 +338,7 @@ final class DictationAudioCapture: DictationAudioCapturing {
         let startedAt = CFAbsoluteTimeGetCurrent()
         defer {
             let elapsedMs = Int((CFAbsoluteTimeGetCurrent() - startedAt) * 1_000)
-            logger.info("[DICTATION-PERF] processBuffer: \(elapsedMs, privacy: .public)ms")
+            logger.notice("[DICTATION-PERF] processBuffer: \(elapsedMs, privacy: .public)ms")
         }
         guard isRunning else { return }
         guard let converter else { return }
@@ -363,7 +363,7 @@ final class DictationAudioCapture: DictationAudioCapturing {
         }
 
         if status == .error {
-            logger.error("Audio conversion failed: \(conversionError?.localizedDescription ?? "unknown", privacy: .public)")
+            logger.notice("Audio conversion failed: \(conversionError?.localizedDescription ?? "unknown", privacy: .public)")
             return
         }
 
@@ -390,7 +390,7 @@ final class DictationAudioCapture: DictationAudioCapturing {
         do {
             try AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         } catch {
-            logger.error("Failed to deactivate AVAudioSession: \(error.localizedDescription, privacy: .public)")
+            logger.notice("Failed to deactivate AVAudioSession: \(error.localizedDescription, privacy: .public)")
         }
 #endif
     }

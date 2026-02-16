@@ -271,19 +271,19 @@ final class SonioxStreamingClient: SonioxStreamingClienting {
     private func handleIncomingText(_ text: String) {
         receiveSequence += 1
         let receiveSeq = receiveSequence
-        logger.info(
+        logger.notice(
             "Soniox recv seq=\(receiveSeq, privacy: .public) json=\(Self.truncatedLogString(text), privacy: .public)"
         )
         do {
             let response = try decodeResponseText(text)
             if let errorCode = response.errorCode, !errorCode.isEmpty {
-                logger.error(
+                logger.notice(
                     "SONIOX_ERROR_CODE code=\(errorCode, privacy: .public) message=\(response.errorMessage ?? "nil", privacy: .public)"
                 )
             }
             continuation?.yield(.response(response))
         } catch {
-            logger.error(
+            logger.notice(
                 "Soniox decode_error json=\(Self.truncatedLogString(text), privacy: .public) error=\(error.localizedDescription, privacy: .public)"
             )
             continuation?.yield(.failed(stage: .decode, code: nil, message: "Failed to decode Soniox response."))
@@ -294,12 +294,12 @@ final class SonioxStreamingClient: SonioxStreamingClienting {
         sendSequence += 1
         let sendSeq = sendSequence
         if success {
-            logger.info(
+            logger.notice(
                 "Soniox send seq=\(sendSeq, privacy: .public) kind=\(kind, privacy: .public) frameBytes=\(frameBytes, privacy: .public) result=success"
             )
             return
         }
-        logger.error(
+        logger.notice(
             "Soniox send seq=\(sendSeq, privacy: .public) kind=\(kind, privacy: .public) frameBytes=\(frameBytes, privacy: .public) result=error error=\(error?.localizedDescription ?? "unknown", privacy: .public)"
         )
     }
@@ -321,7 +321,7 @@ final class SonioxStreamingClient: SonioxStreamingClienting {
             }
             return String(data: reasonData, encoding: .utf8) ?? reasonData.base64EncodedString()
         }()
-        logger.info(
+        logger.notice(
             "Soniox socket_state=\(nextState.rawValue, privacy: .public) context=\(context, privacy: .public) closeCode=\(closeCode, privacy: .public) closeReason=\(closeReason, privacy: .public)"
         )
     }
@@ -336,7 +336,7 @@ final class SonioxStreamingClient: SonioxStreamingClienting {
 
     private func logPerfMarker(functionName: String, startedAt: CFAbsoluteTime) {
         let elapsedMs = Int((CFAbsoluteTimeGetCurrent() - startedAt) * 1_000)
-        logger.info("[DICTATION-PERF] \(functionName, privacy: .public): \(elapsedMs, privacy: .public)ms")
+        logger.notice("[DICTATION-PERF] \(functionName, privacy: .public): \(elapsedMs, privacy: .public)ms")
     }
 
     func decodeResponseText(_ text: String) throws -> SonioxStreamingResponse {

@@ -30,6 +30,10 @@ protocol ChatViewModelHosting: AnyObject {
 final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
     private let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "MessagePipeline")
     private let instanceId = UUID().uuidString
+    private static let richDocumentMimeTypesNeedingPayload: Set<String> = [
+        InteractiveHTMLDescriptor.mimeType,
+        TerminalSessionDescriptor.mimeType
+    ]
     private(set) var messages: [Message] = [] {
         didSet {
             handleMessageWindowChange(oldMessages: oldValue, newMessages: messages)
@@ -66,6 +70,10 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
         if !previousSessionKey.isEmpty {
             persistDraft(for: previousSessionKey)
         }
+        applyActiveSessionKey(sessionKey)
+    }
+
+    private func applyActiveSessionKey(_ sessionKey: String) {
         activeSessionKey = sessionKey
         restoreDraft(for: sessionKey, announceEditorReset: true)
         restoreLastServerMessageIdIfNeeded(for: sessionKey)
@@ -74,6 +82,13 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
         messages = sessionMessages[sessionKey] ?? []
         lastServerMessageId = lastServerMessageIdBySession[sessionKey]
         persistActiveSessionKey(sessionKey)
+    }
+
+    private func clearActiveSession() {
+        activeSessionKey = ""
+        messages = []
+        lastServerMessageId = nil
+        streamDefaults.removeObject(forKey: activeSessionDefaultsKey())
     }
 
     var activeSessionDisplayName: String {
@@ -513,8 +528,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
         error = nil
         clearInput()
         sessionMessages = [:]
-        messages = []
-        activeSessionKey = ""
+        clearActiveSession()
         streamsBySessionKey = [:]
         orderedSessionKeys = []
         syntheticSessionKeys = []
@@ -664,6 +678,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
             if downloadedAssetData[assetId] != nil { return true }
             if attachment.type == .image { return true }
             if attachment.type == .asset { return true }
+            if Self.needsPayloadHydration(for: attachment) { return true }
             return attachment.mimeType?.lowercased().hasPrefix("image/") == true
         }
         guard needsDownload else { return }
@@ -695,9 +710,16 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
                     logger.info("attachment download start id=\(attachment.id, privacy: .public) assetId=\(assetId, privacy: .public)")
                     let data = try await uploadService.download(assetId: assetId)
                     guard !data.isEmpty else { continue }
-                    // Only attach data if it decodes as an image to avoid corrupt assets.
-                    guard UIImage(data: data) != nil else {
-                        logger.error("attachment download non-image id=\(attachment.id, privacy: .public) assetId=\(assetId, privacy: .public) bytes=\(data.count, privacy: .public)")
+                    let isImageAttachment = attachment.type == .image
+                        || attachment.type == .asset
+                        || attachment.mimeType?.lowercased().hasPrefix("image/") == true
+                    if isImageAttachment {
+                        // Image attachments remain guarded to avoid corrupt image payloads.
+                        guard UIImage(data: data) != nil else {
+                            logger.error("attachment download non-image id=\(attachment.id, privacy: .public) assetId=\(assetId, privacy: .public) bytes=\(data.count, privacy: .public)")
+                            continue
+                        }
+                    } else if !Self.needsPayloadHydration(for: attachment) {
                         continue
                     }
                     downloadedAssetData[assetId] = data
@@ -740,6 +762,19 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
                 self.setMessages(messageList, for: updatedMessage.sessionKey)
             }
         }
+    }
+
+    private static func needsPayloadHydration(for attachment: Attachment) -> Bool {
+        guard attachment.type == .document else { return false }
+        guard let mime = normalizedMimeType(attachment.mimeType) else { return false }
+        return richDocumentMimeTypesNeedingPayload.contains(mime)
+    }
+
+    private static func normalizedMimeType(_ raw: String?) -> String? {
+        guard let raw else { return nil }
+        let base = raw.split(separator: ";", maxSplits: 1, omittingEmptySubsequences: true).first
+        let trimmed = base?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     private func replacePendingMessageIfNeeded(with message: Message) -> Bool {
@@ -1721,15 +1756,9 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
         if activeSessionKey.isEmpty {
             if let main = streamMainSessionKey() {
                 ensureStreamEntry(for: main)
-                activeSessionKey = main
+                setActiveSessionKey(main)
             } else if let first = orderedSessionKeys.first {
-                activeSessionKey = first
-            }
-            if !activeSessionKey.isEmpty {
-                restoreDraft(for: activeSessionKey, announceEditorReset: true)
-                ensureSessionStorage(for: activeSessionKey)
-                messages = sessionMessages[activeSessionKey] ?? []
-                lastServerMessageId = lastServerMessageIdBySession[activeSessionKey]
+                setActiveSessionKey(first)
             }
         }
     }
@@ -1824,12 +1853,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
                 ensureStreamEntry(for: fallback)
                 setActiveSessionKey(fallback)
             } else {
-                activeSessionKey = ""
-                messages = []
-                lastServerMessageId = nil
-                inputContent = NSAttributedString(string: "")
-                attachmentData.removeAll()
-                inputResetToken &+= 1
+                clearActiveSession()
             }
         } else if !activeSessionKey.isEmpty {
             messages = sessionMessages[activeSessionKey] ?? []

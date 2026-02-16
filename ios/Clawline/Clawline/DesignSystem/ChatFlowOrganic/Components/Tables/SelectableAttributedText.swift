@@ -4,6 +4,7 @@ import UIKit
 struct SelectableAttributedText: UIViewRepresentable {
     var attributedString: NSAttributedString
     var alignment: NSTextAlignment
+    var colorScheme: ColorScheme
     var onSelectionChange: (Bool) -> Void
     var onLinkTap: (URL) -> Void
 
@@ -12,7 +13,7 @@ struct SelectableAttributedText: UIViewRepresentable {
     }
 
     func makeUIView(context: Context) -> UITextView {
-        let textView = UITextView()
+        let textView = TraitResponsiveTextView()
         textView.delegate = context.coordinator
         textView.backgroundColor = .clear
         textView.isEditable = false
@@ -30,8 +31,30 @@ struct SelectableAttributedText: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: UITextView, context: Context) {
+        let style: UIUserInterfaceStyle = colorScheme == .dark ? .dark : .light
+        if uiView.overrideUserInterfaceStyle != style {
+            uiView.overrideUserInterfaceStyle = style
+        }
         uiView.attributedText = attributedString
         uiView.textAlignment = alignment
+    }
+
+    private final class TraitResponsiveTextView: UITextView {
+        override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+            super.traitCollectionDidChange(previousTraitCollection)
+            guard let previousTraitCollection else { return }
+            guard traitCollection.hasDifferentColorAppearance(comparedTo: previousTraitCollection) else { return }
+
+            // TextKit can cache resolved run colors; reassigning forces it to resolve dynamic UIColor
+            // attributes with the new trait collection.
+            let selection = selectedRange
+            let current = attributedText
+            attributedText = current
+            if selection.location + selection.length <= (attributedText?.length ?? 0) {
+                selectedRange = selection
+            }
+            setNeedsDisplay()
+        }
     }
 
     final class Coordinator: NSObject, UITextViewDelegate {

@@ -101,10 +101,13 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     private var bubbleSizingV2LinkPreviewStateVersionByMessageId: [String: Int] = [:]
     private var bubbleSizingV2PendingRemeasureIds: Set<String> = []
     private var bubbleSizingV2RemeasureDebounceTimer: Timer?
+    private var bubbleSizingV2DeferredFlushTimer: Timer?
     private var bubbleSizingV2RemeasureBatchStartTime: CFAbsoluteTime?
     private var bubbleSizingV2RemeasureDeferredUntilNearBottom: Bool = false
+    private var bubbleSizingV2LastScrollActivityTime: CFAbsoluteTime = 0
     private static let bubbleSizingV2RemeasureDebounceSeconds: TimeInterval = 0.45
     private static let bubbleSizingV2RemeasureMaxWaitSeconds: TimeInterval = 2.5
+    private static let bubbleSizingV2RestSettleDelaySeconds: TimeInterval = 0.12
 
     private var messagesById: [String: Message] = [:]
     private var fingerprints: [String: Int] = [:]
@@ -315,6 +318,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
 #endif
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        bubbleSizingV2LastScrollActivityTime = CFAbsoluteTimeGetCurrent()
 #if os(visionOS)
         updateVisibleCellOpacity()
 #endif
@@ -456,7 +460,31 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         }
         // InsetsChanged: pinned intent means we keep the indicator hidden in AT_BOTTOM* states.
         emitHideIndicatorIfChanged()
+        handleBottomInsetHeightCapChange(previousBottomInset: previousBottomInset, newBottomInset: totalBottomInset)
         NSLog("[KBTIMING] setBottomInset total=%.1f anim=%.2f", totalBottomInset, animatedDuration ?? 0)
+    }
+
+    private func handleBottomInsetHeightCapChange(previousBottomInset: CGFloat, newBottomInset: CGFloat) {
+        guard abs(newBottomInset - previousBottomInset) > 0.5 else { return }
+        guard let viewModel else { return }
+        let metrics = ChatFlowTheme.Metrics(isCompact: isCompact)
+        let affectedIds = messagesById.values.compactMap { message -> String? in
+            let presentation = viewModel.presentation(for: message, metrics: metrics)
+            return isSingleLinkPreviewBubble(presentation: presentation) ? message.id : nil
+        }
+        guard !affectedIds.isEmpty else { return }
+
+        if bubbleSizingV2Enabled {
+            affectedIds.forEach { invalidateBubbleSizingV2Cache(for: $0) }
+        } else {
+            affectedIds.forEach { sizeCache.removeValue(forKey: $0) }
+            affectedIds.forEach { lastMeasuredSizes.removeValue(forKey: $0) }
+        }
+
+        // Item heights depend on bottom inset for single-link bubbles; force both size recompute and
+        // live-cell reconfigure so initial and relayout paths cannot diverge.
+        affectedIds.forEach { scheduleReconfigure(for: $0) }
+        flowLayout.invalidateLayout()
     }
 
     func scheduleScrollToBottom(animated: Bool, attempts: Int = 2) {
@@ -1086,16 +1114,20 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 metrics: metrics,
                 containerWidth: contentWidth
             )
-            let truncationHeightOverride = self.truncationHeightOverrideForMessageBubble(
+            let allowsOuterScroll = (sizeClass == .long)
+            let env = self.bubbleSizingV2Environment(metrics: metrics)
+            let fallbackHeightPolicy = self.bubbleHeightPolicyForPresentation(
                 presentation: presentation,
-                metrics: metrics
+                metrics: metrics,
+                env: env,
+                allowsOuterScroll: allowsOuterScroll
             )
             let layoutStateV2: BubbleSizingV2.LayoutState?
             let configureWidth: CGFloat
             let truncationHeightOverrideV1: CGFloat?
+            let bubbleHeightPolicyForConfigure: BubbleSizingV2.BubbleHeightPolicy
             if self.bubbleSizingV2Enabled {
                 let failureReason = viewModel.failureMessage(for: message.id)
-                let env = self.bubbleSizingV2Environment(metrics: metrics)
                 let plan = self.bubbleSizingV2Plan(
                     message: message,
                     presentation: presentation,
@@ -1115,11 +1147,13 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 layoutStateV2 = state
                 configureWidth = state.measurement.measuredBubbleWidth
                 truncationHeightOverrideV1 = nil
+                bubbleHeightPolicyForConfigure = plan.heightPolicy
             } else {
                 layoutStateV2 = nil
                 // Use cached size width for consistent sizing with measurement
                 configureWidth = self.sizeCache[id]?.width ?? maxWidth
-                truncationHeightOverrideV1 = truncationHeightOverride
+                truncationHeightOverrideV1 = fallbackHeightPolicy.v1TruncationHeightOverride
+                bubbleHeightPolicyForConfigure = fallbackHeightPolicy
             }
             cell?.configure(
                 message: message,
@@ -1127,6 +1161,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 failureReason: viewModel.failureMessage(for: message.id),
                 isCompact: self.isCompact,
                 maxWidth: configureWidth,
+                bubbleHeightPolicy: bubbleHeightPolicyForConfigure,
                 truncationHeightOverride: truncationHeightOverrideV1,
                 bubbleSizingV2: layoutStateV2,
                 showsHeader: !hideHeader,
@@ -1283,23 +1318,22 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
 #endif
     }
 
-    private func effectiveTruncationHeight(metrics: ChatFlowTheme.Metrics) -> CGFloat {
-        let baseHeight = effectiveContainerHeight()
-        let bottomInset = max(currentBottomInset, truncationBottomInset)
-        return BubbleSizingV2.availableHeightCap(
-            containerHeight: baseHeight,
-            topInset: topInset,
-            bottomInset: bottomInset,
-            flowPadding: metrics.containerPadding
-        )
-    }
-
-    private func effectiveSingleLinkPreviewHeightCap(metrics: ChatFlowTheme.Metrics) -> CGFloat {
-        BubbleSizingV2.availableHeightCap(
-            containerHeight: collectionView.bounds.height,
-            topInset: topInset,
-            bottomInset: currentBottomInset,
-            flowPadding: metrics.containerPadding
+    private func bubbleHeightPolicyForPresentation(
+        presentation: MessagePresentation,
+        metrics: ChatFlowTheme.Metrics,
+        env: BubbleSizingV2.Environment,
+        allowsOuterScroll: Bool
+    ) -> BubbleSizingV2.BubbleHeightPolicy {
+        let maxLineWidth = ChatFlowTheme.maxLineWidth(bodyFontSize: metrics.bodyFontSize)
+        return BubbleSizingV2.BubbleHeightPolicy.resolve(
+            metrics: metrics,
+            env: env,
+            isSingleLinkPreview: isSingleLinkPreviewBubble(presentation: presentation),
+            prefersScreenAwareHeightCap: prefersScreenAwareTruncationHeight(
+                presentation: presentation,
+                maxLineWidth: maxLineWidth
+            ),
+            allowsOuterScroll: allowsOuterScroll
         )
     }
 
@@ -1343,22 +1377,6 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
 
     private func isSingleLinkPreviewBubble(presentation: MessagePresentation) -> Bool {
         presentation.hasSingleURL && hasLinkPreviewPart(presentation)
-    }
-
-    private func truncationHeightOverrideForMessageBubble(
-        presentation: MessagePresentation,
-        metrics: ChatFlowTheme.Metrics
-    ) -> CGFloat? {
-        if isSingleLinkPreviewBubble(presentation: presentation) {
-            return effectiveSingleLinkPreviewHeightCap(metrics: metrics)
-        }
-        // Only certain embedded content (tables/images/etc) gets the full screen-aware truncation height.
-        // Plain text/markdown bubbles (even if they contain URLs) keep the design-system cap (metrics.truncationHeight).
-        let maxLineWidth = ChatFlowTheme.maxLineWidth(bodyFontSize: metrics.bodyFontSize)
-        guard prefersScreenAwareTruncationHeight(presentation: presentation, maxLineWidth: maxLineWidth) else {
-            return nil
-        }
-        return effectiveTruncationHeight(metrics: metrics)
     }
 
     private func prefersWideBubbleWidth(presentation: MessagePresentation,
@@ -1408,7 +1426,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         // never show fade/scroll/tap-to-expand affordances.
         //
         // Link-preview bubbles keep the design-system max-height cap by default; single-link
-        // bubbles are overridden separately via `truncationHeightOverrideForMessageBubble`.
+        // bubbles are handled by BubbleHeightPolicy's adaptive single-link branch.
         if presentation.parts.contains(where: { part in
             if case .linkPreview = part { return true }
             return false
@@ -1543,16 +1561,19 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             containerWidth: availableWidth
         )
         let failureReason = viewModel.failureMessage(for: message.id)
-        let truncationHeightOverride = truncationHeightOverrideForMessageBubble(
+        let env = bubbleSizingV2Environment(metrics: metrics)
+        let bubbleHeightPolicy = bubbleHeightPolicyForPresentation(
             presentation: presentation,
-            metrics: metrics
+            metrics: metrics,
+            env: env,
+            allowsOuterScroll: sizeClass == .long
         )
         let measuredSize = measureUIKitBubbleSize(
             message: message,
             presentation: presentation,
             failureReason: failureReason,
             maxWidth: maxWidth,
-            truncationHeightOverride: truncationHeightOverride,
+            bubbleHeightPolicy: bubbleHeightPolicy,
             showsHeader: !hideHeader
         )
         sizeCache[id] = measuredSize
@@ -1564,6 +1585,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                                         presentation: MessagePresentation,
                                         failureReason: String?,
                                         maxWidth: CGFloat,
+                                        bubbleHeightPolicy: BubbleSizingV2.BubbleHeightPolicy? = nil,
                                         truncationHeightOverride: CGFloat? = nil,
                                         showsHeader: Bool = true,
                                         paddingScale: CGFloat = 1,
@@ -1578,6 +1600,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             sizeClass: sizeClass,
             metrics: metrics,
             maxWidth: maxWidth,
+            bubbleHeightPolicy: bubbleHeightPolicy,
             truncationHeightOverride: truncationHeightOverride,
             showsHeader: showsHeader,
             paddingScale: paddingScale,
@@ -1591,7 +1614,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         let preferredWidth: CGFloat
         let maxLineWidth = ChatFlowTheme.maxLineWidth(bodyFontSize: metrics.bodyFontSize)
         let prefersWideWidth = prefersWideBubbleWidth(presentation: presentation, maxLineWidth: maxLineWidth)
-        let prefersScreenAwareHeightCap = prefersScreenAwareTruncationHeight(presentation: presentation, maxLineWidth: maxLineWidth)
+        let policyTruncationCap = bubbleHeightPolicy?.v1TruncationHeightOverride ?? truncationHeightOverride
         if prefersWideWidth {
             preferredWidth = effectiveMaxWidth
         } else if sizeClass == .short {
@@ -1608,7 +1631,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         }
         if hasLinkPreview {
             // Use the active height cap (design-system by default; screen-aware only for specific embedded content).
-            let cap = truncationHeightOverride ?? metrics.truncationHeight
+            let cap = policyTruncationCap ?? metrics.truncationHeight
             var height = max(1, cap)
             if let minHeight = minHeightOverride {
                 height = max(height, minHeight)
@@ -1632,9 +1655,9 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         if let minHeight = minHeightOverride {
             height = max(height, minHeight)
         }
-        if let truncationHeightOverride, prefersScreenAwareHeightCap {
+        if let policyTruncationCap {
             // For wide content, cap at truncation max (but don't force-max).
-            height = min(height, truncationHeightOverride)
+            height = min(height, policyTruncationCap)
         }
         let clamped = CGSize(
             width: min(effectiveMaxWidth, max(minWidth, measured.width)),
@@ -1657,6 +1680,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         return BubbleSizingV2.Environment(
             containerWidth: containerWidth,
             containerHeight: containerHeight,
+            singleLinkContainerHeight: collectionView.bounds.height,
             topInset: topInset,
             bottomInset: currentBottomInset,
             truncationBottomInset: truncationBottomInset,
@@ -1674,7 +1698,6 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         let maxLineWidth = ChatFlowTheme.maxLineWidth(bodyFontSize: metrics.bodyFontSize)
         let isSingleLinkPreview = isSingleLinkPreviewBubble(presentation: presentation)
         let isWide = prefersWideBubbleWidth(presentation: presentation, maxLineWidth: maxLineWidth)
-        let prefersScreenAwareHeightCap = prefersScreenAwareTruncationHeight(presentation: presentation, maxLineWidth: maxLineWidth)
 
         let maxWidth: CGFloat = {
             if isWide { return env.containerWidth }
@@ -1708,21 +1731,12 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         // Design-system: only "large" (.long) bubbles get truncation/outer-scroll behavior.
         // Short/medium bubbles should grow to content (no truncation chrome), even with Dynamic Type.
         let allowsOuterScroll = (sizeClass == .long)
-
-        let heightCapMode: BubbleSizingV2.HeightCapMode = (isSingleLinkPreview || prefersScreenAwareHeightCap) ? .screenAware : .designSystem
-        let heightCap: CGFloat = {
-            if isSingleLinkPreview {
-                return effectiveSingleLinkPreviewHeightCap(metrics: metrics)
-            }
-            // If outer-scroll is disabled, use a very generous cap so we never force overflow.
-            guard allowsOuterScroll else { return 2000 }
-            switch heightCapMode {
-            case .screenAware:
-                return effectiveTruncationHeight(metrics: metrics)
-            case .designSystem:
-                return metrics.truncationHeight
-            }
-        }()
+        let heightPolicy = bubbleHeightPolicyForPresentation(
+            presentation: presentation,
+            metrics: metrics,
+            env: env,
+            allowsOuterScroll: allowsOuterScroll
+        )
 
         let linkPreviewURL = presentation.parts.compactMap({ part -> URL? in
             if case .linkPreview(let url) = part { return url }
@@ -1737,17 +1751,14 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             isWide: isWide,
             maxWidth: maxWidth,
             minWidth: minWidth,
-            heightCapMode: heightCapMode,
-            heightCap: heightCap,
+            heightPolicy: heightPolicy,
             allowsOuterScroll: allowsOuterScroll,
             linkPreviewURL: linkPreviewURL
         )
     }
 
-    private func linkPreviewViewportMaxHeight(plan: BubbleSizingV2.Plan,
-                                              metrics: ChatFlowTheme.Metrics) -> CGFloat {
-        let standardVerticalPadding = max(0, metrics.bubblePaddingVertical * 2)
-        return max(44, plan.heightCap - standardVerticalPadding)
+    private func linkPreviewViewportMaxHeight(plan: BubbleSizingV2.Plan) -> CGFloat {
+        return plan.heightPolicy.linkPreviewViewportMaxHeight
     }
 
     private func bubbleSizingV2LayoutState(message: Message,
@@ -1758,9 +1769,15 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                                           failureReason: String?,
                                           showsHeader: Bool) -> BubbleSizingV2.LayoutState {
         let initialLinkVersion: Int = bubbleSizingV2LinkPreviewStateVersionByMessageId[message.id] ?? 0
-        let key = BubbleSizingV2.CacheKey(
+        let layoutFingerprintSeed = bubbleSizingV2LayoutFingerprintSeed(
+            plan: plan,
+            showsHeader: showsHeader,
+            hasFailureBadge: failureReason != nil
+        )
+        let key = plan.heightPolicy.measurementCacheKey(
             messageId: message.id,
             presentationFingerprint: plan.presentationFingerprint,
+            layoutFingerprintSeed: layoutFingerprintSeed,
             env: env,
             linkPreviewStateVersion: initialLinkVersion
         )
@@ -1789,6 +1806,23 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         return measured
     }
 
+    private func bubbleSizingV2LayoutFingerprintSeed(plan: BubbleSizingV2.Plan,
+                                                     showsHeader: Bool,
+                                                     hasFailureBadge: Bool) -> Int {
+        var hasher = Hasher()
+        hasher.combine(plan.sizeClass)
+        hasher.combine(plan.isSingleLinkPreview)
+        hasher.combine(plan.isWide)
+        hasher.combine(plan.maxWidth)
+        hasher.combine(plan.minWidth)
+        hasher.combine(plan.heightPolicy.cacheFingerprint)
+        hasher.combine(plan.allowsOuterScroll)
+        hasher.combine(plan.linkPreviewURL?.absoluteString ?? "")
+        hasher.combine(showsHeader)
+        hasher.combine(hasFailureBadge)
+        return hasher.finalize()
+    }
+
     private func bubbleSizingV2MakeLayoutState(message: Message,
                                               presentation: MessagePresentation,
                                               metrics: ChatFlowTheme.Metrics,
@@ -1808,7 +1842,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         let paddingHorizontal = round((presentation.hasMediaOnly ? 8 : metrics.bubblePaddingHorizontal) * 1)
         let contentWidth = max(1, measurement.measuredBubbleWidth - (paddingHorizontal * 2))
         let cacheKey = "\(url.absoluteString)|w=\(Int(contentWidth.rounded()))|m=\(env.metricsFingerprint)"
-        let previewMaxHeight = linkPreviewViewportMaxHeight(plan: plan, metrics: metrics)
+        let previewMaxHeight = linkPreviewViewportMaxHeight(plan: plan)
         let fixedPreviewHeight: CGFloat? = plan.isSingleLinkPreview ? previewMaxHeight : nil
         let estimated = fixedPreviewHeight
             ?? bubbleSizingV2LinkPreviewHeightCache.get(cacheKey: cacheKey)
@@ -1838,7 +1872,8 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             sizeClass: plan.sizeClass,
             metrics: metrics,
             maxWidth: plan.maxWidth,
-            truncationHeightOverride: nil,
+            bubbleHeightPolicy: plan.heightPolicy,
+            truncationHeightOverride: plan.heightPolicy.v1TruncationHeightOverride,
             showsHeader: showsHeader,
             onRequestExpand: nil,
             onRequestLayout: nil,
@@ -1860,7 +1895,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         let linkPreviewCacheKey: String? = plan.linkPreviewURL.map { url in
             "\(url.absoluteString)|w=\(Int(contentWidth.rounded()))|m=\(env.metricsFingerprint)"
         }
-        let linkPreviewMaxHeight = linkPreviewViewportMaxHeight(plan: plan, metrics: metrics)
+        let linkPreviewMaxHeight = linkPreviewViewportMaxHeight(plan: plan)
         let fixedPreviewHeight: CGFloat? = plan.isSingleLinkPreview ? linkPreviewMaxHeight : nil
         let linkPreviewEstimatedHeight: CGFloat? = fixedPreviewHeight
             ?? linkPreviewCacheKey.flatMap { bubbleSizingV2LinkPreviewHeightCache.get(cacheKey: $0) }
@@ -1876,7 +1911,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 contentHeight: 0,
                 chromeHeight: 0,
                 outerScrollEnabled: false,
-                outerScrollViewportHeight: plan.heightCap,
+                outerScrollViewportHeight: plan.heightPolicy.heightCap,
                 isFinal: linkPreviewEstimatedHeight != nil
             ),
             linkPreviewCacheKey: linkPreviewCacheKey,
@@ -1890,7 +1925,8 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             sizeClass: plan.sizeClass,
             metrics: metrics,
             maxWidth: measuredBubbleWidth,
-            truncationHeightOverride: nil,
+            bubbleHeightPolicy: plan.heightPolicy,
+            truncationHeightOverride: plan.heightPolicy.v1TruncationHeightOverride,
             bubbleSizingV2: provisional1,
             showsHeader: showsHeader,
             onRequestExpand: nil,
@@ -1905,7 +1941,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         )
         let dynamicHeight1 = uiKitBubbleSizer.measuredDynamicContentHeight(fittingWidth: contentWidth)
         let chromeHeight = max(0, measured1.height - dynamicHeight1)
-        let viewportHeight = max(plan.heightCap - chromeHeight, 44)
+        let viewportHeight = max(plan.heightPolicy.heightCap - chromeHeight, 44)
 
         // Pass 2: reconfigure with the final link-preview viewport max height.
         // Web previews are fixed-height viewports with internal WKWebView scrolling.
@@ -1931,7 +1967,8 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             sizeClass: plan.sizeClass,
             metrics: metrics,
             maxWidth: measuredBubbleWidth,
-            truncationHeightOverride: nil,
+            bubbleHeightPolicy: plan.heightPolicy,
+            truncationHeightOverride: plan.heightPolicy.v1TruncationHeightOverride,
             bubbleSizingV2: provisional2,
             showsHeader: showsHeader,
             onRequestExpand: nil,
@@ -1946,13 +1983,13 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         )
         let dynamicHeight2 = uiKitBubbleSizer.measuredDynamicContentHeight(fittingWidth: contentWidth)
 
-        let outerScrollEnabled = plan.allowsOuterScroll && measured2.height > plan.heightCap
+        let outerScrollEnabled = plan.allowsOuterScroll && measured2.height > plan.heightPolicy.heightCap
         let cellHeight: CGFloat = {
             if plan.isSingleLinkPreview {
-                return plan.heightCap
+                return plan.heightPolicy.heightCap
             }
             if plan.allowsOuterScroll {
-                return min(measured2.height, plan.heightCap)
+                return min(measured2.height, plan.heightPolicy.heightCap)
             }
             return measured2.height
         }()
@@ -2336,8 +2373,11 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             bubbleSizingV2RemeasureDeferredUntilNearBottom = true
             bubbleSizingV2RemeasureDebounceTimer?.invalidate()
             bubbleSizingV2RemeasureDebounceTimer = nil
+            scheduleBubbleSizingV2DeferredFlushAfterRest()
             return
         }
+        bubbleSizingV2DeferredFlushTimer?.invalidate()
+        bubbleSizingV2DeferredFlushTimer = nil
         if bubbleSizingV2RemeasureBatchStartTime == nil {
             bubbleSizingV2RemeasureBatchStartTime = CFAbsoluteTimeGetCurrent()
         }
@@ -2358,9 +2398,38 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         RunLoop.main.add(timer, forMode: .common)
     }
 
+    private func isBubbleSizingV2ScrollAtRest() -> Bool {
+        if collectionView.isDragging || collectionView.isTracking || collectionView.isDecelerating {
+            return false
+        }
+        let elapsedSinceLastScroll = CFAbsoluteTimeGetCurrent() - bubbleSizingV2LastScrollActivityTime
+        return elapsedSinceLastScroll >= Self.bubbleSizingV2RestSettleDelaySeconds
+    }
+
     private func canApplyBubbleSizingV2RemeasureNow() -> Bool {
         // If the user scrolled up to read, don't reflow under their finger/eyes.
-        isNearBottom(extraMargin: 240) && !isUserInteracting
+        // Also require scroll-at-rest so finger-lift + deceleration can't trigger mid-motion reflow.
+        isNearBottom(extraMargin: 240) && isBubbleSizingV2ScrollAtRest()
+    }
+
+    private func scheduleBubbleSizingV2DeferredFlushAfterRest() {
+        guard bubbleSizingV2Enabled else { return }
+        guard bubbleSizingV2RemeasureDeferredUntilNearBottom else { return }
+        guard isNearBottom(extraMargin: 240) else { return }
+        guard bubbleSizingV2DeferredFlushTimer == nil else { return }
+
+        let elapsedSinceLastScroll = CFAbsoluteTimeGetCurrent() - bubbleSizingV2LastScrollActivityTime
+        let delay = max(0.02, Self.bubbleSizingV2RestSettleDelaySeconds - elapsedSinceLastScroll)
+        let timer = Timer(timeInterval: delay, repeats: false) { [weak self] _ in
+            guard let self else { return }
+            self.bubbleSizingV2DeferredFlushTimer = nil
+            self.flushDeferredBubbleSizingV2RemeasureIfNeeded()
+            if self.bubbleSizingV2RemeasureDeferredUntilNearBottom {
+                self.scheduleBubbleSizingV2DeferredFlushAfterRest()
+            }
+        }
+        bubbleSizingV2DeferredFlushTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
     }
 
     private func flushDeferredBubbleSizingV2RemeasureIfNeeded() {
@@ -2374,18 +2443,24 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     private func flushBubbleSizingV2RemeasureIfPossible() {
         guard canApplyBubbleSizingV2RemeasureNow() else {
             bubbleSizingV2RemeasureDeferredUntilNearBottom = true
+            scheduleBubbleSizingV2DeferredFlushAfterRest()
             return
         }
+        bubbleSizingV2DeferredFlushTimer?.invalidate()
+        bubbleSizingV2DeferredFlushTimer = nil
 
         let ids = Array(bubbleSizingV2PendingRemeasureIds)
         bubbleSizingV2PendingRemeasureIds.removeAll()
         bubbleSizingV2RemeasureBatchStartTime = nil
+        guard !ids.isEmpty else { return }
+        let viewportAnchor = captureBubbleSizingV2ViewportAnchor()
 
         for id in ids {
             invalidateBubbleSizingV2Cache(for: id)
             invalidateLayout(for: id)
             scheduleReconfigure(for: id)
         }
+        scheduleBubbleSizingV2ViewportAnchorCompensation(viewportAnchor)
 
         // If more height updates arrived while we were flushing, schedule another debounced pass.
         if !bubbleSizingV2PendingRemeasureIds.isEmpty {
@@ -2397,6 +2472,61 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         guard let keys = bubbleSizingV2KeysByMessageId.removeValue(forKey: messageId) else { return }
         for key in keys {
             bubbleSizingV2MeasurementCache.removeValue(forKey: key)
+        }
+    }
+
+    private struct BubbleSizingV2ViewportAnchor {
+        let messageId: String
+        let contentOffsetY: CGFloat
+        let frameMinY: CGFloat
+    }
+
+    private func captureBubbleSizingV2ViewportAnchor() -> BubbleSizingV2ViewportAnchor? {
+        let visibleRect = CGRect(
+            origin: collectionView.contentOffset,
+            size: collectionView.bounds.size
+        )
+        let epsilon: CGFloat = 0.5
+        let candidates = collectionView.visibleCells.compactMap { cell -> (String, CGRect)? in
+            guard let indexPath = collectionView.indexPath(for: cell),
+                  let id = dataSource.itemIdentifier(for: indexPath),
+                  id != TypingIndicatorCell.itemId else {
+                return nil
+            }
+            let frame = cell.frame
+            guard frame.minY >= visibleRect.minY + epsilon,
+                  frame.maxY <= visibleRect.maxY - epsilon else {
+                return nil
+            }
+            return (id, frame)
+        }
+        guard let anchor = candidates.min(by: { $0.1.minY < $1.1.minY }) else {
+            return nil
+        }
+        return BubbleSizingV2ViewportAnchor(
+            messageId: anchor.0,
+            contentOffsetY: collectionView.contentOffset.y,
+            frameMinY: anchor.1.minY
+        )
+    }
+
+    private func scheduleBubbleSizingV2ViewportAnchorCompensation(_ anchor: BubbleSizingV2ViewportAnchor?) {
+        guard let anchor else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.collectionView.layoutIfNeeded()
+            guard let indexPath = self.dataSource.indexPath(for: anchor.messageId),
+                  let attrs = self.collectionView.layoutAttributesForItem(at: indexPath) else {
+                return
+            }
+            let delta = attrs.frame.minY - anchor.frameMinY
+            guard abs(delta) > 0.5 else { return }
+            let inset = self.collectionView.contentInset
+            let minY = -inset.top
+            let maxY = max(minY, self.collectionView.contentSize.height - self.collectionView.bounds.height + inset.bottom)
+            let targetY = max(minY, min(anchor.contentOffsetY + delta, maxY))
+            guard targetY.isFinite else { return }
+            self.collectionView.setContentOffset(CGPoint(x: self.collectionView.contentOffset.x, y: targetY), animated: false)
         }
     }
 
@@ -2437,11 +2567,13 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             metrics: metrics,
             containerWidth: effectiveContentWidth(metrics: metrics)
         )
-        let truncationHeightOverride = truncationHeightOverrideForMessageBubble(
+        let env = bubbleSizingV2Environment(metrics: metrics)
+        let bubbleHeightPolicy = bubbleHeightPolicyForPresentation(
             presentation: presentation,
-            metrics: metrics
+            metrics: metrics,
+            env: env,
+            allowsOuterScroll: sizeClass == .long
         )
-        let failureReason = viewModel.failureMessage(for: message.id)
         let minWidth: CGFloat = 120
         // #63: Non-short bubbles should never shrink below their size-class max width.
         // Live-cell remeasurement is only needed to correct heights (e.g. link preview WKWebView).
@@ -2457,9 +2589,9 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             height: measuredSize.height
         )
         var snapped = snapToPixel(clamped)
-        if let truncationHeightOverride {
+        if let cap = bubbleHeightPolicy.v1TruncationHeightOverride {
             // Cap height to the truncation max.
-            snapped.height = min(snapped.height, truncationHeightOverride)
+            snapped.height = min(snapped.height, cap)
         }
         if let previous = lastMeasuredSizes[messageId] {
             let heightDelta = abs(previous.height - snapped.height)

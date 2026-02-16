@@ -558,6 +558,89 @@ struct ChatViewModelTests {
         #expect(viewModel.inputContent.string.isEmpty)
     }
 
+    @Test("Asset-backed interactive HTML document hydrates for inline render path")
+    @MainActor
+    func assetBackedInteractiveHTMLHydratesForInlineRenderPath() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let uploadService = TestUploadService()
+        let descriptor = InteractiveHTMLDescriptor(
+            version: 1,
+            html: "<html><body><button>Run</button></body></html>",
+            metadata: .init(title: "Asset card", height: .auto, maxHeight: 320, backgroundColor: nil)
+        )
+        let descriptorData = try JSONEncoder().encode(descriptor)
+        uploadService.downloadPayloads["asset_html_1"] = descriptorData
+
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: uploadService,
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        chatService.emit(
+            Message(
+                id: "s_html_asset",
+                role: .assistant,
+                content: "Interactive card",
+                timestamp: Date(),
+                streaming: false,
+                attachments: [
+                    Attachment(
+                        id: "att_html_asset",
+                        type: .document,
+                        mimeType: "\(InteractiveHTMLDescriptor.mimeType); charset=utf-8",
+                        data: nil,
+                        assetId: "asset_html_1"
+                    )
+                ],
+                deviceId: nil,
+                sessionKey: personalSessionKey
+            )
+        )
+
+        var resolvedMessage: Message?
+        for _ in 0..<60 {
+            let current = viewModel.messages.first(where: { $0.id == "s_html_asset" })
+            if let current, current.attachments.first?.data == descriptorData {
+                resolvedMessage = current
+                break
+            }
+            try await Task.sleep(forDuration: .milliseconds(20))
+        }
+
+        #expect(uploadService.downloadedAssetIds.contains("asset_html_1"))
+        guard let resolvedMessage else {
+            Issue.record("Expected asset-backed interactive HTML attachment to hydrate data")
+            return
+        }
+
+        let presentation = viewModel.presentation(
+            for: resolvedMessage,
+            metrics: ChatFlowTheme.Metrics(isCompact: true)
+        )
+        #expect(presentation.parts.contains(where: { part in
+            if case .interactiveHTML(let decoded) = part {
+                return decoded.metadata?.title == "Asset card"
+            }
+            return false
+        }))
+        #expect(!presentation.parts.contains(where: { part in
+            if case .file(let attachment) = part {
+                return attachment.id == "att_html_asset"
+            }
+            return false
+        }))
+    }
+
     @Test("removing attachments from the attributed string prunes stored data")
     @MainActor
     func prunesOrphanedAttachments() {
@@ -1513,6 +1596,8 @@ private func resetChatPersistence() {
 @MainActor
 private final class TestUploadService: UploadServicing {
     private(set) var uploadedPayloads: [(data: Data, mimeType: String, filename: String?)] = []
+    var downloadPayloads: [String: Data] = [:]
+    private(set) var downloadedAssetIds: [String] = []
 
     func upload(data: Data, mimeType: String, filename: String?) async throws -> String {
         uploadedPayloads.append((data, mimeType, filename))
@@ -1520,7 +1605,8 @@ private final class TestUploadService: UploadServicing {
     }
 
     func download(assetId: String) async throws -> Data {
-        Data()
+        downloadedAssetIds.append(assetId)
+        return downloadPayloads[assetId] ?? Data()
     }
 }
 

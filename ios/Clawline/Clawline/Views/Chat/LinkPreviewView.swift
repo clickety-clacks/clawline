@@ -103,7 +103,8 @@ final class LinkPreviewView: UIView, WKNavigationDelegate, WKUIDelegate, UIGestu
         static let loadTimeout: TimeInterval = 12
         static let emptyBodyDelay: TimeInterval = 0.5
         static let maxRedirects = 5
-        static let mediaCornerRadius: CGFloat = 12
+        // Design system (Link Preview card): 16px radius.
+        static let mediaCornerRadius: CGFloat = 16
         static let mediaCornerExponent: CGFloat = 5.0
     }
 

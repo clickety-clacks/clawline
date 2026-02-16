@@ -885,7 +885,7 @@ struct ChatView: View {
         } else {
             let topAlpha: CGFloat = 0.25
             let fullyHiddenHeight = topInset + 9
-            let fadeHeight: CGFloat = 46
+            let fadeHeight: CGFloat = 23
             VStack(spacing: 0) {
                 Rectangle()
                     .fill(Color.white.opacity(topAlpha))

@@ -97,6 +97,7 @@ struct ExpandedMessageSheet: View {
                 SelectableAttributedText(
                     attributedString: attributedText,
                     alignment: .left,
+                    colorScheme: effectiveColorScheme,
                     onSelectionChange: { _ in },
                     onLinkTap: { url in
                         UIApplication.shared.open(url)

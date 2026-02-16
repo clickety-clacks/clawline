@@ -15,6 +15,7 @@ enum BubbleSizingV2 {
     struct Environment: Hashable {
         let containerWidth: CGFloat
         let containerHeight: CGFloat
+        let singleLinkContainerHeight: CGFloat
         let topInset: CGFloat
         let bottomInset: CGFloat
         let truncationBottomInset: CGFloat
@@ -30,8 +31,7 @@ enum BubbleSizingV2 {
         let isWide: Bool
         let maxWidth: CGFloat
         let minWidth: CGFloat
-        let heightCapMode: HeightCapMode
-        let heightCap: CGFloat
+        let heightPolicy: BubbleHeightPolicy
         let allowsOuterScroll: Bool
         let linkPreviewURL: URL?
     }
@@ -63,8 +63,92 @@ enum BubbleSizingV2 {
     struct CacheKey: Hashable {
         let messageId: String
         let presentationFingerprint: Int
+        let layoutFingerprint: Int
         let env: Environment
         let linkPreviewStateVersion: Int
+    }
+
+    struct BubbleHeightPolicy: Hashable {
+        let isSingleLinkPreview: Bool
+        let heightCapMode: HeightCapMode
+        let heightCap: CGFloat
+        let v1TruncationHeightOverride: CGFloat?
+        let linkPreviewViewportMaxHeight: CGFloat
+        let cacheFingerprint: Int
+
+        static func resolve(
+            metrics: ChatFlowTheme.Metrics,
+            env: Environment,
+            isSingleLinkPreview: Bool,
+            prefersScreenAwareHeightCap: Bool,
+            allowsOuterScroll: Bool
+        ) -> BubbleHeightPolicy {
+            let screenAwareCap = availableHeightCap(
+                containerHeight: env.containerHeight,
+                topInset: env.topInset,
+                bottomInset: max(env.bottomInset, env.truncationBottomInset),
+                flowPadding: metrics.containerPadding
+            )
+            let singleLinkCap = availableHeightCap(
+                containerHeight: env.singleLinkContainerHeight,
+                topInset: env.topInset,
+                bottomInset: env.bottomInset,
+                flowPadding: metrics.containerPadding
+            )
+            let heightCapMode: HeightCapMode = (isSingleLinkPreview || prefersScreenAwareHeightCap) ? .screenAware : .designSystem
+            let heightCap: CGFloat = {
+                if isSingleLinkPreview {
+                    return singleLinkCap
+                }
+                guard allowsOuterScroll else { return 2000 }
+                switch heightCapMode {
+                case .screenAware:
+                    return screenAwareCap
+                case .designSystem:
+                    return metrics.truncationHeight
+                }
+            }()
+            let v1TruncationHeightOverride: CGFloat? = {
+                if isSingleLinkPreview { return singleLinkCap }
+                if prefersScreenAwareHeightCap { return screenAwareCap }
+                return nil
+            }()
+            let linkPreviewViewportMaxHeight = max(44, heightCap - max(0, metrics.bubblePaddingVertical * 2))
+            var hasher = Hasher()
+            hasher.combine(isSingleLinkPreview)
+            hasher.combine(heightCapMode)
+            hasher.combine(heightCap)
+            hasher.combine(v1TruncationHeightOverride)
+            hasher.combine(linkPreviewViewportMaxHeight)
+            let cacheFingerprint = hasher.finalize()
+            return BubbleHeightPolicy(
+                isSingleLinkPreview: isSingleLinkPreview,
+                heightCapMode: heightCapMode,
+                heightCap: heightCap,
+                v1TruncationHeightOverride: v1TruncationHeightOverride,
+                linkPreviewViewportMaxHeight: linkPreviewViewportMaxHeight,
+                cacheFingerprint: cacheFingerprint
+            )
+        }
+
+        func measurementCacheKey(
+            messageId: String,
+            presentationFingerprint: Int,
+            layoutFingerprintSeed: Int,
+            env: Environment,
+            linkPreviewStateVersion: Int
+        ) -> CacheKey {
+            var hasher = Hasher()
+            hasher.combine(layoutFingerprintSeed)
+            hasher.combine(cacheFingerprint)
+            return CacheKey(
+                messageId: messageId,
+                presentationFingerprint: presentationFingerprint,
+                layoutFingerprint: hasher.finalize(),
+                env: env,
+                linkPreviewStateVersion: linkPreviewStateVersion
+            )
+        }
     }
 
     // Simple in-memory LRU cache (controller-owned). Correctness must not depend on retention.

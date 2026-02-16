@@ -244,8 +244,14 @@ struct StreamManagerSheet: View {
                 }
         } else {
             Button {
-                onSelectStream(stream.sessionKey)
+                let selectedSessionKey = stream.sessionKey
                 isPresented = false
+                // Avoid mutating presentation + selected stream in the same synchronous tap turn.
+                // Deferring selection to the next main-actor cycle prevents picker-triggered UI lockups.
+                Task { @MainActor in
+                    await Task.yield()
+                    onSelectStream(selectedSessionKey)
+                }
             } label: {
                 HStack(spacing: 10) {
                     Circle()

@@ -15,6 +15,7 @@ struct MarkdownTableView: View {
     private let cellPaddingVertical: CGFloat = 10
 
     @Environment(\.openURL) private var openURLAction
+    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @Environment(\.verticalSizeClass) private var verticalSizeClass
 
@@ -374,6 +375,7 @@ struct MarkdownTableView: View {
                 SelectableAttributedText(
                     attributedString: styledAttributedString(for: cell, alignment: alignment, isHeader: isHeader),
                     alignment: nsTextAlignment(for: alignment),
+                    colorScheme: colorScheme,
                     onSelectionChange: { hasActiveSelection = $0 },
                     onLinkTap: { url in
                         registerLinkTap()

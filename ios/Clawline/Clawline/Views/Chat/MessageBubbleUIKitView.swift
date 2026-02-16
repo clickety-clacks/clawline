@@ -85,6 +85,7 @@ final class MessageBubbleUIKitContainerView: UIView {
                    failureReason: String?,
                    isCompact: Bool,
                    maxWidth: CGFloat,
+                   bubbleHeightPolicy: BubbleSizingV2.BubbleHeightPolicy? = nil,
                    truncationHeightOverride: CGFloat? = nil,
                    bubbleSizingV2: BubbleSizingV2.LayoutState? = nil,
                    showsHeader: Bool = true,
@@ -106,6 +107,7 @@ final class MessageBubbleUIKitContainerView: UIView {
             sizeClass: sizeClass,
             metrics: metrics,
             maxWidth: maxWidth,
+            bubbleHeightPolicy: bubbleHeightPolicy,
             truncationHeightOverride: truncationHeightOverride,
             bubbleSizingV2: bubbleSizingV2,
             showsHeader: showsHeader,
@@ -517,6 +519,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
                    sizeClass: MessageSizeClass,
                    metrics: ChatFlowTheme.Metrics,
                    maxWidth: CGFloat,
+                   bubbleHeightPolicy: BubbleSizingV2.BubbleHeightPolicy? = nil,
                    truncationHeightOverride: CGFloat? = nil,
                    bubbleSizingV2: BubbleSizingV2.LayoutState? = nil,
                    showsHeader: Bool = true,
@@ -553,7 +556,9 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
         let effectiveMaxWidth = hasLinkPreview
             ? min(rawMaxWidth, Self.linkPreviewWidthCap(metrics: metrics))
             : rawMaxWidth
-        let rawTruncationHeight = truncationHeightOverride ?? metrics.truncationHeight
+        let rawTruncationHeight = bubbleHeightPolicy?.v1TruncationHeightOverride
+            ?? truncationHeightOverride
+            ?? metrics.truncationHeight
         let effectiveTruncationHeight = (hasLinkPreview && !isSingleLinkPreview)
             ? min(rawTruncationHeight, metrics.truncationHeight)
             : rawTruncationHeight
@@ -729,6 +734,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
                         ? palette.bubbleSelfGradient.last!
                         : palette.bubbleOtherGradient.last!
                     let rawPreviewMaxHeight: CGFloat = bubbleSizingV2?.linkPreviewMaxHeight
+                        ?? bubbleHeightPolicy?.linkPreviewViewportMaxHeight
                         ?? Self.linkPreviewViewportMaxHeight(heightCap: effectiveTruncationHeight, metrics: metrics)
                     let previewMaxHeight = isSingleLinkPreview
                         ? rawPreviewMaxHeight
@@ -780,6 +786,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
                 ? palette.bubbleSelfGradient.last!
                 : palette.bubbleOtherGradient.last!
             let rawPreviewMaxHeight: CGFloat = bubbleSizingV2?.linkPreviewMaxHeight
+                ?? bubbleHeightPolicy?.linkPreviewViewportMaxHeight
                 ?? Self.linkPreviewViewportMaxHeight(heightCap: effectiveTruncationHeight, metrics: metrics)
             let previewMaxHeight = isSingleLinkPreview
                 ? rawPreviewMaxHeight
@@ -2004,6 +2011,7 @@ final class MessageBubbleUIKitCell: UICollectionViewCell {
                    failureReason: String?,
                    isCompact: Bool,
                    maxWidth: CGFloat,
+                   bubbleHeightPolicy: BubbleSizingV2.BubbleHeightPolicy? = nil,
                    truncationHeightOverride: CGFloat? = nil,
                    bubbleSizingV2: BubbleSizingV2.LayoutState? = nil,
                    showsHeader: Bool = true,
@@ -2025,6 +2033,7 @@ final class MessageBubbleUIKitCell: UICollectionViewCell {
             failureReason: failureReason,
             isCompact: isCompact,
             maxWidth: maxWidth,
+            bubbleHeightPolicy: bubbleHeightPolicy,
             truncationHeightOverride: truncationHeightOverride,
             bubbleSizingV2: bubbleSizingV2,
             showsHeader: showsHeader,

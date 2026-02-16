@@ -90,7 +90,14 @@ final class UIKitDictationFeedbackProvider: DictationFeedbackProviding {
 @MainActor
 final class DictationCoordinator {
     private let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "DictationCoordinator")
-    private(set) var state: DictationState = .idleMicHidden
+    private(set) var state: DictationState = .idleMicHidden {
+        didSet {
+            guard oldValue != state else { return }
+            let trace = "DICTATION_COORD state \(String(describing: oldValue)) -> \(String(describing: state))"
+            print(trace)
+            logger.notice("\(trace, privacy: .public)")
+        }
+    }
     private(set) var errorMessage: String?
     private(set) var waveformDisplacement: CGFloat = 1
     private(set) var reduceMotionEnabled: Bool = UIAccessibility.isReduceMotionEnabled
@@ -524,13 +531,17 @@ final class DictationCoordinator {
         Task { [weak self] in
             guard let self else { return }
             do {
+                print("DICTATION_COORD socket_connect begin")
                 try await client.connect(config: SonioxStreamingConfig(apiKey: apiKey, languageHint: languageHintProvider()))
+                print("DICTATION_COORD audio_capture start begin")
                 try capture.start()
+                print("DICTATION_COORD audio_capture start success")
                 await MainActor.run {
                     self.armSessionDurationTimer()
                     self.resetTokenInactivityTimer()
                 }
             } catch {
+                print("DICTATION_COORD start failure stage=connect_or_audio_start error=\(error.localizedDescription)")
                 await self.handleTransportFailure(stage: .connect, message: error.localizedDescription)
             }
         }
@@ -601,6 +612,7 @@ final class DictationCoordinator {
                 }
             }
         case .closed:
+            print("DICTATION_COORD soniox_event closed state=\(String(describing: state)) mode=\(String(describing: mode))")
             if let mode,
                state == .dictatingSticky || state == .dictatingWalkieTalkie {
                 let elapsed = elapsedSessionMilliseconds()
@@ -614,6 +626,7 @@ final class DictationCoordinator {
                 )
             }
         case .failed(let stage, let code, let message):
+            print("DICTATION_COORD soniox_event failed stage=\(stage.rawValue) code=\(code ?? "nil") message=\(message)")
             analytics.trackError(errorCode: code, stage: stage.rawValue)
             await handleTransportFailure(stage: stage, message: message)
         }
@@ -634,6 +647,7 @@ final class DictationCoordinator {
             analytics.trackError(errorCode: nil, stage: "audio_media_services_reset")
         case .failed(let message):
             logger.notice("Dictation audio event failed: \(message, privacy: .public)")
+            print("DICTATION_COORD audio_event failed message=\(message)")
             await handleTransportFailure(stage: .audio, message: message)
         }
     }
@@ -655,6 +669,7 @@ final class DictationCoordinator {
 
     private func handleTransportFailure(stage: SonioxStreamingClientStage, message: String) async {
         guard isDictationActive else { return }
+        print("DICTATION_COORD transport_failure stage=\(stage.rawValue) message=\(message)")
         analytics.trackError(errorCode: nil, stage: stage.rawValue)
         await stopKeep(
             reason: "transport_failure",
@@ -821,6 +836,7 @@ final class DictationCoordinator {
     }
 
     private func enterError(message: String) {
+        print("DICTATION_COORD enter_error message=\(message)")
         errorMessage = message
         state = .error
         feedback.notifyError()

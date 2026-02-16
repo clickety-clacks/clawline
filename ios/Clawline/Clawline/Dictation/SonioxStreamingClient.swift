@@ -86,6 +86,7 @@ final class SonioxStreamingClient: SonioxStreamingClienting {
     private var socketLifecycleState: SocketLifecycleState?
     private var sendSequence: UInt64 = 0
     private var receiveSequence: UInt64 = 0
+    private var audioFrameSequence: UInt64 = 0
 
     init(
         session: URLSession = URLSession(configuration: .default),
@@ -154,12 +155,18 @@ final class SonioxStreamingClient: SonioxStreamingClienting {
         guard let task = socketTask else {
             throw SonioxStreamingClientError.notConnected
         }
+        audioFrameSequence += 1
+        let audioSeq = audioFrameSequence
         do {
             try await task.send(.data(frame))
             logSendResult(kind: "audio", frameBytes: frame.count, success: true, error: nil)
+            if audioSeq <= 5 {
+                print("SONIOX send_audio_frame seq=\(audioSeq) bytes=\(frame.count) result=success")
+            }
             logPerfMarker(functionName: "sendAudioFrame", startedAt: startedAt)
         } catch {
             logSendResult(kind: "audio", frameBytes: frame.count, success: false, error: error)
+            print("SONIOX send_audio_frame seq=\(audioSeq) bytes=\(frame.count) result=error error=\(error.localizedDescription)")
             logPerfMarker(functionName: "sendAudioFrame", startedAt: startedAt)
             continuation?.yield(.failed(stage: .send, code: nil, message: error.localizedDescription))
             throw error
@@ -224,6 +231,7 @@ final class SonioxStreamingClient: SonioxStreamingClienting {
                         guard let data = task.closeReason, !data.isEmpty else { return nil }
                         return String(data: data, encoding: .utf8) ?? data.base64EncodedString()
                     }()
+                    print("SONIOX receive_loop closed code=\(closeCode.map(String.init) ?? "nil") reason=\(closeReason ?? "nil") error=\(error.localizedDescription)")
                     stopKeepaliveLoop()
                     continuation?.yield(.closed(code: closeCode, reason: closeReason))
                     logSocketStateChange(.closed, task: task, context: "receive_loop_error")
@@ -280,12 +288,14 @@ final class SonioxStreamingClient: SonioxStreamingClienting {
                 logger.notice(
                     "SONIOX_ERROR_CODE code=\(errorCode, privacy: .public) message=\(response.errorMessage ?? "nil", privacy: .public)"
                 )
+                print("SONIOX protocol_error code=\(errorCode) message=\(response.errorMessage ?? "nil")")
             }
             continuation?.yield(.response(response))
         } catch {
             logger.notice(
                 "Soniox decode_error json=\(Self.truncatedLogString(text), privacy: .public) error=\(error.localizedDescription, privacy: .public)"
             )
+            print("SONIOX decode_error error=\(error.localizedDescription)")
             continuation?.yield(.failed(stage: .decode, code: nil, message: "Failed to decode Soniox response."))
         }
     }
@@ -302,6 +312,7 @@ final class SonioxStreamingClient: SonioxStreamingClienting {
         logger.notice(
             "Soniox send seq=\(sendSeq, privacy: .public) kind=\(kind, privacy: .public) frameBytes=\(frameBytes, privacy: .public) result=error error=\(error?.localizedDescription ?? "unknown", privacy: .public)"
         )
+        print("SONIOX send_error kind=\(kind) frameBytes=\(frameBytes) error=\(error?.localizedDescription ?? "unknown")")
     }
 
     private func logSocketStateChange(_ nextState: SocketLifecycleState, task: URLSessionWebSocketTask?, context: String) {
@@ -324,6 +335,7 @@ final class SonioxStreamingClient: SonioxStreamingClienting {
         logger.notice(
             "Soniox socket_state=\(nextState.rawValue, privacy: .public) context=\(context, privacy: .public) closeCode=\(closeCode, privacy: .public) closeReason=\(closeReason, privacy: .public)"
         )
+        print("SONIOX socket_state=\(nextState.rawValue) context=\(context) closeCode=\(closeCode) closeReason=\(closeReason)")
     }
 
     private static func truncatedLogString(_ text: String, limit: Int = 200) -> String {

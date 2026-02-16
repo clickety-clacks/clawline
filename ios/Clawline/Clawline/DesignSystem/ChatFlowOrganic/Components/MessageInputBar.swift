@@ -276,6 +276,18 @@ struct MessageInputBar: View {
         UIColor(inputTintColor)
     }
 
+#if DEBUG
+    private var dictationDebugVersionText: String? {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
+        guard let build, !build.isEmpty else { return nil }
+        if let version, !version.isEmpty {
+            return "DBG v\(version) b\(build)"
+        }
+        return "DBG b\(build)"
+    }
+#endif
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .bottom, spacing: MessageInputBarMetrics.elementSpacing) {
@@ -557,6 +569,22 @@ struct MessageInputBar: View {
         .simultaneousGesture(TapGesture().onEnded {
             logger.info("Input bar tap gesture")
         })
+#if DEBUG
+        .overlay(alignment: .topTrailing) {
+            if dictation.isDictationActive,
+               let dictationDebugVersionText {
+                Text(dictationDebugVersionText)
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(.ultraThinMaterial, in: Capsule())
+                    .padding(.trailing, containerPadding)
+                    .offset(y: -18)
+                    .accessibilityIdentifier("dictation-debug-version")
+            }
+        }
+#endif
         .onChange(of: content.length) { _, newValue in
             guard newValue == 0 else { return }
             editorHeight = metrics.inputBarHeight

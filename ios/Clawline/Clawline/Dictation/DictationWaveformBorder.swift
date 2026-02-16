@@ -16,7 +16,7 @@ struct DictationWaveformBorder: View {
     private let strokeColor = Color.accentColor
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 0.05)) { timeline in
+        TimelineView(.periodic(from: .now, by: 0.10)) { timeline in
             let t = timeline.date.timeIntervalSinceReferenceDate
             if reduceMotionEnabled {
                 let alpha = 0.825 + 0.175 * sin(t * .pi * 2)

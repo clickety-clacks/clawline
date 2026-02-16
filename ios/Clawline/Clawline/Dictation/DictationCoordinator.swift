@@ -459,9 +459,18 @@ final class DictationCoordinator {
         levelTask?.cancel()
         levelTask = Task { [weak self] in
             guard let self else { return }
+            let minimumWaveformUpdateInterval: CFTimeInterval = 0.10
+            var lastWaveformUpdateAt = CFAbsoluteTimeGetCurrent() - minimumWaveformUpdateInterval
+            var lastAppliedDisplacement: CGFloat = -1
             for await level in capture.levelStream {
+                let now = CFAbsoluteTimeGetCurrent()
+                guard now - lastWaveformUpdateAt >= minimumWaveformUpdateInterval else { continue }
+                lastWaveformUpdateAt = now
+                let nextDisplacement = Self.mappedDisplacement(for: level)
+                guard abs(nextDisplacement - lastAppliedDisplacement) >= 0.05 else { continue }
+                lastAppliedDisplacement = nextDisplacement
                 await MainActor.run {
-                    self.waveformDisplacement = self.mapRMS(level)
+                    self.waveformDisplacement = nextDisplacement
                 }
             }
         }
@@ -759,7 +768,7 @@ final class DictationCoordinator {
         return .idleMicHidden
     }
 
-    private func mapRMS(_ rms: Float) -> CGFloat {
+    private static func mappedDisplacement(for rms: Float) -> CGFloat {
         let low: Float = 0.01
         let high: Float = 0.20
         let clamped = min(max((rms - low) / (high - low), 0), 1)

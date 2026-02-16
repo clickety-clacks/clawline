@@ -97,7 +97,6 @@ struct ChatView: View {
     @State private var keyboardRefreshToken: Int = 0
     @State private var layoutCoordinator = ChatLayoutCoordinator()
     @State private var layoutRevision: Int = 0
-    @State private var selectionRange = NSRange(location: 0, length: 0)
     @State private var pendingInputInsertions: [PendingAttachment] = []
     @State private var activeSheet: ChatSheet?
     @State private var isStreamManagerPopoverPresented = false
@@ -656,7 +655,6 @@ struct ChatView: View {
             layoutCoordinator.setActiveSessionKey(viewModel.activeSessionKey)
             layoutCoordinator.updateInputs(layoutInputs, metrics: layoutMetrics)
             layoutCoordinator.markInputsChanged()
-            updateDictationContext(viewModel: viewModel)
         }
         .onChange(of: keyboardHeight) { _, _ in layoutRevision &+= 1 }
         .onChange(of: keyboardAnimationDuration) { _, _ in layoutRevision &+= 1 }
@@ -665,21 +663,6 @@ struct ChatView: View {
         .onChange(of: isInputFocused) { _, _ in layoutRevision &+= 1 }
         .onChange(of: geometry.safeAreaInsets.bottom) { _, _ in layoutRevision &+= 1 }
         .onChange(of: horizontalSizeClass) { _, _ in layoutRevision &+= 1 }
-        .onChange(of: viewModel.activeSessionKey) { _, _ in
-            updateDictationContext(viewModel: viewModel)
-        }
-        .onChange(of: viewModel.inputContent.length) { _, _ in
-            updateDictationContext(viewModel: viewModel)
-        }
-        .onChange(of: isInputFocused) { _, _ in
-            updateDictationContext(viewModel: viewModel)
-        }
-        .onChange(of: selectionRange) { _, _ in
-            updateDictationContext(viewModel: viewModel)
-        }
-        .onReceive(NotificationCenter.default.publisher(for: UIAccessibility.reduceMotionStatusDidChangeNotification)) { _ in
-            updateDictationContext(viewModel: viewModel)
-        }
         .overlay(alignment: .bottom) {
 #if os(visionOS)
             floatingPageDotsView(
@@ -737,16 +720,6 @@ struct ChatView: View {
             return AttributedString("v\(version) (build ") + buildText + AttributedString(")")
         }
         return AttributedString("v\(version)")
-    }
-
-    private func updateDictationContext(viewModel: ChatViewModel) {
-        dictationCoordinator.updateContext(
-            sessionKey: viewModel.activeSessionKey,
-            composeIsEmpty: viewModel.inputContent.isEffectivelyEmpty,
-            textFieldFocused: isInputFocused,
-            selectionLength: selectionRange.length,
-            reduceMotionEnabled: UIAccessibility.isReduceMotionEnabled
-        )
     }
 
     @ViewBuilder
@@ -839,20 +812,15 @@ struct ChatView: View {
             pageDotsView: pinnedPageDotsView,
             pageDotsGap: pinnedPageDotsGap
         ) {
-            MessageInputBar(
-                content: $viewModel.inputContent,
-                selectionRange: $selectionRange,
-                pendingInsertions: $pendingInputInsertions,
-                dictation: dictationCoordinator,
-                placeholderText: viewModel.activeSessionDisplayName,
-                resetToken: viewModel.inputResetToken,
-                canSend: viewModel.canSend,
-                isSending: viewModel.isSending,
-                connectionState: viewModel.sendButtonConnectionState,
+            ComposeInputBarHost(
+                viewModel: viewModel,
+                pendingInputInsertions: $pendingInputInsertions,
+                dictationCoordinator: dictationCoordinator,
                 focusTrigger: focusRequestID,
                 isTextFieldFocused: isInputFocused,
                 bottomSafeAreaInset: geometry.safeAreaInsets.bottom,
                 isKeyboardVisible: isKeyboardVisible,
+                isCompact: horizontalSizeClass == .compact,
                 onSend: {
                     dictationCoordinator.handleSendTapped {
                         viewModel.send()
@@ -860,14 +828,9 @@ struct ChatView: View {
                 },
                 onCancel: { viewModel.cancelSend() },
                 onReconnect: { viewModel.reconnect() },
-                onAdd: {
-                    activeSheet = .attachmentMenu
-                },
-                // ⚠️ This callback is how focus state survives view recreation.
-                // DO NOT replace with @Binding or try to use @FocusState directly.
+                onAdd: { activeSheet = .attachmentMenu },
                 onFocusChange: { focused in isInputFocused = focused },
-                onPasteImages: handlePastedImages,
-                isCompact: horizontalSizeClass == .compact
+                onPasteImages: handlePastedImages
             )
         }
         .visionOSInputBarDepthOffset()
@@ -1388,6 +1351,78 @@ struct ChatView: View {
         }
     }
 
+}
+
+private struct ComposeInputBarHost: View {
+    @Bindable var viewModel: ChatViewModel
+    @Binding var pendingInputInsertions: [PendingAttachment]
+    let dictationCoordinator: DictationCoordinator
+    let focusTrigger: Int
+    let isTextFieldFocused: Bool
+    let bottomSafeAreaInset: CGFloat
+    let isKeyboardVisible: Bool
+    let isCompact: Bool
+    let onSend: () -> Void
+    let onCancel: () -> Void
+    let onReconnect: () -> Void
+    let onAdd: () -> Void
+    let onFocusChange: (Bool) -> Void
+    let onPasteImages: ([UIImage]) -> Void
+
+    @State private var selectionRange = NSRange(location: 0, length: 0)
+
+    var body: some View {
+        MessageInputBar(
+            content: $viewModel.inputContent,
+            selectionRange: $selectionRange,
+            pendingInsertions: $pendingInputInsertions,
+            dictation: dictationCoordinator,
+            placeholderText: viewModel.activeSessionDisplayName,
+            resetToken: viewModel.inputResetToken,
+            canSend: viewModel.canSend,
+            isSending: viewModel.isSending,
+            connectionState: viewModel.sendButtonConnectionState,
+            focusTrigger: focusTrigger,
+            isTextFieldFocused: isTextFieldFocused,
+            bottomSafeAreaInset: bottomSafeAreaInset,
+            isKeyboardVisible: isKeyboardVisible,
+            onSend: onSend,
+            onCancel: onCancel,
+            onReconnect: onReconnect,
+            onAdd: onAdd,
+            onFocusChange: onFocusChange,
+            onPasteImages: onPasteImages,
+            isCompact: isCompact
+        )
+        .onAppear {
+            updateDictationContext()
+        }
+        .onChange(of: viewModel.activeSessionKey) { _, _ in
+            updateDictationContext()
+        }
+        .onChange(of: viewModel.inputContent.length) { _, _ in
+            updateDictationContext()
+        }
+        .onChange(of: isTextFieldFocused) { _, _ in
+            updateDictationContext()
+        }
+        .onChange(of: selectionRange.length) { _, _ in
+            updateDictationContext()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIAccessibility.reduceMotionStatusDidChangeNotification)) { _ in
+            updateDictationContext()
+        }
+    }
+
+    private func updateDictationContext() {
+        dictationCoordinator.updateContext(
+            sessionKey: viewModel.activeSessionKey,
+            composeIsEmpty: viewModel.inputContent.isEffectivelyEmpty,
+            textFieldFocused: isTextFieldFocused,
+            selectionLength: selectionRange.length,
+            reduceMotionEnabled: UIAccessibility.isReduceMotionEnabled
+        )
+    }
 }
 
 private struct VisionOSInputBarDepthOffset: ViewModifier {

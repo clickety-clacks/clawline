@@ -83,6 +83,7 @@ struct ChatView: View {
     @Bindable var viewModel: ChatViewModel
     let toastManager: ToastManager
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.openURL) private var openURL
     @Environment(AuthManager.self) private var authManager
 
     // ⚠️ CRITICAL: This state MUST live here in ChatView, NOT in MessageInputBar.
@@ -118,6 +119,11 @@ struct ChatView: View {
     init(viewModel: ChatViewModel, toastManager: ToastManager) {
         self._viewModel = Bindable(wrappedValue: viewModel)
         self.toastManager = toastManager
+        _dictationCoordinator = State(
+            initialValue: DictationCoordinator(
+                bridge: ComposeInputDictationBridge(host: viewModel)
+            )
+        )
     }
 
     @Environment(\.colorScheme) private var colorScheme
@@ -128,6 +134,7 @@ struct ChatView: View {
     @State private var streamToastManager = StreamToastManager()
     @State private var streamToastBusySince: Date?
     @State private var streamToastBusyClearTask: Task<Void, Never>?
+    @State private var dictationCoordinator: DictationCoordinator
 
     private let streamToastMinimumBusySeconds: TimeInterval = 0.45
 
@@ -457,13 +464,17 @@ struct ChatView: View {
         }
         .task { await viewModel.onAppear() }
         .onDisappear {
+            dictationCoordinator.handleAppBackgrounded()
             viewModel.onDisappear()
             resetScrollButtonInteractionState()
         }
         .onChange(of: scenePhase) { _, phase in
-            guard phase == .active else { return }
-            viewModel.handleSceneDidBecomeActive()
-            keyboardRefreshToken &+= 1
+            if phase == .active {
+                viewModel.handleSceneDidBecomeActive()
+                keyboardRefreshToken &+= 1
+            } else {
+                dictationCoordinator.handleAppBackgrounded()
+            }
         }
         .background(
             KeyboardLayoutGuideReader(refreshToken: keyboardRefreshToken) { height, duration, curve in
@@ -486,6 +497,21 @@ struct ChatView: View {
             }
         )
         .sheet(item: $activeSheet, content: sheetView)
+        .sheet(isPresented: composeKeyPromptPresentedBinding) {
+            composeKeyPromptSheet
+        }
+        .onChange(of: viewModel.uiSelectedSessionKey) { _, _ in
+            updateDictationContext(viewModel: viewModel)
+        }
+        .onChange(of: viewModel.inputContent.length) { _, _ in
+            updateDictationContext(viewModel: viewModel)
+        }
+        .onChange(of: selectionRange) { _, _ in
+            updateDictationContext(viewModel: viewModel)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIAccessibility.reduceMotionStatusDidChangeNotification)) { _ in
+            updateDictationContext(viewModel: viewModel)
+        }
         .photosPicker(
             isPresented: $isPhotosPickerPresented,
             selection: $photoPickerItems,
@@ -649,6 +675,7 @@ struct ChatView: View {
             layoutCoordinator.setActiveSessionKey(viewModel.engineActiveSessionKey)
             layoutCoordinator.updateInputs(layoutInputs, metrics: layoutMetrics)
             layoutCoordinator.markInputsChanged()
+            updateDictationContext(viewModel: viewModel)
         }
         .onChange(of: viewModel.uiSelectionSequence) { _, _ in
             guard let selectedSessionKey = viewModel.lastUISelectedSessionKey else { return }
@@ -684,7 +711,10 @@ struct ChatView: View {
         .onChange(of: keyboardAnimationDuration) { _, _ in layoutRevision &+= 1 }
         .onChange(of: keyboardAnimationCurve) { _, _ in layoutRevision &+= 1 }
         .onChange(of: inputBarHeight) { _, _ in layoutRevision &+= 1 }
-        .onChange(of: isInputFocused) { _, _ in layoutRevision &+= 1 }
+        .onChange(of: isInputFocused) { _, _ in
+            layoutRevision &+= 1
+            updateDictationContext(viewModel: viewModel)
+        }
         .onChange(of: geometry.safeAreaInsets.bottom) { _, _ in layoutRevision &+= 1 }
         .onChange(of: horizontalSizeClass) { _, _ in layoutRevision &+= 1 }
         .overlay(alignment: .bottom) {
@@ -744,6 +774,16 @@ struct ChatView: View {
             return AttributedString("v\(version) (build ") + buildText + AttributedString(")")
         }
         return AttributedString("v\(version)")
+    }
+
+    private func updateDictationContext(viewModel: ChatViewModel) {
+        dictationCoordinator.updateContext(
+            sessionKey: viewModel.activeSessionKey,
+            composeIsEmpty: viewModel.inputContent.isEffectivelyEmpty,
+            textFieldFocused: isInputFocused,
+            selectionLength: selectionRange.length,
+            reduceMotionEnabled: UIAccessibility.isReduceMotionEnabled
+        )
     }
 
     @ViewBuilder
@@ -841,16 +881,20 @@ struct ChatView: View {
                 content: $viewModel.inputContent,
                 selectionRange: $selectionRange,
                 pendingInsertions: $pendingInputInsertions,
+                dictation: dictationCoordinator,
                 placeholderText: viewModel.activeSessionDisplayName,
                 resetToken: viewModel.inputResetToken,
                 canSend: viewModel.canSend,
                 isSending: viewModel.isSending,
                 connectionState: viewModel.sendButtonConnectionState,
                 focusTrigger: focusRequestID,
+                isTextFieldFocused: isInputFocused,
                 bottomSafeAreaInset: geometry.safeAreaInsets.bottom,
                 isKeyboardVisible: isKeyboardVisible,
                 onSend: {
-                    viewModel.send()
+                    dictationCoordinator.handleSendTapped {
+                        viewModel.send()
+                    }
                 },
                 onCancel: { viewModel.cancelSend() },
                 onReconnect: { viewModel.reconnect() },
@@ -986,6 +1030,58 @@ struct ChatView: View {
             )
             #endif
         }
+    }
+
+    private var composeKeyPromptPresentedBinding: Binding<Bool> {
+        Binding(
+            get: { dictationCoordinator.showsComposeKeyPromptModal },
+            set: { isPresented in
+                if !isPresented {
+                    dictationCoordinator.dismissComposeKeyPrompt()
+                }
+            }
+        )
+    }
+
+    private var composeKeyTextBinding: Binding<String> {
+        Binding(
+            get: { dictationCoordinator.inlineKeyText },
+            set: { dictationCoordinator.updateInlineKeyText($0) }
+        )
+    }
+
+    private var composeKeyPromptSheet: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: 16) {
+                SonioxKeyConfigurationRow(
+                    keyText: composeKeyTextBinding,
+                    status: dictationCoordinator.inlineKeyStatus,
+                    actionTitle: dictationCoordinator.inlineKeyActionTitle,
+                    onAction: {
+                        Task { @MainActor in
+                            await dictationCoordinator.handleComposeKeyPrimaryAction { url in
+                                openURL(url)
+                            }
+                        }
+                    },
+                    placeholder: "soniox.apiKey",
+                    showsBackground: true
+                )
+                Spacer(minLength: 0)
+            }
+            .padding(16)
+            .navigationTitle("Enable Dictation")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Close") {
+                        dictationCoordinator.dismissComposeKeyPrompt()
+                    }
+                }
+            }
+        }
+        .presentationDetents([.medium])
+        .interactiveDismissDisabled(false)
     }
 
     /// Paged TabView for horizontal swipe between streams.

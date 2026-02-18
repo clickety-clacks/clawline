@@ -31,7 +31,7 @@ protocol ChatViewModelHosting: AnyObject {
 
 @Observable
 @MainActor
-final class ChatViewModel: ChatViewModelHosting {
+final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
     private let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "MessagePipeline")
     private let instanceId = UUID().uuidString
     private static let richDocumentMimeTypesNeedingPayload: Set<String> = [
@@ -1413,6 +1413,30 @@ final class ChatViewModel: ChatViewModelHosting {
         attachmentData.removeAll()
         uploadedAssetIds.removeAll()
         inputResetToken &+= 1
+    }
+
+    func captureComposeDraftSnapshot(for sessionKey: String) -> ComposeDraftSnapshot {
+        guard !sessionKey.isEmpty else { return .empty }
+        guard sessionKey == activeSessionKey else {
+            return ComposeDraftSnapshot(content: NSAttributedString(string: ""), attachments: [:])
+        }
+        return ComposeDraftSnapshot(content: inputContent, attachments: attachmentData)
+    }
+
+    func applyComposeDraftSnapshot(
+        _ snapshot: ComposeDraftSnapshot,
+        to sessionKey: String,
+        moveCursorToEnd: Bool,
+        announceEditorReset: Bool
+    ) {
+        _ = moveCursorToEnd
+        guard !sessionKey.isEmpty else { return }
+        guard sessionKey == activeSessionKey else { return }
+        inputContent = snapshot.content
+        attachmentData = snapshot.attachments
+        if announceEditorReset {
+            inputResetToken &+= 1
+        }
     }
 
 

@@ -265,6 +265,7 @@ final class DictationCoordinator {
             guard streamSwitchStopTask == nil else { return }
             streamSwitchStopTask = Task { [weak self] in
                 guard let self else { return }
+                print("DICTATION_STOP caller=stream_switch_handler ts=\(Date().timeIntervalSince1970)")
                 await self.stopKeep(
                     reason: "stream_switch",
                     timeout: self.timing.stopKeepFinalizeTimeout,
@@ -286,10 +287,12 @@ final class DictationCoordinator {
     }
 
     func startStickyDictation() {
+        print("DICTATION_UI startStickyDictation")
         start(mode: .sticky)
     }
 
     func startWalkieTalkieDictation() {
+        print("DICTATION_UI startWalkieTalkieDictation")
         start(mode: .walkieTalkie)
     }
 
@@ -351,6 +354,7 @@ final class DictationCoordinator {
     func stopDictationFromSwipeRight() {
         guard state == .dictatingSticky || state == .dictatingWalkieTalkie else { return }
         Task { [weak self] in
+            print("DICTATION_STOP caller=swipe_right_stop ts=\(Date().timeIntervalSince1970)")
             await self?.stopKeep(
                 reason: "swipe_right",
                 timeout: timing.stopKeepFinalizeTimeout,
@@ -362,6 +366,7 @@ final class DictationCoordinator {
     func endWalkieTalkieIfNeeded() {
         guard state == .dictatingWalkieTalkie else { return }
         Task { [weak self] in
+            print("DICTATION_STOP caller=walkie_release ts=\(Date().timeIntervalSince1970)")
             await self?.stopKeep(
                 reason: "walkie_release",
                 timeout: timing.stopKeepFinalizeTimeout,
@@ -403,6 +408,7 @@ final class DictationCoordinator {
     }
 
     func handleSendTapped(sendAction: @escaping () -> Void) {
+        print("DICTATION_STOP caller=handleSendTapped_entry ts=\(Date().timeIntervalSince1970) state=\(String(describing: state))")
         guard state == .dictatingSticky || state == .dictatingWalkieTalkie || state == .stoppingKeep else {
             sendAction()
             return
@@ -410,6 +416,7 @@ final class DictationCoordinator {
 
         Task { [weak self] in
             guard let self else { return }
+            print("DICTATION_STOP caller=send_tap_finalization ts=\(Date().timeIntervalSince1970)")
             let finalized = await self.stopKeep(
                 reason: "send",
                 timeout: self.timing.sendFinalizeTimeout,
@@ -423,6 +430,7 @@ final class DictationCoordinator {
     func handleAppBackgrounded() {
         guard state == .dictatingSticky || state == .dictatingWalkieTalkie else { return }
         Task { [weak self] in
+            print("DICTATION_STOP caller=app_background_handler ts=\(Date().timeIntervalSince1970)")
             await self?.stopKeep(
                 reason: "app_background",
                 timeout: timing.stopKeepFinalizeTimeout,
@@ -447,7 +455,9 @@ final class DictationCoordinator {
         pendingActivationMode = nil
         self.mode = mode
         self.originSessionKey = currentSessionKey
+        print("DICTATION_PERF ts=\(Date().timeIntervalSince1970) event=capture_snapshot_begin session=\(currentSessionKey)")
         self.preDictationSnapshot = bridge.captureSnapshot(for: currentSessionKey)
+        print("DICTATION_PERF ts=\(Date().timeIntervalSince1970) event=capture_snapshot_end session=\(currentSessionKey)")
         self.transcriptBuffer.reset()
         self.pendingTranscriptText = nil
         self.lastAppliedTranscriptText = ""
@@ -514,7 +524,9 @@ final class DictationCoordinator {
                 let nextDisplacement = Self.mappedDisplacement(for: level)
                 guard abs(nextDisplacement - lastAppliedDisplacement) >= 0.05 else { continue }
                 lastAppliedDisplacement = nextDisplacement
+                let perfTs = Date().timeIntervalSince1970
                 await MainActor.run {
+                    print("DICTATION_PERF ts=\(perfTs) event=waveform_update_main_thread displacement=\(nextDisplacement)")
                     self.waveformDisplacement = nextDisplacement
                 }
             }
@@ -552,6 +564,7 @@ final class DictationCoordinator {
         maxDurationTask = Task { [weak self] in
             guard let self else { return }
             try? await Task.sleep(for: timing.maxSessionDuration)
+            print("DICTATION_STOP caller=timer_max_duration ts=\(Date().timeIntervalSince1970)")
             await self.stopKeep(
                 reason: "max_duration",
                 timeout: timing.stopKeepFinalizeTimeout,
@@ -565,6 +578,7 @@ final class DictationCoordinator {
         tokenInactivityTask = Task { [weak self] in
             guard let self else { return }
             try? await Task.sleep(for: timing.tokenInactivityTimeout)
+            print("DICTATION_STOP caller=timer_token_inactivity ts=\(Date().timeIntervalSince1970)")
             await self.stopKeep(
                 reason: "token_inactivity",
                 timeout: timing.stopKeepFinalizeTimeout,
@@ -663,7 +677,8 @@ final class DictationCoordinator {
                 gracefulFinalize: false,
                 trigger: "protocol_error_event"
             )
-            self.enterError(message: message)
+            print("DICTATION_ERROR path=handleProtocolError ts=\(Date().timeIntervalSince1970) code=\(code ?? "nil") message=\(message)")
+            self.enterError(message: message, source: "handleProtocolError")
         }
     }
 
@@ -678,7 +693,8 @@ final class DictationCoordinator {
             gracefulFinalize: false,
             trigger: "transport_failure_event"
         )
-        enterError(message: "Dictation failed")
+        print("DICTATION_ERROR path=handleTransportFailure ts=\(Date().timeIntervalSince1970) stage=\(stage.rawValue) message=\(message)")
+        enterError(message: "Dictation failed", source: "handleTransportFailure")
     }
 
     @discardableResult
@@ -690,6 +706,10 @@ final class DictationCoordinator {
         trigger: String = "unspecified",
         callSite: String = DictationCoordinator.callSite()
     ) async -> Bool {
+        print(
+            "DICTATION_STOP stopKeep_top ts=\(Date().timeIntervalSince1970) reason=\(reason) " +
+            "state=\(String(describing: state)) callsite=\(callSite)"
+        )
         guard state == .dictatingSticky || state == .dictatingWalkieTalkie || state == .stoppingKeep else {
             logger.notice(
                 "Dictation stopKeep ignored reason=\(reason, privacy: .public) trigger=\(trigger, privacy: .public) callSite=\(callSite, privacy: .public) state=\(String(describing: self.state), privacy: .public)"
@@ -717,7 +737,8 @@ final class DictationCoordinator {
             do {
                 try await streamingClient?.sendFinalize()
             } catch {
-                enterError(message: "Failed to finalize dictation")
+                print("DICTATION_ERROR path=stopKeep_sendFinalize ts=\(Date().timeIntervalSince1970) reason=\(reason) error=\(error.localizedDescription)")
+                enterError(message: "Failed to finalize dictation", source: "stopKeep_sendFinalize")
             }
         }
         audioCapture?.stop()
@@ -835,7 +856,8 @@ final class DictationCoordinator {
         }
     }
 
-    private func enterError(message: String) {
+    private func enterError(message: String, source: String = "unspecified") {
+        print("DICTATION_ERROR enter_error ts=\(Date().timeIntervalSince1970) source=\(source) state=\(String(describing: state)) message=\(message)")
         print("DICTATION_COORD enter_error message=\(message)")
         errorMessage = message
         state = .error
@@ -851,6 +873,7 @@ final class DictationCoordinator {
             guard let self else { return }
             try? await Task.sleep(for: timeout)
             await MainActor.run {
+                print("DICTATION_ERROR auto_dismiss ts=\(Date().timeIntervalSince1970) source=\(source) message=\(self.errorMessage ?? "nil")")
                 self.errorMessage = nil
                 if !self.isDictationActive {
                     self.state = self.idleStateForCurrentContext()
@@ -886,6 +909,7 @@ final class DictationCoordinator {
     }
 
     private func queueTranscriptApply(_ transcriptText: String, immediate: Bool) {
+        print("DICTATION_PERF ts=\(Date().timeIntervalSince1970) event=queue_transcript_apply immediate=\(immediate) chars=\(transcriptText.count)")
         pendingTranscriptText = transcriptText
         if immediate {
             flushPendingTranscriptApply()
@@ -901,11 +925,13 @@ final class DictationCoordinator {
     }
 
     private func flushPendingTranscriptApply() {
+        print("DICTATION_PERF ts=\(Date().timeIntervalSince1970) event=flush_transcript_apply_begin")
         transcriptApplyTask?.cancel()
         transcriptApplyTask = nil
         guard let transcriptText = pendingTranscriptText else { return }
         pendingTranscriptText = nil
         applyTranscriptIfNeeded(transcriptText)
+        print("DICTATION_PERF ts=\(Date().timeIntervalSince1970) event=flush_transcript_apply_end")
     }
 
     private func cancelPendingTranscriptApply() {
@@ -917,10 +943,13 @@ final class DictationCoordinator {
     private func applyTranscriptIfNeeded(_ transcriptText: String) {
         guard transcriptText != lastAppliedTranscriptText else { return }
         guard let originSessionKey else { return }
+        let wallTs = Date().timeIntervalSince1970
+        print("DICTATION_PERF ts=\(wallTs) event=apply_transcript_begin chars=\(transcriptText.count)")
         let startedAt = CFAbsoluteTimeGetCurrent()
         lastAppliedTranscriptText = transcriptText
         bridge.apply(transcript: transcriptText, baseSnapshot: preDictationSnapshot, to: originSessionKey)
         let elapsedMs = Int((CFAbsoluteTimeGetCurrent() - startedAt) * 1_000)
+        print("DICTATION_PERF ts=\(Date().timeIntervalSince1970) event=apply_transcript_end elapsedMs=\(elapsedMs)")
         logger.notice("[DICTATION-PERF] applyTranscriptIfNeeded: \(elapsedMs, privacy: .public)ms")
     }
 }

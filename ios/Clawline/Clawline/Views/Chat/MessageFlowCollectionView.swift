@@ -527,7 +527,6 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         let wasUserInteracting = isUserInteracting
         let wasPinnedToBottomIntent = sbbState.isPinnedToBottomIntent
         let previousSessionKey = self.channelOverride
-        let previousTruncationBottomInset = self.truncationBottomInset
         let previousIsActiveSession = self.isActiveSession
         self.viewModel = viewModel
         self.channelOverride = sessionKey
@@ -565,7 +564,8 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         let needsFullLayout = forceReconfigureAll
             || self.isCompact != isCompact
             || self.topInset != topInset
-            || abs(previousTruncationBottomInset - truncationBottomInset) > 0.5
+            // Bottom inset/truncation changes are handled via setBottomInset() targeted updates.
+            // They must not force a full snapshot rebuild for large message lists.
             || previousIsActiveSession != isActiveSession
             || previousSessionKey != sessionKey
         self.isCompact = isCompact
@@ -592,6 +592,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         if canSkipContentRefresh {
             return
         }
+        print("DICTATION_PERF ts=\(Date().timeIntervalSince1970) event=message_flow_refresh_begin")
 
         // Use session override if provided, otherwise use active session messages.
         let messages = sessionKey.map { viewModel.messages(for: $0) } ?? viewModel.messages
@@ -626,6 +627,10 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         if showTypingIndicator {
             snapshot.appendItems([TypingIndicatorCell.itemId])
         }
+        print(
+            "DICTATION_PERF ts=\(Date().timeIntervalSince1970) event=snapshot_built " +
+            "messageCount=\(messageCount) typing=\(showTypingIndicator)"
+        )
 
         let newItemIds = Set(snapshot.itemIdentifiers)
         let insertedIds = newItemIds.subtracting(oldItemIds)
@@ -675,24 +680,30 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         }
 
         if shouldMorph {
+            print("DICTATION_PERF ts=\(Date().timeIntervalSince1970) event=apply_snapshot_morph_begin")
 #if os(visionOS)
             applySnapshotWithTypingMorphIfPossible(snapshot: snapshot, targetMessageId: newestMessageId) { [weak self] in
+                print("DICTATION_PERF ts=\(Date().timeIntervalSince1970) event=apply_snapshot_morph_end")
                 afterSnapshotApplied()
                 self?.updateVisibleCellOpacity()
             }
 #else
             applySnapshotWithTypingMorphIfPossible(snapshot: snapshot, targetMessageId: newestMessageId) { [weak self] in
+                print("DICTATION_PERF ts=\(Date().timeIntervalSince1970) event=apply_snapshot_morph_end")
                 afterSnapshotApplied()
             }
 #endif
         } else {
+            print("DICTATION_PERF ts=\(Date().timeIntervalSince1970) event=apply_snapshot_begin")
 #if os(visionOS)
             dataSource.apply(snapshot, animatingDifferences: false) { [weak self] in
+                print("DICTATION_PERF ts=\(Date().timeIntervalSince1970) event=apply_snapshot_end")
                 afterSnapshotApplied()
                 self?.updateVisibleCellOpacity()
             }
 #else
             dataSource.apply(snapshot, animatingDifferences: false) { [weak self] in
+                print("DICTATION_PERF ts=\(Date().timeIntervalSince1970) event=apply_snapshot_end")
                 afterSnapshotApplied()
             }
 #endif
@@ -749,6 +760,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         }
         syncUnreadStateWithSBBState()
         handleContentUpdateCompletion()
+        print("DICTATION_PERF ts=\(Date().timeIntervalSince1970) event=message_flow_refresh_end")
     }
 
     static func appendedMessageIDs(previousLastMessageId: String?, messageIDs: [String]) -> [String] {
@@ -1211,10 +1223,12 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         targetMessageId: String?,
         onApplied: (() -> Void)?
     ) {
+        print("DICTATION_PERF ts=\(Date().timeIntervalSince1970) event=typing_morph_path_enter")
         guard let targetMessageId,
               let typingIndexPath = dataSource.indexPath(for: TypingIndicatorCell.itemId),
               let typingCell = collectionView.cellForItem(at: typingIndexPath) else {
             // Fallback: let diffable handle it (better than skipping updates).
+            print("DICTATION_PERF ts=\(Date().timeIntervalSince1970) event=typing_morph_fallback_apply")
             dataSource.apply(snapshot, animatingDifferences: true, completion: onApplied)
             return
         }
@@ -1271,10 +1285,12 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                     initialSpringVelocity: 0.25,
                     options: [.curveEaseInOut, .allowUserInteraction]
                 ) {
+                    print("DICTATION_PERF ts=\(Date().timeIntervalSince1970) event=typing_morph_animation_begin")
                     typingSnapshotView.frame = endFrame
                     typingSnapshotView.alpha = 0
                     targetCell.alpha = 1
                 } completion: { _ in
+                    print("DICTATION_PERF ts=\(Date().timeIntervalSince1970) event=typing_morph_animation_end")
                     typingSnapshotView.removeFromSuperview()
                     self.morphTargetMessageId = nil
                     // Scroll-to-bottom often triggers a layout pass/scroll animation that makes the

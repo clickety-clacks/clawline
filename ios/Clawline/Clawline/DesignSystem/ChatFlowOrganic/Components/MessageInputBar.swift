@@ -429,6 +429,9 @@ struct MessageInputBar: View {
                         .padding(.vertical, 12)
                         .foregroundColor(.red)
                         .allowsHitTesting(false)
+                        .onAppear {
+                            print("DICTATION_ERROR ui_display ts=\(Date().timeIntervalSince1970) message=\(message)")
+                        }
                     }
 
                     if shouldRenderMic {
@@ -643,6 +646,10 @@ struct MessageInputBar: View {
     }
 
     private func handleMicPressChanged() {
+        print(
+            "DICTATION_UI handleMicPressChanged micVisible=\(dictation.micVisible) " +
+            "hasMicPressTask=\(micPressTask != nil) didStartWalkie=\(micDidStartWalkieTalkie)"
+        )
         guard dictation.micVisible else { return }
         guard micPressTask == nil else { return }
 
@@ -657,6 +664,7 @@ struct MessageInputBar: View {
     }
 
     private func handleMicPressEnded() {
+        print("DICTATION_UI handleMicPressEnded")
         let holdTask = micPressTask
         micPressTask = nil
         holdTask?.cancel()
@@ -673,6 +681,7 @@ struct MessageInputBar: View {
     }
 
     private func handleSwipeChanged(_ value: DragGesture.Value) {
+        print("DICTATION_UI handleSwipeChanged")
         let dx = value.translation.width
         let dy = value.translation.height
 
@@ -716,6 +725,7 @@ struct MessageInputBar: View {
     }
 
     private func handleSwipeEnded(_ value: DragGesture.Value) {
+        print("DICTATION_UI handleSwipeEnded")
         defer {
             swipeGestureStart = nil
             swipeThresholdTime = nil

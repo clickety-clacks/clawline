@@ -16,38 +16,69 @@ enum SendButtonConnectionState: Equatable {
     case disconnected
 }
 
-enum ConnectionAlertSeverity: Equatable {
-    case caution
-    case critical
-}
-
 protocol ChatViewModelHosting: AnyObject {
     func handleSceneDidBecomeActive()
 }
 
+// MARK: - Stream Switch State
+// Stream switching now uses two explicit state paths:
+// - uiSelectedSessionKey: immediate, lightweight UI intent.
+// - engineActiveSessionKey: debounced heavy engine activation.
+//
+// Both are MainActor-owned and each has one write seam:
+// - uiSelectedSessionKey mutates only inside setUISelectedSessionKey(_:)
+// - engineActiveSessionKey mutates only inside setEngineActiveSessionKey(_:)
+
 @Observable
 @MainActor
-final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
+final class ChatViewModel: ChatViewModelHosting {
     private let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "MessagePipeline")
     private let instanceId = UUID().uuidString
     private static let richDocumentMimeTypesNeedingPayload: Set<String> = [
         InteractiveHTMLDescriptor.mimeType,
         TerminalSessionDescriptor.mimeType
     ]
-    private(set) var messages: [Message] = [] {
-        didSet {
-            activeMessageListRevision &+= 1
-            handleMessageWindowChange(oldMessages: oldValue, newMessages: messages)
-        }
-    }
-    private(set) var activeMessageListRevision: Int = 0
-    private(set) var activeSessionKey: String = ""
+    private(set) var messages: [Message] = []
     private(set) var streamsBySessionKey: [String: StreamSession] = [:]
     private(set) var orderedSessionKeys: [String] = []
     private var syntheticSessionKeys: Set<String> = []
     private var didRestoreActiveSessionKey = false
-    private var draftContentBySession: [String: NSAttributedString] = [:]
-    private var draftAttachmentsBySession: [String: [UUID: PendingAttachment]] = [:]
+
+    enum StreamSwitchSource: Equatable {
+        case pager
+        case programmatic
+    }
+
+    // UI-intent key: updates immediately on stream-switch intent.
+    private(set) var uiSelectedSessionKey: String = ""
+    // Engine-active key: drives expensive restore/snapshot/layout work.
+    private(set) var engineActiveSessionKey: String = ""
+    // Monotonic epoch used to cancel stale delayed engine activations.
+    private(set) var uiSwitchEpoch: Int = 0
+    // Pulse emitted synchronously with UI intent changes so ChatView can show toast/haptic.
+    private(set) var uiSelectionSequence: Int = 0
+    private(set) var lastUISelectedSessionKey: String?
+    // Pulses for spinner lifecycle: activation start and activation completion.
+    private(set) var engineActivationStartedSequence: Int = 0
+    private(set) var engineActivationCompletedSequence: Int = 0
+    private(set) var lastEngineActivationSessionKey: String?
+
+    private let pagerSettleDebounce: Duration = .milliseconds(500)
+    // Keep first heavy snapshot materialization away from the final pager animation frames.
+    // This intentionally leaves the page blank briefly while the toast spinner communicates loading.
+    private let pagerPostSettleApplyDelay: Duration = .milliseconds(40)
+    private var pendingEngineActivationTask: Task<Void, Never>?
+    private var pendingEngineActivationTarget: String?
+    private var pendingEngineActivationEpoch: Int?
+    private var engineActivationInFlightSessionKey: String?
+    private var isPagerInteracting: Bool = false
+    // Render policy seam:
+    // `.frozen` while pager is physically moving; suppresses new heavy snapshot/layout work on all pages.
+    // `.active` once pager is settled; heavy work may start again.
+    var isRenderPolicyFrozen: Bool { isPagerInteracting }
+
+    // Back-compat read-only alias while call sites migrate to explicit split keys.
+    var activeSessionKey: String { engineActiveSessionKey }
 
     func messages(for sessionKey: String) -> [Message] {
         sessionMessages[sessionKey] ?? []
@@ -62,81 +93,193 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
     }
 
     var activeStream: ChatStream {
-        SessionRegistry.shared.stream(for: activeSessionKey)
+        SessionRegistry.shared.stream(for: engineActiveSessionKey)
     }
 
-    func setActiveSessionKey(_ sessionKey: String) {
-        guard orderedSessionKeys.contains(sessionKey) else { return }
-        guard activeSessionKey != sessionKey else { return }
-        let previousSessionKey = activeSessionKey
-        if !previousSessionKey.isEmpty {
-            persistDraft(for: previousSessionKey)
+    // MARK: Stream Switch API
+    // All switch mutations are MainActor-only by class annotation.
+    // Steps 1-5 are intentionally synchronous (no suspension points) to keep epoch capture atomic.
+
+    func bindStreamSwitchCoordinatorIfNeeded() {
+        if uiSelectedSessionKey.isEmpty {
+            setUISelectedSessionKey(engineActiveSessionKey)
         }
+    }
+
+    func requestStreamSwitch(to sessionKey: String, source: StreamSwitchSource) {
+        guard orderedSessionKeys.contains(sessionKey) else { return }
+
+        // Step 1-2: stream-switch intent + epoch bump.
+        uiSwitchEpoch &+= 1
+        let epoch = uiSwitchEpoch
+
+        // Step 3-4: UI path mutates immediately and emits instant feedback pulse.
+        setUISelectedSessionKey(sessionKey)
+        lastUISelectedSessionKey = sessionKey
+        uiSelectionSequence &+= 1
+        StreamSwitchTiming.log("uiSelectionSequence_incremented", sessionKey: sessionKey)
+
+        // Step 5: schedule candidate activation keyed by (target, epoch).
+        pendingEngineActivationTarget = sessionKey
+        pendingEngineActivationEpoch = epoch
+        pendingEngineActivationTask?.cancel()
+        pendingEngineActivationTask = nil
+        StreamSwitchTiming.log("engine_activation_scheduled", sessionKey: sessionKey)
+
+        switch source {
+        case .programmatic:
+            // Programmatic selection is intentional: commit engine immediately (no debounce).
+            commitPendingEngineActivationIfCurrent(target: sessionKey, epoch: epoch)
+        case .pager:
+            // Pager path waits for scroll-settle signal before debounce starts.
+            if !isPagerInteracting {
+                scheduleDebouncedEngineActivation(target: sessionKey, epoch: epoch)
+            }
+        }
+    }
+
+    func streamPagerDidBeginInteraction() {
+        isPagerInteracting = true
+        pendingEngineActivationTask?.cancel()
+        pendingEngineActivationTask = nil
+    }
+
+    func streamPagerDidSettleAtRest() {
+        StreamSwitchTiming.log("pan_gesture_settled", sessionKey: pendingEngineActivationTarget ?? uiSelectedSessionKey)
+        isPagerInteracting = false
+        guard let target = pendingEngineActivationTarget, let epoch = pendingEngineActivationEpoch else { return }
+        StreamSwitchTiming.log("engine_activation_scheduled_post_settle", sessionKey: target)
+        scheduleDebouncedEngineActivation(target: target, epoch: epoch)
+    }
+
+    // MessageFlow calls this after first active-page materialization so the toast spinner can clear.
+    func markEngineActivationRenderedIfNeeded(for sessionKey: String) {
+        guard engineActivationInFlightSessionKey == sessionKey else { return }
+        engineActivationInFlightSessionKey = nil
+        engineActivationCompletedSequence &+= 1
+        StreamSwitchTiming.log("engineActivationCompletedSequence_fired", sessionKey: sessionKey)
+    }
+
+    // NOTE: keep this private.
+    // Engine-active key mutation seam: all writes go through this method.
+    private func setEngineActiveSessionKey(_ sessionKey: String) {
+        StreamSwitchTiming.log("setEngineActiveSessionKey_enter", sessionKey: sessionKey)
+        if sessionKey.isEmpty {
+            engineActiveSessionKey = ""
+            return
+        }
+        guard orderedSessionKeys.contains(sessionKey) else { return }
+        guard engineActiveSessionKey != sessionKey else { return }
         applyActiveSessionKey(sessionKey)
+        // Keep intent selection coherent for non-switch engine mutations (bootstrap/deletion fallback).
+        // Stream-switch path still writes uiSelectedSessionKey explicitly before this runs.
+        if uiSelectedSessionKey != sessionKey {
+            setUISelectedSessionKey(sessionKey)
+        }
+    }
+
+    // UI-intent key mutation seam: all UI selection writes go through this method.
+    private func setUISelectedSessionKey(_ sessionKey: String) {
+        uiSelectedSessionKey = sessionKey
+        StreamSwitchTiming.log("uiSelectedSessionKey_set", sessionKey: sessionKey)
+    }
+
+#if DEBUG
+    // Explicit test-only bypass.
+    func setActiveSessionKeyForTesting(_ sessionKey: String) {
+        setEngineActiveSessionKey(sessionKey)
+    }
+#endif
+
+    private func scheduleDebouncedEngineActivation(target: String, epoch: Int) {
+        pendingEngineActivationTask?.cancel()
+        pendingEngineActivationTask = Task { [weak self] in
+            guard let self else { return }
+            StreamSwitchTiming.log("debounce_delay_start", sessionKey: target)
+            try? await Task.sleep(for: self.pagerSettleDebounce)
+            guard !Task.isCancelled else { return }
+            StreamSwitchTiming.log("debounce_delay_end", sessionKey: target)
+            // Additional guard band after settle+debounce so `engineActiveSessionKey` commit
+            // (which triggers snapshot/apply work) starts after pager motion is fully at rest.
+            StreamSwitchTiming.log("post_settle_apply_delay_start", sessionKey: target)
+            try? await Task.sleep(for: self.pagerPostSettleApplyDelay)
+            guard !Task.isCancelled else { return }
+            StreamSwitchTiming.log("post_settle_apply_delay_end", sessionKey: target)
+            self.commitPendingEngineActivationIfCurrent(target: target, epoch: epoch)
+        }
+    }
+
+    private func commitPendingEngineActivationIfCurrent(target: String, epoch: Int) {
+        guard epoch == uiSwitchEpoch else { return }
+        guard pendingEngineActivationTarget == target else { return }
+        guard orderedSessionKeys.contains(target) else {
+            pendingEngineActivationTarget = nil
+            pendingEngineActivationEpoch = nil
+            return
+        }
+        pendingEngineActivationTarget = nil
+        pendingEngineActivationEpoch = nil
+        pendingEngineActivationTask?.cancel()
+        pendingEngineActivationTask = nil
+
+        guard target != engineActiveSessionKey else { return }
+
+        // Engine activation start pulse keeps toast spinner visible until active page finishes materializing.
+        engineActivationInFlightSessionKey = target
+        lastEngineActivationSessionKey = target
+        engineActivationStartedSequence &+= 1
+        StreamSwitchTiming.log("engineActiveSessionKey_committed", sessionKey: target)
+
+        setEngineActiveSessionKey(target)
     }
 
     private func applyActiveSessionKey(_ sessionKey: String) {
-        activeSessionKey = sessionKey
-        restoreDraft(for: sessionKey, announceEditorReset: true)
+        StreamSwitchTiming.log("applyActiveSessionKey_enter", sessionKey: sessionKey)
+        engineActiveSessionKey = sessionKey
         restoreLastServerMessageIdIfNeeded(for: sessionKey)
         restoreCachedMessagesIfNeeded(for: sessionKey)
         ensureSessionStorage(for: sessionKey)
         messages = sessionMessages[sessionKey] ?? []
+        StreamSwitchTiming.log("messages_assigned", sessionKey: sessionKey)
         lastServerMessageId = lastServerMessageIdBySession[sessionKey]
         persistActiveSessionKey(sessionKey)
     }
 
     private func clearActiveSession() {
-        activeSessionKey = ""
+        setEngineActiveSessionKey("")
+        setUISelectedSessionKey("")
+        pendingEngineActivationTarget = nil
+        pendingEngineActivationEpoch = nil
+        pendingEngineActivationTask?.cancel()
+        pendingEngineActivationTask = nil
+        engineActivationInFlightSessionKey = nil
         messages = []
         lastServerMessageId = nil
         streamDefaults.removeObject(forKey: activeSessionDefaultsKey())
     }
 
     var activeSessionDisplayName: String {
-        streamsBySessionKey[activeSessionKey]?.displayName ?? fallbackDisplayName(for: activeSessionKey)
+        streamsBySessionKey[uiSelectedSessionKey]?.displayName ?? fallbackDisplayName(for: uiSelectedSessionKey)
     }
     private(set) var lastServerMessageId: String?
     var inputContent: NSAttributedString = NSAttributedString() {
         didSet {
             pruneAttachmentData()
-            persistDraftContentForActiveSessionIfNeeded()
-            logger.info("[trace] inputContent len=\(self.inputContent.length) empty=\(self.inputContent.isEffectivelyEmpty) canSend=\(self.canSend) alert=\(String(describing: self.connectionAlert))")
+            logger.info("[trace] inputContent len=\(self.inputContent.length) empty=\(self.inputContent.isEffectivelyEmpty) canSend=\(self.canSend) state=\(String(describing: self.connectionState))")
         }
     }
-    var attachmentData: [UUID: PendingAttachment] = [:] {
-        didSet {
-            persistDraftAttachmentsForActiveSessionIfNeeded()
-        }
-    }
+    var attachmentData: [UUID: PendingAttachment] = [:]
     private(set) var isSending: Bool = false
-    private(set) var isAssistantTyping: Bool = false {
-        didSet {
-            guard oldValue != isAssistantTyping else { return }
-            typingIndicatorRevision &+= 1
-        }
-    }
-    private(set) var typingSessionKey: String? {
-        didSet {
-            guard oldValue != typingSessionKey else { return }
-            typingIndicatorRevision &+= 1
-        }
-    }
-    private(set) var typingIndicatorRevision: Int = 0
+    private(set) var isAssistantTyping: Bool = false
+    private(set) var typingSessionKey: String?
     private(set) var connectionState: ConnectionState = .disconnected
-    private(set) var connectionAlert: ConnectionAlertSeverity? {
-        didSet {
-            logger.info("[trace] connectionAlert changed to \(String(describing: self.connectionAlert)) canSend=\(self.canSend)")
-        }
-    }
     private(set) var inputResetToken: Int = 0
-    private(set) var error: String?
     private(set) var sendTask: Task<Void, Never>?
     /// Tracks if typing indicator was visible when a message arrives (for morph transition).
     private(set) var shouldMorphTypingIndicator: Bool = false
 
     var canSend: Bool {
-        connectionAlert == nil && !inputContent.isEffectivelyEmpty
+        sendButtonConnectionState == .connected && !inputContent.isEffectivelyEmpty
     }
 
     var sendButtonConnectionState: SendButtonConnectionState {
@@ -174,9 +317,6 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
     private var connectionStableTask: Task<Void, Never>?
     private let stableConnectionInterval: Duration = .seconds(5)
     private var activeClientMessageId: String?
-    private let connectionAlertGracePeriod: Duration
-    private var connectionAlertTask: Task<Void, Never>?
-    private var pendingConnectionErrorMessage: String?
     private var messageFailures: [String: MessageFailure] = [:]
     private var presentationCache: [PresentationCacheKey: PresentationCacheEntry] = [:]
     private var tableParseStates: [String: StreamingTableParseState] = [:]
@@ -186,11 +326,6 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
     private var persistDebounceTasks: [String: Task<Void, Never>] = [:]
     private var pendingPersistPayloads: [String: [Message]] = [:]
     private let messageCacheLimit = 500
-    private let presentationCacheTrimMultiplier = 4
-    private let presentationCacheTrimFloor = 256
-#if DEBUG
-    private var presentationCacheTrimCount = 0
-#endif
     private var restoredSessionKeys: Set<String> = []
     private var restoredStreamMetadataForUserId: String?
     private var supportsSessionProvisioning = false
@@ -216,6 +351,12 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
         case unavailable
     }
 
+    private enum ConnectionStateMutationSource: String {
+        case stateStream
+        case manualReconnect
+        case serviceInterruption
+    }
+
     init(auth: any AuthManaging,
          chatService: any ChatServicing,
          settings: SettingsManager,
@@ -232,7 +373,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
         self.uploadService = uploadService
         self.toastManager = toastManager
         self.salientHighlightService = salientHighlightService
-        self.connectionAlertGracePeriod = connectionAlertGracePeriod
+        _ = connectionAlertGracePeriod
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(handleMemoryWarningNotification),
@@ -277,7 +418,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
     func reconnect() {
         guard auth.token != nil else { return }
         guard sendButtonConnectionState == .disconnected else { return }
-        connectionState = .reconnecting
+        transitionConnectionState(.reconnecting, source: .manualReconnect)
         reconnectTask?.cancel()
         reconnectTask = nil
         scheduleReconnect(immediate: true, reason: .manualReconnect)
@@ -296,11 +437,11 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
             ensureDefaultActiveSessionIfNeeded()
             restoreLastServerMessageIdIfNeeded()
             restoreActiveSessionKeyIfNeeded()
-            if !activeSessionKey.isEmpty {
-                restoreLastServerMessageIdIfNeeded(for: activeSessionKey)
-                restoreCachedMessagesIfNeeded(for: activeSessionKey)
+            if !engineActiveSessionKey.isEmpty {
+                restoreLastServerMessageIdIfNeeded(for: engineActiveSessionKey)
+                restoreCachedMessagesIfNeeded(for: engineActiveSessionKey)
             }
-            for sessionKey in orderedSessionKeys where sessionKey != activeSessionKey {
+            for sessionKey in orderedSessionKeys where sessionKey != engineActiveSessionKey {
                 restoreLastServerMessageIdIfNeeded(for: sessionKey)
                 restoreCachedMessagesIfNeeded(for: sessionKey)
             }
@@ -370,8 +511,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
     private func observeConnectionState() async {
         for await state in chatService.connectionState {
             logger.info("ChatViewModel stateStream id=\(self.instanceId, privacy: .public) state=\(String(describing: state), privacy: .public)")
-            connectionState = state
-            handleConnectionState(state)
+            transitionConnectionState(state, source: .stateStream)
         }
     }
 
@@ -384,6 +524,10 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
 
     func send() {
         guard !isSending else { return }
+        guard sendButtonConnectionState == .connected else {
+            toastManager.show("Could not send; not connected.")
+            return
+        }
         pruneAttachmentData()
         let (text, pendingIds) = inputContent.contentForSending()
         let pendingAttachments = pendingIds.compactMap { attachmentData[$0] }
@@ -397,7 +541,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
         }
 
         ensureDefaultActiveSessionIfNeeded()
-        let outboundSessionKey = activeSessionKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let outboundSessionKey = engineActiveSessionKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !outboundSessionKey.isEmpty else {
             toastManager.show("No stream selected.")
             return
@@ -437,8 +581,6 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
         appendMessage(placeholder)
         pendingLocalMessages.append(PendingLocalMessage(id: clientId, sessionKey: sessionKey))
 
-        error = nil
-
         sendTask = Task { [weak self] in
             await self?.performSend(
                 clientId: clientId,
@@ -467,12 +609,12 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
         }
     }
 
-    func retryMessage(messageId: String) {
+    func resendFailedMessage(messageId: String) {
         guard !isSending else { return }
         guard let (message, sessionKey, index) = findMessage(id: messageId) else { return }
 
         let clientId = "c_\(UUID().uuidString)"
-        let retryMessage = Message(
+        let resentMessage = Message(
             id: clientId,
             role: message.role,
             content: message.content,
@@ -484,7 +626,8 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
         )
 
         var messageList = sessionMessages[sessionKey] ?? []
-        messageList[index] = retryMessage
+        messageList.remove(at: index)
+        messageList.append(resentMessage)
         setMessages(messageList, for: sessionKey)
 
         pendingLocalMessages.removeAll { $0.id == messageId }
@@ -497,15 +640,11 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
         sendTask = Task { [weak self] in
             await self?.performRetrySend(
                 clientId: clientId,
-                content: retryMessage.content,
-                attachments: retryMessage.attachments,
+                content: resentMessage.content,
+                attachments: resentMessage.attachments,
                 sessionKey: sessionKey
             )
         }
-    }
-
-    func resendFailedMessage(messageId: String) {
-        retryMessage(messageId: messageId)
     }
 
     func cancelSend() {
@@ -536,9 +675,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
         lastServerMessageId = nil
         lastServerMessageIdBySession.removeAll()
         auth.clearCredentials()
-        clearConnectionAlert()
         messageFailures.removeAll()
-        error = nil
         clearInput()
         sessionMessages = [:]
         clearActiveSession()
@@ -554,25 +691,23 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
         restoredSessionKeys.removeAll()
         restoredStreamMetadataForUserId = nil
         resetSessionProvisioningState(clearPendingSend: true)
-        draftContentBySession.removeAll()
-        draftAttachmentsBySession.removeAll()
         clearMessageCache()
         clearStreamMetadataCache()
-    }
-
-    func clearError() {
-        error = nil
     }
 
     func canRenameStream(sessionKey: String) -> Bool {
         guard let stream = streamsBySessionKey[sessionKey] else { return false }
         guard !syntheticSessionKeys.contains(sessionKey) else { return false }
         if stream.kind == "main" { return true }
+        if SessionKey.isClawlinePersonalDM(stream.sessionKey) { return true }
         return !stream.isBuiltIn
     }
 
     func canDeleteStream(sessionKey: String) -> Bool {
         guard let stream = streamsBySessionKey[sessionKey] else { return false }
+        if stream.sessionKey == SessionKey.admin { return false }
+        if stream.kind == "main" { return true }
+        if SessionKey.isClawlinePersonalDM(stream.sessionKey) { return true }
         guard !stream.isBuiltIn else { return false }
         return !isProtectedNonDeletableStream(stream)
     }
@@ -586,7 +721,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
                 idempotencyKey: Self.makeIdempotencyKey()
             )
             applyStreamUpsert(stream)
-            setActiveSessionKey(stream.sessionKey)
+            setEngineActiveSessionKey(stream.sessionKey)
             return true
         } catch {
             toastManager.show(error.localizedDescription)
@@ -852,7 +987,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
     private func setMessages(_ newMessages: [Message], for sessionKey: String) {
         sessionMessages[sessionKey] = newMessages
         persistMessages(newMessages, for: sessionKey)
-        if sessionKey == activeSessionKey {
+        if sessionKey == engineActiveSessionKey {
             messages = newMessages
             let total = newMessages.count
             let uniqueCount = Set(newMessages.map(\.id)).count
@@ -871,7 +1006,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
     private func updateLastServerMessageIdIfNeeded(with message: Message) {
         guard message.id.hasPrefix("s_") else { return }
         lastServerMessageIdBySession[message.sessionKey] = message.id
-        if message.sessionKey == activeSessionKey {
+        if message.sessionKey == engineActiveSessionKey {
             lastServerMessageId = message.id
         }
         persistLastServerMessageId(message.id, for: message.sessionKey)
@@ -910,8 +1045,6 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
             }
             reconnectTask?.cancel()
             reconnectTask = nil
-            clearConnectionAlert()
-            error = nil
             lastForegroundReconnectTrigger = nil
             isAssistantTyping = false
             typingSessionKey = nil
@@ -919,7 +1052,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
             connectionStableTask?.cancel()
             connectionStableTask = nil
             resetSessionProvisioningState(clearPendingSend: true)
-            beginConnectionAlert(message: "Not connected to provider.")
+            markPendingMessagesAsFailedForConnectionLoss()
             scheduleReconnect(reason: .connectionStateDisconnected)
             isAssistantTyping = false
             typingSessionKey = nil
@@ -927,13 +1060,13 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
             connectionStableTask?.cancel()
             connectionStableTask = nil
             resetSessionProvisioningState(clearPendingSend: true)
+            markPendingMessagesAsFailedForConnectionLoss()
             handleConnectionFailure(err)
             scheduleReconnect(reason: .connectionStateFailed)
             isAssistantTyping = false
             typingSessionKey = nil
         case .connecting, .reconnecting:
             resetSessionProvisioningState(clearPendingSend: true)
-            beginConnectionAlert(message: "Reconnecting…", shouldAnnounce: false)
             isAssistantTyping = false
             typingSessionKey = nil
         }
@@ -941,11 +1074,11 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
 
     private enum ReconnectTrigger: String {
         case onAppear
-        case manualReconnect
         case sceneDidBecomeActive
         case connectionStateDisconnected
         case connectionStateFailed
         case authStateChange
+        case manualReconnect
     }
 
     private func scheduleReconnect(immediate: Bool = false, reason: ReconnectTrigger = .connectionStateFailed) {
@@ -988,29 +1121,21 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
                 await MainActor.run {
                     self.reconnectBackoff = .seconds(1)
                     self.reconnectTask = nil
-                    self.error = nil
                 }
             } catch {
                 await MainActor.run {
                     if let providerError = error as? ProviderChatService.Error {
                         switch providerError {
                         case .authFailed:
-                            self.enterCriticalConnectionAlert(message: providerError.errorDescription ?? "Authentication failed.")
                             self.reconnectTask = nil
                             self.logout()
                             return
-                        case .missingBaseURL:
-                            self.enterCriticalConnectionAlert(message: providerError.errorDescription ?? "No provider configured.")
-                        case .policyViolation:
-                            self.beginConnectionAlert(message: providerError.errorDescription ?? "Connection rejected.")
                         default:
-                            self.beginConnectionAlert(message: providerError.errorDescription ?? "Connection interrupted.")
+                            break
                         }
-                    } else {
-                        self.beginConnectionAlert(message: "Failed to connect: \(error.localizedDescription)")
                     }
                     if let providerError = error as? ProviderChatService.Error,
-                       shouldUseAuthRejectionBackoff(providerError) {
+                       self.shouldUseAuthRejectionBackoff(providerError) {
                         let current = max(self.reconnectBackoff, self.authRejectionInitialBackoff)
                         self.reconnectBackoff = min(current * 2, self.authRejectionMaxBackoff)
                     } else {
@@ -1030,63 +1155,20 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
     }
 
     private func handleConnectionFailure(_ error: Swift.Error) {
-        if shouldDebounceConnectionError(error) {
-            beginConnectionAlert(message: error.localizedDescription)
-        } else {
-            enterCriticalConnectionAlert(message: error.localizedDescription)
-        }
+        logger.info("connection failure handled silently: \(error.localizedDescription, privacy: .public)")
     }
 
-    private func shouldDebounceConnectionError(_ error: Swift.Error) -> Bool {
-        guard let providerError = error as? ProviderChatService.Error else {
-            return true
+    private func markPendingMessagesAsFailedForConnectionLoss() {
+        guard !pendingLocalMessages.isEmpty else { return }
+        let pendingIds = Set(pendingLocalMessages.map(\.id))
+        for id in pendingIds {
+            messageFailures[id] = MessageFailure(code: "connection_lost", message: nil)
         }
-        switch providerError {
-        case .authFailed, .missingBaseURL:
-            return false
-        default:
-            return true
+        pendingLocalMessages.removeAll()
+        if let activeClientMessageId, pendingIds.contains(activeClientMessageId) {
+            self.activeClientMessageId = nil
+            self.isSending = false
         }
-    }
-
-    private func beginConnectionAlert(message: String, shouldAnnounce: Bool = true) {
-        let resolvedMessage = message.isEmpty ? "Connection interrupted." : message
-        pendingConnectionErrorMessage = resolvedMessage
-        if connectionAlert != .critical {
-            connectionAlert = .caution
-            error = nil
-        }
-        if shouldAnnounce {
-            toastManager.show(resolvedMessage)
-        }
-        connectionAlertTask?.cancel()
-        connectionAlertTask = Task { [weak self] in
-            guard let self else { return }
-            try? await Task.sleep(forDuration: self.connectionAlertGracePeriod)
-            await MainActor.run {
-                guard self.connectionAlert == .caution else { return }
-                self.connectionAlert = .critical
-                self.error = self.pendingConnectionErrorMessage
-                self.toastManager.show(self.pendingConnectionErrorMessage ?? resolvedMessage)
-            }
-        }
-    }
-
-    private func enterCriticalConnectionAlert(message: String) {
-        let resolvedMessage = message.isEmpty ? "Connection interrupted." : message
-        connectionAlertTask?.cancel()
-        connectionAlertTask = nil
-        pendingConnectionErrorMessage = resolvedMessage
-        connectionAlert = .critical
-        error = resolvedMessage
-        toastManager.show(resolvedMessage)
-    }
-
-    private func clearConnectionAlert() {
-        connectionAlertTask?.cancel()
-        connectionAlertTask = nil
-        pendingConnectionErrorMessage = nil
-        connectionAlert = nil
     }
 
     private func performSend(clientId: String,
@@ -1131,7 +1213,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
                 markLocalMessageFailed(
                     id: clientId,
                     code: "queue_failed",
-                    message: error.localizedDescription
+                    message: nil
                 )
                 isSending = false
                 activeClientMessageId = nil
@@ -1180,7 +1262,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
                 markLocalMessageFailed(
                     id: clientId,
                     code: "queue_failed",
-                    message: error.localizedDescription
+                    message: nil
                 )
                 isSending = false
                 activeClientMessageId = nil
@@ -1330,62 +1412,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
         inputContent = NSAttributedString(string: "")
         attachmentData.removeAll()
         uploadedAssetIds.removeAll()
-        persistDraft(for: activeSessionKey)
         inputResetToken &+= 1
-    }
-
-    private func persistDraft(for sessionKey: String) {
-        guard !sessionKey.isEmpty else { return }
-        draftContentBySession[sessionKey] = inputContent
-        draftAttachmentsBySession[sessionKey] = attachmentData
-    }
-
-    private func restoreDraft(for sessionKey: String, announceEditorReset: Bool) {
-        guard !sessionKey.isEmpty else { return }
-        let content = draftContentBySession[sessionKey] ?? NSAttributedString(string: "")
-        let attachments = draftAttachmentsBySession[sessionKey] ?? [:]
-        inputContent = content
-        attachmentData = attachments
-        if announceEditorReset {
-            inputResetToken &+= 1
-        }
-    }
-
-    private func persistDraftContentForActiveSessionIfNeeded() {
-        guard !activeSessionKey.isEmpty else { return }
-        draftContentBySession[activeSessionKey] = inputContent
-    }
-
-    private func persistDraftAttachmentsForActiveSessionIfNeeded() {
-        guard !activeSessionKey.isEmpty else { return }
-        draftAttachmentsBySession[activeSessionKey] = attachmentData
-    }
-
-    func captureComposeDraftSnapshot(for sessionKey: String) -> ComposeDraftSnapshot {
-        guard !sessionKey.isEmpty else { return .empty }
-        if sessionKey == activeSessionKey {
-            return ComposeDraftSnapshot(content: inputContent, attachments: attachmentData)
-        }
-        return ComposeDraftSnapshot(
-            content: draftContentBySession[sessionKey] ?? NSAttributedString(string: ""),
-            attachments: draftAttachmentsBySession[sessionKey] ?? [:]
-        )
-    }
-
-    func applyComposeDraftSnapshot(_ snapshot: ComposeDraftSnapshot,
-                                   to sessionKey: String,
-                                   moveCursorToEnd: Bool,
-                                   announceEditorReset: Bool) {
-        guard !sessionKey.isEmpty else { return }
-        draftContentBySession[sessionKey] = snapshot.content
-        draftAttachmentsBySession[sessionKey] = snapshot.attachments
-
-        guard sessionKey == activeSessionKey else { return }
-        inputContent = snapshot.content
-        attachmentData = snapshot.attachments
-        if announceEditorReset {
-            inputResetToken &+= 1
-        }
     }
 
 
@@ -1423,6 +1450,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
             fingerprint: fingerprint,
             presentation: resolvedPresentation
         )
+        trimPresentationCache()
         trimStreamingStates()
         return resolvedPresentation
     }
@@ -1455,11 +1483,18 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
         case .messageAcked:
             break
         case .connectionInterrupted(let reason):
-            beginConnectionAlert(message: reason ?? "Connection interrupted.")
+            logger.info("connection interrupted reason=\(reason ?? "unknown", privacy: .public)")
+            if sendButtonConnectionState == .connected {
+                transitionConnectionState(.reconnecting, source: .serviceInterruption)
+            }
+            markPendingMessagesAsFailedForConnectionLoss()
+            scheduleReconnect(reason: .connectionStateDisconnected)
         case .userInfo(let info):
             auth.updateAdminStatus(info.isAdmin)
         case .typingStateChanged(let isTyping, let sessionKey):
-            logger.info("typingStateChanged isTyping=\(isTyping, privacy: .public) sessionKey=\(sessionKey, privacy: .public) activeSessionKey=\(self.activeSessionKey, privacy: .public)")
+            logger.info(
+                "typingStateChanged isTyping=\(isTyping, privacy: .public) sessionKey=\(sessionKey, privacy: .public) engineActiveSessionKey=\(self.engineActiveSessionKey, privacy: .public) uiSelectedSessionKey=\(self.uiSelectedSessionKey, privacy: .public)"
+            )
             ensureStreamEntry(for: sessionKey)
             if isTyping {
                 self.isAssistantTyping = true
@@ -1535,6 +1570,13 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
         }
     }
 
+    private func transitionConnectionState(_ state: ConnectionState,
+                                           source: ConnectionStateMutationSource) {
+        connectionState = state
+        logger.info("connectionState transition id=\(self.instanceId, privacy: .public) source=\(source.rawValue, privacy: .public) state=\(String(describing: state), privacy: .public)")
+        handleConnectionState(state)
+    }
+
     private func resetSessionProvisioningState(clearPendingSend: Bool) {
         supportsSessionProvisioning = false
         hasResolvedProvisioningCapability = false
@@ -1573,9 +1615,9 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
 
     private func restoreLastServerMessageIdIfNeeded() {
         guard lastServerMessageId == nil else { return }
-        guard !activeSessionKey.isEmpty else { return }
-        restoreLastServerMessageIdIfNeeded(for: activeSessionKey)
-        lastServerMessageId = lastServerMessageIdBySession[activeSessionKey]
+        guard !engineActiveSessionKey.isEmpty else { return }
+        restoreLastServerMessageIdIfNeeded(for: engineActiveSessionKey)
+        lastServerMessageId = lastServerMessageIdBySession[engineActiveSessionKey]
     }
 
     private func restoreLastServerMessageIdIfNeeded(for sessionKey: String) {
@@ -1616,6 +1658,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
     }
 
     private func restoreCachedMessagesIfNeeded(for sessionKey: String) {
+        StreamSwitchTiming.log("restoreCachedMessagesIfNeeded_start", sessionKey: sessionKey)
         guard restoredSessionKeys.contains(sessionKey) == false else { return }
         restoredSessionKeys.insert(sessionKey)
         guard let url = messageCacheURL(for: sessionKey) else { return }
@@ -1626,6 +1669,9 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
                     self?.clearCursor(for: sessionKey)
                 }
                 return
+            }
+            await MainActor.run {
+                StreamSwitchTiming.log("restoreCachedMessagesIfNeeded_disk_read_complete", sessionKey: sessionKey)
             }
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .iso8601
@@ -1643,11 +1689,12 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
                     self.setMessages(filtered, for: sessionKey)
                     let cachedLast = self.lastServerMessageId(from: filtered)
                     self.lastServerMessageIdBySession[sessionKey] = cachedLast
-                    if self.activeSessionKey == sessionKey {
+                    if self.engineActiveSessionKey == sessionKey {
                         self.lastServerMessageId = cachedLast
                     }
                     self.persistLastServerMessageId(cachedLast, for: sessionKey)
                     self.logger.info("message cache restored sessionKey=\(sessionKey, privacy: .public) count=\(filtered.count, privacy: .public)")
+                    StreamSwitchTiming.log("restoreCachedMessagesIfNeeded_mainactor_apply_complete", sessionKey: sessionKey)
                 }
             } catch {
                 let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "MessagePipeline")
@@ -1657,7 +1704,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
     }
 
     private func clearCursor(for sessionKey: String) {
-        if self.activeSessionKey == sessionKey {
+        if self.engineActiveSessionKey == sessionKey {
             self.lastServerMessageId = nil
         }
         self.lastServerMessageIdBySession.removeValue(forKey: sessionKey)
@@ -1735,7 +1782,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
         didRestoreActiveSessionKey = true
         guard let stored = persistedActiveSessionKey() else { return }
         if orderedSessionKeys.contains(stored) {
-            setActiveSessionKey(stored)
+            setEngineActiveSessionKey(stored)
         }
     }
 
@@ -1751,7 +1798,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
 
     func setActiveStream(_ stream: ChatStream) {
         guard let sessionKey = preferredSessionKey(for: stream) else { return }
-        setActiveSessionKey(sessionKey)
+        setEngineActiveSessionKey(sessionKey)
     }
 
     private func streamMainSessionKey() -> String? {
@@ -1766,12 +1813,12 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
     }
 
     private func ensureDefaultActiveSessionIfNeeded() {
-        if activeSessionKey.isEmpty {
+        if engineActiveSessionKey.isEmpty {
             if let main = streamMainSessionKey() {
                 ensureStreamEntry(for: main)
-                setActiveSessionKey(main)
+                setEngineActiveSessionKey(main)
             } else if let first = orderedSessionKeys.first {
-                setActiveSessionKey(first)
+                setEngineActiveSessionKey(first)
             }
         }
     }
@@ -1820,11 +1867,11 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
         }
         restoreActiveSessionKeyIfNeeded()
         ensureDefaultActiveSessionIfNeeded()
-        if !orderedSessionKeys.contains(activeSessionKey) {
-            applyStreamDeletion(sessionKey: activeSessionKey)
+        if !orderedSessionKeys.contains(engineActiveSessionKey) {
+            applyStreamDeletion(sessionKey: engineActiveSessionKey)
         } else {
-            messages = sessionMessages[activeSessionKey] ?? []
-            lastServerMessageId = lastServerMessageIdBySession[activeSessionKey]
+            messages = sessionMessages[engineActiveSessionKey] ?? []
+            lastServerMessageId = lastServerMessageIdBySession[engineActiveSessionKey]
         }
         SessionRegistry.shared.replace(with: orderedStreams)
         persistStreamMetadata()
@@ -1847,8 +1894,6 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
         syntheticSessionKeys.remove(sessionKey)
         recalculateOrderedSessionKeys()
         sessionMessages.removeValue(forKey: sessionKey)
-        draftContentBySession.removeValue(forKey: sessionKey)
-        draftAttachmentsBySession.removeValue(forKey: sessionKey)
         lastServerMessageIdBySession.removeValue(forKey: sessionKey)
         persistLastServerMessageId(nil, for: sessionKey)
         persistMessages([], for: sessionKey)
@@ -1858,19 +1903,19 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
             isAssistantTyping = false
         }
 
-        if activeSessionKey == sessionKey {
+        if engineActiveSessionKey == sessionKey {
             let fallback = streamMainSessionKey().flatMap { orderedSessionKeys.contains($0) ? $0 : nil }
                 ?? orderedSessionKeys.first
                 ?? streamMainSessionKey()
             if let fallback {
                 ensureStreamEntry(for: fallback)
-                setActiveSessionKey(fallback)
+                setEngineActiveSessionKey(fallback)
             } else {
                 clearActiveSession()
             }
-        } else if !activeSessionKey.isEmpty {
-            messages = sessionMessages[activeSessionKey] ?? []
-            lastServerMessageId = lastServerMessageIdBySession[activeSessionKey]
+        } else if !engineActiveSessionKey.isEmpty {
+            messages = sessionMessages[engineActiveSessionKey] ?? []
+            lastServerMessageId = lastServerMessageIdBySession[engineActiveSessionKey]
         }
         SessionRegistry.shared.remove(sessionKey: sessionKey)
         persistStreamMetadata()
@@ -2075,7 +2120,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
         isSending = false
 
         ensureDefaultActiveSessionIfNeeded()
-        let sessionKey = resolvedSessionKey ?? activeSessionKey
+        let sessionKey = resolvedSessionKey ?? engineActiveSessionKey
         let ack = Message(
             id: "s_no_reply_\(UUID().uuidString)",
             role: .assistant,
@@ -2089,38 +2134,10 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
         appendMessage(ack)
     }
 
-    private struct MessageWindowSignature: Equatable {
-        let count: Int
-        let firstID: String?
-        let lastID: String?
-    }
-
-    private func handleMessageWindowChange(oldMessages: [Message], newMessages: [Message]) {
-        guard !presentationCache.isEmpty else { return }
-        let didWindowChange = messageWindowSignature(for: oldMessages) != messageWindowSignature(for: newMessages)
-        let trimThreshold = max(presentationCacheTrimFloor, newMessages.count * presentationCacheTrimMultiplier)
-        guard didWindowChange || presentationCache.count > trimThreshold else { return }
-        trimPresentationCache(keepingOnly: newMessages)
-    }
-
-    private func messageWindowSignature(for messages: [Message]) -> MessageWindowSignature {
-        MessageWindowSignature(
-            count: messages.count,
-            firstID: messages.first?.id,
-            lastID: messages.last?.id
-        )
-    }
-
-    private func trimPresentationCache(keepingOnly activeMessages: [Message]) {
-        if activeMessages.isEmpty {
-            presentationCache.removeAll(keepingCapacity: true)
-            return
-        }
-        let activeIds = Set(activeMessages.map(\.id))
+    private func trimPresentationCache() {
+        let activeIds = Set(messages.map(\.id))
+        guard !activeIds.isEmpty else { return }
         presentationCache = presentationCache.filter { activeIds.contains($0.key.messageID) }
-#if DEBUG
-        presentationCacheTrimCount += 1
-#endif
     }
 
     private func trimStreamingStates(maxEntries: Int = 120) {
@@ -2182,7 +2199,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
 
     @MainActor
     private func connectionSnapshot() -> (token: String?, lastMessageId: String?) {
-        let activeKey = activeSessionKey
+        let activeKey = engineActiveSessionKey
         let cursor = lastServerMessageIdBySession[activeKey] ?? lastServerMessageId
         return (auth.token, cursor)
     }
@@ -2192,16 +2209,8 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
         connectionSnapshot()
     }
 
-    func debugConnectionAlert() -> ConnectionAlertSeverity? {
-        connectionAlert
-    }
-
     func debugPresentationCacheSize() -> Int {
         presentationCache.count
-    }
-
-    func debugPresentationCacheTrimCount() -> Int {
-        presentationCacheTrimCount
     }
 
     func debugTableParseStateSize() -> Int {

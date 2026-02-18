@@ -292,6 +292,44 @@ struct BubbleScrollTests {
         #expect(layoutRequests == 0)
     }
 
+    @Test("T089: Bubble tap-to-expand is suppressed when link cards are present")
+    @MainActor
+    func bubbleTapSuppressedWhenLinkCardsPresent() {
+        let metrics = ChatFlowTheme.Metrics(isCompact: false)
+        let url = "https://example.com/very/long/link"
+        let repeated = Array(
+            repeating: "This sentence exists to force truncation in the message bubble.",
+            count: 24
+        ).joined(separator: " ")
+        let message = Message(
+            id: "link-card-tap-suppress",
+            role: .assistant,
+            content: "\(repeated)\n\n\(url)",
+            timestamp: Date(),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: "server:personal"
+        )
+
+        let presentationWithPreview = buildPresentation(message, metrics: metrics, enableLinkPreviews: true)
+        let presentationWithoutPreview = buildPresentation(message, metrics: metrics, enableLinkPreviews: false)
+
+        let expandsWithoutPreview = expandCallbackCount(
+            message: message,
+            presentation: presentationWithoutPreview,
+            metrics: metrics
+        )
+        let expandsWithPreview = expandCallbackCount(
+            message: message,
+            presentation: presentationWithPreview,
+            metrics: metrics
+        )
+
+        #expect(expandsWithoutPreview == 1)
+        #expect(expandsWithPreview == 0)
+    }
+
     // MARK: Helpers
 
     @MainActor
@@ -336,6 +374,44 @@ struct BubbleScrollTests {
             return false
         }
         return inner.isScrollEnabled
+    }
+
+    @MainActor
+    private func expandCallbackCount(message: Message,
+                                     presentation: MessagePresentation,
+                                     metrics: ChatFlowTheme.Metrics) -> Int {
+        let sizeClass = MessageFlowRules.sizeClass(for: presentation)
+        let bubble = MessageBubbleUIKitView(frame: CGRect(x: 0, y: 0, width: 360, height: 1))
+        var count = 0
+
+        bubble.configure(
+            message: message,
+            presentation: presentation,
+            sizeClass: sizeClass,
+            metrics: metrics,
+            maxWidth: 360,
+            truncationHeightOverride: 140,
+            bubbleSizingV2: nil,
+            showsHeader: true,
+            paddingScale: 1,
+            minWidthOverride: nil,
+            maxWidthOverride: nil,
+            useContinuousCorners: true,
+            isDark: false,
+            onRequestExpand: { count += 1 },
+            onRequestLayout: nil,
+            onInteractiveCallback: nil
+        )
+        let measured = bubble.systemLayoutSizeFitting(
+            CGSize(width: 360, height: UIView.layoutFittingCompressedSize.height),
+            withHorizontalFittingPriority: .required,
+            verticalFittingPriority: .fittingSizeLevel
+        )
+        bubble.frame = CGRect(origin: .zero, size: measured)
+        bubble.layoutIfNeeded()
+
+        _ = bubble.perform(NSSelectorFromString("handleBubbleTap"))
+        return count
     }
 
     private func allScrollViews(in view: UIView) -> [UIScrollView] {

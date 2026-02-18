@@ -23,11 +23,14 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
     var topInset: CGFloat
     var isCompact: Bool
     var isActiveSession: Bool
+    var isRenderPolicyFrozen: Bool
+    var isInputActive: Bool
     var truncationBottomInset: CGFloat
     var firstUnreadMessageId: String?
     var unreadCount: Int
     var onExpand: ((Message) -> Void)?
     var layoutCoordinator: ChatLayoutCoordinator
+    var shouldRegisterWithLayoutCoordinator: Bool = true
     /// Optional session override - if provided, shows messages for this session instead of activeSessionKey
     var sessionKey: String?
     var onScrollEvent: (@MainActor (MessageFlowScrollEvent) -> Void)?
@@ -46,6 +49,8 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
             viewModel: viewModel,
             isCompact: isCompact,
             isActiveSession: isActiveSession,
+            isRenderPolicyFrozen: isRenderPolicyFrozen,
+            isInputActive: isInputActive,
             topInset: topInset,
             truncationBottomInset: truncationBottomInset,
             firstUnreadMessageId: firstUnreadMessageId,
@@ -55,7 +60,7 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
             onScrollEvent: onScrollEvent,
             isDark: isDark
         )
-        if let sessionKey {
+        if shouldRegisterWithLayoutCoordinator, let sessionKey {
             layoutCoordinator.registerListView(controller, sessionKey: sessionKey)
         }
         return controller
@@ -71,6 +76,8 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
             viewModel: viewModel,
             isCompact: isCompact,
             isActiveSession: isActiveSession,
+            isRenderPolicyFrozen: isRenderPolicyFrozen,
+            isInputActive: isInputActive,
             topInset: topInset,
             truncationBottomInset: truncationBottomInset,
             firstUnreadMessageId: firstUnreadMessageId,
@@ -80,7 +87,7 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
             onScrollEvent: onScrollEvent,
             isDark: isDark
         )
-        if let sessionKey {
+        if shouldRegisterWithLayoutCoordinator, let sessionKey {
             layoutCoordinator.registerListView(uiViewController, sessionKey: sessionKey)
         }
     }
@@ -104,10 +111,14 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     private var bubbleSizingV2DeferredFlushTimer: Timer?
     private var bubbleSizingV2RemeasureBatchStartTime: CFAbsoluteTime?
     private var bubbleSizingV2RemeasureDeferredUntilNearBottom: Bool = false
+    private var deferredBottomInsetRemeasureIds: Set<String> = []
+    private var bottomInsetRemeasureTimer: Timer?
+    private var bottomInsetRemeasureBypassInputGates = false
     private var bubbleSizingV2LastScrollActivityTime: CFAbsoluteTime = 0
     private static let bubbleSizingV2RemeasureDebounceSeconds: TimeInterval = 0.45
     private static let bubbleSizingV2RemeasureMaxWaitSeconds: TimeInterval = 2.5
     private static let bubbleSizingV2RestSettleDelaySeconds: TimeInterval = 0.12
+    private static let bottomInsetHeightCapInvalidationDebounceSeconds: TimeInterval = 0.20
 
     private var messagesById: [String: Message] = [:]
     private var fingerprints: [String: Int] = [:]
@@ -116,16 +127,12 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     private var pendingReconfigureIds: Set<String> = []
     private var dirtySizeIds: Set<String> = []
     private var invalidationScheduled = false
-    private var lastRenderedMessageRevision: Int = -1
-    private var lastRenderedTypingRevision: Int = -1
-    private var lastRenderedSessionOverride: String?
-    private var lastRenderedUnreadCount: Int = 0
-    private var lastRenderedFirstUnreadMessageID: String?
-    private var lastRenderedIsActiveSession: Bool = true
     private var lastMessageId: String?
     private var viewModel: ChatViewModel?
     private var isCompact: Bool = true
     private var isActiveSession: Bool = true
+    private var isRenderPolicyFrozen: Bool = false
+    private var isInputActive: Bool = false
     private var topInset: CGFloat = 0
     private var truncationBottomInset: CGFloat = 0
     private var lastBoundsSize: CGSize = .zero
@@ -141,6 +148,64 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     private var pendingFlashIsUnreadTap: Bool = false
     private var pendingEntranceAnimationIds: Set<String> = []
     private var pendingScrollToBottomAfterInteractionEnd: Bool = false
+    // Staged stream materialization (approved spec: tail window -> full history).
+    // WHY N=50: device measurements showed 500-item first apply taking 1.4-2.7s.
+    // A 50-item first paint targets ~10% of that cost while still showing meaningful recent context.
+    private static let stagedMaterializationTailWindowCount = 50
+
+    private enum MaterializationStage: String {
+        // WHY only two stages: spec intentionally limits complexity to one fast first paint
+        // followed by one full-history expansion. No intermediate windows.
+        case tail
+        case full
+    }
+
+    private enum ExpansionState: String {
+        case idle
+        case pendingFull
+    }
+
+    private struct WindowBounds {
+        var lowerBound: Int
+        var upperBound: Int
+
+        static let empty = WindowBounds(lowerBound: 0, upperBound: 0)
+    }
+
+    private struct MaterializationState {
+        var stage: MaterializationStage
+        var windowBounds: WindowBounds
+        var expansionState: ExpansionState
+        var unreadOutsideTailWindow: Bool
+    }
+
+    private enum MaterializationEvent {
+        case messagesUpdated(totalCount: Int,
+                             firstUnreadMessageId: String?,
+                             fullMessageIds: [String],
+                             allowTailStage: Bool)
+        case tailRendered(totalCount: Int,
+                          firstUnreadMessageId: String?,
+                          fullMessageIds: [String])
+    }
+
+    private struct MaterializationEventEnvelope {
+        let sessionKey: String
+        let event: MaterializationEvent
+    }
+
+    private struct MaterializationPlan {
+        var stage: MaterializationStage
+        var windowBounds: WindowBounds
+        var unreadOutsideTailWindow: Bool
+        var scheduleTailToFullPromotion: Bool
+        var isTailToFullExpansionApply: Bool
+    }
+
+    private var materializationStateBySessionKey: [String: MaterializationState] = [:]
+    private var materializationEventQueue: [MaterializationEventEnvelope] = []
+    private var isMaterializationQueueProcessing = false
+    private var lastMaterializationPlanBySessionKey: [String: MaterializationPlan] = [:]
     // Typing indicator morph is a bespoke overlay animation. During the morph we must prevent
     // normal lifecycle behaviors from fighting it:
     // - `willDisplay` resets (alpha/transform) can overwrite our fade-in target cell state.
@@ -161,6 +226,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     private var restoredScrollKeys: Set<String> = []
     private var scrollStateWriteDebounceTimer: Timer?
     private static let scrollStateWriteDebounceSeconds: TimeInterval = 0.35
+    private var pendingBottomInsetHeightCapInvalidation: DispatchWorkItem?
     // iPad mini 6th gen portrait reference size used as the max chat geometry envelope on large screens.
     private static let bubbleReferenceSize = CGSize(width: 744, height: 1133)
     /// Single source of truth for what “at bottom” means across:
@@ -230,10 +296,171 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
 
     deinit {
         NotificationCenter.default.removeObserver(self, name: UIApplication.willResignActiveNotification, object: nil)
+        pendingBottomInsetHeightCapInvalidation?.cancel()
+    }
+
+    // MARK: - Cache Mutation Seam
+    // Invariant: All bubble cache mutations go through this seam.
+
+    private struct CachedMeasurement {
+        let size: CGSize
+    }
+
+    private typealias HeightDelta = CGFloat
+
+    private enum InvalidationReason {
+        case messageChanged(id: String)
+        case messagesRemoved([String])
+        case envChanged
+        case compactnessChanged
+        case containerSizeChanged
+    }
+
+    private enum InvalidationPlan {
+        case none
+        case reconfigureItems([String])
+        case remeasureAndShift([(id: String, delta: HeightDelta)])
+        case fullRebuild
+    }
+
+    @discardableResult
+    private func readSizeState(messageId: String, env: BubbleSizingV2.Environment) -> CachedMeasurement? {
+        _ = env
+        guard let cached = sizeCache[messageId] else { return nil }
+        lastMeasuredSizes[messageId] = cached
+        return CachedMeasurement(size: cached)
+    }
+
+    @discardableResult
+    private func writeMeasuredSize(messageId: String, measurement: CGSize) -> HeightDelta? {
+        let previous = lastMeasuredSizes[messageId]
+        lastMeasuredSizes[messageId] = measurement
+        sizeCache[messageId] = measurement
+        guard let previous else { return nil }
+        let heightDelta = measurement.height - previous.height
+        let widthDelta = measurement.width - previous.width
+        let epsilon: CGFloat = 0.5
+        guard abs(heightDelta) > epsilon || abs(widthDelta) > epsilon else { return nil }
+        return heightDelta
+    }
+
+    @discardableResult
+    private func recordAsyncPreview(messageId: String, key: String, height: CGFloat) -> HeightDelta? {
+        let oldHeight = bubbleSizingV2LinkPreviewHeightCache.get(cacheKey: key)
+        bubbleSizingV2LinkPreviewHeightCache.set(height: height, cacheKey: key)
+        let epsilon: CGFloat = 4
+        guard oldHeight == nil || abs((oldHeight ?? 0) - height) > epsilon else {
+            return nil
+        }
+        bubbleSizingV2LinkPreviewStateVersionByMessageId[messageId, default: 0] += 1
+        return height - (oldHeight ?? height)
+    }
+
+    @discardableResult
+    private func invalidateFor(reason: InvalidationReason) -> InvalidationPlan {
+        switch reason {
+        case .messageChanged(let id):
+            dirtySizeIds.insert(id)
+            return .fullRebuild
+        case .messagesRemoved(let ids):
+            clearSizeState(for: ids)
+            ids.forEach { invalidateBubbleSizingV2Cache(for: $0) }
+            removeBubbleV2PreviewVersions(for: ids)
+            return .none
+        case .envChanged, .compactnessChanged, .containerSizeChanged:
+            clearAllSizeState()
+            clearAllBubbleV2State()
+            return .fullRebuild
+        }
+    }
+
+    private func executeInvalidationPlan(_ plan: InvalidationPlan) {
+        switch plan {
+        case .none:
+            break
+        case .reconfigureItems(let ids):
+            ids.forEach { scheduleReconfigure(for: $0) }
+        case .remeasureAndShift(let changes):
+            guard changes.count == 1,
+                  let change = changes.first,
+                  abs(change.delta) > 0.5,
+                  let indexPath = dataSource.indexPath(for: change.id) else {
+                scheduleLayoutInvalidation()
+                return
+            }
+            let viewportAnchor = captureBubbleSizingV2ViewportAnchor()
+            flowLayout.invalidateLayout(mode: .itemHeightChange(index: indexPath.item, delta: change.delta))
+            scheduleBubbleSizingV2ViewportAnchorCompensation(viewportAnchor)
+        case .fullRebuild:
+            scheduleLayoutInvalidation()
+        }
+    }
+
+    private func clearSizeState(for ids: [String]) {
+        ids.forEach { id in
+            lastMeasuredSizes.removeValue(forKey: id)
+            sizeCache.removeValue(forKey: id)
+        }
+    }
+
+    private func clearAllSizeState() {
+        lastMeasuredSizes.removeAll()
+        sizeCache.removeAll()
+    }
+
+    private func clearAllBubbleV2State() {
+        bubbleSizingV2MeasurementCache.removeAll()
+        bubbleSizingV2KeysByMessageId.removeAll()
+        bubbleSizingV2LinkPreviewStateVersionByMessageId.removeAll()
+    }
+
+    private func removeBubbleV2PreviewVersions(for ids: [String]) {
+        ids.forEach { bubbleSizingV2LinkPreviewStateVersionByMessageId.removeValue(forKey: $0) }
+    }
+
+    private func cachedWidth(for messageId: String) -> CGFloat? {
+        sizeCache[messageId]?.width
+    }
+
+    private func bubbleV2PreviewVersion(for messageId: String) -> Int {
+        bubbleSizingV2LinkPreviewStateVersionByMessageId[messageId] ?? 0
+    }
+
+    private func bubbleV2Measurement(for key: BubbleSizingV2.CacheKey) -> BubbleSizingV2.Measurement? {
+        bubbleSizingV2MeasurementCache.value(forKey: key)
+    }
+
+    private func recordBubbleV2Measurement(_ measurement: BubbleSizingV2.Measurement,
+                                           key: BubbleSizingV2.CacheKey,
+                                           messageId: String) {
+        bubbleSizingV2MeasurementCache.setValue(measurement, forKey: key)
+        bubbleSizingV2KeysByMessageId[messageId, default: []].insert(key)
+    }
+
+    private func removeBubbleV2Measurements(for messageId: String) {
+        guard let keys = bubbleSizingV2KeysByMessageId.removeValue(forKey: messageId) else { return }
+        for key in keys {
+            bubbleSizingV2MeasurementCache.removeValue(forKey: key)
+        }
+    }
+
+    private func consumePendingInvalidatedSizeIds() -> [String] {
+        let ids = Array(dirtySizeIds)
+        dirtySizeIds.removeAll()
+        return ids
+    }
+
+    private func hasDirtySizeIds() -> Bool {
+        !dirtySizeIds.isEmpty
+    }
+
+    private func cachedPreviewHeight(cacheKey: String) -> CGFloat? {
+        bubbleSizingV2LinkPreviewHeightCache.get(cacheKey: cacheKey)
     }
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
+        let t0 = CFAbsoluteTimeGetCurrent()
 
         // iOS: Extend the collection view to fill the entire screen, ignoring safe areas.
         // SwiftUI's UIViewControllerRepresentable doesn't respect .ignoresSafeArea() for UIKit views,
@@ -268,8 +495,10 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         // Handle bounds size changes
         let size = collectionView.bounds.size
         guard size != .zero, size != lastBoundsSize else {
+            NSLog("[KBTIMING] viewDidLayoutSubviews noChange dt=%.4f", CFAbsoluteTimeGetCurrent() - t0)
             return
         }
+        NSLog("[KBTIMING] viewDidLayoutSubviews RELAYOUT old=%@ new=%@", NSCoder.string(for: lastBoundsSize), NSCoder.string(for: size))
         lastBoundsSize = size
         forceReconfigureAll = true
         updateLayout()
@@ -278,6 +507,8 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 viewModel: viewModel,
                 isCompact: isCompact,
                 isActiveSession: isActiveSession,
+                isRenderPolicyFrozen: isRenderPolicyFrozen,
+                isInputActive: isInputActive,
                 topInset: topInset,
                 truncationBottomInset: truncationBottomInset,
                 firstUnreadMessageId: self.firstUnreadMessageId,
@@ -287,6 +518,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
 #if os(visionOS)
         updateVisibleCellOpacity()
 #endif
+        NSLog("[KBTIMING] viewDidLayoutSubviews DONE dt=%.4f", CFAbsoluteTimeGetCurrent() - t0)
     }
 
 #if os(visionOS)
@@ -328,6 +560,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         checkFirstUnreadCrossingIfNeeded()
         schedulePersistScrollState()
         flushDeferredBubbleSizingV2RemeasureIfNeeded()
+        scheduleDeferredBottomInsetRemeasure()
     }
 
     func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
@@ -346,6 +579,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             performPendingDeferredScrollToBottomIfNeeded()
             schedulePersistScrollState()
             flushDeferredBubbleSizingV2RemeasureIfNeeded()
+            scheduleDeferredBottomInsetRemeasure()
         }
     }
 
@@ -360,6 +594,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         performPendingDeferredScrollToBottomIfNeeded()
         schedulePersistScrollState()
         flushDeferredBubbleSizingV2RemeasureIfNeeded()
+        scheduleDeferredBottomInsetRemeasure()
     }
 
     func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
@@ -369,6 +604,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         performPendingDeferredScrollToBottomIfNeeded()
         schedulePersistScrollState()
         flushDeferredBubbleSizingV2RemeasureIfNeeded()
+        scheduleDeferredBottomInsetRemeasure()
     }
 
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
@@ -423,6 +659,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             cell.transform = .identity
         }
 #endif
+        scheduleDeferredBottomInsetRemeasure()
     }
 
     var currentBottomInset: CGFloat = 0
@@ -463,10 +700,34 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         // InsetsChanged: pinned intent means we keep the indicator hidden in AT_BOTTOM* states.
         emitHideIndicatorIfChanged()
         handleBottomInsetHeightCapChange(previousBottomInset: previousBottomInset, newBottomInset: totalBottomInset)
+        NSLog("[KBTIMING] setBottomInset total=%.1f anim=%.2f", totalBottomInset, animatedDuration ?? 0)
     }
 
     private func handleBottomInsetHeightCapChange(previousBottomInset: CGFloat, newBottomInset: CGFloat) {
         guard abs(newBottomInset - previousBottomInset) > 0.5 else { return }
+        scheduleBottomInsetHeightCapInvalidation(
+            previousBottomInset: previousBottomInset,
+            newBottomInset: newBottomInset
+        )
+    }
+
+    private func scheduleBottomInsetHeightCapInvalidation(previousBottomInset: CGFloat, newBottomInset: CGFloat) {
+        pendingBottomInsetHeightCapInvalidation?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.pendingBottomInsetHeightCapInvalidation = nil
+            self?.applyBottomInsetHeightCapInvalidation(
+                previousBottomInset: previousBottomInset,
+                newBottomInset: newBottomInset
+            )
+        }
+        pendingBottomInsetHeightCapInvalidation = workItem
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + Self.bottomInsetHeightCapInvalidationDebounceSeconds,
+            execute: workItem
+        )
+    }
+
+    private func applyBottomInsetHeightCapInvalidation(previousBottomInset: CGFloat, newBottomInset: CGFloat) {
         guard let viewModel else { return }
         let metrics = ChatFlowTheme.Metrics(isCompact: isCompact)
         let affectedIds = messagesById.values.compactMap { message -> String? in
@@ -474,21 +735,81 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             return isSingleLinkPreviewBubble(presentation: presentation) ? message.id : nil
         }
         guard !affectedIds.isEmpty else { return }
+        deferredBottomInsetRemeasureIds.formUnion(affectedIds)
+        // Keyboard dismiss is a discrete geometry transition, not active typing churn.
+        // When inset collapses significantly, visible capped bubbles must remeasure promptly
+        // even if focus/content gates still report "active input".
+        if isLikelyKeyboardDismissInsetChange(previousBottomInset: previousBottomInset, newBottomInset: newBottomInset) {
+            bottomInsetRemeasureBypassInputGates = true
+        }
+        scheduleDeferredBottomInsetRemeasure()
+    }
 
-        if bubbleSizingV2Enabled {
-            affectedIds.forEach { invalidateBubbleSizingV2Cache(for: $0) }
-        } else {
-            affectedIds.forEach { sizeCache.removeValue(forKey: $0) }
-            affectedIds.forEach { lastMeasuredSizes.removeValue(forKey: $0) }
+    private func isLikelyKeyboardDismissInsetChange(previousBottomInset: CGFloat, newBottomInset: CGFloat) -> Bool {
+        let collapsedBy = previousBottomInset - newBottomInset
+        // Keyboard transitions are large inset drops (hundreds of points), unlike line-wrap
+        // or small chrome adjustments. Keep this threshold conservative to avoid broadening scope.
+        return collapsedBy > 80
+    }
+
+    private func scheduleDeferredBottomInsetRemeasure() {
+        guard !deferredBottomInsetRemeasureIds.isEmpty else { return }
+        bottomInsetRemeasureTimer?.invalidate()
+        let delay: TimeInterval = isBubbleSizingV2ScrollAtRest() ? 0.02 : Self.bubbleSizingV2RestSettleDelaySeconds
+        let timer = Timer(timeInterval: delay, repeats: false) { [weak self] _ in
+            guard let self else { return }
+            self.bottomInsetRemeasureTimer = nil
+            self.flushDeferredBottomInsetRemeasureIfNeeded()
+        }
+        bottomInsetRemeasureTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    private func flushDeferredBottomInsetRemeasureIfNeeded() {
+        guard !deferredBottomInsetRemeasureIds.isEmpty else { return }
+        guard isBubbleSizingV2ScrollAtRest() else {
+            // If we intentionally bypass input gates for keyboard-dismiss, keep trying until rest.
+            if bottomInsetRemeasureBypassInputGates {
+                scheduleDeferredBottomInsetRemeasure()
+            }
+            return
+        }
+        if !bottomInsetRemeasureBypassInputGates {
+            guard !isInputActive else { return }
+            guard viewModel?.inputContent.isEffectivelyEmpty != false else { return }
         }
 
-        // Item heights depend on bottom inset for single-link bubbles; force both size recompute and
-        // live-cell reconfigure so initial and relayout paths cannot diverge.
-        affectedIds.forEach { scheduleReconfigure(for: $0) }
-        flowLayout.invalidateLayout()
+        let visibleIds: Set<String> = Set(collectionView.indexPathsForVisibleItems.compactMap { indexPath in
+            guard let id = dataSource.itemIdentifier(for: indexPath), id != TypingIndicatorCell.itemId else {
+                return nil
+            }
+            return id
+        })
+        let idsToRemeasure = Array(deferredBottomInsetRemeasureIds.intersection(visibleIds))
+        guard !idsToRemeasure.isEmpty else {
+            // Bypass applies to currently visible bubbles only.
+            // Keep non-visible ids queued for normal scroll-into-view handling.
+            bottomInsetRemeasureBypassInputGates = false
+            return
+        }
+
+        if bubbleSizingV2Enabled {
+            idsToRemeasure.forEach { invalidateBubbleSizingV2Cache(for: $0) }
+        } else {
+            clearSizeState(for: idsToRemeasure)
+        }
+
+        idsToRemeasure.forEach { id in
+            scheduleReconfigure(for: id)
+            let plan = invalidateFor(reason: .messageChanged(id: id))
+            executeInvalidationPlan(plan)
+        }
+        deferredBottomInsetRemeasureIds.subtract(idsToRemeasure)
+        bottomInsetRemeasureBypassInputGates = false
     }
 
     func scheduleScrollToBottom(animated: Bool, attempts: Int = 2) {
+        NSLog("[KBTIMING] scheduleScrollToBottom animated=%d attempts=%d", animated ? 1 : 0, attempts)
         pendingScrollToBottomAttempts = max(pendingScrollToBottomAttempts, attempts)
         pendingScrollToBottomAnimated = pendingScrollToBottomAnimated || animated
         performPendingScrollToBottomIfNeeded()
@@ -496,6 +817,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
 
     private func performPendingScrollToBottomIfNeeded() {
         guard pendingScrollToBottomAttempts > 0 else { return }
+        NSLog("[KBTIMING] performPendingScrollToBottom remaining=%d", pendingScrollToBottomAttempts)
         let animated = pendingScrollToBottomAnimated
         pendingScrollToBottomAttempts -= 1
         collectionView.layoutIfNeeded()
@@ -509,10 +831,282 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         }
     }
 
+    // MARK: - Staged Materialization Seam
+    // Invariant: stage/window/expansion mutations flow through advanceMaterialization(sessionKey:event:).
+
+    private func enqueueMaterializationEvent(sessionKey: String,
+                                             event: MaterializationEvent) -> MaterializationPlan {
+        materializationEventQueue.append(MaterializationEventEnvelope(sessionKey: sessionKey, event: event))
+        processMaterializationEventQueue()
+        return lastMaterializationPlanBySessionKey[sessionKey]
+            ?? MaterializationPlan(
+                stage: .full,
+                windowBounds: .empty,
+                unreadOutsideTailWindow: false,
+                scheduleTailToFullPromotion: false,
+                isTailToFullExpansionApply: false
+            )
+    }
+
+    private func pruneMaterializationState(validSessionKeys: Set<String>) {
+        let staleStateKeys = materializationStateBySessionKey.keys.filter { !validSessionKeys.contains($0) }
+        for key in staleStateKeys {
+            materializationStateBySessionKey.removeValue(forKey: key)
+        }
+        let stalePlanKeys = lastMaterializationPlanBySessionKey.keys.filter { !validSessionKeys.contains($0) }
+        for key in stalePlanKeys {
+            lastMaterializationPlanBySessionKey.removeValue(forKey: key)
+        }
+        materializationEventQueue.removeAll { !validSessionKeys.contains($0.sessionKey) }
+    }
+
+    private func processMaterializationEventQueue() {
+        guard !isMaterializationQueueProcessing else { return }
+        isMaterializationQueueProcessing = true
+        defer { isMaterializationQueueProcessing = false }
+
+        // FIFO command processing keeps expansion and append events deterministic.
+        while !materializationEventQueue.isEmpty {
+            let envelope = materializationEventQueue.removeFirst()
+            let plan = advanceMaterialization(sessionKey: envelope.sessionKey, event: envelope.event)
+            lastMaterializationPlanBySessionKey[envelope.sessionKey] = plan
+        }
+    }
+
+    private func advanceMaterialization(sessionKey: String,
+                                        event: MaterializationEvent) -> MaterializationPlan {
+        let totalCount: Int
+        let firstUnreadId: String?
+        let fullMessageIds: [String]
+        let allowTailStage: Bool
+        switch event {
+        case .messagesUpdated(let count, let unreadId, let ids, let allowTail):
+            totalCount = count
+            firstUnreadId = unreadId
+            fullMessageIds = ids
+            allowTailStage = allowTail
+        case .tailRendered(let count, let unreadId, let ids):
+            totalCount = count
+            firstUnreadId = unreadId
+            fullMessageIds = ids
+            allowTailStage = false
+        }
+
+        if totalCount <= 0 {
+            materializationStateBySessionKey[sessionKey] = MaterializationState(
+                stage: .full,
+                windowBounds: .empty,
+                expansionState: .idle,
+                unreadOutsideTailWindow: false
+            )
+            return MaterializationPlan(
+                stage: .full,
+                windowBounds: .empty,
+                unreadOutsideTailWindow: false,
+                scheduleTailToFullPromotion: false,
+                isTailToFullExpansionApply: false
+            )
+        }
+
+        if totalCount <= Self.stagedMaterializationTailWindowCount {
+            // WHY bypass staging for small streams: adding tail->full churn would be overhead
+            // without meaningful latency reduction when full history is already short.
+            let fullBounds = WindowBounds(lowerBound: 0, upperBound: totalCount)
+            materializationStateBySessionKey[sessionKey] = MaterializationState(
+                stage: .full,
+                windowBounds: fullBounds,
+                expansionState: .idle,
+                unreadOutsideTailWindow: false
+            )
+            return MaterializationPlan(
+                stage: .full,
+                windowBounds: fullBounds,
+                unreadOutsideTailWindow: false,
+                scheduleTailToFullPromotion: false,
+                isTailToFullExpansionApply: false
+            )
+        }
+
+        var state = materializationStateBySessionKey[sessionKey]
+        if state == nil {
+            if allowTailStage {
+                let tailBounds = tailWindowBounds(totalCount: totalCount)
+                state = MaterializationState(
+                    stage: .tail,
+                    windowBounds: tailBounds,
+                    expansionState: .pendingFull,
+                    unreadOutsideTailWindow: isUnreadOutsideTailWindow(
+                        firstUnreadMessageId: firstUnreadId,
+                        bounds: tailBounds,
+                        fullMessageIds: fullMessageIds
+                    )
+                )
+            } else {
+                let fullBounds = WindowBounds(lowerBound: 0, upperBound: totalCount)
+                state = MaterializationState(
+                    stage: .full,
+                    windowBounds: fullBounds,
+                    expansionState: .idle,
+                    unreadOutsideTailWindow: false
+                )
+            }
+        }
+        guard var state else {
+            // Defensive fallback to satisfy control-flow analysis.
+            // In practice, state is always initialized by the branch above.
+            let fullBounds = WindowBounds(lowerBound: 0, upperBound: totalCount)
+            return MaterializationPlan(
+                stage: .full,
+                windowBounds: fullBounds,
+                unreadOutsideTailWindow: false,
+                scheduleTailToFullPromotion: false,
+                isTailToFullExpansionApply: false
+            )
+        }
+
+        switch event {
+        case .messagesUpdated:
+            if state.stage == .tail {
+                let tailBounds = tailWindowBounds(totalCount: totalCount)
+                state.windowBounds = tailBounds
+                state.unreadOutsideTailWindow = isUnreadOutsideTailWindow(
+                    firstUnreadMessageId: firstUnreadId,
+                    bounds: tailBounds,
+                    fullMessageIds: fullMessageIds
+                )
+                let shouldSchedule = state.expansionState == .pendingFull
+                if shouldSchedule {
+                    // WHY only one promotion trigger: tail->full is a single transition.
+                    // Reissuing promotions would queue redundant expansion work and add jitter.
+                    state.expansionState = .idle
+                }
+                materializationStateBySessionKey[sessionKey] = state
+                return MaterializationPlan(
+                    stage: .tail,
+                    windowBounds: tailBounds,
+                    unreadOutsideTailWindow: state.unreadOutsideTailWindow,
+                    scheduleTailToFullPromotion: shouldSchedule,
+                    isTailToFullExpansionApply: false
+                )
+            }
+
+            let fullBounds = WindowBounds(lowerBound: 0, upperBound: totalCount)
+            state.stage = .full
+            state.windowBounds = fullBounds
+            state.expansionState = .idle
+            state.unreadOutsideTailWindow = false
+            materializationStateBySessionKey[sessionKey] = state
+            return MaterializationPlan(
+                stage: .full,
+                windowBounds: fullBounds,
+                unreadOutsideTailWindow: false,
+                scheduleTailToFullPromotion: false,
+                isTailToFullExpansionApply: false
+            )
+
+        case .tailRendered:
+            if state.stage == .tail {
+                let fullBounds = WindowBounds(lowerBound: 0, upperBound: totalCount)
+                state.stage = .full
+                state.windowBounds = fullBounds
+                state.expansionState = .idle
+                state.unreadOutsideTailWindow = false
+                materializationStateBySessionKey[sessionKey] = state
+                return MaterializationPlan(
+                    stage: .full,
+                    windowBounds: fullBounds,
+                    unreadOutsideTailWindow: false,
+                    scheduleTailToFullPromotion: false,
+                    isTailToFullExpansionApply: true
+                )
+            }
+
+            let fullBounds = WindowBounds(lowerBound: 0, upperBound: totalCount)
+            state.stage = .full
+            state.windowBounds = fullBounds
+            state.expansionState = .idle
+            state.unreadOutsideTailWindow = false
+            materializationStateBySessionKey[sessionKey] = state
+            return MaterializationPlan(
+                stage: .full,
+                windowBounds: fullBounds,
+                unreadOutsideTailWindow: false,
+                scheduleTailToFullPromotion: false,
+                isTailToFullExpansionApply: false
+            )
+        }
+    }
+
+    private func tailWindowBounds(totalCount: Int) -> WindowBounds {
+        let lower = max(0, totalCount - Self.stagedMaterializationTailWindowCount)
+        return WindowBounds(lowerBound: lower, upperBound: totalCount)
+    }
+
+    private func isUnreadOutsideTailWindow(firstUnreadMessageId: String?,
+                                           bounds: WindowBounds,
+                                           fullMessageIds: [String]) -> Bool {
+        guard let firstUnreadMessageId else { return false }
+        guard let index = fullMessageIds.firstIndex(of: firstUnreadMessageId) else {
+            return true
+        }
+        return index < bounds.lowerBound || index >= bounds.upperBound
+    }
+
+    private func stagedMessageIDs(messages: [Message], bounds: WindowBounds) -> [String] {
+        guard !messages.isEmpty else { return [] }
+        let lower = max(0, min(bounds.lowerBound, messages.count))
+        let upper = max(lower, min(bounds.upperBound, messages.count))
+        guard lower < upper else { return [] }
+        return messages[lower..<upper].map(\.id)
+    }
+
+    private func scheduleTailToFullPromotionIfNeeded(sessionKey: String) {
+        // Promotion is queued on next runloop turn so tail stage can render first.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            let sessionMatches = (self.channelOverride ?? self.viewModel?.engineActiveSessionKey) == sessionKey
+            guard self.isActiveSession, sessionMatches else { return }
+            let fullMessages = self.viewModel?.messages(for: sessionKey) ?? []
+            let fullMessageIds = fullMessages.map(\.id)
+
+            let plan = self.enqueueMaterializationEvent(
+                sessionKey: sessionKey,
+                event: .tailRendered(
+                    totalCount: fullMessages.count,
+                    firstUnreadMessageId: self.firstUnreadMessageId,
+                    fullMessageIds: fullMessageIds
+                )
+            )
+            guard plan.isTailToFullExpansionApply else { return }
+            self.runMaterializationRefreshPass()
+        }
+    }
+
+    private func runMaterializationRefreshPass() {
+        guard let viewModel else { return }
+        update(
+            viewModel: viewModel,
+            isCompact: isCompact,
+            isActiveSession: isActiveSession,
+            isRenderPolicyFrozen: isRenderPolicyFrozen,
+            isInputActive: isInputActive,
+            topInset: topInset,
+            truncationBottomInset: truncationBottomInset,
+            firstUnreadMessageId: firstUnreadMessageId,
+            unreadCount: unreadCount,
+            onExpand: onExpand,
+            sessionKey: channelOverride,
+            onScrollEvent: onScrollEvent,
+            isDark: currentIsDark
+        )
+    }
+
     func update(
         viewModel: ChatViewModel,
         isCompact: Bool,
         isActiveSession: Bool,
+        isRenderPolicyFrozen: Bool,
+        isInputActive: Bool,
         topInset: CGFloat,
         truncationBottomInset: CGFloat,
         firstUnreadMessageId: String?,
@@ -523,14 +1117,16 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         isDark: Bool? = nil
     ) {
         loadViewIfNeeded()
+        let t0 = CFAbsoluteTimeGetCurrent()
         let previousLastMessageId = lastMessageId
         let wasUserInteracting = isUserInteracting
         let wasPinnedToBottomIntent = sbbState.isPinnedToBottomIntent
         let previousSessionKey = self.channelOverride
-        let previousIsActiveSession = self.isActiveSession
         self.viewModel = viewModel
         self.channelOverride = sessionKey
         self.isActiveSession = isActiveSession
+        self.isRenderPolicyFrozen = isRenderPolicyFrozen
+        self.isInputActive = isInputActive
         self.onExpand = onExpand
         self.truncationBottomInset = truncationBottomInset
         self.onScrollEvent = onScrollEvent
@@ -545,8 +1141,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         if let isDark = isDark, currentIsDark != isDark {
             logger.info("update: appearance changed isDark=\(isDark, privacy: .public)")
             currentIsDark = isDark
-            sizeCache.removeAll()
-            lastMeasuredSizes.removeAll()
+            clearAllSizeState()
             forceReconfigureAll = true
         }
 #if os(visionOS)
@@ -559,14 +1154,21 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         }
 #endif
 
-        let effectiveSessionKey = sessionKey ?? viewModel.activeSessionKey
+        let effectiveSessionKey = sessionKey ?? viewModel.engineActiveSessionKey
+        collectionView.accessibilityIdentifier = effectiveSessionKey
+        StreamSwitchTiming.log("messageFlow_update_enter", sessionKey: effectiveSessionKey)
+        pruneMaterializationState(validSessionKeys: Set(viewModel.orderedSessionKeys))
         let isOffscreenSession = sessionKey != nil && !isActiveSession
+        if isRenderPolicyFrozen {
+            // Render policy `.frozen` applies to ALL pages, including the outgoing engine-active page.
+            // We suppress starting new snapshot/apply/layout work during pager animation.
+            // Any apply already in flight is allowed to finish normally.
+            StreamSwitchTiming.log("messageFlow_update_skipped_frozen", sessionKey: effectiveSessionKey)
+            return
+        }
         let needsFullLayout = forceReconfigureAll
             || self.isCompact != isCompact
             || self.topInset != topInset
-            // Bottom inset/truncation changes are handled via setBottomInset() targeted updates.
-            // They must not force a full snapshot rebuild for large message lists.
-            || previousIsActiveSession != isActiveSession
             || previousSessionKey != sessionKey
         self.isCompact = isCompact
         self.topInset = topInset
@@ -580,38 +1182,49 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         if needsFullLayout {
             updateLayout()
         }
-        let currentMessageRevision = viewModel.activeMessageListRevision
-        let currentTypingRevision = viewModel.typingIndicatorRevision
-        let canSkipContentRefresh = !needsFullLayout
-            && lastRenderedMessageRevision == currentMessageRevision
-            && lastRenderedTypingRevision == currentTypingRevision
-            && lastRenderedSessionOverride == sessionKey
-            && lastRenderedFirstUnreadMessageID == firstUnreadMessageId
-            && lastRenderedUnreadCount == unreadCount
-            && lastRenderedIsActiveSession == isActiveSession
-        if canSkipContentRefresh {
-            return
-        }
-        print("DICTATION_PERF ts=\(Date().timeIntervalSince1970) event=message_flow_refresh_begin")
+        NSLog("[KBTIMING] MFCV.update layoutDecision fullLayout=%d dt=%.4f", needsFullLayout ? 1 : 0, CFAbsoluteTimeGetCurrent() - t0)
 
         // Use session override if provided, otherwise use active session messages.
         let messages = sessionKey.map { viewModel.messages(for: $0) } ?? viewModel.messages
-        let appendedMessageIDs = Self.appendedMessageIDs(previousLastMessageId: previousLastMessageId, messageIDs: messages.map(\.id))
+        let fullMessageIds = messages.map(\.id)
+        let appendedMessageIDs = Self.appendedMessageIDs(previousLastMessageId: previousLastMessageId, messageIDs: fullMessageIds)
         let messageCount = messages.count
-        if Set(messages.map(\.id)).count != messageCount {
+        if Set(fullMessageIds).count != messageCount {
             logger.info("diffing duplicate ids in viewModel.messages count=\(messageCount, privacy: .public)")
         }
         messagesById = Dictionary(uniqueKeysWithValues: messages.map { ($0.id, $0) })
         let newFingerprints = Dictionary(uniqueKeysWithValues: messages.map { ($0.id, fingerprint(for: $0)) })
         let removedIds = Set(fingerprints.keys).subtracting(newFingerprints.keys)
-        removedIds.forEach { lastMeasuredSizes.removeValue(forKey: $0) }
-        removedIds.forEach { sizeCache.removeValue(forKey: $0) }
-        removedIds.forEach { invalidateBubbleSizingV2Cache(for: $0) }
-        removedIds.forEach { bubbleSizingV2LinkPreviewStateVersionByMessageId.removeValue(forKey: $0) }
+        let removedPlan = invalidateFor(reason: .messagesRemoved(Array(removedIds)))
+        executeInvalidationPlan(removedPlan)
 
+        StreamSwitchTiming.log("snapshot_build_start", sessionKey: effectiveSessionKey)
+        // WHY revisits skip tail stage: first-visit latency is the bottleneck.
+        // Returning to a visited stream should avoid staged complexity and show full history directly.
+        let isFirstActivationForSession = materializationStateBySessionKey[effectiveSessionKey] == nil
+        let materializationPlan = enqueueMaterializationEvent(
+            sessionKey: effectiveSessionKey,
+            event: .messagesUpdated(
+                totalCount: messageCount,
+                firstUnreadMessageId: firstUnreadMessageId,
+                fullMessageIds: fullMessageIds,
+                allowTailStage: isFirstActivationForSession
+            )
+        )
+        let snapshotMessageIds: [String]
+        switch materializationPlan.stage {
+        case .tail:
+            snapshotMessageIds = stagedMessageIDs(messages: messages, bounds: materializationPlan.windowBounds)
+        case .full:
+            snapshotMessageIds = fullMessageIds
+        }
+        StreamSwitchTiming.log(
+            "materialization_plan stage=\(materializationPlan.stage.rawValue) items=\(snapshotMessageIds.count) total=\(messageCount)",
+            sessionKey: effectiveSessionKey
+        )
         var snapshot = NSDiffableDataSourceSnapshot<Int, String>()
         snapshot.appendSections([0])
-        snapshot.appendItems(messages.map(\.id))
+        snapshot.appendItems(snapshotMessageIds)
         let oldItemIds = Set(dataSource.snapshot().itemIdentifiers)
 
         // Add typing indicator when assistant is typing (server-controlled)
@@ -627,10 +1240,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         if showTypingIndicator {
             snapshot.appendItems([TypingIndicatorCell.itemId])
         }
-        print(
-            "DICTATION_PERF ts=\(Date().timeIntervalSince1970) event=snapshot_built " +
-            "messageCount=\(messageCount) typing=\(showTypingIndicator)"
-        )
+        StreamSwitchTiming.log("snapshot_build_end", sessionKey: effectiveSessionKey)
 
         let newItemIds = Set(snapshot.itemIdentifiers)
         let insertedIds = newItemIds.subtracting(oldItemIds)
@@ -646,18 +1256,20 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             pendingEntranceAnimationIds.insert(newestMessageId)
         }
 
-        let changedIds = needsFullLayout
-            ? messages.map(\.id)
+        let materializedIdSet = Set(snapshotMessageIds)
+        let changedIds = (needsFullLayout
+            ? fullMessageIds
             : newFingerprints.compactMap { id, fingerprint in
                 fingerprints[id] == fingerprint ? nil : id
-            }
+            }).filter { materializedIdSet.contains($0) }
         if !changedIds.isEmpty {
             snapshot.reconfigureItems(changedIds)
-            flowLayout.invalidateLayout()
-            changedIds.forEach { sizeCache.removeValue(forKey: $0) }
-            changedIds.forEach { lastMeasuredSizes.removeValue(forKey: $0) }
+            changedIds.forEach { id in
+                let plan = invalidateFor(reason: .messageChanged(id: id))
+                executeInvalidationPlan(plan)
+            }
             changedIds.forEach { invalidateBubbleSizingV2Cache(for: $0) }
-            changedIds.forEach { bubbleSizingV2LinkPreviewStateVersionByMessageId.removeValue(forKey: $0) }
+            removeBubbleV2PreviewVersions(for: changedIds)
         }
         forceReconfigureAll = false
 
@@ -672,52 +1284,68 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         let afterSnapshotApplied: (() -> Void) = { [weak self] in
             guard let self else { return }
             self.attemptRestoreScrollIfNeeded()
+            if materializationPlan.scheduleTailToFullPromotion {
+                self.scheduleTailToFullPromotionIfNeeded(sessionKey: effectiveSessionKey)
+            }
             if shouldAutoScrollToBottomAfterApply {
                 // Race-sensitive: the contentSize can change again after diffable applies.
                 // A few post-apply attempts preserves the historical “always end up at the bottom” behavior.
                 self.scheduleScrollToBottom(animated: true, attempts: 3)
             }
+            // Stream-switch engine activation completion is defined as:
+            // first active-page snapshot materialization after engineActiveSessionKey commit.
+            // This is the point where ChatView can safely clear the spinner gate.
+            if self.isActiveSession {
+                viewModel.markEngineActivationRenderedIfNeeded(for: effectiveSessionKey)
+            }
         }
+        // Spec requires explicit contentOffset compensation for tail->full prepend.
+        // This anchor path captures (messageId, oldFrameMinY, oldContentOffsetY), then applies:
+        // contentOffset.y += (newFrameMinY - oldFrameMinY), clamped to bounds, with no animated scroll.
+        let expansionAnchor = materializationPlan.isTailToFullExpansionApply
+            ? captureBubbleSizingV2ViewportAnchor()
+            : nil
 
         if shouldMorph {
-            print("DICTATION_PERF ts=\(Date().timeIntervalSince1970) event=apply_snapshot_morph_begin")
 #if os(visionOS)
+            StreamSwitchTiming.log("dataSource_apply_start", sessionKey: effectiveSessionKey)
             applySnapshotWithTypingMorphIfPossible(snapshot: snapshot, targetMessageId: newestMessageId) { [weak self] in
-                print("DICTATION_PERF ts=\(Date().timeIntervalSince1970) event=apply_snapshot_morph_end")
                 afterSnapshotApplied()
+                self?.scheduleBubbleSizingV2ViewportAnchorCompensation(expansionAnchor)
                 self?.updateVisibleCellOpacity()
+                StreamSwitchTiming.log("dataSource_apply_end", sessionKey: effectiveSessionKey)
             }
 #else
+            StreamSwitchTiming.log("dataSource_apply_start", sessionKey: effectiveSessionKey)
             applySnapshotWithTypingMorphIfPossible(snapshot: snapshot, targetMessageId: newestMessageId) { [weak self] in
-                print("DICTATION_PERF ts=\(Date().timeIntervalSince1970) event=apply_snapshot_morph_end")
                 afterSnapshotApplied()
+                self?.scheduleBubbleSizingV2ViewportAnchorCompensation(expansionAnchor)
+                StreamSwitchTiming.log("dataSource_apply_end", sessionKey: effectiveSessionKey)
             }
 #endif
         } else {
-            print("DICTATION_PERF ts=\(Date().timeIntervalSince1970) event=apply_snapshot_begin")
 #if os(visionOS)
+            StreamSwitchTiming.log("dataSource_apply_start", sessionKey: effectiveSessionKey)
             dataSource.apply(snapshot, animatingDifferences: false) { [weak self] in
-                print("DICTATION_PERF ts=\(Date().timeIntervalSince1970) event=apply_snapshot_end")
                 afterSnapshotApplied()
+                self?.scheduleBubbleSizingV2ViewportAnchorCompensation(expansionAnchor)
                 self?.updateVisibleCellOpacity()
+                StreamSwitchTiming.log("dataSource_apply_end", sessionKey: effectiveSessionKey)
             }
 #else
+            StreamSwitchTiming.log("dataSource_apply_start", sessionKey: effectiveSessionKey)
             dataSource.apply(snapshot, animatingDifferences: false) { [weak self] in
-                print("DICTATION_PERF ts=\(Date().timeIntervalSince1970) event=apply_snapshot_end")
                 afterSnapshotApplied()
+                self?.scheduleBubbleSizingV2ViewportAnchorCompensation(expansionAnchor)
+                StreamSwitchTiming.log("dataSource_apply_end", sessionKey: effectiveSessionKey)
             }
 #endif
         }
+        NSLog("[KBTIMING] MFCV.update snapshotApply changed=%d morph=%d dt=%.4f", changedIds.count, shouldMorph ? 1 : 0, CFAbsoluteTimeGetCurrent() - t0)
         logger.info(
             "diffing apply snapshot count=\(messageCount, privacy: .public) changed=\(changedIds.count, privacy: .public) needsLayout=\(needsFullLayout, privacy: .public) morph=\(shouldMorph, privacy: .public)"
         )
         fingerprints = newFingerprints
-        lastRenderedMessageRevision = currentMessageRevision
-        lastRenderedTypingRevision = currentTypingRevision
-        lastRenderedSessionOverride = sessionKey
-        lastRenderedFirstUnreadMessageID = firstUnreadMessageId
-        lastRenderedUnreadCount = unreadCount
-        lastRenderedIsActiveSession = isActiveSession
 
         if lastMessageId != newestMessageId {
             lastMessageId = newestMessageId
@@ -760,7 +1388,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         }
         syncUnreadStateWithSBBState()
         handleContentUpdateCompletion()
-        print("DICTATION_PERF ts=\(Date().timeIntervalSince1970) event=message_flow_refresh_end")
+        NSLog("[KBTIMING] MFCV.update DONE dt=%.4f", CFAbsoluteTimeGetCurrent() - t0)
     }
 
     static func appendedMessageIDs(previousLastMessageId: String?, messageIDs: [String]) -> [String] {
@@ -772,7 +1400,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     }
 
     private func resolvedSessionKey() -> String {
-        channelOverride ?? viewModel?.activeSessionKey ?? ""
+        channelOverride ?? viewModel?.engineActiveSessionKey ?? ""
     }
 
     private func emit(_ event: MessageFlowScrollEvent) {
@@ -904,6 +1532,13 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         guard let messageId = firstUnreadMessageId else { return }
         if didCrossAndClearFirstUnreadId == messageId { return }
         guard let indexPath = dataSource.indexPath(for: messageId) else {
+            let materializationState = materializationStateBySessionKey[resolvedSessionKey()]
+            if materializationState?.stage == .tail,
+               materializationState?.unreadOutsideTailWindow == true {
+                // Tail stage intentionally does not materialize the full history yet.
+                // Missing unread marker here is expected and must not clear unread state.
+                return
+            }
             // Spec: if the unread anchor disappears from the dataset, clear unread immediately.
             unreadCount = 0
             firstUnreadWasBelowViewportCenter = nil
@@ -1103,7 +1738,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                     for: indexPath
                 ) as? TypingIndicatorCell
                 let metrics = ChatFlowTheme.Metrics(isCompact: self.isCompact)
-                let storageKey = viewModel.typingSessionKey ?? viewModel.activeSessionKey
+                let storageKey = viewModel.typingSessionKey ?? viewModel.engineActiveSessionKey
                 let message = TypingIndicatorCell.makeMessage(sessionKey: storageKey)
                 let presentation = TypingIndicatorCell.makePresentation(metrics: metrics)
                 let sizeClass = MessageFlowRules.sizeClass(for: presentation)
@@ -1180,7 +1815,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             } else {
                 layoutStateV2 = nil
                 // Use cached size width for consistent sizing with measurement
-                configureWidth = self.sizeCache[id]?.width ?? maxWidth
+                configureWidth = self.cachedWidth(for: id) ?? maxWidth
                 truncationHeightOverrideV1 = fallbackHeightPolicy.v1TruncationHeightOverride
                 bubbleHeightPolicyForConfigure = fallbackHeightPolicy
             }
@@ -1223,12 +1858,10 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         targetMessageId: String?,
         onApplied: (() -> Void)?
     ) {
-        print("DICTATION_PERF ts=\(Date().timeIntervalSince1970) event=typing_morph_path_enter")
         guard let targetMessageId,
               let typingIndexPath = dataSource.indexPath(for: TypingIndicatorCell.itemId),
               let typingCell = collectionView.cellForItem(at: typingIndexPath) else {
             // Fallback: let diffable handle it (better than skipping updates).
-            print("DICTATION_PERF ts=\(Date().timeIntervalSince1970) event=typing_morph_fallback_apply")
             dataSource.apply(snapshot, animatingDifferences: true, completion: onApplied)
             return
         }
@@ -1285,12 +1918,10 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                     initialSpringVelocity: 0.25,
                     options: [.curveEaseInOut, .allowUserInteraction]
                 ) {
-                    print("DICTATION_PERF ts=\(Date().timeIntervalSince1970) event=typing_morph_animation_begin")
                     typingSnapshotView.frame = endFrame
                     typingSnapshotView.alpha = 0
                     targetCell.alpha = 1
                 } completion: { _ in
-                    print("DICTATION_PERF ts=\(Date().timeIntervalSince1970) event=typing_morph_animation_end")
                     typingSnapshotView.removeFromSuperview()
                     self.morphTargetMessageId = nil
                     // Scroll-to-bottom often triggers a layout pass/scroll animation that makes the
@@ -1306,6 +1937,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     }
 
     private func updateLayout() {
+        let t0 = CFAbsoluteTimeGetCurrent()
         let metrics = ChatFlowTheme.Metrics(isCompact: isCompact)
         flowLayout.minimumInteritemSpacing = metrics.flowGap
         flowLayout.minimumLineSpacing = metrics.flowGap
@@ -1322,12 +1954,9 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         collectionView.contentInset.top = topInset
         collectionView.verticalScrollIndicatorInsets.top = topInset
         setBottomInset(currentBottomInset)
-        lastMeasuredSizes.removeAll()
-        sizeCache.removeAll()
-        bubbleSizingV2MeasurementCache.removeAll()
-        bubbleSizingV2KeysByMessageId.removeAll()
-        bubbleSizingV2LinkPreviewStateVersionByMessageId.removeAll()
-        flowLayout.invalidateLayout()
+        let envInvalidationPlan = invalidateFor(reason: .envChanged)
+        executeInvalidationPlan(envInvalidationPlan)
+        NSLog("[KBTIMING] updateLayout cacheCleared invalidated dt=%.4f", CFAbsoluteTimeGetCurrent() - t0)
     }
 
     private func availableContentWidth() -> CGFloat {
@@ -1519,11 +2148,12 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         guard let id = dataSource.itemIdentifier(for: indexPath), let viewModel else {
             return .zero
         }
+        let metrics = ChatFlowTheme.Metrics(isCompact: isCompact)
+        let env = bubbleSizingV2Environment(metrics: metrics)
 
         // Handle typing indicator size
         if id == TypingIndicatorCell.itemId {
-            let metrics = ChatFlowTheme.Metrics(isCompact: isCompact)
-            let storageKey = viewModel.typingSessionKey ?? viewModel.activeSessionKey
+            let storageKey = viewModel.typingSessionKey ?? viewModel.engineActiveSessionKey
             let message = TypingIndicatorCell.makeMessage(sessionKey: storageKey)
             let presentation = TypingIndicatorCell.makePresentation(metrics: metrics)
             let sizeClass = MessageFlowRules.sizeClass(for: presentation)
@@ -1552,11 +2182,9 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             return .zero
         }
         if bubbleSizingV2Enabled {
-            let metrics = ChatFlowTheme.Metrics(isCompact: isCompact)
             let presentation = viewModel.presentation(for: message, metrics: metrics)
             let hideHeader = shouldHideHeader(for: message, presentation: presentation)
             let failureReason = viewModel.failureMessage(for: message.id)
-            let env = bubbleSizingV2Environment(metrics: metrics)
             let plan = bubbleSizingV2Plan(
                 message: message,
                 presentation: presentation,
@@ -1575,11 +2203,9 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             )
             return layoutState.measurement.measuredCellSize
         }
-        if let cached = sizeCache[id] {
-            lastMeasuredSizes[id] = cached
-            return cached
+        if let cached = readSizeState(messageId: id, env: env) {
+            return cached.size
         }
-        let metrics = ChatFlowTheme.Metrics(isCompact: isCompact)
         let presentation = viewModel.presentation(for: message, metrics: metrics)
         let hideHeader = shouldHideHeader(for: message, presentation: presentation)
         let sizeClass = MessageFlowRules.sizeClass(for: presentation)
@@ -1592,7 +2218,6 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             containerWidth: availableWidth
         )
         let failureReason = viewModel.failureMessage(for: message.id)
-        let env = bubbleSizingV2Environment(metrics: metrics)
         let bubbleHeightPolicy = bubbleHeightPolicyForPresentation(
             presentation: presentation,
             metrics: metrics,
@@ -1607,8 +2232,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             bubbleHeightPolicy: bubbleHeightPolicy,
             showsHeader: !hideHeader
         )
-        sizeCache[id] = measuredSize
-        lastMeasuredSizes[id] = measuredSize
+        _ = writeMeasuredSize(messageId: id, measurement: measuredSize)
         return measuredSize
     }
 
@@ -1799,7 +2423,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                                           plan: BubbleSizingV2.Plan,
                                           failureReason: String?,
                                           showsHeader: Bool) -> BubbleSizingV2.LayoutState {
-        let initialLinkVersion: Int = bubbleSizingV2LinkPreviewStateVersionByMessageId[message.id] ?? 0
+        let initialLinkVersion: Int = bubbleV2PreviewVersion(for: message.id)
         let layoutFingerprintSeed = bubbleSizingV2LayoutFingerprintSeed(
             plan: plan,
             showsHeader: showsHeader,
@@ -1812,7 +2436,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             env: env,
             linkPreviewStateVersion: initialLinkVersion
         )
-        if let cached = bubbleSizingV2MeasurementCache.value(forKey: key) {
+        if let cached = bubbleV2Measurement(for: key) {
             return bubbleSizingV2MakeLayoutState(
                 message: message,
                 presentation: presentation,
@@ -1832,8 +2456,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             failureReason: failureReason,
             showsHeader: showsHeader
         )
-        bubbleSizingV2MeasurementCache.setValue(measured.measurement, forKey: key)
-        bubbleSizingV2KeysByMessageId[message.id, default: []].insert(key)
+        recordBubbleV2Measurement(measured.measurement, key: key, messageId: message.id)
         return measured
     }
 
@@ -1876,7 +2499,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         let previewMaxHeight = linkPreviewViewportMaxHeight(plan: plan)
         let fixedPreviewHeight: CGFloat? = plan.isSingleLinkPreview ? previewMaxHeight : nil
         let estimated = fixedPreviewHeight
-            ?? bubbleSizingV2LinkPreviewHeightCache.get(cacheKey: cacheKey)
+            ?? cachedPreviewHeight(cacheKey: cacheKey)
             ?? 120
         let previewMinHeight = fixedPreviewHeight ?? 40
         return BubbleSizingV2.LayoutState(
@@ -1929,7 +2552,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         let linkPreviewMaxHeight = linkPreviewViewportMaxHeight(plan: plan)
         let fixedPreviewHeight: CGFloat? = plan.isSingleLinkPreview ? linkPreviewMaxHeight : nil
         let linkPreviewEstimatedHeight: CGFloat? = fixedPreviewHeight
-            ?? linkPreviewCacheKey.flatMap { bubbleSizingV2LinkPreviewHeightCache.get(cacheKey: $0) }
+            ?? linkPreviewCacheKey.flatMap { cachedPreviewHeight(cacheKey: $0) }
         let previewInitialHeight = linkPreviewEstimatedHeight ?? 120
         let previewMinHeight = fixedPreviewHeight ?? 40
 
@@ -2186,11 +2809,13 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     }
 
     func scrollToBottom(animated: Bool) {
+        let t0 = CFAbsoluteTimeGetCurrent()
         guard let lastMessageId,
               dataSource.indexPath(for: lastMessageId) != nil else {
             return
         }
         collectionView.layoutIfNeeded()
+        NSLog("[KBTIMING] scrollToBottom.layoutIfNeeded dt=%.4f", CFAbsoluteTimeGetCurrent() - t0)
         let contentInset = collectionView.contentInset
         // Scroll to the bottom of the content (includes section insets/padding).
         // Using contentSize avoids under-scrolling when sectionInset.bottom is non-zero.
@@ -2203,6 +2828,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             return
         }
         collectionView.setContentOffset(CGPoint(x: 0, y: clampedY), animated: animated)
+        NSLog("[KBTIMING] scrollToBottom animated=%d targetY=%.1f dt=%.4f", animated ? 1 : 0, clampedY, CFAbsoluteTimeGetCurrent() - t0)
     }
 
     func scrollToMessageCentered(messageId: String, animated: Bool) {
@@ -2239,6 +2865,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     }
 
     func adjustContentOffsetForBottomInsetChange(delta: CGFloat) {
+        NSLog("[KBTIMING] adjustContentOffset delta=%.1f", delta)
         guard abs(delta) > 0.5 else { return }
         let contentInset = collectionView.contentInset
         let minY = -contentInset.top
@@ -2272,8 +2899,8 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     }
 
     private func invalidateLayout(for messageId: String) {
-        dirtySizeIds.insert(messageId)
-        scheduleLayoutInvalidation()
+        let plan = invalidateFor(reason: .messageChanged(id: messageId))
+        executeInvalidationPlan(plan)
     }
 
     private func handleCellRequestedLayout(messageId: String) {
@@ -2380,13 +3007,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             return
         }
         let newHeight = previewView.reportedHeight
-        let oldHeight = bubbleSizingV2LinkPreviewHeightCache.get(cacheKey: cacheKey)
-        bubbleSizingV2LinkPreviewHeightCache.set(height: newHeight, cacheKey: cacheKey)
-
-        let epsilon: CGFloat = 4
-        if oldHeight == nil || abs((oldHeight ?? 0) - newHeight) > epsilon {
-            bubbleSizingV2LinkPreviewStateVersionByMessageId[messageId, default: 0] += 1
-        }
+        _ = recordAsyncPreview(messageId: messageId, key: cacheKey, height: newHeight)
 
         bubbleSizingV2PendingRemeasureIds.insert(messageId)
         scheduleBubbleSizingV2Remeasure()
@@ -2496,10 +3117,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     }
 
     private func invalidateBubbleSizingV2Cache(for messageId: String) {
-        guard let keys = bubbleSizingV2KeysByMessageId.removeValue(forKey: messageId) else { return }
-        for key in keys {
-            bubbleSizingV2MeasurementCache.removeValue(forKey: key)
-        }
+        removeBubbleV2Measurements(for: messageId)
     }
 
     private struct BubbleSizingV2ViewportAnchor {
@@ -2620,14 +3238,17 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             // Cap height to the truncation max.
             snapped.height = min(snapped.height, cap)
         }
-        if let previous = lastMeasuredSizes[messageId] {
+        let previous = readSizeState(messageId: messageId, env: env)?.size
+        if let previous {
             let heightDelta = abs(previous.height - snapped.height)
             let widthDelta = abs(previous.width - snapped.width)
             guard heightDelta > 8 || widthDelta > 4 else { return }
         }
-        lastMeasuredSizes[messageId] = snapped
-        sizeCache[messageId] = snapped
-        scheduleLayoutInvalidation()
+        if let delta = writeMeasuredSize(messageId: messageId, measurement: snapped) {
+            executeInvalidationPlan(.remeasureAndShift([(id: messageId, delta: delta)]))
+        } else {
+            scheduleLayoutInvalidation()
+        }
         if messageId == lastMessageId {
             scheduleScrollToBottom(animated: false, attempts: 1)
         }
@@ -2651,13 +3272,9 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             self.invalidationScheduled = false
-            if !self.dirtySizeIds.isEmpty {
-                let ids = self.dirtySizeIds
-                self.dirtySizeIds.removeAll()
-                ids.forEach { id in
-                    self.sizeCache.removeValue(forKey: id)
-                    self.lastMeasuredSizes.removeValue(forKey: id)
-                }
+            if self.hasDirtySizeIds() {
+                let ids = self.consumePendingInvalidatedSizeIds()
+                self.clearSizeState(for: ids)
             }
             self.flowLayout.invalidateLayout()
         }
@@ -2671,10 +3288,22 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
 }
 
 private final class MessageFlowLayout: UICollectionViewFlowLayout {
+    enum InvalidationMode {
+        case fullRebuild
+        case itemHeightChange(index: Int, delta: CGFloat)
+    }
+
+    private enum PendingInvalidation: Equatable {
+        case none
+        case fullRebuild
+        case itemHeightChange(index: Int, delta: CGFloat)
+    }
+
     private var cachedAttributes: [IndexPath: UICollectionViewLayoutAttributes] = [:]
     private var cachedContentSize: CGSize = .zero
     private var needsRebuild = true
     private var cachedLayoutSignature: LayoutSignature?
+    private var pendingInvalidation: PendingInvalidation = .fullRebuild
 
     private struct LayoutSignature: Equatable {
         let itemCount: Int
@@ -2685,8 +3314,11 @@ private final class MessageFlowLayout: UICollectionViewFlowLayout {
     }
 
     override func prepare() {
+        let t0 = CFAbsoluteTimeGetCurrent()
         super.prepare()
         guard let collectionView else { return }
+        let sessionKey = collectionView.accessibilityIdentifier
+        StreamSwitchTiming.log("layout_prepare_start", sessionKey: sessionKey)
 
         let itemCount = collectionView.numberOfItems(inSection: 0)
         let contentWidth = collectionView.bounds.width
@@ -2697,7 +3329,29 @@ private final class MessageFlowLayout: UICollectionViewFlowLayout {
             minimumInteritemSpacing: minimumInteritemSpacing,
             minimumLineSpacing: minimumLineSpacing
         )
+        if case let .itemHeightChange(index, delta) = pendingInvalidation,
+           !needsRebuild,
+           cachedLayoutSignature == signature,
+           applyItemHeightChange(index: index, delta: delta) {
+            pendingInvalidation = .none
+            cachedLayoutSignature = signature
+            StreamSwitchTiming.log("layout_prepare_end", sessionKey: sessionKey)
+            return
+        }
+
+        if !needsRebuild,
+           let previous = cachedLayoutSignature,
+           canAppendIncrementally(from: previous, to: signature),
+           appendLastItem(collectionView: collectionView, signature: signature) {
+            pendingInvalidation = .none
+            cachedLayoutSignature = signature
+            StreamSwitchTiming.log("layout_prepare_end", sessionKey: sessionKey)
+            return
+        }
+
         if !needsRebuild, cachedLayoutSignature == signature {
+            pendingInvalidation = .none
+            StreamSwitchTiming.log("layout_prepare_end", sessionKey: sessionKey)
             return
         }
 
@@ -2706,6 +3360,7 @@ private final class MessageFlowLayout: UICollectionViewFlowLayout {
             cachedContentSize = .zero
             cachedLayoutSignature = signature
             needsRebuild = false
+            StreamSwitchTiming.log("layout_prepare_end", sessionKey: sessionKey)
             return
         }
 
@@ -2737,6 +3392,81 @@ private final class MessageFlowLayout: UICollectionViewFlowLayout {
         cachedContentSize = CGSize(width: contentWidth, height: y + rowHeight + sectionInset.bottom)
         cachedLayoutSignature = signature
         needsRebuild = false
+        pendingInvalidation = .none
+        StreamSwitchTiming.log("layout_prepare_end", sessionKey: sessionKey)
+        NSLog("[KBTIMING] FlowLayout.prepare items=%d dt=%.4f", itemCount, CFAbsoluteTimeGetCurrent() - t0)
+    }
+
+    private func canAppendIncrementally(from previous: LayoutSignature, to current: LayoutSignature) -> Bool {
+        guard current.itemCount == previous.itemCount + 1 else { return false }
+        guard current.contentWidth == previous.contentWidth else { return false }
+        guard current.sectionInset == previous.sectionInset else { return false }
+        guard current.minimumInteritemSpacing == previous.minimumInteritemSpacing else { return false }
+        guard current.minimumLineSpacing == previous.minimumLineSpacing else { return false }
+        guard pendingInvalidation == .none else { return false }
+        return !cachedAttributes.isEmpty
+    }
+
+    private func appendLastItem(collectionView: UICollectionView, signature: LayoutSignature) -> Bool {
+        let newItemIndex = signature.itemCount - 1
+        guard newItemIndex > 0 else { return false }
+        let previousIndexPath = IndexPath(item: newItemIndex - 1, section: 0)
+        guard let previousAttributes = cachedAttributes[previousIndexPath] else { return false }
+
+        let newIndexPath = IndexPath(item: newItemIndex, section: 0)
+        let size = (collectionView.delegate as? UICollectionViewDelegateFlowLayout)?
+            .collectionView?(collectionView, layout: self, sizeForItemAt: newIndexPath) ?? itemSize
+        let maxX = signature.contentWidth - sectionInset.right
+        let rowMinY = previousAttributes.frame.minY
+        let rowHeight = cachedAttributes.values
+            .filter { abs($0.frame.minY - rowMinY) <= 0.5 }
+            .map { $0.frame.height }
+            .max() ?? previousAttributes.frame.height
+
+        var x = previousAttributes.frame.maxX + minimumInteritemSpacing
+        var y = rowMinY
+        var currentRowHeight = rowHeight
+        if x + size.width > maxX, x > sectionInset.left {
+            x = sectionInset.left
+            y = rowMinY + rowHeight + minimumLineSpacing
+            currentRowHeight = 0
+        }
+
+        let frame = CGRect(x: x, y: y, width: size.width, height: size.height)
+        let attributes = UICollectionViewLayoutAttributes(forCellWith: newIndexPath)
+        attributes.frame = frame
+        cachedAttributes[newIndexPath] = attributes
+
+        currentRowHeight = max(currentRowHeight, size.height)
+        cachedContentSize = CGSize(
+            width: signature.contentWidth,
+            height: y + currentRowHeight + sectionInset.bottom
+        )
+        return true
+    }
+
+    private func applyItemHeightChange(index: Int, delta: CGFloat) -> Bool {
+        guard abs(delta) > 0.5 else { return true }
+        let indexPath = IndexPath(item: index, section: 0)
+        guard let attributes = cachedAttributes[indexPath] else { return false }
+
+        let oldFrame = attributes.frame
+        let rowMinY = oldFrame.minY
+        let rowAttributes = cachedAttributes.values.filter { abs($0.frame.minY - rowMinY) <= 0.5 }
+        let oldRowHeight = rowAttributes.map(\.frame.height).max() ?? oldFrame.height
+        let newHeight = max(1, oldFrame.height + delta)
+        attributes.frame = CGRect(x: oldFrame.minX, y: oldFrame.minY, width: oldFrame.width, height: newHeight)
+        let newRowHeight = rowAttributes.map(\.frame.height).max() ?? newHeight
+        let rowDelta = newRowHeight - oldRowHeight
+        guard abs(rowDelta) > 0.5 else { return true }
+
+        for entry in cachedAttributes where entry.key != indexPath && entry.value.frame.minY > rowMinY + 0.5 {
+            var frame = entry.value.frame
+            frame.origin.y += rowDelta
+            entry.value.frame = frame
+        }
+        cachedContentSize.height += rowDelta
+        return true
     }
 
     override var collectionViewContentSize: CGSize {
@@ -2751,12 +3481,24 @@ private final class MessageFlowLayout: UICollectionViewFlowLayout {
         cachedAttributes[indexPath]
     }
 
+    func invalidateLayout(mode: InvalidationMode) {
+        switch mode {
+        case .fullRebuild:
+            pendingInvalidation = .fullRebuild
+            needsRebuild = true
+            super.invalidateLayout()
+        case .itemHeightChange(let index, let delta):
+            pendingInvalidation = .itemHeightChange(index: index, delta: delta)
+            super.invalidateLayout()
+        }
+    }
+
     override func invalidateLayout() {
-        needsRebuild = true
-        super.invalidateLayout()
+        invalidateLayout(mode: .fullRebuild)
     }
 
     override func invalidateLayout(with context: UICollectionViewLayoutInvalidationContext) {
+        pendingInvalidation = .fullRebuild
         needsRebuild = true
         super.invalidateLayout(with: context)
     }

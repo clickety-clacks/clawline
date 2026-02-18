@@ -229,6 +229,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
     private weak var centeredOverlayView: UIView?
     private var currentMessageId: String?
     private var wasOverflowingOnLastLayout = false
+    private var suppressExpandTapForLinkCards = false
 
     private var traitObservation: (any NSObjectProtocol)?
 
@@ -687,6 +688,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
                 cardURLs.append(previewURL)
             }
         }
+        suppressExpandTapForLinkCards = !cardURLs.isEmpty
         if !cardURLs.isEmpty {
             if shouldShowInlineReloadButton, let url = cardURLs.first {
                 let row = UIStackView()
@@ -841,6 +843,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
                 role: message.role,
                 metrics: metrics,
                 maxLineWidth: ChatFlowTheme.maxLineWidth(bodyFontSize: metrics.bodyFontSize),
+                isDark: effectiveIsDark,
                 onExpand: { [weak self] in self?.onRequestExpand?() }
             )
             dynamicContentStack.addArrangedSubview(tableView)
@@ -1032,6 +1035,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
 
     func prepareForReuse() {
         currentMessageId = nil
+        suppressExpandTapForLinkCards = false
         resetOuterScrollState(resetOffset: true)
         wasOverflowingOnLastLayout = false
         salientTask?.cancel()
@@ -1317,6 +1321,9 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
     }
 
     @objc private func handleBubbleTap() {
+        if suppressExpandTapForLinkCards {
+            return
+        }
         // If the bubble overflows the max height cap, allow tap-to-expand (signals "truncated").
         if dynamicContentScrollView.contentSize.height > dynamicContentScrollView.bounds.height + 1 {
             onRequestExpand?()
@@ -2401,6 +2408,7 @@ final class TableUIKitWrapperView: UIView {
         role: Message.Role,
         metrics: ChatFlowTheme.Metrics,
         maxLineWidth: CGFloat,
+        isDark: Bool,
         onExpand: @escaping () -> Void
     ) {
         currentModel = model
@@ -2425,7 +2433,10 @@ final class TableUIKitWrapperView: UIView {
         )
 
         let hostingController = UIHostingController(rootView: AnyView(tableView))
+        let style: UIUserInterfaceStyle = isDark ? .dark : .light
+        hostingController.overrideUserInterfaceStyle = style
         hostingController.view.backgroundColor = .clear
+        hostingController.view.overrideUserInterfaceStyle = style
         hostingController.view.translatesAutoresizingMaskIntoConstraints = false
         // Disable safe area insets to prevent layout issues
         hostingController.safeAreaRegions = []

@@ -12,6 +12,7 @@ import SwiftUI
 struct StreamToast: View {
     let displayName: String
     let sessionKey: String
+    let isBusy: Bool
 
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.settingsManager) private var settings
@@ -40,13 +41,20 @@ struct StreamToast: View {
 
     var body: some View {
         VStack(spacing: 8) {
-            Text(displayName)
-                .font(.system(size: 32, weight: .semibold, design: .rounded))
-                .foregroundStyle(toastTextColor)
-                .lineLimit(1)
-                .minimumScaleFactor(0.6)
-                .truncationMode(.tail)
-                .multilineTextAlignment(.center)
+            HStack(spacing: 10) {
+                if isBusy {
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(toastTextColor)
+                }
+                Text(displayName)
+                    .font(.system(size: 32, weight: .semibold, design: .rounded))
+                    .foregroundStyle(toastTextColor)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.6)
+                    .truncationMode(.tail)
+                    .multilineTextAlignment(.center)
+            }
 
             Text(sessionKey)
                 .font(.system(size: 14, weight: .regular, design: .rounded))
@@ -78,13 +86,14 @@ final class StreamToastManager {
     private(set) var isVisible = false
     private(set) var displayName: String = ""
     private(set) var sessionKey: String = ""
+    private(set) var isBusy = false
 
     private var dismissTask: Task<Void, Never>?
     private let dismissDelay: Duration = .seconds(2)
 
     /// Shows or updates the toast with stream display metadata.
     /// If already visible, just updates the name without dismissing.
-    func show(displayName: String, sessionKey: String) {
+    func show(displayName: String, sessionKey: String, isBusy: Bool = false) {
         // Cancel any pending dismiss
         dismissTask?.cancel()
         dismissTask = nil
@@ -92,9 +101,22 @@ final class StreamToastManager {
         // Update displayed metadata and show
         self.displayName = displayName
         self.sessionKey = sessionKey
+        self.isBusy = isBusy
         isVisible = true
 
-        // Schedule new dismiss
+        scheduleDismissIfIdle()
+    }
+
+    func setBusy(_ busy: Bool) {
+        guard isVisible else { return }
+        dismissTask?.cancel()
+        dismissTask = nil
+        isBusy = busy
+        scheduleDismissIfIdle()
+    }
+
+    private func scheduleDismissIfIdle() {
+        guard isVisible, !isBusy else { return }
         dismissTask = Task {
             try? await Task.sleep(for: dismissDelay)
             guard !Task.isCancelled else { return }
@@ -106,6 +128,7 @@ final class StreamToastManager {
     func hide() {
         dismissTask?.cancel()
         dismissTask = nil
+        isBusy = false
         isVisible = false
     }
 }
@@ -115,6 +138,6 @@ final class StreamToastManager {
         Color.gray.opacity(0.3)
             .ignoresSafeArea()
 
-        StreamToast(displayName: "Main", sessionKey: "agent:main:clawline:preview:main")
+        StreamToast(displayName: "Main", sessionKey: "agent:main:clawline:preview:main", isBusy: true)
     }
 }

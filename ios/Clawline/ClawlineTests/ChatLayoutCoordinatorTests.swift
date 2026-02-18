@@ -174,7 +174,8 @@ struct ChatLayoutCoordinatorTests {
         let metrics = ChatLayoutMetrics(
             belowBarGap: 24,
             flowGap: 10,
-            containerPadding: 12
+            containerPadding: 12,
+            pageIndicatorClearance: 0
         )
         let inputs = ChatLayoutInputs(
             keyboardHeight: 0,
@@ -209,12 +210,61 @@ struct ChatLayoutCoordinatorTests {
         let metrics = ChatLayoutMetrics(
             belowBarGap: 24,
             flowGap: 10,
-            containerPadding: 12
+            containerPadding: 12,
+            pageIndicatorClearance: 0
         )
 
         let state = ChatLayoutCoordinator.insetLayoutState(inputs: inputs, metrics: metrics, barHeight: 88)
         #expect(abs(state.keyboardInset) <= 0.5)
         #expect(abs(state.listBottomInset - 110) <= 0.5)
+    }
+
+    @Test("T093: Keyboard inset stays continuous near dismiss threshold")
+    @MainActor
+    func keyboardInsetRemainsContinuousNearDismiss() {
+        let inputs = ChatLayoutInputs(
+            keyboardHeight: 48,
+            keyboardVisible: false,
+            isInputFocused: false,
+            keyboardAnimationDuration: 0.25,
+            keyboardAnimationCurve: .easeInOut,
+            safeAreaBottom: 34,
+            usesExternalKeyboardInsets: false
+        )
+        let metrics = ChatLayoutMetrics(
+            belowBarGap: 18,
+            flowGap: 10,
+            containerPadding: 12,
+            pageIndicatorClearance: 0
+        )
+
+        let state = ChatLayoutCoordinator.insetLayoutState(inputs: inputs, metrics: metrics, barHeight: 88)
+        #expect(abs(state.keyboardInset - 14) <= 0.5)
+        #expect(abs(state.listBottomInset - 118) <= 0.5)
+    }
+
+    @Test("T093: Keyboard-up inset preserves full height for pager clearance")
+    @MainActor
+    func keyboardUpInsetPreservesFullHeight() {
+        let inputs = ChatLayoutInputs(
+            keyboardHeight: 336,
+            keyboardVisible: true,
+            isInputFocused: true,
+            keyboardAnimationDuration: 0.25,
+            keyboardAnimationCurve: .easeInOut,
+            safeAreaBottom: 34,
+            usesExternalKeyboardInsets: false
+        )
+        let metrics = ChatLayoutMetrics(
+            belowBarGap: 12,
+            flowGap: 10,
+            containerPadding: 12,
+            pageIndicatorClearance: 24
+        )
+
+        let state = ChatLayoutCoordinator.insetLayoutState(inputs: inputs, metrics: metrics, barHeight: 88)
+        #expect(abs(state.keyboardInset - 336) <= 0.5)
+        #expect(abs(state.listBottomInset - 458) <= 0.5)
     }
 
     @Test("T071: Transient zero bar height does not collapse inset after stabilization")
@@ -224,7 +274,8 @@ struct ChatLayoutCoordinatorTests {
         let metrics = ChatLayoutMetrics(
             belowBarGap: 24,
             flowGap: 10,
-            containerPadding: 12
+            containerPadding: 12,
+            pageIndicatorClearance: 0
         )
         let inputs = ChatLayoutInputs(
             keyboardHeight: 0,

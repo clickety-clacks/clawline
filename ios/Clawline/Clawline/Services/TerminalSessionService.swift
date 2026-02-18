@@ -192,35 +192,31 @@ final class TerminalSessionService {
     }
 
     private func makeTerminalWebSocketURL() -> URL? {
-        // Prefer the provider's advertised base URL,
-        // but fall back to the paired provider base URL if missing.
+        // Treat the paired provider base URL as authoritative.
+        // The descriptor-advertised URL is a fallback for legacy payloads.
         let base: URL? = {
+            if let paired = ProviderBaseURLStore.baseURL {
+                return paired
+            }
             if let raw = descriptor.provider?.baseUrl?.trimmingCharacters(in: .whitespacesAndNewlines),
                !raw.isEmpty,
                let parsed = URL(string: raw) {
                 return parsed
             }
-            return ProviderBaseURLStore.baseURL
+            return nil
         }()
         guard let base else { return nil }
         guard var components = URLComponents(url: base, resolvingAgainstBaseURL: false) else { return nil }
         let scheme = components.scheme?.lowercased()
-        let host = components.host?.lowercased()
-        let isLocalHost: Bool = {
-            guard let host else { return false }
-            return host == "localhost" || host == "127.0.0.1" || host == "::1"
-        }()
         switch scheme {
         case "https", "wss":
             components.scheme = "wss"
         case "http":
-            // Prefer TLS for remote providers to satisfy ATS by default.
-            components.scheme = isLocalHost ? "ws" : "wss"
+            components.scheme = "ws"
         case "ws":
             components.scheme = "ws"
         default:
-            // If scheme is missing/unknown, try TLS first.
-            components.scheme = "wss"
+            components.scheme = "ws"
         }
 
         // v1: only allow the known terminal endpoint path. Ignore any untrusted descriptor override.

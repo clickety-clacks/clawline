@@ -255,10 +255,10 @@ struct StreamManagerSheet: View {
             } label: {
                 HStack(spacing: 10) {
                     Circle()
-                        .fill(stream.sessionKey == viewModel.activeSessionKey ? Color.accentColor : Color.primary.opacity(0.25))
+                        .fill(stream.sessionKey == viewModel.uiSelectedSessionKey ? Color.accentColor : Color.primary.opacity(0.25))
                         .frame(width: 8, height: 8)
                     Text(stream.displayName)
-                        .font(.system(size: 28, weight: stream.sessionKey == viewModel.activeSessionKey ? .semibold : .regular))
+                        .font(.system(size: 28, weight: stream.sessionKey == viewModel.uiSelectedSessionKey ? .semibold : .regular))
                         .frame(maxWidth: .infinity, alignment: .leading)
                     if isDeletingStream(stream.sessionKey) {
                         ProgressView()

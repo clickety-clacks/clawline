@@ -84,7 +84,6 @@ struct ChatView: View {
     let toastManager: ToastManager
     @Environment(\.scenePhase) private var scenePhase
     @Environment(AuthManager.self) private var authManager
-    @Environment(\.openURL) private var openURL
 
     // ⚠️ CRITICAL: This state MUST live here in ChatView, NOT in MessageInputBar.
     // MessageInputBar is inside .safeAreaInset and gets recreated on geometry changes.
@@ -97,6 +96,7 @@ struct ChatView: View {
     @State private var keyboardRefreshToken: Int = 0
     @State private var layoutCoordinator = ChatLayoutCoordinator()
     @State private var layoutRevision: Int = 0
+    @State private var selectionRange = NSRange(location: 0, length: 0)
     @State private var pendingInputInsertions: [PendingAttachment] = []
     @State private var activeSheet: ChatSheet?
     @State private var isStreamManagerPopoverPresented = false
@@ -118,11 +118,6 @@ struct ChatView: View {
     init(viewModel: ChatViewModel, toastManager: ToastManager) {
         self._viewModel = Bindable(wrappedValue: viewModel)
         self.toastManager = toastManager
-        _dictationCoordinator = State(
-            initialValue: DictationCoordinator(
-                bridge: ComposeInputDictationBridge(host: viewModel)
-            )
-        )
     }
 
     @Environment(\.colorScheme) private var colorScheme
@@ -131,7 +126,10 @@ struct ChatView: View {
 
     @State private var inputBarHeight: CGFloat = 0
     @State private var streamToastManager = StreamToastManager()
-    @State private var dictationCoordinator: DictationCoordinator
+    @State private var streamToastBusySince: Date?
+    @State private var streamToastBusyClearTask: Task<Void, Never>?
+
+    private let streamToastMinimumBusySeconds: TimeInterval = 0.45
 
     private var isKeyboardVisible: Bool {
         keyboardHeight > 0.5
@@ -459,21 +457,18 @@ struct ChatView: View {
         }
         .task { await viewModel.onAppear() }
         .onDisappear {
-            dictationCoordinator.handleAppBackgrounded()
             viewModel.onDisappear()
             resetScrollButtonInteractionState()
         }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active {
-                viewModel.handleSceneDidBecomeActive()
-                keyboardRefreshToken &+= 1
-            } else {
-                dictationCoordinator.handleAppBackgrounded()
-            }
+            guard phase == .active else { return }
+            viewModel.handleSceneDidBecomeActive()
+            keyboardRefreshToken &+= 1
         }
         .background(
             KeyboardLayoutGuideReader(refreshToken: keyboardRefreshToken) { height, duration, curve in
                 if abs(height - keyboardHeight) > 0.5 {
+                    NSLog("[KBTIMING] keyboardHeight state set %.1f -> %.1f", keyboardHeight, height)
                     withAnimation(nil) {
                         keyboardHeight = height
                     }
@@ -491,9 +486,6 @@ struct ChatView: View {
             }
         )
         .sheet(item: $activeSheet, content: sheetView)
-        .sheet(isPresented: composeKeyPromptPresentedBinding) {
-            composeKeyPromptSheet
-        }
         .photosPicker(
             isPresented: $isPhotosPickerPresented,
             selection: $photoPickerItems,
@@ -554,8 +546,9 @@ struct ChatView: View {
             ? metrics.flowGap
             : ChatFlowTheme.Metrics(isCompact: false).flowGap
         let bottomInsetFlowGap = bottomFlowGap
-        // Gap below input bar: version label area (keyboard hidden) or minimal gap (keyboard up)
-        let belowBarGap: CGFloat = isKeyboardVisible ? 12 : 24
+        // Keep the bar gap continuous through the final keyboard-dismiss frames.
+        let keyboardInsetProgress = min(1, max(0, keyboardVisibleHeight / 24))
+        let belowBarGap: CGFloat = 24 - (12 * keyboardInsetProgress)
         let usesExternalKeyboardInsets: Bool = {
 #if os(visionOS)
             // visionOS keyboard geometry can over-report and cause content overlap drift after
@@ -648,13 +641,44 @@ struct ChatView: View {
             layoutCoordinator.updateInputs(layoutInputs, metrics: layoutMetrics)
             layoutCoordinator.markInputsChanged()
         }
-        .onChange(of: viewModel.activeSessionKey) { _, newValue in
+        .onChange(of: viewModel.engineActiveSessionKey) { _, newValue in
             layoutCoordinator.setActiveSessionKey(newValue)
         }
         .onAppear {
-            layoutCoordinator.setActiveSessionKey(viewModel.activeSessionKey)
+            viewModel.bindStreamSwitchCoordinatorIfNeeded()
+            layoutCoordinator.setActiveSessionKey(viewModel.engineActiveSessionKey)
             layoutCoordinator.updateInputs(layoutInputs, metrics: layoutMetrics)
             layoutCoordinator.markInputsChanged()
+        }
+        .onChange(of: viewModel.uiSelectionSequence) { _, _ in
+            guard let selectedSessionKey = viewModel.lastUISelectedSessionKey else { return }
+            let streamDisplayName = viewModel.stream(for: selectedSessionKey)?.displayName ?? viewModel.activeSessionDisplayName
+            let shouldShowBusy = selectedSessionKey != viewModel.engineActiveSessionKey
+            StreamSwitchTiming.log("toast_show_called", sessionKey: selectedSessionKey)
+            #if !os(visionOS)
+            StreamSwitchTiming.log("haptic_fired", sessionKey: selectedSessionKey)
+            let generator = UIImpactFeedbackGenerator(style: .medium)
+            generator.impactOccurred()
+            #endif
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                // UI-intent path is immediate; spinner stays up through debounce + engine activation.
+                streamToastManager.show(displayName: streamDisplayName, sessionKey: selectedSessionKey, isBusy: shouldShowBusy)
+            }
+            if shouldShowBusy {
+                streamToastBusySince = Date()
+                streamToastBusyClearTask?.cancel()
+                streamToastBusyClearTask = nil
+            } else {
+                // Same-stream intent has no engine activation phase, so never enter busy state.
+                streamToastBusySince = nil
+                streamToastBusyClearTask?.cancel()
+                streamToastBusyClearTask = nil
+            }
+        }
+        .onChange(of: viewModel.engineActivationCompletedSequence) { _, _ in
+            guard let completedSessionKey = viewModel.lastEngineActivationSessionKey else { return }
+            guard streamToastManager.isVisible, streamToastManager.sessionKey == completedSessionKey else { return }
+            scheduleStreamToastBusyClear()
         }
         .onChange(of: keyboardHeight) { _, _ in layoutRevision &+= 1 }
         .onChange(of: keyboardAnimationDuration) { _, _ in layoutRevision &+= 1 }
@@ -689,7 +713,7 @@ struct ChatView: View {
 #if os(visionOS)
             // visionOS: keep the scroll-to-bottom button in the main SwiftUI overlay.
             // iOS/iPadOS: we pin it to the UIKit keyboardLayoutGuide via KeyboardPinnedContainerView.
-            let sessionKey = viewModel.activeSessionKey
+            let sessionKey = viewModel.uiSelectedSessionKey
             let state = scrollButtonState(for: sessionKey)
             scrollButtonControl(
                 state: state,
@@ -727,7 +751,8 @@ struct ChatView: View {
         if streamToastManager.isVisible {
             StreamToast(
                 displayName: streamToastManager.displayName,
-                sessionKey: streamToastManager.sessionKey
+                sessionKey: streamToastManager.sessionKey,
+                isBusy: streamToastManager.isBusy
             )
                 .padding(.bottom, inputBarTopFromScreenBottom + 50)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
@@ -756,7 +781,7 @@ struct ChatView: View {
                                  isKeyboardVisible: Bool,
                                  layoutKey: ChatLayoutKey,
                                  streamSelectorMaxHeight: CGFloat) -> some View {
-        let sessionKey = viewModel.activeSessionKey
+        let sessionKey = viewModel.uiSelectedSessionKey
         let effectiveSessionKeys = effectiveStreams.map(\.sessionKey)
         let state = scrollButtonState(for: sessionKey)
         let scrollButtonView: AnyView = AnyView(
@@ -812,25 +837,31 @@ struct ChatView: View {
             pageDotsView: pinnedPageDotsView,
             pageDotsGap: pinnedPageDotsGap
         ) {
-            ComposeInputBarHost(
-                viewModel: viewModel,
-                pendingInputInsertions: $pendingInputInsertions,
-                dictationCoordinator: dictationCoordinator,
+            MessageInputBar(
+                content: $viewModel.inputContent,
+                selectionRange: $selectionRange,
+                pendingInsertions: $pendingInputInsertions,
+                placeholderText: viewModel.activeSessionDisplayName,
+                resetToken: viewModel.inputResetToken,
+                canSend: viewModel.canSend,
+                isSending: viewModel.isSending,
+                connectionState: viewModel.sendButtonConnectionState,
                 focusTrigger: focusRequestID,
-                isTextFieldFocused: isInputFocused,
                 bottomSafeAreaInset: geometry.safeAreaInsets.bottom,
                 isKeyboardVisible: isKeyboardVisible,
-                isCompact: horizontalSizeClass == .compact,
                 onSend: {
-                    dictationCoordinator.handleSendTapped {
-                        viewModel.send()
-                    }
+                    viewModel.send()
                 },
                 onCancel: { viewModel.cancelSend() },
                 onReconnect: { viewModel.reconnect() },
-                onAdd: { activeSheet = .attachmentMenu },
+                onAdd: {
+                    activeSheet = .attachmentMenu
+                },
+                // ⚠️ This callback is how focus state survives view recreation.
+                // DO NOT replace with @Binding or try to use @FocusState directly.
                 onFocusChange: { focused in isInputFocused = focused },
-                onPasteImages: handlePastedImages
+                onPasteImages: handlePastedImages,
+                isCompact: horizontalSizeClass == .compact
             )
         }
         .visionOSInputBarDepthOffset()
@@ -889,7 +920,9 @@ struct ChatView: View {
             viewModel: viewModel,
             topInset: topInset,
             isCompact: horizontalSizeClass == .compact,
-            isActiveSession: sessionKey == viewModel.activeSessionKey,
+            isActiveSession: sessionKey == renderPolicySessionKey,
+            isRenderPolicyFrozen: viewModel.isRenderPolicyFrozen,
+            isInputActive: isInputFocused,
             truncationBottomInset: truncationBottomInset,
             firstUnreadMessageId: state.firstUnreadMessageId,
             unreadCount: state.unreadCount,
@@ -955,58 +988,6 @@ struct ChatView: View {
         }
     }
 
-    private var composeKeyPromptPresentedBinding: Binding<Bool> {
-        Binding(
-            get: { dictationCoordinator.showsComposeKeyPromptModal },
-            set: { isPresented in
-                if !isPresented {
-                    dictationCoordinator.dismissComposeKeyPrompt()
-                }
-            }
-        )
-    }
-
-    private var composeKeyTextBinding: Binding<String> {
-        Binding(
-            get: { dictationCoordinator.inlineKeyText },
-            set: { dictationCoordinator.updateInlineKeyText($0) }
-        )
-    }
-
-    private var composeKeyPromptSheet: some View {
-        NavigationStack {
-            VStack(alignment: .leading, spacing: 16) {
-                SonioxKeyConfigurationRow(
-                    keyText: composeKeyTextBinding,
-                    status: dictationCoordinator.inlineKeyStatus,
-                    actionTitle: dictationCoordinator.inlineKeyActionTitle,
-                    onAction: {
-                        Task { @MainActor in
-                            await dictationCoordinator.handleComposeKeyPrimaryAction { url in
-                                openURL(url)
-                            }
-                        }
-                    },
-                    placeholder: "soniox.apiKey",
-                    showsBackground: true
-                )
-                Spacer(minLength: 0)
-            }
-            .padding(16)
-            .navigationTitle("Enable Dictation")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Close") {
-                        dictationCoordinator.dismissComposeKeyPrompt()
-                    }
-                }
-            }
-        }
-        .presentationDetents([.medium])
-        .interactiveDismissDisabled(false)
-    }
-
     /// Paged TabView for horizontal swipe between streams.
     @ViewBuilder
     private func pagedStreamView(
@@ -1033,23 +1014,113 @@ struct ChatView: View {
                     .tag(sessionKey)
             }
         }
+        .overlay {
+            // First-frame pager hitch mitigation:
+            // SwiftUI lazily realizes neighboring page controllers on first pan recognition.
+            // Precreate only the adjacent UIKit shells (+/-1) ahead of drag; content stays deferred
+            // by MessageFlowCollectionViewController's offscreen early-return path.
+            adjacentPagePrewarmShells(
+                topInset: topInset,
+                truncationBottomInset: truncationBottomInset,
+                effectiveSessionKeys: effectiveSessionKeys
+            )
+            .frame(width: 0, height: 0)
+            .clipped()
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+        }
+        .background {
+            // This bridge feeds explicit pager motion/settle events into the coordinator state machine.
+            // We avoid speculative timing guesses in ChatView itself.
+            StreamPagerScrollObserver(
+                onInteractionBegan: {
+                    StreamSwitchTiming.log("onInteractionBegan_callback_fired", sessionKey: viewModel.uiSelectedSessionKey)
+                    viewModel.streamPagerDidBeginInteraction()
+                },
+                onSettledAtRest: {
+                    StreamSwitchTiming.log("pan_settled_callback_fired", sessionKey: viewModel.uiSelectedSessionKey)
+                    viewModel.streamPagerDidSettleAtRest()
+                },
+                currentSessionKey: {
+                    viewModel.uiSelectedSessionKey
+                }
+            )
+            .allowsHitTesting(false)
+        }
         .tabViewStyle(.page(indexDisplayMode: .never))
         .scrollContentBackground(.hidden)
         .background(Color.clear)
     }
 
-    /// Binding that syncs TabView selection with viewModel.activeSessionKey.
+    @ViewBuilder
+    private func adjacentPagePrewarmShells(topInset: CGFloat,
+                                           truncationBottomInset: CGFloat,
+                                           effectiveSessionKeys: [String]) -> some View {
+        let prewarmKeys = adjacentPrewarmSessionKeys(effectiveSessionKeys: effectiveSessionKeys)
+        ForEach(prewarmKeys, id: \.self) { sessionKey in
+            MessageFlowCollectionView(
+                viewModel: viewModel,
+                topInset: topInset,
+                isCompact: horizontalSizeClass == .compact,
+                // Keep prewarm pages explicitly offscreen so data/snapshot/layout work stays deferred.
+                isActiveSession: false,
+                isRenderPolicyFrozen: false,
+                isInputActive: isInputFocused,
+                truncationBottomInset: truncationBottomInset,
+                firstUnreadMessageId: nil,
+                unreadCount: 0,
+                onExpand: nil,
+                layoutCoordinator: layoutCoordinator,
+                // Do not register prewarm shells as live session list views.
+                shouldRegisterWithLayoutCoordinator: false,
+                sessionKey: sessionKey,
+                onScrollEvent: nil
+            )
+            .hidden()
+        }
+    }
+
+    private func adjacentPrewarmSessionKeys(effectiveSessionKeys: [String]) -> [String] {
+        guard !effectiveSessionKeys.isEmpty else { return [] }
+        let primarySelection = effectiveSessionKeys.contains(viewModel.uiSelectedSessionKey)
+            ? viewModel.uiSelectedSessionKey
+            : viewModel.engineActiveSessionKey
+        guard let centerIndex = effectiveSessionKeys.firstIndex(of: primarySelection) else { return [] }
+        var keys: [String] = []
+        let lower = centerIndex - 1
+        let upper = centerIndex + 1
+        if lower >= 0 {
+            keys.append(effectiveSessionKeys[lower])
+        }
+        if upper < effectiveSessionKeys.count {
+            keys.append(effectiveSessionKeys[upper])
+        }
+        return keys
+    }
+
+    private var renderPolicySessionKey: String {
+        let validKeys = Set(viewModel.orderedStreams.map(\.sessionKey))
+        let key = viewModel.engineActiveSessionKey
+        if validKeys.contains(key), !key.isEmpty {
+            return key
+        }
+        return viewModel.uiSelectedSessionKey
+    }
+
+    /// Binding that syncs TabView selection with uiSelectedSessionKey (intent path).
     private var streamBinding: Binding<String> {
         Binding(
             get: {
                 let effectiveSessionKeys = viewModel.orderedStreams.map(\.sessionKey)
-                if effectiveSessionKeys.contains(viewModel.activeSessionKey) {
-                    return viewModel.activeSessionKey
+                let selected = viewModel.uiSelectedSessionKey
+                if effectiveSessionKeys.contains(selected), !selected.isEmpty {
+                    return selected
                 }
-                return effectiveSessionKeys.first ?? viewModel.activeSessionKey
+                return effectiveSessionKeys.first ?? viewModel.engineActiveSessionKey
             },
             set: { newSessionKey in
-                selectStream(newSessionKey)
+                StreamSwitchTiming.log("tabview_selection_setter_fired", sessionKey: newSessionKey)
+                selectStream(newSessionKey, source: .pager)
             }
         )
     }
@@ -1062,7 +1133,7 @@ struct ChatView: View {
         let effectiveSessionKeys = effectiveStreams.map(\.sessionKey)
         return StreamPageDotsView(
             sessionKeys: effectiveSessionKeys,
-            activeSessionKey: viewModel.activeSessionKey,
+            activeSessionKey: viewModel.uiSelectedSessionKey,
             onTap: { isStreamManagerPopoverPresented = true }
         )
         .popover(
@@ -1075,24 +1146,34 @@ struct ChatView: View {
                 streams: effectiveStreams,
                 isPresented: $isStreamManagerPopoverPresented,
                 maxAvailableHeight: streamSelectorMaxHeight,
-                onSelectStream: selectStream
+                onSelectStream: { sessionKey in
+                    selectStream(sessionKey, source: .programmatic)
+                }
             )
             .presentationCompactAdaptation(.popover)
         }
     }
 
-    private func selectStream(_ sessionKey: String) {
-        guard sessionKey != viewModel.activeSessionKey else { return }
+    private func selectStream(_ sessionKey: String, source: ChatViewModel.StreamSwitchSource) {
+        StreamSwitchTiming.log("selectStream_called", sessionKey: sessionKey)
+        viewModel.requestStreamSwitch(to: sessionKey, source: source)
+    }
 
-        #if !os(visionOS)
-        let generator = UIImpactFeedbackGenerator(style: .medium)
-        generator.impactOccurred()
-        #endif
-
-        viewModel.setActiveSessionKey(sessionKey)
-        let streamDisplayName = viewModel.stream(for: sessionKey)?.displayName ?? viewModel.activeSessionDisplayName
-        withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-            streamToastManager.show(displayName: streamDisplayName, sessionKey: sessionKey)
+    private func scheduleStreamToastBusyClear() {
+        streamToastBusyClearTask?.cancel()
+        let now = Date()
+        let elapsed = streamToastBusySince.map { now.timeIntervalSince($0) } ?? 0
+        let remaining = max(0, streamToastMinimumBusySeconds - elapsed)
+        streamToastBusyClearTask = Task {
+            if remaining > 0 {
+                try? await Task.sleep(for: .seconds(remaining))
+            }
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                    streamToastManager.setBusy(false)
+                }
+            }
         }
     }
 
@@ -1353,78 +1434,6 @@ struct ChatView: View {
 
 }
 
-private struct ComposeInputBarHost: View {
-    @Bindable var viewModel: ChatViewModel
-    @Binding var pendingInputInsertions: [PendingAttachment]
-    let dictationCoordinator: DictationCoordinator
-    let focusTrigger: Int
-    let isTextFieldFocused: Bool
-    let bottomSafeAreaInset: CGFloat
-    let isKeyboardVisible: Bool
-    let isCompact: Bool
-    let onSend: () -> Void
-    let onCancel: () -> Void
-    let onReconnect: () -> Void
-    let onAdd: () -> Void
-    let onFocusChange: (Bool) -> Void
-    let onPasteImages: ([UIImage]) -> Void
-
-    @State private var selectionRange = NSRange(location: 0, length: 0)
-
-    var body: some View {
-        MessageInputBar(
-            content: $viewModel.inputContent,
-            selectionRange: $selectionRange,
-            pendingInsertions: $pendingInputInsertions,
-            dictation: dictationCoordinator,
-            placeholderText: viewModel.activeSessionDisplayName,
-            resetToken: viewModel.inputResetToken,
-            canSend: viewModel.canSend,
-            isSending: viewModel.isSending,
-            connectionState: viewModel.sendButtonConnectionState,
-            focusTrigger: focusTrigger,
-            isTextFieldFocused: isTextFieldFocused,
-            bottomSafeAreaInset: bottomSafeAreaInset,
-            isKeyboardVisible: isKeyboardVisible,
-            onSend: onSend,
-            onCancel: onCancel,
-            onReconnect: onReconnect,
-            onAdd: onAdd,
-            onFocusChange: onFocusChange,
-            onPasteImages: onPasteImages,
-            isCompact: isCompact
-        )
-        .onAppear {
-            updateDictationContext()
-        }
-        .onChange(of: viewModel.activeSessionKey) { _, _ in
-            updateDictationContext()
-        }
-        .onChange(of: viewModel.inputContent.length) { _, _ in
-            updateDictationContext()
-        }
-        .onChange(of: isTextFieldFocused) { _, _ in
-            updateDictationContext()
-        }
-        .onChange(of: selectionRange.length) { _, _ in
-            updateDictationContext()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: UIAccessibility.reduceMotionStatusDidChangeNotification)) { _ in
-            updateDictationContext()
-        }
-    }
-
-    private func updateDictationContext() {
-        dictationCoordinator.updateContext(
-            sessionKey: viewModel.activeSessionKey,
-            composeIsEmpty: viewModel.inputContent.isEffectivelyEmpty,
-            textFieldFocused: isTextFieldFocused,
-            selectionLength: selectionRange.length,
-            reduceMotionEnabled: UIAccessibility.isReduceMotionEnabled
-        )
-    }
-}
-
 private struct VisionOSInputBarDepthOffset: ViewModifier {
     func body(content: Content) -> some View {
 #if os(visionOS)
@@ -1525,6 +1534,12 @@ private final class KeyboardLayoutGuideObserverView: UIView {
         if abs(height - lastHeight) > 0.5 {
             lastHeight = height
         }
+        NSLog(
+            "[KBTIMING] keyboardFrameChanged foreground frame=%@ win=%@ floating=%d",
+            NSCoder.string(for: frameInWindow),
+            NSCoder.string(for: windowBounds),
+            result.isFloating ? 1 : 0
+        )
         onChange?(height, lastDuration, lastCurve)
     }
 
@@ -1564,6 +1579,7 @@ private final class KeyboardLayoutGuideObserverView: UIView {
     }
 
     @objc private func keyboardFrameChanged(_ notification: Notification) {
+        let t0 = CFAbsoluteTimeGetCurrent()
         guard let endFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { return }
         let duration = (notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? NSNumber)?.doubleValue ?? 0.3
         let curveRaw = (notification.userInfo?[UIResponder.keyboardAnimationCurveUserInfoKey] as? NSNumber)?.intValue ?? UIView.AnimationCurve.easeInOut.rawValue
@@ -1578,6 +1594,12 @@ private final class KeyboardLayoutGuideObserverView: UIView {
             let windowBounds = window.bounds
             let result = heightFromFrame(frameInWindow, windowBounds: windowBounds)
             height = result.height
+            NSLog(
+                "[KBTIMING] keyboardFrameChanged frame=%@ win=%@ floating=%d",
+                NSCoder.string(for: frameInWindow),
+                NSCoder.string(for: windowBounds),
+                result.isFloating ? 1 : 0
+            )
         } else {
             let screenHeight = window?.windowScene?.screen.bounds.height
                 ?? UIScreen.main.bounds.height
@@ -1594,6 +1616,7 @@ private final class KeyboardLayoutGuideObserverView: UIView {
             lastCurve = curve
         }
         onChange?(height, duration, curve)
+        NSLog("[KBTIMING] keyboardFrameChanged h=%.1f dur=%.2f curve=%d dt=%.4f", height, duration, curve.rawValue, CFAbsoluteTimeGetCurrent() - t0)
     }
 }
 
@@ -1653,6 +1676,7 @@ private struct KeyboardPinnedContainer<Content: View>: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: KeyboardPinnedContainerView<Content>, context: Context) {
+        let t0 = CFAbsoluteTimeGetCurrent()
         uiView.hostingController.rootView = content
         uiView.updateVersionText(versionText)
         uiView.updateScrollButton(
@@ -1680,6 +1704,7 @@ private struct KeyboardPinnedContainer<Content: View>: UIViewRepresentable {
         layoutCoordinator.registerBarView(uiView)
         layoutCoordinator.applyTransitionIfPossible(reason: "KeyboardPinnedContainer.updateUIView")
         _ = layoutKey
+        NSLog("[KBTIMING] KBPinnedContainer.updateUIView gap=%.1f kbVis=%d dt=%.4f", desiredBottomGap, isKeyboardVisible ? 1 : 0, CFAbsoluteTimeGetCurrent() - t0)
     }
 }
 
@@ -1972,6 +1997,138 @@ private final class KeyboardPinnedContainerView<Content: View>: UIView, Keyboard
             versionLabelBottomToContainer = versionToContainer
         }
 #endif
+    }
+}
+
+// MARK: - Pager Scroll Observer
+// We use a tiny UIKit bridge to detect when the TabView pager is actively moving vs truly settled.
+// SwiftUI's page-style TabView does not expose explicit "deceleration ended" hooks.
+// This observer emits two high-signal lifecycle events:
+// - interaction began
+// - scroll settled at rest (not dragging/tracking/decelerating)
+private struct StreamPagerScrollObserver: UIViewRepresentable {
+    let onInteractionBegan: @MainActor () -> Void
+    let onSettledAtRest: @MainActor () -> Void
+    let currentSessionKey: @MainActor () -> String
+
+    func makeUIView(context: Context) -> StreamPagerProbeView {
+        let view = StreamPagerProbeView()
+        view.onInteractionBegan = onInteractionBegan
+        view.onSettledAtRest = onSettledAtRest
+        view.currentSessionKey = currentSessionKey
+        return view
+    }
+
+    func updateUIView(_ uiView: StreamPagerProbeView, context: Context) {
+        uiView.onInteractionBegan = onInteractionBegan
+        uiView.onSettledAtRest = onSettledAtRest
+        uiView.currentSessionKey = currentSessionKey
+        uiView.attachIfNeeded()
+    }
+}
+
+private final class StreamPagerProbeView: UIView {
+    var onInteractionBegan: (@MainActor () -> Void)?
+    var onSettledAtRest: (@MainActor () -> Void)?
+    var currentSessionKey: (@MainActor () -> String)?
+
+    private weak var observedPagerScrollView: UIScrollView?
+    private var settlePollTimer: Timer?
+    private var didEmitInteractionForCurrentGesture = false
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isUserInteractionEnabled = false
+        backgroundColor = .clear
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    deinit {
+        settlePollTimer?.invalidate()
+        if let pan = observedPagerScrollView?.panGestureRecognizer {
+            pan.removeTarget(self, action: #selector(handlePagerPan(_:)))
+        }
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        attachIfNeeded()
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        attachIfNeeded()
+    }
+
+    func attachIfNeeded() {
+        guard let root = superview else { return }
+        guard let pagerScrollView = findPagerScrollView(in: root) else { return }
+        guard observedPagerScrollView !== pagerScrollView else { return }
+
+        // If SwiftUI re-parents/recreates the page stack, detach old observer before reattaching.
+        if let oldPan = observedPagerScrollView?.panGestureRecognizer {
+            oldPan.removeTarget(self, action: #selector(handlePagerPan(_:)))
+        }
+        observedPagerScrollView = pagerScrollView
+        pagerScrollView.panGestureRecognizer.addTarget(self, action: #selector(handlePagerPan(_:)))
+    }
+
+    @objc
+    private func handlePagerPan(_ gesture: UIPanGestureRecognizer) {
+        switch gesture.state {
+        case .began, .changed:
+            // Emit once per gesture to avoid noisy state churn while finger moves.
+            if !didEmitInteractionForCurrentGesture {
+                didEmitInteractionForCurrentGesture = true
+                StreamSwitchTiming.markGestureBegan(sessionKey: currentSessionKey?())
+                onInteractionBegan?()
+            }
+            settlePollTimer?.invalidate()
+            settlePollTimer = nil
+        case .ended, .cancelled, .failed:
+            StreamSwitchTiming.log("pan_gesture_ended", sessionKey: currentSessionKey?())
+            didEmitInteractionForCurrentGesture = false
+            startSettlePolling()
+        default:
+            break
+        }
+    }
+
+    private func startSettlePolling() {
+        settlePollTimer?.invalidate()
+        // Polling is intentionally scoped to the post-gesture window.
+        // We are not doing continuous per-frame work outside gesture completion.
+        let timer = Timer(timeInterval: 0.02, repeats: true) { [weak self] timer in
+            guard let self, let scrollView = self.observedPagerScrollView else {
+                timer.invalidate()
+                return
+            }
+            let isAtRest = !scrollView.isTracking && !scrollView.isDragging && !scrollView.isDecelerating
+            guard isAtRest else { return }
+            timer.invalidate()
+            self.settlePollTimer = nil
+            self.onSettledAtRest?()
+        }
+        settlePollTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    // The pager scroll view is the paging-enabled ancestor/descendant around TabView(.page).
+    // Message lists are UICollectionViews and are not paging-enabled, so this selector is precise enough.
+    private func findPagerScrollView(in root: UIView) -> UIScrollView? {
+        if let scrollView = root as? UIScrollView,
+           scrollView.isPagingEnabled {
+            return scrollView
+        }
+        for child in root.subviews {
+            if let match = findPagerScrollView(in: child) {
+                return match
+            }
+        }
+        return nil
     }
 }
 

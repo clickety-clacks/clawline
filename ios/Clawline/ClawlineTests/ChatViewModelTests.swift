@@ -714,7 +714,7 @@ struct ChatViewModelTests {
         )
         try await Task.sleep(for: .milliseconds(30))
 
-        viewModel.setActiveSessionKey(adminSessionKey)
+        viewModel.setActiveSessionKeyForTesting(adminSessionKey)
         #expect(viewModel.activeSessionKey == adminSessionKey)
         viewModel.inputContent = NSAttributedString(string: "Admin ping")
         chatService.emitConnectionState(.connected)
@@ -898,7 +898,7 @@ struct ChatViewModelTests {
             if viewModel.orderedSessionKeys.contains(staleKey) { break }
             try await Task.sleep(for: .milliseconds(20))
         }
-        viewModel.setActiveSessionKey(staleKey)
+        viewModel.setActiveSessionKeyForTesting(staleKey)
 
         chatService.emitServiceEvent(.sessionProvisioningAvailable(true))
         try await Task.sleep(for: .milliseconds(20))
@@ -961,7 +961,7 @@ struct ChatViewModelTests {
             if viewModel.orderedSessionKeys.contains(customKey) { break }
             try await Task.sleep(for: .milliseconds(20))
         }
-        viewModel.setActiveSessionKey(customKey)
+        viewModel.setActiveSessionKeyForTesting(customKey)
         #expect(viewModel.activeSessionKey == customKey)
 
         chatService.emitServiceEvent(.sessionProvisioningAvailable(true))
@@ -972,7 +972,7 @@ struct ChatViewModelTests {
         try await Task.sleep(for: .milliseconds(30))
         #expect(chatService.lastSentId == nil)
 
-        viewModel.setActiveSessionKey(personalSessionKey)
+        viewModel.setActiveSessionKeyForTesting(personalSessionKey)
         #expect(viewModel.activeSessionKey == personalSessionKey)
 
         chatService.emitServiceEvent(.sessionInfo(
@@ -1024,7 +1024,7 @@ struct ChatViewModelTests {
             try await Task.sleep(forDuration: .milliseconds(20))
         }
 
-        viewModel.setActiveSessionKey(adminSessionKey)
+        viewModel.setActiveSessionKeyForTesting(adminSessionKey)
         #expect(viewModel.activeSessionKey == adminSessionKey)
 
         let adminMessage = Message(
@@ -1081,7 +1081,7 @@ struct ChatViewModelTests {
             if viewModel.orderedSessionKeys.contains(adminSessionKey) { break }
             try await Task.sleep(for: .milliseconds(20))
         }
-        viewModel.setActiveSessionKey(adminSessionKey)
+        viewModel.setActiveSessionKeyForTesting(adminSessionKey)
         #expect(viewModel.activeSessionKey == adminSessionKey)
 
         chatService.emitServiceEvent(.streamSnapshot([
@@ -1171,7 +1171,7 @@ struct ChatViewModelTests {
             if viewModel.orderedSessionKeys.contains(customKey) { break }
             try await Task.sleep(for: .milliseconds(20))
         }
-        viewModel.setActiveSessionKey(customKey)
+        viewModel.setActiveSessionKeyForTesting(customKey)
         #expect(viewModel.activeSessionKey == customKey)
 
         chatService.emitServiceEvent(.streamDeleted(sessionKey: customKey))

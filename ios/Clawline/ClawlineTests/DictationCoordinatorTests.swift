@@ -600,7 +600,7 @@ private final class SonioxMockFixtureClient: SonioxStreamingClienting {
     private(set) var connected = false
     private(set) var finalized = false
     private(set) var sentFrames: [Data] = []
-    private(set) var closeCalls: [(code: Int, reason: String?)] = []
+    private(set) var closeCalls: [(code: Int, reason: String?, caller: String)] = []
 
     init() {
         var continuation: AsyncStream<SonioxStreamingEvent>.Continuation?
@@ -620,8 +620,8 @@ private final class SonioxMockFixtureClient: SonioxStreamingClienting {
         finalized = true
     }
 
-    func close(code: URLSessionWebSocketTask.CloseCode, reason: String?) {
-        closeCalls.append((Int(code.rawValue), reason))
+    func close(code: URLSessionWebSocketTask.CloseCode, reason: String?, caller: String) {
+        closeCalls.append((Int(code.rawValue), reason, caller))
     }
 
     func emit(_ event: SonioxStreamingEvent) {

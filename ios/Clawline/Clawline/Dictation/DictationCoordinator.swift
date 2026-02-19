@@ -264,7 +264,7 @@ final class DictationCoordinator {
             guard streamSwitchStopTask == nil else { return }
             streamSwitchStopTask = Task { [weak self] in
                 guard let self else { return }
-                logDictation("DICTATION_STOP caller=stream_switch_handler ts=\(Date().timeIntervalSince1970)")
+                logDictation("DICTATION_STOP trace_id=DICTATION_STOP_STREAM_SWITCH caller=stream_switch_handler ts=\(Date().timeIntervalSince1970)")
                 await self.stopKeep(
                     reason: "stream_switch",
                     timeout: self.timing.stopKeepFinalizeTimeout,
@@ -357,7 +357,7 @@ final class DictationCoordinator {
     func stopDictationFromSwipeRight() {
         guard state == .dictatingSticky || state == .dictatingWalkieTalkie else { return }
         Task { [weak self] in
-            logDictation("DICTATION_STOP caller=swipe_right_stop ts=\(Date().timeIntervalSince1970)")
+            logDictation("DICTATION_STOP trace_id=DICTATION_STOP_SWIPE_RIGHT caller=swipe_right_stop ts=\(Date().timeIntervalSince1970)")
             await self?.stopKeep(
                 reason: "swipe_right",
                 timeout: timing.stopKeepFinalizeTimeout,
@@ -369,7 +369,7 @@ final class DictationCoordinator {
     func endWalkieTalkieIfNeeded() {
         guard state == .dictatingWalkieTalkie else { return }
         Task { [weak self] in
-            logDictation("DICTATION_STOP caller=walkie_release ts=\(Date().timeIntervalSince1970)")
+            logDictation("DICTATION_STOP trace_id=DICTATION_STOP_WALKIE_RELEASE caller=walkie_release ts=\(Date().timeIntervalSince1970)")
             await self?.stopKeep(
                 reason: "walkie_release",
                 timeout: timing.stopKeepFinalizeTimeout,
@@ -381,6 +381,7 @@ final class DictationCoordinator {
     func stopFromEscapeKey() {
         guard state == .dictatingSticky else { return }
         Task { [weak self] in
+            logDictation("DICTATION_STOP trace_id=DICTATION_STOP_ESCAPE caller=stopFromEscapeKey ts=\(Date().timeIntervalSince1970)")
             await self?.stopKeep(
                 reason: "escape",
                 timeout: timing.stopKeepFinalizeTimeout,
@@ -391,12 +392,14 @@ final class DictationCoordinator {
 
     func discardFromEscapeLongPress() {
         guard state == .dictatingSticky || state == .dictatingWalkieTalkie else { return }
+        logDictation("DICTATION_STOP trace_id=DICTATION_DISCARD_ESCAPE_LONG_PRESS caller=discardFromEscapeLongPress ts=\(Date().timeIntervalSince1970)")
         stopDiscard(reason: "escape_long_press", trigger: "keyboard_escape_long_press")
     }
 
     func stopFromVoiceOverAction() {
         guard state == .dictatingSticky else { return }
         Task { [weak self] in
+            logDictation("DICTATION_STOP trace_id=DICTATION_STOP_VOICEOVER caller=stopFromVoiceOverAction ts=\(Date().timeIntervalSince1970)")
             await self?.stopKeep(
                 reason: "voiceover_stop",
                 timeout: timing.stopKeepFinalizeTimeout,
@@ -407,11 +410,12 @@ final class DictationCoordinator {
 
     func discardFromVoiceOverAction() {
         guard state == .dictatingSticky || state == .dictatingWalkieTalkie else { return }
+        logDictation("DICTATION_STOP trace_id=DICTATION_DISCARD_VOICEOVER caller=discardFromVoiceOverAction ts=\(Date().timeIntervalSince1970)")
         stopDiscard(reason: "voiceover_discard", trigger: "voiceover_discard_action")
     }
 
     func handleSendTapped(sendAction: @escaping () -> Void) {
-        logDictation("DICTATION_STOP caller=handleSendTapped_entry ts=\(Date().timeIntervalSince1970) state=\(String(describing: state))")
+        logDictation("DICTATION_STOP trace_id=DICTATION_STOP_SEND_TAPPED_ENTRY caller=handleSendTapped_entry ts=\(Date().timeIntervalSince1970) state=\(String(describing: state))")
         guard state == .dictatingSticky || state == .dictatingWalkieTalkie || state == .stoppingKeep else {
             sendAction()
             return
@@ -419,7 +423,7 @@ final class DictationCoordinator {
 
         Task { [weak self] in
             guard let self else { return }
-            logDictation("DICTATION_STOP caller=send_tap_finalization ts=\(Date().timeIntervalSince1970)")
+            logDictation("DICTATION_STOP trace_id=DICTATION_STOP_SEND_FINALIZE caller=send_tap_finalization ts=\(Date().timeIntervalSince1970)")
             let finalized = await self.stopKeep(
                 reason: "send",
                 timeout: self.timing.sendFinalizeTimeout,
@@ -433,7 +437,7 @@ final class DictationCoordinator {
     func handleAppBackgrounded() {
         guard state == .dictatingSticky || state == .dictatingWalkieTalkie else { return }
         Task { [weak self] in
-            logDictation("DICTATION_STOP caller=app_background_handler ts=\(Date().timeIntervalSince1970)")
+            logDictation("DICTATION_STOP trace_id=DICTATION_STOP_APP_BACKGROUND caller=app_background_handler ts=\(Date().timeIntervalSince1970)")
             await self?.stopKeep(
                 reason: "app_background",
                 timeout: timing.stopKeepFinalizeTimeout,
@@ -568,7 +572,7 @@ final class DictationCoordinator {
         maxDurationTask = Task { [weak self] in
             guard let self else { return }
             try? await Task.sleep(for: timing.maxSessionDuration)
-            logDictation("DICTATION_STOP caller=timer_max_duration ts=\(Date().timeIntervalSince1970)")
+            logDictation("DICTATION_STOP trace_id=DICTATION_STOP_TIMER_MAX_DURATION caller=timer_max_duration ts=\(Date().timeIntervalSince1970)")
             await self.stopKeep(
                 reason: "max_duration",
                 timeout: timing.stopKeepFinalizeTimeout,
@@ -582,7 +586,7 @@ final class DictationCoordinator {
         tokenInactivityTask = Task { [weak self] in
             guard let self else { return }
             try? await Task.sleep(for: timing.tokenInactivityTimeout)
-            logDictation("DICTATION_STOP caller=timer_token_inactivity ts=\(Date().timeIntervalSince1970)")
+            logDictation("DICTATION_STOP trace_id=DICTATION_STOP_TIMER_TOKEN_INACTIVITY caller=timer_token_inactivity ts=\(Date().timeIntervalSince1970)")
             await self.stopKeep(
                 reason: "token_inactivity",
                 timeout: timing.stopKeepFinalizeTimeout,
@@ -630,7 +634,7 @@ final class DictationCoordinator {
                 }
             }
         case .closed:
-            logDictation("DICTATION_COORD soniox_event closed state=\(String(describing: state)) mode=\(String(describing: mode))")
+            logDictation("DICTATION_STOP trace_id=DICTATION_STOP_SOCKET_CLOSED_EVENT caller=soniox_event_closed state=\(String(describing: state)) mode=\(String(describing: mode))")
             if let mode,
                state == .dictatingSticky || state == .dictatingWalkieTalkie {
                 let elapsed = elapsedSessionMilliseconds()
@@ -674,6 +678,7 @@ final class DictationCoordinator {
         analytics.trackError(errorCode: code, stage: "protocol")
         Task { [weak self] in
             guard let self else { return }
+            logDictation("DICTATION_STOP trace_id=DICTATION_STOP_PROTOCOL_ERROR caller=handleProtocolError ts=\(Date().timeIntervalSince1970) code=\(code ?? "nil")")
             await self.stopKeep(
                 reason: "protocol_error",
                 timeout: .zero,
@@ -688,7 +693,7 @@ final class DictationCoordinator {
 
     private func handleTransportFailure(stage: SonioxStreamingClientStage, message: String) async {
         guard isDictationActive else { return }
-        logDictation("DICTATION_COORD transport_failure stage=\(stage.rawValue) message=\(message)")
+        logDictation("DICTATION_STOP trace_id=DICTATION_STOP_TRANSPORT_FAILURE caller=handleTransportFailure ts=\(Date().timeIntervalSince1970) stage=\(stage.rawValue) message=\(message)")
         analytics.trackError(errorCode: nil, stage: stage.rawValue)
         await stopKeep(
             reason: "transport_failure",
@@ -737,7 +742,9 @@ final class DictationCoordinator {
         var finalizedWithinTimeout = false
 
         if gracefulFinalize {
-            logger.notice("Dictation stopKeep sendFinalize reason=\(reason, privacy: .public)")
+            logger.notice(
+                "DICTATION_STOP trace_id=DICTATION_STOP_SEND_FINALIZE_INTERNAL reason=\(reason, privacy: .public) trigger=\(trigger, privacy: .public) callSite=\(callSite, privacy: .public)"
+            )
             do {
                 try await streamingClient?.sendFinalize()
             } catch {
@@ -759,7 +766,14 @@ final class DictationCoordinator {
             finalizedWithinTimeout = await waitForFinished(timeout: timeout)
         }
 
-        streamingClient?.close(code: .normalClosure, reason: "client_finalize")
+        logger.notice(
+            "DICTATION_STOP trace_id=DICTATION_STOP_CLOSE_CLIENT_FINALIZE reason=\(reason, privacy: .public) trigger=\(trigger, privacy: .public) callSite=\(callSite, privacy: .public)"
+        )
+        streamingClient?.close(
+            code: .normalClosure,
+            reason: "client_finalize",
+            caller: "DictationCoordinator.stopKeep reason=\(reason) trigger=\(trigger) callSite=\(callSite)"
+        )
         finalizeSessionCleanup(reason: reason, announceStop: announceStop)
         return finalizedWithinTimeout
     }
@@ -783,7 +797,14 @@ final class DictationCoordinator {
         cancelPendingTranscriptApply()
 
         audioCapture?.stop()
-        streamingClient?.close(code: .normalClosure, reason: "client_cancelled")
+        logger.notice(
+            "DICTATION_STOP trace_id=DICTATION_DISCARD_CLOSE_CLIENT_CANCELLED reason=\(reason, privacy: .public) trigger=\(trigger, privacy: .public) callSite=\(callSite, privacy: .public)"
+        )
+        streamingClient?.close(
+            code: .normalClosure,
+            reason: "client_cancelled",
+            caller: "DictationCoordinator.stopDiscard reason=\(reason) trigger=\(trigger) callSite=\(callSite)"
+        )
 
         if let originSessionKey {
             bridge.restore(snapshot: preDictationSnapshot, to: originSessionKey)

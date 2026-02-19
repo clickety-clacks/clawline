@@ -44,7 +44,7 @@ protocol SonioxStreamingClienting: AnyObject {
     func connect(config: SonioxStreamingConfig) async throws
     func sendAudioFrame(_ frame: Data) async throws
     func sendFinalize() async throws
-    func close(code: URLSessionWebSocketTask.CloseCode, reason: String?)
+    func close(code: URLSessionWebSocketTask.CloseCode, reason: String?, caller: String)
 }
 
 enum SonioxStreamingClientError: LocalizedError {
@@ -88,6 +88,14 @@ final class SonioxStreamingClient: SonioxStreamingClienting {
     private var receiveSequence: UInt64 = 0
     private var audioFrameSequence: UInt64 = 0
 
+    nonisolated private static func callSite(
+        function: StaticString = #function,
+        fileID: StaticString = #fileID,
+        line: UInt = #line
+    ) -> String {
+        "\(fileID):\(line) \(function)"
+    }
+
     init(
         session: URLSession = URLSession(configuration: .default),
         keepaliveInterval: Duration = .seconds(10),
@@ -107,7 +115,7 @@ final class SonioxStreamingClient: SonioxStreamingClienting {
 
     func connect(config: SonioxStreamingConfig) async throws {
         let startedAt = CFAbsoluteTimeGetCurrent()
-        close(code: .goingAway, reason: "restart")
+        close(code: .goingAway, reason: "restart", caller: Self.callSite())
 
         var request = URLRequest(url: Self.endpointURL)
         request.timeoutInterval = 20
@@ -189,12 +197,19 @@ final class SonioxStreamingClient: SonioxStreamingClienting {
         }
     }
 
-    func close(code: URLSessionWebSocketTask.CloseCode = .normalClosure, reason: String?) {
+    func close(
+        code: URLSessionWebSocketTask.CloseCode = .normalClosure,
+        reason: String?,
+        caller: String
+    ) {
         stopKeepaliveLoop()
         receiveTask?.cancel()
         receiveTask = nil
 
         if let task = socketTask {
+            logger.notice(
+                "DICTATION_CLOSE trace_id=DICTATION_CLOSE_SOCKET_CANCEL caller=\(caller, privacy: .public) reason=\(reason ?? "nil", privacy: .public) code=\(Int(code.rawValue), privacy: .public)"
+            )
             logSocketStateChange(.closing, task: task, context: "client_close_request")
             let reasonData = reason.map { Data($0.utf8) }
             task.cancel(with: code, reason: reasonData)

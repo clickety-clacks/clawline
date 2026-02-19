@@ -42,6 +42,7 @@ final class ComposeInputDictationBridge {
         var initialReplacementUTF16Length: Int
         var previousTranscriptUTF16Length: Int
         var hasAppliedTranscript: Bool
+        var previousServerTranscript: String
     }
 
     private weak var host: (any DictationComposeDraftHosting)?
@@ -70,7 +71,8 @@ final class ComposeInputDictationBridge {
             insertionLocation: insertionLocation,
             initialReplacementUTF16Length: initialReplacementLength,
             previousTranscriptUTF16Length: 0,
-            hasAppliedTranscript: false
+            hasAppliedTranscript: false,
+            previousServerTranscript: ""
         )
     }
 
@@ -92,7 +94,8 @@ final class ComposeInputDictationBridge {
             insertionLocation: baseSnapshot.content.length,
             initialReplacementUTF16Length: 0,
             previousTranscriptUTF16Length: transcript.utf16.count,
-            hasAppliedTranscript: true
+            hasAppliedTranscript: true,
+            previousServerTranscript: transcript
         )
     }
 
@@ -119,24 +122,44 @@ final class ComposeInputDictationBridge {
             insertionLocation: textView.selectedRange.location == NSNotFound ? textView.attributedText.length : textView.selectedRange.location,
             initialReplacementUTF16Length: textView.selectedRange.location == NSNotFound ? 0 : textView.selectedRange.length,
             previousTranscriptUTF16Length: 0,
-            hasAppliedTranscript: false
+            hasAppliedTranscript: false,
+            previousServerTranscript: ""
         )
 
-        let replacementLength = state.hasAppliedTranscript
-            ? state.previousTranscriptUTF16Length
-            : state.initialReplacementUTF16Length
-        let fullLength = textView.attributedText.length
-        let safeLocation = min(max(state.insertionLocation, 0), fullLength)
-        let safeLength = min(max(replacementLength, 0), max(0, fullLength - safeLocation))
-        let replacementRange = NSRange(location: safeLocation, length: safeLength)
+        if !state.hasAppliedTranscript {
+            let replacementLength = state.initialReplacementUTF16Length
+            let fullLength = textView.attributedText.length
+            let safeLocation = min(max(state.insertionLocation, 0), fullLength)
+            let safeLength = min(max(replacementLength, 0), max(0, fullLength - safeLocation))
+            let replacementRange = NSRange(location: safeLocation, length: safeLength)
 
-        guard let textRange = textRange(in: textView, nsRange: replacementRange) else {
-            return false
+            guard let textRange = textRange(in: textView, nsRange: replacementRange) else {
+                return false
+            }
+
+            textView.replace(textRange, withText: transcript)
+            state.insertionLocation = safeLocation
+            state.previousTranscriptUTF16Length = transcript.utf16.count
+            state.hasAppliedTranscript = true
+            state.previousServerTranscript = transcript
+            transcriptStateBySession[sessionKey] = state
+            return true
         }
 
-        textView.replace(textRange, withText: transcript)
-        state.insertionLocation = safeLocation
+        let previousServerTranscript = state.previousServerTranscript
+        if transcript.hasPrefix(previousServerTranscript) {
+            let suffixStart = previousServerTranscript.endIndex
+            let suffix = String(transcript[suffixStart...])
+            if !suffix.isEmpty {
+                textView.insertText(suffix)
+            }
+        } else {
+            // User can edit inside the dictated span while the server keeps revising partial text.
+            // Preserve local edits by not replacing the entire dictated segment.
+        }
+
         state.previousTranscriptUTF16Length = transcript.utf16.count
+        state.previousServerTranscript = transcript
         state.hasAppliedTranscript = true
         transcriptStateBySession[sessionKey] = state
         return true

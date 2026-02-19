@@ -145,7 +145,7 @@ struct MessageInputBar: View {
     }
 
     private var shouldRenderMic: Bool {
-        dictation.micVisible || micTransientVisible
+        dictation.micVisible || dictation.isStickyDictationActive || micTransientVisible
     }
 
     private var micTrailingPadding: CGFloat {
@@ -441,9 +441,9 @@ struct MessageInputBar: View {
                         micButton
                             .padding(.trailing, 8)
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
-                            .opacity(dictation.micVisible ? 1 : micTransientOpacity)
-                            .offset(x: dictation.micVisible ? 0 : micTransientOffset)
-                            .allowsHitTesting(dictation.micVisible)
+                            .opacity((dictation.micVisible || dictation.isStickyDictationActive) ? 1 : micTransientOpacity)
+                            .offset(x: (dictation.micVisible || dictation.isStickyDictationActive) ? 0 : micTransientOffset)
+                            .allowsHitTesting(dictation.micVisible || dictation.isStickyDictationActive)
                             .transition(.move(edge: .trailing).combined(with: .opacity))
                             .animation(.easeOut(duration: isTextFieldFocused ? 0.7 : 0.35), value: dictation.micVisible)
                     }
@@ -459,23 +459,18 @@ struct MessageInputBar: View {
                 .glassEffect(.regular, in: inputShape)
 #endif
                 .overlay {
-                    ZStack {
-                        inputShape
-                            .stroke(inputBorderColor, lineWidth: 1)
-                        if dictation.isWaveformVisible {
-                            DictationWaveformBorder(
-                                isActive: true,
-                                amplitude: dictation.waveformDisplacement,
-                                cornerRadius: inputCornerRadius,
-                                reduceMotionEnabled: reduceMotionForDictation
-                            )
-                        }
-                    }
+                    DictationWaveformBorder(
+                        isActive: dictation.isWaveformVisible,
+                        amplitude: dictation.waveformDisplacement,
+                        cornerRadius: inputCornerRadius,
+                        inactiveStrokeColor: inputBorderColor,
+                        activeStrokeColor: .accentColor,
+                        reduceMotionEnabled: reduceMotionForDictation
+                    )
                 }
                 .accessibilityAction(named: Text("Start Sticky Dictation")) {
                     guard dictation.micVisible || dictation.swipeActivationEnabled else { return }
                     dictation.startStickyDictation()
-                    beginMicFadeOut(fromSwipe: !dictation.micVisible)
                 }
                 .accessibilityAction(named: Text("Start Walkie-Talkie Dictation")) {
                     guard dictation.micVisible || dictation.swipeActivationEnabled else { return }
@@ -635,7 +630,7 @@ struct MessageInputBar: View {
                         handleMicPressEnded()
                     }
             )
-            .accessibilityLabel("Start dictation")
+            .accessibilityLabel(dictation.isStickyDictationActive ? "Stop dictation" : "Start dictation")
     }
 
     private var swipeDictationGesture: some Gesture {
@@ -678,9 +673,13 @@ struct MessageInputBar: View {
             return
         }
 
+        if dictation.isStickyDictationActive {
+            dictation.stopStickyFromMicTap()
+            return
+        }
+
         guard dictation.micVisible else { return }
         dictation.startStickyDictation()
-        beginMicFadeOut(fromSwipe: false)
     }
 
     private func handleSwipeChanged(_ value: DragGesture.Value) {
@@ -758,7 +757,6 @@ struct MessageInputBar: View {
         }
 
         dictation.startStickyDictation()
-        beginMicFadeOut(fromSwipe: true)
     }
 
     private func beginMicFadeOut(fromSwipe: Bool) {

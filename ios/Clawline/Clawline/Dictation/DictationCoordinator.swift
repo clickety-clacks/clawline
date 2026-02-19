@@ -368,6 +368,18 @@ final class DictationCoordinator {
         }
     }
 
+    func stopStickyFromMicTap() {
+        guard state == .dictatingSticky else { return }
+        Task { [weak self] in
+            logDictation("DICTATION_STOP trace_id=DICTATION_STOP_MIC_TAP caller=mic_tap_stop ts=\(Date().timeIntervalSince1970)")
+            await self?.stopKeep(
+                reason: "mic_tap_toggle",
+                timeout: timing.stopKeepFinalizeTimeout,
+                trigger: "mic_tap_toggle"
+            )
+        }
+    }
+
     func endWalkieTalkieIfNeeded() {
         guard state == .dictatingWalkieTalkie else { return }
         Task { [weak self] in
@@ -524,7 +536,7 @@ final class DictationCoordinator {
         levelTask?.cancel()
         levelTask = Task { [weak self] in
             guard let self else { return }
-            let minimumWaveformUpdateInterval: CFTimeInterval = 0.10
+            let minimumWaveformUpdateInterval: CFTimeInterval = 0.05
             var lastWaveformUpdateAt = CFAbsoluteTimeGetCurrent() - minimumWaveformUpdateInterval
             var lastAppliedDisplacement: CGFloat = -1
             for await level in capture.levelStream {
@@ -951,10 +963,11 @@ final class DictationCoordinator {
     }
 
     private static func mappedDisplacement(for rms: Float) -> CGFloat {
-        let low: Float = 0.01
-        let high: Float = 0.20
+        let low: Float = 0.005
+        let high: Float = 0.25
         let clamped = min(max((rms - low) / (high - low), 0), 1)
-        return CGFloat(1 + clamped * 5)
+        let eased = pow(clamped, 0.65)
+        return CGFloat(0.6 + eased * 7.4)
     }
 
     private func elapsedSessionMilliseconds() -> Int {

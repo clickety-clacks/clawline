@@ -11,28 +11,31 @@ struct DictationWaveformBorder: View {
     let isActive: Bool
     let amplitude: CGFloat
     let cornerRadius: CGFloat
+    let inactiveStrokeColor: Color
+    let activeStrokeColor: Color
     let reduceMotionEnabled: Bool
 
-    private let strokeColor = Color.accentColor
-
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 0.10)) { timeline in
+        TimelineView(.periodic(from: .now, by: 0.05)) { timeline in
             let t = timeline.date.timeIntervalSinceReferenceDate
-            if reduceMotionEnabled {
-                let alpha = 0.825 + 0.175 * sin(t * .pi * 2)
+            if !isActive {
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .stroke(strokeColor.opacity(isActive ? alpha : 0), lineWidth: 1.5)
+                    .stroke(inactiveStrokeColor, lineWidth: 1)
+            } else if reduceMotionEnabled {
+                let alpha = 0.82 + 0.18 * sin(t * .pi * 2)
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .stroke(activeStrokeColor.opacity(alpha), lineWidth: 1.5)
             } else {
                 GeometryReader { geometry in
                     let phase = CGFloat(t * .pi * 2 * 0.5)
                     let path = DictationWavePath.path(
                         in: geometry.frame(in: .local),
                         cornerRadius: cornerRadius,
-                        amplitude: isActive ? amplitude : 0,
+                        amplitude: amplitude,
                         phase: phase
                     )
                     path
-                        .stroke(strokeColor.opacity(isActive ? 0.95 : 0), lineWidth: 1.5)
+                        .stroke(activeStrokeColor.opacity(0.95), lineWidth: 1.5)
                 }
             }
         }

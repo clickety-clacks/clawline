@@ -94,8 +94,7 @@ final class DictationCoordinator {
         didSet {
             guard oldValue != state else { return }
             let trace = "DICTATION_COORD state \(String(describing: oldValue)) -> \(String(describing: state))"
-            print(trace)
-            logger.notice("\(trace, privacy: .public)")
+            logDictation(trace)
         }
     }
     private(set) var errorMessage: String?
@@ -265,7 +264,7 @@ final class DictationCoordinator {
             guard streamSwitchStopTask == nil else { return }
             streamSwitchStopTask = Task { [weak self] in
                 guard let self else { return }
-                print("DICTATION_STOP caller=stream_switch_handler ts=\(Date().timeIntervalSince1970)")
+                logDictation("DICTATION_STOP caller=stream_switch_handler ts=\(Date().timeIntervalSince1970)")
                 await self.stopKeep(
                     reason: "stream_switch",
                     timeout: self.timing.stopKeepFinalizeTimeout,
@@ -291,12 +290,12 @@ final class DictationCoordinator {
     }
 
     func startStickyDictation() {
-        print("DICTATION_UI startStickyDictation")
+        logDictation("DICTATION_UI startStickyDictation")
         start(mode: .sticky)
     }
 
     func startWalkieTalkieDictation() {
-        print("DICTATION_UI startWalkieTalkieDictation")
+        logDictation("DICTATION_UI startWalkieTalkieDictation")
         start(mode: .walkieTalkie)
     }
 
@@ -358,7 +357,7 @@ final class DictationCoordinator {
     func stopDictationFromSwipeRight() {
         guard state == .dictatingSticky || state == .dictatingWalkieTalkie else { return }
         Task { [weak self] in
-            print("DICTATION_STOP caller=swipe_right_stop ts=\(Date().timeIntervalSince1970)")
+            logDictation("DICTATION_STOP caller=swipe_right_stop ts=\(Date().timeIntervalSince1970)")
             await self?.stopKeep(
                 reason: "swipe_right",
                 timeout: timing.stopKeepFinalizeTimeout,
@@ -370,7 +369,7 @@ final class DictationCoordinator {
     func endWalkieTalkieIfNeeded() {
         guard state == .dictatingWalkieTalkie else { return }
         Task { [weak self] in
-            print("DICTATION_STOP caller=walkie_release ts=\(Date().timeIntervalSince1970)")
+            logDictation("DICTATION_STOP caller=walkie_release ts=\(Date().timeIntervalSince1970)")
             await self?.stopKeep(
                 reason: "walkie_release",
                 timeout: timing.stopKeepFinalizeTimeout,
@@ -412,7 +411,7 @@ final class DictationCoordinator {
     }
 
     func handleSendTapped(sendAction: @escaping () -> Void) {
-        print("DICTATION_STOP caller=handleSendTapped_entry ts=\(Date().timeIntervalSince1970) state=\(String(describing: state))")
+        logDictation("DICTATION_STOP caller=handleSendTapped_entry ts=\(Date().timeIntervalSince1970) state=\(String(describing: state))")
         guard state == .dictatingSticky || state == .dictatingWalkieTalkie || state == .stoppingKeep else {
             sendAction()
             return
@@ -420,7 +419,7 @@ final class DictationCoordinator {
 
         Task { [weak self] in
             guard let self else { return }
-            print("DICTATION_STOP caller=send_tap_finalization ts=\(Date().timeIntervalSince1970)")
+            logDictation("DICTATION_STOP caller=send_tap_finalization ts=\(Date().timeIntervalSince1970)")
             let finalized = await self.stopKeep(
                 reason: "send",
                 timeout: self.timing.sendFinalizeTimeout,
@@ -434,7 +433,7 @@ final class DictationCoordinator {
     func handleAppBackgrounded() {
         guard state == .dictatingSticky || state == .dictatingWalkieTalkie else { return }
         Task { [weak self] in
-            print("DICTATION_STOP caller=app_background_handler ts=\(Date().timeIntervalSince1970)")
+            logDictation("DICTATION_STOP caller=app_background_handler ts=\(Date().timeIntervalSince1970)")
             await self?.stopKeep(
                 reason: "app_background",
                 timeout: timing.stopKeepFinalizeTimeout,
@@ -460,9 +459,9 @@ final class DictationCoordinator {
         self.mode = mode
         self.originSessionKey = currentSessionKey
         bridge.resetTranscriptState(for: currentSessionKey)
-        print("DICTATION_PERF ts=\(Date().timeIntervalSince1970) event=capture_snapshot_begin session=\(currentSessionKey)")
+        logDictation("DICTATION_PERF ts=\(Date().timeIntervalSince1970) event=capture_snapshot_begin session=\(currentSessionKey)")
         self.preDictationSnapshot = bridge.captureSnapshot(for: currentSessionKey)
-        print("DICTATION_PERF ts=\(Date().timeIntervalSince1970) event=capture_snapshot_end session=\(currentSessionKey)")
+        logDictation("DICTATION_PERF ts=\(Date().timeIntervalSince1970) event=capture_snapshot_end session=\(currentSessionKey)")
         self.transcriptBuffer.reset()
         self.pendingTranscriptText = nil
         self.lastAppliedTranscriptText = ""
@@ -531,7 +530,7 @@ final class DictationCoordinator {
                 lastAppliedDisplacement = nextDisplacement
                 let perfTs = Date().timeIntervalSince1970
                 await MainActor.run {
-                    print("DICTATION_PERF ts=\(perfTs) event=waveform_update_main_thread displacement=\(nextDisplacement)")
+                    logDictation("DICTATION_PERF ts=\(perfTs) event=waveform_update_main_thread displacement=\(nextDisplacement)")
                     self.waveformDisplacement = nextDisplacement
                 }
             }
@@ -548,17 +547,17 @@ final class DictationCoordinator {
         Task { [weak self] in
             guard let self else { return }
             do {
-                print("DICTATION_COORD socket_connect begin")
+                logDictation("DICTATION_COORD socket_connect begin")
                 try await client.connect(config: SonioxStreamingConfig(apiKey: apiKey, languageHint: languageHintProvider()))
-                print("DICTATION_COORD audio_capture start begin")
+                logDictation("DICTATION_COORD audio_capture start begin")
                 try capture.start()
-                print("DICTATION_COORD audio_capture start success")
+                logDictation("DICTATION_COORD audio_capture start success")
                 await MainActor.run {
                     self.armSessionDurationTimer()
                     self.resetTokenInactivityTimer()
                 }
             } catch {
-                print("DICTATION_COORD start failure stage=connect_or_audio_start error=\(error.localizedDescription)")
+                logDictation("DICTATION_COORD start failure stage=connect_or_audio_start error=\(error.localizedDescription)")
                 await self.handleTransportFailure(stage: .connect, message: error.localizedDescription)
             }
         }
@@ -569,7 +568,7 @@ final class DictationCoordinator {
         maxDurationTask = Task { [weak self] in
             guard let self else { return }
             try? await Task.sleep(for: timing.maxSessionDuration)
-            print("DICTATION_STOP caller=timer_max_duration ts=\(Date().timeIntervalSince1970)")
+            logDictation("DICTATION_STOP caller=timer_max_duration ts=\(Date().timeIntervalSince1970)")
             await self.stopKeep(
                 reason: "max_duration",
                 timeout: timing.stopKeepFinalizeTimeout,
@@ -583,7 +582,7 @@ final class DictationCoordinator {
         tokenInactivityTask = Task { [weak self] in
             guard let self else { return }
             try? await Task.sleep(for: timing.tokenInactivityTimeout)
-            print("DICTATION_STOP caller=timer_token_inactivity ts=\(Date().timeIntervalSince1970)")
+            logDictation("DICTATION_STOP caller=timer_token_inactivity ts=\(Date().timeIntervalSince1970)")
             await self.stopKeep(
                 reason: "token_inactivity",
                 timeout: timing.stopKeepFinalizeTimeout,
@@ -631,7 +630,7 @@ final class DictationCoordinator {
                 }
             }
         case .closed:
-            print("DICTATION_COORD soniox_event closed state=\(String(describing: state)) mode=\(String(describing: mode))")
+            logDictation("DICTATION_COORD soniox_event closed state=\(String(describing: state)) mode=\(String(describing: mode))")
             if let mode,
                state == .dictatingSticky || state == .dictatingWalkieTalkie {
                 let elapsed = elapsedSessionMilliseconds()
@@ -645,7 +644,7 @@ final class DictationCoordinator {
                 )
             }
         case .failed(let stage, let code, let message):
-            print("DICTATION_COORD soniox_event failed stage=\(stage.rawValue) code=\(code ?? "nil") message=\(message)")
+            logDictation("DICTATION_COORD soniox_event failed stage=\(stage.rawValue) code=\(code ?? "nil") message=\(message)")
             analytics.trackError(errorCode: code, stage: stage.rawValue)
             await handleTransportFailure(stage: stage, message: message)
         }
@@ -666,7 +665,7 @@ final class DictationCoordinator {
             analytics.trackError(errorCode: nil, stage: "audio_media_services_reset")
         case .failed(let message):
             logger.notice("Dictation audio event failed: \(message, privacy: .public)")
-            print("DICTATION_COORD audio_event failed message=\(message)")
+            logDictation("DICTATION_COORD audio_event failed message=\(message)")
             await handleTransportFailure(stage: .audio, message: message)
         }
     }
@@ -682,14 +681,14 @@ final class DictationCoordinator {
                 gracefulFinalize: false,
                 trigger: "protocol_error_event"
             )
-            print("DICTATION_ERROR path=handleProtocolError ts=\(Date().timeIntervalSince1970) code=\(code ?? "nil") message=\(message)")
+            logDictation("DICTATION_ERROR path=handleProtocolError ts=\(Date().timeIntervalSince1970) code=\(code ?? "nil") message=\(message)")
             self.enterError(message: message, source: "handleProtocolError")
         }
     }
 
     private func handleTransportFailure(stage: SonioxStreamingClientStage, message: String) async {
         guard isDictationActive else { return }
-        print("DICTATION_COORD transport_failure stage=\(stage.rawValue) message=\(message)")
+        logDictation("DICTATION_COORD transport_failure stage=\(stage.rawValue) message=\(message)")
         analytics.trackError(errorCode: nil, stage: stage.rawValue)
         await stopKeep(
             reason: "transport_failure",
@@ -698,7 +697,7 @@ final class DictationCoordinator {
             gracefulFinalize: false,
             trigger: "transport_failure_event"
         )
-        print("DICTATION_ERROR path=handleTransportFailure ts=\(Date().timeIntervalSince1970) stage=\(stage.rawValue) message=\(message)")
+        logDictation("DICTATION_ERROR path=handleTransportFailure ts=\(Date().timeIntervalSince1970) stage=\(stage.rawValue) message=\(message)")
         enterError(message: "Dictation failed", source: "handleTransportFailure")
     }
 
@@ -711,7 +710,7 @@ final class DictationCoordinator {
         trigger: String = "unspecified",
         callSite: String = DictationCoordinator.callSite()
     ) async -> Bool {
-        print(
+        logDictation(
             "DICTATION_STOP stopKeep_top ts=\(Date().timeIntervalSince1970) reason=\(reason) " +
             "state=\(String(describing: state)) callsite=\(callSite)"
         )
@@ -742,7 +741,7 @@ final class DictationCoordinator {
             do {
                 try await streamingClient?.sendFinalize()
             } catch {
-                print("DICTATION_ERROR path=stopKeep_sendFinalize ts=\(Date().timeIntervalSince1970) reason=\(reason) error=\(error.localizedDescription)")
+                logDictation("DICTATION_ERROR path=stopKeep_sendFinalize ts=\(Date().timeIntervalSince1970) reason=\(reason) error=\(error.localizedDescription)")
                 enterError(message: "Failed to finalize dictation", source: "stopKeep_sendFinalize")
             }
         }
@@ -862,8 +861,8 @@ final class DictationCoordinator {
     }
 
     private func enterError(message: String, source: String = "unspecified") {
-        print("DICTATION_ERROR enter_error ts=\(Date().timeIntervalSince1970) source=\(source) state=\(String(describing: state)) message=\(message)")
-        print("DICTATION_COORD enter_error message=\(message)")
+        logDictation("DICTATION_ERROR enter_error ts=\(Date().timeIntervalSince1970) source=\(source) state=\(String(describing: state)) message=\(message)")
+        logDictation("DICTATION_COORD enter_error message=\(message)")
         errorMessage = message
         state = .error
         feedback.notifyError()
@@ -878,7 +877,7 @@ final class DictationCoordinator {
             guard let self else { return }
             try? await Task.sleep(for: timeout)
             await MainActor.run {
-                print("DICTATION_ERROR auto_dismiss ts=\(Date().timeIntervalSince1970) source=\(source) message=\(self.errorMessage ?? "nil")")
+                logDictation("DICTATION_ERROR auto_dismiss ts=\(Date().timeIntervalSince1970) source=\(source) message=\(self.errorMessage ?? "nil")")
                 self.errorMessage = nil
                 if !self.isDictationActive {
                     self.state = self.idleStateForCurrentContext()
@@ -914,7 +913,7 @@ final class DictationCoordinator {
     }
 
     private func queueTranscriptApply(_ transcriptText: String, immediate: Bool) {
-        print("DICTATION_PERF ts=\(Date().timeIntervalSince1970) event=queue_transcript_apply immediate=\(immediate) chars=\(transcriptText.count)")
+        logDictation("DICTATION_PERF ts=\(Date().timeIntervalSince1970) event=queue_transcript_apply immediate=\(immediate) chars=\(transcriptText.count)")
         pendingTranscriptText = transcriptText
         if immediate {
             flushPendingTranscriptApply()
@@ -930,13 +929,13 @@ final class DictationCoordinator {
     }
 
     private func flushPendingTranscriptApply() {
-        print("DICTATION_PERF ts=\(Date().timeIntervalSince1970) event=flush_transcript_apply_begin")
+        logDictation("DICTATION_PERF ts=\(Date().timeIntervalSince1970) event=flush_transcript_apply_begin")
         transcriptApplyTask?.cancel()
         transcriptApplyTask = nil
         guard let transcriptText = pendingTranscriptText else { return }
         pendingTranscriptText = nil
         applyTranscriptIfNeeded(transcriptText)
-        print("DICTATION_PERF ts=\(Date().timeIntervalSince1970) event=flush_transcript_apply_end")
+        logDictation("DICTATION_PERF ts=\(Date().timeIntervalSince1970) event=flush_transcript_apply_end")
     }
 
     private func cancelPendingTranscriptApply() {
@@ -945,16 +944,20 @@ final class DictationCoordinator {
         pendingTranscriptText = nil
     }
 
+    private func logDictation(_ message: String) {
+        logger.notice("\(message, privacy: .public)")
+    }
+
     private func applyTranscriptIfNeeded(_ transcriptText: String) {
         guard transcriptText != lastAppliedTranscriptText else { return }
         guard let originSessionKey else { return }
         let wallTs = Date().timeIntervalSince1970
-        print("DICTATION_PERF ts=\(wallTs) event=apply_transcript_begin chars=\(transcriptText.count)")
+        logDictation("DICTATION_PERF ts=\(wallTs) event=apply_transcript_begin chars=\(transcriptText.count)")
         let startedAt = CFAbsoluteTimeGetCurrent()
         lastAppliedTranscriptText = transcriptText
         bridge.apply(transcript: transcriptText, baseSnapshot: preDictationSnapshot, to: originSessionKey)
         let elapsedMs = Int((CFAbsoluteTimeGetCurrent() - startedAt) * 1_000)
-        print("DICTATION_PERF ts=\(Date().timeIntervalSince1970) event=apply_transcript_end elapsedMs=\(elapsedMs)")
+        logDictation("DICTATION_PERF ts=\(Date().timeIntervalSince1970) event=apply_transcript_end elapsedMs=\(elapsedMs)")
         logger.notice("[DICTATION-PERF] applyTranscriptIfNeeded: \(elapsedMs, privacy: .public)ms")
     }
 }

@@ -433,7 +433,7 @@ struct MessageInputBar: View {
                         .foregroundColor(.red)
                         .allowsHitTesting(false)
                         .onAppear {
-                            print("DICTATION_ERROR ui_display ts=\(Date().timeIntervalSince1970) message=\(message)")
+                            logDictation("DICTATION_ERROR ui_display ts=\(Date().timeIntervalSince1970) message=\(message)")
                         }
                     }
 
@@ -649,7 +649,7 @@ struct MessageInputBar: View {
     }
 
     private func handleMicPressChanged() {
-        print(
+        logDictation(
             "DICTATION_UI handleMicPressChanged micVisible=\(dictation.micVisible) " +
             "hasMicPressTask=\(micPressTask != nil) didStartWalkie=\(micDidStartWalkieTalkie)"
         )
@@ -667,7 +667,7 @@ struct MessageInputBar: View {
     }
 
     private func handleMicPressEnded() {
-        print("DICTATION_UI handleMicPressEnded")
+        logDictation("DICTATION_UI handleMicPressEnded")
         let holdTask = micPressTask
         micPressTask = nil
         holdTask?.cancel()
@@ -684,7 +684,7 @@ struct MessageInputBar: View {
     }
 
     private func handleSwipeChanged(_ value: DragGesture.Value) {
-        print("DICTATION_UI handleSwipeChanged")
+        logDictation("DICTATION_UI handleSwipeChanged")
         let dx = value.translation.width
         let dy = value.translation.height
 
@@ -728,7 +728,7 @@ struct MessageInputBar: View {
     }
 
     private func handleSwipeEnded(_ value: DragGesture.Value) {
-        print("DICTATION_UI handleSwipeEnded")
+        logDictation("DICTATION_UI handleSwipeEnded")
         defer {
             swipeGestureStart = nil
             swipeThresholdTime = nil
@@ -796,6 +796,10 @@ struct MessageInputBar: View {
             micTransientOpacity = 0
             micTransientOffset = 0
         }
+    }
+
+    private func logDictation(_ message: String) {
+        logger.notice("\(message, privacy: .public)")
     }
 }
 

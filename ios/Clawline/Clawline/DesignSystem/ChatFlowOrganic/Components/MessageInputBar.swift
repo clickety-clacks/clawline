@@ -511,6 +511,7 @@ struct MessageInputBar: View {
                                     height: min(12, sendButtonWidth * 0.4)
                                 )
                                 .opacity(reconnectPulseOn ? 1 : 0.4)
+                                .scaleEffect(reconnectPulseOn ? 1.2 : 1.0)
                         } else {
                             Image(systemName: "stop.fill")
                                 .font(.system(size: 16, weight: .semibold))

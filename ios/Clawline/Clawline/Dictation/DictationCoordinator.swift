@@ -455,6 +455,7 @@ final class DictationCoordinator {
         pendingActivationMode = nil
         self.mode = mode
         self.originSessionKey = currentSessionKey
+        bridge.resetTranscriptState(for: currentSessionKey)
         print("DICTATION_PERF ts=\(Date().timeIntervalSince1970) event=capture_snapshot_begin session=\(currentSessionKey)")
         self.preDictationSnapshot = bridge.captureSnapshot(for: currentSessionKey)
         print("DICTATION_PERF ts=\(Date().timeIntervalSince1970) event=capture_snapshot_end session=\(currentSessionKey)")

@@ -20,6 +20,13 @@ protocol DictationComposeDraftHosting: AnyObject {
     var activeSessionKey: String { get }
 
     func captureComposeDraftSnapshot(for sessionKey: String) -> ComposeDraftSnapshot
+    func applyComposeDraftDelta(
+        baseSnapshot: ComposeDraftSnapshot,
+        previousTranscriptUTF16Length: Int,
+        replacementText: NSAttributedString,
+        to sessionKey: String,
+        moveCursorToEnd: Bool
+    )
     func applyComposeDraftSnapshot(
         _ snapshot: ComposeDraftSnapshot,
         to sessionKey: String,
@@ -30,7 +37,12 @@ protocol DictationComposeDraftHosting: AnyObject {
 
 @MainActor
 final class ComposeInputDictationBridge {
+    private struct TranscriptState {
+        var previousTranscriptUTF16Length: Int
+    }
+
     private weak var host: (any DictationComposeDraftHosting)?
+    private var transcriptStateBySession: [String: TranscriptState] = [:]
 
     init(host: any DictationComposeDraftHosting) {
         self.host = host
@@ -40,21 +52,26 @@ final class ComposeInputDictationBridge {
         host?.captureComposeDraftSnapshot(for: sessionKey) ?? .empty
     }
 
+    func resetTranscriptState(for sessionKey: String) {
+        transcriptStateBySession[sessionKey] = TranscriptState(previousTranscriptUTF16Length: 0)
+    }
+
     func apply(transcript: String, baseSnapshot: ComposeDraftSnapshot, to sessionKey: String) {
         guard let host else { return }
-        let rendered = NSMutableAttributedString(attributedString: baseSnapshot.content)
-        if !transcript.isEmpty {
-            rendered.append(NSAttributedString(string: transcript, attributes: defaultTextAttributes()))
-        }
-        host.applyComposeDraftSnapshot(
-            ComposeDraftSnapshot(content: rendered, attachments: baseSnapshot.attachments),
+        let previousUTF16Length = transcriptStateBySession[sessionKey]?.previousTranscriptUTF16Length ?? 0
+        let replacementText = NSAttributedString(string: transcript, attributes: defaultTextAttributes())
+        host.applyComposeDraftDelta(
+            baseSnapshot: baseSnapshot,
+            previousTranscriptUTF16Length: previousUTF16Length,
+            replacementText: replacementText,
             to: sessionKey,
-            moveCursorToEnd: true,
-            announceEditorReset: false
+            moveCursorToEnd: true
         )
+        transcriptStateBySession[sessionKey] = TranscriptState(previousTranscriptUTF16Length: transcript.utf16.count)
     }
 
     func restore(snapshot: ComposeDraftSnapshot, to sessionKey: String) {
+        transcriptStateBySession.removeValue(forKey: sessionKey)
         host?.applyComposeDraftSnapshot(
             snapshot,
             to: sessionKey,

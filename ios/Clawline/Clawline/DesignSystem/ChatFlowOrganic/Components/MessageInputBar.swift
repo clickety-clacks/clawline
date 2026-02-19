@@ -867,6 +867,14 @@ private final class PreviewDictationDraftHost: DictationComposeDraftHosting {
         .empty
     }
 
+    func applyComposeDraftDelta(
+        baseSnapshot: ComposeDraftSnapshot,
+        previousTranscriptUTF16Length: Int,
+        replacementText: NSAttributedString,
+        to sessionKey: String,
+        moveCursorToEnd: Bool
+    ) {}
+
     func applyComposeDraftSnapshot(_ snapshot: ComposeDraftSnapshot,
                                    to sessionKey: String,
                                    moveCursorToEnd: Bool,

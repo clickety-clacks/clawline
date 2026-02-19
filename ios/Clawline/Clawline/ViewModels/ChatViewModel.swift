@@ -1415,6 +1415,45 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
         inputResetToken &+= 1
     }
 
+    func applyComposeDraftDelta(
+        baseSnapshot: ComposeDraftSnapshot,
+        previousTranscriptUTF16Length: Int,
+        replacementText: NSAttributedString,
+        to sessionKey: String,
+        moveCursorToEnd: Bool
+    ) {
+        _ = moveCursorToEnd
+        guard !sessionKey.isEmpty else { return }
+        guard sessionKey == activeSessionKey else { return }
+
+        let prefixLength = baseSnapshot.content.length
+        let replacementRange = NSRange(location: prefixLength, length: previousTranscriptUTF16Length)
+        let current = NSMutableAttributedString(attributedString: inputContent)
+
+        let hasExpectedPrefix: Bool = {
+            guard current.length >= prefixLength else { return false }
+            let prefix = current.attributedSubstring(from: NSRange(location: 0, length: prefixLength))
+            return prefix.isEqual(to: baseSnapshot.content)
+        }()
+
+        guard hasExpectedPrefix,
+              replacementRange.location >= 0,
+              replacementRange.length >= 0,
+              replacementRange.location + replacementRange.length <= current.length else {
+            let fallback = NSMutableAttributedString(attributedString: baseSnapshot.content)
+            if replacementText.length > 0 {
+                fallback.append(replacementText)
+            }
+            inputContent = fallback
+            attachmentData = baseSnapshot.attachments
+            return
+        }
+
+        current.replaceCharacters(in: replacementRange, with: replacementText)
+        inputContent = current
+        attachmentData = baseSnapshot.attachments
+    }
+
     func captureComposeDraftSnapshot(for sessionKey: String) -> ComposeDraftSnapshot {
         guard !sessionKey.isEmpty else { return .empty }
         guard sessionKey == activeSessionKey else {

@@ -286,6 +286,10 @@ final class DictationCoordinator {
         }
     }
 
+    func setComposeTextView(_ textView: PastableTextView?) {
+        bridge.setComposeTextView(textView)
+    }
+
     func startStickyDictation() {
         print("DICTATION_UI startStickyDictation")
         start(mode: .sticky)

@@ -377,6 +377,9 @@ struct MessageInputBar: View {
                             dictation.discardFromEscapeLongPress()
                         },
                         onPasteImages: onPasteImages,
+                        onTextViewReady: { textView in
+                            dictation.setComposeTextView(textView)
+                        },
                         trailingPadding: micTrailingPadding
                     )
                     .opacity(isSending ? 0.5 : 1)

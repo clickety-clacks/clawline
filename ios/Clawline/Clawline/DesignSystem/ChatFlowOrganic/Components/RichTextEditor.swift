@@ -27,6 +27,7 @@ struct RichTextEditor: UIViewRepresentable {
     var onEscape: (() -> Void)?
     var onEscapeLongPress: (() -> Void)?
     var onPasteImages: (([UIImage]) -> Void)?
+    var onTextViewReady: ((PastableTextView) -> Void)?
     var trailingPadding: CGFloat = 20
 
     func makeUIView(context: Context) -> PastableTextView {
@@ -66,6 +67,7 @@ struct RichTextEditor: UIViewRepresentable {
         textView.isInputEnabled = isEditable
         textView.setContentHuggingPriority(.defaultLow, for: .horizontal)
         textView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        onTextViewReady?(textView)
         return textView
     }
 
@@ -86,6 +88,7 @@ struct RichTextEditor: UIViewRepresentable {
         textView.onLayout = { _ in
             coordinator.updateHeight(for: textView, allowAutoScroll: false)
         }
+        onTextViewReady?(textView)
 
         let isComposing = textView.markedTextRange != nil
         if resetToken != context.coordinator.lastResetToken, !isComposing {

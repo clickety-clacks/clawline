@@ -1093,6 +1093,64 @@ struct ChatViewModelTests {
         #expect(viewModel.activeSessionKey == personalSessionKey)
     }
 
+    @Test("Relaunch restores previously active non-default stream")
+    @MainActor
+    func relaunchRestoresPreviouslyActiveStream() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+
+        let streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: adminSessionKey, displayName: "Admin", kind: "global_dm", orderIndex: 1, isBuiltIn: true),
+        ]
+
+        let firstService = TestChatService()
+        firstService.streams = streams
+        let firstViewModel = ChatViewModel(
+            auth: auth,
+            chatService: firstService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+
+        await firstViewModel.onAppear()
+        firstService.emitServiceEvent(.streamSnapshot(streams))
+        for _ in 0..<50 {
+            if firstViewModel.orderedSessionKeys.contains(adminSessionKey) { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        firstViewModel.setActiveSessionKeyForTesting(adminSessionKey)
+        #expect(firstViewModel.activeSessionKey == adminSessionKey)
+        #expect(UserDefaults.standard.string(forKey: "clawline.lastSessionKey.user") == adminSessionKey)
+        firstViewModel.onDisappear()
+
+        let secondService = TestChatService()
+        secondService.streams = streams
+        let secondViewModel = ChatViewModel(
+            auth: auth,
+            chatService: secondService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { secondViewModel.onDisappear() }
+
+        await secondViewModel.onAppear()
+        secondService.emitServiceEvent(.streamSnapshot(streams))
+        for _ in 0..<50 {
+            if secondViewModel.activeSessionKey == adminSessionKey { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(secondViewModel.activeSessionKey == adminSessionKey)
+    }
+
     @Test("Incremental stream events update metadata")
     @MainActor
     func incrementalStreamEvents() async throws {

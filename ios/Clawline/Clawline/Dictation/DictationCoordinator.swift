@@ -24,7 +24,7 @@ enum DictationState: Equatable {
 
 struct DictationTiming {
     var maxSessionDuration: Duration = .seconds(600)
-    var tokenInactivityTimeout: Duration = .seconds(180)
+    var tokenInactivityTimeout: Duration = .seconds(30)
     var stopKeepFinalizeTimeout: Duration = .milliseconds(1_200)
     var sendFinalizeTimeout: Duration = .milliseconds(500)
     var composeUpdateCoalescingInterval: Duration = .milliseconds(75)

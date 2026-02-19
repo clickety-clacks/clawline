@@ -193,6 +193,8 @@ final class DictationCoordinator {
     private var audioEventTask: Task<Void, Never>?
     private var maxDurationTask: Task<Void, Never>?
     private var tokenInactivityTask: Task<Void, Never>?
+    private var tokenInactivityTaskID: UInt64 = 0
+    private var activeTokenInactivityTaskID: UInt64?
     private var errorDismissTask: Task<Void, Never>?
     private var streamSwitchStopTask: Task<Void, Never>?
     private var transcriptApplyTask: Task<Void, Never>?
@@ -582,17 +584,50 @@ final class DictationCoordinator {
     }
 
     private func resetTokenInactivityTimer() {
-        tokenInactivityTask?.cancel()
+        logDictation(
+            "DICTATION_STOP trace_id=DICTATION_STOP_TIMER_TOKEN_INACTIVITY_RESET " +
+            "caller=resetTokenInactivityTimer ts=\(Date().timeIntervalSince1970) " +
+            "state=\(String(describing: state)) timeout=\(String(describing: timing.tokenInactivityTimeout))"
+        )
+        cancelTokenInactivityTimer(reason: "reset_token_inactivity_timer")
+        tokenInactivityTaskID &+= 1
+        let taskID = tokenInactivityTaskID
+        activeTokenInactivityTaskID = taskID
+        logDictation(
+            "DICTATION_STOP trace_id=DICTATION_STOP_TIMER_TOKEN_INACTIVITY_START " +
+            "caller=resetTokenInactivityTimer task_id=\(taskID) ts=\(Date().timeIntervalSince1970) " +
+            "state=\(String(describing: state))"
+        )
         tokenInactivityTask = Task { [weak self] in
             guard let self else { return }
             try? await Task.sleep(for: timing.tokenInactivityTimeout)
+            if Task.isCancelled {
+                self.logDictation(
+                    "DICTATION_STOP trace_id=DICTATION_STOP_TIMER_TOKEN_INACTIVITY_CANCELLED_OBSERVED " +
+                    "caller=timer_token_inactivity task_id=\(taskID) ts=\(Date().timeIntervalSince1970)"
+                )
+                return
+            }
             logDictation("DICTATION_STOP trace_id=DICTATION_STOP_TIMER_TOKEN_INACTIVITY caller=timer_token_inactivity ts=\(Date().timeIntervalSince1970)")
+            activeTokenInactivityTaskID = nil
             await self.stopKeep(
                 reason: "token_inactivity",
                 timeout: timing.stopKeepFinalizeTimeout,
                 trigger: "token_inactivity_timer_fired"
             )
         }
+    }
+
+    private func cancelTokenInactivityTimer(reason: String) {
+        guard let tokenInactivityTask else { return }
+        logDictation(
+            "DICTATION_STOP trace_id=DICTATION_STOP_TIMER_TOKEN_INACTIVITY_CANCEL " +
+            "caller=cancelTokenInactivityTimer reason=\(reason) " +
+            "task_id=\(activeTokenInactivityTaskID.map(String.init) ?? "nil") ts=\(Date().timeIntervalSince1970)"
+        )
+        tokenInactivityTask.cancel()
+        self.tokenInactivityTask = nil
+        activeTokenInactivityTaskID = nil
     }
 
     private func handleSonioxEvent(_ event: SonioxStreamingEvent) async {
@@ -736,7 +771,7 @@ final class DictationCoordinator {
         }
 
         maxDurationTask?.cancel()
-        tokenInactivityTask?.cancel()
+        cancelTokenInactivityTimer(reason: "stopKeep_enter")
         flushPendingTranscriptApply()
 
         var finalizedWithinTimeout = false
@@ -793,7 +828,7 @@ final class DictationCoordinator {
         state = .stoppingDiscard
 
         maxDurationTask?.cancel()
-        tokenInactivityTask?.cancel()
+        cancelTokenInactivityTimer(reason: "stopDiscard_enter")
         cancelPendingTranscriptApply()
 
         audioCapture?.stop()
@@ -851,7 +886,7 @@ final class DictationCoordinator {
         levelTask?.cancel()
         audioEventTask?.cancel()
         maxDurationTask?.cancel()
-        tokenInactivityTask?.cancel()
+        cancelTokenInactivityTimer(reason: "finalizeSessionCleanup")
         errorDismissTask?.cancel()
         streamSwitchStopTask?.cancel()
         transcriptApplyTask?.cancel()
@@ -861,7 +896,6 @@ final class DictationCoordinator {
         levelTask = nil
         audioEventTask = nil
         maxDurationTask = nil
-        tokenInactivityTask = nil
         errorDismissTask = nil
         streamSwitchStopTask = nil
         transcriptApplyTask = nil

@@ -229,6 +229,19 @@ final class DictationAudioCapture: DictationAudioCapturing {
         guard isRunning else { return }
         continuationEvents?.yield(.routeChanged)
 
+        let reasonRawValue = notification.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt
+        let reason = reasonRawValue.flatMap(AVAudioSession.RouteChangeReason.init(rawValue:)) ?? .unknown
+        let shouldRecover: Bool
+        switch reason {
+        case .newDeviceAvailable, .oldDeviceUnavailable, .noSuitableRouteForCategory:
+            shouldRecover = true
+        case .categoryChange, .routeConfigurationChange, .override, .wakeFromSleep, .unknown:
+            shouldRecover = false
+        @unknown default:
+            shouldRecover = false
+        }
+        guard shouldRecover else { return }
+
         guard let outputFormat else { return }
         do {
             teardownEngineGraph()

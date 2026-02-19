@@ -800,6 +800,7 @@ struct MessageInputBar: View {
 
     private func logDictation(_ message: String) {
         logger.notice("\(message, privacy: .public)")
+        print(message)
     }
 }
 

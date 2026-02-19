@@ -207,9 +207,10 @@ final class SonioxStreamingClient: SonioxStreamingClienting {
         receiveTask = nil
 
         if let task = socketTask {
-            logger.notice(
-                "DICTATION_CLOSE trace_id=DICTATION_CLOSE_SOCKET_CANCEL caller=\(caller, privacy: .public) reason=\(reason ?? "nil", privacy: .public) code=\(Int(code.rawValue), privacy: .public)"
-            )
+            let closeTrace =
+                "DICTATION_CLOSE trace_id=DICTATION_CLOSE_SOCKET_CANCEL caller=\(caller) reason=\(reason ?? "nil") code=\(Int(code.rawValue))"
+            logger.notice("\(closeTrace, privacy: .public)")
+            print(closeTrace)
             logSocketStateChange(.closing, task: task, context: "client_close_request")
             let reasonData = reason.map { Data($0.utf8) }
             task.cancel(with: code, reason: reasonData)

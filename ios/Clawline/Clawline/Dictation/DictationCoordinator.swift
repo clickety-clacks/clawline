@@ -742,8 +742,8 @@ final class DictationCoordinator {
         var finalizedWithinTimeout = false
 
         if gracefulFinalize {
-            logger.notice(
-                "DICTATION_STOP trace_id=DICTATION_STOP_SEND_FINALIZE_INTERNAL reason=\(reason, privacy: .public) trigger=\(trigger, privacy: .public) callSite=\(callSite, privacy: .public)"
+            logDictation(
+                "DICTATION_STOP trace_id=DICTATION_STOP_SEND_FINALIZE_INTERNAL reason=\(reason) trigger=\(trigger) callSite=\(callSite)"
             )
             do {
                 try await streamingClient?.sendFinalize()
@@ -766,8 +766,8 @@ final class DictationCoordinator {
             finalizedWithinTimeout = await waitForFinished(timeout: timeout)
         }
 
-        logger.notice(
-            "DICTATION_STOP trace_id=DICTATION_STOP_CLOSE_CLIENT_FINALIZE reason=\(reason, privacy: .public) trigger=\(trigger, privacy: .public) callSite=\(callSite, privacy: .public)"
+        logDictation(
+            "DICTATION_STOP trace_id=DICTATION_STOP_CLOSE_CLIENT_FINALIZE reason=\(reason) trigger=\(trigger) callSite=\(callSite)"
         )
         streamingClient?.close(
             code: .normalClosure,
@@ -797,8 +797,8 @@ final class DictationCoordinator {
         cancelPendingTranscriptApply()
 
         audioCapture?.stop()
-        logger.notice(
-            "DICTATION_STOP trace_id=DICTATION_DISCARD_CLOSE_CLIENT_CANCELLED reason=\(reason, privacy: .public) trigger=\(trigger, privacy: .public) callSite=\(callSite, privacy: .public)"
+        logDictation(
+            "DICTATION_STOP trace_id=DICTATION_DISCARD_CLOSE_CLIENT_CANCELLED reason=\(reason) trigger=\(trigger) callSite=\(callSite)"
         )
         streamingClient?.close(
             code: .normalClosure,
@@ -967,6 +967,7 @@ final class DictationCoordinator {
 
     private func logDictation(_ message: String) {
         logger.notice("\(message, privacy: .public)")
+        print(message)
     }
 
     private func applyTranscriptIfNeeded(_ transcriptText: String) {

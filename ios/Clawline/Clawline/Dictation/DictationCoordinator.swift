@@ -89,6 +89,11 @@ final class UIKitDictationFeedbackProvider: DictationFeedbackProviding {
 @Observable
 @MainActor
 final class DictationCoordinator {
+    private enum WaveformDefaults {
+        static let amplitudeFloor: CGFloat = 0.35
+        static let amplitudeRange: CGFloat = 8.65
+    }
+
     private let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "DictationCoordinator")
     private(set) var state: DictationState = .idleMicHidden {
         didSet {
@@ -541,8 +546,8 @@ final class DictationCoordinator {
             var previousSampleAt = CFAbsoluteTimeGetCurrent()
             var lastAppliedDisplacement: CGFloat = -1
             var smoothedDisplacement: CGFloat = self.waveformDisplacement
-            let minDisplacement: CGFloat = 0.35
-            let maxDisplacement: CGFloat = 9.0
+            let minDisplacement: CGFloat = WaveformDefaults.amplitudeFloor
+            let maxDisplacement: CGFloat = WaveformDefaults.amplitudeFloor + WaveformDefaults.amplitudeRange
             let attackTimeConstant: CFTimeInterval = 0.12
             let releaseTimeConstant: CFTimeInterval = 0.28
             for await level in capture.levelStream {
@@ -975,13 +980,13 @@ final class DictationCoordinator {
     }
 
     private static func mappedDisplacement(for rms: Float) -> CGFloat {
-        guard rms > 0 else { return 0.35 }
+        guard rms > 0 else { return WaveformDefaults.amplitudeFloor }
         let db = 20 * log10(rms)
         let minDb: Float = -55
         let maxDb: Float = -10
         let clamped = min(max((db - minDb) / (maxDb - minDb), 0), 1)
         let eased = pow(clamped, 0.7)
-        return CGFloat(0.35 + eased * 8.65)
+        return WaveformDefaults.amplitudeFloor + CGFloat(eased) * WaveformDefaults.amplitudeRange
     }
 
     private func elapsedSessionMilliseconds() -> Int {

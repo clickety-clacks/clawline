@@ -9,6 +9,15 @@ import SwiftUI
 import UIKit
 
 struct DictationCausticsUnderlay: View {
+    private enum Defaults {
+        static let amplitudeFloor: Double = 0.35
+        static let amplitudeRange: Double = 8.65
+        static let reduceMotionBaselineSpeed: Double = 0.12
+        static let reduceMotionMaxSpeed: Double = 0.18
+        static let baseOpacity: Double = 0.30
+        static let activeOpacity: Double = 0.92
+    }
+
     let isActive: Bool
     let amplitude: CGFloat
     let cornerRadius: CGFloat
@@ -21,19 +30,22 @@ struct DictationCausticsUnderlay: View {
     let color1: Color
 
     private var normalizedAmplitude: Double {
-        let value = max(0, min((amplitude - 0.35) / 8.65, 1))
+        let value = max(0, min((amplitude - Defaults.amplitudeFloor) / Defaults.amplitudeRange, 1))
         return Double(value)
     }
 
-    private var effectConfig: BackgroundEffectConfiguration {
-        let minSpeed: Double = reduceMotionEnabled ? 0.12 : baselineSpeed
-        let effectiveMaxSpeed: Double = reduceMotionEnabled ? 0.18 : maxSpeed
+    private var computedSpeed: Double {
+        let minSpeed: Double = reduceMotionEnabled ? Defaults.reduceMotionBaselineSpeed : baselineSpeed
+        let effectiveMaxSpeed: Double = reduceMotionEnabled ? Defaults.reduceMotionMaxSpeed : maxSpeed
         let speedLowerBound = min(minSpeed, effectiveMaxSpeed)
         let speedUpperBound = max(minSpeed, effectiveMaxSpeed)
         let clampedAmplitude = min(max(normalizedAmplitude, 0), 1)
         let smoothedAmplitude = clampedAmplitude * clampedAmplitude * (3 - (2 * clampedAmplitude))
         let rawSpeed = minSpeed + ((effectiveMaxSpeed - minSpeed) * smoothedAmplitude)
-        let speed = min(max(rawSpeed, speedLowerBound), speedUpperBound)
+        return min(max(rawSpeed, speedLowerBound), speedUpperBound)
+    }
+
+    private var effectConfig: BackgroundEffectConfiguration {
         let intensity = brightness
         let patternScale = scale
         let lineSharpness = sharpness
@@ -45,7 +57,7 @@ struct DictationCausticsUnderlay: View {
             color2: CodableColor(color: lineColor),
             color3: CodableColor(color: lineColor),
             intensity: intensity,
-            speed: speed,
+            speed: computedSpeed,
             scale: patternScale,
             sharpness: lineSharpness,
             isEnabled: true
@@ -76,7 +88,7 @@ struct DictationCausticsUnderlay: View {
             .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             .compositingGroup()
             .blendMode(.plusLighter)
-            .opacity(isActive ? 0.92 : 0)
+            .opacity(isActive ? Defaults.activeOpacity : Defaults.baseOpacity)
             .animation(.easeInOut(duration: 0.30), value: isActive)
             .allowsHitTesting(false)
     }

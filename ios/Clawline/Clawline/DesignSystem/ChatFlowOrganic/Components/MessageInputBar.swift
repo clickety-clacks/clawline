@@ -456,9 +456,15 @@ struct MessageInputBar: View {
 #if os(visionOS)
                 .background(.regularMaterial, in: inputShape)
 #else
-                .glassEffect(.regular, in: inputShape)
+                .background(.regularMaterial, in: inputShape)
+                .if(!dictation.isWaveformVisible) { view in
+                    view.glassEffect(.regular, in: inputShape)
+                }
 #endif
                 .overlay {
+                    inputShape
+                        .stroke(inputBorderColor, lineWidth: 1)
+                        .opacity(dictation.isWaveformVisible ? 0 : 1)
                     if dictation.isWaveformVisible {
                         DictationWaveformBorder(
                             amplitude: dictation.waveformDisplacement,
@@ -466,9 +472,6 @@ struct MessageInputBar: View {
                             activeStrokeColor: .accentColor,
                             reduceMotionEnabled: reduceMotionForDictation
                         )
-                    } else {
-                        inputShape
-                            .stroke(inputBorderColor, lineWidth: 1)
                     }
                 }
                 .accessibilityAction(named: Text("Start Sticky Dictation")) {
@@ -832,6 +835,20 @@ struct DictationMicAffordanceAnimationPlan {
             fadeDurationMs: 1_200,
             cleanupTailMs: 80
         )
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func `if`<Transformed: View>(
+        _ condition: Bool,
+        transform: (Self) -> Transformed
+    ) -> some View {
+        if condition {
+            transform(self)
+        } else {
+            self
+        }
     }
 }
 

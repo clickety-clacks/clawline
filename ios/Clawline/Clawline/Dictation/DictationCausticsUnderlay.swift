@@ -19,8 +19,9 @@ struct DictationCausticsUnderlay: View {
     }
 
     private var effectConfig: BackgroundEffectConfiguration {
-        let minSpeed: Double = reduceMotionEnabled ? 0.05 : 0.10
-        let maxSpeed: Double = reduceMotionEnabled ? 0.18 : 0.65
+        // Keep baseline motion alive even in silence; speech should only gently accelerate it.
+        let minSpeed: Double = reduceMotionEnabled ? 0.12 : 0.24
+        let maxSpeed: Double = reduceMotionEnabled ? 0.18 : 0.34
         let speed = minSpeed + ((maxSpeed - minSpeed) * normalizedAmplitude)
         let intensity = 0.45 + (0.40 * normalizedAmplitude)
         let scale = 1.5 + (1.1 * normalizedAmplitude)

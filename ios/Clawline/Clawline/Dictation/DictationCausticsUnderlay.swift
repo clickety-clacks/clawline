@@ -90,17 +90,6 @@ struct DictationCausticsUnderlay: View {
             .fill(Color(red: 0.02, green: 0.03, blue: 0.05).opacity(0.96))
             .backgroundEffect(effectConfig)
             .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-            .mask {
-                LinearGradient(
-                    stops: [
-                        .init(color: .white, location: 0.0),
-                        .init(color: .white, location: 0.30),
-                        .init(color: .clear, location: 0.55)
-                    ],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-            }
             .compositingGroup()
             .blendMode(.plusLighter)
             .opacity(isActive ? Defaults.activeOpacity : Defaults.baseOpacity)

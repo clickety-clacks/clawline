@@ -19,11 +19,11 @@ struct DictationCausticsUnderlay: View {
     }
 
     private var effectConfig: BackgroundEffectConfiguration {
-        let minSpeed: Double = reduceMotionEnabled ? 0.04 : 0.08
-        let maxSpeed: Double = reduceMotionEnabled ? 0.12 : 0.42
+        let minSpeed: Double = reduceMotionEnabled ? 0.05 : 0.10
+        let maxSpeed: Double = reduceMotionEnabled ? 0.18 : 0.65
         let speed = minSpeed + ((maxSpeed - minSpeed) * normalizedAmplitude)
-        let intensity = 0.20 + (0.35 * normalizedAmplitude)
-        let scale = 1.7 + (0.8 * normalizedAmplitude)
+        let intensity = 0.45 + (0.40 * normalizedAmplitude)
+        let scale = 1.5 + (1.1 * normalizedAmplitude)
 
         return BackgroundEffectConfiguration(
             effectType: .caustics,
@@ -39,11 +39,13 @@ struct DictationCausticsUnderlay: View {
 
     var body: some View {
         RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-            .fill(Color.white.opacity(0.14))
+            .fill(Color.white.opacity(0.30))
             .backgroundEffect(effectConfig)
             .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
-            .opacity(isActive ? 1 : 0)
-            .animation(.easeInOut(duration: 0.25), value: isActive)
+            .compositingGroup()
+            .blendMode(.plusLighter)
+            .opacity(isActive ? 0.92 : 0)
+            .animation(.easeInOut(duration: 0.30), value: isActive)
             .allowsHitTesting(false)
     }
 }

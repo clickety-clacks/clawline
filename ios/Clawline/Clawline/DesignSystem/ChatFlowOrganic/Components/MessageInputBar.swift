@@ -416,20 +416,6 @@ struct MessageInputBar: View {
 #if os(visionOS)
                 .background(.regularMaterial, in: inputShape)
 #else
-                .background {
-                    DictationCausticsUnderlay(
-                        isActive: dictation.isWaveformVisible,
-                        amplitude: dictation.waveformDisplacement,
-                        cornerRadius: inputCornerRadius,
-                        reduceMotionEnabled: reduceMotionForDictation,
-                        baselineSpeed: settings.dictationCausticsBaselineSpeed,
-                        maxSpeed: settings.dictationCausticsMaxSpeed,
-                        brightness: settings.dictationCausticsBrightness,
-                        scale: settings.dictationCausticsScale,
-                        sharpness: settings.dictationCausticsSharpness,
-                        color1: settings.dictationCausticsColor1.color
-                    )
-                }
                 .glassEffect(.regular, in: inputShape)
 #endif
                 .overlay {

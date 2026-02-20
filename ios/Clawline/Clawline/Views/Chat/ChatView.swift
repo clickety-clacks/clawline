@@ -85,6 +85,7 @@ struct ChatView: View {
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.openURL) private var openURL
     @Environment(AuthManager.self) private var authManager
+    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
 
     // ⚠️ CRITICAL: This state MUST live here in ChatView, NOT in MessageInputBar.
     // MessageInputBar is inside .safeAreaInset and gets recreated on geometry changes.
@@ -648,6 +649,20 @@ struct ChatView: View {
         )
 
         ZStack(alignment: .top) {
+            DictationCausticsUnderlay(
+                isActive: dictationCoordinator.isWaveformVisible,
+                amplitude: dictationCoordinator.waveformDisplacement,
+                cornerRadius: 0,
+                reduceMotionEnabled: accessibilityReduceMotion || dictationCoordinator.reduceMotionEnabled,
+                baselineSpeed: settings.dictationCausticsBaselineSpeed,
+                maxSpeed: settings.dictationCausticsMaxSpeed,
+                brightness: settings.dictationCausticsBrightness,
+                scale: settings.dictationCausticsScale,
+                sharpness: settings.dictationCausticsSharpness,
+                color1: settings.dictationCausticsColor1.color
+            )
+            .ignoresSafeArea()
+
             messageLayer
                 // #31: fade out message content behind the system status bar (mask, not overlay tint).
                 .compositingGroup()

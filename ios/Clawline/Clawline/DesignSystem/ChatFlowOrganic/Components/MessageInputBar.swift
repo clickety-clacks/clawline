@@ -425,6 +425,8 @@ struct MessageInputBar: View {
                         baselineSpeed: settings.dictationCausticsBaselineSpeed,
                         maxSpeed: settings.dictationCausticsMaxSpeed,
                         brightness: settings.dictationCausticsBrightness,
+                        scale: settings.dictationCausticsScale,
+                        sharpness: settings.dictationCausticsSharpness,
                         color1: settings.dictationCausticsColor1.color
                     )
                 }

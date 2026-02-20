@@ -40,6 +40,14 @@ final class SettingsManager {
         didSet { saveDictationCausticsSettings() }
     }
 
+    var dictationCausticsScale: Double {
+        didSet { saveDictationCausticsSettings() }
+    }
+
+    var dictationCausticsSharpness: Double {
+        didSet { saveDictationCausticsSettings() }
+    }
+
     var dictationCausticsColor1: CodableColor {
         didSet { saveDictationCausticsSettings() }
     }
@@ -55,10 +63,14 @@ final class SettingsManager {
     private static let dictationCausticsBaselineSpeedKey = "dictation.caustics.baselineSpeed"
     private static let dictationCausticsMaxSpeedKey = "dictation.caustics.maxSpeed"
     private static let dictationCausticsBrightnessKey = "dictation.caustics.brightness"
+    private static let dictationCausticsScaleKey = "dictation.caustics.scale"
+    private static let dictationCausticsSharpnessKey = "dictation.caustics.sharpness"
     private static let dictationCausticsColor1Key = "dictation.caustics.color1"
     static let defaultDictationCausticsBaselineSpeed: Double = 0.24
     static let defaultDictationCausticsMaxSpeed: Double = 0.34
     static let defaultDictationCausticsBrightness: Double = 0.72
+    static let defaultDictationCausticsScale: Double = 2.0
+    static let defaultDictationCausticsSharpness: Double = 2.0
     static let defaultDictationCausticsColor1 = CodableColor(red: 1.00, green: 0.96, blue: 0.88)
     private let sonioxVerifier: any SonioxKeyVerifying
 
@@ -86,6 +98,10 @@ final class SettingsManager {
             ?? Self.defaultDictationCausticsMaxSpeed
         self.dictationCausticsBrightness = UserDefaults.standard.object(forKey: Self.dictationCausticsBrightnessKey) as? Double
             ?? Self.defaultDictationCausticsBrightness
+        self.dictationCausticsScale = UserDefaults.standard.object(forKey: Self.dictationCausticsScaleKey) as? Double
+            ?? Self.defaultDictationCausticsScale
+        self.dictationCausticsSharpness = UserDefaults.standard.object(forKey: Self.dictationCausticsSharpnessKey) as? Double
+            ?? Self.defaultDictationCausticsSharpness
         self.dictationCausticsColor1 = Self.loadCodableColor(
             forKey: Self.dictationCausticsColor1Key,
             fallback: Self.defaultDictationCausticsColor1
@@ -106,6 +122,8 @@ final class SettingsManager {
         UserDefaults.standard.set(dictationCausticsBaselineSpeed, forKey: Self.dictationCausticsBaselineSpeedKey)
         UserDefaults.standard.set(dictationCausticsMaxSpeed, forKey: Self.dictationCausticsMaxSpeedKey)
         UserDefaults.standard.set(dictationCausticsBrightness, forKey: Self.dictationCausticsBrightnessKey)
+        UserDefaults.standard.set(dictationCausticsScale, forKey: Self.dictationCausticsScaleKey)
+        UserDefaults.standard.set(dictationCausticsSharpness, forKey: Self.dictationCausticsSharpnessKey)
         if let data = try? JSONEncoder().encode(dictationCausticsColor1) {
             UserDefaults.standard.set(data, forKey: Self.dictationCausticsColor1Key)
         }
@@ -117,6 +135,8 @@ final class SettingsManager {
         dictationCausticsBaselineSpeed = Self.defaultDictationCausticsBaselineSpeed
         dictationCausticsMaxSpeed = Self.defaultDictationCausticsMaxSpeed
         dictationCausticsBrightness = Self.defaultDictationCausticsBrightness
+        dictationCausticsScale = Self.defaultDictationCausticsScale
+        dictationCausticsSharpness = Self.defaultDictationCausticsSharpness
         dictationCausticsColor1 = Self.defaultDictationCausticsColor1
     }
 

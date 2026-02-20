@@ -80,7 +80,8 @@ using namespace metal;
     half4 lightColor,
     float intensity,
     float speed,
-    float scale
+    float scale,
+    float sharpness
 ) {
     float2 uv = position / size;
     float2 scaledUV = uv * scale;
@@ -97,7 +98,7 @@ using namespace metal;
     caustic = caustic * 0.5; // Normalize
 
     // Boost the bright areas
-    caustic = pow(caustic, 2.0) * 3.0;
+    caustic = pow(caustic, sharpness) * 3.0;
     caustic = clamp(caustic, 0.0, 1.0);
     caustic = 1.0 - caustic;
 

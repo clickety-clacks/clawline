@@ -16,6 +16,8 @@ struct DictationCausticsUnderlay: View {
     let baselineSpeed: Double
     let maxSpeed: Double
     let brightness: Double
+    let scale: Double
+    let sharpness: Double
     let color1: Color
 
     private var normalizedAmplitude: Double {
@@ -28,7 +30,8 @@ struct DictationCausticsUnderlay: View {
         let effectiveMaxSpeed: Double = reduceMotionEnabled ? 0.18 : maxSpeed
         let speed = minSpeed + ((effectiveMaxSpeed - minSpeed) * normalizedAmplitude)
         let intensity = brightness
-        let scale = 2.0
+        let patternScale = scale
+        let lineSharpness = sharpness
         let lineColor = causticLineColor
 
         return BackgroundEffectConfiguration(
@@ -38,7 +41,8 @@ struct DictationCausticsUnderlay: View {
             color3: CodableColor(color: lineColor),
             intensity: intensity,
             speed: speed,
-            scale: scale,
+            scale: patternScale,
+            sharpness: lineSharpness,
             isEnabled: true
         )
     }

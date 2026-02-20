@@ -22,7 +22,30 @@ struct BackgroundEffectConfiguration: Equatable, Codable {
     var intensity: Double
     var speed: Double
     var scale: Double
+    var sharpness: Double
     var isEnabled: Bool
+
+    init(
+        effectType: ShaderEffectType,
+        color1: CodableColor,
+        color2: CodableColor,
+        color3: CodableColor,
+        intensity: Double,
+        speed: Double,
+        scale: Double,
+        sharpness: Double,
+        isEnabled: Bool
+    ) {
+        self.effectType = effectType
+        self.color1 = color1
+        self.color2 = color2
+        self.color3 = color3
+        self.intensity = intensity
+        self.speed = speed
+        self.scale = scale
+        self.sharpness = sharpness
+        self.isEnabled = isEnabled
+    }
 
     /// Off-white pastel defaults - subtle shimmer on background
     /// For caustics: brighter warm white simulates sunlight through water
@@ -35,8 +58,47 @@ struct BackgroundEffectConfiguration: Equatable, Codable {
         intensity: 0.35,
         speed: 0.25,
         scale: 2.0,
+        sharpness: 2.0,
         isEnabled: true
     )
+
+    private enum CodingKeys: String, CodingKey {
+        case effectType
+        case color1
+        case color2
+        case color3
+        case intensity
+        case speed
+        case scale
+        case sharpness
+        case isEnabled
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        effectType = try container.decode(ShaderEffectType.self, forKey: .effectType)
+        color1 = try container.decode(CodableColor.self, forKey: .color1)
+        color2 = try container.decode(CodableColor.self, forKey: .color2)
+        color3 = try container.decode(CodableColor.self, forKey: .color3)
+        intensity = try container.decode(Double.self, forKey: .intensity)
+        speed = try container.decode(Double.self, forKey: .speed)
+        scale = try container.decode(Double.self, forKey: .scale)
+        sharpness = try container.decodeIfPresent(Double.self, forKey: .sharpness) ?? 2.0
+        isEnabled = try container.decode(Bool.self, forKey: .isEnabled)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(effectType, forKey: .effectType)
+        try container.encode(color1, forKey: .color1)
+        try container.encode(color2, forKey: .color2)
+        try container.encode(color3, forKey: .color3)
+        try container.encode(intensity, forKey: .intensity)
+        try container.encode(speed, forKey: .speed)
+        try container.encode(scale, forKey: .scale)
+        try container.encode(sharpness, forKey: .sharpness)
+        try container.encode(isEnabled, forKey: .isEnabled)
+    }
 }
 
 /// Codable wrapper for Color
@@ -104,7 +166,8 @@ struct BackgroundEffectModifier: ViewModifier {
                 .color(configuration.color1.color),
                 .float(configuration.intensity),
                 .float(configuration.speed),
-                .float(configuration.scale)
+                .float(configuration.scale),
+                .float(configuration.sharpness)
             )
         }
     }

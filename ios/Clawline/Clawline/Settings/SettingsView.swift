@@ -18,6 +18,8 @@ struct SettingsView: View {
         let baseline = settings.dictationCausticsBaselineSpeed
         let max = settings.dictationCausticsMaxSpeed
         let brightness = settings.dictationCausticsBrightness
+        let scale = settings.dictationCausticsScale
+        let sharpness = settings.dictationCausticsSharpness
         let color1 = settings.dictationCausticsColor1
 
         return """
@@ -26,9 +28,10 @@ struct SettingsView: View {
             "baselineSpeed": \(String(format: "%.3f", baseline)),
             "maxSpeed": \(String(format: "%.3f", max)),
             "brightness": \(String(format: "%.3f", brightness)),
+            "scale": \(String(format: "%.3f", scale)),
+            "sharpness": \(String(format: "%.3f", sharpness)),
             "amplitudeNormalization": { "floor": 0.35, "range": 8.65 },
             "intensity": { "formula": "brightness", "value": \(String(format: "%.3f", brightness)) },
-            "scale": { "formula": "constant", "value": 2.000 },
             "overlay": { "baseOpacity": 0.30, "activeOpacity": 0.92, "blendMode": "plusLighter" },
             "color": { "r": \(String(format: "%.3f", color1.red)), "g": \(String(format: "%.3f", color1.green)), "b": \(String(format: "%.3f", color1.blue)), "a": \(String(format: "%.3f", color1.alpha)) },
             "audioAffects": ["speed"],
@@ -69,13 +72,23 @@ struct SettingsView: View {
                         Text("Fast Speed: \(settings.dictationCausticsMaxSpeed, specifier: "%.2f")")
                         Slider(
                             value: $settings.dictationCausticsMaxSpeed,
-                            in: settings.dictationCausticsBaselineSpeed...0.60
+                            in: settings.dictationCausticsBaselineSpeed...2.50
                         )
                     }
 
                     VStack(alignment: .leading) {
                         Text("Brightness: \(settings.dictationCausticsBrightness, specifier: "%.2f")")
                         Slider(value: $settings.dictationCausticsBrightness, in: 0.30...1.20)
+                    }
+
+                    VStack(alignment: .leading) {
+                        Text("Scale: \(settings.dictationCausticsScale, specifier: "%.2f")")
+                        Slider(value: $settings.dictationCausticsScale, in: 0.6...5.0)
+                    }
+
+                    VStack(alignment: .leading) {
+                        Text("Sharpness: \(settings.dictationCausticsSharpness, specifier: "%.2f")")
+                        Slider(value: $settings.dictationCausticsSharpness, in: 0.8...5.0)
                     }
 
                     ColorPicker("Color", selection: dictationColor1Binding)
@@ -228,6 +241,8 @@ struct SettingsView: View {
                 baselineSpeed: settings.dictationCausticsBaselineSpeed,
                 maxSpeed: settings.dictationCausticsMaxSpeed,
                 brightness: settings.dictationCausticsBrightness,
+                scale: settings.dictationCausticsScale,
+                sharpness: settings.dictationCausticsSharpness,
                 color1: settings.dictationCausticsColor1.color
             )
             .clipShape(shape)

@@ -458,9 +458,7 @@ struct ChatView: View {
 #if os(visionOS)
             Color.clear
 #else
-            ChatFlowTheme.pageBackground(colorScheme)
-                .ignoresSafeArea()
-                .overlay(NoiseOverlayView().ignoresSafeArea())
+            Color.clear
 #endif
         }
         .task { await viewModel.onAppear() }
@@ -950,7 +948,7 @@ struct ChatView: View {
                 .frame(height: fadeHeight)
                 Rectangle().fill(Color.white)
             }
-            .ignoresSafeArea(.container, edges: .top)
+            .ignoresSafeArea(.container, edges: [.top, .bottom])
         }
     }
 
@@ -1117,9 +1115,7 @@ struct ChatView: View {
 #if os(visionOS)
                         Color.clear
 #else
-                        ChatFlowTheme.pageBackground(colorScheme)
-                            .ignoresSafeArea()
-                            .overlay(NoiseOverlayView().ignoresSafeArea())
+                        Color.clear
 #endif
                     }
                     .tag(sessionKey)

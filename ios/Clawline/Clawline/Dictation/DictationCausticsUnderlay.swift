@@ -31,7 +31,8 @@ struct DictationCausticsUnderlay: View {
         let speedLowerBound = min(minSpeed, effectiveMaxSpeed)
         let speedUpperBound = max(minSpeed, effectiveMaxSpeed)
         let clampedAmplitude = min(max(normalizedAmplitude, 0), 1)
-        let rawSpeed = minSpeed + ((effectiveMaxSpeed - minSpeed) * clampedAmplitude)
+        let smoothedAmplitude = clampedAmplitude * clampedAmplitude * (3 - (2 * clampedAmplitude))
+        let rawSpeed = minSpeed + ((effectiveMaxSpeed - minSpeed) * smoothedAmplitude)
         let speed = min(max(rawSpeed, speedLowerBound), speedUpperBound)
         let intensity = brightness
         let patternScale = scale

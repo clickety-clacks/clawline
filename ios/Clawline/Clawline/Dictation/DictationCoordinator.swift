@@ -556,7 +556,7 @@ final class DictationCoordinator {
                 let alpha = CGFloat(1 - exp(-delta / timeConstant))
                 smoothedDisplacement += (targetDisplacement - smoothedDisplacement) * alpha
                 let nextDisplacement = min(max(smoothedDisplacement, minDisplacement), maxDisplacement)
-                guard abs(nextDisplacement - lastAppliedDisplacement) >= 0.05 else { continue }
+                guard abs(nextDisplacement - lastAppliedDisplacement) >= 0.01 else { continue }
                 lastAppliedDisplacement = nextDisplacement
                 let perfTs = Date().timeIntervalSince1970
                 await MainActor.run {

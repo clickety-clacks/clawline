@@ -99,6 +99,7 @@ using namespace metal;
     // Boost the bright areas
     caustic = pow(caustic, 2.0) * 3.0;
     caustic = clamp(caustic, 0.0, 1.0);
+    caustic = 1.0 - caustic;
 
     // Add caustic light to the color
     half4 result = color + lightColor * half(caustic * intensity) * color.a;

@@ -936,7 +936,7 @@ struct ChatView: View {
                 .frame(height: fadeHeight)
                 Rectangle().fill(Color.white)
             }
-            .ignoresSafeArea(.container, edges: .top)
+            .ignoresSafeArea(.container, edges: [.top, .bottom])
         }
     }
 

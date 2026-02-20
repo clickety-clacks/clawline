@@ -543,24 +543,15 @@ final class DictationCoordinator {
             guard let self else { return }
             let minimumWaveformUpdateInterval: CFTimeInterval = 0.05
             var lastWaveformUpdateAt = CFAbsoluteTimeGetCurrent() - minimumWaveformUpdateInterval
-            var previousSampleAt = CFAbsoluteTimeGetCurrent()
             var lastAppliedDisplacement: CGFloat = -1
-            var smoothedDisplacement: CGFloat = self.waveformDisplacement
             let minDisplacement: CGFloat = WaveformDefaults.amplitudeFloor
             let maxDisplacement: CGFloat = WaveformDefaults.amplitudeFloor + WaveformDefaults.amplitudeRange
-            let attackTimeConstant: CFTimeInterval = 0.05
-            let releaseTimeConstant: CFTimeInterval = 0.28
             for await level in capture.levelStream {
                 let now = CFAbsoluteTimeGetCurrent()
                 guard now - lastWaveformUpdateAt >= minimumWaveformUpdateInterval else { continue }
-                let delta = max(0.001, now - previousSampleAt)
-                previousSampleAt = now
                 lastWaveformUpdateAt = now
-                let targetDisplacement = Self.mappedDisplacement(for: level)
-                let timeConstant = targetDisplacement > smoothedDisplacement ? attackTimeConstant : releaseTimeConstant
-                let alpha = CGFloat(1 - exp(-delta / timeConstant))
-                smoothedDisplacement += (targetDisplacement - smoothedDisplacement) * alpha
-                let nextDisplacement = min(max(smoothedDisplacement, minDisplacement), maxDisplacement)
+                let mappedDisplacement = Self.mappedDisplacement(for: level)
+                let nextDisplacement = min(max(mappedDisplacement, minDisplacement), maxDisplacement)
                 guard abs(nextDisplacement - lastAppliedDisplacement) >= 0.01 else { continue }
                 lastAppliedDisplacement = nextDisplacement
                 let perfTs = Date().timeIntervalSince1970

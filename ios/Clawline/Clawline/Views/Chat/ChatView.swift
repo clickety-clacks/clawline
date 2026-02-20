@@ -647,9 +647,12 @@ struct ChatView: View {
         )
 
         ZStack(alignment: .top) {
+            let backgroundCausticsAmplitude: CGFloat = dictationCoordinator.isWaveformVisible
+                ? dictationCoordinator.waveformDisplacement
+                : 0
             DictationCausticsUnderlay(
                 isActive: dictationCoordinator.isWaveformVisible,
-                amplitude: dictationCoordinator.waveformDisplacement,
+                amplitude: backgroundCausticsAmplitude,
                 cornerRadius: 0,
                 reduceMotionEnabled: accessibilityReduceMotion || dictationCoordinator.reduceMotionEnabled,
                 baselineSpeed: settings.dictationCausticsBaselineSpeed,

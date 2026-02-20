@@ -110,8 +110,7 @@ struct RootView: View {
                             )
                         }
                 } else {
-                    backgroundColor
-                        .backgroundEffect(settings.effectConfig)
+                    Color.clear
                 }
             }
                 .ignoresSafeArea()

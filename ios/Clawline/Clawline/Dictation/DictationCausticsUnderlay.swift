@@ -28,7 +28,11 @@ struct DictationCausticsUnderlay: View {
     private var effectConfig: BackgroundEffectConfiguration {
         let minSpeed: Double = reduceMotionEnabled ? 0.12 : baselineSpeed
         let effectiveMaxSpeed: Double = reduceMotionEnabled ? 0.18 : maxSpeed
-        let speed = minSpeed + ((effectiveMaxSpeed - minSpeed) * normalizedAmplitude)
+        let speedLowerBound = min(minSpeed, effectiveMaxSpeed)
+        let speedUpperBound = max(minSpeed, effectiveMaxSpeed)
+        let clampedAmplitude = min(max(normalizedAmplitude, 0), 1)
+        let rawSpeed = minSpeed + ((effectiveMaxSpeed - minSpeed) * clampedAmplitude)
+        let speed = min(max(rawSpeed, speedLowerBound), speedUpperBound)
         let intensity = brightness
         let patternScale = scale
         let lineSharpness = sharpness

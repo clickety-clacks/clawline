@@ -40,8 +40,8 @@ struct DictationCausticsUnderlay: View {
         let speedLowerBound = min(minSpeed, effectiveMaxSpeed)
         let speedUpperBound = max(minSpeed, effectiveMaxSpeed)
         let clampedAmplitude = min(max(normalizedAmplitude, 0), 1)
-        let smoothedAmplitude = clampedAmplitude * clampedAmplitude * (3 - (2 * clampedAmplitude))
-        let rawSpeed = minSpeed + ((effectiveMaxSpeed - minSpeed) * smoothedAmplitude)
+        let hotAmplitude = pow(clampedAmplitude, 0.35)
+        let rawSpeed = minSpeed + ((effectiveMaxSpeed - minSpeed) * hotAmplitude)
         return min(max(rawSpeed, speedLowerBound), speedUpperBound)
     }
 

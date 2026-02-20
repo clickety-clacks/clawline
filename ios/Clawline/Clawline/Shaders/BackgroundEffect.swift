@@ -130,23 +130,56 @@ struct CodableColor: Equatable, Codable {
 
 /// View modifier that applies animated shader effect (plasma or caustics)
 struct BackgroundEffectModifier: ViewModifier {
+    private final class CausticsPhaseClock {
+        private var lastDate: Date?
+        private var phase: TimeInterval = 0
+        private var smoothedSpeed: Double?
+        private let speedTimeConstant: TimeInterval = 0.18
+        private let maxDeltaTime: TimeInterval = 0.1
+
+        func nextPhase(now: Date, targetSpeed: Double) -> TimeInterval {
+            guard let lastDate else {
+                self.lastDate = now
+                self.smoothedSpeed = targetSpeed
+                return phase
+            }
+
+            let rawDelta = now.timeIntervalSince(lastDate)
+            let dt = max(0, min(rawDelta, maxDeltaTime))
+            self.lastDate = now
+
+            let currentSpeed = smoothedSpeed ?? targetSpeed
+            let alpha = dt > 0 ? (1 - exp(-dt / speedTimeConstant)) : 1
+            let nextSpeed = currentSpeed + ((targetSpeed - currentSpeed) * alpha)
+            smoothedSpeed = nextSpeed
+
+            phase += dt * nextSpeed
+            return phase
+        }
+    }
+
     let configuration: BackgroundEffectConfiguration
     @State private var startTime: Date = .now
+    @State private var causticsPhaseClock = CausticsPhaseClock()
 
     func body(content: Content) -> some View {
         if configuration.isEnabled {
             TimelineView(.animation) { timeline in
                 let elapsed = timeline.date.timeIntervalSince(startTime)
+                let causticsPhase = causticsPhaseClock.nextPhase(
+                    now: timeline.date,
+                    targetSpeed: configuration.speed
+                )
 
                 content
-                    .colorEffect(shaderForEffect(elapsed: elapsed))
+                    .colorEffect(shaderForEffect(elapsed: elapsed, causticsPhase: causticsPhase))
             }
         } else {
             content
         }
     }
 
-    private func shaderForEffect(elapsed: TimeInterval) -> Shader {
+    private func shaderForEffect(elapsed: TimeInterval, causticsPhase: TimeInterval) -> Shader {
         switch configuration.effectType {
         case .plasma:
             return ShaderLibrary.plasmaEffect(
@@ -161,11 +194,11 @@ struct BackgroundEffectModifier: ViewModifier {
             )
         case .caustics:
             return ShaderLibrary.causticsEffect(
-                .float(elapsed),
+                .float(causticsPhase),
                 .float2(400, 400),
                 .color(configuration.color1.color),
                 .float(configuration.intensity),
-                .float(configuration.speed),
+                .float(1.0),
                 .float(configuration.scale),
                 .float(configuration.sharpness)
             )

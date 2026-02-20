@@ -463,7 +463,11 @@ struct MessageInputBar: View {
                         cornerRadius: inputCornerRadius,
                         reduceMotionEnabled: reduceMotionForDictation,
                         baselineSpeed: settings.dictationCausticsBaselineSpeed,
-                        maxSpeed: settings.dictationCausticsMaxSpeed
+                        maxSpeed: settings.dictationCausticsMaxSpeed,
+                        brightness: settings.dictationCausticsBrightness,
+                        color1: settings.dictationCausticsColor1.color,
+                        color2: settings.dictationCausticsColor2.color,
+                        color3: settings.dictationCausticsColor3.color
                     )
                 }
                 .glassEffect(.regular, in: inputShape)

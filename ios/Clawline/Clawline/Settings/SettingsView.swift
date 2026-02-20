@@ -11,48 +11,33 @@ import UIKit
 struct SettingsView: View {
     @Bindable var settings: SettingsManager
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.colorScheme) private var colorScheme
     @Environment(\.openURL) private var openURL
     @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
-
-    private var effectiveColorScheme: ColorScheme {
-#if os(visionOS)
-        return settings.appearanceMode == .dark ? .dark : .light
-#else
-        return colorScheme
-#endif
-    }
-
-    private var previewBackgroundColor: Color {
-        effectiveColorScheme == .dark
-            ? Color(red: 0.1, green: 0.12, blue: 0.15)
-            : Color(uiColor: .systemGray6)
-    }
 
     private var dictationDiagnosticsText: String {
         let baseline = settings.dictationCausticsBaselineSpeed
         let max = settings.dictationCausticsMaxSpeed
-        let quietNormalized = 0.0
-        let loudNormalized = 1.0
-        let quietIntensity = 0.45 + (0.40 * quietNormalized)
-        let loudIntensity = 0.45 + (0.40 * loudNormalized)
-        let quietScale = 1.5 + (1.1 * quietNormalized)
-        let loudScale = 1.5 + (1.1 * loudNormalized)
+        let brightness = settings.dictationCausticsBrightness
+        let color1 = settings.dictationCausticsColor1
+        let color2 = settings.dictationCausticsColor2
+        let color3 = settings.dictationCausticsColor3
 
         return """
         {
           "dictationCaustics": {
             "baselineSpeed": \(String(format: "%.3f", baseline)),
             "maxSpeed": \(String(format: "%.3f", max)),
+            "brightness": \(String(format: "%.3f", brightness)),
             "amplitudeNormalization": { "floor": 0.35, "range": 8.65 },
-            "intensity": { "formula": "0.45 + (0.40 * normalizedAmplitude)", "quiet": \(String(format: "%.3f", quietIntensity)), "loud": \(String(format: "%.3f", loudIntensity)) },
-            "scale": { "formula": "1.5 + (1.1 * normalizedAmplitude)", "quiet": \(String(format: "%.3f", quietScale)), "loud": \(String(format: "%.3f", loudScale)) },
+            "intensity": { "formula": "brightness", "value": \(String(format: "%.3f", brightness)) },
+            "scale": { "formula": "constant", "value": 2.000 },
             "overlay": { "baseOpacity": 0.30, "activeOpacity": 0.92, "blendMode": "plusLighter" },
             "colors": [
-              { "r": 1.00, "g": 0.96, "b": 0.88 },
-              { "r": 0.88, "g": 0.95, "b": 1.00 },
-              { "r": 0.94, "g": 0.91, "b": 1.00 }
+              { "r": \(String(format: "%.3f", color1.red)), "g": \(String(format: "%.3f", color1.green)), "b": \(String(format: "%.3f", color1.blue)), "a": \(String(format: "%.3f", color1.alpha)) },
+              { "r": \(String(format: "%.3f", color2.red)), "g": \(String(format: "%.3f", color2.green)), "b": \(String(format: "%.3f", color2.blue)), "a": \(String(format: "%.3f", color2.alpha)) },
+              { "r": \(String(format: "%.3f", color3.red)), "g": \(String(format: "%.3f", color3.green)), "b": \(String(format: "%.3f", color3.blue)), "a": \(String(format: "%.3f", color3.alpha)) }
             ],
+            "audioAffects": ["speed"],
             "reduceMotionEnabled": \(accessibilityReduceMotion ? "true" : "false"),
             "reduceMotionSpeeds": { "baseline": 0.12, "max": 0.18 }
           }
@@ -78,17 +63,6 @@ struct SettingsView: View {
                         placeholder: "soniox.apiKey"
                     )
 
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("Caustics Preview")
-                            .font(.subheadline.weight(.semibold))
-
-                        HStack(spacing: 12) {
-                            dictationCausticsPreview(amplitude: 0)
-                            dictationCausticsPreview(amplitude: 9)
-                        }
-                    }
-                    .padding(.top, 4)
-
                     VStack(alignment: .leading) {
                         Text("Baseline Speed: \(settings.dictationCausticsBaselineSpeed, specifier: "%.2f")")
                         Slider(
@@ -104,6 +78,15 @@ struct SettingsView: View {
                             in: settings.dictationCausticsBaselineSpeed...0.60
                         )
                     }
+
+                    VStack(alignment: .leading) {
+                        Text("Brightness: \(settings.dictationCausticsBrightness, specifier: "%.2f")")
+                        Slider(value: $settings.dictationCausticsBrightness, in: 0.30...1.20)
+                    }
+
+                    ColorPicker("Color 1", selection: dictationColor1Binding)
+                    ColorPicker("Color 2", selection: dictationColor2Binding)
+                    ColorPicker("Color 3", selection: dictationColor3Binding)
 
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Diagnostics")
@@ -177,6 +160,9 @@ struct SettingsView: View {
                     }
                 }
             }
+            .safeAreaInset(edge: .top, spacing: 0) {
+                dictationPinnedPreview
+            }
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -211,6 +197,47 @@ struct SettingsView: View {
         )
     }
 
+    private var dictationColor1Binding: Binding<Color> {
+        Binding(
+            get: { settings.dictationCausticsColor1.color },
+            set: { settings.dictationCausticsColor1 = CodableColor(color: $0) }
+        )
+    }
+
+    private var dictationColor2Binding: Binding<Color> {
+        Binding(
+            get: { settings.dictationCausticsColor2.color },
+            set: { settings.dictationCausticsColor2 = CodableColor(color: $0) }
+        )
+    }
+
+    private var dictationColor3Binding: Binding<Color> {
+        Binding(
+            get: { settings.dictationCausticsColor3.color },
+            set: { settings.dictationCausticsColor3 = CodableColor(color: $0) }
+        )
+    }
+
+    private var dictationPinnedPreview: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Dictation Caustics Preview")
+                .font(.subheadline.weight(.semibold))
+                .padding(.horizontal, 16)
+
+            HStack(spacing: 12) {
+                dictationCausticsPreview(amplitude: 0)
+                dictationCausticsPreview(amplitude: 9)
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 8)
+        }
+        .frame(maxWidth: .infinity)
+        .background(.ultraThinMaterial)
+        .overlay(alignment: .bottom) {
+            Divider()
+        }
+    }
+
     private func dictationCausticsPreview(amplitude: CGFloat) -> some View {
         let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
 
@@ -221,7 +248,11 @@ struct SettingsView: View {
                 cornerRadius: 14,
                 reduceMotionEnabled: accessibilityReduceMotion,
                 baselineSpeed: settings.dictationCausticsBaselineSpeed,
-                maxSpeed: settings.dictationCausticsMaxSpeed
+                maxSpeed: settings.dictationCausticsMaxSpeed,
+                brightness: settings.dictationCausticsBrightness,
+                color1: settings.dictationCausticsColor1.color,
+                color2: settings.dictationCausticsColor2.color,
+                color3: settings.dictationCausticsColor3.color
             )
             .clipShape(shape)
 

@@ -14,6 +14,10 @@ struct DictationCausticsUnderlay: View {
     let reduceMotionEnabled: Bool
     let baselineSpeed: Double
     let maxSpeed: Double
+    let brightness: Double
+    let color1: Color
+    let color2: Color
+    let color3: Color
 
     private var normalizedAmplitude: Double {
         let value = max(0, min((amplitude - 0.35) / 8.65, 1))
@@ -24,14 +28,14 @@ struct DictationCausticsUnderlay: View {
         let minSpeed: Double = reduceMotionEnabled ? 0.12 : baselineSpeed
         let effectiveMaxSpeed: Double = reduceMotionEnabled ? 0.18 : maxSpeed
         let speed = minSpeed + ((effectiveMaxSpeed - minSpeed) * normalizedAmplitude)
-        let intensity = 0.45 + (0.40 * normalizedAmplitude)
-        let scale = 1.5 + (1.1 * normalizedAmplitude)
+        let intensity = brightness
+        let scale = 2.0
 
         return BackgroundEffectConfiguration(
             effectType: .caustics,
-            color1: CodableColor(color: Color(red: 1.00, green: 0.96, blue: 0.88)),
-            color2: CodableColor(color: Color(red: 0.88, green: 0.95, blue: 1.00)),
-            color3: CodableColor(color: Color(red: 0.94, green: 0.91, blue: 1.00)),
+            color1: CodableColor(color: color1),
+            color2: CodableColor(color: color2),
+            color3: CodableColor(color: color3),
             intensity: intensity,
             speed: speed,
             scale: scale,

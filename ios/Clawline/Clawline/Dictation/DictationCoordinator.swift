@@ -548,7 +548,7 @@ final class DictationCoordinator {
             var smoothedDisplacement: CGFloat = self.waveformDisplacement
             let minDisplacement: CGFloat = WaveformDefaults.amplitudeFloor
             let maxDisplacement: CGFloat = WaveformDefaults.amplitudeFloor + WaveformDefaults.amplitudeRange
-            let attackTimeConstant: CFTimeInterval = 0.12
+            let attackTimeConstant: CFTimeInterval = 0.05
             let releaseTimeConstant: CFTimeInterval = 0.28
             for await level in capture.levelStream {
                 let now = CFAbsoluteTimeGetCurrent()

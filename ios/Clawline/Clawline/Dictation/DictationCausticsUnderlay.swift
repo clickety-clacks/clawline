@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import UIKit
 
 struct DictationCausticsUnderlay: View {
     let isActive: Bool
@@ -28,12 +29,13 @@ struct DictationCausticsUnderlay: View {
         let speed = minSpeed + ((effectiveMaxSpeed - minSpeed) * normalizedAmplitude)
         let intensity = brightness
         let scale = 2.0
+        let lineColor = causticLineColor
 
         return BackgroundEffectConfiguration(
             effectType: .caustics,
-            color1: CodableColor(color: color1),
-            color2: CodableColor(color: color1),
-            color3: CodableColor(color: color1),
+            color1: CodableColor(color: lineColor),
+            color2: CodableColor(color: lineColor),
+            color3: CodableColor(color: lineColor),
             intensity: intensity,
             speed: speed,
             scale: scale,
@@ -41,9 +43,26 @@ struct DictationCausticsUnderlay: View {
         )
     }
 
+    private var causticLineColor: Color {
+        let uiColor = UIColor(color1)
+        var hue: CGFloat = 0
+        var saturation: CGFloat = 0
+        var brightness: CGFloat = 0
+        var alpha: CGFloat = 0
+        guard uiColor.getHue(&hue, saturation: &saturation, brightness: &brightness, alpha: &alpha) else {
+            return Color.white
+        }
+        return Color(
+            hue: Double(hue),
+            saturation: Double(max(0.18, saturation * 0.65)),
+            brightness: Double(max(0.94, brightness)),
+            opacity: Double(max(0.95, alpha))
+        )
+    }
+
     var body: some View {
         RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-            .fill(Color.black.opacity(0.72))
+            .fill(Color(red: 0.02, green: 0.03, blue: 0.05).opacity(0.96))
             .backgroundEffect(effectConfig)
             .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             .compositingGroup()

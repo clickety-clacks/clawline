@@ -41,9 +41,19 @@ enum ChatMarkdownRenderer {
             parsedMarkdown = markdown
         }
 
-        // Prefer full parsing (block syntax like headings), but fall back to inline-only.
+        // UIKit rendering relies on concrete line breaks in the backing string. Ordered lists parsed
+        // with `.full` collapse separators into presentation intents, which become run-on text.
+        let hasOrderedListSyntax = parsedMarkdown.range(
+            of: #"(?m)^\s*\d+\.\s+"#,
+            options: .regularExpression
+        ) != nil
+
+        // Prefer full parsing (block syntax like headings), but keep list separators intact.
         let attributed: AttributedString
-        if let full = try? AttributedString(markdown: parsedMarkdown, options: .init(interpretedSyntax: .full)) {
+        if hasOrderedListSyntax,
+           let inline = try? AttributedString(markdown: parsedMarkdown, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)) {
+            attributed = inline
+        } else if let full = try? AttributedString(markdown: parsedMarkdown, options: .init(interpretedSyntax: .full)) {
             attributed = full
         } else if let inline = try? AttributedString(markdown: parsedMarkdown, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)) {
             attributed = inline

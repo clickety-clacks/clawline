@@ -102,28 +102,6 @@ struct MessageInputBar: View {
         return max(editorHeight, metrics.inputBarHeight)
     }
 
-    private var connectionAlertColor: Color? {
-        switch connectionState {
-        case .reconnecting:
-            return Color.yellow
-        case .disconnected:
-            return Color.red
-        case .connected:
-            return nil
-        }
-    }
-
-    private var connectionAlertMessage: String? {
-        switch connectionState {
-        case .reconnecting:
-            return "Reconnecting…"
-        case .disconnected:
-            return "Disconnected"
-        case .connected:
-            return nil
-        }
-    }
-
     private var isSingleLine: Bool {
         editorHeight <= metrics.inputBarHeight + 0.5
     }
@@ -396,24 +374,6 @@ struct MessageInputBar: View {
                             .padding(.trailing, micTrailingPadding)
                     }
 
-                    if let alertMessage = connectionAlertMessage,
-                       let alertColor = connectionAlertColor {
-                        RoundedRectangle(cornerRadius: inputCornerRadius, style: .continuous)
-                            .fill(alertColor.opacity(0.08))
-                            .allowsHitTesting(false)
-
-                        HStack(spacing: 8) {
-                            Image(systemName: "wifi.slash")
-                                .font(.system(size: 14, weight: .semibold))
-                            Text(alertMessage)
-                                .font(.system(size: 14, weight: .semibold))
-                        }
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 12)
-                        .foregroundColor(alertColor)
-                        .allowsHitTesting(false)
-                    }
-
                     if dictation.state == .error,
                        let message = dictation.errorMessage {
                         RoundedRectangle(cornerRadius: inputCornerRadius, style: .continuous)
@@ -492,8 +452,7 @@ struct MessageInputBar: View {
 
                 // Send button - morphs with connection state, keeps frame/anchor stable.
                 let sendActionEnabled = isSending || canSend || isDisconnected
-                let sendIconOpacity = (connectionAlertColor == nil ? 1 : 0.65)
-                    * ((sendActionEnabled || isReconnecting) ? 1 : 0.4)
+                let sendIconOpacity = (sendActionEnabled || isReconnecting) ? 1 : 0.4
                 Button(action: {
                     if isSending {
                         onCancel()

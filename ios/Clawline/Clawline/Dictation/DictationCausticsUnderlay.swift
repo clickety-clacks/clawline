@@ -43,7 +43,7 @@ struct DictationCausticsUnderlay: View {
 
     var body: some View {
         RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-            .fill(Color.white.opacity(0.30))
+            .fill(Color.black.opacity(0.72))
             .backgroundEffect(effectConfig)
             .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             .compositingGroup()

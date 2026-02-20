@@ -459,14 +459,17 @@ struct MessageInputBar: View {
                 .glassEffect(.regular, in: inputShape)
 #endif
                 .overlay {
-                    DictationWaveformBorder(
-                        isActive: dictation.isWaveformVisible,
-                        amplitude: dictation.waveformDisplacement,
-                        cornerRadius: inputCornerRadius,
-                        inactiveStrokeColor: inputBorderColor,
-                        activeStrokeColor: .accentColor,
-                        reduceMotionEnabled: reduceMotionForDictation
-                    )
+                    if dictation.isWaveformVisible {
+                        DictationWaveformBorder(
+                            amplitude: dictation.waveformDisplacement,
+                            cornerRadius: inputCornerRadius,
+                            activeStrokeColor: .accentColor,
+                            reduceMotionEnabled: reduceMotionForDictation
+                        )
+                    } else {
+                        inputShape
+                            .stroke(inputBorderColor, lineWidth: 1)
+                    }
                 }
                 .accessibilityAction(named: Text("Start Sticky Dictation")) {
                     guard dictation.micVisible || dictation.swipeActivationEnabled else { return }

@@ -8,23 +8,20 @@
 import SwiftUI
 
 struct DictationWaveformBorder: View {
-    let isActive: Bool
     let amplitude: CGFloat
     let cornerRadius: CGFloat
-    let inactiveStrokeColor: Color
     let activeStrokeColor: Color
     let reduceMotionEnabled: Bool
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 0.05)) { timeline in
             let t = timeline.date.timeIntervalSinceReferenceDate
-            if !isActive {
+            if reduceMotionEnabled {
+                let normalized = max(0, min((amplitude - 0.35) / 8.65, 1))
+                let alpha = 0.72 + (0.23 * normalized)
+                let lineWidth = 1.1 + (0.6 * normalized)
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .stroke(inactiveStrokeColor, lineWidth: 1)
-            } else if reduceMotionEnabled {
-                let alpha = 0.82 + 0.18 * sin(t * .pi * 2)
-                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-                    .stroke(activeStrokeColor.opacity(alpha), lineWidth: 1.5)
+                    .stroke(activeStrokeColor.opacity(alpha), lineWidth: lineWidth)
             } else {
                 GeometryReader { geometry in
                     let phase = CGFloat(t * .pi * 2 * 0.5)
@@ -45,8 +42,8 @@ struct DictationWaveformBorder: View {
 
 private enum DictationWavePath {
     static func path(in rect: CGRect, cornerRadius: CGFloat, amplitude: CGFloat, phase: CGFloat) -> Path {
-        let clampedAmplitude = max(0, amplitude)
-        let inset = clampedAmplitude + 2
+        let clampedAmplitude = max(0.35, amplitude)
+        let inset: CGFloat = 2
         let insetRect = rect.insetBy(dx: inset, dy: inset)
         guard insetRect.width > 8, insetRect.height > 8 else {
             return RoundedRectangle(cornerRadius: cornerRadius, style: .continuous).path(in: rect)

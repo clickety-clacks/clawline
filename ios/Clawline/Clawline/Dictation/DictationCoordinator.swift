@@ -963,11 +963,13 @@ final class DictationCoordinator {
     }
 
     private static func mappedDisplacement(for rms: Float) -> CGFloat {
-        let low: Float = 0.005
-        let high: Float = 0.25
-        let clamped = min(max((rms - low) / (high - low), 0), 1)
-        let eased = pow(clamped, 0.65)
-        return CGFloat(0.6 + eased * 7.4)
+        guard rms > 0 else { return 0.35 }
+        let db = 20 * log10(rms)
+        let minDb: Float = -55
+        let maxDb: Float = -10
+        let clamped = min(max((db - minDb) / (maxDb - minDb), 0), 1)
+        let eased = pow(clamped, 0.7)
+        return CGFloat(0.35 + eased * 8.65)
     }
 
     private func elapsedSessionMilliseconds() -> Int {

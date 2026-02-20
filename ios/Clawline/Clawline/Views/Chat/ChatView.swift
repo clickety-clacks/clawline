@@ -458,7 +458,9 @@ struct ChatView: View {
 #if os(visionOS)
             Color.clear
 #else
-            Color.clear
+            ChatFlowTheme.pageBackground(colorScheme)
+                .ignoresSafeArea()
+                .overlay(NoiseOverlayView().ignoresSafeArea())
 #endif
         }
         .task { await viewModel.onAppear() }
@@ -647,23 +649,6 @@ struct ChatView: View {
         )
 
         ZStack(alignment: .top) {
-            let backgroundCausticsAmplitude: CGFloat = dictationCoordinator.isWaveformVisible
-                ? dictationCoordinator.waveformDisplacement
-                : 0
-            DictationCausticsUnderlay(
-                isActive: dictationCoordinator.isWaveformVisible,
-                amplitude: backgroundCausticsAmplitude,
-                cornerRadius: 0,
-                reduceMotionEnabled: accessibilityReduceMotion || dictationCoordinator.reduceMotionEnabled,
-                baselineSpeed: settings.dictationCausticsBaselineSpeed,
-                maxSpeed: settings.dictationCausticsMaxSpeed,
-                brightness: settings.dictationCausticsBrightness,
-                scale: settings.dictationCausticsScale,
-                sharpness: settings.dictationCausticsSharpness,
-                color1: settings.dictationCausticsColor1.color
-            )
-            .ignoresSafeArea()
-
             messageLayer
                 // #31: fade out message content behind the system status bar (mask, not overlay tint).
                 .compositingGroup()
@@ -951,7 +936,7 @@ struct ChatView: View {
                 .frame(height: fadeHeight)
                 Rectangle().fill(Color.white)
             }
-            .ignoresSafeArea(.container, edges: [.top, .bottom])
+            .ignoresSafeArea(.container, edges: .top)
         }
     }
 
@@ -1118,7 +1103,9 @@ struct ChatView: View {
 #if os(visionOS)
                         Color.clear
 #else
-                        Color.clear
+                        ChatFlowTheme.pageBackground(colorScheme)
+                            .ignoresSafeArea()
+                            .overlay(NoiseOverlayView().ignoresSafeArea())
 #endif
                     }
                     .tag(sessionKey)

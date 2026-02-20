@@ -19,8 +19,6 @@ struct SettingsView: View {
         let max = settings.dictationCausticsMaxSpeed
         let brightness = settings.dictationCausticsBrightness
         let color1 = settings.dictationCausticsColor1
-        let color2 = settings.dictationCausticsColor2
-        let color3 = settings.dictationCausticsColor3
 
         return """
         {
@@ -32,11 +30,7 @@ struct SettingsView: View {
             "intensity": { "formula": "brightness", "value": \(String(format: "%.3f", brightness)) },
             "scale": { "formula": "constant", "value": 2.000 },
             "overlay": { "baseOpacity": 0.30, "activeOpacity": 0.92, "blendMode": "plusLighter" },
-            "colors": [
-              { "r": \(String(format: "%.3f", color1.red)), "g": \(String(format: "%.3f", color1.green)), "b": \(String(format: "%.3f", color1.blue)), "a": \(String(format: "%.3f", color1.alpha)) },
-              { "r": \(String(format: "%.3f", color2.red)), "g": \(String(format: "%.3f", color2.green)), "b": \(String(format: "%.3f", color2.blue)), "a": \(String(format: "%.3f", color2.alpha)) },
-              { "r": \(String(format: "%.3f", color3.red)), "g": \(String(format: "%.3f", color3.green)), "b": \(String(format: "%.3f", color3.blue)), "a": \(String(format: "%.3f", color3.alpha)) }
-            ],
+            "color": { "r": \(String(format: "%.3f", color1.red)), "g": \(String(format: "%.3f", color1.green)), "b": \(String(format: "%.3f", color1.blue)), "a": \(String(format: "%.3f", color1.alpha)) },
             "audioAffects": ["speed"],
             "reduceMotionEnabled": \(accessibilityReduceMotion ? "true" : "false"),
             "reduceMotionSpeeds": { "baseline": 0.12, "max": 0.18 }
@@ -64,7 +58,7 @@ struct SettingsView: View {
                     )
 
                     VStack(alignment: .leading) {
-                        Text("Baseline Speed: \(settings.dictationCausticsBaselineSpeed, specifier: "%.2f")")
+                        Text("Slow Speed: \(settings.dictationCausticsBaselineSpeed, specifier: "%.2f")")
                         Slider(
                             value: $settings.dictationCausticsBaselineSpeed,
                             in: 0.10...settings.dictationCausticsMaxSpeed
@@ -72,7 +66,7 @@ struct SettingsView: View {
                     }
 
                     VStack(alignment: .leading) {
-                        Text("Max Speed: \(settings.dictationCausticsMaxSpeed, specifier: "%.2f")")
+                        Text("Fast Speed: \(settings.dictationCausticsMaxSpeed, specifier: "%.2f")")
                         Slider(
                             value: $settings.dictationCausticsMaxSpeed,
                             in: settings.dictationCausticsBaselineSpeed...0.60
@@ -84,9 +78,7 @@ struct SettingsView: View {
                         Slider(value: $settings.dictationCausticsBrightness, in: 0.30...1.20)
                     }
 
-                    ColorPicker("Color 1", selection: dictationColor1Binding)
-                    ColorPicker("Color 2", selection: dictationColor2Binding)
-                    ColorPicker("Color 3", selection: dictationColor3Binding)
+                    ColorPicker("Color", selection: dictationColor1Binding)
 
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Diagnostics")
@@ -114,7 +106,7 @@ struct SettingsView: View {
                         }
                     }
                 } header: {
-                    Text("Background Effect")
+                    Text("Chat Background Effect (Non-Dictation)")
                 }
 
                 if settings.effectConfig.isEnabled {
@@ -204,20 +196,6 @@ struct SettingsView: View {
         )
     }
 
-    private var dictationColor2Binding: Binding<Color> {
-        Binding(
-            get: { settings.dictationCausticsColor2.color },
-            set: { settings.dictationCausticsColor2 = CodableColor(color: $0) }
-        )
-    }
-
-    private var dictationColor3Binding: Binding<Color> {
-        Binding(
-            get: { settings.dictationCausticsColor3.color },
-            set: { settings.dictationCausticsColor3 = CodableColor(color: $0) }
-        )
-    }
-
     private var dictationPinnedPreview: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Dictation Caustics Preview")
@@ -250,9 +228,7 @@ struct SettingsView: View {
                 baselineSpeed: settings.dictationCausticsBaselineSpeed,
                 maxSpeed: settings.dictationCausticsMaxSpeed,
                 brightness: settings.dictationCausticsBrightness,
-                color1: settings.dictationCausticsColor1.color,
-                color2: settings.dictationCausticsColor2.color,
-                color3: settings.dictationCausticsColor3.color
+                color1: settings.dictationCausticsColor1.color
             )
             .clipShape(shape)
 

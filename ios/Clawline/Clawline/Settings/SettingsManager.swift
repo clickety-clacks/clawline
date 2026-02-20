@@ -44,14 +44,6 @@ final class SettingsManager {
         didSet { saveDictationCausticsSettings() }
     }
 
-    var dictationCausticsColor2: CodableColor {
-        didSet { saveDictationCausticsSettings() }
-    }
-
-    var dictationCausticsColor3: CodableColor {
-        didSet { saveDictationCausticsSettings() }
-    }
-
     private(set) var sonioxKeyStatus: SonioxKeyVerificationStatus {
         didSet { SonioxConfigurationStore.setKeyStatus(sonioxKeyStatus) }
     }
@@ -64,14 +56,10 @@ final class SettingsManager {
     private static let dictationCausticsMaxSpeedKey = "dictation.caustics.maxSpeed"
     private static let dictationCausticsBrightnessKey = "dictation.caustics.brightness"
     private static let dictationCausticsColor1Key = "dictation.caustics.color1"
-    private static let dictationCausticsColor2Key = "dictation.caustics.color2"
-    private static let dictationCausticsColor3Key = "dictation.caustics.color3"
     static let defaultDictationCausticsBaselineSpeed: Double = 0.24
     static let defaultDictationCausticsMaxSpeed: Double = 0.34
     static let defaultDictationCausticsBrightness: Double = 0.72
     static let defaultDictationCausticsColor1 = CodableColor(red: 1.00, green: 0.96, blue: 0.88)
-    static let defaultDictationCausticsColor2 = CodableColor(red: 0.88, green: 0.95, blue: 1.00)
-    static let defaultDictationCausticsColor3 = CodableColor(red: 0.94, green: 0.91, blue: 1.00)
     private let sonioxVerifier: any SonioxKeyVerifying
 
     init(sonioxVerifier: any SonioxKeyVerifying = SonioxKeyVerifier()) {
@@ -102,14 +90,6 @@ final class SettingsManager {
             forKey: Self.dictationCausticsColor1Key,
             fallback: Self.defaultDictationCausticsColor1
         )
-        self.dictationCausticsColor2 = Self.loadCodableColor(
-            forKey: Self.dictationCausticsColor2Key,
-            fallback: Self.defaultDictationCausticsColor2
-        )
-        self.dictationCausticsColor3 = Self.loadCodableColor(
-            forKey: Self.dictationCausticsColor3Key,
-            fallback: Self.defaultDictationCausticsColor3
-        )
     }
 
     private func save() {
@@ -129,12 +109,6 @@ final class SettingsManager {
         if let data = try? JSONEncoder().encode(dictationCausticsColor1) {
             UserDefaults.standard.set(data, forKey: Self.dictationCausticsColor1Key)
         }
-        if let data = try? JSONEncoder().encode(dictationCausticsColor2) {
-            UserDefaults.standard.set(data, forKey: Self.dictationCausticsColor2Key)
-        }
-        if let data = try? JSONEncoder().encode(dictationCausticsColor3) {
-            UserDefaults.standard.set(data, forKey: Self.dictationCausticsColor3Key)
-        }
     }
 
     func resetToDefaults() {
@@ -144,8 +118,6 @@ final class SettingsManager {
         dictationCausticsMaxSpeed = Self.defaultDictationCausticsMaxSpeed
         dictationCausticsBrightness = Self.defaultDictationCausticsBrightness
         dictationCausticsColor1 = Self.defaultDictationCausticsColor1
-        dictationCausticsColor2 = Self.defaultDictationCausticsColor2
-        dictationCausticsColor3 = Self.defaultDictationCausticsColor3
     }
 
     func toggleSettings() {

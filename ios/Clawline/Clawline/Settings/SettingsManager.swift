@@ -66,12 +66,12 @@ final class SettingsManager {
     private static let dictationCausticsScaleKey = "dictation.caustics.scale"
     private static let dictationCausticsSharpnessKey = "dictation.caustics.sharpness"
     private static let dictationCausticsColor1Key = "dictation.caustics.color1"
-    static let defaultDictationCausticsBaselineSpeed: Double = 0.24
-    static let defaultDictationCausticsMaxSpeed: Double = 0.34
-    static let defaultDictationCausticsBrightness: Double = 0.72
-    static let defaultDictationCausticsScale: Double = 2.0
-    static let defaultDictationCausticsSharpness: Double = 2.0
-    static let defaultDictationCausticsColor1 = CodableColor(red: 1.00, green: 0.96, blue: 0.88)
+    static let defaultDictationCausticsBaselineSpeed: Double = 0.600
+    static let defaultDictationCausticsMaxSpeed: Double = 2.140
+    static let defaultDictationCausticsBrightness: Double = 0.373
+    static let defaultDictationCausticsScale: Double = 5.000
+    static let defaultDictationCausticsSharpness: Double = 1.065
+    static let defaultDictationCausticsColor1 = CodableColor(red: 1.000, green: 1.000, blue: 1.000, alpha: 1.000)
     private let sonioxVerifier: any SonioxKeyVerifying
 
     init(sonioxVerifier: any SonioxKeyVerifying = SonioxKeyVerifier()) {

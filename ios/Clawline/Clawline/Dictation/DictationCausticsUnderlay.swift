@@ -35,13 +35,17 @@ struct DictationCausticsUnderlay: View {
     }
 
     private var computedSpeed: Double {
+        // Keep quiet speech anchored at baseline, then ramp quickly once amplitude passes the knee.
+        let knee: Double = 0.24
+        let rampExponent: Double = 0.45
         let minSpeed: Double = reduceMotionEnabled ? Defaults.reduceMotionBaselineSpeed : baselineSpeed
         let effectiveMaxSpeed: Double = reduceMotionEnabled ? Defaults.reduceMotionMaxSpeed : maxSpeed
         let speedLowerBound = min(minSpeed, effectiveMaxSpeed)
         let speedUpperBound = max(minSpeed, effectiveMaxSpeed)
         let clampedAmplitude = min(max(normalizedAmplitude, 0), 1)
-        let hotAmplitude = pow(clampedAmplitude, 0.35)
-        let rawSpeed = minSpeed + ((effectiveMaxSpeed - minSpeed) * hotAmplitude)
+        let normalizedAboveKnee = min(max((clampedAmplitude - knee) / (1 - knee), 0), 1)
+        let rampedAmplitude = pow(normalizedAboveKnee, rampExponent)
+        let rawSpeed = minSpeed + ((effectiveMaxSpeed - minSpeed) * rampedAmplitude)
         return min(max(rawSpeed, speedLowerBound), speedUpperBound)
     }
 

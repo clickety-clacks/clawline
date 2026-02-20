@@ -33,6 +33,24 @@ struct RootView: View {
             : Color(uiColor: .systemGray6)              // Light gray
     }
 
+    private var isPairingRoute: Bool {
+        !auth.isAuthenticated || !isProviderConfigured
+    }
+
+    private var pairingCausticsConfig: BackgroundEffectConfiguration {
+        BackgroundEffectConfiguration(
+            effectType: .caustics,
+            color1: settings.dictationCausticsColor1,
+            color2: settings.dictationCausticsColor1,
+            color3: settings.dictationCausticsColor1,
+            intensity: settings.dictationCausticsBrightness,
+            speed: settings.dictationCausticsBaselineSpeed,
+            scale: settings.dictationCausticsScale,
+            sharpness: settings.dictationCausticsSharpness,
+            isEnabled: true
+        )
+    }
+
     var body: some View {
         Group {
             // If the provider base URL is missing (fresh install / wiped defaults), route to
@@ -76,8 +94,26 @@ struct RootView: View {
                 .allowsHitTesting(false)
                 .accessibilityHidden(true)
 #else
-            backgroundColor
-                .backgroundEffect(settings.effectConfig)
+            Group {
+                if isPairingRoute {
+                    backgroundColor
+                        .backgroundEffect(pairingCausticsConfig)
+                        .mask {
+                            LinearGradient(
+                                stops: [
+                                    .init(color: .white, location: 0.0),
+                                    .init(color: .white, location: 0.30),
+                                    .init(color: .clear, location: 0.55)
+                                ],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        }
+                } else {
+                    backgroundColor
+                        .backgroundEffect(settings.effectConfig)
+                }
+            }
                 .ignoresSafeArea()
                 .allowsHitTesting(false)
                 .accessibilityHidden(true)

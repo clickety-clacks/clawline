@@ -461,7 +461,9 @@ struct MessageInputBar: View {
                         isActive: dictation.isWaveformVisible,
                         amplitude: dictation.waveformDisplacement,
                         cornerRadius: inputCornerRadius,
-                        reduceMotionEnabled: reduceMotionForDictation
+                        reduceMotionEnabled: reduceMotionForDictation,
+                        baselineSpeed: settings.dictationCausticsBaselineSpeed,
+                        maxSpeed: settings.dictationCausticsMaxSpeed
                     )
                 }
                 .glassEffect(.regular, in: inputShape)

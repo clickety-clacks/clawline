@@ -13,6 +13,7 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.openURL) private var openURL
+    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
 
     private var effectiveColorScheme: ColorScheme {
 #if os(visionOS)
@@ -45,6 +46,33 @@ struct SettingsView: View {
                         },
                         placeholder: "soniox.apiKey"
                     )
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Caustics Preview")
+                            .font(.subheadline.weight(.semibold))
+
+                        HStack(spacing: 12) {
+                            dictationCausticsPreview(amplitude: 0)
+                            dictationCausticsPreview(amplitude: 9)
+                        }
+                    }
+                    .padding(.top, 4)
+
+                    VStack(alignment: .leading) {
+                        Text("Baseline Speed: \(settings.dictationCausticsBaselineSpeed, specifier: "%.2f")")
+                        Slider(
+                            value: $settings.dictationCausticsBaselineSpeed,
+                            in: 0.10...settings.dictationCausticsMaxSpeed
+                        )
+                    }
+
+                    VStack(alignment: .leading) {
+                        Text("Max Speed: \(settings.dictationCausticsMaxSpeed, specifier: "%.2f")")
+                        Slider(
+                            value: $settings.dictationCausticsMaxSpeed,
+                            in: settings.dictationCausticsBaselineSpeed...0.60
+                        )
+                    }
                 } header: {
                     Text("Voice Dictation")
                 }
@@ -164,6 +192,32 @@ struct SettingsView: View {
         }
         .frame(height: 150)
         .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    private func dictationCausticsPreview(amplitude: CGFloat) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
+
+        return ZStack {
+            DictationCausticsUnderlay(
+                isActive: true,
+                amplitude: amplitude,
+                cornerRadius: 14,
+                reduceMotionEnabled: accessibilityReduceMotion,
+                baselineSpeed: settings.dictationCausticsBaselineSpeed,
+                maxSpeed: settings.dictationCausticsMaxSpeed
+            )
+            .clipShape(shape)
+
+            shape
+                .fill(.regularMaterial)
+                .opacity(0.85)
+
+            Text(amplitude == 0 ? "Quiet" : "Loud")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+        }
+        .frame(height: 74)
+        .clipShape(shape)
     }
 }
 

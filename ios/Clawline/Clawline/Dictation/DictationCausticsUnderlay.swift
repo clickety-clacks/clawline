@@ -12,6 +12,8 @@ struct DictationCausticsUnderlay: View {
     let amplitude: CGFloat
     let cornerRadius: CGFloat
     let reduceMotionEnabled: Bool
+    let baselineSpeed: Double
+    let maxSpeed: Double
 
     private var normalizedAmplitude: Double {
         let value = max(0, min((amplitude - 0.35) / 8.65, 1))
@@ -19,10 +21,9 @@ struct DictationCausticsUnderlay: View {
     }
 
     private var effectConfig: BackgroundEffectConfiguration {
-        // Keep baseline motion alive even in silence; speech should only gently accelerate it.
-        let minSpeed: Double = reduceMotionEnabled ? 0.12 : 0.24
-        let maxSpeed: Double = reduceMotionEnabled ? 0.18 : 0.34
-        let speed = minSpeed + ((maxSpeed - minSpeed) * normalizedAmplitude)
+        let minSpeed: Double = reduceMotionEnabled ? 0.12 : baselineSpeed
+        let effectiveMaxSpeed: Double = reduceMotionEnabled ? 0.18 : maxSpeed
+        let speed = minSpeed + ((effectiveMaxSpeed - minSpeed) * normalizedAmplitude)
         let intensity = 0.45 + (0.40 * normalizedAmplitude)
         let scale = 1.5 + (1.1 * normalizedAmplitude)
 

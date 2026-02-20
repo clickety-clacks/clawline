@@ -28,6 +28,14 @@ final class SettingsManager {
         didSet { handleSonioxKeyChanged(from: oldValue, to: sonioxAPIKey) }
     }
 
+    var dictationCausticsBaselineSpeed: Double {
+        didSet { saveDictationCausticsSettings() }
+    }
+
+    var dictationCausticsMaxSpeed: Double {
+        didSet { saveDictationCausticsSettings() }
+    }
+
     private(set) var sonioxKeyStatus: SonioxKeyVerificationStatus {
         didSet { SonioxConfigurationStore.setKeyStatus(sonioxKeyStatus) }
     }
@@ -36,6 +44,10 @@ final class SettingsManager {
 
     private static let effectConfigKey = "backgroundEffectConfiguration"
     private static let appearanceModeKey = "appearanceMode"
+    private static let dictationCausticsBaselineSpeedKey = "dictation.caustics.baselineSpeed"
+    private static let dictationCausticsMaxSpeedKey = "dictation.caustics.maxSpeed"
+    static let defaultDictationCausticsBaselineSpeed: Double = 0.24
+    static let defaultDictationCausticsMaxSpeed: Double = 0.34
     private let sonioxVerifier: any SonioxKeyVerifying
 
     init(sonioxVerifier: any SonioxKeyVerifying = SonioxKeyVerifier()) {
@@ -56,6 +68,10 @@ final class SettingsManager {
 
         self.sonioxAPIKey = SonioxConfigurationStore.editableAPIKey
         self.sonioxKeyStatus = SonioxConfigurationStore.keyStatus
+        self.dictationCausticsBaselineSpeed = UserDefaults.standard.object(forKey: Self.dictationCausticsBaselineSpeedKey) as? Double
+            ?? Self.defaultDictationCausticsBaselineSpeed
+        self.dictationCausticsMaxSpeed = UserDefaults.standard.object(forKey: Self.dictationCausticsMaxSpeedKey) as? Double
+            ?? Self.defaultDictationCausticsMaxSpeed
     }
 
     private func save() {
@@ -68,9 +84,16 @@ final class SettingsManager {
         UserDefaults.standard.set(appearanceMode.rawValue, forKey: Self.appearanceModeKey)
     }
 
+    private func saveDictationCausticsSettings() {
+        UserDefaults.standard.set(dictationCausticsBaselineSpeed, forKey: Self.dictationCausticsBaselineSpeedKey)
+        UserDefaults.standard.set(dictationCausticsMaxSpeed, forKey: Self.dictationCausticsMaxSpeedKey)
+    }
+
     func resetToDefaults() {
         effectConfig = .default
         appearanceMode = .dark
+        dictationCausticsBaselineSpeed = Self.defaultDictationCausticsBaselineSpeed
+        dictationCausticsMaxSpeed = Self.defaultDictationCausticsMaxSpeed
     }
 
     func toggleSettings() {

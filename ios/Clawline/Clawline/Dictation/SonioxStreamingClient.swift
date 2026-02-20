@@ -135,7 +135,8 @@ final class SonioxStreamingClient: SonioxStreamingClienting {
             sampleRate: config.sampleRate,
             numChannels: config.channels,
             languageHints: [config.languageHint],
-            enableEndpointDetection: true,
+            enableEndpointDetection: false,
+            documentFormatting: SonioxInitialConfigPayload.DocumentFormatting(verbalizedPunct: true),
             clientReferenceID: config.clientReferenceID
         )
 
@@ -382,6 +383,14 @@ final class SonioxStreamingClient: SonioxStreamingClienting {
 }
 
 private struct SonioxInitialConfigPayload: Encodable {
+    struct DocumentFormatting: Encodable {
+        let verbalizedPunct: Bool
+
+        enum CodingKeys: String, CodingKey {
+            case verbalizedPunct = "verbalized_punct"
+        }
+    }
+
     let apiKey: String
     let model: String
     let audioFormat: String
@@ -389,6 +398,7 @@ private struct SonioxInitialConfigPayload: Encodable {
     let numChannels: Int
     let languageHints: [String]
     let enableEndpointDetection: Bool
+    let documentFormatting: DocumentFormatting
     let clientReferenceID: String
 
     enum CodingKeys: String, CodingKey {
@@ -399,6 +409,7 @@ private struct SonioxInitialConfigPayload: Encodable {
         case numChannels = "num_channels"
         case languageHints = "language_hints"
         case enableEndpointDetection = "enable_endpoint_detection"
+        case documentFormatting = "document_formatting"
         case clientReferenceID = "client_reference_id"
     }
 }

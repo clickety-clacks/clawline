@@ -1,0 +1,58 @@
+{
+  "source": "/Users/mike/src/clawline/ios/Clawline/Clawline/DesignSystem/ChatFlowOrganic/Components/Tables/MarkdownTableView.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "Table with %lld rows and %lld columns",
+        "location": {
+          "startingColumn": 29,
+          "startingLine": 168
+        }
+      },
+      {
+        "comment": "",
+        "key": "Copy as Markdown",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 162
+        }
+      },
+      {
+        "comment": "",
+        "key": "Copy as Tab-Separated Text",
+        "location": {
+          "startingColumn": 20,
+          "startingLine": 163
+        }
+      },
+      {
+        "comment": "",
+        "key": "table.more.rows.one",
+        "location": {
+          "startingColumn": 44,
+          "startingLine": 568
+        },
+        "value": "+1 more row"
+      },
+      {
+        "comment": "",
+        "key": "table.more.rows.many",
+        "location": {
+          "startingColumn": 40,
+          "startingLine": 570
+        },
+        "value": "+%lld more rows"
+      },
+      {
+        "comment": "",
+        "key": "—",
+        "location": {
+          "startingColumn": 22,
+          "startingLine": 354
+        }
+      }
+    ]
+  },
+  "version": 1
+}

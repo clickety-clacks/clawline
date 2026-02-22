@@ -109,13 +109,13 @@ struct MarkdownTableView: View {
     private var columnWidths: [CGFloat] {
         var widths: [CGFloat] = Array(repeating: 0, count: model.columns.count)
         if let header = model.header {
-            for (idx, cell) in header.enumerated() {
-                widths[idx] = max(widths[idx], cell.intrinsicWidth)
+            for (idx, cell) in header.prefix(model.columns.count).enumerated() {
+                widths[idx] = max(widths[idx], measuredCellTextWidth(cell: cell, alignment: model.columns[idx].alignment, isHeader: true))
             }
         }
         for row in model.rows {
-            for (idx, cell) in row.cells.enumerated() {
-                widths[idx] = max(widths[idx], cell.intrinsicWidth)
+            for (idx, cell) in row.cells.prefix(model.columns.count).enumerated() {
+                widths[idx] = max(widths[idx], measuredCellTextWidth(cell: cell, alignment: model.columns[idx].alignment, isHeader: false))
             }
         }
         return widths
@@ -212,7 +212,13 @@ struct MarkdownTableView: View {
             .onPreferenceChange(HorizontalOffsetPreferenceKey.self) { value in
                 scrollOffset = -value
             }
-            .onAppear { scrollProxy = proxy }
+            .onAppear {
+                scrollProxy = proxy
+                resetHorizontalScrollToLeading(using: proxy)
+            }
+            .onChange(of: containerWidth) { _, _ in
+                resetHorizontalScrollToLeading(using: proxy)
+            }
         }
     }
 
@@ -447,6 +453,24 @@ struct MarkdownTableView: View {
         return mutable
     }
 
+    private func measuredCellTextWidth(cell: TableModel.Cell, alignment: ColumnAlignment, isHeader: Bool) -> CGFloat {
+        guard !cell.isEmpty else {
+            let baseFont = UIFont.systemFont(ofSize: metrics.bodyFontSize, weight: isHeader ? .semibold : .regular)
+            let scaledFont = UIFontMetrics.default.scaledFont(for: baseFont)
+            let width = ("—" as NSString).size(withAttributes: [.font: scaledFont]).width
+            return ceil(width)
+        }
+
+        let styled = styledAttributedString(for: cell, alignment: alignment, isHeader: isHeader)
+        let measured = styled.boundingRect(
+            with: CGSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            context: nil
+        )
+        // Small safety margin prevents edge-case glyph clipping/wrapping in UITextView layout.
+        return ceil(measured.width) + 1
+    }
+
     private func inlineCodeBackgroundColor() -> UIColor {
         dynamicColor { colorScheme in
             colorScheme == .dark
@@ -495,6 +519,15 @@ struct MarkdownTableView: View {
             if needsHorizontalScroll {
                 scrollProxy?.scrollTo("leading", anchor: .leading)
             }
+        }
+    }
+
+    private func resetHorizontalScrollToLeading(using proxy: ScrollViewProxy) {
+        guard !isExpanded else { return }
+        guard needsHorizontalScroll else { return }
+        // Ensure collapsed tables always start at the left-most columns when mounted in bubble UIKit wrappers.
+        DispatchQueue.main.async {
+            proxy.scrollTo("leading", anchor: .leading)
         }
     }
 

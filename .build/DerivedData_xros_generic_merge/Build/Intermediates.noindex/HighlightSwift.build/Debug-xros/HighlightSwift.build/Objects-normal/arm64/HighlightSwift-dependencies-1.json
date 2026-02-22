@@ -1,0 +1,768 @@
+[
+  {
+    "isFramework" : false,
+    "moduleName" : "ARKit",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/ARKit.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : true,
+    "moduleName" : "AVFAudio",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/AVFAudio.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "AVFoundation",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/AVFoundation.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : true,
+    "moduleName" : "Accessibility",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/Accessibility.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : true,
+    "moduleName" : "AudioToolbox",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/AudioToolbox.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : true,
+    "moduleName" : "Combine",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/Combine.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "CoreAudio",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/CoreAudio.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : true,
+    "moduleName" : "CoreData",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/CoreData.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "CoreFoundation",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/CoreFoundation.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : true,
+    "moduleName" : "CoreGraphics",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/CoreGraphics.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "CoreImage",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/CoreImage.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "CoreLocation",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/CoreLocation.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "CoreMIDI",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/CoreMIDI.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "CoreMedia",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/CoreMedia.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : true,
+    "moduleName" : "CoreMotion",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/CoreMotion.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : true,
+    "moduleName" : "CoreText",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/CoreText.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : true,
+    "moduleName" : "CoreTransferable",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/CoreTransferable.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : true,
+    "moduleName" : "CoreVideo",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/CoreVideo.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "Darwin",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/Darwin.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : true,
+    "moduleName" : "DataDetection",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/DataDetection.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : true,
+    "moduleName" : "DeveloperToolsSupport",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/DeveloperToolsSupport.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "Dispatch",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/Dispatch.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "Distributed",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/Distributed.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : true,
+    "moduleName" : "FileProvider",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/FileProvider.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : true,
+    "moduleName" : "Foundation",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/Foundation.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : true,
+    "moduleName" : "GameController",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/GameController.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "Metal",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/Metal.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : true,
+    "moduleName" : "Network",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/Network.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "OSLog",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/OSLog.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "ObjectiveC",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/ObjectiveC.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "Observation",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/Observation.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "QuartzCore",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/QuartzCore.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : true,
+    "moduleName" : "RealityFoundation",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/RealityFoundation.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "Spatial",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/Spatial.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "Swift",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/Swift.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "SwiftOnoneSupport",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/SwiftOnoneSupport.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : true,
+    "moduleName" : "SwiftUI",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/SwiftUI.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : true,
+    "moduleName" : "SwiftUICore",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/SwiftUICore.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : true,
+    "moduleName" : "Symbols",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/Symbols.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "Synchronization",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/Synchronization.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "System",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/System.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : true,
+    "moduleName" : "UIKit",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/UIKit.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "UniformTypeIdentifiers",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/UniformTypeIdentifiers.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "_Builtin_float",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/_Builtin_float.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "_Concurrency",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/_Concurrency.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "_DarwinFoundation1",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/_DarwinFoundation1.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "_DarwinFoundation2",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/_DarwinFoundation2.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "_DarwinFoundation3",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/_DarwinFoundation3.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "_StringProcessing",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/_StringProcessing.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "os",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/os.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "simd",
+    "modulePath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/swift\/xros\/prebuilt-modules\/26.1\/simd.swiftmodule\/arm64e-apple-xros.swiftmodule"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/ARKit.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/mike\/src\/clawline\/.build\/DerivedData_xros_generic_merge\/ModuleCache.noindex\/ARKit-28SFM9OI6NTJP2WW9M9SH9WZH.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "ARKit"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/AVFAudio.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/mike\/src\/clawline\/.build\/DerivedData_xros_generic_merge\/ModuleCache.noindex\/AVFAudio-196LI6EWZAY4WQN1I5HOOHMFX.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "AVFAudio"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/AVFoundation.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/mike\/src\/clawline\/.build\/DerivedData_xros_generic_merge\/ModuleCache.noindex\/AVFoundation-E2BDPVDVUUJD5JPU6KOM08C5N.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "AVFoundation"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/AVRouting.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/mike\/src\/clawline\/.build\/DerivedData_xros_generic_merge\/ModuleCache.noindex\/AVRouting-94J503CTBA9KMD0WNKHRLJZND.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "AVRouting"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/Accessibility.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/mike\/src\/clawline\/.build\/DerivedData_xros_generic_merge\/ModuleCache.noindex\/Accessibility-3FUN2Y3856EL3URNMILPWNLOR.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "Accessibility"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/AudioToolbox.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/mike\/src\/clawline\/.build\/DerivedData_xros_generic_merge\/ModuleCache.noindex\/AudioToolbox-DQQSTPBUB8NNCADHJJY8VNF39.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "AudioToolbox"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/CFNetwork.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/mike\/src\/clawline\/.build\/DerivedData_xros_generic_merge\/ModuleCache.noindex\/CFNetwork-BO7KEYBPAXWMX3F2EY5GRNP03.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "CFNetwork"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/CoreAudio.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/mike\/src\/clawline\/.build\/DerivedData_xros_generic_merge\/ModuleCache.noindex\/CoreAudio-96ENV1GRS2YMGEOAFVMZTRD4W.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "CoreAudio"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/CoreAudioTypes.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/mike\/src\/clawline\/.build\/DerivedData_xros_generic_merge\/ModuleCache.noindex\/CoreAudioTypes-6XP9LQ4TUBVO5PEAFAYWWH917.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "CoreAudioTypes"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/CoreData.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/mike\/src\/clawline\/.build\/DerivedData_xros_generic_merge\/ModuleCache.noindex\/CoreData-4ULN5XOG15T13JNXHJ2DSIQ4Q.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "CoreData"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/CoreFoundation.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/mike\/src\/clawline\/.build\/DerivedData_xros_generic_merge\/ModuleCache.noindex\/CoreFoundation-32PIQHICN9CIA9VJVA8YLVHNE.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "CoreFoundation"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/CoreGraphics.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/mike\/src\/clawline\/.build\/DerivedData_xros_generic_merge\/ModuleCache.noindex\/CoreGraphics-40DODPQZQDKG1D8RQWMTLH1Y0.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "CoreGraphics"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/CoreImage.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/mike\/src\/clawline\/.build\/DerivedData_xros_generic_merge\/ModuleCache.noindex\/CoreImage-99RF3OJM206SB4DZMMGOBE67Q.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "CoreImage"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/CoreLocation.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/mike\/src\/clawline\/.build\/DerivedData_xros_generic_merge\/ModuleCache.noindex\/CoreLocation-6B3VY9QOUWTUQGKADMWP2L4MC.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "CoreLocation"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/CoreMIDI.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/mike\/src\/clawline\/.build\/DerivedData_xros_generic_merge\/ModuleCache.noindex\/CoreMIDI-CHQGLP1UQZIZFTGNPD7VH5V5J.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "CoreMIDI"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/CoreMedia.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/mike\/src\/clawline\/.build\/DerivedData_xros_generic_merge\/ModuleCache.noindex\/CoreMedia-BTANFTDJAQY6F1UM4XAVA6JNY.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "CoreMedia"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/CoreMotion.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/mike\/src\/clawline\/.build\/DerivedData_xros_generic_merge\/ModuleCache.noindex\/CoreMotion-9Y4LADOV557MROSMT4MHESHYA.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "CoreMotion"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/CoreServices.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/mike\/src\/clawline\/.build\/DerivedData_xros_generic_merge\/ModuleCache.noindex\/CoreServices-4WV6M09UAZUSSQKPDWWUD88UX.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "CoreServices"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/CoreText.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/mike\/src\/clawline\/.build\/DerivedData_xros_generic_merge\/ModuleCache.noindex\/CoreText-89ZMC8TTXUTOX1VR06CAV74FY.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "CoreText"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/CoreTransferable.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/mike\/src\/clawline\/.build\/DerivedData_xros_generic_merge\/ModuleCache.noindex\/CoreTransferable-AUSW8QMQCH5MH0LZOZMTEG0AY.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "CoreTransferable"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/CoreVideo.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/mike\/src\/clawline\/.build\/DerivedData_xros_generic_merge\/ModuleCache.noindex\/CoreVideo-9HTXP0H0IEBB34VM5T0QXE2KX.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "CoreVideo"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/usr\/include\/Darwin.modulemap",
+    "clangModulePath" : "\/Users\/mike\/src\/clawline\/.build\/DerivedData_xros_generic_merge\/ModuleCache.noindex\/Darwin-A682PNRY4YH6GLOSBM0NAV0EH.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "Darwin"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/DataDetection.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/mike\/src\/clawline\/.build\/DerivedData_xros_generic_merge\/ModuleCache.noindex\/DataDetection-E8LGFEXZJBUSTA0L22HY1HFLT.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "DataDetection"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/DeveloperToolsSupport.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/mike\/src\/clawline\/.build\/DerivedData_xros_generic_merge\/ModuleCache.noindex\/DeveloperToolsSupport-B4PHGNSG8HHJ1HBZH2Q37YEDQ.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "DeveloperToolsSupport"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/usr\/include\/dispatch.modulemap",
+    "clangModulePath" : "\/Users\/mike\/src\/clawline\/.build\/DerivedData_xros_generic_merge\/ModuleCache.noindex\/Dispatch-CWH782DO4165L80VYE0S9UN6D.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "Dispatch"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/FileProvider.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/mike\/src\/clawline\/.build\/DerivedData_xros_generic_merge\/ModuleCache.noindex\/FileProvider-BM01Y2XWSKNL7WBTQGM3UUSX.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "FileProvider"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/Foundation.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/mike\/src\/clawline\/.build\/DerivedData_xros_generic_merge\/ModuleCache.noindex\/Foundation-CTY936LL886DXNLBM5TWLA307.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "Foundation"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/GameController.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/mike\/src\/clawline\/.build\/DerivedData_xros_generic_merge\/ModuleCache.noindex\/GameController-61Q0UIXYE5QUVI7MHJD9U1GT2.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "GameController"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/IOSurface.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/mike\/src\/clawline\/.build\/DerivedData_xros_generic_merge\/ModuleCache.noindex\/IOSurface-14X20EZBP7DWLA64KSMU31ZCY.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "IOSurface"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/ImageIO.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/mike\/src\/clawline\/.build\/DerivedData_xros_generic_merge\/ModuleCache.noindex\/ImageIO-1FS3XS6PGJS5ON5ZMTG82P9XC.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "ImageIO"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/JavaScriptCore.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/mike\/src\/clawline\/.build\/DerivedData_xros_generic_merge\/ModuleCache.noindex\/JavaScriptCore-3MD01M536UVQIQ8K38J8FS7Q1.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "JavaScriptCore"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/usr\/include\/DarwinBasic.modulemap",
+    "clangModulePath" : "\/Users\/mike\/src\/clawline\/.build\/DerivedData_xros_generic_merge\/ModuleCache.noindex\/MachO-C7OLWXFD311OPS3DFJ7BFEGA5.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "MachO"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/MediaToolbox.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/mike\/src\/clawline\/.build\/DerivedData_xros_generic_merge\/ModuleCache.noindex\/MediaToolbox-EO1QH8U71TREP9GYE9WSDYFFA.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "MediaToolbox"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/Metal.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/mike\/src\/clawline\/.build\/DerivedData_xros_generic_merge\/ModuleCache.noindex\/Metal-E07TOGSOH9OH3YFPEO7RZNH7B.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "Metal"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/Network.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/mike\/src\/clawline\/.build\/DerivedData_xros_generic_merge\/ModuleCache.noindex\/Network-89ILYO0V67TDR0DT4CXW4SOPO.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "Network"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/OSLog.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/mike\/src\/clawline\/.build\/DerivedData_xros_generic_merge\/ModuleCache.noindex\/OSLog-F4CZBV261V3ZG2Q3BMA30IYSY.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "OSLog"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/usr\/include\/ObjectiveC.modulemap",
+    "clangModulePath" : "\/Users\/mike\/src\/clawline\/.build\/DerivedData_xros_generic_merge\/ModuleCache.noindex\/ObjectiveC-6963971MJ5LJPI16S7K9KHOI9.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "ObjectiveC"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/OpenGLES.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/mike\/src\/clawline\/.build\/DerivedData_xros_generic_merge\/ModuleCache.noindex\/OpenGLES-4JB21305FMAQVW6SI7LUKNDMZ.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "OpenGLES"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/QuartzCore.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/mike\/src\/clawline\/.build\/DerivedData_xros_generic_merge\/ModuleCache.noindex\/QuartzCore-7W8HSQ7JCKSVFB4BQCWEKC02T.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "QuartzCore"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/Security.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/mike\/src\/clawline\/.build\/DerivedData_xros_generic_merge\/ModuleCache.noindex\/Security-BDVNVZ6R3CJM19T3FUUTZ4VGF.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "Security"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/usr\/include\/Spatial\/module.modulemap",
+    "clangModulePath" : "\/Users\/mike\/src\/clawline\/.build\/DerivedData_xros_generic_merge\/ModuleCache.noindex\/Spatial-AR0LAS3AYLL3VI8Z4EURQIDLJ.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "Spatial"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/usr\/lib\/swift\/shims\/module.modulemap",
+    "clangModulePath" : "\/Users\/mike\/src\/clawline\/.build\/DerivedData_xros_generic_merge\/ModuleCache.noindex\/SwiftShims-C65RN0A9H4TRIR8VZVFZSTE4A.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "SwiftShims"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/SwiftUI.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/mike\/src\/clawline\/.build\/DerivedData_xros_generic_merge\/ModuleCache.noindex\/SwiftUI-BIYBTYL5TQFG2G0YTUPGL1EPA.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "SwiftUI"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/SwiftUICore.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/mike\/src\/clawline\/.build\/DerivedData_xros_generic_merge\/ModuleCache.noindex\/SwiftUICore-2LMHOEGG3SCHYN8QN2YVMW2RR.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "SwiftUICore"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/Symbols.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/mike\/src\/clawline\/.build\/DerivedData_xros_generic_merge\/ModuleCache.noindex\/Symbols-BA74920F72U4SAUSPH3ERFAFB.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "Symbols"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/UIKit.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/mike\/src\/clawline\/.build\/DerivedData_xros_generic_merge\/ModuleCache.noindex\/UIKit-DYIS6V1L12ZH0Q4BEL8DNJ2MO.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "UIKit"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/SubFrameworks\/UIUtilities.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/mike\/src\/clawline\/.build\/DerivedData_xros_generic_merge\/ModuleCache.noindex\/UIUtilities-B73O1SYP6F57X2GWQ3GOYLMEP.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "UIUtilities"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/UniformTypeIdentifiers.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/mike\/src\/clawline\/.build\/DerivedData_xros_generic_merge\/ModuleCache.noindex\/UniformTypeIdentifiers-93FOTLVH7P0BZLYGALCMXSQFY.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "UniformTypeIdentifiers"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/UserNotifications.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/mike\/src\/clawline\/.build\/DerivedData_xros_generic_merge\/ModuleCache.noindex\/UserNotifications-EUU567EH36UGYVF44MCIXFRZ2.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "UserNotifications"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/usr\/include\/DarwinFoundation1.modulemap",
+    "clangModulePath" : "\/Users\/mike\/src\/clawline\/.build\/DerivedData_xros_generic_merge\/ModuleCache.noindex\/_AvailabilityInternal-5KN14SVY2CX51PKUWJNB3L9FY.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "_AvailabilityInternal"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/clang\/17\/include\/module.modulemap",
+    "clangModulePath" : "\/Users\/mike\/src\/clawline\/.build\/DerivedData_xros_generic_merge\/ModuleCache.noindex\/_Builtin_float-NFD4Y6IXHMPLQDYJWS3R09P7.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "_Builtin_float"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/clang\/17\/include\/module.modulemap",
+    "clangModulePath" : "\/Users\/mike\/src\/clawline\/.build\/DerivedData_xros_generic_merge\/ModuleCache.noindex\/_Builtin_intrinsics-8Y487LNKODIZJ4P2FG17T835P.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "_Builtin_intrinsics"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/clang\/17\/include\/module.modulemap",
+    "clangModulePath" : "\/Users\/mike\/src\/clawline\/.build\/DerivedData_xros_generic_merge\/ModuleCache.noindex\/_Builtin_inttypes-95RDYQ6DYUULTUKTY5U56E5DQ.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "_Builtin_inttypes"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/clang\/17\/include\/module.modulemap",
+    "clangModulePath" : "\/Users\/mike\/src\/clawline\/.build\/DerivedData_xros_generic_merge\/ModuleCache.noindex\/_Builtin_limits-9EQ5GR35B6VFML2P042T1LH4Q.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "_Builtin_limits"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/clang\/17\/include\/module.modulemap",
+    "clangModulePath" : "\/Users\/mike\/src\/clawline\/.build\/DerivedData_xros_generic_merge\/ModuleCache.noindex\/_Builtin_stdarg-3SCUF2APZL6GP5N02U5QQ8K3E.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "_Builtin_stdarg"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/clang\/17\/include\/module.modulemap",
+    "clangModulePath" : "\/Users\/mike\/src\/clawline\/.build\/DerivedData_xros_generic_merge\/ModuleCache.noindex\/_Builtin_stdatomic-CTAIZJKLPP1QLW03TK6V3NB36.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "_Builtin_stdatomic"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/clang\/17\/include\/module.modulemap",
+    "clangModulePath" : "\/Users\/mike\/src\/clawline\/.build\/DerivedData_xros_generic_merge\/ModuleCache.noindex\/_Builtin_stdbool-CDPIA6Q71AS2TJXSTWLO4QRG4.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "_Builtin_stdbool"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/clang\/17\/include\/module.modulemap",
+    "clangModulePath" : "\/Users\/mike\/src\/clawline\/.build\/DerivedData_xros_generic_merge\/ModuleCache.noindex\/_Builtin_stddef-3T3MQSF691J74LQ63A9EGAPEC.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "_Builtin_stddef"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/clang\/17\/include\/module.modulemap",
+    "clangModulePath" : "\/Users\/mike\/src\/clawline\/.build\/DerivedData_xros_generic_merge\/ModuleCache.noindex\/_Builtin_stdint-6G5ITDP9ACF9BGPRN0MQU38JO.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "_Builtin_stdint"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/clang\/17\/include\/module.modulemap",
+    "clangModulePath" : "\/Users\/mike\/src\/clawline\/.build\/DerivedData_xros_generic_merge\/ModuleCache.noindex\/_Builtin_tgmath-7O8Z7B6N7STKYU2ET7H7W13GO.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "_Builtin_tgmath"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/usr\/include\/DarwinFoundation1.modulemap",
+    "clangModulePath" : "\/Users\/mike\/src\/clawline\/.build\/DerivedData_xros_generic_merge\/ModuleCache.noindex\/_DarwinFoundation1-3E1U1MUNY1RSSL2WG1CWNK4TZ.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "_DarwinFoundation1"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/usr\/include\/DarwinFoundation2.modulemap",
+    "clangModulePath" : "\/Users\/mike\/src\/clawline\/.build\/DerivedData_xros_generic_merge\/ModuleCache.noindex\/_DarwinFoundation2-D5M6TV25YBE4MFTNCBUEZ8WLV.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "_DarwinFoundation2"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/usr\/include\/DarwinFoundation3.modulemap",
+    "clangModulePath" : "\/Users\/mike\/src\/clawline\/.build\/DerivedData_xros_generic_merge\/ModuleCache.noindex\/_DarwinFoundation3-DP7ZQNH4GOEJ2Y8C8SILKZ96R.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "_DarwinFoundation3"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/System\/Library\/Frameworks\/_LocationEssentials.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/mike\/src\/clawline\/.build\/DerivedData_xros_generic_merge\/ModuleCache.noindex\/_LocationEssentials-7QSRG91PV1G4K3ED4VILGZIEW.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "_LocationEssentials"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/usr\/lib\/swift\/shims\/module.modulemap",
+    "clangModulePath" : "\/Users\/mike\/src\/clawline\/.build\/DerivedData_xros_generic_merge\/ModuleCache.noindex\/_SwiftConcurrencyShims-F4TZUFQAGYYAQ0KBKPJCCDHL8.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "_SwiftConcurrencyShims"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/usr\/include\/dnssd.modulemap",
+    "clangModulePath" : "\/Users\/mike\/src\/clawline\/.build\/DerivedData_xros_generic_merge\/ModuleCache.noindex\/dnssd-AI6WSKBBQZSG2LGF2W0VQTO3M.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "dnssd"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/usr\/include\/os.modulemap",
+    "clangModulePath" : "\/Users\/mike\/src\/clawline\/.build\/DerivedData_xros_generic_merge\/ModuleCache.noindex\/os-BUG7WM7EZS40EY9BHUX1V828U.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "os"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/usr\/include\/os.modulemap",
+    "clangModulePath" : "\/Users\/mike\/src\/clawline\/.build\/DerivedData_xros_generic_merge\/ModuleCache.noindex\/os_object-2EPP5K9XKWEVBC0K283LI76FD.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "os_object"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/usr\/include\/os.modulemap",
+    "clangModulePath" : "\/Users\/mike\/src\/clawline\/.build\/DerivedData_xros_generic_merge\/ModuleCache.noindex\/os_workgroup-DYZAJPT4HDJ7XYT2G7TC08CIK.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "os_workgroup"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/clang\/17\/include\/module.modulemap",
+    "clangModulePath" : "\/Users\/mike\/src\/clawline\/.build\/DerivedData_xros_generic_merge\/ModuleCache.noindex\/ptrauth-I9BWJ7ARKXGZXNP6HWMO9UIQ.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "ptrauth"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Toolchains\/XcodeDefault.xctoolchain\/usr\/lib\/clang\/17\/include\/module.modulemap",
+    "clangModulePath" : "\/Users\/mike\/src\/clawline\/.build\/DerivedData_xros_generic_merge\/ModuleCache.noindex\/ptrcheck-3MJ5EPU5EYXEIJ3YQW6Q9DH6U.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "ptrcheck"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/usr\/include\/simd\/module.modulemap",
+    "clangModulePath" : "\/Users\/mike\/src\/clawline\/.build\/DerivedData_xros_generic_merge\/ModuleCache.noindex\/simd-8IIHPUOGR0MXTTNI3NNL78DA5.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "simd"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode.app\/Contents\/Developer\/Platforms\/XROS.platform\/Developer\/SDKs\/XROS.sdk\/usr\/include\/DarwinFoundation2.modulemap",
+    "clangModulePath" : "\/Users\/mike\/src\/clawline\/.build\/DerivedData_xros_generic_merge\/ModuleCache.noindex\/sys_types-BQGIWEVCX9B6YYZ56RT7VLVCA.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "sys_types"
+  }
+]

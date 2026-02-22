@@ -1,0 +1,44 @@
+{
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/DesignSystem/ChatFlowOrganic/Components/CameraPicker.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_ios_merge/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/CameraPicker.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_ios_merge/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/CameraPicker.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_ios_merge/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/CameraPicker.dia",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_ios_merge/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/CameraPicker.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_ios_merge/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/CameraPicker.swiftdeps"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/DesignSystem/ChatFlowOrganic/Components/CodeBlockView.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_ios_merge/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/CodeBlockView.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_ios_merge/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/CodeBlockView.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_ios_merge/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/CodeBlockView.dia",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_ios_merge/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/CodeBlockView.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_ios_merge/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/CodeBlockView.swiftdeps"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/DesignSystem/ChatFlowOrganic/Components/DocumentPicker.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_ios_merge/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/DocumentPicker.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_ios_merge/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/DocumentPicker.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_ios_merge/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/DocumentPicker.dia",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_ios_merge/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/DocumentPicker.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_ios_merge/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/DocumentPicker.swiftdeps"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/DesignSystem/ChatFlowOrganic/Components/Tables/MarkdownTableView.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_ios_merge/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MarkdownTableView.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_ios_merge/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MarkdownTableView.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_ios_merge/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MarkdownTableView.dia",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_ios_merge/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MarkdownTableView.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_ios_merge/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MarkdownTableView.swiftdeps"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/DesignSystem/ChatFlowOrganic/Components/Tables/SelectableAttributedText.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_ios_merge/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SelectableAttributedText.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_ios_merge/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SelectableAttributedText.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_ios_merge/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SelectableAttributedText.dia",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_ios_merge/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SelectableAttributedText.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_ios_merge/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SelectableAttributedText.swiftdeps"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/DesignSystem/ChatFlowOrganic/Components/Tables/TableKeyCommandBridge.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_ios_merge/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/TableKeyCommandBridge.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_ios_merge/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/TableKeyCommandBridge.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_ios_merge/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/TableKeyCommandBridge.dia",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_ios_merge/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/TableKeyCommandBridge.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_ios_merge/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/TableKeyCommandBridge.swiftdeps"
+  }
+}

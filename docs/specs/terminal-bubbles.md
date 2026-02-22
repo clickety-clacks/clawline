@@ -300,16 +300,18 @@ Provider MUST use stable error codes so clients can render actionable UI.
 
 ## tmux Connectivity (Provider)
 
-### DM-Only Policy (Provider) (MVP Decision)
-Terminal bubbles are only allowed for *personal DM* session keys of the form:
+### Personal-Stream Policy (Provider) (Product Decision)
+Terminal bubbles are allowed for any *personal Clawline stream* session keys of the form:
 - `agent:main:clawline:{userId}:main`
+- `agent:main:clawline:{userId}:s_*` (user-created personal streams)
 
 Provider MUST refuse to emit terminal session attachments for:
 - `agent:main:main` (global admin channel)
-- any non-DM / group session key patterns
+- any non-personal / group session key patterns
 
 Enforcement rule (provider):
-- Gate on session key pattern before creating the tmux session and before emitting the message attachment.
+- Gate on personal-stream session key pattern before creating the tmux session and before emitting the message attachment.
+- `...:main` has no elevated rendering privilege over `...:s_*`; both must decode/render identically on clients.
 
 ### Provider Responsibilities
 The provider owns:
@@ -490,7 +492,7 @@ Fallback behavior:
 
 ## Open Questions
 Resolved by Flynn decisions:
-- DM-only for personal Clawline DMs (`agent:main:clawline:{userId}:main`).
+- Personal-stream scope for Clawline streams: `agent:main:clawline:{userId}:main` and `agent:main:clawline:{userId}:s_*`; `...:main` has no elevated rendering privilege.
 - Auto-connect immediately on render.
 - No bubble chrome; sizing and scroll capture match HTML link previews.
 - Expand opens a larger pane via a NEW connection (tmux backfill restores scrollback).

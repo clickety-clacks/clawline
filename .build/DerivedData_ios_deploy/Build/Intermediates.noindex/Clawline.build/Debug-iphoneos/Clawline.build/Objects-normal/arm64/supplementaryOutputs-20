@@ -1,0 +1,37 @@
+{
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Protocols/ChatServicing.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_ios_deploy/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatServicing.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_ios_deploy/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatServicing.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_ios_deploy/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatServicing.dia",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_ios_deploy/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatServicing.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_ios_deploy/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatServicing.swiftdeps"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Protocols/ConnectionServicing.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_ios_deploy/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ConnectionServicing.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_ios_deploy/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ConnectionServicing.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_ios_deploy/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ConnectionServicing.dia",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_ios_deploy/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ConnectionServicing.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_ios_deploy/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ConnectionServicing.swiftdeps"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Protocols/DeviceIdentifying.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_ios_deploy/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/DeviceIdentifying.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_ios_deploy/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/DeviceIdentifying.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_ios_deploy/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/DeviceIdentifying.dia",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_ios_deploy/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/DeviceIdentifying.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_ios_deploy/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/DeviceIdentifying.swiftdeps"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Protocols/SalientHighlightServicing.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_ios_deploy/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SalientHighlightServicing.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_ios_deploy/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SalientHighlightServicing.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_ios_deploy/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SalientHighlightServicing.dia",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_ios_deploy/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SalientHighlightServicing.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_ios_deploy/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SalientHighlightServicing.swiftdeps"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Protocols/UploadServicing.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_ios_deploy/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/UploadServicing.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_ios_deploy/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/UploadServicing.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_ios_deploy/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/UploadServicing.dia",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_ios_deploy/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/UploadServicing.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_ios_deploy/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/UploadServicing.swiftdeps"
+  }
+}

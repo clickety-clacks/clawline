@@ -1,0 +1,16 @@
+{
+  "source": "/Users/mike/src/clawline/ios/Clawline/Clawline/Views/Chat/ExpandedMessageSheet.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "Done",
+        "location": {
+          "startingColumn": 28,
+          "startingLine": 47
+        }
+      }
+    ]
+  },
+  "version": 1
+}

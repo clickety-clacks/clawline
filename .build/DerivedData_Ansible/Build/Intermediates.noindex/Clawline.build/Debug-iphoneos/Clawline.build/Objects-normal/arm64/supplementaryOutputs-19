@@ -1,0 +1,37 @@
+{
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Models/TerminalSessionDescriptor.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_Ansible/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/TerminalSessionDescriptor.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_Ansible/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/TerminalSessionDescriptor.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_Ansible/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/TerminalSessionDescriptor.dia",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_Ansible/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/TerminalSessionDescriptor.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_Ansible/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/TerminalSessionDescriptor.swiftdeps"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Models/WireAttachment.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_Ansible/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/WireAttachment.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_Ansible/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/WireAttachment.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_Ansible/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/WireAttachment.dia",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_Ansible/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/WireAttachment.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_Ansible/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/WireAttachment.swiftdeps"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Networking/URLSessionWebSocketConnector.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_Ansible/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/URLSessionWebSocketConnector.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_Ansible/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/URLSessionWebSocketConnector.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_Ansible/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/URLSessionWebSocketConnector.dia",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_Ansible/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/URLSessionWebSocketConnector.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_Ansible/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/URLSessionWebSocketConnector.swiftdeps"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Networking/WebSocketClient.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_Ansible/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/WebSocketClient.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_Ansible/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/WebSocketClient.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_Ansible/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/WebSocketClient.dia",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_Ansible/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/WebSocketClient.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_Ansible/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/WebSocketClient.swiftdeps"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Protocols/AuthManaging.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_Ansible/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/AuthManaging.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_Ansible/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/AuthManaging.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_Ansible/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/AuthManaging.dia",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_Ansible/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/AuthManaging.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_Ansible/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/AuthManaging.swiftdeps"
+  }
+}

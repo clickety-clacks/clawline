@@ -182,6 +182,19 @@ Notes:
   - gate conditions (e.g. never enable for single-image-only)
   - AND `contentHeight > heightCap`
 
+### Single-link (web preview) bubble height rule (2026-02-12)
+
+**Single-link bubbles ALWAYS fill the full available vertical space.** No dynamic height based on web content.
+
+- `heightCap` for single-link bubbles = distance from bottom of status bar to top of input bar, minus flow padding.
+- The bubble ALWAYS extends to this full height, regardless of whether the web content is shorter.
+- The web view inside fills the bubble height minus its top/bottom padding (same inner layout rule — just taller because the bubble is taller).
+- This is a **fixed height** — no resize, no shrink-to-fit, no content-dependent height calculation.
+
+**Motivation:** Stop layout flapping and jitter caused by web preview bubbles resizing as content loads/changes. A fixed-size viewport eliminates the feedback loop between web content height changes and flow layout invalidation.
+
+**This rule applies ONLY to single-link (web preview) bubbles.** All other bubble types retain their existing height cap behavior (design-system or screen-aware cap with truncation + "show more").
+
 ### Outer scroll decision policy
 
 The decision is centralized and deterministic:
@@ -219,27 +232,27 @@ This ensures:
 - Short link previews produce short cells immediately (no forced cap-height).
 - Tall link previews participate in outer scrolling correctly (no cap bypass).
 
-### Web preview frame height (invariant)
+### Web preview frame height (invariant) — UPDATED 2026-02-12
 
 The web preview (WKWebView / `LinkPreviewView`) is a **fixed-size viewport**, not an auto-expanding container. It has its own internal scroll for page content.
 
+**For single-link bubbles:** The bubble is ALWAYS at full available height (see "Single-link bubble height rule" above). The web preview fills the bubble height minus standard bubble padding (top + bottom). It never shrinks, even if the web content is shorter than the viewport. Short web content simply has empty space below it within the fixed viewport.
+
 **Max web preview height** = `heightCap` − standard bubble padding (top + bottom).
 
-- If the rendered page is shorter than this max, the preview sizes to the page content height (no wasted space).
-- If the rendered page is taller, the preview stays at max height and the page scrolls **inside** the preview (internal WKWebView scroll).
-- The preview **never** expands beyond this max to fit the page. It is a browser viewport, not a layout container.
+- The preview is ALWAYS at this max height for single-link bubbles. No content-dependent sizing.
+- If the rendered page is taller, the page scrolls **inside** the preview (internal WKWebView scroll).
+- If the rendered page is shorter, the preview remains at max height (fixed viewport).
 
-**Interaction with other content:**
+**Interaction with other content (non-single-link bubbles only):**
 
-Text and other content above/below the web preview are additive to total content height. The web preview's max height is independent — it gets its full allocation regardless of surrounding text.
+For messages with text AND a link preview (not single-link), text and other content above/below the web preview are additive to total content height.
 
 - If text + preview + padding ≤ `heightCap` → bubble is shorter than max (sizes to content).
 - If text + preview + padding > `heightCap` → bubble is at max height, outer scroll enables, user scrolls through text + preview together.
 
-**Example:** `heightCap` = 400pt, padding = 16pt top + 16pt bottom.
-- Web preview max height = 400 − 32 = 368pt.
-- Page is 1200pt tall → preview is 368pt, page scrolls internally.
-- Text above is 60pt → total content = 60 + 368 + 32 = 460pt > 400pt → outer scroll enables.
+**Example (single-link):** `heightCap` = 600pt (full available space), padding = 16pt top + 16pt bottom.
+- Web preview height = 600 − 32 = 568pt. Always. Regardless of page content height.
 
 ### Estimated -> Final State Machine (Required)
 

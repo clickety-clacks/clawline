@@ -1,0 +1,23 @@
+{
+  "/Users/mike/src/clawline/.build/DerivedData_Ansible/SourcePackages/checkouts/SwiftTerm/Sources/SwiftTerm/CircularList.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_Ansible/Build/Intermediates.noindex/SwiftTerm.build/Debug-iphoneos/SwiftTerm.build/Objects-normal/arm64/CircularList.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_Ansible/Build/Intermediates.noindex/SwiftTerm.build/Debug-iphoneos/SwiftTerm.build/Objects-normal/arm64/CircularList.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_Ansible/Build/Intermediates.noindex/SwiftTerm.build/Debug-iphoneos/SwiftTerm.build/Objects-normal/arm64/CircularList.dia",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_Ansible/Build/Intermediates.noindex/SwiftTerm.build/Debug-iphoneos/SwiftTerm.build/Objects-normal/arm64/CircularList.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_Ansible/Build/Intermediates.noindex/SwiftTerm.build/Debug-iphoneos/SwiftTerm.build/Objects-normal/arm64/CircularList.swiftdeps"
+  },
+  "/Users/mike/src/clawline/.build/DerivedData_Ansible/SourcePackages/checkouts/SwiftTerm/Sources/SwiftTerm/Colors.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_Ansible/Build/Intermediates.noindex/SwiftTerm.build/Debug-iphoneos/SwiftTerm.build/Objects-normal/arm64/Colors.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_Ansible/Build/Intermediates.noindex/SwiftTerm.build/Debug-iphoneos/SwiftTerm.build/Objects-normal/arm64/Colors.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_Ansible/Build/Intermediates.noindex/SwiftTerm.build/Debug-iphoneos/SwiftTerm.build/Objects-normal/arm64/Colors.dia",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_Ansible/Build/Intermediates.noindex/SwiftTerm.build/Debug-iphoneos/SwiftTerm.build/Objects-normal/arm64/Colors.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_Ansible/Build/Intermediates.noindex/SwiftTerm.build/Debug-iphoneos/SwiftTerm.build/Objects-normal/arm64/Colors.swiftdeps"
+  },
+  "/Users/mike/src/clawline/.build/DerivedData_Ansible/SourcePackages/checkouts/SwiftTerm/Sources/SwiftTerm/EscapeSequenceParser.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_Ansible/Build/Intermediates.noindex/SwiftTerm.build/Debug-iphoneos/SwiftTerm.build/Objects-normal/arm64/EscapeSequenceParser.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_Ansible/Build/Intermediates.noindex/SwiftTerm.build/Debug-iphoneos/SwiftTerm.build/Objects-normal/arm64/EscapeSequenceParser.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_Ansible/Build/Intermediates.noindex/SwiftTerm.build/Debug-iphoneos/SwiftTerm.build/Objects-normal/arm64/EscapeSequenceParser.dia",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_Ansible/Build/Intermediates.noindex/SwiftTerm.build/Debug-iphoneos/SwiftTerm.build/Objects-normal/arm64/EscapeSequenceParser.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_Ansible/Build/Intermediates.noindex/SwiftTerm.build/Debug-iphoneos/SwiftTerm.build/Objects-normal/arm64/EscapeSequenceParser.swiftdeps"
+  }
+}

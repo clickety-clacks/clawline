@@ -1,0 +1,37 @@
+{
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Models/PendingTextAttachment.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/PendingTextAttachment.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/PendingTextAttachment.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/PendingTextAttachment.dia",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/PendingTextAttachment.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/PendingTextAttachment.swiftdeps"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Models/ProviderWireModels.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ProviderWireModels.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ProviderWireModels.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ProviderWireModels.dia",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ProviderWireModels.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ProviderWireModels.swiftdeps"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Models/SalientHighlights.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SalientHighlights.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SalientHighlights.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SalientHighlights.dia",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SalientHighlights.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SalientHighlights.swiftdeps"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Models/SessionKey.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SessionKey.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SessionKey.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SessionKey.dia",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SessionKey.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SessionKey.swiftdeps"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Models/SessionRegistry.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SessionRegistry.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SessionRegistry.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SessionRegistry.dia",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SessionRegistry.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SessionRegistry.swiftdeps"
+  }
+}

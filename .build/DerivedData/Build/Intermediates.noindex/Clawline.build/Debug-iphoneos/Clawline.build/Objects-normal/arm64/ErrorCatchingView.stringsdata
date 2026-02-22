@@ -1,0 +1,16 @@
+{
+  "source": "/Users/mike/src/clawline/ios/Clawline/Clawline/Support/ErrorCatchingView.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "[Table rendering failed]",
+        "location": {
+          "startingColumn": 18,
+          "startingLine": 15
+        }
+      }
+    ]
+  },
+  "version": 1
+}

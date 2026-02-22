@@ -1,5 +1,5 @@
 //
-//  ChatMarkdownRendererMarkTests.swift
+//  UnifiedMarkdownRendererMarkTests.swift
 //  ClawlineTests
 //
 
@@ -7,7 +7,7 @@ import Testing
 import UIKit
 @testable import Clawline
 
-struct ChatMarkdownRendererMarkTests {
+struct UnifiedMarkdownRendererMarkTests {
     private struct RGB: Equatable {
         let red: Int
         let green: Int
@@ -17,7 +17,7 @@ struct ChatMarkdownRendererMarkTests {
     @Test("Markdown mark syntax applies rust color and skips inline code")
     func markSyntaxLightModeSkipsInlineCode() {
         let rust = SalientHighlightApplier.highlightColor(isDark: false)
-        let rendered = ChatMarkdownRenderer.renderNSAttributedString(
+        let rendered = UnifiedMarkdownRenderer.renderNSAttributedString(
             markdown: "Alpha ==focus== and `==literal==`.",
             baseFont: UIFont.systemFont(ofSize: 15, weight: .regular),
             inkColor: .black,
@@ -45,7 +45,7 @@ struct ChatMarkdownRendererMarkTests {
     @Test("Markdown mark syntax applies muted gold in dark mode")
     func markSyntaxDarkModeColor() {
         let mutedGold = SalientHighlightApplier.highlightColor(isDark: true)
-        let rendered = ChatMarkdownRenderer.renderNSAttributedString(
+        let rendered = UnifiedMarkdownRenderer.renderNSAttributedString(
             markdown: "==focus==",
             baseFont: UIFont.systemFont(ofSize: 15, weight: .regular),
             inkColor: .white,
@@ -62,10 +62,16 @@ struct ChatMarkdownRendererMarkTests {
         #expect(rgb(rendered, at: 0) == RGB(red: 217, green: 175, blue: 98))
     }
 
-    @Test("MessageTextPartRenderer only applies markdown highlights when enabled")
-    func messageTextPartRendererHighlightToggle() {
+    @Test("UnifiedMarkdownRenderer only applies markdown highlights when enabled")
+    func unifiedMarkdownRendererHighlightToggle() {
         let presentation = MessagePresentation(
             parts: [.markdown("==focus==")],
+            markdownRenderPlan: MarkdownRenderPlan(
+                blocks: [.richText(markdownSource: "==focus==")],
+                plainTextForMetrics: "focus",
+                containsTextualContent: true,
+                isEmojiOnly: false
+            ),
             wordCount: 1,
             hasTextualContent: true,
             isEmojiOnly: false,
@@ -75,26 +81,39 @@ struct ChatMarkdownRendererMarkTests {
             hasSingleURL: false
         )
 
-        let disabled = MessageTextPartRenderer.attributedText(
-            from: presentation,
-            sizeClass: .long,
-            metrics: ChatFlowTheme.Metrics(isCompact: true),
-            inkColor: .black,
-            isDarkMode: false,
-            enableMarkdownHighlights: false
+        let disabled = UnifiedMarkdownRenderer.render(
+            plan: presentation.markdownRenderPlan,
+            options: MarkdownRenderOptions(
+                baseFont: UIFont.systemFont(ofSize: 15, weight: .regular),
+                inkColor: .black,
+                lineSpacing: 4,
+                stripDetectedURLs: false,
+                markHighlightColor: nil
+            )
         )
-        #expect(disabled.string == "==focus==")
+        #expect(disabled.count == 1)
+        guard case .attributedText(let disabledText)? = disabled.first else {
+            Issue.record("Expected attributed text block")
+            return
+        }
+        #expect(disabledText.string == "==focus==")
 
-        let enabled = MessageTextPartRenderer.attributedText(
-            from: presentation,
-            sizeClass: .long,
-            metrics: ChatFlowTheme.Metrics(isCompact: true),
-            inkColor: .black,
-            isDarkMode: false,
-            enableMarkdownHighlights: true
+        let enabled = UnifiedMarkdownRenderer.render(
+            plan: presentation.markdownRenderPlan,
+            options: MarkdownRenderOptions(
+                baseFont: UIFont.systemFont(ofSize: 15, weight: .regular),
+                inkColor: .black,
+                lineSpacing: 4,
+                stripDetectedURLs: false,
+                markHighlightColor: rustColor(isDark: false)
+            )
         )
-        #expect(enabled.string == "focus")
-        #expect(rgb(enabled, at: 0) == RGB(red: 158, green: 62, blue: 28))
+        guard case .attributedText(let enabledText)? = enabled.first else {
+            Issue.record("Expected attributed text block")
+            return
+        }
+        #expect(enabledText.string == "focus")
+        #expect(rgb(enabledText, at: 0) == RGB(red: 158, green: 62, blue: 28))
     }
 
     @Test("MessagePresentationBuilder routes mark syntax through markdown renderer")
@@ -123,18 +142,28 @@ struct ChatMarkdownRendererMarkTests {
             return false
         }))
 
-        let rendered = MessageTextPartRenderer.attributedText(
-            from: presentation,
-            sizeClass: .long,
-            metrics: ChatFlowTheme.Metrics(isCompact: true),
-            inkColor: .black,
-            isDarkMode: false,
-            enableMarkdownHighlights: true
+        let rendered = UnifiedMarkdownRenderer.render(
+            plan: presentation.markdownRenderPlan,
+            options: MarkdownRenderOptions(
+                baseFont: UIFont.systemFont(ofSize: 15, weight: .regular),
+                inkColor: .black,
+                lineSpacing: 4,
+                stripDetectedURLs: false,
+                markHighlightColor: rustColor(isDark: false)
+            )
         )
-        #expect(rendered.string == "Alpha focus beta")
-        let focusRange = (rendered.string as NSString).range(of: "focus")
+        guard case .attributedText(let renderedText)? = rendered.first else {
+            Issue.record("Expected attributed text block")
+            return
+        }
+        #expect(renderedText.string == "Alpha focus beta")
+        let focusRange = (renderedText.string as NSString).range(of: "focus")
         #expect(focusRange.location != NSNotFound)
-        #expect(rgb(rendered, at: focusRange.location) == RGB(red: 158, green: 62, blue: 28))
+        #expect(rgb(renderedText, at: focusRange.location) == RGB(red: 158, green: 62, blue: 28))
+    }
+
+    private func rustColor(isDark: Bool) -> UIColor {
+        SalientHighlightApplier.highlightColor(isDark: isDark)
     }
 
     private func rgb(_ attributed: NSAttributedString, at index: Int) -> RGB? {

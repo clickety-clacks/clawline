@@ -167,13 +167,10 @@ struct ChatFlowOrganicComplianceTests {
         #expect(codeBlocks[1].0 == "python")
         #expect(codeBlocks[1].1.contains("print(\"second\")"))
 
-        let attributed = MessageTextPartRenderer.attributedText(
+        let renderedText = renderedMarkdownText(
             from: presentation,
-            sizeClass: .long,
-            metrics: ChatFlowTheme.Metrics(isCompact: true),
-            inkColor: .black
+            stripDetectedURLs: true
         )
-        let renderedText = attributed.string
         #expect(renderedText.contains("Intro paragraph."))
         #expect(renderedText.contains("Middle paragraph with markdown."))
         #expect(renderedText.contains("Final paragraph."))
@@ -185,21 +182,8 @@ struct ChatFlowOrganicComplianceTests {
     func expandedTextExtractionPreservesURLs() {
         let message = sampleMessage(content: "See https://a.example and https://b.example")
         let presentation = buildPresentation(message)
-        let metrics = ChatFlowTheme.Metrics(isCompact: true)
-
-        let bubbleText = MessageTextPartRenderer.attributedText(
-            from: presentation,
-            sizeClass: .long,
-            metrics: metrics,
-            inkColor: .black
-        ).string
-        let expandedText = MessageTextPartRenderer.attributedText(
-            from: presentation,
-            sizeClass: .long,
-            metrics: metrics,
-            inkColor: .black,
-            stripDetectedURLs: false
-        ).string
+        let bubbleText = renderedMarkdownText(from: presentation, stripDetectedURLs: true)
+        let expandedText = renderedMarkdownText(from: presentation, stripDetectedURLs: false)
 
         #expect(!bubbleText.contains("https://a.example"))
         #expect(!bubbleText.contains("https://b.example"))
@@ -441,6 +425,15 @@ struct ChatFlowOrganicComplianceTests {
             return false
         }))
         #expect(presentation.isEmojiOnly)
+    }
+
+    @Test("Doc §5: Chromeless emoji supports 1-3 and rejects 4+")
+    func messagePresentationChromelessEmojiCountBounds() {
+        let three = buildPresentation(sampleMessage(content: "😀😁😂"))
+        #expect(three.chromelessStyle == .emoji)
+
+        let four = buildPresentation(sampleMessage(content: "😀😁😂🤣"))
+        #expect(four.chromelessStyle != .emoji)
     }
 
     @Test("Doc §5: Media-only attachments map to gallery")
@@ -972,6 +965,29 @@ struct ChatFlowOrganicComplianceTests {
         )
     }
 
+    private func renderedMarkdownText(from presentation: MessagePresentation, stripDetectedURLs: Bool) -> String {
+        let options = MarkdownRenderOptions(
+            baseFont: UIFont.systemFont(ofSize: ChatFlowTheme.Metrics(isCompact: true).bodyFontSize, weight: .regular),
+            inkColor: .black,
+            lineSpacing: 4,
+            stripDetectedURLs: stripDetectedURLs,
+            markHighlightColor: nil
+        )
+        let rendered = UnifiedMarkdownRenderer.render(
+            plan: presentation.markdownRenderPlan,
+            options: options
+        )
+        let combined = NSMutableAttributedString()
+        for block in rendered {
+            guard case .attributedText(let attributed) = block else { continue }
+            if combined.length > 0 {
+                combined.append(NSAttributedString(string: "\n\n"))
+            }
+            combined.append(attributed)
+        }
+        return combined.string
+    }
+
     private func buildPresentation(_ message: Message,
                                    isCompact: Bool = true,
                                    enableLinkPreviews: Bool = true) -> MessagePresentation {
@@ -992,6 +1008,7 @@ struct ChatFlowOrganicComplianceTests {
         }
         return MessagePresentation(
             parts: filtered,
+            markdownRenderPlan: presentation.markdownRenderPlan,
             wordCount: presentation.wordCount,
             hasTextualContent: presentation.hasTextualContent,
             isEmojiOnly: presentation.isEmojiOnly,

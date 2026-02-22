@@ -41,6 +41,8 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
     private(set) var messages: [Message] = []
     private(set) var streamsBySessionKey: [String: StreamSession] = [:]
     private(set) var orderedSessionKeys: [String] = []
+    private(set) var lastReadMessageIdBySession: [String: String] = [:]
+    private(set) var hasUnreadBySession: [String: Bool] = [:]
     private var syntheticSessionKeys: Set<String> = []
     private var didRestoreActiveSessionKey = false
 
@@ -171,6 +173,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
         guard orderedSessionKeys.contains(sessionKey) else { return }
         guard engineActiveSessionKey != sessionKey else { return }
         applyActiveSessionKey(sessionKey)
+        markSessionRead(sessionKey)
         // Keep intent selection coherent for non-switch engine mutations (bootstrap/deletion fallback).
         // Stream-switch path still writes uiSelectedSessionKey explicitly before this runs.
         if uiSelectedSessionKey != sessionKey {
@@ -671,9 +674,12 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
         sessionKeysToClear.formUnion(sessionMessages.keys)
         for key in sessionKeysToClear {
             persistLastServerMessageId(nil, for: key)
+            persistLastReadMessageId(nil, for: key)
         }
         lastServerMessageId = nil
         lastServerMessageIdBySession.removeAll()
+        lastReadMessageIdBySession.removeAll()
+        hasUnreadBySession.removeAll()
         auth.clearCredentials()
         messageFailures.removeAll()
         clearInput()
@@ -800,6 +806,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
 
         if replacePendingMessageIfNeeded(with: resolvedMessage) {
             logger.info("incoming replacePending id=\(resolvedMessage.id, privacy: .public)")
+            markUnreadIfNeeded(for: resolvedMessage)
             updateLastServerMessageIdIfNeeded(with: resolvedMessage)
             resolveAssetAttachmentsIfNeeded(for: resolvedMessage)
             return
@@ -815,6 +822,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
         }
         setMessages(messageList, for: resolvedMessage.sessionKey)
 
+        markUnreadIfNeeded(for: resolvedMessage)
         updateLastServerMessageIdIfNeeded(with: resolvedMessage)
         resolveAssetAttachmentsIfNeeded(for: resolvedMessage)
     }
@@ -987,6 +995,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
     private func setMessages(_ newMessages: [Message], for sessionKey: String) {
         sessionMessages[sessionKey] = newMessages
         persistMessages(newMessages, for: sessionKey)
+        refreshUnreadState(for: sessionKey)
         if sessionKey == engineActiveSessionKey {
             messages = newMessages
             let total = newMessages.count
@@ -1667,8 +1676,26 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
         return components.joined(separator: ".")
     }
 
+    private func lastReadMessageDefaultsKey(for sessionKey: String) -> String {
+        var components = ["clawline.lastReadMessageId"]
+        if let userId = auth.currentUserId, !userId.isEmpty {
+            components.append(userId)
+        }
+        components.append(sessionKey)
+        return components.joined(separator: ".")
+    }
+
     private func persistLastServerMessageId(_ value: String?, for sessionKey: String) {
         let key = lastServerMessageDefaultsKey(for: sessionKey)
+        if let value, !value.isEmpty {
+            streamDefaults.set(value, forKey: key)
+        } else {
+            streamDefaults.removeObject(forKey: key)
+        }
+    }
+
+    private func persistLastReadMessageId(_ value: String?, for sessionKey: String) {
+        let key = lastReadMessageDefaultsKey(for: sessionKey)
         if let value, !value.isEmpty {
             streamDefaults.set(value, forKey: key)
         } else {
@@ -1687,6 +1714,13 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
         guard lastServerMessageIdBySession[sessionKey] == nil else { return }
         if let stored = streamDefaults.string(forKey: lastServerMessageDefaultsKey(for: sessionKey)) {
             lastServerMessageIdBySession[sessionKey] = stored
+        }
+    }
+
+    private func restoreLastReadMessageIdIfNeeded(for sessionKey: String) {
+        guard lastReadMessageIdBySession[sessionKey] == nil else { return }
+        if let stored = streamDefaults.string(forKey: lastReadMessageDefaultsKey(for: sessionKey)) {
+            lastReadMessageIdBySession[sessionKey] = stored
         }
     }
 
@@ -1772,6 +1806,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
         }
         self.lastServerMessageIdBySession.removeValue(forKey: sessionKey)
         self.persistLastServerMessageId(nil, for: sessionKey)
+        self.refreshUnreadState(for: sessionKey)
     }
 
     private func persistMessages(_ messages: [Message], for sessionKey: String) {
@@ -1909,6 +1944,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
     }
 
     private func applyStreamSnapshot(_ streams: [StreamSession]) {
+        let previousSessionKeys = Set(streamsBySessionKey.keys)
         var byKey: [String: StreamSession] = Dictionary(uniqueKeysWithValues: streams.map { ($0.sessionKey, $0) })
         for (sessionKey, cachedMessages) in sessionMessages
             where byKey[sessionKey] == nil && !cachedMessages.isEmpty {
@@ -1925,11 +1961,20 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
         let serverKeys = Set(streams.map(\.sessionKey))
         syntheticSessionKeys = Set(byKey.keys).subtracting(serverKeys)
         streamsBySessionKey = byKey
+        let validSessionKeys = Set(byKey.keys)
+        let removedSessionKeys = previousSessionKeys.subtracting(validSessionKeys)
+        for sessionKey in removedSessionKeys {
+            persistLastReadMessageId(nil, for: sessionKey)
+        }
+        hasUnreadBySession = hasUnreadBySession.filter { validSessionKeys.contains($0.key) }
+        lastReadMessageIdBySession = lastReadMessageIdBySession.filter { validSessionKeys.contains($0.key) }
         recalculateOrderedSessionKeys()
         for sessionKey in orderedSessionKeys {
             ensureSessionStorage(for: sessionKey)
             restoreLastServerMessageIdIfNeeded(for: sessionKey)
+            restoreLastReadMessageIdIfNeeded(for: sessionKey)
             restoreCachedMessagesIfNeeded(for: sessionKey)
+            refreshUnreadState(for: sessionKey)
         }
         restoreActiveSessionKeyIfNeeded()
         ensureDefaultActiveSessionIfNeeded()
@@ -1949,7 +1994,9 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
         recalculateOrderedSessionKeys()
         ensureSessionStorage(for: stream.sessionKey)
         restoreLastServerMessageIdIfNeeded(for: stream.sessionKey)
+        restoreLastReadMessageIdIfNeeded(for: stream.sessionKey)
         restoreCachedMessagesIfNeeded(for: stream.sessionKey)
+        refreshUnreadState(for: stream.sessionKey)
         ensureDefaultActiveSessionIfNeeded()
         SessionRegistry.shared.upsert(stream)
         persistStreamMetadata()
@@ -1961,7 +2008,10 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
         recalculateOrderedSessionKeys()
         sessionMessages.removeValue(forKey: sessionKey)
         lastServerMessageIdBySession.removeValue(forKey: sessionKey)
+        lastReadMessageIdBySession.removeValue(forKey: sessionKey)
+        hasUnreadBySession.removeValue(forKey: sessionKey)
         persistLastServerMessageId(nil, for: sessionKey)
+        persistLastReadMessageId(nil, for: sessionKey)
         persistMessages([], for: sessionKey)
         pendingLocalMessages.removeAll { $0.sessionKey == sessionKey }
         if typingSessionKey == sessionKey {
@@ -2268,6 +2318,35 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
         let activeKey = engineActiveSessionKey
         let cursor = lastServerMessageIdBySession[activeKey] ?? lastServerMessageId
         return (auth.token, cursor)
+    }
+
+    private func markUnreadIfNeeded(for message: Message) {
+        guard message.role == .assistant else { return }
+        guard message.sessionKey != engineActiveSessionKey else { return }
+        hasUnreadBySession[message.sessionKey] = true
+    }
+
+    private func markSessionRead(_ sessionKey: String) {
+        let tailMessageId = sessionMessages[sessionKey]?.last?.id
+        if let tailMessageId {
+            lastReadMessageIdBySession[sessionKey] = tailMessageId
+            persistLastReadMessageId(tailMessageId, for: sessionKey)
+        }
+        hasUnreadBySession[sessionKey] = false
+    }
+
+    private func refreshUnreadState(for sessionKey: String) {
+        if sessionKey == engineActiveSessionKey {
+            hasUnreadBySession[sessionKey] = false
+            return
+        }
+        restoreLastReadMessageIdIfNeeded(for: sessionKey)
+        guard let tailMessageId = sessionMessages[sessionKey]?.last?.id else {
+            hasUnreadBySession[sessionKey] = false
+            return
+        }
+        let lastReadMessageId = lastReadMessageIdBySession[sessionKey]
+        hasUnreadBySession[sessionKey] = (lastReadMessageId != tailMessageId)
     }
 
 #if DEBUG

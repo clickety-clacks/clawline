@@ -8,8 +8,11 @@
 import SwiftUI
 
 struct StreamPageDotsView: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     let sessionKeys: [String]
     let activeSessionKey: String
+    let unreadSessionKeys: Set<String>
     let onTap: () -> Void
 
     private let maxVisibleDots = 11
@@ -46,8 +49,17 @@ struct StreamPageDotsView: View {
                         .frame(width: 4, height: 4)
                 }
                 ForEach(visibleDotIndices, id: \.self) { index in
+                    let sessionKey = sessionKeys[index]
+                    let isActive = index == activeIndex
+                    let hasUnread = unreadSessionKeys.contains(sessionKey)
                     Circle()
-                        .fill(index == activeIndex ? Color.primary : Color.primary.opacity(0.25))
+                        .fill(
+                            StreamDotColor.resolve(
+                                isActive: isActive,
+                                hasUnread: hasUnread,
+                                colorScheme: colorScheme
+                            )
+                        )
                         .frame(width: 7, height: 7)
                 }
                 if showsTrailingOverflow {

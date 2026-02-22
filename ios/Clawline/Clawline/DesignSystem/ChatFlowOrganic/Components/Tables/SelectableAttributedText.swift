@@ -14,19 +14,11 @@ struct SelectableAttributedText: UIViewRepresentable {
 
     func makeUIView(context: Context) -> UITextView {
         let textView = TraitResponsiveTextView()
-        textView.delegate = context.coordinator
-        textView.backgroundColor = .clear
-        textView.isEditable = false
-        textView.isSelectable = true
-        textView.isScrollEnabled = false
-        textView.showsVerticalScrollIndicator = false
-        textView.showsHorizontalScrollIndicator = false
-        textView.textContainerInset = .zero
-        textView.textContainer.lineFragmentPadding = 0
+        UnifiedMarkdownRenderer.configureTextView(textView, delegate: context.coordinator)
+        textView.textContainer.widthTracksTextView = true
         textView.adjustsFontForContentSizeCategory = true
         textView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         textView.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        textView.linkTextAttributes = [:]
         return textView
     }
 
@@ -37,6 +29,12 @@ struct SelectableAttributedText: UIViewRepresentable {
         }
         uiView.attributedText = attributedString
         uiView.textAlignment = alignment
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextView, context: Context) -> CGSize? {
+        guard let width = proposal.width, width > 0 else { return nil }
+        let fitting = uiView.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
+        return CGSize(width: width, height: ceil(fitting.height))
     }
 
     private final class TraitResponsiveTextView: UITextView {

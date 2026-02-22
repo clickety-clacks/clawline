@@ -1,0 +1,23 @@
+{
+  "/Users/mike/src/clawline/.build/DerivedData_ios_deploy/SourcePackages/checkouts/SwiftTerm/Sources/SwiftTerm/Apple/TerminalViewDelegate.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_ios_deploy/Build/Intermediates.noindex/SwiftTerm.build/Debug-iphoneos/SwiftTerm.build/Objects-normal/arm64/TerminalViewDelegate.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_ios_deploy/Build/Intermediates.noindex/SwiftTerm.build/Debug-iphoneos/SwiftTerm.build/Objects-normal/arm64/TerminalViewDelegate.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_ios_deploy/Build/Intermediates.noindex/SwiftTerm.build/Debug-iphoneos/SwiftTerm.build/Objects-normal/arm64/TerminalViewDelegate.dia",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_ios_deploy/Build/Intermediates.noindex/SwiftTerm.build/Debug-iphoneos/SwiftTerm.build/Objects-normal/arm64/TerminalViewDelegate.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_ios_deploy/Build/Intermediates.noindex/SwiftTerm.build/Debug-iphoneos/SwiftTerm.build/Objects-normal/arm64/TerminalViewDelegate.swiftdeps"
+  },
+  "/Users/mike/src/clawline/.build/DerivedData_ios_deploy/SourcePackages/checkouts/SwiftTerm/Sources/SwiftTerm/Buffer.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_ios_deploy/Build/Intermediates.noindex/SwiftTerm.build/Debug-iphoneos/SwiftTerm.build/Objects-normal/arm64/Buffer.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_ios_deploy/Build/Intermediates.noindex/SwiftTerm.build/Debug-iphoneos/SwiftTerm.build/Objects-normal/arm64/Buffer.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_ios_deploy/Build/Intermediates.noindex/SwiftTerm.build/Debug-iphoneos/SwiftTerm.build/Objects-normal/arm64/Buffer.dia",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_ios_deploy/Build/Intermediates.noindex/SwiftTerm.build/Debug-iphoneos/SwiftTerm.build/Objects-normal/arm64/Buffer.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_ios_deploy/Build/Intermediates.noindex/SwiftTerm.build/Debug-iphoneos/SwiftTerm.build/Objects-normal/arm64/Buffer.swiftdeps"
+  },
+  "/Users/mike/src/clawline/.build/DerivedData_ios_deploy/SourcePackages/checkouts/SwiftTerm/Sources/SwiftTerm/BufferLine.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_ios_deploy/Build/Intermediates.noindex/SwiftTerm.build/Debug-iphoneos/SwiftTerm.build/Objects-normal/arm64/BufferLine.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_ios_deploy/Build/Intermediates.noindex/SwiftTerm.build/Debug-iphoneos/SwiftTerm.build/Objects-normal/arm64/BufferLine.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_ios_deploy/Build/Intermediates.noindex/SwiftTerm.build/Debug-iphoneos/SwiftTerm.build/Objects-normal/arm64/BufferLine.dia",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_ios_deploy/Build/Intermediates.noindex/SwiftTerm.build/Debug-iphoneos/SwiftTerm.build/Objects-normal/arm64/BufferLine.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_ios_deploy/Build/Intermediates.noindex/SwiftTerm.build/Debug-iphoneos/SwiftTerm.build/Objects-normal/arm64/BufferLine.swiftdeps"
+  }
+}

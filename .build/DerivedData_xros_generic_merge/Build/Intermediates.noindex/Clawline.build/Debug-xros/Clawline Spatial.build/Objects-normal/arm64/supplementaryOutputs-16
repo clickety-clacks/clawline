@@ -1,0 +1,44 @@
+{
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Intents/SiriSendMessageIntent.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_xros_generic_merge/Build/Intermediates.noindex/Clawline.build/Debug-xros/Clawline Spatial.build/Objects-normal/arm64/SiriSendMessageIntent.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_xros_generic_merge/Build/Intermediates.noindex/Clawline.build/Debug-xros/Clawline Spatial.build/Objects-normal/arm64/SiriSendMessageIntent.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_xros_generic_merge/Build/Intermediates.noindex/Clawline.build/Debug-xros/Clawline Spatial.build/Objects-normal/arm64/SiriSendMessageIntent.dia",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_xros_generic_merge/Build/Intermediates.noindex/Clawline.build/Debug-xros/Clawline Spatial.build/Objects-normal/arm64/SiriSendMessageIntent.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_xros_generic_merge/Build/Intermediates.noindex/Clawline.build/Debug-xros/Clawline Spatial.build/Objects-normal/arm64/SiriSendMessageIntent.swiftdeps"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Models/Attachment.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_xros_generic_merge/Build/Intermediates.noindex/Clawline.build/Debug-xros/Clawline Spatial.build/Objects-normal/arm64/Attachment.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_xros_generic_merge/Build/Intermediates.noindex/Clawline.build/Debug-xros/Clawline Spatial.build/Objects-normal/arm64/Attachment.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_xros_generic_merge/Build/Intermediates.noindex/Clawline.build/Debug-xros/Clawline Spatial.build/Objects-normal/arm64/Attachment.dia",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_xros_generic_merge/Build/Intermediates.noindex/Clawline.build/Debug-xros/Clawline Spatial.build/Objects-normal/arm64/Attachment.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_xros_generic_merge/Build/Intermediates.noindex/Clawline.build/Debug-xros/Clawline Spatial.build/Objects-normal/arm64/Attachment.swiftdeps"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Models/AttachmentError.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_xros_generic_merge/Build/Intermediates.noindex/Clawline.build/Debug-xros/Clawline Spatial.build/Objects-normal/arm64/AttachmentError.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_xros_generic_merge/Build/Intermediates.noindex/Clawline.build/Debug-xros/Clawline Spatial.build/Objects-normal/arm64/AttachmentError.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_xros_generic_merge/Build/Intermediates.noindex/Clawline.build/Debug-xros/Clawline Spatial.build/Objects-normal/arm64/AttachmentError.dia",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_xros_generic_merge/Build/Intermediates.noindex/Clawline.build/Debug-xros/Clawline Spatial.build/Objects-normal/arm64/AttachmentError.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_xros_generic_merge/Build/Intermediates.noindex/Clawline.build/Debug-xros/Clawline Spatial.build/Objects-normal/arm64/AttachmentError.swiftdeps"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Models/ChatError.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_xros_generic_merge/Build/Intermediates.noindex/Clawline.build/Debug-xros/Clawline Spatial.build/Objects-normal/arm64/ChatError.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_xros_generic_merge/Build/Intermediates.noindex/Clawline.build/Debug-xros/Clawline Spatial.build/Objects-normal/arm64/ChatError.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_xros_generic_merge/Build/Intermediates.noindex/Clawline.build/Debug-xros/Clawline Spatial.build/Objects-normal/arm64/ChatError.dia",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_xros_generic_merge/Build/Intermediates.noindex/Clawline.build/Debug-xros/Clawline Spatial.build/Objects-normal/arm64/ChatError.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_xros_generic_merge/Build/Intermediates.noindex/Clawline.build/Debug-xros/Clawline Spatial.build/Objects-normal/arm64/ChatError.swiftdeps"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Models/InteractiveHTMLDescriptor.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_xros_generic_merge/Build/Intermediates.noindex/Clawline.build/Debug-xros/Clawline Spatial.build/Objects-normal/arm64/InteractiveHTMLDescriptor.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_xros_generic_merge/Build/Intermediates.noindex/Clawline.build/Debug-xros/Clawline Spatial.build/Objects-normal/arm64/InteractiveHTMLDescriptor.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_xros_generic_merge/Build/Intermediates.noindex/Clawline.build/Debug-xros/Clawline Spatial.build/Objects-normal/arm64/InteractiveHTMLDescriptor.dia",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_xros_generic_merge/Build/Intermediates.noindex/Clawline.build/Debug-xros/Clawline Spatial.build/Objects-normal/arm64/InteractiveHTMLDescriptor.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_xros_generic_merge/Build/Intermediates.noindex/Clawline.build/Debug-xros/Clawline Spatial.build/Objects-normal/arm64/InteractiveHTMLDescriptor.swiftdeps"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Models/JSONValue.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_xros_generic_merge/Build/Intermediates.noindex/Clawline.build/Debug-xros/Clawline Spatial.build/Objects-normal/arm64/JSONValue.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_xros_generic_merge/Build/Intermediates.noindex/Clawline.build/Debug-xros/Clawline Spatial.build/Objects-normal/arm64/JSONValue.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_xros_generic_merge/Build/Intermediates.noindex/Clawline.build/Debug-xros/Clawline Spatial.build/Objects-normal/arm64/JSONValue.dia",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_xros_generic_merge/Build/Intermediates.noindex/Clawline.build/Debug-xros/Clawline Spatial.build/Objects-normal/arm64/JSONValue.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_xros_generic_merge/Build/Intermediates.noindex/Clawline.build/Debug-xros/Clawline Spatial.build/Objects-normal/arm64/JSONValue.swiftdeps"
+  }
+}

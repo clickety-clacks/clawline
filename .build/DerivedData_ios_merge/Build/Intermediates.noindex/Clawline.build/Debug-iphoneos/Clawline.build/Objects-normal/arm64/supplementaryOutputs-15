@@ -1,0 +1,44 @@
+{
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/DesignSystem/ChatFlowOrganic/Support/MessageAccessibilityFormatter.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_ios_merge/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageAccessibilityFormatter.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_ios_merge/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageAccessibilityFormatter.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_ios_merge/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageAccessibilityFormatter.dia",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_ios_merge/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageAccessibilityFormatter.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_ios_merge/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageAccessibilityFormatter.swiftdeps"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/DesignSystem/ChatFlowOrganic/Support/MessageFlowRules.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_ios_merge/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageFlowRules.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_ios_merge/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageFlowRules.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_ios_merge/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageFlowRules.dia",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_ios_merge/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageFlowRules.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_ios_merge/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageFlowRules.swiftdeps"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/DesignSystem/ChatFlowOrganic/Support/MessageInputBarMetrics.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_ios_merge/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageInputBarMetrics.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_ios_merge/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageInputBarMetrics.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_ios_merge/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageInputBarMetrics.dia",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_ios_merge/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageInputBarMetrics.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_ios_merge/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageInputBarMetrics.swiftdeps"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/DesignSystem/ChatFlowOrganic/Theme/ChatFlowTheme.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_ios_merge/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatFlowTheme.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_ios_merge/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatFlowTheme.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_ios_merge/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatFlowTheme.dia",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_ios_merge/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatFlowTheme.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_ios_merge/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatFlowTheme.swiftdeps"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Environment/EnvironmentKeys.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_ios_merge/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/EnvironmentKeys.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_ios_merge/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/EnvironmentKeys.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_ios_merge/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/EnvironmentKeys.dia",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_ios_merge/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/EnvironmentKeys.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_ios_merge/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/EnvironmentKeys.swiftdeps"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Extensions/NSAttributedString+PendingAttachments.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_ios_merge/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/NSAttributedString+PendingAttachments.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_ios_merge/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/NSAttributedString+PendingAttachments.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_ios_merge/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/NSAttributedString+PendingAttachments.dia",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_ios_merge/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/NSAttributedString+PendingAttachments.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_ios_merge/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/NSAttributedString+PendingAttachments.swiftdeps"
+  }
+}

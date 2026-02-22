@@ -1,0 +1,37 @@
+{
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Settings/SettingsView.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SettingsView.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SettingsView.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SettingsView.dia",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SettingsView.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SettingsView.swiftdeps"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Shaders/BackgroundEffect.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/BackgroundEffect.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/BackgroundEffect.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/BackgroundEffect.dia",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/BackgroundEffect.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/BackgroundEffect.swiftdeps"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Support/ErrorCatchingView.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ErrorCatchingView.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ErrorCatchingView.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ErrorCatchingView.dia",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ErrorCatchingView.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ErrorCatchingView.swiftdeps"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Support/Task+Sleep.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/Task+Sleep.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/Task+Sleep.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/Task+Sleep.dia",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/Task+Sleep.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/Task+Sleep.swiftdeps"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/ViewModels/ChatViewModel.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatViewModel.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatViewModel.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatViewModel.dia",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatViewModel.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatViewModel.swiftdeps"
+  }
+}

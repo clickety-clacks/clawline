@@ -330,6 +330,71 @@ struct BubbleScrollTests {
         #expect(expandsWithPreview == 0)
     }
 
+    @Test("T057: Bubble uses per-block text containers without re-merging rich text")
+    @MainActor
+    func bubbleUsesPerBlockTextContainers() {
+        let content = """
+        # Title
+
+        Intro paragraph.
+
+        - Item one
+        - Item two
+
+        > Quoted line
+
+        Tail paragraph.
+        """
+
+        let message = Message(
+            id: "bubble-block-separation",
+            role: .assistant,
+            content: content,
+            timestamp: Date(),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: "server:personal"
+        )
+        let metrics = ChatFlowTheme.Metrics(isCompact: false)
+        let presentation = buildPresentation(message, metrics: metrics, enableLinkPreviews: false)
+        let sizeClass = MessageFlowRules.sizeClass(for: presentation)
+
+        let host = UIView(frame: CGRect(x: 0, y: 0, width: 420, height: 900))
+        host.layoutIfNeeded()
+        let bubble = MessageBubbleUIKitView(frame: CGRect(x: 0, y: 0, width: 360, height: 1))
+        host.addSubview(bubble)
+
+        bubble.configure(
+            message: message,
+            presentation: presentation,
+            sizeClass: sizeClass,
+            metrics: metrics,
+            maxWidth: 360,
+            truncationHeightOverride: 1000,
+            bubbleSizingV2: nil,
+            showsHeader: true,
+            paddingScale: 1,
+            minWidthOverride: nil,
+            maxWidthOverride: nil,
+            useContinuousCorners: true,
+            isDark: false,
+            onRequestExpand: nil,
+            onRequestLayout: nil,
+            onInteractiveCallback: nil
+        )
+        bubble.layoutIfNeeded()
+
+        let textRuns = textViews(in: bubble)
+            .compactMap { $0.attributedText?.string.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+
+        #expect(textRuns.count >= 2)
+        #expect(textRuns.contains(where: { $0.contains("Title") }))
+        #expect(textRuns.contains(where: { $0.contains("Tail paragraph.") }))
+        #expect(!textRuns.contains(where: { $0.contains("Title") && $0.contains("Tail paragraph.") }))
+    }
+
     // MARK: Helpers
 
     @MainActor
@@ -461,6 +526,17 @@ struct BubbleScrollTests {
         return result
     }
 
+    private func textViews(in view: UIView) -> [UITextView] {
+        var result: [UITextView] = []
+        if let textView = view as? UITextView {
+            result.append(textView)
+        }
+        for sub in view.subviews {
+            result.append(contentsOf: textViews(in: sub))
+        }
+        return result
+    }
+
     private struct ImmediateHighlightService: SalientHighlightServicing {
         let storedHighlights: SalientHighlights
         func cachedHighlights(messageId: String, renderedText: String) -> SalientHighlights? { nil }
@@ -484,6 +560,7 @@ struct BubbleScrollTests {
         }
         return MessagePresentation(
             parts: filtered,
+            markdownRenderPlan: presentation.markdownRenderPlan,
             wordCount: presentation.wordCount,
             hasTextualContent: presentation.hasTextualContent,
             isEmojiOnly: presentation.isEmojiOnly,

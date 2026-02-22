@@ -8,8 +8,11 @@
 import SwiftUI
 
 struct StreamManagerSheet: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     @Bindable var viewModel: ChatViewModel
     let streams: [StreamSession]
+    let unreadSessionKeys: Set<String>
     @Binding var isPresented: Bool
     let maxAvailableHeight: CGFloat
     let onSelectStream: (String) -> Void
@@ -152,7 +155,7 @@ struct StreamManagerSheet: View {
             .environment(\.defaultMinListRowHeight, listRowHeight)
             .listRowSpacing(listRowSpacing)
             .scrollDisabled(!allowsListScrolling)
-            .scrollBounceBehavior(.basedOnSize)
+            .scrollBounceBehavior(.always)
             .contentMargins(.vertical, 0, for: .scrollContent)
             .scrollContentBackground(.hidden)
             .background(Color.clear)
@@ -254,11 +257,19 @@ struct StreamManagerSheet: View {
                 }
             } label: {
                 HStack(spacing: 10) {
+                    let isActive = stream.sessionKey == viewModel.uiSelectedSessionKey
+                    let hasUnread = unreadSessionKeys.contains(stream.sessionKey)
                     Circle()
-                        .fill(stream.sessionKey == viewModel.uiSelectedSessionKey ? Color.accentColor : Color.primary.opacity(0.25))
+                        .fill(
+                            StreamDotColor.resolve(
+                                isActive: isActive,
+                                hasUnread: hasUnread,
+                                colorScheme: colorScheme
+                            )
+                        )
                         .frame(width: 8, height: 8)
                     Text(stream.displayName)
-                        .font(.system(size: 28, weight: stream.sessionKey == viewModel.uiSelectedSessionKey ? .semibold : .regular))
+                        .font(.system(size: 28, weight: isActive ? .semibold : .regular))
                         .frame(maxWidth: .infinity, alignment: .leading)
                     if isDeletingStream(stream.sessionKey) {
                         ProgressView()
@@ -266,10 +277,11 @@ struct StreamManagerSheet: View {
                             .tint(.secondary)
                     }
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .disabled(isWorking || isDeletingStream(stream.sessionKey))
-            .contentShape(Rectangle())
         }
     }
 

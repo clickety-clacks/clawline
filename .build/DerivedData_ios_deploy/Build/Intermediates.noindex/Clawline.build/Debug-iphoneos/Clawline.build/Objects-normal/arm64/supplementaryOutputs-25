@@ -1,0 +1,37 @@
+{
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/ViewModels/PairingViewModel.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_ios_deploy/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/PairingViewModel.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_ios_deploy/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/PairingViewModel.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_ios_deploy/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/PairingViewModel.dia",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_ios_deploy/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/PairingViewModel.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_ios_deploy/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/PairingViewModel.swiftdeps"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Views/Chat/BubbleSizingV2.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_ios_deploy/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/BubbleSizingV2.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_ios_deploy/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/BubbleSizingV2.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_ios_deploy/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/BubbleSizingV2.dia",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_ios_deploy/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/BubbleSizingV2.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_ios_deploy/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/BubbleSizingV2.swiftdeps"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Views/Chat/ChannelSwitcherView.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_ios_deploy/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChannelSwitcherView.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_ios_deploy/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChannelSwitcherView.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_ios_deploy/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChannelSwitcherView.dia",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_ios_deploy/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChannelSwitcherView.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_ios_deploy/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChannelSwitcherView.swiftdeps"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Views/Chat/ChannelToast.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_ios_deploy/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChannelToast.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_ios_deploy/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChannelToast.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_ios_deploy/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChannelToast.dia",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_ios_deploy/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChannelToast.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_ios_deploy/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChannelToast.swiftdeps"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Views/Chat/ChatLayoutCoordinator.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_ios_deploy/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatLayoutCoordinator.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_ios_deploy/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatLayoutCoordinator.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_ios_deploy/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatLayoutCoordinator.dia",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_ios_deploy/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatLayoutCoordinator.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_ios_deploy/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatLayoutCoordinator.swiftdeps"
+  }
+}

@@ -131,7 +131,7 @@ final class SonioxStreamingClient: SonioxStreamingClienting {
         let payload = SonioxInitialConfigPayload(
             apiKey: config.apiKey,
             model: config.model,
-            audioFormat: "pcm_s16le",
+            audioFormat: "s16le",
             sampleRate: config.sampleRate,
             numChannels: config.channels,
             languageHints: [config.languageHint],

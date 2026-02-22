@@ -382,7 +382,7 @@ final class DictationCoordinator {
     }
 
     func pauseFromWaveformTap() {
-        guard state == .dictatingSticky || state == .dictatingWalkieTalkie else { return }
+        guard state == .dictatingSticky || state == .dictatingPaused || state == .dictatingWalkieTalkie else { return }
         Task { [weak self] in
             await self?.pauseListening(reason: "waveform_tap_pause")
         }
@@ -507,7 +507,7 @@ final class DictationCoordinator {
     }
 
     func stopFromEscapeKey() {
-        guard state == .dictatingSticky else { return }
+        guard state == .dictatingSticky || state == .dictatingPaused else { return }
         Task { [weak self] in
             logDictation("DICTATION_STOP trace_id=DICTATION_STOP_ESCAPE caller=stopFromEscapeKey ts=\(Date().timeIntervalSince1970)")
             await self?.stopKeep(
@@ -519,13 +519,13 @@ final class DictationCoordinator {
     }
 
     func discardFromEscapeLongPress() {
-        guard state == .dictatingSticky || state == .dictatingWalkieTalkie else { return }
+        guard state == .dictatingSticky || state == .dictatingPaused || state == .dictatingWalkieTalkie else { return }
         logDictation("DICTATION_STOP trace_id=DICTATION_DISCARD_ESCAPE_LONG_PRESS caller=discardFromEscapeLongPress ts=\(Date().timeIntervalSince1970)")
         stopDiscard(reason: "escape_long_press", trigger: "keyboard_escape_long_press")
     }
 
     func stopFromVoiceOverAction() {
-        guard state == .dictatingSticky else { return }
+        guard state == .dictatingSticky || state == .dictatingPaused else { return }
         Task { [weak self] in
             logDictation("DICTATION_STOP trace_id=DICTATION_STOP_VOICEOVER caller=stopFromVoiceOverAction ts=\(Date().timeIntervalSince1970)")
             await self?.stopKeep(
@@ -537,7 +537,7 @@ final class DictationCoordinator {
     }
 
     func discardFromVoiceOverAction() {
-        guard state == .dictatingSticky || state == .dictatingWalkieTalkie else { return }
+        guard state == .dictatingSticky || state == .dictatingPaused || state == .dictatingWalkieTalkie else { return }
         logDictation("DICTATION_STOP trace_id=DICTATION_DISCARD_VOICEOVER caller=discardFromVoiceOverAction ts=\(Date().timeIntervalSince1970)")
         stopDiscard(reason: "voiceover_discard", trigger: "voiceover_discard_action")
     }
@@ -554,9 +554,15 @@ final class DictationCoordinator {
 
     func handleAppBackgrounded() {
         teardownPhase1(reason: PrewarmTeardownReason.viewInactive.rawValue)
-        guard state == .dictatingSticky || state == .dictatingWalkieTalkie || state == .dictatingPaused else { return }
+        guard state == .dictatingSticky || state == .dictatingWalkieTalkie else { return }
         Task { [weak self] in
-            await self?.pauseListening(reason: "app_background")
+            await self?.stopKeep(
+                reason: "app_background",
+                timeout: self?.timing.stopKeepFinalizeTimeout ?? .milliseconds(1_200),
+                announceStop: false,
+                collapseSurface: false,
+                trigger: "app_background"
+            )
         }
     }
 
@@ -905,7 +911,7 @@ final class DictationCoordinator {
             "DICTATION_STOP stopKeep_top ts=\(Date().timeIntervalSince1970) reason=\(reason) " +
             "state=\(String(describing: state)) callsite=\(callSite)"
         )
-        guard state == .dictatingSticky || state == .dictatingWalkieTalkie || state == .stoppingKeep else {
+        guard state == .dictatingSticky || state == .dictatingPaused || state == .dictatingWalkieTalkie || state == .stoppingKeep else {
             logger.notice(
                 "Dictation stopKeep ignored reason=\(reason, privacy: .public) trigger=\(trigger, privacy: .public) callSite=\(callSite, privacy: .public) state=\(String(describing: self.state), privacy: .public)"
             )
@@ -969,7 +975,7 @@ final class DictationCoordinator {
         trigger: String = "unspecified",
         callSite: String = DictationCoordinator.callSite()
     ) {
-        guard state == .dictatingSticky || state == .dictatingWalkieTalkie || state == .stoppingKeep else { return }
+        guard state == .dictatingSticky || state == .dictatingPaused || state == .dictatingWalkieTalkie || state == .stoppingKeep else { return }
 
         pendingStopContext = "trigger=\(trigger) callSite=\(callSite)"
         logger.notice(

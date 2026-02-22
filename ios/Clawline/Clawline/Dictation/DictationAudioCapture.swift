@@ -384,7 +384,8 @@ final class DictationAudioCapture: DictationAudioCapturing {
         guard let pcmData = pcmData(from: converted), !pcmData.isEmpty else { return }
         frameAccumulator.append(pcmData)
 
-        let targetFrameBytes = 3_840
+        // 20ms at 16kHz mono PCM16 = 320 samples * 2 bytes = 640 bytes.
+        let targetFrameBytes = 640
         while frameAccumulator.count >= targetFrameBytes {
             let chunk = frameAccumulator.prefix(targetFrameBytes)
             continuationFrames?.yield(Data(chunk))

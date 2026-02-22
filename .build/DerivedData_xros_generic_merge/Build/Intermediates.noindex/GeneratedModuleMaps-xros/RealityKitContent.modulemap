@@ -1,4 +1,0 @@
-module RealityKitContent {
-header "RealityKitContent-Swift.h"
-export *
-}

@@ -1,9 +1,0 @@
-schemaVersion: 1
-sessionDefaults:
-  projectPath: /Users/mike/src/clawline-dictation/ios/Clawline/Clawline.xcodeproj
-  scheme: Clawline
-  configuration: Debug
-  deviceId: 63C9EE36-3EA0-580A-8DE2-9E9C50174CAC
-  useLatestOS: true
-  platform: iOS
-  bundleId: co.clicketyclacks.Clawline

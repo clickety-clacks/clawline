@@ -61,14 +61,18 @@ struct MessageInputBar: View {
     let onReconnect: () -> Void
     let onAdd: () -> Void
     let onFocusChange: (Bool) -> Void
+    let onDictationSurfaceDragActiveChange: (Bool) -> Void
     var onPasteImages: (([UIImage]) -> Void)?
 
     @State private var editorHeight: CGFloat = 44
     @State private var pushGestureStart: Date?
     @State private var pushCommitReachedAt: Date?
     @State private var pushStartedWalkieTalkie = false
-    @State private var waveformHoldTask: Task<Void, Never>?
+    @State private var pushGestureStartedWithSurfaceOpen = false
     @State private var waveformDidStartWalkie = false
+    @State private var surfaceInteractiveProgress: CGFloat = 0
+    @State private var pullToSendProgress: CGFloat = 0
+    @State private var pullToSendArmed = false
     @State private var micTransientVisible = false
     @State private var micTransientOpacity: Double = 0
     @State private var micTransientOffset: CGFloat = 0
@@ -122,7 +126,10 @@ struct MessageInputBar: View {
     }
 
     private var shouldRenderMic: Bool {
-        dictation.micVisible || dictation.isStickyDictationActive || micTransientVisible
+        !dictation.isSurfaceOpen
+            && !isTextFieldFocused
+            && content.length == 0
+            && (dictation.micVisible || micTransientVisible)
     }
 
     private var micTrailingPadding: CGFloat {
@@ -150,6 +157,16 @@ struct MessageInputBar: View {
 
     private var sendButtonWidth: CGFloat {
         metrics.inputBarHeight
+    }
+
+    private var pullToSendStartThreshold: CGFloat { 40 }
+    private var pullToSendTriggerThreshold: CGFloat { 62 }
+    private var pullToSendEligible: Bool {
+        !isSending && canSend && connectionState == .connected
+    }
+
+    private var pullToSendLift: CGFloat {
+        (16 + 56 * pullToSendProgress) * (pullToSendProgress > 0 ? 1 : 0)
     }
 
     private var containerPadding: CGFloat {
@@ -377,9 +394,9 @@ struct MessageInputBar: View {
                         micButton
                             .padding(.trailing, 8)
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
-                            .opacity((dictation.micVisible || dictation.isStickyDictationActive) ? 1 : micTransientOpacity)
-                            .offset(x: (dictation.micVisible || dictation.isStickyDictationActive) ? 0 : micTransientOffset)
-                            .allowsHitTesting(dictation.micVisible || dictation.isStickyDictationActive)
+                            .opacity(dictation.micVisible ? 1 : micTransientOpacity)
+                            .offset(x: dictation.micVisible ? 0 : micTransientOffset)
+                            .allowsHitTesting(dictation.micVisible)
                             .transition(.move(edge: .trailing).combined(with: .opacity))
                             .animation(.easeOut(duration: isTextFieldFocused ? 0.7 : 0.35), value: dictation.micVisible)
                     }
@@ -493,15 +510,29 @@ struct MessageInputBar: View {
                 .animation(nil, value: connectionState)
             }
 
-            if dictation.isSurfaceOpen {
+            if dictation.isSurfaceOpen || surfaceInteractiveProgress > 0.001 {
                 dictationSurface
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .opacity(surfaceInteractiveProgress)
+                    .frame(height: max(0, 100 * surfaceInteractiveProgress), alignment: .top)
+                    .clipped()
             }
+
         }
         .padding(.horizontal, containerPadding)
         .padding(.bottom, metrics.bottomPadding)
         .frame(maxWidth: maxBarWidth)
         .frame(maxWidth: .infinity, alignment: .center)
+        .offset(y: -pullToSendLift)
+        .overlay(alignment: .bottom) {
+            if pullToSendProgress > 0.001 {
+                pullToSendIndicator
+                    .frame(height: 40)
+                    .scaleEffect(0.85 + 0.15 * pullToSendProgress, anchor: .center)
+                    .opacity(min(1, 0.2 + 1.2 * pullToSendProgress))
+                    .offset(y: MessageInputBarMetrics.elementSpacing)
+                    .allowsHitTesting(false)
+            }
+        }
         .simultaneousGesture(TapGesture().onEnded {
             logger.info("Input bar tap gesture")
         })
@@ -526,15 +557,28 @@ struct MessageInputBar: View {
             editorHeight = metrics.inputBarHeight
         }
         .onDisappear {
-            waveformHoldTask?.cancel()
             micFadeTask?.cancel()
             reconnectPulseOn = false
+            onDictationSurfaceDragActiveChange(false)
+            resetPullToSendVisualState()
         }
         .onAppear {
+            surfaceInteractiveProgress = dictation.isSurfaceOpen ? 1 : 0
             reconnectPulseOn = false
             guard isReconnecting else { return }
             withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) {
                 reconnectPulseOn = true
+            }
+        }
+        .onChange(of: dictation.isSurfaceOpen) { _, isOpen in
+            if isOpen {
+                micFadeTask?.cancel()
+                micTransientVisible = false
+                micTransientOpacity = 0
+                micTransientOffset = 0
+            }
+            withAnimation(.interactiveSpring(response: 0.28, dampingFraction: 0.82, blendDuration: 0.12)) {
+                surfaceInteractiveProgress = isOpen ? 1 : 0
             }
         }
         .onChange(of: connectionState) { _, newValue in
@@ -584,16 +628,27 @@ struct MessageInputBar: View {
         let dy = value.translation.height
         let up = max(0, -dy)
         let down = max(0, dy)
+        let verticalDominant = max(up, down) >= 1.4 * abs(dx)
 
         if pushGestureStart == nil {
             pushGestureStart = Date()
             pushCommitReachedAt = nil
             pushStartedWalkieTalkie = false
+            pushGestureStartedWithSurfaceOpen = dictation.isSurfaceOpen
+            onDictationSurfaceDragActiveChange(true)
             dictation.beginGesturePrewarm()
         }
 
         if dictation.isSurfaceOpen {
-            _ = down
+            if verticalDominant {
+                if up > 0 {
+                    surfaceInteractiveProgress = 1
+                    updatePullToSendArming(upDistance: up)
+                } else {
+                    surfaceInteractiveProgress = max(0, min(1, 1 - (down / 120)))
+                    resetPullToSendVisualState()
+                }
+            }
             return
         }
 
@@ -605,9 +660,12 @@ struct MessageInputBar: View {
             if abs(dx) > up {
                 dictation.cancelGesturePrewarmIfNeeded(trigger: "push_changed_horizontal_dominant")
             }
+            resetPullToSendVisualState()
             return
         }
         guard up >= 28 else { return }
+        surfaceInteractiveProgress = max(0, min(1, up / 120))
+        updatePullToSendArming(upDistance: up)
 
         if pushCommitReachedAt == nil {
             pushCommitReachedAt = Date()
@@ -625,10 +683,14 @@ struct MessageInputBar: View {
 
     private func handlePushEnded(_ value: DragGesture.Value) {
         logDictation("DICTATION_UI handlePushEnded")
+        let shouldSendFromPull = pullToSendArmed && pullToSendEligible
         defer {
             pushGestureStart = nil
             pushCommitReachedAt = nil
             pushStartedWalkieTalkie = false
+            pushGestureStartedWithSurfaceOpen = false
+            onDictationSurfaceDragActiveChange(false)
+            resetPullToSendVisualState()
         }
 
         let dx = value.translation.width
@@ -638,14 +700,44 @@ struct MessageInputBar: View {
         let verticalDominant = max(up, down) >= 1.4 * abs(dx)
         let fastUp = value.predictedEndTranslation.height < -120
         let fastDown = value.predictedEndTranslation.height > 120
+        let projectedUp = max(0, -value.predictedEndTranslation.height)
+        let projectedDown = max(0, value.predictedEndTranslation.height)
+
+        if shouldSendFromPull {
+            let wasWalkie = dictation.isWalkieTalkieActive
+            let wasSurfaceOpen = dictation.isSurfaceOpen
+            onSend()
+            withAnimation(.interactiveSpring(response: 0.28, dampingFraction: 0.82, blendDuration: 0.12)) {
+                if wasWalkie {
+                    surfaceInteractiveProgress = 0
+                } else {
+                    surfaceInteractiveProgress = wasSurfaceOpen ? 1 : 0
+                }
+            }
+            return
+        }
 
         if dictation.isSurfaceOpen {
             if dictation.isWalkieTalkieActive {
-                dictation.endWalkieTalkieIfNeeded()
+                if pushGestureStartedWithSurfaceOpen {
+                    dictation.endWalkieTalkieIfNeeded()
+                    withAnimation(.interactiveSpring(response: 0.28, dampingFraction: 0.82, blendDuration: 0.12)) {
+                        surfaceInteractiveProgress = 1
+                    }
+                } else {
+                    dictation.dismissSurfaceFromUserGesture()
+                    withAnimation(.interactiveSpring(response: 0.28, dampingFraction: 0.82, blendDuration: 0.12)) {
+                        surfaceInteractiveProgress = 0
+                    }
+                }
                 return
             }
-            if verticalDominant && (down >= 32 || fastDown) {
+            if verticalDominant && (down >= 32 || fastDown || projectedDown >= 96 || surfaceInteractiveProgress < 0.45) {
                 dictation.dismissSurfaceFromUserGesture()
+            } else {
+                withAnimation(.interactiveSpring(response: 0.28, dampingFraction: 0.82, blendDuration: 0.12)) {
+                    surfaceInteractiveProgress = 1
+                }
             }
             return
         }
@@ -656,43 +748,72 @@ struct MessageInputBar: View {
         }
         guard verticalDominant else {
             dictation.cancelGesturePrewarmIfNeeded(trigger: "push_end_not_vertical_dominant")
+            withAnimation(.interactiveSpring(response: 0.28, dampingFraction: 0.82, blendDuration: 0.12)) {
+                surfaceInteractiveProgress = 0
+            }
             return
         }
-        guard up >= 32 || fastUp else {
+        guard up >= 32 || fastUp || projectedUp >= 96 || surfaceInteractiveProgress >= 0.45 else {
             dictation.cancelGesturePrewarmIfNeeded(trigger: "push_end_threshold_not_met")
+            withAnimation(.interactiveSpring(response: 0.28, dampingFraction: 0.82, blendDuration: 0.12)) {
+                surfaceInteractiveProgress = 0
+            }
             return
         }
         if pushStartedWalkieTalkie {
             dictation.endWalkieTalkieIfNeeded()
+            withAnimation(.interactiveSpring(response: 0.28, dampingFraction: 0.82, blendDuration: 0.12)) {
+                surfaceInteractiveProgress = 1
+            }
             return
         }
 
         dictation.startStickyDictation()
         beginMicFadeOut(fromSwipe: false)
+        withAnimation(.interactiveSpring(response: 0.28, dampingFraction: 0.82, blendDuration: 0.12)) {
+            surfaceInteractiveProgress = 1
+        }
+    }
+
+    private func updatePullToSendArming(upDistance: CGFloat) {
+        let progress = max(0, min(1, (upDistance - pullToSendStartThreshold) / (pullToSendTriggerThreshold - pullToSendStartThreshold)))
+        pullToSendProgress = progress
+        pullToSendArmed = progress >= 1 && pullToSendEligible
+    }
+
+    private func resetPullToSendVisualState() {
+        pullToSendProgress = 0
+        pullToSendArmed = false
     }
 
     private var dictationSurface: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            waveformBars
+        VStack(alignment: .center, spacing: 8) {
+            waveformLine
                 .frame(maxWidth: .infinity)
                 .frame(height: 44)
                 .contentShape(Rectangle())
                 .onTapGesture {
                     dictation.toggleWaveformTapAction()
                 }
-                .highPriorityGesture(
-                    DragGesture(minimumDistance: 0)
-                        .onChanged { _ in
-                            handleWaveformHoldChanged()
-                        }
-                        .onEnded { _ in
-                            handleWaveformHoldEnded()
-                        }
+                .onLongPressGesture(
+                    minimumDuration: 0.35,
+                    maximumDistance: 24,
+                    pressing: { isPressing in
+                        guard !isPressing, waveformDidStartWalkie else { return }
+                        waveformDidStartWalkie = false
+                        dictation.endWalkieTalkieIfNeeded()
+                    },
+                    perform: {
+                        guard dictation.state == .dictatingPaused else { return }
+                        waveformDidStartWalkie = true
+                        dictation.startWalkieTalkieFromPausedSurface()
+                    }
                 )
 
             Text(dictation.state == .dictatingPaused ? "Paused" : "Listening...")
                 .font(.footnote.weight(.semibold))
                 .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .center)
 
             if dictation.state == .error, let message = dictation.errorMessage {
                 Text(message)
@@ -714,40 +835,73 @@ struct MessageInputBar: View {
 #endif
     }
 
-    private var waveformBars: some View {
-        HStack(alignment: .center, spacing: 4) {
-            ForEach(0..<16, id: \.self) { index in
-                let normalized = max(0.05, min(1.0, dictation.waveformDisplacement / 9.0))
-                let base = CGFloat(8 + (index % 4) * 2)
-                let amplitude = dictation.state == .dictatingPaused ? 0.20 : normalized
-                let height = base + (30 * amplitude)
-                Capsule()
-                    .fill(Color.primary.opacity(dictation.state == .dictatingPaused ? 0.35 : 0.95))
-                    .frame(width: 3, height: height)
+    private var pullToSendIndicator: some View {
+        HStack(spacing: 8) {
+            Image(systemName: pullToSendArmed ? "paperplane.fill" : "arrow.up.circle")
+                .font(.system(size: 14, weight: .semibold))
+            Text(pullToSendArmed ? "Release to send" : "Pull up to send")
+                .font(.footnote.weight(.semibold))
+        }
+        .foregroundStyle(pullToSendArmed ? ChatFlowTheme.adminAccent(colorScheme) : inputTintColor.opacity(0.9))
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 8)
+        .background(.ultraThinMaterial, in: Capsule())
+    }
+
+    private var waveformLine: some View {
+        TimelineView(.periodic(from: .now, by: reduceMotionForDictation ? 0.12 : (1 / 60))) { context in
+            GeometryReader { proxy in
+                let width = max(1, proxy.size.width)
+                let height = max(1, proxy.size.height)
+                let midY = height * 0.5
+                let t = CGFloat(context.date.timeIntervalSinceReferenceDate)
+                let normalizedAudio = max(0, min(1, (dictation.waveformDisplacement - 0.35) / 8.65))
+                let pauseMultiplier: CGFloat = dictation.state == .dictatingPaused ? 0.55 : 1.0
+                let idleDrift = 0.070 + 0.022 * sin(t * 1.9)
+                let audioSwell = dictation.state == .dictatingPaused ? 0 : (1.22 * normalizedAudio)
+                let baseAmplitude = (idleDrift + audioSwell) * pauseMultiplier
+                let baseLineWidth: CGFloat = dictation.state == .dictatingPaused ? 1.4 : 2.0
+                let colorSet: [Color] = [
+                    ChatFlowTheme.adminAccent(colorScheme),
+                    ChatFlowTheme.sage(colorScheme),
+                    ChatFlowTheme.softCoral(colorScheme),
+                    ChatFlowTheme.terracotta(colorScheme)
+                ]
+                let waveConfigs: [(frequency: CGFloat, phaseOffset: CGFloat, speed: CGFloat, amplitudeScale: CGFloat)] = [
+                    (1.30, 0.0, 2.0, 1.00),
+                    (1.85, 1.1, 2.7, 0.95),
+                    (2.45, 2.0, 3.4, 0.86),
+                    (3.10, 2.8, 4.0, 0.74)
+                ]
+
+                ZStack {
+                    ForEach(Array(waveConfigs.enumerated()), id: \.offset) { index, config in
+                        let phase = (t * config.speed) + config.phaseOffset
+                        let waveAmplitude = min(1.28, max(0.060, baseAmplitude * config.amplitudeScale))
+                        Path { path in
+                            path.move(to: CGPoint(x: 0, y: midY))
+                            let step: CGFloat = 2
+                            var x: CGFloat = 0
+                            while x <= width {
+                                let progress = x / width
+                                let taper = pow(sin(progress * .pi), 0.95)
+                                let y = midY + sin((progress * .pi * 2 * config.frequency) + phase) * height * waveAmplitude * taper
+                                path.addLine(to: CGPoint(x: x, y: y))
+                                x += step
+                            }
+                        }
+                        .stroke(
+                            colorSet[index].opacity(dictation.state == .dictatingPaused ? 0.34 : (0.62 - CGFloat(index) * 0.10)),
+                            style: StrokeStyle(
+                                lineWidth: baseLineWidth + CGFloat(3 - index) * 0.26,
+                                lineCap: .round,
+                                lineJoin: .round
+                            )
+                        )
+                    }
+                }
             }
         }
-        .animation(.easeOut(duration: reduceMotionForDictation ? 0.0 : 0.08), value: dictation.waveformDisplacement)
-    }
-
-    private func handleWaveformHoldChanged() {
-        guard dictation.state == .dictatingPaused else { return }
-        guard waveformHoldTask == nil else { return }
-        waveformDidStartWalkie = false
-        waveformHoldTask = Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(350))
-            guard dictation.state == .dictatingPaused else { return }
-            waveformDidStartWalkie = true
-            dictation.startWalkieTalkieFromPausedSurface()
-        }
-    }
-
-    private func handleWaveformHoldEnded() {
-        let task = waveformHoldTask
-        waveformHoldTask = nil
-        task?.cancel()
-        guard waveformDidStartWalkie else { return }
-        waveformDidStartWalkie = false
-        dictation.endWalkieTalkieIfNeeded()
     }
 
     private func beginMicFadeOut(fromSwipe: Bool) {
@@ -850,6 +1004,7 @@ struct DictationMicAffordanceAnimationPlan {
                 onReconnect: {},
                 onAdd: {},
                 onFocusChange: { _ in },
+                onDictationSurfaceDragActiveChange: { _ in },
                 onPasteImages: nil,
                 isCompact: true
             )

@@ -132,6 +132,8 @@ struct ChatView: View {
     @Environment(\.settingsManager) private var settings
 
     @State private var inputBarHeight: CGFloat = 0
+    @State private var settledInputBarHeight: CGFloat = 0
+    @State private var isDictationSurfaceDragActive: Bool = false
     @State private var streamToastManager = StreamToastManager()
     @State private var streamToastBusySince: Date?
     @State private var streamToastBusyClearTask: Task<Void, Never>?
@@ -555,7 +557,8 @@ struct ChatView: View {
         let topInset: CGFloat = geometry.safeAreaInsets.top
         let isCompactLayout = horizontalSizeClass == .compact
         let metrics = ChatFlowTheme.Metrics(isCompact: isCompactLayout)
-        let resolvedInputHeight = max(inputBarHeight, MessageInputBarMetrics.minInputBarHeight)
+        let insetInputHeight = isDictationSurfaceDragActive ? settledInputBarHeight : inputBarHeight
+        let resolvedInputHeight = max(insetInputHeight, MessageInputBarMetrics.minInputBarHeight)
         let keyboardVisibleHeight = max(0, keyboardHeight - geometry.safeAreaInsets.bottom)
         let isKeyboardVisible = keyboardVisibleHeight > 0.5
         let effectiveStreams = viewModel.orderedStreams
@@ -711,10 +714,21 @@ struct ChatView: View {
         .onChange(of: keyboardHeight) { _, _ in layoutRevision &+= 1 }
         .onChange(of: keyboardAnimationDuration) { _, _ in layoutRevision &+= 1 }
         .onChange(of: keyboardAnimationCurve) { _, _ in layoutRevision &+= 1 }
-        .onChange(of: inputBarHeight) { _, _ in layoutRevision &+= 1 }
+        .onChange(of: inputBarHeight) { _, newValue in
+            if !isDictationSurfaceDragActive {
+                settledInputBarHeight = newValue
+            }
+            layoutRevision &+= 1
+        }
         .onChange(of: isInputFocused) { _, _ in
             layoutRevision &+= 1
             updateDictationContext(viewModel: viewModel)
+        }
+        .onChange(of: isDictationSurfaceDragActive) { _, isActive in
+            if !isActive {
+                settledInputBarHeight = inputBarHeight
+            }
+            layoutRevision &+= 1
         }
         .onChange(of: geometry.safeAreaInsets.bottom) { _, _ in layoutRevision &+= 1 }
         .onChange(of: horizontalSizeClass) { _, _ in layoutRevision &+= 1 }
@@ -866,6 +880,7 @@ struct ChatView: View {
             desiredBottomGap: belowBarGap,
             isKeyboardVisible: isKeyboardVisible,
             measuredHeight: $inputBarHeight,
+            freezeBarHeightUpdates: isDictationSurfaceDragActive,
             versionText: appVersionLabel,
             layoutCoordinator: layoutCoordinator,
             layoutKey: layoutKey
@@ -905,6 +920,9 @@ struct ChatView: View {
                 // ⚠️ This callback is how focus state survives view recreation.
                 // DO NOT replace with @Binding or try to use @FocusState directly.
                 onFocusChange: { focused in isInputFocused = focused },
+                onDictationSurfaceDragActiveChange: { isActive in
+                    isDictationSurfaceDragActive = isActive
+                },
                 onPasteImages: handlePastedImages,
                 isCompact: horizontalSizeClass == .compact
             )
@@ -1753,6 +1771,7 @@ private struct KeyboardPinnedContainer<Content: View>: UIViewRepresentable {
     let desiredBottomGap: CGFloat
     let isKeyboardVisible: Bool
     @Binding var measuredHeight: CGFloat
+    let freezeBarHeightUpdates: Bool
     let versionText: AttributedString?
     let layoutCoordinator: ChatLayoutCoordinator
     let layoutKey: ChatLayoutKey
@@ -1769,6 +1788,7 @@ private struct KeyboardPinnedContainer<Content: View>: UIViewRepresentable {
         desiredBottomGap: CGFloat,
         isKeyboardVisible: Bool,
         measuredHeight: Binding<CGFloat>,
+        freezeBarHeightUpdates: Bool = false,
         versionText: AttributedString? = nil,
         layoutCoordinator: ChatLayoutCoordinator,
         layoutKey: ChatLayoutKey,
@@ -1784,6 +1804,7 @@ private struct KeyboardPinnedContainer<Content: View>: UIViewRepresentable {
         self.desiredBottomGap = desiredBottomGap
         self.isKeyboardVisible = isKeyboardVisible
         self._measuredHeight = measuredHeight
+        self.freezeBarHeightUpdates = freezeBarHeightUpdates
         self.versionText = versionText
         self.layoutCoordinator = layoutCoordinator
         self.layoutKey = layoutKey
@@ -1815,6 +1836,7 @@ private struct KeyboardPinnedContainer<Content: View>: UIViewRepresentable {
         )
         uiView.updatePageDots(pageDotsView, gap: pageDotsGap)
         uiView.setOnBarHeightChange { [weak layoutCoordinator] height in
+            guard !freezeBarHeightUpdates else { return }
             // Break potential SwiftUI layout cycles by only propagating meaningful bar height changes.
             // (On some iOS 26.2 devices we observed AttributeGraph "cycle detected" during launch.)
             let snapped = (height * 2).rounded() / 2  // half-point granularity

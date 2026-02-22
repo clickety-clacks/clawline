@@ -224,6 +224,7 @@ final class DictationCoordinator {
     private var isSocketConnected = false
     private var bufferedAudioFrames: [Data] = []
     private let maxBufferedAudioFrames = 64
+    private var lastAudioActivityResetAt: Date?
 
     nonisolated private static func callSite(
         function: StaticString = #function,
@@ -303,6 +304,7 @@ final class DictationCoordinator {
                     reason: "stream_switch",
                     timeout: self.timing.stopKeepFinalizeTimeout,
                     announceStop: false,
+                    collapseSurface: false,
                     trigger: "stream_switch_context_update"
                 )
                 await MainActor.run {
@@ -402,6 +404,7 @@ final class DictationCoordinator {
             await self?.stopKeep(
                 reason: "surface_dismiss",
                 timeout: timing.stopKeepFinalizeTimeout,
+                collapseSurfaceImmediately: true,
                 trigger: "user_swipe_down"
             )
         }
@@ -548,8 +551,24 @@ final class DictationCoordinator {
             sendAction()
             return
         }
-        analytics.trackSendWhileActive(finalizedWithinTimeout: true)
         sendAction()
+        Task { [weak self] in
+            guard let self else { return }
+            logDictation("DICTATION_STOP trace_id=DICTATION_STOP_SEND_TAP_FINALIZATION caller=send_tap_finalization ts=\(Date().timeIntervalSince1970)")
+            let finalizedWithinTimeout: Bool
+            if self.state == .dictatingWalkieTalkie {
+                finalizedWithinTimeout = await self.stopKeep(
+                    reason: "send_tap_walkie",
+                    timeout: self.timing.stopKeepFinalizeTimeout,
+                    collapseSurfaceImmediately: true,
+                    trigger: "send_tap_finalization_walkie"
+                )
+            } else {
+                await self.pauseListening(reason: "send_tap_pause")
+                finalizedWithinTimeout = true
+            }
+            self.analytics.trackSendWhileActive(finalizedWithinTimeout: finalizedWithinTimeout)
+        }
     }
 
     func handleAppBackgrounded() {
@@ -662,21 +681,30 @@ final class DictationCoordinator {
 
         levelTask = Task { [weak self] in
             guard let self else { return }
-            let minimumWaveformUpdateInterval: CFTimeInterval = 0.05
+            let minimumWaveformUpdateInterval: CFTimeInterval = 1.0 / 60.0
             var lastWaveformUpdateAt = CFAbsoluteTimeGetCurrent() - minimumWaveformUpdateInterval
-            var lastAppliedDisplacement: CGFloat = -1
+            var lastAppliedDisplacement: CGFloat = WaveformDefaults.amplitudeFloor
             let minDisplacement: CGFloat = WaveformDefaults.amplitudeFloor
             let maxDisplacement: CGFloat = WaveformDefaults.amplitudeFloor + WaveformDefaults.amplitudeRange
+            let fastAttackAlpha: CGFloat = 0.82
+            let slowReleaseAlpha: CGFloat = 0.18
             for await level in capture.levelStream {
                 let now = CFAbsoluteTimeGetCurrent()
                 guard now - lastWaveformUpdateAt >= minimumWaveformUpdateInterval else { continue }
                 lastWaveformUpdateAt = now
                 let mappedDisplacement = Self.mappedDisplacement(for: level)
-                let nextDisplacement = min(max(mappedDisplacement, minDisplacement), maxDisplacement)
-                guard abs(nextDisplacement - lastAppliedDisplacement) >= 0.01 else { continue }
+                let targetDisplacement = min(max(mappedDisplacement, minDisplacement), maxDisplacement)
+                let isAttacking = targetDisplacement >= lastAppliedDisplacement
+                let alpha = isAttacking ? fastAttackAlpha : slowReleaseAlpha
+                let nextDisplacement = lastAppliedDisplacement + ((targetDisplacement - lastAppliedDisplacement) * alpha)
+                guard abs(nextDisplacement - lastAppliedDisplacement) >= 0.004 else { continue }
                 lastAppliedDisplacement = nextDisplacement
                 await MainActor.run {
                     self.waveformDisplacement = nextDisplacement
+                    if (self.state == .dictatingSticky || self.state == .dictatingWalkieTalkie),
+                       targetDisplacement > (WaveformDefaults.amplitudeFloor + 0.10) {
+                        self.markInactivityActivity(source: "audio_level")
+                    }
                 }
             }
         }
@@ -785,6 +813,21 @@ final class DictationCoordinator {
         }
     }
 
+    private func markInactivityActivity(source: String) {
+        let now = Date()
+        if source == "audio_level",
+           let lastAudioActivityResetAt,
+           now.timeIntervalSince(lastAudioActivityResetAt) < 0.35 {
+            return
+        }
+        if source == "audio_level" {
+            self.lastAudioActivityResetAt = now
+        }
+        lastTokenAt = now
+        logDictation("DICTATION_STOP trace_id=DICTATION_STOP_TIMER_TOKEN_INACTIVITY_ACTIVITY source=\(source) ts=\(now.timeIntervalSince1970)")
+        resetTokenInactivityTimer()
+    }
+
     private func cancelTokenInactivityTimer(reason: String) {
         guard let tokenInactivityTask else { return }
         logDictation(
@@ -825,8 +868,7 @@ final class DictationCoordinator {
             }
 
             if !response.tokens.isEmpty {
-                lastTokenAt = Date()
-                resetTokenInactivityTimer()
+                markInactivityActivity(source: "soniox_token")
             }
 
             if response.finished {
@@ -904,6 +946,7 @@ final class DictationCoordinator {
         announceStop: Bool = true,
         gracefulFinalize: Bool = true,
         collapseSurface: Bool = true,
+        collapseSurfaceImmediately: Bool = false,
         trigger: String = "unspecified",
         callSite: String = DictationCoordinator.callSite()
     ) async -> Bool {
@@ -925,6 +968,10 @@ final class DictationCoordinator {
 
         if state != .stoppingKeep {
             state = .stoppingKeep
+        }
+
+        if collapseSurface && collapseSurfaceImmediately {
+            state = .idleSurfaceClosed
         }
 
         maxDurationTask?.cancel()
@@ -1120,6 +1167,8 @@ final class DictationCoordinator {
         isSocketConnected = false
         isPhase3StreamingAudio = false
         bufferedAudioFrames.removeAll(keepingCapacity: true)
+        prewarmGeneration = nil
+        lastAudioActivityResetAt = nil
         mode = nil
         state = .dictatingPaused
         schedulePhase1IdleTeardown()

@@ -19,7 +19,7 @@ enum SonioxStreamingClientStage: String, Sendable {
 struct SonioxStreamingConfig: Sendable {
     var apiKey: String
     var languageHint: String
-    var model: String = "stt-rt-v4"
+    var model: String = "stt-rt-preview"
     var sampleRate: Int = 16_000
     var channels: Int = 1
     var clientReferenceID: String = UUID().uuidString
@@ -98,7 +98,7 @@ final class SonioxStreamingClient: SonioxStreamingClienting {
 
     init(
         session: URLSession = URLSession(configuration: .default),
-        keepaliveInterval: Duration = .seconds(10),
+        keepaliveInterval: Duration = .seconds(5),
         sleepFor: @escaping @Sendable (Duration) async -> Void = { duration in
             try? await Task.sleep(for: duration)
         }
@@ -135,8 +135,7 @@ final class SonioxStreamingClient: SonioxStreamingClienting {
             sampleRate: config.sampleRate,
             numChannels: config.channels,
             languageHints: [config.languageHint],
-            enableEndpointDetection: false,
-            documentFormatting: SonioxInitialConfigPayload.DocumentFormatting(verbalizedPunct: true),
+            enableEndpointDetection: true,
             clientReferenceID: config.clientReferenceID
         )
 
@@ -383,14 +382,6 @@ final class SonioxStreamingClient: SonioxStreamingClienting {
 }
 
 private struct SonioxInitialConfigPayload: Encodable {
-    struct DocumentFormatting: Encodable {
-        let verbalizedPunct: Bool
-
-        enum CodingKeys: String, CodingKey {
-            case verbalizedPunct = "verbalized_punct"
-        }
-    }
-
     let apiKey: String
     let model: String
     let audioFormat: String
@@ -398,7 +389,6 @@ private struct SonioxInitialConfigPayload: Encodable {
     let numChannels: Int
     let languageHints: [String]
     let enableEndpointDetection: Bool
-    let documentFormatting: DocumentFormatting
     let clientReferenceID: String
 
     enum CodingKeys: String, CodingKey {
@@ -409,7 +399,6 @@ private struct SonioxInitialConfigPayload: Encodable {
         case numChannels = "num_channels"
         case languageHints = "language_hints"
         case enableEndpointDetection = "enable_endpoint_detection"
-        case documentFormatting = "document_formatting"
         case clientReferenceID = "client_reference_id"
     }
 }

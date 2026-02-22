@@ -64,12 +64,11 @@ struct MessageInputBar: View {
     var onPasteImages: (([UIImage]) -> Void)?
 
     @State private var editorHeight: CGFloat = 44
-    @State private var micPressTask: Task<Void, Never>?
-    @State private var micDidStartWalkieTalkie = false
-    @State private var swipeGestureStart: Date?
-    @State private var swipeThresholdTime: Date?
-    @State private var swipeBlockedForEditing = false
-    @State private var swipeStartedWalkieTalkie = false
+    @State private var pushGestureStart: Date?
+    @State private var pushCommitReachedAt: Date?
+    @State private var pushStartedWalkieTalkie = false
+    @State private var waveformHoldTask: Task<Void, Never>?
+    @State private var waveformDidStartWalkie = false
     @State private var micTransientVisible = false
     @State private var micTransientOpacity: Double = 0
     @State private var micTransientOffset: CGFloat = 0
@@ -374,29 +373,6 @@ struct MessageInputBar: View {
                             .padding(.trailing, micTrailingPadding)
                     }
 
-                    if dictation.state == .error,
-                       let message = dictation.errorMessage {
-                        RoundedRectangle(cornerRadius: inputCornerRadius, style: .continuous)
-                            .fill(Color.red.opacity(0.1))
-                            .allowsHitTesting(false)
-
-                        HStack(spacing: 8) {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .font(.system(size: 14, weight: .semibold))
-                            Text(message)
-                                .font(.system(size: 13, weight: .semibold))
-                                .lineLimit(1)
-                                .truncationMode(.tail)
-                        }
-                        .padding(.horizontal, 20)
-                        .padding(.vertical, 12)
-                        .foregroundColor(.red)
-                        .allowsHitTesting(false)
-                        .onAppear {
-                            logDictation("DICTATION_ERROR ui_display ts=\(Date().timeIntervalSince1970) message=\(message)")
-                        }
-                    }
-
                     if shouldRenderMic {
                         micButton
                             .padding(.trailing, 8)
@@ -412,7 +388,7 @@ struct MessageInputBar: View {
                 .frame(height: inputHeight)
                 .frame(maxWidth: .infinity, alignment: .bottom)
                 .contentShape(Rectangle())
-                .simultaneousGesture(swipeDictationGesture)
+                .simultaneousGesture(pushToRevealGesture)
 #if os(visionOS)
                 .background(.regularMaterial, in: inputShape)
 #else
@@ -516,6 +492,11 @@ struct MessageInputBar: View {
                 .animation(nil, value: canSend)
                 .animation(nil, value: connectionState)
             }
+
+            if dictation.isSurfaceOpen {
+                dictationSurface
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
         }
         .padding(.horizontal, containerPadding)
         .padding(.bottom, metrics.bottomPadding)
@@ -545,7 +526,7 @@ struct MessageInputBar: View {
             editorHeight = metrics.inputBarHeight
         }
         .onDisappear {
-            micPressTask?.cancel()
+            waveformHoldTask?.cancel()
             micFadeTask?.cancel()
             reconnectPulseOn = false
         }
@@ -574,143 +555,199 @@ struct MessageInputBar: View {
             .foregroundStyle(inputTintColor.opacity(0.9))
             .frame(width: metrics.inputBarHeight, height: metrics.inputBarHeight)
             .contentShape(Rectangle())
-            .highPriorityGesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { _ in
-                        guard !isSending else { return }
-                        handleMicPressChanged()
-                    }
-                    .onEnded { _ in
-                        handleMicPressEnded()
-                    }
-            )
+            .onTapGesture {
+                guard !isSending else { return }
+                if dictation.isStickyDictationActive {
+                    dictation.dismissSurfaceFromUserGesture()
+                } else {
+                    dictation.beginGesturePrewarm()
+                    dictation.startStickyDictation()
+                    beginMicFadeOut(fromSwipe: false)
+                }
+            }
             .accessibilityLabel(dictation.isStickyDictationActive ? "Stop dictation" : "Start dictation")
     }
 
-    private var swipeDictationGesture: some Gesture {
+    private var pushToRevealGesture: some Gesture {
         DragGesture(minimumDistance: 0)
             .onChanged { value in
-                handleSwipeChanged(value)
+                handlePushChanged(value)
             }
             .onEnded { value in
-                handleSwipeEnded(value)
+                handlePushEnded(value)
             }
     }
 
-    private func handleMicPressChanged() {
-        logDictation(
-            "DICTATION_UI handleMicPressChanged micVisible=\(dictation.micVisible) " +
-            "hasMicPressTask=\(micPressTask != nil) didStartWalkie=\(micDidStartWalkieTalkie)"
-        )
-        guard dictation.micVisible else { return }
-        guard micPressTask == nil else { return }
+    private func handlePushChanged(_ value: DragGesture.Value) {
+        logDictation("DICTATION_UI handlePushChanged")
+        let dx = value.translation.width
+        let dy = value.translation.height
+        let up = max(0, -dy)
+        let down = max(0, dy)
 
-        micDidStartWalkieTalkie = false
-        micPressTask = Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(350))
-            guard dictation.micVisible else { return }
-            micDidStartWalkieTalkie = true
+        if pushGestureStart == nil {
+            pushGestureStart = Date()
+            pushCommitReachedAt = nil
+            pushStartedWalkieTalkie = false
+            dictation.beginGesturePrewarm()
+        }
+
+        if dictation.isSurfaceOpen {
+            _ = down
+            return
+        }
+
+        guard dictation.swipeActivationEnabled else {
+            dictation.cancelGesturePrewarmIfNeeded(trigger: "push_changed_activation_disabled")
+            return
+        }
+        guard up >= 1.4 * abs(dx) else {
+            if abs(dx) > up {
+                dictation.cancelGesturePrewarmIfNeeded(trigger: "push_changed_horizontal_dominant")
+            }
+            return
+        }
+        guard up >= 28 else { return }
+
+        if pushCommitReachedAt == nil {
+            pushCommitReachedAt = Date()
+            return
+        }
+
+        if let pushCommitReachedAt,
+           !pushStartedWalkieTalkie,
+           Date().timeIntervalSince(pushCommitReachedAt) >= 0.35 {
+            pushStartedWalkieTalkie = true
             dictation.startWalkieTalkieDictation()
             beginMicFadeOut(fromSwipe: false)
         }
     }
 
-    private func handleMicPressEnded() {
-        logDictation("DICTATION_UI handleMicPressEnded")
-        let holdTask = micPressTask
-        micPressTask = nil
-        holdTask?.cancel()
-
-        if micDidStartWalkieTalkie {
-            micDidStartWalkieTalkie = false
-            dictation.endWalkieTalkieIfNeeded()
-            return
-        }
-
-        if dictation.isStickyDictationActive {
-            dictation.stopStickyFromMicTap()
-            return
-        }
-
-        guard dictation.micVisible else { return }
-        dictation.startStickyDictation()
-    }
-
-    private func handleSwipeChanged(_ value: DragGesture.Value) {
-        logDictation("DICTATION_UI handleSwipeChanged")
-        let dx = value.translation.width
-        let dy = value.translation.height
-
-        if swipeGestureStart == nil {
-            swipeGestureStart = Date()
-            swipeThresholdTime = nil
-            swipeBlockedForEditing = false
-            swipeStartedWalkieTalkie = false
-        }
-
-        if dictation.isDictationActive {
-            return
-        }
-
-        guard dictation.swipeActivationEnabled else { return }
-        guard !swipeBlockedForEditing else { return }
-
-        if let swipeGestureStart,
-           Date().timeIntervalSince(swipeGestureStart) >= 0.3,
-           abs(dx) < 28 {
-            swipeBlockedForEditing = true
-            return
-        }
-
-        guard abs(dx) >= 28 else { return }
-        guard abs(dx) >= 1.4 * abs(dy) else { return }
-        guard dx <= -28 else { return }
-
-        if swipeThresholdTime == nil {
-            swipeThresholdTime = Date()
-            return
-        }
-
-        if let swipeThresholdTime,
-           !swipeStartedWalkieTalkie,
-           Date().timeIntervalSince(swipeThresholdTime) >= 0.35 {
-            swipeStartedWalkieTalkie = true
-            dictation.startWalkieTalkieDictation()
-            beginMicFadeOut(fromSwipe: true)
-        }
-    }
-
-    private func handleSwipeEnded(_ value: DragGesture.Value) {
-        logDictation("DICTATION_UI handleSwipeEnded")
+    private func handlePushEnded(_ value: DragGesture.Value) {
+        logDictation("DICTATION_UI handlePushEnded")
         defer {
-            swipeGestureStart = nil
-            swipeThresholdTime = nil
-            swipeBlockedForEditing = false
-            swipeStartedWalkieTalkie = false
+            pushGestureStart = nil
+            pushCommitReachedAt = nil
+            pushStartedWalkieTalkie = false
         }
 
         let dx = value.translation.width
         let dy = value.translation.height
-        let isHorizontal = abs(dx) >= 28 && abs(dx) >= 1.4 * abs(dy)
+        let up = max(0, -dy)
+        let down = max(0, dy)
+        let verticalDominant = max(up, down) >= 1.4 * abs(dx)
+        let fastUp = value.predictedEndTranslation.height < -120
+        let fastDown = value.predictedEndTranslation.height > 120
 
-        if dictation.isDictationActive {
-            if isHorizontal, dx >= 28 {
-                dictation.stopDictationFromSwipeRight()
-            } else if dictation.isWalkieTalkieActive {
+        if dictation.isSurfaceOpen {
+            if dictation.isWalkieTalkieActive {
                 dictation.endWalkieTalkieIfNeeded()
+                return
+            }
+            if verticalDominant && (down >= 32 || fastDown) {
+                dictation.dismissSurfaceFromUserGesture()
             }
             return
         }
 
-        guard dictation.swipeActivationEnabled else { return }
-        guard isHorizontal, dx <= -28 else { return }
-
-        if swipeStartedWalkieTalkie {
+        guard dictation.swipeActivationEnabled else {
+            dictation.cancelGesturePrewarmIfNeeded(trigger: "push_end_activation_disabled")
+            return
+        }
+        guard verticalDominant else {
+            dictation.cancelGesturePrewarmIfNeeded(trigger: "push_end_not_vertical_dominant")
+            return
+        }
+        guard up >= 32 || fastUp else {
+            dictation.cancelGesturePrewarmIfNeeded(trigger: "push_end_threshold_not_met")
+            return
+        }
+        if pushStartedWalkieTalkie {
             dictation.endWalkieTalkieIfNeeded()
             return
         }
 
         dictation.startStickyDictation()
+        beginMicFadeOut(fromSwipe: false)
+    }
+
+    private var dictationSurface: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            waveformBars
+                .frame(maxWidth: .infinity)
+                .frame(height: 44)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    dictation.toggleWaveformTapAction()
+                }
+                .highPriorityGesture(
+                    DragGesture(minimumDistance: 0)
+                        .onChanged { _ in
+                            handleWaveformHoldChanged()
+                        }
+                        .onEnded { _ in
+                            handleWaveformHoldEnded()
+                        }
+                )
+
+            Text(dictation.state == .dictatingPaused ? "Paused" : "Listening...")
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(.secondary)
+
+            if dictation.state == .error, let message = dictation.errorMessage {
+                Text(message)
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.red)
+                    .onAppear {
+                        logDictation("DICTATION_ERROR ui_display ts=\(Date().timeIntervalSince1970) message=\(message)")
+                    }
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity)
+        .frame(height: 100, alignment: .top)
+#if os(visionOS)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+#else
+        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+#endif
+    }
+
+    private var waveformBars: some View {
+        HStack(alignment: .center, spacing: 4) {
+            ForEach(0..<16, id: \.self) { index in
+                let normalized = max(0.05, min(1.0, dictation.waveformDisplacement / 9.0))
+                let base = CGFloat(8 + (index % 4) * 2)
+                let amplitude = dictation.state == .dictatingPaused ? 0.20 : normalized
+                let height = base + (30 * amplitude)
+                Capsule()
+                    .fill(Color.primary.opacity(dictation.state == .dictatingPaused ? 0.35 : 0.95))
+                    .frame(width: 3, height: height)
+            }
+        }
+        .animation(.easeOut(duration: reduceMotionForDictation ? 0.0 : 0.08), value: dictation.waveformDisplacement)
+    }
+
+    private func handleWaveformHoldChanged() {
+        guard dictation.state == .dictatingPaused else { return }
+        guard waveformHoldTask == nil else { return }
+        waveformDidStartWalkie = false
+        waveformHoldTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(350))
+            guard dictation.state == .dictatingPaused else { return }
+            waveformDidStartWalkie = true
+            dictation.startWalkieTalkieFromPausedSurface()
+        }
+    }
+
+    private func handleWaveformHoldEnded() {
+        let task = waveformHoldTask
+        waveformHoldTask = nil
+        task?.cancel()
+        guard waveformDidStartWalkie else { return }
+        waveformDidStartWalkie = false
+        dictation.endWalkieTalkieIfNeeded()
     }
 
     private func beginMicFadeOut(fromSwipe: Bool) {

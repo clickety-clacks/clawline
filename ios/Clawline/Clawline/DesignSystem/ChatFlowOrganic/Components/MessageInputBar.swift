@@ -362,6 +362,7 @@ struct MessageInputBar: View {
     @State private var micTransientOffset: CGFloat = 0
     @State private var micFadeTask: Task<Void, Never>?
     @State private var insetUnfreezeTask: Task<Void, Never>?
+    @State private var gestureSettleTask: Task<Void, Never>?
     @State private var reconnectPulseOn: Bool = false
     @State private var textEditorGlobalFrame: CGRect = .zero
     let isCompact: Bool
@@ -471,6 +472,12 @@ struct MessageInputBar: View {
     private var walkieHoldDurationSeconds: TimeInterval { 0.55 }
     private var pullToSendEligible: Bool {
         !isSending && canSend && connectionState == .connected
+    }
+
+    private var settleDurationMs: Int { 640 }
+
+    private var settleSpring: Animation {
+        .interactiveSpring(response: 0.56, dampingFraction: 0.82, blendDuration: 0.12)
     }
 
     private var pullToSendLift: CGFloat {
@@ -668,6 +675,7 @@ struct MessageInputBar: View {
         .onDisappear {
             micFadeTask?.cancel()
             insetUnfreezeTask?.cancel()
+            gestureSettleTask?.cancel()
             motionModel.clearGestureState()
             reconnectPulseOn = false
             onDictationSurfaceDragActiveChange(false)
@@ -692,7 +700,7 @@ struct MessageInputBar: View {
                 micTransientOpacity = 0
                 micTransientOffset = 0
             }
-            withAnimation(.interactiveSpring(response: 0.28, dampingFraction: 0.82, blendDuration: 0.12)) {
+            withAnimation(settleSpring) {
                 motionModel.surfaceInteractiveProgress = isOpen ? 1 : 0
             }
         }
@@ -971,6 +979,7 @@ struct MessageInputBar: View {
         let verticalDominant = max(up, down) >= 1.4 * abs(dx)
 
         if motionModel.pushGestureStart == nil {
+            gestureSettleTask?.cancel()
             motionModel.beginGesture(surfaceOpen: dictation.isSurfaceOpen)
             insetUnfreezeTask?.cancel()
             onDictationSurfaceDragActiveChange(true)
@@ -1032,9 +1041,7 @@ struct MessageInputBar: View {
             return
         }
         let shouldSendFromPull = motionModel.pullToSendArmed && pullToSendEligible
-        defer {
-            clearPushGestureState()
-        }
+        defer { clearPushGestureState() }
 
         let dx = translation.x
         let dy = translation.y
@@ -1051,7 +1058,7 @@ struct MessageInputBar: View {
             let wasWalkie = dictation.isWalkieTalkieActive
             let wasSurfaceOpen = dictation.isSurfaceOpen
             onSend()
-            withAnimation(.interactiveSpring(response: 0.28, dampingFraction: 0.82, blendDuration: 0.12)) {
+            withAnimation(settleSpring) {
                 if wasWalkie {
                     motionModel.surfaceInteractiveProgress = 0
                 } else {
@@ -1065,12 +1072,12 @@ struct MessageInputBar: View {
             if dictation.isWalkieTalkieActive {
                 if motionModel.pushGestureStartedWithSurfaceOpen {
                     dictation.endWalkieTalkieIfNeeded()
-                    withAnimation(.interactiveSpring(response: 0.28, dampingFraction: 0.82, blendDuration: 0.12)) {
+                    withAnimation(settleSpring) {
                         motionModel.surfaceInteractiveProgress = 1
                     }
                 } else {
                     dictation.dismissSurfaceFromUserGesture()
-                    withAnimation(.interactiveSpring(response: 0.28, dampingFraction: 0.82, blendDuration: 0.12)) {
+                    withAnimation(settleSpring) {
                         motionModel.surfaceInteractiveProgress = 0
                     }
                 }
@@ -1079,7 +1086,7 @@ struct MessageInputBar: View {
             if verticalDominant && (down >= 32 || fastDown || projectedDown >= 96 || motionModel.surfaceInteractiveProgress < 0.45) {
                 dictation.dismissSurfaceFromUserGesture()
             } else {
-                withAnimation(.interactiveSpring(response: 0.28, dampingFraction: 0.82, blendDuration: 0.12)) {
+                withAnimation(settleSpring) {
                     motionModel.surfaceInteractiveProgress = 1
                 }
             }
@@ -1092,14 +1099,14 @@ struct MessageInputBar: View {
         }
         guard verticalDominant else {
             dictation.cancelGesturePrewarmIfNeeded(trigger: "push_end_not_vertical_dominant")
-            withAnimation(.interactiveSpring(response: 0.28, dampingFraction: 0.82, blendDuration: 0.12)) {
+            withAnimation(settleSpring) {
                 motionModel.surfaceInteractiveProgress = 0
             }
             return
         }
         guard up >= 32 || fastUp || projectedUp >= 96 || motionModel.surfaceInteractiveProgress >= 0.45 else {
             dictation.cancelGesturePrewarmIfNeeded(trigger: "push_end_threshold_not_met")
-            withAnimation(.interactiveSpring(response: 0.28, dampingFraction: 0.82, blendDuration: 0.12)) {
+            withAnimation(settleSpring) {
                 motionModel.surfaceInteractiveProgress = 0
             }
             return
@@ -1107,7 +1114,7 @@ struct MessageInputBar: View {
         if motionModel.pushStartedWalkieTalkie {
             logDictation("DICTATION_UI gesture_end classification=walkie_release up=\(up) down=\(down) fastUp=\(fastUp) projectedUp=\(projectedUp)")
             dictation.endWalkieTalkieIfNeeded()
-            withAnimation(.interactiveSpring(response: 0.28, dampingFraction: 0.82, blendDuration: 0.12)) {
+            withAnimation(settleSpring) {
                 motionModel.surfaceInteractiveProgress = 1
             }
             return
@@ -1116,7 +1123,7 @@ struct MessageInputBar: View {
         logDictation("DICTATION_UI gesture_end classification=sticky_start up=\(up) down=\(down) fastUp=\(fastUp) projectedUp=\(projectedUp)")
         dictation.startStickyDictation()
         beginMicFadeOut(fromSwipe: false)
-        withAnimation(.interactiveSpring(response: 0.28, dampingFraction: 0.82, blendDuration: 0.12)) {
+        withAnimation(settleSpring) {
             motionModel.surfaceInteractiveProgress = 1
         }
     }
@@ -1125,17 +1132,21 @@ struct MessageInputBar: View {
         guard motionModel.pushGestureStart != nil || motionModel.pushDragUpDistance != 0 || motionModel.pushCommitReachedAt != nil || motionModel.pushStartedWalkieTalkie || motionModel.pushGestureStartedWithSurfaceOpen else {
             return
         }
-        motionModel.clearGestureState()
-        scheduleInsetUnfreezeAfterSettle()
+        scheduleInsetUnfreezeAfterSettle(resetMotionState: true)
     }
 
     private func shouldBeginDictationPan(startLocation: CGPoint, velocity: CGPoint) -> Bool {
         if dictation.isSurfaceOpen {
             return true
         }
-        guard dictation.swipeActivationEnabled else { return false }
+        if dictation.swipeActivationEnabled {
+            return true
+        }
+        if selectionRange.length > 0 && !startsInEditableRegion(startLocation: startLocation) {
+            return true
+        }
         _ = velocity
-        return true
+        return false
     }
 
     private func startsInEditableRegion(startLocation: CGPoint) -> Bool {
@@ -1205,13 +1216,24 @@ struct MessageInputBar: View {
     }
 
     private var pullToSendIndicator: some View {
-        HStack(spacing: 8) {
+        let subtitle: String = {
+            if !pullToSendEligible {
+                return "Nothing to send"
+            }
+            return motionModel.pullToSendArmed ? "Release to send" : "Pull up to send"
+        }()
+
+        return HStack(spacing: 8) {
             Image(systemName: motionModel.pullToSendArmed ? "paperplane.fill" : "arrow.up.circle")
                 .font(.system(size: 14, weight: .semibold))
-            Text(motionModel.pullToSendArmed ? "Release to send" : "Pull up to send")
+            Text(subtitle)
                 .font(.footnote.weight(.semibold))
         }
-        .foregroundStyle(motionModel.pullToSendArmed ? ChatFlowTheme.adminAccent(colorScheme) : inputTintColor.opacity(0.9))
+        .foregroundStyle({
+            if !pullToSendEligible { return AnyShapeStyle(.secondary) }
+            if motionModel.pullToSendArmed { return AnyShapeStyle(ChatFlowTheme.adminAccent(colorScheme)) }
+            return AnyShapeStyle(inputTintColor.opacity(0.9))
+        }())
         .frame(maxWidth: .infinity)
         .padding(.vertical, 8)
         .background(.ultraThinMaterial, in: Capsule())
@@ -1329,17 +1351,29 @@ struct MessageInputBar: View {
         }
     }
 
-    private func scheduleInsetUnfreezeAfterSettle() {
+    private func scheduleInsetUnfreezeAfterSettle(resetMotionState: Bool = false) {
         insetUnfreezeTask?.cancel()
+        gestureSettleTask?.cancel()
         insetUnfreezeTask = Task { @MainActor in
             do {
-                try await Task.sleep(for: .milliseconds(320))
+                try await Task.sleep(for: .milliseconds(settleDurationMs))
             } catch is CancellationError {
                 return
             } catch {
                 return
             }
             onDictationSurfaceDragActiveChange(false)
+        }
+        guard resetMotionState else { return }
+        gestureSettleTask = Task { @MainActor in
+            do {
+                try await Task.sleep(for: .milliseconds(settleDurationMs))
+            } catch is CancellationError {
+                return
+            } catch {
+                return
+            }
+            motionModel.clearGestureState()
         }
     }
 

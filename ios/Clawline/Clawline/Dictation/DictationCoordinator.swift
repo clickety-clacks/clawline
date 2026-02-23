@@ -109,6 +109,9 @@ final class DictationCoordinator {
             guard oldValue != state else { return }
             let trace = "DICTATION_COORD state \(String(describing: oldValue)) -> \(String(describing: state))"
             logDictation(trace)
+            if !isSurfaceOpen {
+                setSystemIdleSleepDisabled(false)
+            }
         }
     }
     private(set) var errorMessage: String?
@@ -824,6 +827,15 @@ final class DictationCoordinator {
     }
 
     private func armSessionDurationTimer() {
+        if mode == .walkieTalkie {
+            maxDurationTask?.cancel()
+            maxDurationTask = nil
+            logDictation(
+                "DICTATION_STOP trace_id=DICTATION_STOP_TIMER_MAX_DURATION_SKIP " +
+                "caller=armSessionDurationTimer reason=walkie_mode \(attemptContext())"
+            )
+            return
+        }
         if maxDurationTask != nil {
             logDictation(
                 "DICTATION_STOP trace_id=DICTATION_STOP_TIMER_MAX_DURATION_CANCEL " +
@@ -865,6 +877,14 @@ final class DictationCoordinator {
     }
 
     private func resetTokenInactivityTimer() {
+        if mode == .walkieTalkie {
+            cancelTokenInactivityTimer(reason: "walkie_mode_skip")
+            logDictation(
+                "DICTATION_STOP trace_id=DICTATION_STOP_TIMER_TOKEN_INACTIVITY_SKIP " +
+                "caller=resetTokenInactivityTimer reason=walkie_mode \(attemptContext())"
+            )
+            return
+        }
         logDictation(
             "DICTATION_STOP trace_id=DICTATION_STOP_TIMER_TOKEN_INACTIVITY_RESET " +
             "caller=resetTokenInactivityTimer ts=\(Date().timeIntervalSince1970) " +
@@ -1414,9 +1434,10 @@ final class DictationCoordinator {
         let db = 20 * log10(rms)
         let minDb: Float = -55
         let maxDb: Float = -10
-        let clamped = min(max((db - minDb) / (maxDb - minDb), 0), 1)
-        let eased = pow(clamped, 0.7)
-        return WaveformDefaults.amplitudeFloor + CGFloat(eased) * WaveformDefaults.amplitudeRange
+        let normalized = max(0, (db - minDb) / (maxDb - minDb))
+        let curveGain: Float = 2.4
+        let curved = tanh(normalized * curveGain) / tanh(curveGain)
+        return WaveformDefaults.amplitudeFloor + CGFloat(curved) * WaveformDefaults.amplitudeRange
     }
 
     private func elapsedSessionMilliseconds() -> Int {

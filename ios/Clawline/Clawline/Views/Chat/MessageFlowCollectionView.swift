@@ -25,6 +25,7 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
     var isActiveSession: Bool
     var isRenderPolicyFrozen: Bool
     var isInputActive: Bool
+    var isKeyboardVisible: Bool
     var truncationBottomInset: CGFloat
     var firstUnreadMessageId: String?
     var unreadCount: Int
@@ -51,6 +52,7 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
             isActiveSession: isActiveSession,
             isRenderPolicyFrozen: isRenderPolicyFrozen,
             isInputActive: isInputActive,
+            isKeyboardVisible: isKeyboardVisible,
             topInset: topInset,
             truncationBottomInset: truncationBottomInset,
             firstUnreadMessageId: firstUnreadMessageId,
@@ -78,6 +80,7 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
             isActiveSession: isActiveSession,
             isRenderPolicyFrozen: isRenderPolicyFrozen,
             isInputActive: isInputActive,
+            isKeyboardVisible: isKeyboardVisible,
             topInset: topInset,
             truncationBottomInset: truncationBottomInset,
             firstUnreadMessageId: firstUnreadMessageId,
@@ -133,6 +136,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     private var isActiveSession: Bool = true
     private var isRenderPolicyFrozen: Bool = false
     private var isInputActive: Bool = false
+    private var isKeyboardVisible: Bool = false
     private var topInset: CGFloat = 0
     private var truncationBottomInset: CGFloat = 0
     private var lastBoundsSize: CGSize = .zero
@@ -509,6 +513,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 isActiveSession: isActiveSession,
                 isRenderPolicyFrozen: isRenderPolicyFrozen,
                 isInputActive: isInputActive,
+                isKeyboardVisible: isKeyboardVisible,
                 topInset: topInset,
                 truncationBottomInset: truncationBottomInset,
                 firstUnreadMessageId: self.firstUnreadMessageId,
@@ -1090,6 +1095,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             isActiveSession: isActiveSession,
             isRenderPolicyFrozen: isRenderPolicyFrozen,
             isInputActive: isInputActive,
+            isKeyboardVisible: isKeyboardVisible,
             topInset: topInset,
             truncationBottomInset: truncationBottomInset,
             firstUnreadMessageId: firstUnreadMessageId,
@@ -1107,6 +1113,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         isActiveSession: Bool,
         isRenderPolicyFrozen: Bool,
         isInputActive: Bool,
+        isKeyboardVisible: Bool,
         topInset: CGFloat,
         truncationBottomInset: CGFloat,
         firstUnreadMessageId: String?,
@@ -1127,6 +1134,13 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         self.isActiveSession = isActiveSession
         self.isRenderPolicyFrozen = isRenderPolicyFrozen
         self.isInputActive = isInputActive
+        self.isKeyboardVisible = isKeyboardVisible
+#if !os(visionOS)
+        let desiredDismissMode: UIScrollView.KeyboardDismissMode = .interactive
+        if collectionView.keyboardDismissMode != desiredDismissMode {
+            collectionView.keyboardDismissMode = desiredDismissMode
+        }
+#endif
         self.onExpand = onExpand
         self.truncationBottomInset = truncationBottomInset
         self.onScrollEvent = onScrollEvent

@@ -134,6 +134,7 @@ struct ChatView: View {
     @State private var inputBarHeight: CGFloat = 0
     @State private var settledInputBarHeight: CGFloat = 0
     @State private var isDictationSurfaceDragActive: Bool = false
+    @State private var composerMotionOffsetY: CGFloat = 0
     @State private var streamToastManager = StreamToastManager()
     @State private var streamToastBusySince: Date?
     @State private var streamToastBusyClearTask: Task<Void, Never>?
@@ -412,7 +413,8 @@ struct ChatView: View {
         )
         .contentShape(Rectangle())
         .highPriorityGesture(
-            DragGesture(minimumDistance: 2)
+            // Use global coordinates so drag translation remains stable while the button itself moves.
+            DragGesture(minimumDistance: 2, coordinateSpace: .global)
                 .onChanged { value in
                     handleScrollButtonDragChanged(value, containerWidth: containerWidth)
                 }
@@ -717,8 +719,8 @@ struct ChatView: View {
         .onChange(of: inputBarHeight) { _, newValue in
             if !isDictationSurfaceDragActive {
                 settledInputBarHeight = newValue
+                layoutRevision &+= 1
             }
-            layoutRevision &+= 1
         }
         .onChange(of: isInputFocused) { _, _ in
             layoutRevision &+= 1
@@ -727,8 +729,9 @@ struct ChatView: View {
         .onChange(of: isDictationSurfaceDragActive) { _, isActive in
             if !isActive {
                 settledInputBarHeight = inputBarHeight
+                layoutCoordinator.updateBarHeight(inputBarHeight)
+                layoutRevision &+= 1
             }
-            layoutRevision &+= 1
         }
         .onChange(of: geometry.safeAreaInsets.bottom) { _, _ in layoutRevision &+= 1 }
         .onChange(of: horizontalSizeClass) { _, _ in layoutRevision &+= 1 }
@@ -879,6 +882,7 @@ struct ChatView: View {
         return KeyboardPinnedContainer(
             desiredBottomGap: belowBarGap,
             isKeyboardVisible: isKeyboardVisible,
+            composerMotionOffsetY: composerMotionOffsetY,
             measuredHeight: $inputBarHeight,
             freezeBarHeightUpdates: isDictationSurfaceDragActive,
             versionText: appVersionLabel,
@@ -922,6 +926,9 @@ struct ChatView: View {
                 onFocusChange: { focused in isInputFocused = focused },
                 onDictationSurfaceDragActiveChange: { isActive in
                     isDictationSurfaceDragActive = isActive
+                },
+                onComposerMotionOffsetChange: { offsetY in
+                    composerMotionOffsetY = offsetY
                 },
                 onPasteImages: handlePastedImages,
                 isCompact: horizontalSizeClass == .compact
@@ -986,6 +993,7 @@ struct ChatView: View {
             isActiveSession: sessionKey == renderPolicySessionKey,
             isRenderPolicyFrozen: viewModel.isRenderPolicyFrozen,
             isInputActive: isInputFocused,
+            isKeyboardVisible: isKeyboardVisible,
             truncationBottomInset: truncationBottomInset,
             firstUnreadMessageId: state.firstUnreadMessageId,
             unreadCount: state.unreadCount,
@@ -1181,6 +1189,7 @@ struct ChatView: View {
                 isActiveSession: false,
                 isRenderPolicyFrozen: false,
                 isInputActive: isInputFocused,
+                isKeyboardVisible: isKeyboardVisible,
                 truncationBottomInset: truncationBottomInset,
                 firstUnreadMessageId: nil,
                 unreadCount: 0,
@@ -1770,6 +1779,7 @@ private struct KeyboardPinnedContainer<Content: View>: UIViewRepresentable {
 
     let desiredBottomGap: CGFloat
     let isKeyboardVisible: Bool
+    let composerMotionOffsetY: CGFloat
     @Binding var measuredHeight: CGFloat
     let freezeBarHeightUpdates: Bool
     let versionText: AttributedString?
@@ -1787,6 +1797,7 @@ private struct KeyboardPinnedContainer<Content: View>: UIViewRepresentable {
     init(
         desiredBottomGap: CGFloat,
         isKeyboardVisible: Bool,
+        composerMotionOffsetY: CGFloat = 0,
         measuredHeight: Binding<CGFloat>,
         freezeBarHeightUpdates: Bool = false,
         versionText: AttributedString? = nil,
@@ -1803,6 +1814,7 @@ private struct KeyboardPinnedContainer<Content: View>: UIViewRepresentable {
     ) {
         self.desiredBottomGap = desiredBottomGap
         self.isKeyboardVisible = isKeyboardVisible
+        self.composerMotionOffsetY = composerMotionOffsetY
         self._measuredHeight = measuredHeight
         self.freezeBarHeightUpdates = freezeBarHeightUpdates
         self.versionText = versionText
@@ -1836,7 +1848,6 @@ private struct KeyboardPinnedContainer<Content: View>: UIViewRepresentable {
         )
         uiView.updatePageDots(pageDotsView, gap: pageDotsGap)
         uiView.setOnBarHeightChange { [weak layoutCoordinator] height in
-            guard !freezeBarHeightUpdates else { return }
             // Break potential SwiftUI layout cycles by only propagating meaningful bar height changes.
             // (On some iOS 26.2 devices we observed AttributeGraph "cycle detected" during launch.)
             let snapped = (height * 2).rounded() / 2  // half-point granularity
@@ -1844,6 +1855,18 @@ private struct KeyboardPinnedContainer<Content: View>: UIViewRepresentable {
                 DispatchQueue.main.async {
                     _measuredHeight.wrappedValue = snapped
                 }
+            } else if measuredHeight <= 0.5, snapped > 0.5 {
+                // First non-zero measurement after mount: always inform coordinator.
+                DispatchQueue.main.async {
+                    _measuredHeight.wrappedValue = snapped
+                }
+            }
+
+            // During an active dictation drag, keep layout coordinator inset frozen.
+            // We still update measuredHeight so the settled value is available immediately on release.
+            guard !freezeBarHeightUpdates else { return }
+
+            if abs(measuredHeight - snapped) > 1.0 {
                 layoutCoordinator?.updateBarHeight(snapped)
             } else if measuredHeight <= 0.5, snapped > 0.5 {
                 // First non-zero measurement after mount: always inform coordinator.
@@ -1851,6 +1874,7 @@ private struct KeyboardPinnedContainer<Content: View>: UIViewRepresentable {
             }
         }
         layoutCoordinator.registerBarView(uiView)
+        uiView.setComposerMotionOffsetY(composerMotionOffsetY)
         layoutCoordinator.applyTransitionIfPossible(reason: "KeyboardPinnedContainer.updateUIView")
         _ = layoutKey
         NSLog("[KBTIMING] KBPinnedContainer.updateUIView gap=%.1f kbVis=%d dt=%.4f", desiredBottomGap, isKeyboardVisible ? 1 : 0, CFAbsoluteTimeGetCurrent() - t0)
@@ -1873,6 +1897,7 @@ private final class KeyboardPinnedContainerView<Content: View>: UIView, Keyboard
     private var bottomToContainerConstraint: NSLayoutConstraint?
     private var onBarHeightChange: ((CGFloat) -> Void)?
     private var lastMeasuredHeight: CGFloat = 0
+    private var composerMotionOffsetY: CGFloat = 0
 
     init(rootView: Content, versionText: AttributedString?) {
         hostingController = UIHostingController(rootView: rootView)
@@ -2038,6 +2063,12 @@ private final class KeyboardPinnedContainerView<Content: View>: UIView, Keyboard
 #endif
     }
 
+    func setComposerMotionOffsetY(_ offsetY: CGFloat) {
+        guard abs(composerMotionOffsetY - offsetY) > 0.5 else { return }
+        composerMotionOffsetY = offsetY
+        applyComposerMotionTransform()
+    }
+
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
@@ -2061,10 +2092,25 @@ private final class KeyboardPinnedContainerView<Content: View>: UIView, Keyboard
 
     override func layoutSubviews() {
         super.layoutSubviews()
+        applyComposerMotionTransform()
         let height = barHeight
         guard abs(height - lastMeasuredHeight) > 0.5 else { return }
         lastMeasuredHeight = height
         onBarHeightChange?(height)
+    }
+
+    private func applyComposerMotionTransform() {
+        guard let hostingView = hostingController.view else { return }
+        let transform = CGAffineTransform(translationX: 0, y: composerMotionOffsetY)
+        if hostingView.transform != transform {
+            hostingView.transform = transform
+        }
+        if let pageDotsHost, pageDotsHost.view.transform != transform {
+            pageDotsHost.view.transform = transform
+        }
+        if versionLabel.transform != transform {
+            versionLabel.transform = transform
+        }
     }
 
     private func ensureConstraints(desiredBottomGap: CGFloat) {

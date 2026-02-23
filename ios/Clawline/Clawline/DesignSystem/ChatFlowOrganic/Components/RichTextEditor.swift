@@ -54,7 +54,7 @@ struct RichTextEditor: UIViewRepresentable {
         textView.font = UIFont.preferredFont(forTextStyle: .body)
         textView.allowsEditingTextAttributes = true
 #if !os(visionOS)
-        textView.keyboardDismissMode = .interactive
+        textView.keyboardDismissMode = .none
 #endif
         textView.returnKeyType = .send
         textView.tintColor = tintColor
@@ -113,6 +113,12 @@ struct RichTextEditor: UIViewRepresentable {
         if textView.isInputEnabled != isEditable {
             textView.isInputEnabled = isEditable
         }
+
+#if !os(visionOS)
+        if textView.keyboardDismissMode != .none {
+            textView.keyboardDismissMode = .none
+        }
+#endif
 
         if textView.tintColor != tintColor {
             textView.tintColor = tintColor
@@ -331,9 +337,6 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
             guard oldValue != isInputEnabled else { return }
             isEditable = isInputEnabled
             isSelectable = isInputEnabled
-            if !isInputEnabled && isFirstResponder {
-                resignFirstResponder()
-            }
         }
     }
 

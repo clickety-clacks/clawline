@@ -117,6 +117,12 @@ final class DictationCoordinator {
     private(set) var inlineKeyText: String = SonioxConfigurationStore.editableAPIKey
     private(set) var inlineKeyStatus: SonioxKeyVerificationStatus = SonioxConfigurationStore.keyStatus
 
+    private func setSystemIdleSleepDisabled(_ disabled: Bool) {
+#if os(iOS)
+        UIApplication.shared.isIdleTimerDisabled = disabled
+#endif
+    }
+
     var inlineKeyActionTitle: String {
         inlineKeyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Get Key" : "Verify"
     }
@@ -140,6 +146,10 @@ final class DictationCoordinator {
 
     var isListening: Bool {
         state == .dictatingSticky || state == .dictatingWalkieTalkie
+    }
+
+    var isListeningReady: Bool {
+        isListening && isPhase3StreamingAudio && isSocketConnected
     }
 
     var isStickyDictationActive: Bool {
@@ -218,6 +228,7 @@ final class DictationCoordinator {
     private var transcriptApplyTask: Task<Void, Never>?
     private var phase1IdleTeardownTask: Task<Void, Never>?
     private var prewarmConnectTask: Task<Void, Never>?
+    private var pauseListeningInFlight = false
     private var activationGeneration: UInt64 = 0
     private var prewarmGeneration: UInt64?
     private var isPhase3StreamingAudio = false
@@ -225,6 +236,9 @@ final class DictationCoordinator {
     private var bufferedAudioFrames: [Data] = []
     private let maxBufferedAudioFrames = 64
     private var lastAudioActivityResetAt: Date?
+    private var suppressedPrewarmFailureBudget = 0
+    private var dictationAttemptID: UInt64 = 0
+    private var activeAttemptID: UInt64?
 
     nonisolated private static func callSite(
         function: StaticString = #function,
@@ -362,7 +376,7 @@ final class DictationCoordinator {
     }
 
     func startStickyDictation() {
-        logDictation("DICTATION_UI startStickyDictation")
+        logDictation("DICTATION_UI startStickyDictation state=\(String(describing: state)) \(attemptContext())")
         if state == .dictatingPaused {
             resumeFromPaused()
             return
@@ -372,7 +386,7 @@ final class DictationCoordinator {
     }
 
     func startWalkieTalkieDictation() {
-        logDictation("DICTATION_UI startWalkieTalkieDictation")
+        logDictation("DICTATION_UI startWalkieTalkieDictation state=\(String(describing: state)) \(attemptContext())")
         walkieOrigin = .pushHold
         start(mode: .walkieTalkie)
     }
@@ -551,7 +565,6 @@ final class DictationCoordinator {
             sendAction()
             return
         }
-        sendAction()
         Task { [weak self] in
             guard let self else { return }
             logDictation("DICTATION_STOP trace_id=DICTATION_STOP_SEND_TAP_FINALIZATION caller=send_tap_finalization ts=\(Date().timeIntervalSince1970)")
@@ -566,6 +579,9 @@ final class DictationCoordinator {
             } else {
                 await self.pauseListening(reason: "send_tap_pause")
                 finalizedWithinTimeout = true
+            }
+            await MainActor.run {
+                sendAction()
             }
             self.analytics.trackSendWhileActive(finalizedWithinTimeout: finalizedWithinTimeout)
         }
@@ -594,10 +610,18 @@ final class DictationCoordinator {
             return
         }
 
+        dictationAttemptID &+= 1
+        activeAttemptID = dictationAttemptID
         let generation = prewarmGeneration ?? nextActivationGeneration()
         pendingActivationMode = nil
         self.mode = mode
-        if state != .dictatingPaused {
+        logDictation("DICTATION_ATTEMPT start_requested start_mode=\(mode.rawValue) \(attemptContext())")
+        let needsSessionContextInitialization =
+            state != .dictatingPaused ||
+            originSessionKey == nil ||
+            originSessionKey != currentSessionKey
+
+        if needsSessionContextInitialization {
             self.originSessionKey = currentSessionKey
             bridge.resetTranscriptState(for: currentSessionKey)
             logDictation("DICTATION_PERF ts=\(Date().timeIntervalSince1970) event=capture_snapshot_begin session=\(currentSessionKey)")
@@ -625,6 +649,8 @@ final class DictationCoordinator {
         case .walkieTalkie:
             state = .dictatingWalkieTalkie
         }
+        logDictation("DICTATION_ATTEMPT mode_committed \(attemptContext())")
+        setSystemIdleSleepDisabled(true)
 
         analytics.trackStart(mode: mode, sessionKey: currentSessionKey)
         if prewarmGeneration != generation {
@@ -652,9 +678,14 @@ final class DictationCoordinator {
         return apiKey
     }
 
+    private func attemptContext() -> String {
+        "attempt_id=\(activeAttemptID.map(String.init) ?? "nil") generation=\(prewarmGeneration.map(String.init) ?? "nil") mode=\(String(describing: mode)) state=\(String(describing: state)) socket=\(isSocketConnected) phase3=\(isPhase3StreamingAudio)"
+    }
+
     private func beginPhase2Prewarm(apiKey: String, generation: UInt64) {
         closeAndResetRealtimePipeline(closeReason: "phase2_replacement")
         prewarmGeneration = generation
+        suppressedPrewarmFailureBudget = 1
         isPhase3StreamingAudio = false
         isSocketConnected = false
         bufferedAudioFrames.removeAll(keepingCapacity: true)
@@ -701,10 +732,6 @@ final class DictationCoordinator {
                 lastAppliedDisplacement = nextDisplacement
                 await MainActor.run {
                     self.waveformDisplacement = nextDisplacement
-                    if (self.state == .dictatingSticky || self.state == .dictatingWalkieTalkie),
-                       targetDisplacement > (WaveformDefaults.amplitudeFloor + 0.10) {
-                        self.markInactivityActivity(source: "audio_level")
-                    }
                 }
             }
         }
@@ -718,23 +745,40 @@ final class DictationCoordinator {
 
         prewarmConnectTask = Task { [weak self] in
             guard let self else { return }
-            do {
-                logDictation("DICTATION_COORD phase2_connect begin generation=\(generation)")
-                try await client.connect(config: SonioxStreamingConfig(apiKey: apiKey, languageHint: languageHintProvider()))
-                try capture.start()
-                await MainActor.run {
-                    guard self.prewarmGeneration == generation else { return }
-                    self.isSocketConnected = true
-                    self.prewarmConnectTask = nil
-                    self.flushBufferedFramesIfPossible()
+            var lastError: Error?
+            for attempt in 1...2 {
+                do {
+                    logDictation("DICTATION_CONN phase2_connect_begin connect_attempt=\(attempt) \(attemptContext())")
+                    try capture.start()
+                    try await client.connect(config: SonioxStreamingConfig(apiKey: apiKey, languageHint: languageHintProvider()))
+                    await MainActor.run {
+                        guard self.prewarmGeneration == generation else { return }
+                        self.isSocketConnected = true
+                        self.logDictation("DICTATION_CONN phase2_connect_success connect_attempt=\(attempt) \(self.attemptContext())")
+                        self.prewarmConnectTask = nil
+                        self.suppressedPrewarmFailureBudget = 0
+                        self.flushBufferedFramesIfPossible()
+                    }
+                    return
+                } catch {
+                    lastError = error
+                    logDictation("DICTATION_CONN phase2_connect_failed connect_attempt=\(attempt) error=\(error.localizedDescription) \(attemptContext())")
+                    capture.stop()
+                    client.close(code: .goingAway, reason: "phase2_retry", caller: "DictationCoordinator.beginPhase2Prewarm attempt=\(attempt)")
+                    if attempt < 2 {
+                        try? await Task.sleep(for: .milliseconds(220))
+                    }
                 }
-            } catch {
-                await MainActor.run {
-                    guard self.prewarmGeneration == generation else { return }
-                    self.prewarmConnectTask = nil
-                    self.closeAndResetRealtimePipeline(closeReason: "phase2_connect_failed")
-                    self.enterError(message: "Dictation failed", source: "phase2_connect")
+            }
+            await MainActor.run {
+                guard self.prewarmGeneration == generation else { return }
+                self.prewarmConnectTask = nil
+                self.suppressedPrewarmFailureBudget = 0
+                self.closeAndResetRealtimePipeline(closeReason: "phase2_connect_failed")
+                if let lastError {
+                    self.logDictation("DICTATION_CONN phase2_connect_final_failed error=\(lastError.localizedDescription) \(self.attemptContext())")
                 }
+                self.enterError(message: "Dictation failed", source: "phase2_connect")
             }
         }
     }
@@ -774,10 +818,42 @@ final class DictationCoordinator {
     }
 
     private func armSessionDurationTimer() {
+        if maxDurationTask != nil {
+            logDictation(
+                "DICTATION_STOP trace_id=DICTATION_STOP_TIMER_MAX_DURATION_CANCEL " +
+                "caller=armSessionDurationTimer reason=replace_existing " +
+                "ts=\(Date().timeIntervalSince1970) \(attemptContext())"
+            )
+        }
         maxDurationTask?.cancel()
+        let startedAt = Date().timeIntervalSince1970
+        logDictation(
+            "DICTATION_STOP trace_id=DICTATION_STOP_TIMER_MAX_DURATION_START " +
+            "caller=armSessionDurationTimer ts=\(startedAt) timeout=\(String(describing: timing.maxSessionDuration)) " +
+            "\(attemptContext())"
+        )
         maxDurationTask = Task { [weak self] in
             guard let self else { return }
-            try? await Task.sleep(for: timing.maxSessionDuration)
+            do {
+                try await Task.sleep(for: timing.maxSessionDuration)
+            } catch {
+                self.logDictation(
+                    "DICTATION_STOP trace_id=DICTATION_STOP_TIMER_MAX_DURATION_CANCELLED_OBSERVED " +
+                    "caller=timer_max_duration ts=\(Date().timeIntervalSince1970) \(self.attemptContext())"
+                )
+                return
+            }
+            guard !Task.isCancelled else {
+                self.logDictation(
+                    "DICTATION_STOP trace_id=DICTATION_STOP_TIMER_MAX_DURATION_CANCELLED_OBSERVED " +
+                    "caller=timer_max_duration ts=\(Date().timeIntervalSince1970) \(self.attemptContext())"
+                )
+                return
+            }
+            self.logDictation(
+                "DICTATION_STOP trace_id=DICTATION_STOP_TIMER_MAX_DURATION_FIRED " +
+                "caller=timer_max_duration ts=\(Date().timeIntervalSince1970) \(self.attemptContext())"
+            )
             await self.pauseListening(reason: "max_duration")
         }
     }
@@ -786,7 +862,8 @@ final class DictationCoordinator {
         logDictation(
             "DICTATION_STOP trace_id=DICTATION_STOP_TIMER_TOKEN_INACTIVITY_RESET " +
             "caller=resetTokenInactivityTimer ts=\(Date().timeIntervalSince1970) " +
-            "state=\(String(describing: state)) timeout=\(String(describing: timing.tokenInactivityTimeout))"
+            "state=\(String(describing: state)) timeout=\(String(describing: timing.tokenInactivityTimeout)) " +
+            "\(attemptContext())"
         )
         cancelTokenInactivityTimer(reason: "reset_token_inactivity_timer")
         tokenInactivityTaskID &+= 1
@@ -795,19 +872,27 @@ final class DictationCoordinator {
         logDictation(
             "DICTATION_STOP trace_id=DICTATION_STOP_TIMER_TOKEN_INACTIVITY_START " +
             "caller=resetTokenInactivityTimer task_id=\(taskID) ts=\(Date().timeIntervalSince1970) " +
-            "state=\(String(describing: state))"
+            "state=\(String(describing: state)) \(attemptContext())"
         )
         tokenInactivityTask = Task { [weak self] in
             guard let self else { return }
-            try? await Task.sleep(for: timing.tokenInactivityTimeout)
-            if Task.isCancelled {
+            do {
+                try await Task.sleep(for: timing.tokenInactivityTimeout)
+            } catch {
                 self.logDictation(
                     "DICTATION_STOP trace_id=DICTATION_STOP_TIMER_TOKEN_INACTIVITY_CANCELLED_OBSERVED " +
-                    "caller=timer_token_inactivity task_id=\(taskID) ts=\(Date().timeIntervalSince1970)"
+                    "caller=timer_token_inactivity task_id=\(taskID) ts=\(Date().timeIntervalSince1970) \(self.attemptContext())"
                 )
                 return
             }
-            logDictation("DICTATION_STOP trace_id=DICTATION_STOP_TIMER_TOKEN_INACTIVITY caller=timer_token_inactivity ts=\(Date().timeIntervalSince1970)")
+            if Task.isCancelled {
+                self.logDictation(
+                    "DICTATION_STOP trace_id=DICTATION_STOP_TIMER_TOKEN_INACTIVITY_CANCELLED_OBSERVED " +
+                    "caller=timer_token_inactivity task_id=\(taskID) ts=\(Date().timeIntervalSince1970) \(self.attemptContext())"
+                )
+                return
+            }
+            logDictation("DICTATION_STOP trace_id=DICTATION_STOP_TIMER_TOKEN_INACTIVITY caller=timer_token_inactivity ts=\(Date().timeIntervalSince1970) \(attemptContext())")
             activeTokenInactivityTaskID = nil
             await self.pauseListening(reason: "token_inactivity")
         }
@@ -833,7 +918,7 @@ final class DictationCoordinator {
         logDictation(
             "DICTATION_STOP trace_id=DICTATION_STOP_TIMER_TOKEN_INACTIVITY_CANCEL " +
             "caller=cancelTokenInactivityTimer reason=\(reason) " +
-            "task_id=\(activeTokenInactivityTaskID.map(String.init) ?? "nil") ts=\(Date().timeIntervalSince1970)"
+            "task_id=\(activeTokenInactivityTaskID.map(String.init) ?? "nil") ts=\(Date().timeIntervalSince1970) \(attemptContext())"
         )
         tokenInactivityTask.cancel()
         self.tokenInactivityTask = nil
@@ -878,7 +963,7 @@ final class DictationCoordinator {
                 }
             }
         case .closed:
-            logDictation("DICTATION_STOP trace_id=DICTATION_STOP_SOCKET_CLOSED_EVENT caller=soniox_event_closed state=\(String(describing: state)) mode=\(String(describing: mode))")
+            logDictation("DICTATION_STOP trace_id=DICTATION_STOP_SOCKET_CLOSED_EVENT caller=soniox_event_closed state=\(String(describing: state)) mode=\(String(describing: mode)) \(attemptContext())")
             if let mode,
                state == .dictatingSticky || state == .dictatingWalkieTalkie {
                 let elapsed = elapsedSessionMilliseconds()
@@ -886,7 +971,7 @@ final class DictationCoordinator {
                 await pauseListening(reason: "socket_drop")
             }
         case .failed(let stage, let code, let message):
-            logDictation("DICTATION_COORD soniox_event failed stage=\(stage.rawValue) code=\(code ?? "nil") message=\(message)")
+            logDictation("DICTATION_CONN soniox_event_failed stage=\(stage.rawValue) code=\(code ?? "nil") message=\(message) \(attemptContext())")
             analytics.trackError(errorCode: code, stage: stage.rawValue)
             await handleTransportFailure(stage: stage, message: message)
         }
@@ -932,7 +1017,12 @@ final class DictationCoordinator {
 
     private func handleTransportFailure(stage: SonioxStreamingClientStage, message: String) async {
         guard isDictationActive || prewarmConnectTask != nil else { return }
-        logDictation("DICTATION_STOP trace_id=DICTATION_STOP_TRANSPORT_FAILURE caller=handleTransportFailure ts=\(Date().timeIntervalSince1970) stage=\(stage.rawValue) message=\(message)")
+        if prewarmConnectTask != nil, suppressedPrewarmFailureBudget > 0 {
+            suppressedPrewarmFailureBudget -= 1
+            logDictation("DICTATION_COORD suppressed_prewarm_failure stage=\(stage.rawValue) message=\(message) \(attemptContext())")
+            return
+        }
+        logDictation("DICTATION_STOP trace_id=DICTATION_STOP_TRANSPORT_FAILURE caller=handleTransportFailure ts=\(Date().timeIntervalSince1970) stage=\(stage.rawValue) message=\(message) \(attemptContext())")
         analytics.trackError(errorCode: nil, stage: stage.rawValue)
         await pauseListening(reason: "transport_failure")
         logDictation("DICTATION_ERROR path=handleTransportFailure ts=\(Date().timeIntervalSince1970) stage=\(stage.rawValue) message=\(message)")
@@ -952,7 +1042,7 @@ final class DictationCoordinator {
     ) async -> Bool {
         logDictation(
             "DICTATION_STOP stopKeep_top ts=\(Date().timeIntervalSince1970) reason=\(reason) " +
-            "state=\(String(describing: state)) callsite=\(callSite)"
+            "state=\(String(describing: state)) callsite=\(callSite) \(attemptContext())"
         )
         guard state == .dictatingSticky || state == .dictatingPaused || state == .dictatingWalkieTalkie || state == .stoppingKeep else {
             logger.notice(
@@ -991,7 +1081,10 @@ final class DictationCoordinator {
                 enterError(message: "Failed to finalize dictation", source: "stopKeep_sendFinalize")
             }
         }
-        audioCapture?.stop()
+        let keepAudioForPausedWaveform = !collapseSurface
+        if !keepAudioForPausedWaveform {
+            audioCapture?.stop()
+        }
 
         if gracefulFinalize {
             do {
@@ -1013,7 +1106,12 @@ final class DictationCoordinator {
             reason: "client_finalize",
             caller: "DictationCoordinator.stopKeep reason=\(reason) trigger=\(trigger) callSite=\(callSite)"
         )
-        finalizeSessionCleanup(reason: reason, announceStop: announceStop, collapseSurface: collapseSurface)
+        finalizeSessionCleanup(
+            reason: reason,
+            announceStop: announceStop,
+            collapseSurface: collapseSurface,
+            keepAudioForPausedWaveform: keepAudioForPausedWaveform
+        )
         return finalizedWithinTimeout
     }
 
@@ -1025,6 +1123,7 @@ final class DictationCoordinator {
         guard state == .dictatingSticky || state == .dictatingPaused || state == .dictatingWalkieTalkie || state == .stoppingKeep else { return }
 
         pendingStopContext = "trigger=\(trigger) callSite=\(callSite)"
+        logDictation("DICTATION_STOP stopDiscard_entry reason=\(reason) trigger=\(trigger) callsite=\(callSite) \(attemptContext())")
         logger.notice(
             "Dictation stopDiscard requested reason=\(reason, privacy: .public) trigger=\(trigger, privacy: .public) callSite=\(callSite, privacy: .public) state=\(String(describing: self.state), privacy: .public)"
         )
@@ -1066,7 +1165,12 @@ final class DictationCoordinator {
         return finishedReceived
     }
 
-    private func finalizeSessionCleanup(reason: String, announceStop: Bool, collapseSurface: Bool) {
+    private func finalizeSessionCleanup(
+        reason: String,
+        announceStop: Bool,
+        collapseSurface: Bool,
+        keepAudioForPausedWaveform: Bool = false
+    ) {
         let duration = elapsedSessionMilliseconds()
         let stopContext = pendingStopContext ?? "trigger=unknown callSite=unknown"
         logger.notice(
@@ -1079,16 +1183,21 @@ final class DictationCoordinator {
             feedback.announce("Dictation stopped")
         }
 
-        waveformDisplacement = 1
+        if !keepAudioForPausedWaveform {
+            waveformDisplacement = 1
+        }
         finishedReceived = false
         mode = nil
         sessionStartedAt = nil
         lastTokenAt = nil
+        setSystemIdleSleepDisabled(false)
 
         eventTask?.cancel()
         frameTask?.cancel()
-        levelTask?.cancel()
-        audioEventTask?.cancel()
+        if !keepAudioForPausedWaveform {
+            levelTask?.cancel()
+            audioEventTask?.cancel()
+        }
         maxDurationTask?.cancel()
         cancelTokenInactivityTimer(reason: "finalizeSessionCleanup")
         streamSwitchStopTask?.cancel()
@@ -1097,25 +1206,31 @@ final class DictationCoordinator {
 
         eventTask = nil
         frameTask = nil
-        levelTask = nil
-        audioEventTask = nil
+        if !keepAudioForPausedWaveform {
+            levelTask = nil
+            audioEventTask = nil
+        }
         maxDurationTask = nil
         streamSwitchStopTask = nil
         transcriptApplyTask = nil
         prewarmConnectTask = nil
 
-        audioCapture = nil
+        if !keepAudioForPausedWaveform {
+            audioCapture = nil
+        }
         streamingClient = nil
         isSocketConnected = false
         isPhase3StreamingAudio = false
         bufferedAudioFrames.removeAll(keepingCapacity: false)
         prewarmGeneration = nil
 
-        originSessionKey = nil
-        preDictationSnapshot = .empty
-        pendingTranscriptText = nil
-        lastAppliedTranscriptText = ""
-        pendingActivationMode = nil
+        if !keepAudioForPausedWaveform {
+            originSessionKey = nil
+            preDictationSnapshot = .empty
+            pendingTranscriptText = nil
+            lastAppliedTranscriptText = ""
+            pendingActivationMode = nil
+        }
         pendingStopContext = nil
 
         if collapseSurface, state != .error {
@@ -1128,6 +1243,7 @@ final class DictationCoordinator {
     private func enterError(message: String, source: String = "unspecified") {
         logDictation("DICTATION_ERROR enter_error ts=\(Date().timeIntervalSince1970) source=\(source) state=\(String(describing: state)) message=\(message)")
         logDictation("DICTATION_COORD enter_error message=\(message)")
+        setSystemIdleSleepDisabled(false)
         errorMessage = message
         state = .error
         feedback.notifyError()
@@ -1140,13 +1256,31 @@ final class DictationCoordinator {
 
     private func pauseListening(reason: String) async {
         guard state == .dictatingSticky || state == .dictatingWalkieTalkie || state == .dictatingPaused else { return }
+        guard !pauseListeningInFlight else {
+            logDictation(
+                "DICTATION_STOP trace_id=DICTATION_STOP_PAUSE_DUPLICATE_SUPPRESSED " +
+                "caller=pauseListening reason=\(reason) ts=\(Date().timeIntervalSince1970) \(attemptContext())"
+            )
+            return
+        }
+        pauseListeningInFlight = true
+        defer { pauseListeningInFlight = false }
+        logDictation("DICTATION_STOP pauseListening_entry reason=\(reason) \(attemptContext())")
+        let keepCaptureForPausedWaveform = reason == "waveform_tap_pause"
+            || reason == "walkie_release_to_paused"
+            || reason == "send_tap_pause"
+        logDictation(
+            "DICTATION_STOP trace_id=DICTATION_STOP_TIMER_MAX_DURATION_CANCEL " +
+            "caller=pauseListening reason=\(reason) ts=\(Date().timeIntervalSince1970) \(attemptContext())"
+        )
         maxDurationTask?.cancel()
         cancelTokenInactivityTimer(reason: "pauseListening")
         flushPendingTranscriptApply()
         prewarmConnectTask?.cancel()
         prewarmConnectTask = nil
+        suppressedPrewarmFailureBudget = 0
 
-        audioCapture?.stop()
+        await finalizeForPendingStopAction(reason: reason, timeout: timing.sendFinalizeTimeout)
         streamingClient?.close(
             code: .normalClosure,
             reason: "paused",
@@ -1155,14 +1289,9 @@ final class DictationCoordinator {
 
         eventTask?.cancel()
         frameTask?.cancel()
-        levelTask?.cancel()
-        audioEventTask?.cancel()
         eventTask = nil
         frameTask = nil
-        levelTask = nil
-        audioEventTask = nil
         maxDurationTask = nil
-        audioCapture = nil
         streamingClient = nil
         isSocketConnected = false
         isPhase3StreamingAudio = false
@@ -1170,8 +1299,34 @@ final class DictationCoordinator {
         prewarmGeneration = nil
         lastAudioActivityResetAt = nil
         mode = nil
+        setSystemIdleSleepDisabled(false)
+
+        if !keepCaptureForPausedWaveform {
+            audioCapture?.stop()
+            levelTask?.cancel()
+            audioEventTask?.cancel()
+            levelTask = nil
+            audioEventTask = nil
+            audioCapture = nil
+        }
+
         state = .dictatingPaused
         schedulePhase1IdleTeardown()
+    }
+
+    private func finalizeForPendingStopAction(reason: String, timeout: Duration) async {
+        guard streamingClient != nil else { return }
+        do {
+            try await streamingClient?.sendFinalize()
+        } catch {
+            logDictation("DICTATION_COORD finalize_for_pause sendFinalize_failed reason=\(reason) error=\(error.localizedDescription)")
+        }
+        do {
+            try await streamingClient?.sendAudioFrame(Data())
+        } catch {
+            // Best-effort flush marker.
+        }
+        _ = await waitForFinished(timeout: timeout)
     }
 
     private func resumeFromPaused() {
@@ -1192,6 +1347,7 @@ final class DictationCoordinator {
     }
 
     private func closeAndResetRealtimePipeline(closeReason: String) {
+        logDictation("DICTATION_CONN close_and_reset reason=\(closeReason) \(attemptContext())")
         prewarmConnectTask?.cancel()
         prewarmConnectTask = nil
         audioCapture?.stop()

@@ -8,8 +8,185 @@
 import SwiftUI
 import UIKit
 import OSLog
+import Combine
 
 private let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "MessageInputBar")
+
+private struct MessageInputBarTextEditorFramePreferenceKey: PreferenceKey {
+    static var defaultValue: CGRect = .zero
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
+        value = nextValue()
+    }
+}
+
+@MainActor
+private final class DictationSurfaceMotionModel: ObservableObject {
+    @Published var pushGestureStart: Date?
+    @Published var pushCommitReachedAt: Date?
+    @Published var pushDragUpDistance: CGFloat = 0
+    @Published var pushStartedWalkieTalkie = false
+    @Published var pushGestureStartedWithSurfaceOpen = false
+    @Published var surfaceInteractiveProgress: CGFloat = 0
+    @Published var pullToSendProgress: CGFloat = 0
+    @Published var pullToSendArmed = false
+
+    func beginGesture(surfaceOpen: Bool) {
+        guard pushGestureStart == nil else { return }
+        pushGestureStart = Date()
+        pushCommitReachedAt = nil
+        pushStartedWalkieTalkie = false
+        pushGestureStartedWithSurfaceOpen = surfaceOpen
+    }
+
+    func updatePullToSendArming(upDistance: CGFloat, startThreshold: CGFloat, triggerThreshold: CGFloat, eligible: Bool) {
+        let progress = max(0, min(1, (upDistance - startThreshold) / (triggerThreshold - startThreshold)))
+        pullToSendProgress = progress
+        pullToSendArmed = progress >= 1 && eligible
+    }
+
+    func resetPullToSendVisualState() {
+        pullToSendProgress = 0
+        pullToSendArmed = false
+    }
+
+    func clearGestureState() {
+        pushGestureStart = nil
+        pushCommitReachedAt = nil
+        pushDragUpDistance = 0
+        pushStartedWalkieTalkie = false
+        pushGestureStartedWithSurfaceOpen = false
+        resetPullToSendVisualState()
+    }
+}
+
+private struct DictationPanEvent {
+    let startLocation: CGPoint
+    let translation: CGPoint
+    let predictedEndTranslation: CGPoint
+    let velocity: CGPoint
+}
+
+private struct DictationPanGestureInstaller: UIViewRepresentable {
+    var shouldBegin: (CGPoint, CGPoint) -> Bool
+    var onChanged: (DictationPanEvent) -> Void
+    var onEnded: (DictationPanEvent, Bool) -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(shouldBegin: shouldBegin, onChanged: onChanged, onEnded: onEnded)
+    }
+
+    func makeUIView(context: Context) -> InstallerView {
+        let view = InstallerView()
+        view.coordinator = context.coordinator
+        context.coordinator.attachIfNeeded(from: view)
+        return view
+    }
+
+    func updateUIView(_ uiView: InstallerView, context: Context) {
+        context.coordinator.shouldBegin = shouldBegin
+        context.coordinator.onChanged = onChanged
+        context.coordinator.onEnded = onEnded
+        context.coordinator.attachIfNeeded(from: uiView)
+    }
+
+    final class InstallerView: UIView {
+        weak var coordinator: Coordinator?
+
+        override init(frame: CGRect) {
+            super.init(frame: frame)
+            isUserInteractionEnabled = false
+            backgroundColor = .clear
+        }
+
+        required init?(coder: NSCoder) {
+            fatalError("init(coder:) has not been implemented")
+        }
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            coordinator?.attachIfNeeded(from: self)
+        }
+    }
+
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        var shouldBegin: (CGPoint, CGPoint) -> Bool
+        var onChanged: (DictationPanEvent) -> Void
+        var onEnded: (DictationPanEvent, Bool) -> Void
+
+        private weak var attachedView: UIView?
+        private let pan = UIPanGestureRecognizer()
+
+        init(
+            shouldBegin: @escaping (CGPoint, CGPoint) -> Bool,
+            onChanged: @escaping (DictationPanEvent) -> Void,
+            onEnded: @escaping (DictationPanEvent, Bool) -> Void
+        ) {
+            self.shouldBegin = shouldBegin
+            self.onChanged = onChanged
+            self.onEnded = onEnded
+            super.init()
+            pan.addTarget(self, action: #selector(handlePan(_:)))
+            pan.delegate = self
+            pan.maximumNumberOfTouches = 1
+            pan.cancelsTouchesInView = true
+            pan.delaysTouchesBegan = false
+            pan.delaysTouchesEnded = false
+        }
+
+        func attachIfNeeded(from installerView: InstallerView) {
+            guard let host = installerView.superview else { return }
+            guard attachedView !== host else { return }
+            attachedView?.removeGestureRecognizer(pan)
+            host.addGestureRecognizer(pan)
+            attachedView = host
+        }
+
+        @objc
+        private func handlePan(_ gesture: UIPanGestureRecognizer) {
+            guard let host = attachedView, let window = host.window else { return }
+            let event = DictationPanEvent(
+                startLocation: gesture.location(in: window),
+                translation: gesture.translation(in: window),
+                predictedEndTranslation: {
+                    let t = gesture.translation(in: window)
+                    let v = gesture.velocity(in: window)
+                    return CGPoint(x: t.x + (v.x * 0.12), y: t.y + (v.y * 0.12))
+                }(),
+                velocity: gesture.velocity(in: window)
+            )
+
+            switch gesture.state {
+            case .began, .changed:
+                onChanged(event)
+            case .ended:
+                onEnded(event, false)
+            case .cancelled, .failed:
+                onEnded(event, true)
+            default:
+                break
+            }
+        }
+
+        func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+            guard gestureRecognizer === pan,
+                  let host = attachedView,
+                  let window = host.window
+            else {
+                return false
+            }
+            let location = pan.location(in: window)
+            let velocity = pan.velocity(in: window)
+            return shouldBegin(location, velocity)
+        }
+
+        func gestureRecognizer(
+            _ gestureRecognizer: UIGestureRecognizer,
+            shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+        ) -> Bool {
+            false
+        }
+    }
+}
 
 // MARK: - ⚠️⚠️⚠️ CRITICAL: READ ChatView.swift HEADER BEFORE MODIFYING ⚠️⚠️⚠️
 //
@@ -62,22 +239,19 @@ struct MessageInputBar: View {
     let onAdd: () -> Void
     let onFocusChange: (Bool) -> Void
     let onDictationSurfaceDragActiveChange: (Bool) -> Void
+    let onComposerMotionOffsetChange: (CGFloat) -> Void
     var onPasteImages: (([UIImage]) -> Void)?
 
     @State private var editorHeight: CGFloat = 44
-    @State private var pushGestureStart: Date?
-    @State private var pushCommitReachedAt: Date?
-    @State private var pushStartedWalkieTalkie = false
-    @State private var pushGestureStartedWithSurfaceOpen = false
+    @StateObject private var motionModel = DictationSurfaceMotionModel()
     @State private var waveformDidStartWalkie = false
-    @State private var surfaceInteractiveProgress: CGFloat = 0
-    @State private var pullToSendProgress: CGFloat = 0
-    @State private var pullToSendArmed = false
     @State private var micTransientVisible = false
     @State private var micTransientOpacity: Double = 0
     @State private var micTransientOffset: CGFloat = 0
     @State private var micFadeTask: Task<Void, Never>?
+    @State private var insetUnfreezeTask: Task<Void, Never>?
     @State private var reconnectPulseOn: Bool = false
+    @State private var textEditorGlobalFrame: CGRect = .zero
     let isCompact: Bool
 
     private var metrics: MessageInputBarMetrics {
@@ -132,6 +306,25 @@ struct MessageInputBar: View {
             && (dictation.micVisible || micTransientVisible)
     }
 
+    private var isDictationDragActive: Bool {
+        motionModel.pushGestureStart != nil
+    }
+
+    private var shouldPreserveKeyboardDuringSurfaceDrag: Bool {
+        isKeyboardVisible && isTextFieldFocused
+    }
+
+    private var isWalkieDragLockRequired: Bool {
+        isDictationDragActive && (motionModel.pushStartedWalkieTalkie || dictation.isWalkieTalkieActive)
+    }
+
+    private var shouldLockTextSelectionForDrag: Bool {
+        if isWalkieDragLockRequired {
+            return true
+        }
+        return isDictationDragActive && !shouldPreserveKeyboardDuringSurfaceDrag
+    }
+
     private var micTrailingPadding: CGFloat {
         shouldRenderMic ? 52 : 20
     }
@@ -161,12 +354,16 @@ struct MessageInputBar: View {
 
     private var pullToSendStartThreshold: CGFloat { 40 }
     private var pullToSendTriggerThreshold: CGFloat { 62 }
+    private var revealThreshold: CGFloat { 100 }
+    private var walkieHoldActivationThreshold: CGFloat { 124 }
+    private var walkieHoldDurationSeconds: TimeInterval { 0.55 }
     private var pullToSendEligible: Bool {
         !isSending && canSend && connectionState == .connected
     }
 
     private var pullToSendLift: CGFloat {
-        (16 + 56 * pullToSendProgress) * (pullToSendProgress > 0 ? 1 : 0)
+        let revealContribution = motionModel.pushGestureStartedWithSurfaceOpen ? 0 : min(motionModel.pushDragUpDistance, 100)
+        return max(0, motionModel.pushDragUpDistance - revealContribution)
     }
 
     private var containerPadding: CGFloat {
@@ -284,236 +481,12 @@ struct MessageInputBar: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .bottom, spacing: MessageInputBarMetrics.elementSpacing) {
-#if os(visionOS)
-                // Appearance toggle button
-                Button(action: {
-                    settings.toggleAppearanceMode()
-                }) {
-                    Image(systemName: appearanceIconName)
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(appearanceIconColor)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .frame(width: metrics.inputBarHeight, height: metrics.inputBarHeight)
-#if os(visionOS)
-                .background(.regularMaterial, in: Circle())
-                .overlay {
-                    Circle()
-                        .stroke(visionOSBorderColor, lineWidth: 1)
-                }
-#else
-                .glassEffect(.regular.interactive(), in: Circle())
-                .background {
-                    if isLightMode {
-                        Circle()
-                            .fill(Color.primary.opacity(0.15))
-                    }
-                }
-#endif
-                .accessibilityLabel("Toggle appearance")
-#endif
+            inputRow
 
-                // Add button - send-style for reliable hit testing (left side)
-                Button(action: {
-                    onAdd()
-                }) {
-                    Image(systemName: "plus")
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundStyle(addButtonForeground)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .frame(width: metrics.inputBarHeight, height: metrics.inputBarHeight)
-#if os(visionOS)
-                .background(.regularMaterial, in: Circle())
-                .overlay(
-                    Circle()
-                        .stroke(visionOSBorderColor, lineWidth: 1)
-                )
-#else
-                .glassEffect(.regular.interactive(), in: Circle())
-#endif
-                .accessibilityLabel("Add attachment")
-                .disabled(isSending)
-
-                // Text field - glass capsule/rounded rect
-                ZStack(alignment: .leading) {
-                    RichTextEditor(
-                        attributedText: $content,
-                        calculatedHeight: $editorHeight,
-                        selectionRange: $selectionRange,
-                        pendingInsertions: $pendingInsertions,
-                        resetToken: resetToken,
-                        focusTrigger: focusTrigger,
-                        isEditable: true,
-                        tintColor: inputTintUIColor,
-                        textColor: {
-#if os(visionOS)
-                            // #61: Input bar is forced dark on visionOS; ensure typed text is visible.
-                            return .white
-#else
-                            return .label
-#endif
-                        }(),
-                        onFocusChange: onFocusChange,
-                        onSubmit: {
-                            guard !isSending, canSend else { return }
-                            onSend()
-                        },
-                        onEscape: {
-                            dictation.stopFromEscapeKey()
-                        },
-                        onEscapeLongPress: {
-                            dictation.discardFromEscapeLongPress()
-                        },
-                        onPasteImages: onPasteImages,
-                        onTextViewReady: { textView in
-                            dictation.setComposeTextView(textView)
-                        },
-                        trailingPadding: micTrailingPadding
-                    )
-                    .opacity(isSending ? 0.5 : 1)
-
-                    if content.length == 0 {
-                        Text(placeholderText)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                            .minimumScaleFactor(0.7)
-                            .foregroundColor(placeholderColor)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-                            .frame(maxHeight: .infinity, alignment: .center)
-                            .padding(.leading, 20)
-                            .padding(.trailing, micTrailingPadding)
-                    }
-
-                    if shouldRenderMic {
-                        micButton
-                            .padding(.trailing, 8)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
-                            .opacity(dictation.micVisible ? 1 : micTransientOpacity)
-                            .offset(x: dictation.micVisible ? 0 : micTransientOffset)
-                            .allowsHitTesting(dictation.micVisible)
-                            .transition(.move(edge: .trailing).combined(with: .opacity))
-                            .animation(.easeOut(duration: isTextFieldFocused ? 0.7 : 0.35), value: dictation.micVisible)
-                    }
-                }
-                .tint(inputTintColor)
-                .frame(height: inputHeight)
-                .frame(maxWidth: .infinity, alignment: .bottom)
-                .contentShape(Rectangle())
-                .simultaneousGesture(pushToRevealGesture)
-#if os(visionOS)
-                .background(.regularMaterial, in: inputShape)
-#else
-                .glassEffect(.regular, in: inputShape)
-#endif
-                .overlay {
-                    inputShape
-                        .stroke(inputBorderColor, lineWidth: 1)
-                }
-                .accessibilityAction(named: Text("Start Sticky Dictation")) {
-                    guard dictation.micVisible || dictation.swipeActivationEnabled else { return }
-                    dictation.startStickyDictation()
-                }
-                .accessibilityAction(named: Text("Start Walkie-Talkie Dictation")) {
-                    guard dictation.micVisible || dictation.swipeActivationEnabled else { return }
-                    dictation.startWalkieTalkieDictation()
-                    beginMicFadeOut(fromSwipe: !dictation.micVisible)
-                }
-                .accessibilityAction(named: Text("Stop Dictation")) {
-                    dictation.stopFromVoiceOverAction()
-                }
-                .accessibilityAction(named: Text("Cancel and Discard Dictation")) {
-                    dictation.discardFromVoiceOverAction()
-                }
-
-                // Send button - morphs with connection state, keeps frame/anchor stable.
-                let sendActionEnabled = isSending || canSend || isDisconnected
-                let sendIconOpacity = (sendActionEnabled || isReconnecting) ? 1 : 0.4
-                Button(action: {
-                    if isSending {
-                        onCancel()
-                        return
-                    }
-                    switch connectionState {
-                    case .connected:
-                        onSend()
-                    case .disconnected:
-                        onReconnect()
-                    case .reconnecting:
-                        break
-                    }
-                }) {
-                    ZStack {
-                        if isReconnecting {
-                            Circle()
-                                .fill(sendBackgroundColor)
-                                .frame(
-                                    width: min(12, sendButtonWidth * 0.4),
-                                    height: min(12, sendButtonWidth * 0.4)
-                                )
-                                .opacity(reconnectPulseOn ? 1 : 0.4)
-                                .scaleEffect(reconnectPulseOn ? 1.2 : 1.0)
-                        } else {
-                            Image(systemName: "stop.fill")
-                                .font(.system(size: 16, weight: .semibold))
-                                .foregroundStyle(sendIconColor)
-                                .opacity(isSending ? 1 : 0)
-                            Image(systemName: isDisconnected ? "arrow.clockwise" : "paperplane.fill")
-                                .font(.system(size: 18, weight: .semibold))
-                                .foregroundStyle(sendIconColor)
-                                .opacity(isSending ? 0 : 1)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .contentShape(Rectangle())
-                }
-                .frame(width: sendButtonWidth, height: metrics.inputBarHeight)
-#if os(visionOS)
-                .background(
-                    Circle().fill(
-                        isReconnecting
-                            ? .clear
-                            : sendBackgroundColor.opacity(sendActionEnabled ? 1 : 0.35)
-                    )
-                )
-                .overlay(Circle().stroke(visionOSBorderColor, lineWidth: 1))
-#else
-                .background(
-                    Capsule().fill(
-                        isReconnecting
-                            ? .clear
-                            : sendBackgroundColor.opacity(sendActionEnabled ? 1 : 0.35)
-                    )
-                )
-#endif
-                .buttonStyle(.plain)
-#if os(visionOS)
-                .tint(sendIconColor)
-                .foregroundStyle(sendIconColor)
-#endif
-                .allowsHitTesting(sendActionEnabled && !isReconnecting)
-                .opacity(sendIconOpacity)
-                .accessibilityLabel(
-                    isReconnecting ? "Reconnecting" :
-                        (isDisconnected ? "Disconnected. Tap to reconnect." : "Send message")
-                )
-                .accessibilityHint(connectionAlertHint ?? "")
-                .id("send-button")
-                .transaction { $0.animation = nil }
-                .animation(nil, value: isSending)
-                .animation(nil, value: canSend)
-                .animation(nil, value: connectionState)
-            }
-
-            if dictation.isSurfaceOpen || surfaceInteractiveProgress > 0.001 {
+            if dictation.isSurfaceOpen || motionModel.surfaceInteractiveProgress > 0.001 {
                 dictationSurface
-                    .opacity(surfaceInteractiveProgress)
-                    .frame(height: max(0, 100 * surfaceInteractiveProgress), alignment: .top)
+                    .opacity(motionModel.surfaceInteractiveProgress)
+                    .frame(height: max(0, 100 * motionModel.surfaceInteractiveProgress), alignment: .top)
                     .clipped()
             }
 
@@ -522,16 +495,37 @@ struct MessageInputBar: View {
         .padding(.bottom, metrics.bottomPadding)
         .frame(maxWidth: maxBarWidth)
         .frame(maxWidth: .infinity, alignment: .center)
-        .offset(y: -pullToSendLift)
         .overlay(alignment: .bottom) {
-            if pullToSendProgress > 0.001 {
+            if motionModel.pullToSendProgress > 0.001 {
                 pullToSendIndicator
                     .frame(height: 40)
-                    .scaleEffect(0.85 + 0.15 * pullToSendProgress, anchor: .center)
-                    .opacity(min(1, 0.2 + 1.2 * pullToSendProgress))
+                    .scaleEffect(0.85 + 0.15 * motionModel.pullToSendProgress, anchor: .center)
+                    .opacity(min(1, 0.2 + 1.2 * motionModel.pullToSendProgress))
                     .offset(y: MessageInputBarMetrics.elementSpacing)
-                    .allowsHitTesting(false)
+                .allowsHitTesting(false)
             }
+        }
+        .contentShape(Rectangle())
+        .background(
+            DictationPanGestureInstaller(
+                shouldBegin: shouldBeginDictationPan(startLocation:velocity:),
+                onChanged: { event in
+                    handlePushChanged(startLocation: event.startLocation, translation: event.translation)
+                },
+                onEnded: { event, _ in
+                    handlePushEnded(
+                        startLocation: event.startLocation,
+                        translation: event.translation,
+                        predictedEndTranslation: event.predictedEndTranslation
+                    )
+                }
+            )
+        )
+        .onChange(of: pullToSendLift) { _, newValue in
+            onComposerMotionOffsetChange(-newValue)
+        }
+        .onPreferenceChange(MessageInputBarTextEditorFramePreferenceKey.self) { frame in
+            textEditorGlobalFrame = frame
         }
         .simultaneousGesture(TapGesture().onEnded {
             logger.info("Input bar tap gesture")
@@ -558,19 +552,25 @@ struct MessageInputBar: View {
         }
         .onDisappear {
             micFadeTask?.cancel()
+            insetUnfreezeTask?.cancel()
+            motionModel.clearGestureState()
             reconnectPulseOn = false
             onDictationSurfaceDragActiveChange(false)
-            resetPullToSendVisualState()
+            onComposerMotionOffsetChange(0)
         }
         .onAppear {
-            surfaceInteractiveProgress = dictation.isSurfaceOpen ? 1 : 0
+            motionModel.surfaceInteractiveProgress = dictation.isSurfaceOpen ? 1 : 0
             reconnectPulseOn = false
+            onComposerMotionOffsetChange(-pullToSendLift)
             guard isReconnecting else { return }
             withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) {
                 reconnectPulseOn = true
             }
         }
         .onChange(of: dictation.isSurfaceOpen) { _, isOpen in
+            // Keep list inset frozen through surface settle so layout uses one settled signal.
+            onDictationSurfaceDragActiveChange(true)
+            scheduleInsetUnfreezeAfterSettle()
             if isOpen {
                 micFadeTask?.cancel()
                 micTransientVisible = false
@@ -578,7 +578,7 @@ struct MessageInputBar: View {
                 micTransientOffset = 0
             }
             withAnimation(.interactiveSpring(response: 0.28, dampingFraction: 0.82, blendDuration: 0.12)) {
-                surfaceInteractiveProgress = isOpen ? 1 : 0
+                motionModel.surfaceInteractiveProgress = isOpen ? 1 : 0
             }
         }
         .onChange(of: connectionState) { _, newValue in
@@ -590,6 +590,241 @@ struct MessageInputBar: View {
             } else {
                 reconnectPulseOn = false
             }
+        }
+    }
+
+    private var inputRow: some View {
+        HStack(alignment: .bottom, spacing: MessageInputBarMetrics.elementSpacing) {
+#if os(visionOS)
+            // Appearance toggle button
+            Button(action: {
+                settings.toggleAppearanceMode()
+            }) {
+                Image(systemName: appearanceIconName)
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(appearanceIconColor)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .frame(width: metrics.inputBarHeight, height: metrics.inputBarHeight)
+#if os(visionOS)
+            .background(.regularMaterial, in: Circle())
+            .overlay {
+                Circle()
+                    .stroke(visionOSBorderColor, lineWidth: 1)
+            }
+#else
+            .glassEffect(.regular.interactive(), in: Circle())
+            .background {
+                if isLightMode {
+                    Circle()
+                        .fill(Color.primary.opacity(0.15))
+                }
+            }
+#endif
+            .accessibilityLabel("Toggle appearance")
+#endif
+
+            // Add button - send-style for reliable hit testing (left side)
+            Button(action: {
+                onAdd()
+            }) {
+                Image(systemName: "plus")
+                    .font(.system(size: 18, weight: .semibold))
+                    .foregroundStyle(addButtonForeground)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .frame(width: metrics.inputBarHeight, height: metrics.inputBarHeight)
+#if os(visionOS)
+            .background(.regularMaterial, in: Circle())
+            .overlay(
+                Circle()
+                    .stroke(visionOSBorderColor, lineWidth: 1)
+            )
+#else
+            .glassEffect(.regular.interactive(), in: Circle())
+#endif
+            .accessibilityLabel("Add attachment")
+            .disabled(isSending)
+
+            // Text field - glass capsule/rounded rect
+            ZStack(alignment: .leading) {
+                RichTextEditor(
+                    attributedText: $content,
+                    calculatedHeight: $editorHeight,
+                    selectionRange: $selectionRange,
+                    pendingInsertions: $pendingInsertions,
+                    resetToken: resetToken,
+                    focusTrigger: focusTrigger,
+                    isEditable: true,
+                    tintColor: inputTintUIColor,
+                    textColor: {
+#if os(visionOS)
+                        // #61: Input bar is forced dark on visionOS; ensure typed text is visible.
+                        return .white
+#else
+                        return .label
+#endif
+                    }(),
+                    onFocusChange: onFocusChange,
+                    onSubmit: {
+                        guard !isSending, canSend else { return }
+                        onSend()
+                    },
+                    onEscape: {
+                        dictation.stopFromEscapeKey()
+                    },
+                    onEscapeLongPress: {
+                        dictation.discardFromEscapeLongPress()
+                    },
+                    onPasteImages: onPasteImages,
+                    onTextViewReady: { textView in
+                        dictation.setComposeTextView(textView)
+                    },
+                    trailingPadding: micTrailingPadding
+                )
+                .opacity(isSending ? 0.5 : 1)
+
+                if content.length == 0 {
+                    Text(placeholderText)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .minimumScaleFactor(0.7)
+                        .foregroundColor(placeholderColor)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                        .frame(maxHeight: .infinity, alignment: .center)
+                        .padding(.leading, 20)
+                        .padding(.trailing, micTrailingPadding)
+                }
+
+                if shouldRenderMic {
+                    micButton
+                        .padding(.trailing, 8)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+                        .opacity(dictation.micVisible ? 1 : micTransientOpacity)
+                        .offset(x: dictation.micVisible ? 0 : micTransientOffset)
+                        .allowsHitTesting(dictation.micVisible)
+                        .transition(.move(edge: .trailing).combined(with: .opacity))
+                        .animation(.easeOut(duration: isTextFieldFocused ? 0.7 : 0.35), value: dictation.micVisible)
+                }
+            }
+            .tint(inputTintColor)
+            .frame(height: inputHeight)
+            .frame(maxWidth: .infinity, alignment: .bottom)
+            .contentShape(Rectangle())
+#if os(visionOS)
+            .background(.regularMaterial, in: inputShape)
+#else
+            .glassEffect(.regular, in: inputShape)
+#endif
+            .overlay {
+                inputShape
+                    .stroke(inputBorderColor, lineWidth: 1)
+            }
+            .background(
+                GeometryReader { proxy in
+                    Color.clear.preference(
+                        key: MessageInputBarTextEditorFramePreferenceKey.self,
+                        value: proxy.frame(in: .global)
+                    )
+                }
+            )
+            .accessibilityAction(named: Text("Start Sticky Dictation")) {
+                guard dictation.micVisible || dictation.swipeActivationEnabled else { return }
+                dictation.startStickyDictation()
+            }
+            .accessibilityAction(named: Text("Start Walkie-Talkie Dictation")) {
+                guard dictation.micVisible || dictation.swipeActivationEnabled else { return }
+                dictation.startWalkieTalkieDictation()
+                beginMicFadeOut(fromSwipe: !dictation.micVisible)
+            }
+            .accessibilityAction(named: Text("Stop Dictation")) {
+                dictation.stopFromVoiceOverAction()
+            }
+            .accessibilityAction(named: Text("Cancel and Discard Dictation")) {
+                dictation.discardFromVoiceOverAction()
+            }
+
+            // Send button - morphs with connection state, keeps frame/anchor stable.
+            let sendActionEnabled = isSending || canSend || isDisconnected
+            let sendIconOpacity = (sendActionEnabled || isReconnecting) ? 1 : 0.4
+            Button(action: {
+                if isSending {
+                    onCancel()
+                    return
+                }
+                switch connectionState {
+                case .connected:
+                    onSend()
+                case .disconnected:
+                    onReconnect()
+                case .reconnecting:
+                    break
+                }
+            }) {
+                ZStack {
+                    if isReconnecting {
+                        Circle()
+                            .fill(sendBackgroundColor)
+                            .frame(
+                                width: min(12, sendButtonWidth * 0.4),
+                                height: min(12, sendButtonWidth * 0.4)
+                            )
+                            .opacity(reconnectPulseOn ? 1 : 0.4)
+                            .scaleEffect(reconnectPulseOn ? 1.2 : 1.0)
+                    } else {
+                        Image(systemName: "stop.fill")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(sendIconColor)
+                            .opacity(isSending ? 1 : 0)
+                        Image(systemName: isDisconnected ? "arrow.clockwise" : "paperplane.fill")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundStyle(sendIconColor)
+                            .opacity(isSending ? 0 : 1)
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .contentShape(Rectangle())
+            }
+            .frame(width: sendButtonWidth, height: metrics.inputBarHeight)
+#if os(visionOS)
+            .background(
+                Circle().fill(
+                    isReconnecting
+                        ? .clear
+                        : sendBackgroundColor.opacity(sendActionEnabled ? 1 : 0.35)
+                )
+            )
+            .overlay(Circle().stroke(visionOSBorderColor, lineWidth: 1))
+#else
+            .background(
+                Capsule().fill(
+                    isReconnecting
+                        ? .clear
+                        : sendBackgroundColor.opacity(sendActionEnabled ? 1 : 0.35)
+                )
+            )
+#endif
+            .buttonStyle(.plain)
+#if os(visionOS)
+            .tint(sendIconColor)
+            .foregroundStyle(sendIconColor)
+#endif
+            .allowsHitTesting(sendActionEnabled && !isReconnecting)
+            .opacity(sendIconOpacity)
+            .accessibilityLabel(
+                isReconnecting ? "Reconnecting" :
+                    (isDisconnected ? "Disconnected. Tap to reconnect." : "Send message")
+            )
+            .accessibilityHint(connectionAlertHint ?? "")
+            .id("send-button")
+            .transaction { $0.animation = nil }
+            .animation(nil, value: isSending)
+            .animation(nil, value: canSend)
+            .animation(nil, value: connectionState)
         }
     }
 
@@ -612,40 +847,30 @@ struct MessageInputBar: View {
             .accessibilityLabel(dictation.isStickyDictationActive ? "Stop dictation" : "Start dictation")
     }
 
-    private var pushToRevealGesture: some Gesture {
-        DragGesture(minimumDistance: 0)
-            .onChanged { value in
-                handlePushChanged(value)
-            }
-            .onEnded { value in
-                handlePushEnded(value)
-            }
-    }
-
-    private func handlePushChanged(_ value: DragGesture.Value) {
+    private func handlePushChanged(startLocation: CGPoint, translation: CGPoint) {
         logDictation("DICTATION_UI handlePushChanged")
-        let dx = value.translation.width
-        let dy = value.translation.height
+        let dx = translation.x
+        let dy = translation.y
         let up = max(0, -dy)
         let down = max(0, dy)
         let verticalDominant = max(up, down) >= 1.4 * abs(dx)
 
-        if pushGestureStart == nil {
-            pushGestureStart = Date()
-            pushCommitReachedAt = nil
-            pushStartedWalkieTalkie = false
-            pushGestureStartedWithSurfaceOpen = dictation.isSurfaceOpen
+        if motionModel.pushGestureStart == nil {
+            motionModel.beginGesture(surfaceOpen: dictation.isSurfaceOpen)
+            insetUnfreezeTask?.cancel()
             onDictationSurfaceDragActiveChange(true)
             dictation.beginGesturePrewarm()
         }
+        motionModel.pushDragUpDistance = up
 
         if dictation.isSurfaceOpen {
             if verticalDominant {
                 if up > 0 {
-                    surfaceInteractiveProgress = 1
+                    motionModel.surfaceInteractiveProgress = 1
                     updatePullToSendArming(upDistance: up)
                 } else {
-                    surfaceInteractiveProgress = max(0, min(1, 1 - (down / 120)))
+                    motionModel.pushDragUpDistance = 0
+                    motionModel.surfaceInteractiveProgress = max(0, min(1, 1 - (down / 120)))
                     resetPullToSendVisualState()
                 }
             }
@@ -660,58 +885,62 @@ struct MessageInputBar: View {
             if abs(dx) > up {
                 dictation.cancelGesturePrewarmIfNeeded(trigger: "push_changed_horizontal_dominant")
             }
+            motionModel.pushDragUpDistance = 0
             resetPullToSendVisualState()
             return
         }
-        guard up >= 28 else { return }
-        surfaceInteractiveProgress = max(0, min(1, up / 120))
+        motionModel.surfaceInteractiveProgress = max(0, min(1, up / revealThreshold))
         updatePullToSendArming(upDistance: up)
 
-        if pushCommitReachedAt == nil {
-            pushCommitReachedAt = Date()
-            return
-        }
+        if up >= walkieHoldActivationThreshold {
+            if motionModel.pushCommitReachedAt == nil {
+                motionModel.pushCommitReachedAt = Date()
+                return
+            }
 
-        if let pushCommitReachedAt,
-           !pushStartedWalkieTalkie,
-           Date().timeIntervalSince(pushCommitReachedAt) >= 0.35 {
-            pushStartedWalkieTalkie = true
-            dictation.startWalkieTalkieDictation()
-            beginMicFadeOut(fromSwipe: false)
+            if let commitReachedAt = motionModel.pushCommitReachedAt,
+               !motionModel.pushStartedWalkieTalkie,
+               Date().timeIntervalSince(commitReachedAt) >= walkieHoldDurationSeconds {
+                motionModel.pushStartedWalkieTalkie = true
+                logDictation("DICTATION_UI gesture_classification=walkie_hold_activated up=\(up) dx=\(dx) dy=\(dy) hold_secs=\(Date().timeIntervalSince(commitReachedAt))")
+                dictation.startWalkieTalkieDictation()
+                beginMicFadeOut(fromSwipe: false)
+            }
+        } else {
+            motionModel.pushCommitReachedAt = nil
         }
     }
 
-    private func handlePushEnded(_ value: DragGesture.Value) {
+    private func handlePushEnded(startLocation: CGPoint, translation: CGPoint, predictedEndTranslation: CGPoint) {
         logDictation("DICTATION_UI handlePushEnded")
-        let shouldSendFromPull = pullToSendArmed && pullToSendEligible
+        guard motionModel.pushGestureStart != nil else {
+            return
+        }
+        let shouldSendFromPull = motionModel.pullToSendArmed && pullToSendEligible
         defer {
-            pushGestureStart = nil
-            pushCommitReachedAt = nil
-            pushStartedWalkieTalkie = false
-            pushGestureStartedWithSurfaceOpen = false
-            onDictationSurfaceDragActiveChange(false)
-            resetPullToSendVisualState()
+            clearPushGestureState()
         }
 
-        let dx = value.translation.width
-        let dy = value.translation.height
+        let dx = translation.x
+        let dy = translation.y
         let up = max(0, -dy)
         let down = max(0, dy)
         let verticalDominant = max(up, down) >= 1.4 * abs(dx)
-        let fastUp = value.predictedEndTranslation.height < -120
-        let fastDown = value.predictedEndTranslation.height > 120
-        let projectedUp = max(0, -value.predictedEndTranslation.height)
-        let projectedDown = max(0, value.predictedEndTranslation.height)
+        let fastUp = predictedEndTranslation.y < -120
+        let fastDown = predictedEndTranslation.y > 120
+        let projectedUp = max(0, -predictedEndTranslation.y)
+        let projectedDown = max(0, predictedEndTranslation.y)
 
         if shouldSendFromPull {
+            logDictation("DICTATION_UI gesture_end action=pull_to_send up=\(up) down=\(down) verticalDominant=\(verticalDominant) startedSurfaceOpen=\(motionModel.pushGestureStartedWithSurfaceOpen) walkieActive=\(dictation.isWalkieTalkieActive)")
             let wasWalkie = dictation.isWalkieTalkieActive
             let wasSurfaceOpen = dictation.isSurfaceOpen
             onSend()
             withAnimation(.interactiveSpring(response: 0.28, dampingFraction: 0.82, blendDuration: 0.12)) {
                 if wasWalkie {
-                    surfaceInteractiveProgress = 0
+                    motionModel.surfaceInteractiveProgress = 0
                 } else {
-                    surfaceInteractiveProgress = wasSurfaceOpen ? 1 : 0
+                    motionModel.surfaceInteractiveProgress = wasSurfaceOpen ? 1 : 0
                 }
             }
             return
@@ -719,24 +948,24 @@ struct MessageInputBar: View {
 
         if dictation.isSurfaceOpen {
             if dictation.isWalkieTalkieActive {
-                if pushGestureStartedWithSurfaceOpen {
+                if motionModel.pushGestureStartedWithSurfaceOpen {
                     dictation.endWalkieTalkieIfNeeded()
                     withAnimation(.interactiveSpring(response: 0.28, dampingFraction: 0.82, blendDuration: 0.12)) {
-                        surfaceInteractiveProgress = 1
+                        motionModel.surfaceInteractiveProgress = 1
                     }
                 } else {
                     dictation.dismissSurfaceFromUserGesture()
                     withAnimation(.interactiveSpring(response: 0.28, dampingFraction: 0.82, blendDuration: 0.12)) {
-                        surfaceInteractiveProgress = 0
+                        motionModel.surfaceInteractiveProgress = 0
                     }
                 }
                 return
             }
-            if verticalDominant && (down >= 32 || fastDown || projectedDown >= 96 || surfaceInteractiveProgress < 0.45) {
+            if verticalDominant && (down >= 32 || fastDown || projectedDown >= 96 || motionModel.surfaceInteractiveProgress < 0.45) {
                 dictation.dismissSurfaceFromUserGesture()
             } else {
                 withAnimation(.interactiveSpring(response: 0.28, dampingFraction: 0.82, blendDuration: 0.12)) {
-                    surfaceInteractiveProgress = 1
+                    motionModel.surfaceInteractiveProgress = 1
                 }
             }
             return
@@ -749,41 +978,79 @@ struct MessageInputBar: View {
         guard verticalDominant else {
             dictation.cancelGesturePrewarmIfNeeded(trigger: "push_end_not_vertical_dominant")
             withAnimation(.interactiveSpring(response: 0.28, dampingFraction: 0.82, blendDuration: 0.12)) {
-                surfaceInteractiveProgress = 0
+                motionModel.surfaceInteractiveProgress = 0
             }
             return
         }
-        guard up >= 32 || fastUp || projectedUp >= 96 || surfaceInteractiveProgress >= 0.45 else {
+        guard up >= 32 || fastUp || projectedUp >= 96 || motionModel.surfaceInteractiveProgress >= 0.45 else {
             dictation.cancelGesturePrewarmIfNeeded(trigger: "push_end_threshold_not_met")
             withAnimation(.interactiveSpring(response: 0.28, dampingFraction: 0.82, blendDuration: 0.12)) {
-                surfaceInteractiveProgress = 0
+                motionModel.surfaceInteractiveProgress = 0
             }
             return
         }
-        if pushStartedWalkieTalkie {
+        if motionModel.pushStartedWalkieTalkie {
+            logDictation("DICTATION_UI gesture_end classification=walkie_release up=\(up) down=\(down) fastUp=\(fastUp) projectedUp=\(projectedUp)")
             dictation.endWalkieTalkieIfNeeded()
             withAnimation(.interactiveSpring(response: 0.28, dampingFraction: 0.82, blendDuration: 0.12)) {
-                surfaceInteractiveProgress = 1
+                motionModel.surfaceInteractiveProgress = 1
             }
             return
         }
 
+        logDictation("DICTATION_UI gesture_end classification=sticky_start up=\(up) down=\(down) fastUp=\(fastUp) projectedUp=\(projectedUp)")
         dictation.startStickyDictation()
         beginMicFadeOut(fromSwipe: false)
         withAnimation(.interactiveSpring(response: 0.28, dampingFraction: 0.82, blendDuration: 0.12)) {
-            surfaceInteractiveProgress = 1
+            motionModel.surfaceInteractiveProgress = 1
         }
     }
 
+    private func clearPushGestureState() {
+        guard motionModel.pushGestureStart != nil || motionModel.pushDragUpDistance != 0 || motionModel.pushCommitReachedAt != nil || motionModel.pushStartedWalkieTalkie || motionModel.pushGestureStartedWithSurfaceOpen else {
+            return
+        }
+        motionModel.clearGestureState()
+        scheduleInsetUnfreezeAfterSettle()
+    }
+
+    private func shouldBeginDictationPan(startLocation: CGPoint, velocity: CGPoint) -> Bool {
+        let screenHeight = UIScreen.main.bounds.height
+        let homeGestureReserve = max(12, bottomSafeAreaInset - 2)
+        if screenHeight - startLocation.y <= homeGestureReserve {
+            return false
+        }
+
+        let inTextEditor = textEditorGlobalFrame != .zero && textEditorGlobalFrame.contains(startLocation)
+        let verticalDominantVelocity = abs(velocity.y) >= (abs(velocity.x) * 1.25)
+
+        if inTextEditor {
+            if dictation.isSurfaceOpen {
+                // If the surface is already open, require a clear vertical swipe to take over.
+                return abs(velocity.y) >= 220 && verticalDominantVelocity
+            }
+            // Closed surface over text editor: only fast upward intent should engage dictation drag.
+            return velocity.y <= -260 && verticalDominantVelocity
+        }
+
+        if dictation.isSurfaceOpen {
+            return abs(velocity.y) >= max(35, abs(velocity.x))
+        }
+        guard dictation.swipeActivationEnabled else { return false }
+        return velocity.y <= -35 && abs(velocity.y) >= max(35, abs(velocity.x))
+    }
+
     private func updatePullToSendArming(upDistance: CGFloat) {
-        let progress = max(0, min(1, (upDistance - pullToSendStartThreshold) / (pullToSendTriggerThreshold - pullToSendStartThreshold)))
-        pullToSendProgress = progress
-        pullToSendArmed = progress >= 1 && pullToSendEligible
+        motionModel.updatePullToSendArming(
+            upDistance: upDistance,
+            startThreshold: pullToSendStartThreshold,
+            triggerThreshold: pullToSendTriggerThreshold,
+            eligible: pullToSendEligible
+        )
     }
 
     private func resetPullToSendVisualState() {
-        pullToSendProgress = 0
-        pullToSendArmed = false
+        motionModel.resetPullToSendVisualState()
     }
 
     private var dictationSurface: some View {
@@ -810,7 +1077,7 @@ struct MessageInputBar: View {
                     }
                 )
 
-            Text(dictation.state == .dictatingPaused ? "Paused" : "Listening...")
+            Text(dictation.state == .dictatingPaused ? "Paused" : (dictation.isListeningReady ? "Listening..." : "Connecting..."))
                 .font(.footnote.weight(.semibold))
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .center)
@@ -837,12 +1104,12 @@ struct MessageInputBar: View {
 
     private var pullToSendIndicator: some View {
         HStack(spacing: 8) {
-            Image(systemName: pullToSendArmed ? "paperplane.fill" : "arrow.up.circle")
+            Image(systemName: motionModel.pullToSendArmed ? "paperplane.fill" : "arrow.up.circle")
                 .font(.system(size: 14, weight: .semibold))
-            Text(pullToSendArmed ? "Release to send" : "Pull up to send")
+            Text(motionModel.pullToSendArmed ? "Release to send" : "Pull up to send")
                 .font(.footnote.weight(.semibold))
         }
-        .foregroundStyle(pullToSendArmed ? ChatFlowTheme.adminAccent(colorScheme) : inputTintColor.opacity(0.9))
+        .foregroundStyle(motionModel.pullToSendArmed ? ChatFlowTheme.adminAccent(colorScheme) : inputTintColor.opacity(0.9))
         .frame(maxWidth: .infinity)
         .padding(.vertical, 8)
         .background(.ultraThinMaterial, in: Capsule())
@@ -856,11 +1123,17 @@ struct MessageInputBar: View {
                 let midY = height * 0.5
                 let t = CGFloat(context.date.timeIntervalSinceReferenceDate)
                 let normalizedAudio = max(0, min(1, (dictation.waveformDisplacement - 0.35) / 8.65))
-                let pauseMultiplier: CGFloat = dictation.state == .dictatingPaused ? 0.55 : 1.0
+                let isPaused = dictation.state == .dictatingPaused
+                let pauseMultiplier: CGFloat = isPaused ? 0.70 : 1.0
                 let idleDrift = 0.070 + 0.022 * sin(t * 1.9)
-                let audioSwell = dictation.state == .dictatingPaused ? 0 : (1.22 * normalizedAudio)
+                let pausedAudioScale: CGFloat = isPaused ? 0.80 : 1.0
+                let audioSwell = 1.22 * normalizedAudio * pausedAudioScale
                 let baseAmplitude = (idleDrift + audioSwell) * pauseMultiplier
-                let baseLineWidth: CGFloat = dictation.state == .dictatingPaused ? 1.4 : 2.0
+                let frequencyAudioScale: CGFloat = isPaused ? 0.64 : 0.95
+                let phaseAudioScale: CGFloat = isPaused ? 0.52 : 0.65
+                let dynamicFrequencyScale: CGFloat = 1.0 + frequencyAudioScale * normalizedAudio
+                let dynamicPhaseSpeedScale: CGFloat = 1.0 + phaseAudioScale * normalizedAudio
+                let baseLineWidth: CGFloat = isPaused ? 1.1 : 2.0
                 let colorSet: [Color] = [
                     ChatFlowTheme.adminAccent(colorScheme),
                     ChatFlowTheme.sage(colorScheme),
@@ -876,7 +1149,8 @@ struct MessageInputBar: View {
 
                 ZStack {
                     ForEach(Array(waveConfigs.enumerated()), id: \.offset) { index, config in
-                        let phase = (t * config.speed) + config.phaseOffset
+                        let phase = (t * config.speed * dynamicPhaseSpeedScale) + config.phaseOffset
+                        let frequency = config.frequency * dynamicFrequencyScale
                         let waveAmplitude = min(1.28, max(0.060, baseAmplitude * config.amplitudeScale))
                         Path { path in
                             path.move(to: CGPoint(x: 0, y: midY))
@@ -885,13 +1159,13 @@ struct MessageInputBar: View {
                             while x <= width {
                                 let progress = x / width
                                 let taper = pow(sin(progress * .pi), 0.95)
-                                let y = midY + sin((progress * .pi * 2 * config.frequency) + phase) * height * waveAmplitude * taper
+                                let y = midY + sin((progress * .pi * 2 * frequency) + phase) * height * waveAmplitude * taper
                                 path.addLine(to: CGPoint(x: x, y: y))
                                 x += step
                             }
                         }
                         .stroke(
-                            colorSet[index].opacity(dictation.state == .dictatingPaused ? 0.34 : (0.62 - CGFloat(index) * 0.10)),
+                            colorSet[index].opacity(isPaused ? (0.18 - CGFloat(index) * 0.02) : (0.62 - CGFloat(index) * 0.10)),
                             style: StrokeStyle(
                                 lineWidth: baseLineWidth + CGFloat(3 - index) * 0.26,
                                 lineCap: .round,
@@ -938,6 +1212,14 @@ struct MessageInputBar: View {
             micTransientVisible = false
             micTransientOpacity = 0
             micTransientOffset = 0
+        }
+    }
+
+    private func scheduleInsetUnfreezeAfterSettle() {
+        insetUnfreezeTask?.cancel()
+        insetUnfreezeTask = Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(320))
+            onDictationSurfaceDragActiveChange(false)
         }
     }
 
@@ -1005,6 +1287,7 @@ struct DictationMicAffordanceAnimationPlan {
                 onAdd: {},
                 onFocusChange: { _ in },
                 onDictationSurfaceDragActiveChange: { _ in },
+                onComposerMotionOffsetChange: { _ in },
                 onPasteImages: nil,
                 isCompact: true
             )

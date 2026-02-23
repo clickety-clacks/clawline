@@ -1180,7 +1180,7 @@ struct MessageInputBar: View {
             statusColor = .secondary
         }
 
-        VStack(alignment: .center, spacing: 8) {
+        return VStack(alignment: .center, spacing: 8) {
             waveformLine
                 .frame(maxWidth: .infinity)
                 .frame(height: 44)

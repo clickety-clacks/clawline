@@ -1095,13 +1095,7 @@ struct MessageInputBar: View {
             return true
         }
         guard dictation.swipeActivationEnabled else { return false }
-
-        if startsInEditableRegion(startLocation: startLocation) {
-            // Over text editing surface: require clear upward intent to enter dictation drag arbitration.
-            let verticalDominantVelocity = abs(velocity.y) >= (abs(velocity.x) * 1.25)
-            return velocity.y <= -40 && verticalDominantVelocity
-        }
-
+        _ = velocity
         return true
     }
 

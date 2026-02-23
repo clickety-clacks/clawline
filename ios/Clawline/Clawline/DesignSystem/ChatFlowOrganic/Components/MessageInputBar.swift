@@ -153,7 +153,11 @@ private struct DictationPanGestureInstaller: UIViewRepresentable {
         }
 
         func attachIfNeeded(from installerView: InstallerView) {
-            guard let host = installerView.superview else { return }
+            var candidate = installerView.superview
+            while let view = candidate, !view.isUserInteractionEnabled {
+                candidate = view.superview
+            }
+            guard let host = candidate else { return }
             guard attachedView !== host else { return }
             attachedView?.removeGestureRecognizer(pan)
             host.addGestureRecognizer(pan)
@@ -575,7 +579,7 @@ struct MessageInputBar: View {
             }
         }
         .contentShape(Rectangle())
-        .background(
+        .overlay(
             DictationPanGestureInstaller(
                 shouldBegin: shouldBeginDictationPan(startLocation:velocity:),
                 startsInEditableRegion: startsInEditableRegion(startLocation:),
@@ -590,6 +594,7 @@ struct MessageInputBar: View {
                     )
                 }
             )
+            .allowsHitTesting(false)
         )
         .onChange(of: pullToSendLift) { _, newValue in
             onComposerMotionOffsetChange(-newValue)

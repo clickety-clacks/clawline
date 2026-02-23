@@ -69,6 +69,7 @@ private struct DictationPanEvent {
 private struct DictationPanGestureInstaller: UIViewControllerRepresentable {
     var shouldBegin: (CGPoint, CGPoint) -> Bool
     var startsInEditableRegion: (CGPoint) -> Bool
+    var isSurfaceOpen: () -> Bool
     var onChanged: (DictationPanEvent) -> Void
     var onEnded: (DictationPanEvent, Bool) -> Void
 
@@ -76,6 +77,7 @@ private struct DictationPanGestureInstaller: UIViewControllerRepresentable {
         Coordinator(
             shouldBegin: shouldBegin,
             startsInEditableRegion: startsInEditableRegion,
+            isSurfaceOpen: isSurfaceOpen,
             onChanged: onChanged,
             onEnded: onEnded
         )
@@ -91,6 +93,7 @@ private struct DictationPanGestureInstaller: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: InstallerViewController, context: Context) {
         context.coordinator.shouldBegin = shouldBegin
         context.coordinator.startsInEditableRegion = startsInEditableRegion
+        context.coordinator.isSurfaceOpen = isSurfaceOpen
         context.coordinator.onChanged = onChanged
         context.coordinator.onEnded = onEnded
         context.coordinator.attachIfNeeded(from: uiViewController)
@@ -127,6 +130,7 @@ private struct DictationPanGestureInstaller: UIViewControllerRepresentable {
 
         var shouldBegin: (CGPoint, CGPoint) -> Bool
         var startsInEditableRegion: (CGPoint) -> Bool
+        var isSurfaceOpen: () -> Bool
         var onChanged: (DictationPanEvent) -> Void
         var onEnded: (DictationPanEvent, Bool) -> Void
 
@@ -141,11 +145,13 @@ private struct DictationPanGestureInstaller: UIViewControllerRepresentable {
         init(
             shouldBegin: @escaping (CGPoint, CGPoint) -> Bool,
             startsInEditableRegion: @escaping (CGPoint) -> Bool,
+            isSurfaceOpen: @escaping () -> Bool,
             onChanged: @escaping (DictationPanEvent) -> Void,
             onEnded: @escaping (DictationPanEvent, Bool) -> Void
         ) {
             self.shouldBegin = shouldBegin
             self.startsInEditableRegion = startsInEditableRegion
+            self.isSurfaceOpen = isSurfaceOpen
             self.onChanged = onChanged
             self.onEnded = onEnded
             super.init()
@@ -249,6 +255,10 @@ private struct DictationPanGestureInstaller: UIViewControllerRepresentable {
             let fastUpVelocity = event.velocity.y <= -220 && verticalDominant
 
             if startedInEditableRegion {
+                if isSurfaceOpen(), verticalDominant && down >= 6 {
+                    intentLock = .dictation
+                    return
+                }
                 if fastUpVelocity || (up >= 22 && elapsed < 0.18 && verticalDominant) {
                     intentLock = .dictation
                     return
@@ -261,7 +271,7 @@ private struct DictationPanGestureInstaller: UIViewControllerRepresentable {
                 return
             }
 
-            if up >= 6 && verticalDominant {
+            if verticalDominant && (up >= 6 || (isSurfaceOpen() && down >= 6)) {
                 intentLock = .dictation
             }
         }
@@ -612,6 +622,7 @@ struct MessageInputBar: View {
             DictationPanGestureInstaller(
                 shouldBegin: shouldBeginDictationPan(startLocation:velocity:),
                 startsInEditableRegion: startsInEditableRegion(startLocation:),
+                isSurfaceOpen: { dictation.isSurfaceOpen },
                 onChanged: { event in
                     handlePushChanged(startLocation: event.startLocation, translation: event.translation)
                 },
@@ -1119,12 +1130,6 @@ struct MessageInputBar: View {
     }
 
     private func shouldBeginDictationPan(startLocation: CGPoint, velocity: CGPoint) -> Bool {
-        let screenHeight = UIScreen.main.bounds.height
-        let homeGestureReserve = max(12, bottomSafeAreaInset - 2)
-        if screenHeight - startLocation.y <= homeGestureReserve {
-            return false
-        }
-
         if dictation.isSurfaceOpen {
             return true
         }

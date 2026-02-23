@@ -166,6 +166,7 @@ private struct DictationPanGestureInstaller: UIViewRepresentable {
 
         @objc
         private func handlePan(_ gesture: UIPanGestureRecognizer) {
+            logger.info("DICTATION_UI pan_debug_fired state=\(gesture.state.rawValue, privacy: .public)")
             guard let host = attachedView, let window = host.window else { return }
             let event = DictationPanEvent(
                 startLocation: gesture.location(in: window),

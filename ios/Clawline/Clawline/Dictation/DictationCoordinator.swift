@@ -1031,6 +1031,14 @@ final class DictationCoordinator {
         logDictation("DICTATION_STOP trace_id=DICTATION_STOP_TRANSPORT_FAILURE caller=handleTransportFailure ts=\(Date().timeIntervalSince1970) stage=\(stage.rawValue) message=\(message) \(attemptContext())")
         analytics.trackError(errorCode: nil, stage: stage.rawValue)
         await pauseListening(reason: "transport_failure")
+        guard shouldPresentDictationErrorSurface else {
+            logDictation("DICTATION_COORD transport_failure_suppressed_to_idle stage=\(stage.rawValue) message=\(message) \(attemptContext())")
+            errorMessage = nil
+            if !isDictationActive {
+                state = .idleSurfaceClosed
+            }
+            return
+        }
         logDictation("DICTATION_ERROR path=handleTransportFailure ts=\(Date().timeIntervalSince1970) stage=\(stage.rawValue) message=\(message)")
         enterError(message: "Dictation failed", source: "handleTransportFailure")
     }
@@ -1260,6 +1268,15 @@ final class DictationCoordinator {
         state = .error
         feedback.notifyError()
         feedback.announce("Dictation failed")
+    }
+
+    private var shouldPresentDictationErrorSurface: Bool {
+        switch state {
+        case .dictatingSticky, .dictatingPaused, .dictatingWalkieTalkie, .stoppingKeep, .stoppingDiscard, .error:
+            return true
+        case .idleSurfaceClosed, .keyPromptModal, .keyVerifyingModal:
+            return false
+        }
     }
 
     private func idleStateForCurrentContext() -> DictationState {

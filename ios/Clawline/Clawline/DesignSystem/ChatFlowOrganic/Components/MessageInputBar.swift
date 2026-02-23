@@ -21,41 +21,271 @@ private struct MessageInputBarTextEditorFramePreferenceKey: PreferenceKey {
 
 @MainActor
 private final class DictationSurfaceMotionModel: ObservableObject {
-    @Published var pushGestureStart: Date?
-    @Published var pushCommitReachedAt: Date?
-    @Published var pushDragUpDistance: CGFloat = 0
-    @Published var pushStartedWalkieTalkie = false
-    @Published var pushGestureStartedWithSurfaceOpen = false
-    @Published var surfaceInteractiveProgress: CGFloat = 0
-    @Published var pullToSendProgress: CGFloat = 0
-    @Published var pullToSendArmed = false
+    enum GesturePhase: Equatable {
+        case idle
+        case dragging
+        case settling
+    }
 
-    func beginGesture(surfaceOpen: Bool) {
-        guard pushGestureStart == nil else { return }
+    enum SettledSurface: Equatable {
+        case closed
+        case openPaused
+        case openListening
+    }
+
+    enum GestureOrigin: Equatable {
+        case closed
+        case open
+    }
+
+    enum GestureEndIntent: Equatable {
+        case none
+        case send
+        case dismissSurface
+        case startSticky
+        case endWalkieKeepOpen
+        case endWalkieAndDismiss
+        case settleOpen
+        case settleClosed
+    }
+
+    struct SettledCommit: Equatable {
+        let target: SettledSurface
+        let reason: String
+    }
+
+    struct GestureEndContext {
+        let isSurfaceOpen: Bool
+        let isWalkieActive: Bool
+        let swipeActivationEnabled: Bool
+        let pullToSendEligible: Bool
+    }
+
+    @Published private(set) var gesturePhase: GesturePhase = .idle
+    @Published private(set) var settledSurface: SettledSurface = .closed
+    @Published private(set) var dragTranslationY: CGFloat = 0
+    @Published private(set) var visualOffsetY: CGFloat = 0
+    @Published private(set) var isTextInteractionLocked = false
+    @Published private(set) var pullToSendProgress: CGFloat = 0
+    @Published private(set) var isPullToSendArmed = false
+    @Published private(set) var originAtGestureStart: GestureOrigin = .closed
+    @Published private(set) var pendingCommit: SettledCommit?
+    @Published private(set) var surfaceInteractiveProgress: CGFloat = 0
+
+    @Published private(set) var pushGestureStart: Date?
+    @Published private(set) var pushCommitReachedAt: Date?
+    @Published private(set) var pushDragUpDistance: CGFloat = 0
+    @Published private(set) var pushStartedWalkieTalkie = false
+    @Published private(set) var pushGestureStartedWithSurfaceOpen = false
+
+    func gestureBegan(originWasOpen: Bool) {
+        guard gesturePhase == .idle else { return }
+        gesturePhase = .dragging
+        isTextInteractionLocked = true
         pushGestureStart = Date()
         pushCommitReachedAt = nil
         pushStartedWalkieTalkie = false
-        pushGestureStartedWithSurfaceOpen = surfaceOpen
+        pushGestureStartedWithSurfaceOpen = originWasOpen
+        originAtGestureStart = originWasOpen ? .open : .closed
+        dragTranslationY = 0
+        pushDragUpDistance = 0
+        if originWasOpen {
+            setSurfaceProgress(1)
+        }
     }
 
-    func updatePullToSendArming(upDistance: CGFloat, startThreshold: CGFloat, triggerThreshold: CGFloat, eligible: Bool) {
-        let progress = max(0, min(1, (upDistance - startThreshold) / (triggerThreshold - startThreshold)))
-        pullToSendProgress = progress
-        pullToSendArmed = progress >= 1 && eligible
+    func gestureChanged(
+        globalTranslationY: CGFloat,
+        velocityY: CGFloat,
+        revealThreshold: CGFloat,
+        pullToSendStartThreshold: CGFloat,
+        pullToSendTriggerThreshold: CGFloat,
+        pullToSendEligible: Bool
+    ) {
+        guard gesturePhase == .dragging else { return }
+        dragTranslationY = globalTranslationY
+        let up = max(0, -globalTranslationY)
+        let down = max(0, globalTranslationY)
+        let _ = velocityY
+        pushDragUpDistance = up
+
+        if originAtGestureStart == .open {
+            if up > 0 {
+                setSurfaceProgress(1)
+                updatePullToSendArming(
+                    upDistance: up,
+                    startThreshold: pullToSendStartThreshold,
+                    triggerThreshold: pullToSendTriggerThreshold,
+                    eligible: pullToSendEligible
+                )
+            } else {
+                setSurfaceProgress(max(0, min(1, 1 - (down / 120))))
+                resetPullToSendVisualState()
+            }
+            visualOffsetY = globalTranslationY
+            return
+        }
+
+        setSurfaceProgress(max(0, min(1, up / max(1, revealThreshold))))
+        updatePullToSendArming(
+            upDistance: up,
+            startThreshold: pullToSendStartThreshold,
+            triggerThreshold: pullToSendTriggerThreshold,
+            eligible: pullToSendEligible
+        )
+        visualOffsetY = globalTranslationY
+    }
+
+    func gestureEnded(
+        globalTranslationY: CGFloat,
+        globalTranslationX: CGFloat,
+        predictedY: CGFloat,
+        velocityY: CGFloat,
+        context: GestureEndContext
+    ) -> GestureEndIntent {
+        guard gesturePhase == .dragging else { return .none }
+
+        let up = max(0, -globalTranslationY)
+        let down = max(0, globalTranslationY)
+        let _ = velocityY
+        let verticalDominant = max(up, down) >= 1.4 * abs(globalTranslationX)
+        let projectedUp = max(0, -predictedY)
+        let projectedDown = max(0, predictedY)
+        let fastUp = predictedY < -120
+        let fastDown = predictedY > 120
+
+        gesturePhase = .settling
+        isTextInteractionLocked = false
+        dragTranslationY = 0
+        visualOffsetY = 0
+
+        if isPullToSendArmed && context.pullToSendEligible {
+            pendingCommit = .init(target: context.isWalkieActive ? .closed : .openPaused, reason: "pull_to_send")
+            return .send
+        }
+
+        if context.isSurfaceOpen {
+            if context.isWalkieActive {
+                if originAtGestureStart == .open {
+                    pendingCommit = .init(target: .openPaused, reason: "walkie_release_keep_open")
+                    return .endWalkieKeepOpen
+                }
+                pendingCommit = .init(target: .closed, reason: "walkie_release_dismiss")
+                return .endWalkieAndDismiss
+            }
+
+            if verticalDominant && (down >= 32 || fastDown || projectedDown >= 96 || surfaceInteractiveProgress < 0.45) {
+                pendingCommit = .init(target: .closed, reason: "dismiss_surface")
+                return .dismissSurface
+            }
+            pendingCommit = .init(target: .openPaused, reason: "settle_open_existing")
+            return .settleOpen
+        }
+
+        guard context.swipeActivationEnabled else {
+            pendingCommit = .init(target: .closed, reason: "activation_disabled")
+            return .settleClosed
+        }
+        guard verticalDominant else {
+            pendingCommit = .init(target: .closed, reason: "not_vertical_dominant")
+            return .settleClosed
+        }
+        guard up >= 32 || fastUp || projectedUp >= 96 || surfaceInteractiveProgress >= 0.45 else {
+            pendingCommit = .init(target: .closed, reason: "threshold_not_met")
+            return .settleClosed
+        }
+        if pushStartedWalkieTalkie {
+            pendingCommit = .init(target: .openPaused, reason: "walkie_release_to_open")
+            return .endWalkieKeepOpen
+        }
+        pendingCommit = .init(target: .openListening, reason: "start_sticky")
+        return .startSticky
+    }
+
+    func gestureCancelled() {
+        guard gesturePhase != .idle else { return }
+        gesturePhase = .settling
+        isTextInteractionLocked = false
+        dragTranslationY = 0
+        visualOffsetY = 0
+        pendingCommit = .init(target: settledSurface, reason: "gesture_cancelled")
+    }
+
+    func setListeningState(isSurfaceOpen: Bool, isListening: Bool) {
+        let target: SettledSurface = if !isSurfaceOpen {
+            .closed
+        } else if isListening {
+            .openListening
+        } else {
+            .openPaused
+        }
+        settledSurface = target
+        guard gesturePhase == .idle else { return }
+        setSurfaceProgress(target == .closed ? 0 : 1)
+    }
+
+    func commitSettledState(_ target: SettledSurface) {
+        settledSurface = target
+        gesturePhase = .idle
+        isTextInteractionLocked = false
+        pendingCommit = nil
+        pushGestureStart = nil
+        pushCommitReachedAt = nil
+        pushStartedWalkieTalkie = false
+        pushDragUpDistance = 0
+        dragTranslationY = 0
+        visualOffsetY = 0
+        pushGestureStartedWithSurfaceOpen = false
+        resetPullToSendVisualState()
+        setSurfaceProgress(target == .closed ? 0 : 1)
+    }
+
+    func updateWalkieHoldArming(up: CGFloat, activationThreshold: CGFloat, holdDuration: TimeInterval) -> Bool {
+        guard gesturePhase == .dragging else { return false }
+        if up >= activationThreshold {
+            if pushCommitReachedAt == nil {
+                pushCommitReachedAt = Date()
+                return false
+            }
+            if let commitReachedAt = pushCommitReachedAt,
+               !pushStartedWalkieTalkie,
+               Date().timeIntervalSince(commitReachedAt) >= holdDuration {
+                pushStartedWalkieTalkie = true
+                return true
+            }
+        } else {
+            pushCommitReachedAt = nil
+        }
+        return false
     }
 
     func resetPullToSendVisualState() {
         pullToSendProgress = 0
-        pullToSendArmed = false
+        isPullToSendArmed = false
     }
 
     func clearGestureState() {
+        gesturePhase = .idle
+        isTextInteractionLocked = false
+        pendingCommit = nil
         pushGestureStart = nil
         pushCommitReachedAt = nil
         pushDragUpDistance = 0
         pushStartedWalkieTalkie = false
         pushGestureStartedWithSurfaceOpen = false
+        dragTranslationY = 0
+        visualOffsetY = 0
         resetPullToSendVisualState()
+    }
+
+    private func setSurfaceProgress(_ value: CGFloat) {
+        surfaceInteractiveProgress = max(0, min(1, value))
+    }
+
+    private func updatePullToSendArming(upDistance: CGFloat, startThreshold: CGFloat, triggerThreshold: CGFloat, eligible: Bool) {
+        let progress = max(0, min(1, (upDistance - startThreshold) / max(1, (triggerThreshold - startThreshold))))
+        pullToSendProgress = progress
+        isPullToSendArmed = progress >= 1 && eligible
     }
 }
 
@@ -421,7 +651,7 @@ struct MessageInputBar: View {
     }
 
     private var isDictationDragActive: Bool {
-        motionModel.pushGestureStart != nil
+        motionModel.gesturePhase == .dragging
     }
 
     private var shouldPreserveKeyboardDuringSurfaceDrag: Bool {
@@ -433,10 +663,7 @@ struct MessageInputBar: View {
     }
 
     private var shouldLockTextSelectionForDrag: Bool {
-        if isWalkieDragLockRequired {
-            return true
-        }
-        return isDictationDragActive && !shouldPreserveKeyboardDuringSurfaceDrag
+        motionModel.isTextInteractionLocked || isWalkieDragLockRequired || (isDictationDragActive && !shouldPreserveKeyboardDuringSurfaceDrag)
     }
 
     private var micTrailingPadding: CGFloat {
@@ -475,7 +702,7 @@ struct MessageInputBar: View {
         !isSending && canSend && connectionState == .connected
     }
 
-    private var settleDurationMs: Int { 640 }
+    private var settleDurationMs: Int { 300 }
 
     private var settleSpring: Animation {
         .interactiveSpring(response: 0.56, dampingFraction: 0.82, blendDuration: 0.12)
@@ -487,7 +714,7 @@ struct MessageInputBar: View {
     }
 
     private var isSurfaceVisibleForGesture: Bool {
-        dictation.isSurfaceOpen || motionModel.surfaceInteractiveProgress > 0.001
+        motionModel.settledSurface != .closed || motionModel.surfaceInteractiveProgress > 0.001 || motionModel.gesturePhase != .idle
     }
 
     private var containerPadding: CGFloat {
@@ -607,7 +834,7 @@ struct MessageInputBar: View {
         VStack(alignment: .leading, spacing: 8) {
             inputRow
 
-            if dictation.isSurfaceOpen || motionModel.surfaceInteractiveProgress > 0.001 {
+            if isSurfaceVisibleForGesture {
                 dictationSurface
                     .opacity(motionModel.surfaceInteractiveProgress)
                     .frame(height: max(0, 100 * motionModel.surfaceInteractiveProgress), alignment: .top)
@@ -687,7 +914,7 @@ struct MessageInputBar: View {
             onComposerMotionOffsetChange(0)
         }
         .onAppear {
-            motionModel.surfaceInteractiveProgress = dictation.isSurfaceOpen ? 1 : 0
+            motionModel.setListeningState(isSurfaceOpen: dictation.isSurfaceOpen, isListening: dictation.isListening)
             reconnectPulseOn = false
             onComposerMotionOffsetChange(-pullToSendLift)
             guard isReconnecting else { return }
@@ -695,18 +922,21 @@ struct MessageInputBar: View {
                 reconnectPulseOn = true
             }
         }
-        .onChange(of: dictation.isSurfaceOpen) { _, isOpen in
-            // Keep list inset frozen through surface settle so layout uses one settled signal.
-            onDictationSurfaceDragActiveChange(true)
-            scheduleInsetUnfreezeAfterSettle()
-            if isOpen {
+        .onChange(of: dictation.state) { _, _ in
+            motionModel.setListeningState(isSurfaceOpen: dictation.isSurfaceOpen, isListening: dictation.isListening)
+            if dictation.isSurfaceOpen {
                 micFadeTask?.cancel()
                 micTransientVisible = false
                 micTransientOpacity = 0
                 micTransientOffset = 0
             }
-            withAnimation(settleSpring) {
-                motionModel.surfaceInteractiveProgress = isOpen ? 1 : 0
+        }
+        .onChange(of: motionModel.gesturePhase) { _, phase in
+            switch phase {
+            case .dragging, .settling:
+                onDictationSurfaceDragActiveChange(true)
+            case .idle:
+                onDictationSurfaceDragActiveChange(false)
             }
         }
         .onChange(of: connectionState) { _, newValue in
@@ -787,7 +1017,7 @@ struct MessageInputBar: View {
                     pendingInsertions: $pendingInsertions,
                     resetToken: resetToken,
                     focusTrigger: focusTrigger,
-                    isEditable: true,
+                    isEditable: !motionModel.isTextInteractionLocked,
                     tintColor: inputTintUIColor,
                     textColor: {
 #if os(visionOS)
@@ -983,169 +1213,104 @@ struct MessageInputBar: View {
         let down = max(0, dy)
         let verticalDominant = max(up, down) >= 1.4 * abs(dx)
 
-        if motionModel.pushGestureStart == nil {
+        if motionModel.gesturePhase == .idle {
             gestureSettleTask?.cancel()
-            motionModel.beginGesture(surfaceOpen: dictation.isSurfaceOpen)
+            motionModel.gestureBegan(originWasOpen: isSurfaceVisibleForGesture)
             insetUnfreezeTask?.cancel()
-            onDictationSurfaceDragActiveChange(true)
             dictation.beginGesturePrewarm()
         }
-        motionModel.pushDragUpDistance = up
 
-        if isSurfaceVisibleForGesture {
-            if verticalDominant {
-                if up > 0 {
-                    motionModel.surfaceInteractiveProgress = 1
-                    updatePullToSendArming(upDistance: up)
-                } else {
-                    motionModel.pushDragUpDistance = 0
-                    motionModel.surfaceInteractiveProgress = max(0, min(1, 1 - (down / 120)))
-                    resetPullToSendVisualState()
-                }
-            }
-            return
-        }
-
-        guard dictation.swipeActivationEnabled else {
+        if !isSurfaceVisibleForGesture && !dictation.swipeActivationEnabled {
             dictation.cancelGesturePrewarmIfNeeded(trigger: "push_changed_activation_disabled")
+            motionModel.gestureCancelled()
+            scheduleInsetUnfreezeAfterSettle(resetMotionState: false)
             return
         }
-        guard up >= 1.4 * abs(dx) else {
+
+        if !isSurfaceVisibleForGesture && up < 1.4 * abs(dx) {
             if abs(dx) > up {
                 dictation.cancelGesturePrewarmIfNeeded(trigger: "push_changed_horizontal_dominant")
             }
-            motionModel.pushDragUpDistance = 0
-            resetPullToSendVisualState()
+            motionModel.gestureCancelled()
+            scheduleInsetUnfreezeAfterSettle(resetMotionState: false)
             return
         }
-        motionModel.surfaceInteractiveProgress = max(0, min(1, up / revealThreshold))
-        updatePullToSendArming(upDistance: up)
 
-        if up >= walkieHoldActivationThreshold {
-            if motionModel.pushCommitReachedAt == nil {
-                motionModel.pushCommitReachedAt = Date()
-                return
-            }
+        motionModel.gestureChanged(
+            globalTranslationY: dy,
+            velocityY: 0,
+            revealThreshold: revealThreshold,
+            pullToSendStartThreshold: pullToSendStartThreshold,
+            pullToSendTriggerThreshold: pullToSendTriggerThreshold,
+            pullToSendEligible: pullToSendEligible
+        )
 
-            if let commitReachedAt = motionModel.pushCommitReachedAt,
-               !motionModel.pushStartedWalkieTalkie,
-               Date().timeIntervalSince(commitReachedAt) >= walkieHoldDurationSeconds {
-                motionModel.pushStartedWalkieTalkie = true
-                logDictation("DICTATION_UI gesture_classification=walkie_hold_activated up=\(up) dx=\(dx) dy=\(dy) hold_secs=\(Date().timeIntervalSince(commitReachedAt))")
-                dictation.startWalkieTalkieDictation()
-                beginMicFadeOut(fromSwipe: false)
-            }
-        } else {
-            motionModel.pushCommitReachedAt = nil
+        if !isSurfaceVisibleForGesture,
+           verticalDominant,
+           motionModel.updateWalkieHoldArming(
+            up: up,
+            activationThreshold: walkieHoldActivationThreshold,
+            holdDuration: walkieHoldDurationSeconds
+           ) {
+            logDictation("DICTATION_UI gesture_classification=walkie_hold_activated up=\(up) dx=\(dx) dy=\(dy)")
+            dictation.startWalkieTalkieDictation()
+            beginMicFadeOut(fromSwipe: false)
         }
     }
 
     private func handlePushEnded(startLocation: CGPoint, translation: CGPoint, predictedEndTranslation: CGPoint) {
         logDictation("DICTATION_UI handlePushEnded")
-        guard motionModel.pushGestureStart != nil else {
+        guard motionModel.gesturePhase == .dragging else {
             return
         }
-        let shouldSendFromPull = motionModel.pullToSendArmed && pullToSendEligible
-        defer { clearPushGestureState() }
 
         let dx = translation.x
         let dy = translation.y
         let up = max(0, -dy)
         let down = max(0, dy)
         let verticalDominant = max(up, down) >= 1.4 * abs(dx)
-        let fastUp = predictedEndTranslation.y < -120
-        let fastDown = predictedEndTranslation.y > 120
-        let projectedUp = max(0, -predictedEndTranslation.y)
-        let projectedDown = max(0, predictedEndTranslation.y)
 
-        if shouldSendFromPull {
+        let intent = motionModel.gestureEnded(
+            globalTranslationY: dy,
+            globalTranslationX: dx,
+            predictedY: predictedEndTranslation.y,
+            velocityY: 0,
+            context: .init(
+                isSurfaceOpen: isSurfaceVisibleForGesture,
+                isWalkieActive: dictation.isWalkieTalkieActive,
+                swipeActivationEnabled: dictation.swipeActivationEnabled,
+                pullToSendEligible: pullToSendEligible
+            )
+        )
+
+        switch intent {
+        case .send:
             logDictation("DICTATION_UI gesture_end action=pull_to_send up=\(up) down=\(down) verticalDominant=\(verticalDominant) startedSurfaceOpen=\(motionModel.pushGestureStartedWithSurfaceOpen) walkieActive=\(dictation.isWalkieTalkieActive)")
-            let wasWalkie = dictation.isWalkieTalkieActive
-            let wasSurfaceOpen = dictation.isSurfaceOpen
             onSend()
-            withAnimation(settleSpring) {
-                if wasWalkie {
-                    motionModel.surfaceInteractiveProgress = 0
-                } else {
-                    motionModel.surfaceInteractiveProgress = wasSurfaceOpen ? 1 : 0
-                }
-            }
-            return
-        }
-
-        if isSurfaceVisibleForGesture {
-            if dictation.isWalkieTalkieActive {
-                if motionModel.pushGestureStartedWithSurfaceOpen {
-                    dictation.endWalkieTalkieIfNeeded()
-                    withAnimation(settleSpring) {
-                        motionModel.surfaceInteractiveProgress = 1
-                    }
-                } else {
-                    dictation.dismissSurfaceFromUserGesture()
-                    withAnimation(settleSpring) {
-                        motionModel.surfaceInteractiveProgress = 0
-                    }
-                }
-                return
-            }
-            if verticalDominant && (down >= 32 || fastDown || projectedDown >= 96 || motionModel.surfaceInteractiveProgress < 0.45) {
-                dictation.dismissSurfaceFromUserGesture()
-            } else {
-                withAnimation(settleSpring) {
-                    motionModel.surfaceInteractiveProgress = 1
-                }
-            }
-            return
-        }
-
-        guard dictation.swipeActivationEnabled else {
-            dictation.cancelGesturePrewarmIfNeeded(trigger: "push_end_activation_disabled")
-            return
-        }
-        guard verticalDominant else {
-            dictation.cancelGesturePrewarmIfNeeded(trigger: "push_end_not_vertical_dominant")
-            withAnimation(settleSpring) {
-                motionModel.surfaceInteractiveProgress = 0
-            }
-            return
-        }
-        guard up >= 32 || fastUp || projectedUp >= 96 || motionModel.surfaceInteractiveProgress >= 0.45 else {
-            dictation.cancelGesturePrewarmIfNeeded(trigger: "push_end_threshold_not_met")
-            withAnimation(settleSpring) {
-                motionModel.surfaceInteractiveProgress = 0
-            }
-            return
-        }
-        if motionModel.pushStartedWalkieTalkie {
-            logDictation("DICTATION_UI gesture_end classification=walkie_release up=\(up) down=\(down) fastUp=\(fastUp) projectedUp=\(projectedUp)")
+        case .dismissSurface:
+            dictation.dismissSurfaceFromUserGesture()
+        case .startSticky:
+            logDictation("DICTATION_UI gesture_end classification=sticky_start up=\(up) down=\(down)")
+            dictation.startStickyDictation()
+            beginMicFadeOut(fromSwipe: false)
+        case .endWalkieKeepOpen:
+            logDictation("DICTATION_UI gesture_end classification=walkie_release_keep_open up=\(up) down=\(down)")
             dictation.endWalkieTalkieIfNeeded()
-            withAnimation(settleSpring) {
-                motionModel.surfaceInteractiveProgress = 1
-            }
-            return
+        case .endWalkieAndDismiss:
+            logDictation("DICTATION_UI gesture_end classification=walkie_release_dismiss up=\(up) down=\(down)")
+            dictation.dismissSurfaceFromUserGesture()
+        case .settleClosed:
+            break
+        case .settleOpen:
+            break
+        case .none:
+            break
         }
-
-        logDictation("DICTATION_UI gesture_end classification=sticky_start up=\(up) down=\(down) fastUp=\(fastUp) projectedUp=\(projectedUp)")
-        dictation.startStickyDictation()
-        beginMicFadeOut(fromSwipe: false)
-        withAnimation(settleSpring) {
-            motionModel.surfaceInteractiveProgress = 1
-        }
+        scheduleInsetUnfreezeAfterSettle(resetMotionState: false)
     }
 
     private func clearPushGestureState() {
-        guard motionModel.pushGestureStart != nil
-                || motionModel.pushDragUpDistance != 0
-                || motionModel.pushCommitReachedAt != nil
-                || motionModel.pushStartedWalkieTalkie
-                || motionModel.pushGestureStartedWithSurfaceOpen
-                || motionModel.pullToSendProgress > 0
-                || motionModel.pullToSendArmed else {
-            return
-        }
-        // Pull-to-send UI is drag-only; hide immediately on release/cancel.
-        resetPullToSendVisualState()
-        scheduleInsetUnfreezeAfterSettle(resetMotionState: true)
+        motionModel.clearGestureState()
     }
 
     private func shouldBeginDictationPan(startLocation: CGPoint, velocity: CGPoint) -> Bool {
@@ -1166,18 +1331,9 @@ struct MessageInputBar: View {
         textEditorGlobalFrame != .zero && textEditorGlobalFrame.contains(startLocation)
     }
 
-    private func updatePullToSendArming(upDistance: CGFloat) {
-        motionModel.updatePullToSendArming(
-            upDistance: upDistance,
-            startThreshold: pullToSendStartThreshold,
-            triggerThreshold: pullToSendTriggerThreshold,
-            eligible: pullToSendEligible
-        )
-    }
+    private func updatePullToSendArming(upDistance: CGFloat) {}
 
-    private func resetPullToSendVisualState() {
-        motionModel.resetPullToSendVisualState()
-    }
+    private func resetPullToSendVisualState() {}
 
     @ViewBuilder
     private var dictationSurface: some View {
@@ -1292,18 +1448,18 @@ struct MessageInputBar: View {
             if !pullToSendEligible {
                 return "Nothing to send"
             }
-            return motionModel.pullToSendArmed ? "Release to send" : "Pull up to send"
+            return motionModel.isPullToSendArmed ? "Release to send" : "Pull up to send"
         }()
 
         return HStack(spacing: 8) {
-            Image(systemName: motionModel.pullToSendArmed ? "paperplane.fill" : "arrow.up.circle")
+            Image(systemName: motionModel.isPullToSendArmed ? "paperplane.fill" : "arrow.up.circle")
                 .font(.system(size: 14, weight: .semibold))
             Text(subtitle)
                 .font(.footnote.weight(.semibold))
         }
         .foregroundStyle({
             if !pullToSendEligible { return AnyShapeStyle(.secondary) }
-            if motionModel.pullToSendArmed { return AnyShapeStyle(ChatFlowTheme.adminAccent(colorScheme)) }
+            if motionModel.isPullToSendArmed { return AnyShapeStyle(ChatFlowTheme.adminAccent(colorScheme)) }
             return AnyShapeStyle(inputTintColor.opacity(0.9))
         }())
         .frame(maxWidth: .infinity)

@@ -21,6 +21,12 @@ private struct MessageInputBarTextEditorFramePreferenceKey: PreferenceKey {
 
 @MainActor
 private final class DictationSurfaceMotionModel: ObservableObject {
+    private enum Thresholds {
+        static let reveal: CGFloat = 100
+        static let pullToSendStart: CGFloat = 40
+        static let pullToSendTrigger: CGFloat = 62
+    }
+
     enum GesturePhase: Equatable {
         case idle
         case dragging
@@ -59,6 +65,7 @@ private final class DictationSurfaceMotionModel: ObservableObject {
         let isWalkieActive: Bool
         let swipeActivationEnabled: Bool
         let pullToSendEligible: Bool
+        let verticalDominant: Bool
     }
 
     @Published private(set) var gesturePhase: GesturePhase = .idle
@@ -96,27 +103,20 @@ private final class DictationSurfaceMotionModel: ObservableObject {
 
     func gestureChanged(
         globalTranslationY: CGFloat,
-        velocityY: CGFloat,
-        revealThreshold: CGFloat,
-        pullToSendStartThreshold: CGFloat,
-        pullToSendTriggerThreshold: CGFloat,
-        pullToSendEligible: Bool
+        velocityY: CGFloat
     ) {
         guard gesturePhase == .dragging else { return }
         dragTranslationY = globalTranslationY
         let up = max(0, -globalTranslationY)
         let down = max(0, globalTranslationY)
-        let _ = velocityY
+        _ = velocityY
         pushDragUpDistance = up
 
         if originAtGestureStart == .open {
             if up > 0 {
                 setSurfaceProgress(1)
                 updatePullToSendArming(
-                    upDistance: up,
-                    startThreshold: pullToSendStartThreshold,
-                    triggerThreshold: pullToSendTriggerThreshold,
-                    eligible: pullToSendEligible
+                    upDistance: up
                 )
             } else {
                 setSurfaceProgress(max(0, min(1, 1 - (down / 120))))
@@ -126,19 +126,15 @@ private final class DictationSurfaceMotionModel: ObservableObject {
             return
         }
 
-        setSurfaceProgress(max(0, min(1, up / max(1, revealThreshold))))
+        setSurfaceProgress(max(0, min(1, up / max(1, Thresholds.reveal))))
         updatePullToSendArming(
-            upDistance: up,
-            startThreshold: pullToSendStartThreshold,
-            triggerThreshold: pullToSendTriggerThreshold,
-            eligible: pullToSendEligible
+            upDistance: up
         )
         visualOffsetY = globalTranslationY
     }
 
     func gestureEnded(
         globalTranslationY: CGFloat,
-        globalTranslationX: CGFloat,
         predictedY: CGFloat,
         velocityY: CGFloat,
         context: GestureEndContext
@@ -147,12 +143,10 @@ private final class DictationSurfaceMotionModel: ObservableObject {
 
         let up = max(0, -globalTranslationY)
         let down = max(0, globalTranslationY)
-        let _ = velocityY
-        let verticalDominant = max(up, down) >= 1.4 * abs(globalTranslationX)
         let projectedUp = max(0, -predictedY)
         let projectedDown = max(0, predictedY)
-        let fastUp = predictedY < -120
-        let fastDown = predictedY > 120
+        let fastUp = predictedY < -120 || velocityY < -900
+        let fastDown = predictedY > 120 || velocityY > 900
 
         gesturePhase = .settling
         isTextInteractionLocked = false
@@ -181,7 +175,7 @@ private final class DictationSurfaceMotionModel: ObservableObject {
                 return .endWalkieAndDismiss
             }
 
-            if verticalDominant && (down >= 32 || fastDown || projectedDown >= 96 || surfaceInteractiveProgress < 0.45) {
+            if context.verticalDominant && (down >= 32 || fastDown || projectedDown >= 96 || surfaceInteractiveProgress < 0.45) {
                 pendingCommit = .init(target: .closed, reason: "dismiss_surface")
                 pushDragUpDistance = 0
                 setSurfaceProgress(0)
@@ -199,7 +193,7 @@ private final class DictationSurfaceMotionModel: ObservableObject {
             setSurfaceProgress(0)
             return .settleClosed
         }
-        guard verticalDominant else {
+        guard context.verticalDominant else {
             pendingCommit = .init(target: .closed, reason: "not_vertical_dominant")
             pushDragUpDistance = 0
             setSurfaceProgress(0)
@@ -305,10 +299,13 @@ private final class DictationSurfaceMotionModel: ObservableObject {
         surfaceInteractiveProgress = max(0, min(1, value))
     }
 
-    private func updatePullToSendArming(upDistance: CGFloat, startThreshold: CGFloat, triggerThreshold: CGFloat, eligible: Bool) {
-        let progress = max(0, min(1, (upDistance - startThreshold) / max(1, (triggerThreshold - startThreshold))))
+    private func updatePullToSendArming(upDistance: CGFloat) {
+        let progress = max(
+            0,
+            min(1, (upDistance - Thresholds.pullToSendStart) / max(1, (Thresholds.pullToSendTrigger - Thresholds.pullToSendStart)))
+        )
         pullToSendProgress = progress
-        isPullToSendArmed = progress >= 1 && eligible
+        isPullToSendArmed = progress >= 1
     }
 }
 
@@ -703,9 +700,6 @@ struct MessageInputBar: View {
         metrics.inputBarHeight
     }
 
-    private var pullToSendStartThreshold: CGFloat { 40 }
-    private var pullToSendTriggerThreshold: CGFloat { 62 }
-    private var revealThreshold: CGFloat { 100 }
     private var walkieHoldActivationThreshold: CGFloat { 124 }
     private var walkieHoldDurationSeconds: TimeInterval { 0.55 }
     private var pullToSendEligible: Bool {
@@ -1228,6 +1222,11 @@ struct MessageInputBar: View {
         let down = max(0, dy)
         let verticalDominant = max(up, down) >= 1.4 * abs(dx)
 
+        if motionModel.gesturePhase == .settling {
+            gestureSettleTask?.cancel()
+            motionModel.clearGestureState()
+        }
+
         if motionModel.gesturePhase == .idle {
             gestureSettleTask?.cancel()
             motionModel.gestureBegan(originWasOpen: isSurfaceVisibleForGesture)
@@ -1256,11 +1255,7 @@ struct MessageInputBar: View {
 
         motionModel.gestureChanged(
             globalTranslationY: dy,
-            velocityY: velocity.y,
-            revealThreshold: revealThreshold,
-            pullToSendStartThreshold: pullToSendStartThreshold,
-            pullToSendTriggerThreshold: pullToSendTriggerThreshold,
-            pullToSendEligible: pullToSendEligible
+            velocityY: velocity.y
         )
 
         if !isSurfaceVisibleForGesture,
@@ -1304,14 +1299,14 @@ struct MessageInputBar: View {
         let intent: DictationSurfaceMotionModel.GestureEndIntent = withAnimation(settleSpring) {
             motionModel.gestureEnded(
                 globalTranslationY: dy,
-                globalTranslationX: dx,
                 predictedY: predictedEndTranslation.y,
                 velocityY: velocity.y,
                 context: .init(
                     isSurfaceOpen: isSurfaceVisibleForGesture,
                     isWalkieActive: dictation.isWalkieTalkieActive,
                     swipeActivationEnabled: dictation.swipeActivationEnabled,
-                    pullToSendEligible: pullToSendEligible
+                    pullToSendEligible: pullToSendEligible,
+                    verticalDominant: verticalDominant
                 )
             )
         }

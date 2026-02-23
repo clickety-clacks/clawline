@@ -410,7 +410,13 @@ final class TerminalSessionService {
             // Delay a bit after ready (best-effort) by scheduling anyway.
         }
         enableMessagesTask = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(250))
+            do {
+                try await Task.sleep(for: .milliseconds(250))
+            } catch is CancellationError {
+                return
+            } catch {
+                return
+            }
             await MainActor.run {
                 guard let self else { return }
                 self.isReady = true

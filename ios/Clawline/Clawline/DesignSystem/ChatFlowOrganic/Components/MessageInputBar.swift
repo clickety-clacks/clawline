@@ -1263,7 +1263,13 @@ struct MessageInputBar: View {
 
         micFadeTask = Task { @MainActor in
             if animationPlan.fadeDelayMs > 0 {
-                try? await Task.sleep(for: .milliseconds(animationPlan.fadeDelayMs))
+                do {
+                    try await Task.sleep(for: .milliseconds(animationPlan.fadeDelayMs))
+                } catch is CancellationError {
+                    return
+                } catch {
+                    return
+                }
             }
 
             withAnimation(.easeOut(duration: Double(animationPlan.fadeDurationMs) / 1_000)) {
@@ -1271,7 +1277,13 @@ struct MessageInputBar: View {
             }
 
             let cleanupDelayMs = animationPlan.fadeDurationMs + animationPlan.cleanupTailMs
-            try? await Task.sleep(for: .milliseconds(cleanupDelayMs))
+            do {
+                try await Task.sleep(for: .milliseconds(cleanupDelayMs))
+            } catch is CancellationError {
+                return
+            } catch {
+                return
+            }
             micTransientVisible = false
             micTransientOpacity = 0
             micTransientOffset = 0
@@ -1281,7 +1293,13 @@ struct MessageInputBar: View {
     private func scheduleInsetUnfreezeAfterSettle() {
         insetUnfreezeTask?.cancel()
         insetUnfreezeTask = Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(320))
+            do {
+                try await Task.sleep(for: .milliseconds(320))
+            } catch is CancellationError {
+                return
+            } catch {
+                return
+            }
             onDictationSurfaceDragActiveChange(false)
         }
     }

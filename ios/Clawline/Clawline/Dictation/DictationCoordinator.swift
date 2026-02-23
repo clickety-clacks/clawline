@@ -766,7 +766,13 @@ final class DictationCoordinator {
                     capture.stop()
                     client.close(code: .goingAway, reason: "phase2_retry", caller: "DictationCoordinator.beginPhase2Prewarm attempt=\(attempt)")
                     if attempt < 2 {
-                        try? await Task.sleep(for: .milliseconds(220))
+                        do {
+                            try await Task.sleep(for: .milliseconds(220))
+                        } catch is CancellationError {
+                            return
+                        } catch {
+                            return
+                        }
                     }
                 }
             }
@@ -1160,7 +1166,13 @@ final class DictationCoordinator {
             if finishedReceived {
                 return true
             }
-            try? await Task.sleep(for: .milliseconds(20))
+            do {
+                try await Task.sleep(for: .milliseconds(20))
+            } catch is CancellationError {
+                return finishedReceived
+            } catch {
+                return finishedReceived
+            }
         }
         return finishedReceived
     }
@@ -1338,7 +1350,13 @@ final class DictationCoordinator {
         phase1IdleTeardownTask?.cancel()
         phase1IdleTeardownTask = Task { [weak self] in
             guard let self else { return }
-            try? await Task.sleep(for: .seconds(60))
+            do {
+                try await Task.sleep(for: .seconds(60))
+            } catch is CancellationError {
+                return
+            } catch {
+                return
+            }
             await MainActor.run {
                 guard !self.isListening else { return }
                 self.teardownPhase1(reason: PrewarmTeardownReason.phase1IdleTimeout.rawValue)

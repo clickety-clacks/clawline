@@ -292,7 +292,13 @@ private actor Worker {
             if throttleWakeTask == nil {
                 let delay = nextPermitGrantTime - now
                 throttleWakeTask = Task { [delay] in
-                    try? await Task.sleep(nanoseconds: UInt64(max(0, delay) * 1_000_000_000))
+                    do {
+                        try await Task.sleep(nanoseconds: UInt64(max(0, delay) * 1_000_000_000))
+                    } catch is CancellationError {
+                        return
+                    } catch {
+                        return
+                    }
                     await self.clearThrottleWake()
                     await self.schedulePermitGrant()
                 }

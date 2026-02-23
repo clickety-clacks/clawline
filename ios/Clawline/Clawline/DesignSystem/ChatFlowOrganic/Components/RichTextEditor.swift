@@ -462,7 +462,13 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
         escapeLongPressTask?.cancel()
         escapeLongPressTask = Task { [weak self] in
             guard let self else { return }
-            try? await Task.sleep(for: escapeLongPressDuration)
+            do {
+                try await Task.sleep(for: escapeLongPressDuration)
+            } catch is CancellationError {
+                return
+            } catch {
+                return
+            }
             await MainActor.run {
                 guard self.isEscapePressed else { return }
                 self.didFireEscapeLongPress = true

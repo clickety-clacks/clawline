@@ -784,7 +784,13 @@ final class ProviderChatService: ChatServicing {
         Task { [weak self] in
             guard let self else { return }
             while !Task.isCancelled {
-                try? await Task.sleep(forDuration: ackInterval)
+                do {
+                    try await Task.sleep(forDuration: ackInterval)
+                } catch is CancellationError {
+                    return
+                } catch {
+                    return
+                }
                 guard let socket = self.socket else { return }
                 guard self.pendingMessages[payload.id] != nil else { return }
                 if let data = try? self.encoder.encode(payload),

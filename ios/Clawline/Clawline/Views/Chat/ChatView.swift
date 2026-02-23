@@ -278,7 +278,13 @@ struct ChatView: View {
         scrollButtonSuppressNextTap = true
         scrollButtonTapSuppressionTask?.cancel()
         scrollButtonTapSuppressionTask = Task { @MainActor in
-            try? await Task.sleep(for: scrollButtonTapSuppressionDuration)
+            do {
+                try await Task.sleep(for: scrollButtonTapSuppressionDuration)
+            } catch is CancellationError {
+                return
+            } catch {
+                return
+            }
             scrollButtonSuppressNextTap = false
         }
     }
@@ -337,7 +343,13 @@ struct ChatView: View {
             scrollButtonIsDetentSettling = true
             scrollButtonSettleTask?.cancel()
             scrollButtonSettleTask = Task { @MainActor in
-                try? await Task.sleep(for: scrollButtonSettleDuration)
+                do {
+                    try await Task.sleep(for: scrollButtonSettleDuration)
+                } catch is CancellationError {
+                    return
+                } catch {
+                    return
+                }
                 scrollButtonIsDetentSettling = false
                 scrollButtonSettleStartOffset = nil
             }

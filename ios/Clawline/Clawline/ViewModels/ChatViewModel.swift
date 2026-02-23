@@ -1114,7 +1114,13 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
                 delay = max(delay, .seconds(minDelay))
             }
             if delay > .zero {
-                try? await Task.sleep(forDuration: delay)
+                do {
+                    try await Task.sleep(forDuration: delay)
+                } catch is CancellationError {
+                    return
+                } catch {
+                    return
+                }
             }
             await MainActor.run {
                 self.lastReconnectAttemptAt = Date()
@@ -1816,7 +1822,13 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
         persistDebounceTasks[sessionKey]?.cancel()
         persistDebounceTasks[sessionKey] = Task { [weak self] in
             guard let self else { return }
-            try? await Task.sleep(for: .milliseconds(500))
+            do {
+                try await Task.sleep(for: .milliseconds(500))
+            } catch is CancellationError {
+                return
+            } catch {
+                return
+            }
             guard let pendingPayload = self.pendingPersistPayloads[sessionKey] else { return }
             self.pendingPersistPayloads[sessionKey] = nil
             Task.detached { [pendingPayload, url, sessionKey] in

@@ -485,6 +485,10 @@ struct MessageInputBar: View {
         return max(0, motionModel.pushDragUpDistance - revealContribution)
     }
 
+    private var isSurfaceVisibleForGesture: Bool {
+        dictation.isSurfaceOpen || motionModel.surfaceInteractiveProgress > 0.001
+    }
+
     private var containerPadding: CGFloat {
         ChatFlowTheme.Metrics(isCompact: isCompact).inputBarPaddingHorizontal
     }
@@ -629,7 +633,7 @@ struct MessageInputBar: View {
             DictationPanGestureInstaller(
                 shouldBegin: shouldBeginDictationPan(startLocation:velocity:),
                 startsInEditableRegion: startsInEditableRegion(startLocation:),
-                isSurfaceOpen: { dictation.isSurfaceOpen },
+                isSurfaceOpen: { isSurfaceVisibleForGesture },
                 onChanged: { event in
                     handlePushChanged(startLocation: event.startLocation, translation: event.translation)
                 },
@@ -987,7 +991,7 @@ struct MessageInputBar: View {
         }
         motionModel.pushDragUpDistance = up
 
-        if dictation.isSurfaceOpen {
+        if isSurfaceVisibleForGesture {
             if verticalDominant {
                 if up > 0 {
                     motionModel.surfaceInteractiveProgress = 1
@@ -1068,7 +1072,7 @@ struct MessageInputBar: View {
             return
         }
 
-        if dictation.isSurfaceOpen {
+        if isSurfaceVisibleForGesture {
             if dictation.isWalkieTalkieActive {
                 if motionModel.pushGestureStartedWithSurfaceOpen {
                     dictation.endWalkieTalkieIfNeeded()
@@ -1144,7 +1148,7 @@ struct MessageInputBar: View {
     }
 
     private func shouldBeginDictationPan(startLocation: CGPoint, velocity: CGPoint) -> Bool {
-        if dictation.isSurfaceOpen {
+        if isSurfaceVisibleForGesture {
             return true
         }
         if dictation.swipeActivationEnabled {

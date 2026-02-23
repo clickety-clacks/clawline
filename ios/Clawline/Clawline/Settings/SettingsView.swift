@@ -57,7 +57,8 @@ struct SettingsView: View {
                                 }
                             }
                         },
-                        placeholder: "soniox.apiKey"
+                        placeholder: "soniox.apiKey",
+                        style: .settings
                     )
 
                     VStack(alignment: .leading) {

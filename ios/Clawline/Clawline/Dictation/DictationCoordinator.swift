@@ -173,7 +173,7 @@ final class DictationCoordinator {
     }
 
     var isSurfaceOpen: Bool {
-        isWaveformVisible || state == .error
+        isWaveformVisible || state == .error || state == .keyPromptModal || state == .keyVerifyingModal
     }
 
     var micVisible: Bool {
@@ -417,6 +417,10 @@ final class DictationCoordinator {
 
     func dismissSurfaceFromUserGesture() {
         guard isSurfaceOpen else { return }
+        if state == .keyPromptModal || state == .keyVerifyingModal {
+            dismissComposeKeyPrompt()
+            return
+        }
         Task { [weak self] in
             await self?.stopKeep(
                 reason: "surface_dismiss",

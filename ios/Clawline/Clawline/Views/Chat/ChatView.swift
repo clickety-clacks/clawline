@@ -83,7 +83,6 @@ struct ChatView: View {
     @Bindable var viewModel: ChatViewModel
     let toastManager: ToastManager
     @Environment(\.scenePhase) private var scenePhase
-    @Environment(\.openURL) private var openURL
     @Environment(AuthManager.self) private var authManager
     @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
 
@@ -514,9 +513,6 @@ struct ChatView: View {
             }
         )
         .sheet(item: $activeSheet, content: sheetView)
-        .sheet(isPresented: composeKeyPromptPresentedBinding) {
-            composeKeyPromptSheet
-        }
         .onChange(of: viewModel.uiSelectedSessionKey) { _, _ in
             updateDictationContext(viewModel: viewModel)
         }
@@ -1069,58 +1065,6 @@ struct ChatView: View {
             )
             #endif
         }
-    }
-
-    private var composeKeyPromptPresentedBinding: Binding<Bool> {
-        Binding(
-            get: { dictationCoordinator.showsComposeKeyPromptModal },
-            set: { isPresented in
-                if !isPresented {
-                    dictationCoordinator.dismissComposeKeyPrompt()
-                }
-            }
-        )
-    }
-
-    private var composeKeyTextBinding: Binding<String> {
-        Binding(
-            get: { dictationCoordinator.inlineKeyText },
-            set: { dictationCoordinator.updateInlineKeyText($0) }
-        )
-    }
-
-    private var composeKeyPromptSheet: some View {
-        NavigationStack {
-            VStack(alignment: .leading, spacing: 16) {
-                SonioxKeyConfigurationRow(
-                    keyText: composeKeyTextBinding,
-                    status: dictationCoordinator.inlineKeyStatus,
-                    actionTitle: dictationCoordinator.inlineKeyActionTitle,
-                    onAction: {
-                        Task { @MainActor in
-                            await dictationCoordinator.handleComposeKeyPrimaryAction { url in
-                                openURL(url)
-                            }
-                        }
-                    },
-                    placeholder: "soniox.apiKey",
-                    showsBackground: true
-                )
-                Spacer(minLength: 0)
-            }
-            .padding(16)
-            .navigationTitle("Enable Dictation")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Close") {
-                        dictationCoordinator.dismissComposeKeyPrompt()
-                    }
-                }
-            }
-        }
-        .presentationDetents([.medium])
-        .interactiveDismissDisabled(false)
     }
 
     /// Paged TabView for horizontal swipe between streams.

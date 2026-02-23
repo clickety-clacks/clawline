@@ -330,6 +330,7 @@ struct MessageInputBar: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.settingsManager) private var settings
     @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
+    @Environment(\.openURL) private var openURL
     @Binding var content: NSAttributedString
     @Binding var selectionRange: NSRange
     @Binding var pendingInsertions: [PendingAttachment]
@@ -1178,7 +1179,16 @@ struct MessageInputBar: View {
         motionModel.resetPullToSendVisualState()
     }
 
+    @ViewBuilder
     private var dictationSurface: some View {
+        if dictation.showsComposeKeyPromptModal {
+            dictationKeyEntryContent
+        } else {
+            dictationWaveformContent
+        }
+    }
+
+    private var dictationWaveformContent: some View {
         let statusText: String
         let statusColor: Color
         if dictation.state == .error, let message = dictation.errorMessage {
@@ -1229,6 +1239,42 @@ struct MessageInputBar: View {
                         logDictation("DICTATION_ERROR ui_display ts=\(Date().timeIntervalSince1970) message=\(message)")
                     }
                 }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity)
+        .frame(height: 100, alignment: .top)
+#if os(visionOS)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+#else
+        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+#endif
+    }
+
+    private var dictationKeyTextBinding: Binding<String> {
+        Binding(
+            get: { dictation.inlineKeyText },
+            set: { dictation.updateInlineKeyText($0) }
+        )
+    }
+
+    private var dictationKeyEntryContent: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            SonioxKeyConfigurationRow(
+                keyText: dictationKeyTextBinding,
+                status: dictation.inlineKeyStatus,
+                actionTitle: dictation.inlineKeyActionTitle,
+                onAction: {
+                    Task { @MainActor in
+                        await dictation.handleComposeKeyPrimaryAction { url in
+                            openURL(url)
+                        }
+                    }
+                },
+                placeholder: "Soniox API Key",
+                style: .surface,
+                colorSchemeOverride: .dark
+            )
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)

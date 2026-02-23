@@ -8,22 +8,44 @@
 import SwiftUI
 
 struct SonioxKeyConfigurationRow: View {
+    enum Style {
+        case settings
+        case surface
+    }
+
     @Binding var keyText: String
     let status: SonioxKeyVerificationStatus
     let actionTitle: String
     let onAction: () -> Void
     var placeholder: String = "Soniox API Key"
-    var showsBackground: Bool = false
+    var style: Style = .settings
+    var colorSchemeOverride: ColorScheme? = nil
+
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var scheme: ColorScheme {
+        colorSchemeOverride ?? colorScheme
+    }
 
     private var statusColor: Color {
         switch status {
         case .invalid:
-            return .red
+            return ChatFlowTheme.connectionDisconnected(scheme)
         case .validated:
-            return .green
+            return ChatFlowTheme.sage(scheme)
         case .missing, .unverified, .validating:
-            return .secondary
+            return ChatFlowTheme.stone(scheme)
         }
+    }
+
+    private var fieldCornerRadius: CGFloat {
+        style == .surface ? 10 : 12
+    }
+
+    private var fieldPadding: EdgeInsets {
+        style == .surface
+            ? .init(top: 8, leading: 12, bottom: 8, trailing: 12)
+            : .init(top: 10, leading: 14, bottom: 10, trailing: 14)
     }
 
     var body: some View {
@@ -35,33 +57,42 @@ struct SonioxKeyConfigurationRow: View {
 #if !os(visionOS)
                     .keyboardType(.asciiCapable)
 #endif
-                    .textFieldStyle(.roundedBorder)
+                    .font(.system(.subheadline, design: .monospaced))
+                    .foregroundStyle(ChatFlowTheme.ink(scheme))
+                    .padding(fieldPadding)
+                    .background(
+                        RoundedRectangle(cornerRadius: fieldCornerRadius, style: .continuous)
+                            .fill(ChatFlowTheme.ink(scheme).opacity(0.06))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: fieldCornerRadius, style: .continuous)
+                            .stroke(ChatFlowTheme.ink(scheme).opacity(0.12), lineWidth: 1)
+                    )
+                    .textFieldStyle(.plain)
 
-                Button(actionTitle, action: onAction)
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
+                Button(action: onAction) {
+                    Group {
+                        if status == .validating {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Text(actionTitle)
+                                .font(.subheadline.weight(.semibold))
+                        }
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(ChatFlowTheme.sage(scheme), in: Capsule())
+                }
+                .buttonStyle(.plain)
                     .disabled(status == .validating)
             }
 
-            if status == .validating {
-                HStack(spacing: 6) {
-                    ProgressView()
-                        .controlSize(.small)
-                    Text("Validating...")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            } else if let statusText = status.inlineStatusText {
+            if let statusText = status.inlineStatusText, status != .validating {
                 Text(statusText)
                     .font(.caption)
                     .foregroundStyle(statusColor)
-            }
-        }
-        .padding(showsBackground ? 10 : 0)
-        .background {
-            if showsBackground {
-                RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .fill(Color(uiColor: .secondarySystemBackground))
             }
         }
     }

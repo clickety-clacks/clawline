@@ -1,0 +1,37 @@
+{
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Views/Chat/LinkPreviewView.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/LinkPreviewView.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/LinkPreviewView.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/LinkPreviewView.dia",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/LinkPreviewView.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/LinkPreviewView.swiftdeps"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Views/Chat/MessageBubbleUIKitView.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageBubbleUIKitView.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageBubbleUIKitView.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageBubbleUIKitView.dia",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageBubbleUIKitView.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageBubbleUIKitView.swiftdeps"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Views/Chat/MessageFlowCollectionView.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageFlowCollectionView.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageFlowCollectionView.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageFlowCollectionView.dia",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageFlowCollectionView.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageFlowCollectionView.swiftdeps"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Views/Chat/SalientHighlightApplier.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SalientHighlightApplier.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SalientHighlightApplier.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SalientHighlightApplier.dia",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SalientHighlightApplier.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SalientHighlightApplier.swiftdeps"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Views/Chat/TerminalBubbleUIKitView.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/TerminalBubbleUIKitView.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/TerminalBubbleUIKitView.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/TerminalBubbleUIKitView.dia",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/TerminalBubbleUIKitView.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/TerminalBubbleUIKitView.swiftdeps"
+  }
+}

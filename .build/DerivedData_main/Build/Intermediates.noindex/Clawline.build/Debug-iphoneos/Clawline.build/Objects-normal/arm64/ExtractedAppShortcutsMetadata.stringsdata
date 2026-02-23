@@ -1,0 +1,25 @@
+{
+  "version" : 1,
+  "source" : "\/Users\/mike\/src\/clawline\/ios\/Clawline\/Clawline\/Intents\/SiriSendMessageIntent.swift",
+  "tables" : {
+    "AppShortcuts" : [
+      {
+        "values" : [
+          "Tell ${applicationName} to send a message",
+          "Ask ${applicationName} to send a message",
+          "Send a message with ${applicationName}"
+        ],
+        "key" : "Tell ${applicationName} to send a message",
+        "location" : {
+          "startingLine" : 139,
+          "startingColumn" : 0
+        }
+      }
+    ],
+    "Localizable" : [
+      {
+        "key" : "Send ${message}"
+      }
+    ]
+  }
+}

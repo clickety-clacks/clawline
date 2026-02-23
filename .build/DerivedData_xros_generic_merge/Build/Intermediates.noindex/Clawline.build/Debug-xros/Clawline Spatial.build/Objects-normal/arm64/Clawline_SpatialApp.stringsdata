@@ -1,0 +1,16 @@
+{
+  "source": "/Users/mike/src/clawline/ios/Clawline/Clawline Spatial/Clawline_SpatialApp.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "Settings...",
+        "location": {
+          "startingColumn": 24,
+          "startingLine": 58
+        }
+      }
+    ]
+  },
+  "version": 1
+}

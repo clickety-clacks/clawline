@@ -1,0 +1,20 @@
+Target dependency graph (9 targets)
+Target 'Clawline Spatial' in project 'Clawline'
+➜ Explicit dependency on target 'RealityKitContent' in project 'RealityKitContent'
+➜ Explicit dependency on target 'HighlightSwift' in project 'HighlightSwift'
+➜ Explicit dependency on target 'SwiftTerm' in project 'SwiftTerm'
+Target 'SwiftTerm' in project 'SwiftTerm'
+➜ Explicit dependency on target 'SwiftTerm' in project 'SwiftTerm'
+Target 'SwiftTerm' in project 'SwiftTerm' (no dependencies)
+Target 'HighlightSwift' in project 'HighlightSwift'
+➜ Explicit dependency on target 'HighlightSwift' in project 'HighlightSwift'
+➜ Explicit dependency on target 'HighlightSwift_HighlightSwift' in project 'HighlightSwift'
+Target 'HighlightSwift' in project 'HighlightSwift'
+➜ Explicit dependency on target 'HighlightSwift_HighlightSwift' in project 'HighlightSwift'
+Target 'HighlightSwift_HighlightSwift' in project 'HighlightSwift' (no dependencies)
+Target 'RealityKitContent' in project 'RealityKitContent'
+➜ Explicit dependency on target 'RealityKitContent' in project 'RealityKitContent'
+➜ Explicit dependency on target 'RealityKitContent_RealityKitContent' in project 'RealityKitContent'
+Target 'RealityKitContent' in project 'RealityKitContent'
+➜ Explicit dependency on target 'RealityKitContent_RealityKitContent' in project 'RealityKitContent'
+Target 'RealityKitContent_RealityKitContent' in project 'RealityKitContent' (no dependencies)

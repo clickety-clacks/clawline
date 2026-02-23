@@ -1,0 +1,23 @@
+{
+  "/Users/mike/src/clawline/.build/DerivedData_main/SourcePackages/checkouts/SwiftTerm/Sources/SwiftTerm/EscapeSequences.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/SwiftTerm.build/Debug-iphoneos/SwiftTerm.build/Objects-normal/arm64/EscapeSequences.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/SwiftTerm.build/Debug-iphoneos/SwiftTerm.build/Objects-normal/arm64/EscapeSequences.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/SwiftTerm.build/Debug-iphoneos/SwiftTerm.build/Objects-normal/arm64/EscapeSequences.dia",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/SwiftTerm.build/Debug-iphoneos/SwiftTerm.build/Objects-normal/arm64/EscapeSequences.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/SwiftTerm.build/Debug-iphoneos/SwiftTerm.build/Objects-normal/arm64/EscapeSequences.swiftdeps"
+  },
+  "/Users/mike/src/clawline/.build/DerivedData_main/SourcePackages/checkouts/SwiftTerm/Sources/SwiftTerm/ExtensionsTerminal.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/SwiftTerm.build/Debug-iphoneos/SwiftTerm.build/Objects-normal/arm64/ExtensionsTerminal.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/SwiftTerm.build/Debug-iphoneos/SwiftTerm.build/Objects-normal/arm64/ExtensionsTerminal.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/SwiftTerm.build/Debug-iphoneos/SwiftTerm.build/Objects-normal/arm64/ExtensionsTerminal.dia",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/SwiftTerm.build/Debug-iphoneos/SwiftTerm.build/Objects-normal/arm64/ExtensionsTerminal.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/SwiftTerm.build/Debug-iphoneos/SwiftTerm.build/Objects-normal/arm64/ExtensionsTerminal.swiftdeps"
+  },
+  "/Users/mike/src/clawline/.build/DerivedData_main/SourcePackages/checkouts/SwiftTerm/Sources/SwiftTerm/File.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/SwiftTerm.build/Debug-iphoneos/SwiftTerm.build/Objects-normal/arm64/File.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/SwiftTerm.build/Debug-iphoneos/SwiftTerm.build/Objects-normal/arm64/File.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/SwiftTerm.build/Debug-iphoneos/SwiftTerm.build/Objects-normal/arm64/File.dia",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/SwiftTerm.build/Debug-iphoneos/SwiftTerm.build/Objects-normal/arm64/File.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/SwiftTerm.build/Debug-iphoneos/SwiftTerm.build/Objects-normal/arm64/File.swiftdeps"
+  }
+}

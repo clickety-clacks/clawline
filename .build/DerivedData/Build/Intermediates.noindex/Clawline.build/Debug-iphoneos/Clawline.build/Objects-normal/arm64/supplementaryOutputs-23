@@ -1,0 +1,37 @@
+{
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Services/StubConnectionService.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/StubConnectionService.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/StubConnectionService.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/StubConnectionService.dia",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/StubConnectionService.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/StubConnectionService.swiftdeps"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Services/TerminalSessionService.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/TerminalSessionService.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/TerminalSessionService.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/TerminalSessionService.dia",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/TerminalSessionService.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/TerminalSessionService.swiftdeps"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Services/ToastManager.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ToastManager.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ToastManager.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ToastManager.dia",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ToastManager.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ToastManager.swiftdeps"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Services/UploadService.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/UploadService.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/UploadService.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/UploadService.dia",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/UploadService.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/UploadService.swiftdeps"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Settings/SettingsManager.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SettingsManager.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SettingsManager.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SettingsManager.dia",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SettingsManager.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SettingsManager.swiftdeps"
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "" : {
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_xros_generic_merge/Build/Intermediates.noindex/RealityKitContent.build/Debug-xros/RealityKitContent.build/Objects-normal/arm64/RealityKitContent-primary.dia",
+    "emit-module-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_xros_generic_merge/Build/Intermediates.noindex/RealityKitContent.build/Debug-xros/RealityKitContent.build/Objects-normal/arm64/RealityKitContent-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_xros_generic_merge/Build/Intermediates.noindex/RealityKitContent.build/Debug-xros/RealityKitContent.build/Objects-normal/arm64/RealityKitContent-primary-emit-module.dia",
+    "pch" : "/Users/mike/src/clawline/.build/DerivedData_xros_generic_merge/Build/Intermediates.noindex/RealityKitContent.build/Debug-xros/RealityKitContent.build/Objects-normal/arm64/RealityKitContent-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_xros_generic_merge/Build/Intermediates.noindex/RealityKitContent.build/Debug-xros/RealityKitContent.build/Objects-normal/arm64/RealityKitContent-primary.swiftdeps"
+  },
+  "/Users/mike/src/clawline/.build/DerivedData_xros_generic_merge/Build/Intermediates.noindex/RealityKitContent.build/Debug-xros/RealityKitContent.build/DerivedSources/resource_bundle_accessor.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_xros_generic_merge/Build/Intermediates.noindex/RealityKitContent.build/Debug-xros/RealityKitContent.build/Objects-normal/arm64/resource_bundle_accessor.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_xros_generic_merge/Build/Intermediates.noindex/RealityKitContent.build/Debug-xros/RealityKitContent.build/Objects-normal/arm64/resource_bundle_accessor.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_xros_generic_merge/Build/Intermediates.noindex/RealityKitContent.build/Debug-xros/RealityKitContent.build/Objects-normal/arm64/resource_bundle_accessor.dia",
+    "index-unit-output-path" : "/RealityKitContent.build/Debug-xros/RealityKitContent.build/Objects-normal/arm64/resource_bundle_accessor.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_xros_generic_merge/Build/Intermediates.noindex/RealityKitContent.build/Debug-xros/RealityKitContent.build/Objects-normal/arm64/resource_bundle_accessor.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_xros_generic_merge/Build/Intermediates.noindex/RealityKitContent.build/Debug-xros/RealityKitContent.build/Objects-normal/arm64/resource_bundle_accessor.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_xros_generic_merge/Build/Intermediates.noindex/RealityKitContent.build/Debug-xros/RealityKitContent.build/Objects-normal/arm64/resource_bundle_accessor.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_xros_generic_merge/Build/Intermediates.noindex/RealityKitContent.build/Debug-xros/RealityKitContent.build/Objects-normal/arm64/resource_bundle_accessor~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Packages/RealityKitContent/Sources/RealityKitContent/RealityKitContent.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_xros_generic_merge/Build/Intermediates.noindex/RealityKitContent.build/Debug-xros/RealityKitContent.build/Objects-normal/arm64/RealityKitContent.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_xros_generic_merge/Build/Intermediates.noindex/RealityKitContent.build/Debug-xros/RealityKitContent.build/Objects-normal/arm64/RealityKitContent.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_xros_generic_merge/Build/Intermediates.noindex/RealityKitContent.build/Debug-xros/RealityKitContent.build/Objects-normal/arm64/RealityKitContent.dia",
+    "index-unit-output-path" : "/RealityKitContent.build/Debug-xros/RealityKitContent.build/Objects-normal/arm64/RealityKitContent.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_xros_generic_merge/Build/Intermediates.noindex/RealityKitContent.build/Debug-xros/RealityKitContent.build/Objects-normal/arm64/RealityKitContent.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_xros_generic_merge/Build/Intermediates.noindex/RealityKitContent.build/Debug-xros/RealityKitContent.build/Objects-normal/arm64/RealityKitContent.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_xros_generic_merge/Build/Intermediates.noindex/RealityKitContent.build/Debug-xros/RealityKitContent.build/Objects-normal/arm64/RealityKitContent.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_xros_generic_merge/Build/Intermediates.noindex/RealityKitContent.build/Debug-xros/RealityKitContent.build/Objects-normal/arm64/RealityKitContent~partial.swiftmodule"
+  }
+}

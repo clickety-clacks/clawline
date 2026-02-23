@@ -176,6 +176,9 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
     private let dynamicContentStack = UIStackView()  // Holds text + code blocks
     private let avatarView = AvatarCircleView()
     private let senderLabel = UILabel()
+    private let senderTimestampStack = UIStackView()
+    private let senderTimestampSpacer = UIView()
+    private let timestampLabel = UILabel()
     private let bodyLabel = UITextView()
     private let bodyTextContainer = UIView()
     private let fadeView = TruncationFadeView()
@@ -230,6 +233,8 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
     private var currentMessageId: String?
     private var wasOverflowingOnLastLayout = false
     private var suppressExpandTapForLinkCards = false
+    private var timestampDate: Date?
+    private var timestampRefreshTimer: Timer?
 
     private var traitObservation: (any NSObjectProtocol)?
 
@@ -314,14 +319,32 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
         headerStack.axis = .horizontal
         headerStack.spacing = 10
         headerStack.alignment = .center
+        headerStack.isLayoutMarginsRelativeArrangement = true
+        headerStack.directionalLayoutMargins = NSDirectionalEdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 4)
         headerStack.setContentHuggingPriority(.required, for: .vertical)
         headerStack.setContentCompressionResistancePriority(.required, for: .vertical)
 
         senderLabel.numberOfLines = 1
         senderLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
 
+        senderTimestampStack.axis = .horizontal
+        senderTimestampStack.alignment = .firstBaseline
+        senderTimestampStack.spacing = 8
+        senderTimestampStack.isLayoutMarginsRelativeArrangement = true
+        senderTimestampStack.directionalLayoutMargins = NSDirectionalEdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 4)
+
+        senderTimestampSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        senderTimestampSpacer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        timestampLabel.numberOfLines = 1
+        timestampLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        senderTimestampStack.addArrangedSubview(senderLabel)
+        senderTimestampStack.addArrangedSubview(senderTimestampSpacer)
+        senderTimestampStack.addArrangedSubview(timestampLabel)
+
         headerStack.addArrangedSubview(avatarView)
-        headerStack.addArrangedSubview(senderLabel)
+        headerStack.addArrangedSubview(senderTimestampStack)
 
         bodyLabel.translatesAutoresizingMaskIntoConstraints = false
         UnifiedMarkdownRenderer.configureTextView(bodyLabel, delegate: self)
@@ -448,6 +471,10 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
         fatalError("init(coder:) has not been implemented")
     }
 
+    deinit {
+        timestampRefreshTimer?.invalidate()
+    }
+
     override func layoutSubviews() {
         super.layoutSubviews()
         gradientLayer.frame = bubbleBackgroundView.bounds
@@ -504,6 +531,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
         topHighlightMask.frame = CGRect(x: 0, y: 0, width: bubbleBackgroundView.bounds.width, height: highlightHeight)
         topHighlightMask.path = (hasTerminalSessionsForLayout || useContinuousCorners) ? path.cgPath : highlightMaskPath.cgPath
 
+        updateTimestampVisibilityIfNeeded()
         updateOuterScrollState()
     }
 
@@ -574,6 +602,10 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
         senderLabel.font = UIFont.systemFont(ofSize: metrics.senderFontSize, weight: .semibold)
         senderLabel.textColor = senderColor.withAlphaComponent(message.stream == .admin ? 1.0 : 0.7)
         senderLabel.text = message.displayName
+        timestampLabel.font = UIFont.systemFont(ofSize: 10, weight: .regular)
+        timestampLabel.textColor = palette.textMuted.withAlphaComponent(0.4)
+        timestampDate = message.timestamp
+        refreshTimestampDisplay()
         headerStack.isHidden = !showsHeader
         bodyLabel.linkTextAttributes = [
             .foregroundColor: palette.ink,
@@ -1006,6 +1038,11 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
     func prepareForReuse() {
         currentMessageId = nil
         suppressExpandTapForLinkCards = false
+        timestampDate = nil
+        timestampRefreshTimer?.invalidate()
+        timestampRefreshTimer = nil
+        timestampLabel.isHidden = true
+        timestampLabel.attributedText = nil
         resetOuterScrollState(resetOffset: true)
         wasOverflowingOnLastLayout = false
         salientTask?.cancel()
@@ -1194,6 +1231,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
         // Update sender label color
         let senderColor = (currentStream == .admin) ? palette.adminAccent : palette.warmBrown
         senderLabel.textColor = senderColor.withAlphaComponent(currentStream == .admin ? 1.0 : 0.7)
+        timestampLabel.textColor = palette.textMuted.withAlphaComponent(0.4)
 
         // Update body text color - must update attributed string since textColor is ignored for attributed text
         if let attributedText = bodyLabel.attributedText, attributedText.length > 0 {
@@ -1276,7 +1314,9 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
     }
 
     func preferredWidth(maxWidth: CGFloat) -> CGFloat {
-        let headerWidth: CGFloat = showsHeader ? (32 + 10 + senderLabel.intrinsicContentSize.width) : 0
+        let headerWidth: CGFloat = showsHeader
+            ? (32 + 10 + senderLabel.intrinsicContentSize.width + 8 + timestampLabel.intrinsicContentSize.width + 4)
+            : 0
         let contentWidth = maxWidth - (currentContentPaddingHorizontal * 2)
         let bodySize = bodyLabel.sizeThatFits(CGSize(width: contentWidth, height: .greatestFiniteMagnitude))
         let contentMax = max(headerWidth, bodySize.width)
@@ -1352,6 +1392,132 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
             return (UIFont.systemFont(ofSize: metrics.bodyFontSize, weight: .regular), 4)
         }
     }
+
+    private func refreshTimestampDisplay(now: Date = Date()) {
+        guard showsHeader else {
+            timestampLabel.attributedText = nil
+            timestampRefreshTimer?.invalidate()
+            timestampRefreshTimer = nil
+            return
+        }
+        guard let timestamp = timestampDate else {
+            timestampLabel.attributedText = nil
+            timestampRefreshTimer?.invalidate()
+            timestampRefreshTimer = nil
+            return
+        }
+        let formatted = Self.formattedBubbleTimestamp(timestamp, now: now)
+        timestampLabel.attributedText = NSAttributedString(
+            string: formatted,
+            attributes: [.kern: 0.2]
+        )
+        updateTimestampVisibilityIfNeeded()
+        scheduleTimestampRefreshIfNeeded(now: now)
+    }
+
+    private func updateTimestampVisibilityIfNeeded() {
+        guard showsHeader else {
+            timestampLabel.isHidden = true
+            return
+        }
+        guard let timestampText = timestampLabel.attributedText, !timestampText.string.isEmpty else {
+            timestampLabel.isHidden = true
+            return
+        }
+
+        let horizontalMargins = senderTimestampStack.directionalLayoutMargins.leading
+            + senderTimestampStack.directionalLayoutMargins.trailing
+        let availableWidth = senderTimestampStack.bounds.width - horizontalMargins
+        guard availableWidth > 0 else {
+            timestampLabel.isHidden = true
+            return
+        }
+
+        let requiredWidth = senderLabel.intrinsicContentSize.width
+            + timestampLabel.intrinsicContentSize.width
+            + (senderTimestampStack.spacing * 2)
+        timestampLabel.isHidden = requiredWidth > availableWidth
+    }
+
+    private func scheduleTimestampRefreshIfNeeded(now: Date) {
+        timestampRefreshTimer?.invalidate()
+        timestampRefreshTimer = nil
+        guard let timestamp = timestampDate else { return }
+
+        let elapsed = max(0, now.timeIntervalSince(timestamp))
+        guard elapsed < 86_400 else { return }
+
+        let calendar = Calendar.autoupdatingCurrent
+        let nextInterval: TimeInterval
+        if elapsed < 3_600 {
+            let nextMinute = calendar.nextDate(
+                after: now,
+                matching: DateComponents(second: 0),
+                matchingPolicy: .nextTime
+            ) ?? now.addingTimeInterval(60)
+            nextInterval = max(1, nextMinute.timeIntervalSince(now))
+        } else {
+            let nextHour = calendar.nextDate(
+                after: now,
+                matching: DateComponents(minute: 0, second: 0),
+                matchingPolicy: .nextTime
+            ) ?? now.addingTimeInterval(3_600)
+            nextInterval = max(1, nextHour.timeIntervalSince(now))
+        }
+
+        timestampRefreshTimer = Timer.scheduledTimer(withTimeInterval: nextInterval, repeats: false) { [weak self] _ in
+            self?.refreshTimestampDisplay()
+        }
+    }
+
+    private static func formattedBubbleTimestamp(_ timestamp: Date, now: Date) -> String {
+        let interval = max(0, now.timeIntervalSince(timestamp))
+        if interval < 3_600 {
+            return "\(max(1, Int(interval / 60)))m ago"
+        }
+        if interval < 86_400 {
+            return "\(Int(interval / 3_600))h ago"
+        }
+        let calendar = Calendar.autoupdatingCurrent
+        if calendar.isDateInYesterday(timestamp) {
+            return "Yesterday \(timeFormatter.string(from: timestamp))"
+        }
+        if calendar.component(.year, from: timestamp) != calendar.component(.year, from: now) {
+            return differentYearFormatter.string(from: timestamp)
+        }
+        if calendar.isDate(timestamp, equalTo: now, toGranularity: .weekOfYear) {
+            return "\(weekdayFormatter.string(from: timestamp)) \(timeFormatter.string(from: timestamp))"
+        }
+        return olderDateFormatter.string(from: timestamp)
+    }
+
+    private static let timeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale.autoupdatingCurrent
+        formatter.dateFormat = "h:mm a"
+        return formatter
+    }()
+
+    private static let olderDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale.autoupdatingCurrent
+        formatter.dateFormat = "MMM d h:mm a"
+        return formatter
+    }()
+
+    private static let weekdayFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale.autoupdatingCurrent
+        formatter.dateFormat = "EEE"
+        return formatter
+    }()
+
+    private static let differentYearFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale.autoupdatingCurrent
+        formatter.dateFormat = "MMM d, yyyy h:mm a"
+        return formatter
+    }()
 
     private func addRenderedMarkdownBlocks(
         _ blocks: [RenderedMarkdownBlock],
@@ -1933,6 +2099,7 @@ enum ChatFlowUIKitTheme {
         let failureText: UIColor
         let failureBackground: UIColor
         let shadowNear: UIColor
+        let textMuted: UIColor
     }
 
     static func palette(isDark: Bool) -> Palette {
@@ -1961,7 +2128,8 @@ enum ChatFlowUIKitTheme {
                 fadeTop: UIColor(red: 0, green: 0, blue: 0, alpha: 0),
                 failureText: UIColor(red: 0.95, green: 0.62, blue: 0.62, alpha: 1),
                 failureBackground: UIColor(red: 0.30, green: 0.14, blue: 0.14, alpha: 1),
-                shadowNear: UIColor.black.withAlphaComponent(0.35)
+                shadowNear: UIColor.black.withAlphaComponent(0.35),
+                textMuted: UIColor(red: 0.545, green: 0.502, blue: 0.471, alpha: 1)
             )
         }
         return Palette(
@@ -1988,7 +2156,8 @@ enum ChatFlowUIKitTheme {
             fadeTop: UIColor(red: 1, green: 1, blue: 1, alpha: 0),
             failureText: UIColor(red: 0.6, green: 0.12, blue: 0.12, alpha: 1),
             failureBackground: UIColor(red: 0.98, green: 0.92, blue: 0.92, alpha: 1),
-            shadowNear: UIColor(red: 0.361, green: 0.290, blue: 0.239, alpha: 0.30)
+            shadowNear: UIColor(red: 0.361, green: 0.290, blue: 0.239, alpha: 0.30),
+            textMuted: UIColor(red: 0.651, green: 0.608, blue: 0.553, alpha: 1)
         )
     }
 

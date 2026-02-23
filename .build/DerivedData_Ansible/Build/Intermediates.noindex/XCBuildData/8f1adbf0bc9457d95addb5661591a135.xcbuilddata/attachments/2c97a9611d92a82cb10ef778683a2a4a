@@ -1,0 +1,4 @@
+module HighlightSwift {
+header "HighlightSwift-Swift.h"
+export *
+}

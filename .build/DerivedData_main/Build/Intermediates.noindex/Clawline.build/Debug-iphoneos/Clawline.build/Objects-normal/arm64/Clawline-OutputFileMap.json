@@ -1,0 +1,839 @@
+{
+  "" : {
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/Clawline-primary.dia",
+    "emit-module-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/Clawline-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/Clawline-primary-emit-module.dia",
+    "pch" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/Clawline-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/Clawline-primary.swiftdeps"
+  },
+  "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/DerivedSources/GeneratedAssetSymbols.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/GeneratedAssetSymbols.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/GeneratedAssetSymbols.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/GeneratedAssetSymbols.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/GeneratedAssetSymbols.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/GeneratedAssetSymbols.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/GeneratedAssetSymbols.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/GeneratedAssetSymbols.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/GeneratedAssetSymbols~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/ClawlineApp.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ClawlineApp.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ClawlineApp.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ClawlineApp.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ClawlineApp.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ClawlineApp.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ClawlineApp.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ClawlineApp.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ClawlineApp~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/DesignSystem/ChatFlowOrganic/Components/CameraPicker.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/CameraPicker.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/CameraPicker.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/CameraPicker.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/CameraPicker.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/CameraPicker.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/CameraPicker.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/CameraPicker.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/CameraPicker~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/DesignSystem/ChatFlowOrganic/Components/CodeBlockView.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/CodeBlockView.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/CodeBlockView.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/CodeBlockView.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/CodeBlockView.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/CodeBlockView.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/CodeBlockView.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/CodeBlockView.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/CodeBlockView~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/DesignSystem/ChatFlowOrganic/Components/DocumentPicker.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/DocumentPicker.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/DocumentPicker.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/DocumentPicker.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/DocumentPicker.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/DocumentPicker.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/DocumentPicker.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/DocumentPicker.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/DocumentPicker~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/DesignSystem/ChatFlowOrganic/Components/MessageInputBar.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageInputBar.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageInputBar.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageInputBar.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageInputBar.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageInputBar.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageInputBar.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageInputBar.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageInputBar~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/DesignSystem/ChatFlowOrganic/Components/NoiseOverlayView.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/NoiseOverlayView.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/NoiseOverlayView.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/NoiseOverlayView.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/NoiseOverlayView.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/NoiseOverlayView.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/NoiseOverlayView.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/NoiseOverlayView.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/NoiseOverlayView~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/DesignSystem/ChatFlowOrganic/Components/PhotoPicker.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/PhotoPicker.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/PhotoPicker.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/PhotoPicker.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/PhotoPicker.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/PhotoPicker.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/PhotoPicker.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/PhotoPicker.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/PhotoPicker~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/DesignSystem/ChatFlowOrganic/Components/RichTextEditor.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/RichTextEditor.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/RichTextEditor.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/RichTextEditor.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/RichTextEditor.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/RichTextEditor.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/RichTextEditor.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/RichTextEditor.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/RichTextEditor~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/DesignSystem/ChatFlowOrganic/Components/ScrollToBottomButton.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ScrollToBottomButton.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ScrollToBottomButton.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ScrollToBottomButton.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ScrollToBottomButton.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ScrollToBottomButton.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ScrollToBottomButton.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ScrollToBottomButton.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ScrollToBottomButton~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/DesignSystem/ChatFlowOrganic/Components/Tables/MarkdownTableView.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MarkdownTableView.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MarkdownTableView.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MarkdownTableView.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MarkdownTableView.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MarkdownTableView.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MarkdownTableView.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MarkdownTableView.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MarkdownTableView~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/DesignSystem/ChatFlowOrganic/Components/Tables/SelectableAttributedText.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SelectableAttributedText.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SelectableAttributedText.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SelectableAttributedText.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SelectableAttributedText.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SelectableAttributedText.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SelectableAttributedText.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SelectableAttributedText.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SelectableAttributedText~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/DesignSystem/ChatFlowOrganic/Components/Tables/TableKeyCommandBridge.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/TableKeyCommandBridge.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/TableKeyCommandBridge.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/TableKeyCommandBridge.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/TableKeyCommandBridge.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/TableKeyCommandBridge.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/TableKeyCommandBridge.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/TableKeyCommandBridge.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/TableKeyCommandBridge~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/DesignSystem/ChatFlowOrganic/Layout/FlowLayout.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/FlowLayout.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/FlowLayout.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/FlowLayout.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/FlowLayout.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/FlowLayout.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/FlowLayout.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/FlowLayout.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/FlowLayout~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/DesignSystem/ChatFlowOrganic/Support/MessageAccessibilityFormatter.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageAccessibilityFormatter.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageAccessibilityFormatter.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageAccessibilityFormatter.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageAccessibilityFormatter.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageAccessibilityFormatter.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageAccessibilityFormatter.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageAccessibilityFormatter.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageAccessibilityFormatter~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/DesignSystem/ChatFlowOrganic/Support/MessageFlowRules.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageFlowRules.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageFlowRules.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageFlowRules.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageFlowRules.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageFlowRules.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageFlowRules.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageFlowRules.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageFlowRules~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/DesignSystem/ChatFlowOrganic/Support/MessageInputBarMetrics.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageInputBarMetrics.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageInputBarMetrics.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageInputBarMetrics.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageInputBarMetrics.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageInputBarMetrics.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageInputBarMetrics.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageInputBarMetrics.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageInputBarMetrics~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/DesignSystem/ChatFlowOrganic/Theme/ChatFlowTheme.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatFlowTheme.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatFlowTheme.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatFlowTheme.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatFlowTheme.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatFlowTheme.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatFlowTheme.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatFlowTheme.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatFlowTheme~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Environment/EnvironmentKeys.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/EnvironmentKeys.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/EnvironmentKeys.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/EnvironmentKeys.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/EnvironmentKeys.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/EnvironmentKeys.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/EnvironmentKeys.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/EnvironmentKeys.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/EnvironmentKeys~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Extensions/NSAttributedString+PendingAttachments.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/NSAttributedString+PendingAttachments.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/NSAttributedString+PendingAttachments.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/NSAttributedString+PendingAttachments.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/NSAttributedString+PendingAttachments.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/NSAttributedString+PendingAttachments.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/NSAttributedString+PendingAttachments.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/NSAttributedString+PendingAttachments.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/NSAttributedString+PendingAttachments~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Intents/SiriSendMessageIntent.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SiriSendMessageIntent.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SiriSendMessageIntent.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SiriSendMessageIntent.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SiriSendMessageIntent.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SiriSendMessageIntent.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SiriSendMessageIntent.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SiriSendMessageIntent.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SiriSendMessageIntent~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Models/Attachment.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/Attachment.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/Attachment.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/Attachment.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/Attachment.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/Attachment.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/Attachment.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/Attachment.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/Attachment~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Models/AttachmentError.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/AttachmentError.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/AttachmentError.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/AttachmentError.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/AttachmentError.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/AttachmentError.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/AttachmentError.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/AttachmentError.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/AttachmentError~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Models/ChatError.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatError.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatError.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatError.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatError.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatError.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatError.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatError.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatError~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Models/InteractiveHTMLDescriptor.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/InteractiveHTMLDescriptor.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/InteractiveHTMLDescriptor.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/InteractiveHTMLDescriptor.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/InteractiveHTMLDescriptor.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/InteractiveHTMLDescriptor.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/InteractiveHTMLDescriptor.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/InteractiveHTMLDescriptor.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/InteractiveHTMLDescriptor~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Models/JSONValue.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/JSONValue.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/JSONValue.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/JSONValue.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/JSONValue.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/JSONValue.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/JSONValue.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/JSONValue.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/JSONValue~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Models/Message.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/Message.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/Message.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/Message.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/Message.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/Message.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/Message.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/Message.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/Message~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Models/MessagePresentation.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessagePresentation.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessagePresentation.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessagePresentation.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessagePresentation.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessagePresentation.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessagePresentation.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessagePresentation.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessagePresentation~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Models/PairingState.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/PairingState.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/PairingState.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/PairingState.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/PairingState.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/PairingState.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/PairingState.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/PairingState.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/PairingState~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Models/PendingAttachment.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/PendingAttachment.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/PendingAttachment.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/PendingAttachment.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/PendingAttachment.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/PendingAttachment.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/PendingAttachment.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/PendingAttachment.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/PendingAttachment~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Models/PendingTextAttachment.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/PendingTextAttachment.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/PendingTextAttachment.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/PendingTextAttachment.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/PendingTextAttachment.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/PendingTextAttachment.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/PendingTextAttachment.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/PendingTextAttachment.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/PendingTextAttachment~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Models/ProviderWireModels.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ProviderWireModels.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ProviderWireModels.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ProviderWireModels.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ProviderWireModels.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ProviderWireModels.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ProviderWireModels.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ProviderWireModels.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ProviderWireModels~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Models/SalientHighlights.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SalientHighlights.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SalientHighlights.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SalientHighlights.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SalientHighlights.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SalientHighlights.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SalientHighlights.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SalientHighlights.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SalientHighlights~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Models/SessionKey.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SessionKey.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SessionKey.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SessionKey.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SessionKey.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SessionKey.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SessionKey.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SessionKey.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SessionKey~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Models/SessionRegistry.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SessionRegistry.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SessionRegistry.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SessionRegistry.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SessionRegistry.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SessionRegistry.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SessionRegistry.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SessionRegistry.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SessionRegistry~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Models/TerminalSessionDescriptor.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/TerminalSessionDescriptor.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/TerminalSessionDescriptor.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/TerminalSessionDescriptor.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/TerminalSessionDescriptor.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/TerminalSessionDescriptor.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/TerminalSessionDescriptor.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/TerminalSessionDescriptor.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/TerminalSessionDescriptor~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Models/WireAttachment.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/WireAttachment.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/WireAttachment.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/WireAttachment.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/WireAttachment.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/WireAttachment.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/WireAttachment.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/WireAttachment.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/WireAttachment~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Networking/URLSessionWebSocketConnector.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/URLSessionWebSocketConnector.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/URLSessionWebSocketConnector.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/URLSessionWebSocketConnector.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/URLSessionWebSocketConnector.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/URLSessionWebSocketConnector.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/URLSessionWebSocketConnector.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/URLSessionWebSocketConnector.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/URLSessionWebSocketConnector~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Networking/WebSocketClient.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/WebSocketClient.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/WebSocketClient.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/WebSocketClient.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/WebSocketClient.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/WebSocketClient.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/WebSocketClient.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/WebSocketClient.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/WebSocketClient~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Protocols/AuthManaging.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/AuthManaging.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/AuthManaging.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/AuthManaging.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/AuthManaging.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/AuthManaging.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/AuthManaging.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/AuthManaging.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/AuthManaging~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Protocols/ChatServicing.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatServicing.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatServicing.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatServicing.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatServicing.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatServicing.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatServicing.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatServicing.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatServicing~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Protocols/ConnectionServicing.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ConnectionServicing.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ConnectionServicing.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ConnectionServicing.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ConnectionServicing.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ConnectionServicing.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ConnectionServicing.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ConnectionServicing.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ConnectionServicing~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Protocols/DeviceIdentifying.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/DeviceIdentifying.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/DeviceIdentifying.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/DeviceIdentifying.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/DeviceIdentifying.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/DeviceIdentifying.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/DeviceIdentifying.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/DeviceIdentifying.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/DeviceIdentifying~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Protocols/SalientHighlightServicing.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SalientHighlightServicing.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SalientHighlightServicing.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SalientHighlightServicing.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SalientHighlightServicing.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SalientHighlightServicing.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SalientHighlightServicing.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SalientHighlightServicing.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SalientHighlightServicing~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Protocols/UploadServicing.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/UploadServicing.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/UploadServicing.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/UploadServicing.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/UploadServicing.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/UploadServicing.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/UploadServicing.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/UploadServicing.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/UploadServicing~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Services/AuthManager.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/AuthManager.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/AuthManager.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/AuthManager.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/AuthManager.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/AuthManager.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/AuthManager.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/AuthManager.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/AuthManager~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Services/DeviceIdentifier.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/DeviceIdentifier.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/DeviceIdentifier.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/DeviceIdentifier.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/DeviceIdentifier.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/DeviceIdentifier.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/DeviceIdentifier.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/DeviceIdentifier.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/DeviceIdentifier~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Services/KeychainSecureStore.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/KeychainSecureStore.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/KeychainSecureStore.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/KeychainSecureStore.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/KeychainSecureStore.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/KeychainSecureStore.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/KeychainSecureStore.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/KeychainSecureStore.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/KeychainSecureStore~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Services/LinkCardMetadataFetcher.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/LinkCardMetadataFetcher.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/LinkCardMetadataFetcher.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/LinkCardMetadataFetcher.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/LinkCardMetadataFetcher.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/LinkCardMetadataFetcher.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/LinkCardMetadataFetcher.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/LinkCardMetadataFetcher.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/LinkCardMetadataFetcher~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Services/ProviderBaseURLStore.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ProviderBaseURLStore.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ProviderBaseURLStore.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ProviderBaseURLStore.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ProviderBaseURLStore.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ProviderBaseURLStore.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ProviderBaseURLStore.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ProviderBaseURLStore.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ProviderBaseURLStore~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Services/ProviderChatService.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ProviderChatService.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ProviderChatService.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ProviderChatService.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ProviderChatService.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ProviderChatService.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ProviderChatService.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ProviderChatService.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ProviderChatService~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Services/ProviderConnectionService.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ProviderConnectionService.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ProviderConnectionService.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ProviderConnectionService.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ProviderConnectionService.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ProviderConnectionService.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ProviderConnectionService.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ProviderConnectionService.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ProviderConnectionService~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Services/SalientHighlightService.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SalientHighlightService.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SalientHighlightService.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SalientHighlightService.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SalientHighlightService.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SalientHighlightService.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SalientHighlightService.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SalientHighlightService.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SalientHighlightService~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Services/SecureStore.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SecureStore.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SecureStore.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SecureStore.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SecureStore.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SecureStore.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SecureStore.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SecureStore.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SecureStore~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Services/StubChatService.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/StubChatService.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/StubChatService.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/StubChatService.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/StubChatService.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/StubChatService.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/StubChatService.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/StubChatService.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/StubChatService~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Services/StubConnectionService.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/StubConnectionService.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/StubConnectionService.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/StubConnectionService.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/StubConnectionService.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/StubConnectionService.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/StubConnectionService.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/StubConnectionService.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/StubConnectionService~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Services/TerminalSessionService.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/TerminalSessionService.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/TerminalSessionService.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/TerminalSessionService.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/TerminalSessionService.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/TerminalSessionService.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/TerminalSessionService.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/TerminalSessionService.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/TerminalSessionService~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Services/ToastManager.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ToastManager.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ToastManager.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ToastManager.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ToastManager.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ToastManager.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ToastManager.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ToastManager.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ToastManager~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Services/UploadService.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/UploadService.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/UploadService.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/UploadService.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/UploadService.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/UploadService.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/UploadService.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/UploadService.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/UploadService~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Settings/SettingsManager.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SettingsManager.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SettingsManager.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SettingsManager.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SettingsManager.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SettingsManager.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SettingsManager.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SettingsManager.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SettingsManager~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Settings/SettingsView.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SettingsView.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SettingsView.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SettingsView.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SettingsView.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SettingsView.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SettingsView.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SettingsView.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SettingsView~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Shaders/BackgroundEffect.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/BackgroundEffect.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/BackgroundEffect.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/BackgroundEffect.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/BackgroundEffect.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/BackgroundEffect.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/BackgroundEffect.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/BackgroundEffect.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/BackgroundEffect~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Support/ErrorCatchingView.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ErrorCatchingView.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ErrorCatchingView.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ErrorCatchingView.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ErrorCatchingView.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ErrorCatchingView.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ErrorCatchingView.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ErrorCatchingView.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ErrorCatchingView~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Support/Task+Sleep.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/Task+Sleep.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/Task+Sleep.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/Task+Sleep.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/Task+Sleep.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/Task+Sleep.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/Task+Sleep.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/Task+Sleep.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/Task+Sleep~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/ViewModels/ChatViewModel.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatViewModel.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatViewModel.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatViewModel.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatViewModel.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatViewModel.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatViewModel.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatViewModel.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatViewModel~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/ViewModels/PairingViewModel.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/PairingViewModel.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/PairingViewModel.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/PairingViewModel.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/PairingViewModel.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/PairingViewModel.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/PairingViewModel.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/PairingViewModel.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/PairingViewModel~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Views/Chat/BubbleSizingV2.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/BubbleSizingV2.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/BubbleSizingV2.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/BubbleSizingV2.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/BubbleSizingV2.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/BubbleSizingV2.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/BubbleSizingV2.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/BubbleSizingV2.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/BubbleSizingV2~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Views/Chat/ChannelSwitcherView.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChannelSwitcherView.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChannelSwitcherView.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChannelSwitcherView.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChannelSwitcherView.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChannelSwitcherView.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChannelSwitcherView.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChannelSwitcherView.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChannelSwitcherView~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Views/Chat/ChannelToast.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChannelToast.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChannelToast.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChannelToast.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChannelToast.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChannelToast.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChannelToast.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChannelToast.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChannelToast~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Views/Chat/ChatLayoutCoordinator.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatLayoutCoordinator.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatLayoutCoordinator.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatLayoutCoordinator.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatLayoutCoordinator.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatLayoutCoordinator.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatLayoutCoordinator.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatLayoutCoordinator.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatLayoutCoordinator~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Views/Chat/ChatMarkdownRenderer.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatMarkdownRenderer.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatMarkdownRenderer.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatMarkdownRenderer.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatMarkdownRenderer.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatMarkdownRenderer.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatMarkdownRenderer.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatMarkdownRenderer.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatMarkdownRenderer~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Views/Chat/ChatView.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatView.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatView.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatView.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatView.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatView.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatView.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatView.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ChatView~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Views/Chat/ExpandedMessageSheet.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ExpandedMessageSheet.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ExpandedMessageSheet.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ExpandedMessageSheet.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ExpandedMessageSheet.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ExpandedMessageSheet.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ExpandedMessageSheet.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ExpandedMessageSheet.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ExpandedMessageSheet~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Views/Chat/InteractiveHTMLBubbleUIKitView.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/InteractiveHTMLBubbleUIKitView.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/InteractiveHTMLBubbleUIKitView.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/InteractiveHTMLBubbleUIKitView.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/InteractiveHTMLBubbleUIKitView.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/InteractiveHTMLBubbleUIKitView.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/InteractiveHTMLBubbleUIKitView.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/InteractiveHTMLBubbleUIKitView.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/InteractiveHTMLBubbleUIKitView~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Views/Chat/LinkCardUIKitView.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/LinkCardUIKitView.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/LinkCardUIKitView.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/LinkCardUIKitView.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/LinkCardUIKitView.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/LinkCardUIKitView.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/LinkCardUIKitView.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/LinkCardUIKitView.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/LinkCardUIKitView~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Views/Chat/LinkPreviewView.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/LinkPreviewView.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/LinkPreviewView.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/LinkPreviewView.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/LinkPreviewView.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/LinkPreviewView.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/LinkPreviewView.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/LinkPreviewView.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/LinkPreviewView~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Views/Chat/MessageBubbleUIKitView.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageBubbleUIKitView.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageBubbleUIKitView.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageBubbleUIKitView.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageBubbleUIKitView.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageBubbleUIKitView.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageBubbleUIKitView.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageBubbleUIKitView.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageBubbleUIKitView~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Views/Chat/MessageFlowCollectionView.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageFlowCollectionView.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageFlowCollectionView.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageFlowCollectionView.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageFlowCollectionView.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageFlowCollectionView.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageFlowCollectionView.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageFlowCollectionView.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageFlowCollectionView~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Views/Chat/SalientHighlightApplier.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SalientHighlightApplier.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SalientHighlightApplier.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SalientHighlightApplier.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SalientHighlightApplier.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SalientHighlightApplier.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SalientHighlightApplier.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SalientHighlightApplier.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/SalientHighlightApplier~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Views/Chat/TerminalBubbleUIKitView.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/TerminalBubbleUIKitView.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/TerminalBubbleUIKitView.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/TerminalBubbleUIKitView.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/TerminalBubbleUIKitView.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/TerminalBubbleUIKitView.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/TerminalBubbleUIKitView.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/TerminalBubbleUIKitView.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/TerminalBubbleUIKitView~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Views/Chat/TypingIndicatorCell.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/TypingIndicatorCell.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/TypingIndicatorCell.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/TypingIndicatorCell.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/TypingIndicatorCell.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/TypingIndicatorCell.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/TypingIndicatorCell.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/TypingIndicatorCell.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/TypingIndicatorCell~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Views/Pairing/PairingView.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/PairingView.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/PairingView.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/PairingView.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/PairingView.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/PairingView.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/PairingView.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/PairingView.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/PairingView~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/Views/RootView.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/RootView.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/RootView.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/RootView.dia",
+    "index-unit-output-path" : "/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/RootView.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/RootView.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/RootView.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/RootView.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData_main/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/RootView~partial.swiftmodule"
+  }
+}

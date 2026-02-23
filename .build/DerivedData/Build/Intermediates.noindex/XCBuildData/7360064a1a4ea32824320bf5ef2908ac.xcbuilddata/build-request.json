@@ -1,0 +1,71 @@
+{
+  "buildCommand" : {
+    "command" : "build",
+    "skipDependencies" : false,
+    "style" : "buildOnly"
+  },
+  "configuredTargets" : [
+    {
+      "guid" : "c346729f83ea764821815080afd397ef85d8eea484085109a2f63b203d0eb585"
+    }
+  ],
+  "containerPath" : "/Users/mike/src/clawline/ios/Clawline/Clawline.xcodeproj",
+  "continueBuildingAfterErrors" : false,
+  "dependencyScope" : "workspace",
+  "enableIndexBuildArena" : false,
+  "hideShellScriptEnvironment" : false,
+  "parameters" : {
+    "action" : "build",
+    "activeArchitecture" : "arm64",
+    "activeRunDestination" : {
+      "disableOnlyActiveArch" : false,
+      "platform" : "iphoneos",
+      "sdk" : "iphoneos26.1",
+      "sdkVariant" : "iphoneos",
+      "supportedArchitectures" : [
+        "arm64e",
+        "arm64"
+      ],
+      "targetArchitecture" : "arm64"
+    },
+    "arenaInfo" : {
+      "buildIntermediatesPath" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex",
+      "buildProductsPath" : "/Users/mike/src/clawline/.build/DerivedData/Build/Products",
+      "derivedDataPath" : "/Users/mike/src/clawline/.build/DerivedData",
+      "indexDataStoreFolderPath" : "/Users/mike/src/clawline/.build/DerivedData/Index.noindex/DataStore",
+      "indexEnableDataStore" : true,
+      "indexPCHPath" : "/Users/mike/src/clawline/.build/DerivedData/Index.noindex/PrecompiledHeaders",
+      "pchPath" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/PrecompiledHeaders"
+    },
+    "configurationName" : "Debug",
+    "overrides" : {
+      "commandLine" : {
+        "table" : {
+
+        }
+      },
+      "synthesized" : {
+        "table" : {
+          "ACTION" : "build",
+          "ASSETCATALOG_FILTER_FOR_DEVICE_MODEL" : "iPad14,2",
+          "ASSETCATALOG_FILTER_FOR_DEVICE_OS_VERSION" : "26.2.1",
+          "ASSETCATALOG_FILTER_FOR_THINNING_DEVICE_CONFIGURATION" : "iPad14,2",
+          "BUILD_ACTIVE_RESOURCES_ONLY" : "YES",
+          "ENABLE_PREVIEWS" : "NO",
+          "ENABLE_XOJIT_PREVIEWS" : "YES",
+          "TARGET_DEVICE_IDENTIFIER" : "00008110-000A41E902BB801E",
+          "TARGET_DEVICE_MODEL" : "iPad14,2",
+          "TARGET_DEVICE_OS_VERSION" : "26.2.1",
+          "TARGET_DEVICE_PLATFORM_NAME" : "iphoneos",
+          "TOOLCHAINS" : "com.apple.dt.toolchain.Metal.32023 $(inherited)"
+        }
+      }
+    }
+  },
+  "schemeCommand" : "launch",
+  "showNonLoggedProgress" : true,
+  "useDryRun" : false,
+  "useImplicitDependencies" : true,
+  "useLegacyBuildLocations" : false,
+  "useParallelTargets" : true
+}

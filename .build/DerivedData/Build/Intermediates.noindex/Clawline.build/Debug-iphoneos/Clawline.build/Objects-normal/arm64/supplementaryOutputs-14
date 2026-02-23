@@ -1,0 +1,44 @@
+{
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/DesignSystem/ChatFlowOrganic/Components/MessageInputBar.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageInputBar.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageInputBar.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageInputBar.dia",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageInputBar.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/MessageInputBar.swiftdeps"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/DesignSystem/ChatFlowOrganic/Components/NoiseOverlayView.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/NoiseOverlayView.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/NoiseOverlayView.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/NoiseOverlayView.dia",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/NoiseOverlayView.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/NoiseOverlayView.swiftdeps"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/DesignSystem/ChatFlowOrganic/Components/PhotoPicker.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/PhotoPicker.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/PhotoPicker.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/PhotoPicker.dia",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/PhotoPicker.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/PhotoPicker.swiftdeps"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/DesignSystem/ChatFlowOrganic/Components/RichTextEditor.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/RichTextEditor.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/RichTextEditor.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/RichTextEditor.dia",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/RichTextEditor.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/RichTextEditor.swiftdeps"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/DesignSystem/ChatFlowOrganic/Components/ScrollToBottomButton.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ScrollToBottomButton.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ScrollToBottomButton.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ScrollToBottomButton.dia",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ScrollToBottomButton.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/ScrollToBottomButton.swiftdeps"
+  },
+  "/Users/mike/src/clawline/ios/Clawline/Clawline/DesignSystem/ChatFlowOrganic/Layout/FlowLayout.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/FlowLayout.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/FlowLayout.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/FlowLayout.dia",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/FlowLayout.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/Clawline.build/Debug-iphoneos/Clawline.build/Objects-normal/arm64/FlowLayout.swiftdeps"
+  }
+}

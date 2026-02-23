@@ -1,0 +1,11 @@
+{
+  "dependencies" : [
+
+  ],
+  "module" : {
+    "moduleName" : "RealityKitContent",
+    "swiftFiles" : [
+      "/Users/mike/src/clawline/ios/Clawline/Packages/RealityKitContent/Sources/RealityKitContent/RealityKitContent.swift"
+    ]
+  }
+}

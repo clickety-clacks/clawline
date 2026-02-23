@@ -1,0 +1,16 @@
+{
+  "source": "/Users/mike/src/clawline/ios/Clawline/Clawline/DesignSystem/ChatFlowOrganic/Components/MessageInputBar.swift",
+  "tables": {
+    "Localizable": [
+      {
+        "comment": "",
+        "key": "Add attachment",
+        "location": {
+          "startingColumn": 33,
+          "startingLine": 278
+        }
+      }
+    ]
+  },
+  "version": 1
+}

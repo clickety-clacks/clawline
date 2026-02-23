@@ -1,0 +1,199 @@
+{
+  "" : {
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HighlightSwift-primary.dia",
+    "emit-module-dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HighlightSwift-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HighlightSwift-primary-emit-module.dia",
+    "pch" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HighlightSwift-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HighlightSwift-primary.swiftdeps"
+  },
+  "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/DerivedSources/resource_bundle_accessor.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/resource_bundle_accessor.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/resource_bundle_accessor.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/resource_bundle_accessor.dia",
+    "index-unit-output-path" : "/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/resource_bundle_accessor.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/resource_bundle_accessor.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/resource_bundle_accessor.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/resource_bundle_accessor.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/resource_bundle_accessor~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/.build/DerivedData/SourcePackages/checkouts/HighlightSwift/Sources/HighlightSwift/CodeText/CodeText.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/CodeText.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/CodeText.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/CodeText.dia",
+    "index-unit-output-path" : "/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/CodeText.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/CodeText.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/CodeText.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/CodeText.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/CodeText~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/.build/DerivedData/SourcePackages/checkouts/HighlightSwift/Sources/HighlightSwift/CodeText/CodeTextCardView.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/CodeTextCardView.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/CodeTextCardView.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/CodeTextCardView.dia",
+    "index-unit-output-path" : "/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/CodeTextCardView.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/CodeTextCardView.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/CodeTextCardView.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/CodeTextCardView.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/CodeTextCardView~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/.build/DerivedData/SourcePackages/checkouts/HighlightSwift/Sources/HighlightSwift/CodeText/CodeTextColors.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/CodeTextColors.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/CodeTextColors.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/CodeTextColors.dia",
+    "index-unit-output-path" : "/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/CodeTextColors.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/CodeTextColors.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/CodeTextColors.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/CodeTextColors.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/CodeTextColors~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/.build/DerivedData/SourcePackages/checkouts/HighlightSwift/Sources/HighlightSwift/CodeText/CodeTextModifiers.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/CodeTextModifiers.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/CodeTextModifiers.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/CodeTextModifiers.dia",
+    "index-unit-output-path" : "/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/CodeTextModifiers.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/CodeTextModifiers.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/CodeTextModifiers.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/CodeTextModifiers.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/CodeTextModifiers~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/.build/DerivedData/SourcePackages/checkouts/HighlightSwift/Sources/HighlightSwift/CodeText/CodeTextStyle.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/CodeTextStyle.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/CodeTextStyle.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/CodeTextStyle.dia",
+    "index-unit-output-path" : "/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/CodeTextStyle.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/CodeTextStyle.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/CodeTextStyle.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/CodeTextStyle.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/CodeTextStyle~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/.build/DerivedData/SourcePackages/checkouts/HighlightSwift/Sources/HighlightSwift/CodeText/CodeTextView.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/CodeTextView.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/CodeTextView.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/CodeTextView.dia",
+    "index-unit-output-path" : "/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/CodeTextView.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/CodeTextView.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/CodeTextView.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/CodeTextView.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/CodeTextView~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/.build/DerivedData/SourcePackages/checkouts/HighlightSwift/Sources/HighlightSwift/HLJS/HLJS.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HLJS.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HLJS.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HLJS.dia",
+    "index-unit-output-path" : "/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HLJS.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HLJS.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HLJS.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HLJS.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HLJS~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/.build/DerivedData/SourcePackages/checkouts/HighlightSwift/Sources/HighlightSwift/HLJS/HLJSError.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HLJSError.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HLJSError.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HLJSError.dia",
+    "index-unit-output-path" : "/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HLJSError.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HLJSError.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HLJSError.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HLJSError.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HLJSError~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/.build/DerivedData/SourcePackages/checkouts/HighlightSwift/Sources/HighlightSwift/HLJS/HLJSResult.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HLJSResult.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HLJSResult.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HLJSResult.dia",
+    "index-unit-output-path" : "/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HLJSResult.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HLJSResult.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HLJSResult.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HLJSResult.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HLJSResult~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/.build/DerivedData/SourcePackages/checkouts/HighlightSwift/Sources/HighlightSwift/Highlight/Highlight.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/Highlight.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/Highlight.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/Highlight.dia",
+    "index-unit-output-path" : "/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/Highlight.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/Highlight.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/Highlight.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/Highlight.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/Highlight~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/.build/DerivedData/SourcePackages/checkouts/HighlightSwift/Sources/HighlightSwift/Highlight/HighlightBackground.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HighlightBackground.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HighlightBackground.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HighlightBackground.dia",
+    "index-unit-output-path" : "/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HighlightBackground.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HighlightBackground.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HighlightBackground.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HighlightBackground.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HighlightBackground~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/.build/DerivedData/SourcePackages/checkouts/HighlightSwift/Sources/HighlightSwift/Highlight/HighlightCSS.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HighlightCSS.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HighlightCSS.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HighlightCSS.dia",
+    "index-unit-output-path" : "/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HighlightCSS.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HighlightCSS.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HighlightCSS.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HighlightCSS.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HighlightCSS~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/.build/DerivedData/SourcePackages/checkouts/HighlightSwift/Sources/HighlightSwift/Highlight/HighlightColors.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HighlightColors.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HighlightColors.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HighlightColors.dia",
+    "index-unit-output-path" : "/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HighlightColors.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HighlightColors.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HighlightColors.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HighlightColors.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HighlightColors~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/.build/DerivedData/SourcePackages/checkouts/HighlightSwift/Sources/HighlightSwift/Highlight/HighlightEntry.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HighlightEntry.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HighlightEntry.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HighlightEntry.dia",
+    "index-unit-output-path" : "/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HighlightEntry.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HighlightEntry.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HighlightEntry.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HighlightEntry.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HighlightEntry~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/.build/DerivedData/SourcePackages/checkouts/HighlightSwift/Sources/HighlightSwift/Highlight/HighlightLanguage.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HighlightLanguage.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HighlightLanguage.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HighlightLanguage.dia",
+    "index-unit-output-path" : "/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HighlightLanguage.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HighlightLanguage.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HighlightLanguage.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HighlightLanguage.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HighlightLanguage~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/.build/DerivedData/SourcePackages/checkouts/HighlightSwift/Sources/HighlightSwift/Highlight/HighlightMode.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HighlightMode.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HighlightMode.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HighlightMode.dia",
+    "index-unit-output-path" : "/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HighlightMode.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HighlightMode.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HighlightMode.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HighlightMode.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HighlightMode~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/.build/DerivedData/SourcePackages/checkouts/HighlightSwift/Sources/HighlightSwift/Highlight/HighlightResult.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HighlightResult.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HighlightResult.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HighlightResult.dia",
+    "index-unit-output-path" : "/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HighlightResult.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HighlightResult.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HighlightResult.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HighlightResult.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HighlightResult~partial.swiftmodule"
+  },
+  "/Users/mike/src/clawline/.build/DerivedData/SourcePackages/checkouts/HighlightSwift/Sources/HighlightSwift/Highlight/HighlightTheme.swift" : {
+    "const-values" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HighlightTheme.swiftconstvalues",
+    "dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HighlightTheme.d",
+    "diagnostics" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HighlightTheme.dia",
+    "index-unit-output-path" : "/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HighlightTheme.o",
+    "llvm-bc" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HighlightTheme.bc",
+    "object" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HighlightTheme.o",
+    "swift-dependencies" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HighlightTheme.swiftdeps",
+    "swiftmodule" : "/Users/mike/src/clawline/.build/DerivedData/Build/Intermediates.noindex/HighlightSwift.build/Debug-iphoneos/HighlightSwift.build/Objects-normal/arm64/HighlightTheme~partial.swiftmodule"
+  }
+}

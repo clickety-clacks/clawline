@@ -676,18 +676,6 @@ struct MessageInputBar: View {
         motionModel.gesturePhase == .dragging
     }
 
-    private var shouldPreserveKeyboardDuringSurfaceDrag: Bool {
-        isKeyboardVisible && isTextFieldFocused
-    }
-
-    private var isWalkieDragLockRequired: Bool {
-        isDictationDragActive && (motionModel.pushStartedWalkieTalkie || dictation.isWalkieTalkieActive)
-    }
-
-    private var shouldLockTextSelectionForDrag: Bool {
-        motionModel.isTextInteractionLocked || isWalkieDragLockRequired || (isDictationDragActive && !shouldPreserveKeyboardDuringSurfaceDrag)
-    }
-
     private var micTrailingPadding: CGFloat {
         shouldRenderMic ? 52 : 20
     }

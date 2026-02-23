@@ -1129,9 +1129,17 @@ struct MessageInputBar: View {
     }
 
     private func clearPushGestureState() {
-        guard motionModel.pushGestureStart != nil || motionModel.pushDragUpDistance != 0 || motionModel.pushCommitReachedAt != nil || motionModel.pushStartedWalkieTalkie || motionModel.pushGestureStartedWithSurfaceOpen else {
+        guard motionModel.pushGestureStart != nil
+                || motionModel.pushDragUpDistance != 0
+                || motionModel.pushCommitReachedAt != nil
+                || motionModel.pushStartedWalkieTalkie
+                || motionModel.pushGestureStartedWithSurfaceOpen
+                || motionModel.pullToSendProgress > 0
+                || motionModel.pullToSendArmed else {
             return
         }
+        // Pull-to-send UI is drag-only; hide immediately on release/cancel.
+        resetPullToSendVisualState()
         scheduleInsetUnfreezeAfterSettle(resetMotionState: true)
     }
 

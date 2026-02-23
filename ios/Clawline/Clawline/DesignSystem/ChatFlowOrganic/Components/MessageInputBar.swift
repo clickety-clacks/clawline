@@ -1167,6 +1167,19 @@ struct MessageInputBar: View {
     }
 
     private var dictationSurface: some View {
+        let statusText: String
+        let statusColor: Color
+        if dictation.state == .error, let message = dictation.errorMessage {
+            statusText = message
+            statusColor = .red
+        } else if dictation.state == .dictatingPaused {
+            statusText = "Paused"
+            statusColor = .secondary
+        } else {
+            statusText = dictation.isListeningReady ? "Listening..." : "Connecting..."
+            statusColor = .secondary
+        }
+
         VStack(alignment: .center, spacing: 8) {
             waveformLine
                 .frame(maxWidth: .infinity)
@@ -1190,19 +1203,20 @@ struct MessageInputBar: View {
                     }
                 )
 
-            Text(dictation.state == .dictatingPaused ? "Paused" : (dictation.isListeningReady ? "Listening..." : "Connecting..."))
+            Text(statusText)
                 .font(.footnote.weight(.semibold))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(statusColor)
                 .frame(maxWidth: .infinity, alignment: .center)
-
-            if dictation.state == .error, let message = dictation.errorMessage {
-                Text(message)
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(.red)
-                    .onAppear {
+                .onAppear {
+                    if dictation.state == .error, let message = dictation.errorMessage {
                         logDictation("DICTATION_ERROR ui_display ts=\(Date().timeIntervalSince1970) message=\(message)")
                     }
-            }
+                }
+                .onChange(of: dictation.errorMessage) { _, newValue in
+                    if dictation.state == .error, let message = newValue {
+                        logDictation("DICTATION_ERROR ui_display ts=\(Date().timeIntervalSince1970) message=\(message)")
+                    }
+                }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)

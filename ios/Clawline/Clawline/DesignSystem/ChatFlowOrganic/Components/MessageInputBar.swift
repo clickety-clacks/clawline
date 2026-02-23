@@ -1494,17 +1494,21 @@ struct MessageInputBar: View {
                 let height = max(1, proxy.size.height)
                 let midY = height * 0.5
                 let t = CGFloat(context.date.timeIntervalSinceReferenceDate)
-                let normalizedAudio = max(0, min(1, (dictation.waveformDisplacement - 0.35) / 8.65))
+                let rawAudio = max(0, (dictation.waveformDisplacement - 0.35) / 8.65)
                 let isPaused = dictation.state == .dictatingPaused
                 let pauseMultiplier: CGFloat = isPaused ? 0.70 : 1.0
                 let idleDrift = 0.070 + 0.022 * sin(t * 1.9)
                 let pausedAudioScale: CGFloat = isPaused ? 0.80 : 1.0
-                let audioSwell = 1.22 * normalizedAudio * pausedAudioScale
-                let baseAmplitude = (idleDrift + audioSwell) * pauseMultiplier
+                // Invariant 11: asymptotic amplitude curve (fast rise, bounded approach).
+                let boundedAmplitudeDrive = tanh(rawAudio * 2.4)
+                let targetAmplitude = 0.060 + (0.455 - 0.060) * boundedAmplitudeDrive * pausedAudioScale
+                let baseAmplitude = (idleDrift + targetAmplitude) * pauseMultiplier
+                // Invariant 12: period curve differs from amplitude and keeps increasing.
+                let periodDrive = log1p(rawAudio * 1.8)
                 let frequencyAudioScale: CGFloat = isPaused ? 0.64 : 0.95
                 let phaseAudioScale: CGFloat = isPaused ? 0.52 : 0.65
-                let dynamicFrequencyScale: CGFloat = 1.0 + frequencyAudioScale * normalizedAudio
-                let dynamicPhaseSpeedScale: CGFloat = 1.0 + phaseAudioScale * normalizedAudio
+                let dynamicFrequencyScale: CGFloat = 1.0 + frequencyAudioScale * periodDrive
+                let dynamicPhaseSpeedScale: CGFloat = 1.0 + phaseAudioScale * periodDrive
                 let baseLineWidth: CGFloat = isPaused ? 1.1 : 2.0
                 let colorSet: [Color] = [
                     ChatFlowTheme.adminAccent(colorScheme),
@@ -1523,7 +1527,8 @@ struct MessageInputBar: View {
                     ForEach(Array(waveConfigs.enumerated()), id: \.offset) { index, config in
                         let phase = (t * config.speed * dynamicPhaseSpeedScale) + config.phaseOffset
                         let frequency = config.frequency * dynamicFrequencyScale
-                        let waveAmplitude = min(1.28, max(0.060, baseAmplitude * config.amplitudeScale))
+                        // Keep waveform bounded within panel while allowing near-max fill.
+                        let waveAmplitude = min(0.48, max(0.050, baseAmplitude * config.amplitudeScale))
                         Path { path in
                             path.move(to: CGPoint(x: 0, y: midY))
                             let step: CGFloat = 2

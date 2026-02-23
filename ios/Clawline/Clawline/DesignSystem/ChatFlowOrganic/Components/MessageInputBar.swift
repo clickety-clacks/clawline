@@ -68,11 +68,17 @@ private struct DictationPanEvent {
 
 private struct DictationPanGestureInstaller: UIViewRepresentable {
     var shouldBegin: (CGPoint, CGPoint) -> Bool
+    var startsInEditableRegion: (CGPoint) -> Bool
     var onChanged: (DictationPanEvent) -> Void
     var onEnded: (DictationPanEvent, Bool) -> Void
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(shouldBegin: shouldBegin, onChanged: onChanged, onEnded: onEnded)
+        Coordinator(
+            shouldBegin: shouldBegin,
+            startsInEditableRegion: startsInEditableRegion,
+            onChanged: onChanged,
+            onEnded: onEnded
+        )
     }
 
     func makeUIView(context: Context) -> InstallerView {
@@ -84,6 +90,7 @@ private struct DictationPanGestureInstaller: UIViewRepresentable {
 
     func updateUIView(_ uiView: InstallerView, context: Context) {
         context.coordinator.shouldBegin = shouldBegin
+        context.coordinator.startsInEditableRegion = startsInEditableRegion
         context.coordinator.onChanged = onChanged
         context.coordinator.onEnded = onEnded
         context.coordinator.attachIfNeeded(from: uiView)
@@ -109,26 +116,38 @@ private struct DictationPanGestureInstaller: UIViewRepresentable {
     }
 
     final class Coordinator: NSObject, UIGestureRecognizerDelegate {
+        private enum IntentLock {
+            case undecided
+            case dictation
+            case textEditing
+        }
+
         var shouldBegin: (CGPoint, CGPoint) -> Bool
+        var startsInEditableRegion: (CGPoint) -> Bool
         var onChanged: (DictationPanEvent) -> Void
         var onEnded: (DictationPanEvent, Bool) -> Void
 
         private weak var attachedView: UIView?
         private let pan = UIPanGestureRecognizer()
+        private var intentLock: IntentLock = .undecided
+        private var gestureStartDate: Date = .distantPast
+        private var startedInEditableRegion = false
 
         init(
             shouldBegin: @escaping (CGPoint, CGPoint) -> Bool,
+            startsInEditableRegion: @escaping (CGPoint) -> Bool,
             onChanged: @escaping (DictationPanEvent) -> Void,
             onEnded: @escaping (DictationPanEvent, Bool) -> Void
         ) {
             self.shouldBegin = shouldBegin
+            self.startsInEditableRegion = startsInEditableRegion
             self.onChanged = onChanged
             self.onEnded = onEnded
             super.init()
             pan.addTarget(self, action: #selector(handlePan(_:)))
             pan.delegate = self
             pan.maximumNumberOfTouches = 1
-            pan.cancelsTouchesInView = true
+            pan.cancelsTouchesInView = false
             pan.delaysTouchesBegan = false
             pan.delaysTouchesEnded = false
         }
@@ -156,14 +175,64 @@ private struct DictationPanGestureInstaller: UIViewRepresentable {
             )
 
             switch gesture.state {
-            case .began, .changed:
-                onChanged(event)
+            case .began:
+                gestureStartDate = Date()
+                startedInEditableRegion = startsInEditableRegion(event.startLocation)
+                intentLock = .undecided
+                promoteIntentIfNeeded(event)
+                if intentLock == .dictation {
+                    onChanged(event)
+                }
+            case .changed:
+                promoteIntentIfNeeded(event)
+                if intentLock == .dictation {
+                    onChanged(event)
+                }
             case .ended:
-                onEnded(event, false)
+                if intentLock == .dictation {
+                    onEnded(event, false)
+                }
+                resetGestureState()
             case .cancelled, .failed:
-                onEnded(event, true)
+                if intentLock == .dictation {
+                    onEnded(event, true)
+                }
+                resetGestureState()
             default:
                 break
+            }
+        }
+
+        private func resetGestureState() {
+            intentLock = .undecided
+            startedInEditableRegion = false
+            gestureStartDate = .distantPast
+        }
+
+        private func promoteIntentIfNeeded(_ event: DictationPanEvent) {
+            guard intentLock == .undecided else { return }
+
+            let elapsed = Date().timeIntervalSince(gestureStartDate)
+            let up = max(0, -event.translation.y)
+            let down = max(0, event.translation.y)
+            let verticalDominant = max(up, down) >= 1.25 * abs(event.translation.x)
+            let fastUpVelocity = event.velocity.y <= -220 && verticalDominant
+
+            if startedInEditableRegion {
+                if fastUpVelocity || (up >= 22 && elapsed < 0.18 && verticalDominant) {
+                    intentLock = .dictation
+                    return
+                }
+                if elapsed >= 0.18 || down >= 8 || abs(event.translation.x) >= 20 {
+                    intentLock = .textEditing
+                    pan.isEnabled = false
+                    pan.isEnabled = true
+                }
+                return
+            }
+
+            if up >= 6 && verticalDominant {
+                intentLock = .dictation
             }
         }
 
@@ -509,6 +578,7 @@ struct MessageInputBar: View {
         .background(
             DictationPanGestureInstaller(
                 shouldBegin: shouldBeginDictationPan(startLocation:velocity:),
+                startsInEditableRegion: startsInEditableRegion(startLocation:),
                 onChanged: { event in
                     handlePushChanged(startLocation: event.startLocation, translation: event.translation)
                 },
@@ -1021,23 +1091,22 @@ struct MessageInputBar: View {
             return false
         }
 
-        let inTextEditor = textEditorGlobalFrame != .zero && textEditorGlobalFrame.contains(startLocation)
-        let verticalDominantVelocity = abs(velocity.y) >= (abs(velocity.x) * 1.25)
-
-        if inTextEditor {
-            if dictation.isSurfaceOpen {
-                // If the surface is already open, require a clear vertical swipe to take over.
-                return abs(velocity.y) >= 220 && verticalDominantVelocity
-            }
-            // Closed surface over text editor: only fast upward intent should engage dictation drag.
-            return velocity.y <= -260 && verticalDominantVelocity
-        }
-
         if dictation.isSurfaceOpen {
-            return abs(velocity.y) >= max(35, abs(velocity.x))
+            return true
         }
         guard dictation.swipeActivationEnabled else { return false }
-        return velocity.y <= -35 && abs(velocity.y) >= max(35, abs(velocity.x))
+
+        if startsInEditableRegion(startLocation: startLocation) {
+            // Over text editing surface: require clear upward intent to enter dictation drag arbitration.
+            let verticalDominantVelocity = abs(velocity.y) >= (abs(velocity.x) * 1.25)
+            return velocity.y <= -40 && verticalDominantVelocity
+        }
+
+        return true
+    }
+
+    private func startsInEditableRegion(startLocation: CGPoint) -> Bool {
+        textEditorGlobalFrame != .zero && textEditorGlobalFrame.contains(startLocation)
     }
 
     private func updatePullToSendArming(upDistance: CGFloat) {

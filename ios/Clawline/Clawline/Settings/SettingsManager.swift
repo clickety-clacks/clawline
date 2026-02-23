@@ -52,6 +52,14 @@ final class SettingsManager {
         didSet { saveDictationCausticsSettings() }
     }
 
+    var trustSelfSignedCertificates: Bool {
+        didSet { saveTrustSelfSignedCertificates() }
+    }
+
+    var pinnedLeafCertificateSHA256: String {
+        didSet { savePinnedLeafCertificateSHA256() }
+    }
+
     private(set) var sonioxKeyStatus: SonioxKeyVerificationStatus {
         didSet { SonioxConfigurationStore.setKeyStatus(sonioxKeyStatus) }
     }
@@ -106,6 +114,8 @@ final class SettingsManager {
             forKey: Self.dictationCausticsColor1Key,
             fallback: Self.defaultDictationCausticsColor1
         )
+        self.trustSelfSignedCertificates = ProviderTLSSettingsStore.trustSelfSignedCertificates
+        self.pinnedLeafCertificateSHA256 = ProviderTLSSettingsStore.pinnedLeafCertificateSHA256 ?? ""
     }
 
     private func save() {
@@ -129,6 +139,14 @@ final class SettingsManager {
         }
     }
 
+    private func saveTrustSelfSignedCertificates() {
+        ProviderTLSSettingsStore.trustSelfSignedCertificates = trustSelfSignedCertificates
+    }
+
+    private func savePinnedLeafCertificateSHA256() {
+        ProviderTLSSettingsStore.pinnedLeafCertificateSHA256 = pinnedLeafCertificateSHA256
+    }
+
     func resetToDefaults() {
         effectConfig = .default
         appearanceMode = .dark
@@ -138,6 +156,8 @@ final class SettingsManager {
         dictationCausticsScale = Self.defaultDictationCausticsScale
         dictationCausticsSharpness = Self.defaultDictationCausticsSharpness
         dictationCausticsColor1 = Self.defaultDictationCausticsColor1
+        trustSelfSignedCertificates = true
+        pinnedLeafCertificateSHA256 = ""
     }
 
     func toggleSettings() {

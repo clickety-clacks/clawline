@@ -108,6 +108,18 @@ struct SettingsView: View {
                     Text("Voice Dictation")
                 }
 
+                Section {
+                    Toggle("Trust self-signed certificates", isOn: $settings.trustSelfSignedCertificates)
+                    TextField("Pinned cert SHA-256 (optional)", text: $settings.pinnedLeafCertificateSHA256)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .font(.system(.footnote, design: .monospaced))
+                } header: {
+                    Text("Server TLS")
+                } footer: {
+                    Text("When enabled, Clawline accepts self-signed TLS certificates for provider WebSocket connections. Add a SHA-256 leaf certificate fingerprint to pin a specific cert.")
+                }
+
             }
             .safeAreaInset(edge: .top, spacing: 0) {
                 dictationPinnedPreview

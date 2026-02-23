@@ -78,50 +78,70 @@ final class ProviderConnectionService: ConnectionServicing {
             throw Error.unsupportedURL
         }
 
-        let socket = try await runWithTimeout(timeout: operationTimeout) { [self] in
-            try await connector.connect(to: serverURL)
-        }
-        defer { socket.close(with: .normalClosure) }
-
-        let trimmedName = String(claimedName.prefix(64))
-        let payload = PairRequestPayload(
-            deviceId: deviceId,
-            claimedName: trimmedName,
-            deviceInfo: makeDeviceInfo()
-        )
-
-        let data = try encoder.encode(payload)
-        guard let json = String(data: data, encoding: .utf8) else {
-            throw Error.invalidResponse
+        let candidateURLs = ProviderWebSocketURLBuilder.candidateURLs(from: serverURL, defaultPath: "/ws")
+        guard !candidateURLs.isEmpty else {
+            throw Error.unsupportedURL
         }
 
-        try await runWithTimeout(timeout: operationTimeout) {
-            try await socket.send(text: json)
-        }
+        var lastError: Swift.Error?
+        for (index, url) in candidateURLs.enumerated() {
+            do {
+                let socket = try await runWithTimeout(timeout: operationTimeout) { [self] in
+                    try await connector.connect(to: url)
+                }
+                defer { socket.close(with: .normalClosure) }
 
-        while true {
-            let text = try await waitForMessage(stream: socket.incomingTextMessages)
-            let response = try decoder.decode(PairResultPayload.self, from: Data(text.utf8))
+                let trimmedName = String(claimedName.prefix(64))
+                let payload = PairRequestPayload(
+                    deviceId: deviceId,
+                    claimedName: trimmedName,
+                    deviceInfo: makeDeviceInfo()
+                )
 
-            guard response.type == "pair_result" else {
-                logger.warning("Ignoring unexpected payload type \(response.type, privacy: .public)")
-                continue
+                let data = try encoder.encode(payload)
+                guard let json = String(data: data, encoding: .utf8) else {
+                    throw Error.invalidResponse
+                }
+
+                try await runWithTimeout(timeout: operationTimeout) {
+                    try await socket.send(text: json)
+                }
+
+                while true {
+                    let text = try await waitForMessage(stream: socket.incomingTextMessages)
+                    let response = try decoder.decode(PairResultPayload.self, from: Data(text.utf8))
+
+                    guard response.type == "pair_result" else {
+                        logger.warning("Ignoring unexpected payload type \(response.type, privacy: .public)")
+                        continue
+                    }
+
+                    if response.reason == "pair_pending" {
+                        logger.debug("Pairing still pending approval...")
+                        continue
+                    }
+
+                    if response.success,
+                       let token = response.token,
+                       let userId = response.userId {
+                        return .success(token: token, userId: userId)
+                    }
+
+                    let reason = response.reason ?? "Pairing request denied"
+                    return .denied(reason: reason)
+                }
+            } catch {
+                lastError = error
+                let hasNextAttempt = index < candidateURLs.count - 1
+                if hasNextAttempt, shouldFallbackAfter(error: error) {
+                    logger.warning("pairing connect failed for \(url.absoluteString, privacy: .public); retrying next candidate: \(error.localizedDescription, privacy: .public)")
+                    continue
+                }
+                throw error
             }
-
-            if response.reason == "pair_pending" {
-                logger.debug("Pairing still pending approval...")
-                continue
-            }
-
-            if response.success,
-               let token = response.token,
-               let userId = response.userId {
-                return .success(token: token, userId: userId)
-            }
-
-            let reason = response.reason ?? "Pairing request denied"
-            return .denied(reason: reason)
         }
+
+        throw lastError ?? Error.invalidResponse
     }
 
     private func waitForMessage(stream: AsyncStream<String>) async throws -> String {
@@ -173,5 +193,20 @@ final class ProviderConnectionService: ConnectionServicing {
 #else
         return DeviceInfoPayload(platform: "iOS", model: "Simulator")
 #endif
+    }
+
+    private func shouldFallbackAfter(error: Swift.Error) -> Bool {
+        if let providerError = error as? Error {
+            switch providerError {
+            case .unsupportedURL:
+                return false
+            case .timeout, .socketClosed, .invalidResponse:
+                return true
+            }
+        }
+        if error is URLError {
+            return true
+        }
+        return true
     }
 }

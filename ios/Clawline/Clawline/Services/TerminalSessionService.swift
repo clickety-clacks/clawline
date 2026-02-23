@@ -25,6 +25,7 @@ final class TerminalSessionService {
 
     // Use our own URLSession so we can set timeouts and headers consistently with the main chat socket.
     private let session: URLSession
+    private let sessionDelegate: URLSessionDelegate
     private var socket: URLSessionWebSocketTask?
     private var receiveTask: Task<Void, Never>?
     private var pingTask: Task<Void, Never>?
@@ -54,7 +55,9 @@ final class TerminalSessionService {
         let configuration = URLSessionConfiguration.default
         configuration.timeoutIntervalForRequest = 20
         configuration.timeoutIntervalForResource = 360
-        self.session = URLSession(configuration: configuration)
+        let delegate = ProviderWebSocketTLSSessionDelegate(policyProvider: { ProviderTLSSettingsStore.policy })
+        self.sessionDelegate = delegate
+        self.session = URLSession(configuration: configuration, delegate: delegate, delegateQueue: nil)
 
         var outCont: AsyncStream<Data>.Continuation!
         self.output = AsyncStream { cont in outCont = cont }

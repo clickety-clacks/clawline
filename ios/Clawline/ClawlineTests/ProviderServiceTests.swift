@@ -69,6 +69,35 @@ struct ProviderServiceTests {
         }
     }
 
+    @Test("Pairing request falls back from wss to ws when TLS handshake fails")
+    func pairingFallsBackToPlainWebSocket() async throws {
+        let mockSocket = MockWebSocketClient()
+        let connector = FallbackMockWebSocketConnector(client: mockSocket)
+        let service = ProviderConnectionService(connector: connector)
+        let serverURL = URL(string: "ws://example.com/ws")!
+
+        Task {
+            try await Task.sleep(forDuration: .milliseconds(10))
+            mockSocket.enqueue(text: #"{ "type": "pair_result", "success": true, "token": "jwt", "userId": "user_1" }"#)
+        }
+
+        let result = try await service.requestPairing(
+            serverURL: serverURL,
+            claimedName: "Test",
+            deviceId: "device_123"
+        )
+
+        #expect(connector.connectedURLs.count == 2)
+        #expect(connector.connectedURLs.first?.absoluteString == "wss://example.com/ws")
+        #expect(connector.connectedURLs.last?.absoluteString == "ws://example.com/ws")
+        if case .success(let token, let userId) = result {
+            #expect(token == "jwt")
+            #expect(userId == "user_1")
+        } else {
+            Issue.record("Expected pairing success after ws fallback")
+        }
+    }
+
     @Test("Pairing request times out when send never completes")
     func pairingTimesOutWhenSendHangs() async {
         let connector = HangingWebSocketConnector(mode: .send)
@@ -128,6 +157,29 @@ struct ProviderServiceTests {
         #expect(mockSocket.sentTexts.contains { $0.contains("\"type\":\"auth\"") && $0.contains("\"lastMessageId\":\"s_0\"") })
         #expect(mockSocket.sentTexts.contains { $0.contains("\"clientFeatures\":[\"terminal_bubbles_v1\"]") })
         #expect(message?.content == "Hi")
+    }
+
+    @Test("Chat connect falls back from wss to ws when TLS handshake fails")
+    func chatConnectFallsBackToPlainWebSocket() async throws {
+        let mockSocket = MockWebSocketClient()
+        let connector = FallbackMockWebSocketConnector(client: mockSocket)
+        let baseURL = URL(string: "http://example.com")!
+        let service = ProviderChatService(
+            connector: connector,
+            deviceId: "device_123",
+            baseURLProvider: { baseURL }
+        )
+
+        Task {
+            try await Task.sleep(forDuration: .milliseconds(20))
+            mockSocket.enqueue(text: #"{ "type": "auth_result", "success": true }"#)
+        }
+
+        try await service.connect(token: "jwt", lastMessageId: nil)
+
+        #expect(connector.connectedURLs.count == 2)
+        #expect(connector.connectedURLs.first?.absoluteString == "wss://example.com/ws")
+        #expect(connector.connectedURLs.last?.absoluteString == "ws://example.com/ws")
     }
 
     @Test("Chat send serializes message payload")
@@ -255,6 +307,23 @@ private final class MockWebSocketConnector: WebSocketConnecting {
 
     func connect(to url: URL) async throws -> any WebSocketClient {
         connectedURL = url
+        return client
+    }
+}
+
+private final class FallbackMockWebSocketConnector: WebSocketConnecting {
+    let client: MockWebSocketClient
+    private(set) var connectedURLs: [URL] = []
+
+    init(client: MockWebSocketClient) {
+        self.client = client
+    }
+
+    func connect(to url: URL) async throws -> any WebSocketClient {
+        connectedURLs.append(url)
+        if url.scheme == "wss" {
+            throw URLError(.secureConnectionFailed)
+        }
         return client
     }
 }

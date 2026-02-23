@@ -111,7 +111,13 @@ private struct DictationPanGestureInstaller: UIViewRepresentable {
 
         override func didMoveToWindow() {
             super.didMoveToWindow()
+            coordinator?.updateActiveRegion(from: self)
             coordinator?.attachIfNeeded(from: self)
+        }
+
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            coordinator?.updateActiveRegion(from: self)
         }
     }
 
@@ -128,10 +134,12 @@ private struct DictationPanGestureInstaller: UIViewRepresentable {
         var onEnded: (DictationPanEvent, Bool) -> Void
 
         private weak var attachedView: UIView?
+        private weak var installerView: InstallerView?
         private let pan = UIPanGestureRecognizer()
         private var intentLock: IntentLock = .undecided
         private var gestureStartDate: Date = .distantPast
         private var startedInEditableRegion = false
+        private var activeRegionInWindow: CGRect = .zero
 
         init(
             shouldBegin: @escaping (CGPoint, CGPoint) -> Bool,
@@ -153,15 +161,33 @@ private struct DictationPanGestureInstaller: UIViewRepresentable {
         }
 
         func attachIfNeeded(from installerView: InstallerView) {
-            var candidate = installerView.superview
-            while let view = candidate, !view.isUserInteractionEnabled {
-                candidate = view.superview
+            self.installerView = installerView
+            updateActiveRegion(from: installerView)
+
+            let host: UIView?
+            if let window = installerView.window {
+                host = window
+            } else {
+                var candidate = installerView.superview
+                while let view = candidate, !view.isUserInteractionEnabled {
+                    candidate = view.superview
+                }
+                host = candidate
             }
-            guard let host = candidate else { return }
+
+            guard let host else { return }
             guard attachedView !== host else { return }
             attachedView?.removeGestureRecognizer(pan)
             host.addGestureRecognizer(pan)
             attachedView = host
+        }
+
+        func updateActiveRegion(from installerView: InstallerView) {
+            guard let window = installerView.window else {
+                activeRegionInWindow = .zero
+                return
+            }
+            activeRegionInWindow = installerView.convert(installerView.bounds, to: window)
         }
 
         @objc
@@ -249,6 +275,7 @@ private struct DictationPanGestureInstaller: UIViewRepresentable {
                 return false
             }
             let location = pan.location(in: window)
+            guard activeRegionInWindow.contains(location) else { return false }
             let velocity = pan.velocity(in: window)
             return shouldBegin(location, velocity)
         }

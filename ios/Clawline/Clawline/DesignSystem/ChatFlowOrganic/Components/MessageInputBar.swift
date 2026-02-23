@@ -103,13 +103,12 @@ private final class DictationSurfaceMotionModel: ObservableObject {
 
     func gestureChanged(
         globalTranslationY: CGFloat,
-        velocityY: CGFloat
+        velocityY _: CGFloat
     ) {
         guard gesturePhase == .dragging else { return }
         dragTranslationY = globalTranslationY
         let up = max(0, -globalTranslationY)
         let down = max(0, globalTranslationY)
-        _ = velocityY
         pushDragUpDistance = up
 
         if originAtGestureStart == .open {

@@ -66,7 +66,7 @@ private struct DictationPanEvent {
     let velocity: CGPoint
 }
 
-private struct DictationPanGestureInstaller: UIViewRepresentable {
+private struct DictationPanGestureInstaller: UIViewControllerRepresentable {
     var shouldBegin: (CGPoint, CGPoint) -> Bool
     var startsInEditableRegion: (CGPoint) -> Bool
     var onChanged: (DictationPanEvent) -> Void
@@ -81,42 +81,39 @@ private struct DictationPanGestureInstaller: UIViewRepresentable {
         )
     }
 
-    func makeUIView(context: Context) -> InstallerView {
-        let view = InstallerView()
-        view.coordinator = context.coordinator
-        context.coordinator.attachIfNeeded(from: view)
-        return view
+    func makeUIViewController(context: Context) -> InstallerViewController {
+        let controller = InstallerViewController()
+        controller.coordinator = context.coordinator
+        context.coordinator.attachIfNeeded(from: controller)
+        return controller
     }
 
-    func updateUIView(_ uiView: InstallerView, context: Context) {
+    func updateUIViewController(_ uiViewController: InstallerViewController, context: Context) {
         context.coordinator.shouldBegin = shouldBegin
         context.coordinator.startsInEditableRegion = startsInEditableRegion
         context.coordinator.onChanged = onChanged
         context.coordinator.onEnded = onEnded
-        context.coordinator.attachIfNeeded(from: uiView)
+        context.coordinator.attachIfNeeded(from: uiViewController)
     }
 
-    final class InstallerView: UIView {
+    final class InstallerViewController: UIViewController {
         weak var coordinator: Coordinator?
 
-        override init(frame: CGRect) {
-            super.init(frame: frame)
-            isUserInteractionEnabled = false
-            backgroundColor = .clear
+        override func loadView() {
+            let view = UIView()
+            view.backgroundColor = .clear
+            view.isUserInteractionEnabled = false
+            self.view = view
         }
 
-        required init?(coder: NSCoder) {
-            fatalError("init(coder:) has not been implemented")
-        }
-
-        override func didMoveToWindow() {
-            super.didMoveToWindow()
+        override func viewDidAppear(_ animated: Bool) {
+            super.viewDidAppear(animated)
             coordinator?.updateActiveRegion(from: self)
             coordinator?.attachIfNeeded(from: self)
         }
 
-        override func layoutSubviews() {
-            super.layoutSubviews()
+        override func viewDidLayoutSubviews() {
+            super.viewDidLayoutSubviews()
             coordinator?.updateActiveRegion(from: self)
         }
     }
@@ -134,7 +131,7 @@ private struct DictationPanGestureInstaller: UIViewRepresentable {
         var onEnded: (DictationPanEvent, Bool) -> Void
 
         private weak var attachedView: UIView?
-        private weak var installerView: InstallerView?
+        private weak var installerViewController: InstallerViewController?
         private let pan = UIPanGestureRecognizer()
         private var intentLock: IntentLock = .undecided
         private var gestureStartDate: Date = .distantPast
@@ -160,34 +157,36 @@ private struct DictationPanGestureInstaller: UIViewRepresentable {
             pan.delaysTouchesEnded = false
         }
 
-        func attachIfNeeded(from installerView: InstallerView) {
-            self.installerView = installerView
-            updateActiveRegion(from: installerView)
+        func attachIfNeeded(from installerViewController: InstallerViewController) {
+            self.installerViewController = installerViewController
+            updateActiveRegion(from: installerViewController)
 
-            let host: UIView?
-            if let window = installerView.window {
-                host = window
-            } else {
-                var candidate = installerView.superview
-                while let view = candidate, !view.isUserInteractionEnabled {
-                    candidate = view.superview
-                }
-                host = candidate
-            }
-
+            let host = resolveInteractiveHost(from: installerViewController)
             guard let host else { return }
+
             guard attachedView !== host else { return }
             attachedView?.removeGestureRecognizer(pan)
             host.addGestureRecognizer(pan)
             attachedView = host
+            logger.info("DICTATION_UI pan_attach host=\(String(describing: type(of: host)), privacy: .public)")
         }
 
-        func updateActiveRegion(from installerView: InstallerView) {
-            guard let window = installerView.window else {
+        func updateActiveRegion(from installerViewController: InstallerViewController) {
+            guard let window = installerViewController.view.window else {
                 activeRegionInWindow = .zero
                 return
             }
-            activeRegionInWindow = installerView.convert(installerView.bounds, to: window)
+            activeRegionInWindow = installerViewController.view.convert(installerViewController.view.bounds, to: window)
+        }
+
+        private func resolveInteractiveHost(from installerViewController: InstallerViewController) -> UIView? {
+            if let parentView = installerViewController.parent?.view {
+                return parentView
+            }
+            if let rootView = installerViewController.view.window?.rootViewController?.view {
+                return rootView
+            }
+            return installerViewController.view.window
         }
 
         @objc
@@ -277,7 +276,9 @@ private struct DictationPanGestureInstaller: UIViewRepresentable {
             let location = pan.location(in: window)
             guard activeRegionInWindow.contains(location) else { return false }
             let velocity = pan.velocity(in: window)
-            return shouldBegin(location, velocity)
+            let allowed = shouldBegin(location, velocity)
+            logger.info("DICTATION_UI pan_should_begin allowed=\(allowed, privacy: .public) location=\(location.debugDescription, privacy: .public) velocity=\(velocity.debugDescription, privacy: .public)")
+            return allowed
         }
 
         func gestureRecognizer(

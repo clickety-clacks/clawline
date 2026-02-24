@@ -167,6 +167,7 @@ final class MessageBubbleUIKitContainerView: UIView {
 
 final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
     private static let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "BubbleTheme")
+    override var safeAreaInsets: UIEdgeInsets { .zero }
     private let shadowContainerView = UIView()  // Separate view for shadow (masks clip shadows)
     private let bubbleBackgroundView = UIView()
     private let contentStack = UIStackView()
@@ -176,7 +177,6 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
     private let dynamicContentStack = UIStackView()  // Holds text + code blocks
     private let avatarView = AvatarCircleView()
     private let senderLabel = UILabel()
-    private let senderTimestampStack = UIStackView()
     private let senderTimestampSpacer = UIView()
     private let timestampLabel = UILabel()
     private let bodyLabel = UITextView()
@@ -241,6 +241,8 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
     override init(frame: CGRect) {
         super.init(frame: frame)
         backgroundColor = .clear
+        insetsLayoutMarginsFromSafeArea = false
+        preservesSuperviewLayoutMargins = false
 
         // Register for trait changes (modern API, replaces deprecated traitCollectionDidChange)
         traitObservation = registerForTraitChanges([UITraitUserInterfaceStyle.self]) { [weak self] (view: MessageBubbleUIKitView, previousTraitCollection: UITraitCollection) in
@@ -254,6 +256,8 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
 
         bubbleBackgroundView.translatesAutoresizingMaskIntoConstraints = false
         bubbleBackgroundView.isUserInteractionEnabled = true
+        bubbleBackgroundView.insetsLayoutMarginsFromSafeArea = false
+        bubbleBackgroundView.preservesSuperviewLayoutMargins = false
         let bubbleTap = UITapGestureRecognizer(target: self, action: #selector(handleBubbleTap))
         bubbleTap.cancelsTouchesInView = false
         bubbleTap.delaysTouchesBegan = false
@@ -313,6 +317,8 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
         contentStack.axis = .vertical
         contentStack.spacing = 10
         contentStack.alignment = .fill
+        contentStack.insetsLayoutMarginsFromSafeArea = false
+        contentStack.preservesSuperviewLayoutMargins = false
         contentStack.translatesAutoresizingMaskIntoConstraints = false
         bubbleBackgroundView.addSubview(contentStack)
 
@@ -321,30 +327,27 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
         headerStack.alignment = .center
         headerStack.isLayoutMarginsRelativeArrangement = true
         headerStack.directionalLayoutMargins = NSDirectionalEdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 4)
+        headerStack.insetsLayoutMarginsFromSafeArea = false
+        headerStack.preservesSuperviewLayoutMargins = false
         headerStack.setContentHuggingPriority(.required, for: .vertical)
         headerStack.setContentCompressionResistancePriority(.required, for: .vertical)
 
         senderLabel.numberOfLines = 1
         senderLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
-
-        senderTimestampStack.axis = .horizontal
-        senderTimestampStack.alignment = .firstBaseline
-        senderTimestampStack.spacing = 8
-        senderTimestampStack.isLayoutMarginsRelativeArrangement = true
-        senderTimestampStack.directionalLayoutMargins = NSDirectionalEdgeInsets(top: 0, leading: 0, bottom: 0, trailing: 4)
+        senderLabel.setContentHuggingPriority(.defaultHigh, for: .horizontal)
 
         senderTimestampSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
         senderTimestampSpacer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         timestampLabel.numberOfLines = 1
         timestampLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
-
-        senderTimestampStack.addArrangedSubview(senderLabel)
-        senderTimestampStack.addArrangedSubview(senderTimestampSpacer)
-        senderTimestampStack.addArrangedSubview(timestampLabel)
+        timestampLabel.setContentHuggingPriority(.required, for: .horizontal)
 
         headerStack.addArrangedSubview(avatarView)
-        headerStack.addArrangedSubview(senderTimestampStack)
+        headerStack.addArrangedSubview(senderLabel)
+        headerStack.addArrangedSubview(senderTimestampSpacer)
+        headerStack.addArrangedSubview(timestampLabel)
+        senderLabel.firstBaselineAnchor.constraint(equalTo: timestampLabel.firstBaselineAnchor).isActive = true
 
         bodyLabel.translatesAutoresizingMaskIntoConstraints = false
         UnifiedMarkdownRenderer.configureTextView(bodyLabel, delegate: self)
@@ -1425,9 +1428,9 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
             return
         }
 
-        let horizontalMargins = senderTimestampStack.directionalLayoutMargins.leading
-            + senderTimestampStack.directionalLayoutMargins.trailing
-        let availableWidth = senderTimestampStack.bounds.width - horizontalMargins
+        let horizontalMargins = headerStack.directionalLayoutMargins.leading
+            + headerStack.directionalLayoutMargins.trailing
+        let availableWidth = headerStack.bounds.width - horizontalMargins - avatarView.bounds.width - headerStack.spacing
         guard availableWidth > 0 else {
             timestampLabel.isHidden = true
             return
@@ -1435,7 +1438,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
 
         let requiredWidth = senderLabel.intrinsicContentSize.width
             + timestampLabel.intrinsicContentSize.width
-            + (senderTimestampStack.spacing * 2)
+            + (headerStack.spacing * 2)
         timestampLabel.isHidden = requiredWidth > availableWidth
     }
 

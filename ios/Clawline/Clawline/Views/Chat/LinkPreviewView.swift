@@ -989,15 +989,6 @@ final class LinkPreviewView: UIView, WKNavigationDelegate, WKUIDelegate, UIGestu
 
         let scriptSource = """
         (function(){
-          try {
-            // Make the page background transparent so the bubble chrome surface shows through.
-            var style = document.createElement('style');
-            style.type = 'text/css';
-            style.appendChild(document.createTextNode('html,body{background:transparent !important;}'));
-            (document.documentElement || document).appendChild(style);
-            if (document.documentElement) { document.documentElement.style.background = 'transparent'; }
-            if (document.body) { document.body.style.background = 'transparent'; }
-          } catch(e) {}
           var handler = '\(handler)';
           var token = '\(token)';
           var store = window.__clawlineLinkPreviewObservers || (window.__clawlineLinkPreviewObservers = {});

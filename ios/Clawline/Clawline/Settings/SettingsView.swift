@@ -196,5 +196,5 @@ struct SettingsView: View {
 }
 
 #Preview {
-    SettingsView(settings: SettingsManager())
+    SettingsView(settings: SettingsManager(sonioxKeyStore: SonioxKeyStore()))
 }

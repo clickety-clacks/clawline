@@ -24,9 +24,7 @@ final class SettingsManager {
         didSet { saveAppearanceMode() }
     }
 
-    var sonioxAPIKey: String {
-        didSet { handleSonioxKeyChanged(from: oldValue, to: sonioxAPIKey) }
-    }
+    let sonioxKeyStore: SonioxKeyStore
 
     var dictationCausticsBaselineSpeed: Double {
         didSet { saveDictationCausticsSettings() }
@@ -60,8 +58,13 @@ final class SettingsManager {
         didSet { savePinnedLeafCertificateSHA256() }
     }
 
-    private(set) var sonioxKeyStatus: SonioxKeyVerificationStatus {
-        didSet { SonioxConfigurationStore.setKeyStatus(sonioxKeyStatus) }
+    var sonioxAPIKey: String {
+        get { sonioxKeyStore.editableKey }
+        set { sonioxKeyStore.setKey(newValue) }
+    }
+
+    var sonioxKeyStatus: SonioxKeyVerificationStatus {
+        sonioxKeyStore.keyStatus
     }
 
     var isSettingsPresented: Bool = false
@@ -80,10 +83,8 @@ final class SettingsManager {
     static let defaultDictationCausticsScale: Double = 5.000
     static let defaultDictationCausticsSharpness: Double = 1.065
     static let defaultDictationCausticsColor1 = CodableColor(red: 1.000, green: 1.000, blue: 1.000, alpha: 1.000)
-    private let sonioxVerifier: any SonioxKeyVerifying
-
-    init(sonioxVerifier: any SonioxKeyVerifying = SonioxKeyVerifier()) {
-        self.sonioxVerifier = sonioxVerifier
+    init(sonioxKeyStore: SonioxKeyStore) {
+        self.sonioxKeyStore = sonioxKeyStore
         if let data = UserDefaults.standard.data(forKey: Self.effectConfigKey),
            let config = try? JSONDecoder().decode(BackgroundEffectConfiguration.self, from: data) {
             self.effectConfig = config
@@ -98,8 +99,6 @@ final class SettingsManager {
             self.appearanceMode = .dark
         }
 
-        self.sonioxAPIKey = SonioxConfigurationStore.editableAPIKey
-        self.sonioxKeyStatus = SonioxConfigurationStore.keyStatus
         self.dictationCausticsBaselineSpeed = UserDefaults.standard.object(forKey: Self.dictationCausticsBaselineSpeedKey) as? Double
             ?? Self.defaultDictationCausticsBaselineSpeed
         self.dictationCausticsMaxSpeed = UserDefaults.standard.object(forKey: Self.dictationCausticsMaxSpeedKey) as? Double
@@ -173,14 +172,11 @@ final class SettingsManager {
     }
 
     var sonioxCTATitle: String {
-        sonioxAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Get Key" : "Verify"
+        sonioxKeyStore.ctaTitle
     }
 
     func handleSonioxPrimaryAction(openURL: (URL) -> Void) async -> Bool {
-        let trimmed = sonioxAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty {
-            sonioxKeyStatus = .missing
-            SonioxConfigurationStore.setAPIKey(nil)
+        if !sonioxKeyStore.hasKey {
             openURL(SonioxConfigurationStore.keyManagementURL)
             return false
         }
@@ -189,29 +185,10 @@ final class SettingsManager {
 
     @discardableResult
     func verifySonioxKey() async -> Bool {
-        let trimmed = sonioxAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
-            sonioxKeyStatus = .missing
-            SonioxConfigurationStore.setAPIKey(nil)
+        guard sonioxKeyStore.hasKey else {
             return false
         }
-
-        sonioxKeyStatus = .validating
-        let isValid = await sonioxVerifier.verify(apiKey: trimmed)
-        sonioxKeyStatus = isValid ? .validated : .invalid
-        return isValid
-    }
-
-    private func handleSonioxKeyChanged(from oldValue: String, to newValue: String) {
-        let oldTrimmed = oldValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        let trimmed = newValue.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        SonioxConfigurationStore.setAPIKey(trimmed.isEmpty ? nil : trimmed)
-        if trimmed.isEmpty {
-            sonioxKeyStatus = .missing
-        } else if oldTrimmed != trimmed, sonioxKeyStatus != .validating {
-            sonioxKeyStatus = .unverified
-        }
+        return await sonioxKeyStore.verify()
     }
 
     private static func loadCodableColor(forKey key: String, fallback: CodableColor) -> CodableColor {
@@ -226,7 +203,7 @@ final class SettingsManager {
 // MARK: - Environment Key
 
 private struct SettingsManagerKey: EnvironmentKey {
-    static let defaultValue: SettingsManager = SettingsManager()
+    @MainActor static let defaultValue: SettingsManager = SettingsManager(sonioxKeyStore: SonioxKeyStore())
 }
 
 extension EnvironmentValues {

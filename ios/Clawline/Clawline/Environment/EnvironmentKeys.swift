@@ -51,6 +51,17 @@ extension EnvironmentValues {
     }
 }
 
+private struct SonioxKeyStoreKey: EnvironmentKey {
+    static let defaultValue: SonioxKeyStore = SonioxKeyStore()
+}
+
+extension EnvironmentValues {
+    var sonioxKeyStore: SonioxKeyStore {
+        get { self[SonioxKeyStoreKey.self] }
+        set { self[SonioxKeyStoreKey.self] = newValue }
+    }
+}
+
 private struct StubUploadService: UploadServicing {
     func upload(data: Data, mimeType: String, filename: String?) async throws -> String {
         throw AttachmentError.missingAuth

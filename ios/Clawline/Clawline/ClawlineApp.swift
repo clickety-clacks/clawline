@@ -15,6 +15,7 @@ import Observation
 struct ClawlineApp: App {
     @State private var authManager: AuthManager
     @State private var settingsManager: SettingsManager
+    @State private var sonioxKeyStore: SonioxKeyStore
 
     private let deviceIdentifier: any DeviceIdentifying
     private let connectionService: any ConnectionServicing
@@ -37,7 +38,9 @@ struct ClawlineApp: App {
         Self.configureDebugAdminIfNeeded(authManager: authManager)
 #endif
         _authManager = State(initialValue: authManager)
-        let settingsManager = SettingsManager()
+        let sonioxKeyStore = SonioxKeyStore()
+        _sonioxKeyStore = State(initialValue: sonioxKeyStore)
+        let settingsManager = SettingsManager(sonioxKeyStore: sonioxKeyStore)
         _settingsManager = State(initialValue: settingsManager)
         let device = DeviceIdentifier()
         let connector = URLSessionWebSocketConnector(connectTimeout: 20, resourceTimeout: 360)
@@ -60,6 +63,7 @@ struct ClawlineApp: App {
                 .environment(\.deviceIdentifier, deviceIdentifier)
                 .environment(\.chatService, chatService)
                 .environment(\.settingsManager, settingsManager)
+                .environment(\.sonioxKeyStore, sonioxKeyStore)
                 .sheet(isPresented: $settingsManager.isSettingsPresented) {
                     SettingsView(settings: settingsManager)
                 }

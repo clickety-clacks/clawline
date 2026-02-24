@@ -311,8 +311,6 @@ struct MessageInputBar: View {
     let onReconnect: () -> Void
     let onAdd: () -> Void
     let onFocusChange: (Bool) -> Void
-    let onDictationSurfaceDragActiveChange: (Bool) -> Void
-    let onComposerMotionOffsetChange: (CGFloat) -> Void
     var onPasteImages: (([UIImage]) -> Void)?
 
     @State private var editorHeight: CGFloat = 44
@@ -595,9 +593,6 @@ struct MessageInputBar: View {
             )
             .allowsHitTesting(false)
         )
-        .onChange(of: pullToSendLift) { _, newValue in
-            onComposerMotionOffsetChange(-newValue)
-        }
         .onPreferenceChange(MessageInputBarTextEditorFramePreferenceKey.self) { frame in
             textEditorGlobalFrame = frame
         }
@@ -629,13 +624,10 @@ struct MessageInputBar: View {
             gestureSettleTask?.cancel()
             motion.clearGestureState()
             reconnectPulseOn = false
-            onDictationSurfaceDragActiveChange(false)
-            onComposerMotionOffsetChange(0)
         }
         .onAppear {
             motion.setListeningState(isSurfaceOpen: dictation.isSurfaceOpen, isListening: dictation.isListening)
             reconnectPulseOn = false
-            onComposerMotionOffsetChange(-pullToSendLift)
             guard isReconnecting else { return }
             withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) {
                 reconnectPulseOn = true
@@ -648,14 +640,6 @@ struct MessageInputBar: View {
                 micTransientVisible = false
                 micTransientOpacity = 0
                 micTransientOffset = 0
-            }
-        }
-        .onChange(of: motion.gesturePhase) { _, phase in
-            switch phase {
-            case .dragging, .settling:
-                onDictationSurfaceDragActiveChange(true)
-            case .idle:
-                onDictationSurfaceDragActiveChange(false)
             }
         }
         .onChange(of: connectionState) { _, newValue in
@@ -1392,8 +1376,6 @@ struct DictationMicAffordanceAnimationPlan {
                 onReconnect: {},
                 onAdd: {},
                 onFocusChange: { _ in },
-                onDictationSurfaceDragActiveChange: { _ in },
-                onComposerMotionOffsetChange: { _ in },
                 onPasteImages: nil,
                 motion: motion,
                 isCompact: true

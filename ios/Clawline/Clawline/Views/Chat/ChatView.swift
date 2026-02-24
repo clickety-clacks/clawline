@@ -136,8 +136,6 @@ struct ChatView: View {
 
     @State private var inputBarHeight: CGFloat = 0
     @State private var settledInputBarHeight: CGFloat = 0
-    @State private var isDictationSurfaceDragActive: Bool = false
-    @State private var composerMotionOffsetY: CGFloat = 0
     @State private var streamToastManager = StreamToastManager()
     @State private var streamToastBusySince: Date?
     @State private var streamToastBusyClearTask: Task<Void, Never>?
@@ -572,7 +570,7 @@ struct ChatView: View {
         let topInset: CGFloat = geometry.safeAreaInsets.top
         let isCompactLayout = horizontalSizeClass == .compact
         let metrics = ChatFlowTheme.Metrics(isCompact: isCompactLayout)
-        let insetInputHeight = isDictationSurfaceDragActive ? settledInputBarHeight : inputBarHeight
+        let insetInputHeight = dictationMotion.shouldFreezeLayout ? settledInputBarHeight : inputBarHeight
         let resolvedInputHeight = max(insetInputHeight, MessageInputBarMetrics.minInputBarHeight)
         let keyboardVisibleHeight = max(0, keyboardHeight - geometry.safeAreaInsets.bottom)
         let isKeyboardVisible = keyboardVisibleHeight > 0.5
@@ -730,7 +728,7 @@ struct ChatView: View {
         .onChange(of: keyboardAnimationDuration) { _, _ in layoutRevision &+= 1 }
         .onChange(of: keyboardAnimationCurve) { _, _ in layoutRevision &+= 1 }
         .onChange(of: inputBarHeight) { _, newValue in
-            if !isDictationSurfaceDragActive {
+            if !dictationMotion.shouldFreezeLayout {
                 settledInputBarHeight = newValue
                 layoutRevision &+= 1
             }
@@ -739,8 +737,8 @@ struct ChatView: View {
             layoutRevision &+= 1
             updateDictationContext(viewModel: viewModel)
         }
-        .onChange(of: isDictationSurfaceDragActive) { _, isActive in
-            if !isActive {
+        .onChange(of: dictationMotion.shouldFreezeLayout) { _, isFrozen in
+            if !isFrozen {
                 settledInputBarHeight = inputBarHeight
                 layoutCoordinator.updateBarHeight(inputBarHeight)
                 layoutRevision &+= 1
@@ -895,9 +893,9 @@ struct ChatView: View {
         return KeyboardPinnedContainer(
             desiredBottomGap: belowBarGap,
             isKeyboardVisible: isKeyboardVisible,
-            composerMotionOffsetY: composerMotionOffsetY,
+            composerMotionOffsetY: -dictationMotion.composerLiftY,
             measuredHeight: $inputBarHeight,
-            freezeBarHeightUpdates: isDictationSurfaceDragActive,
+            freezeBarHeightUpdates: dictationMotion.shouldFreezeLayout,
             versionText: appVersionLabel,
             layoutCoordinator: layoutCoordinator,
             layoutKey: layoutKey
@@ -937,12 +935,6 @@ struct ChatView: View {
                 // ⚠️ This callback is how focus state survives view recreation.
                 // DO NOT replace with @Binding or try to use @FocusState directly.
                 onFocusChange: { focused in isInputFocused = focused },
-                onDictationSurfaceDragActiveChange: { isActive in
-                    isDictationSurfaceDragActive = isActive
-                },
-                onComposerMotionOffsetChange: { offsetY in
-                    composerMotionOffsetY = offsetY
-                },
                 onPasteImages: handlePastedImages,
                 motion: dictationMotion,
                 isCompact: horizontalSizeClass == .compact

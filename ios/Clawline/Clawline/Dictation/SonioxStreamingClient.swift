@@ -19,6 +19,7 @@ enum SonioxStreamingClientStage: String, Sendable {
 struct SonioxStreamingConfig: Sendable {
     var apiKey: String
     var languageHint: String
+    var contextTerms: [String] = []
     var model: String = "stt-rt-preview"
     var sampleRate: Int = 16_000
     var channels: Int = 1
@@ -135,6 +136,7 @@ final class SonioxStreamingClient: SonioxStreamingClienting {
             sampleRate: config.sampleRate,
             numChannels: config.channels,
             languageHints: [config.languageHint],
+            contextTerms: config.contextTerms,
             enableEndpointDetection: true,
             clientReferenceID: config.clientReferenceID
         )
@@ -388,6 +390,7 @@ private struct SonioxInitialConfigPayload: Encodable {
     let sampleRate: Int
     let numChannels: Int
     let languageHints: [String]
+    let contextTerms: [String]
     let enableEndpointDetection: Bool
     let clientReferenceID: String
 
@@ -398,6 +401,7 @@ private struct SonioxInitialConfigPayload: Encodable {
         case sampleRate = "sample_rate"
         case numChannels = "num_channels"
         case languageHints = "language_hints"
+        case contextTerms = "context_terms"
         case enableEndpointDetection = "enable_endpoint_detection"
         case clientReferenceID = "client_reference_id"
     }

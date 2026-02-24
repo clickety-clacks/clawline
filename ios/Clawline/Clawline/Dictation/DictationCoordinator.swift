@@ -10,7 +10,7 @@ import Observation
 import OSLog
 import UIKit
 
-enum DictationState: Equatable {
+private enum DictationState: Equatable {
     case idleSurfaceClosed
     case keyPromptModal
     case keyVerifyingModal
@@ -110,21 +110,22 @@ final class DictationSession {
     }
 
     private let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "DictationCoordinator")
-    private(set) var state: DictationState = .idleSurfaceClosed {
+    private var state: DictationState = .idleSurfaceClosed {
         didSet {
             guard oldValue != state else { return }
             let trace = "DICTATION_COORD state \(String(describing: oldValue)) -> \(String(describing: state))"
             logDictation(trace)
-            if !isSurfaceOpen {
-                setSystemIdleSleepDisabled(false)
-            }
+            surfaceTarget = isSurfaceOpen ? .open : .closed
         }
     }
     private(set) var errorMessage: String?
     private(set) var audioLevel: CGFloat = 1
     private(set) var reduceMotionEnabled: Bool = UIAccessibility.isReduceMotionEnabled
-    var surfaceTarget: SurfaceTarget {
-        isSurfaceOpen ? .open : .closed
+    private(set) var surfaceTarget: SurfaceTarget = .closed {
+        didSet {
+            guard oldValue != surfaceTarget else { return }
+            setSystemIdleSleepDisabled(surfaceTarget == .open)
+        }
     }
 
     private func setSystemIdleSleepDisabled(_ disabled: Bool) {
@@ -213,13 +214,14 @@ final class DictationSession {
     private var composeIsEmpty = true
     private var isTextFieldFocused = false
     private var selectionLength = 0
+    private var contextTerms: [String] = []
 
     private var originSessionKey: String?
     private var preDictationSnapshot: ComposeDraftSnapshot = .empty
     private var transcriptBuffer = DictationTranscriptBuffer()
     private var pendingTranscriptText: String?
     private var pendingActivationMode: DictationMode?
-    private var mode: DictationMode?
+    private(set) var mode: DictationMode?
     private var sessionStartedAt: Date?
     private var lastTokenAt: Date?
     private var finishedReceived = false
@@ -310,7 +312,8 @@ final class DictationSession {
         composeIsEmpty: Bool,
         textFieldFocused: Bool,
         selectionLength: Int,
-        reduceMotionEnabled: Bool
+        reduceMotionEnabled: Bool,
+        contextTerms: [String] = []
     ) {
         let previousSession = currentSessionKey
         self.currentSessionKey = sessionKey
@@ -318,6 +321,9 @@ final class DictationSession {
         self.isTextFieldFocused = textFieldFocused
         self.selectionLength = selectionLength
         self.reduceMotionEnabled = reduceMotionEnabled
+        self.contextTerms = contextTerms
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
 
         if sessionKey.isEmpty {
             teardownPhase1(reason: PrewarmTeardownReason.viewInactive.rawValue)
@@ -653,7 +659,6 @@ final class DictationSession {
             state = .dictatingWalkieTalkie
         }
         logDictation("DICTATION_ATTEMPT mode_committed \(attemptContext())")
-        setSystemIdleSleepDisabled(true)
 
         analytics.trackStart(mode: mode, sessionKey: currentSessionKey)
         if prewarmGeneration != generation {
@@ -748,7 +753,13 @@ final class DictationSession {
                 do {
                     logDictation("DICTATION_CONN phase2_connect_begin connect_attempt=\(attempt) \(attemptContext())")
                     try capture.start()
-                    try await client.connect(config: SonioxStreamingConfig(apiKey: apiKey, languageHint: languageHintProvider()))
+                    try await client.connect(
+                        config: SonioxStreamingConfig(
+                            apiKey: apiKey,
+                            languageHint: languageHintProvider(),
+                            contextTerms: self.contextTerms
+                        )
+                    )
                     await MainActor.run {
                         guard self.prewarmGeneration == generation else { return }
                         self.isSocketConnected = true
@@ -1259,7 +1270,6 @@ final class DictationSession {
         mode = nil
         sessionStartedAt = nil
         lastTokenAt = nil
-        setSystemIdleSleepDisabled(false)
 
         eventTask?.cancel()
         frameTask?.cancel()
@@ -1310,7 +1320,6 @@ final class DictationSession {
     private func enterError(message: String, source: String = "unspecified") {
         logDictation("DICTATION_ERROR enter_error ts=\(Date().timeIntervalSince1970) source=\(source) state=\(String(describing: state)) message=\(message)")
         logDictation("DICTATION_COORD enter_error message=\(message)")
-        setSystemIdleSleepDisabled(false)
         errorMessage = message
         state = .error
         feedback.notifyError()
@@ -1373,7 +1382,6 @@ final class DictationSession {
         prewarmGeneration = nil
         lastAudioActivityResetAt = nil
         mode = nil
-        setSystemIdleSleepDisabled(false)
 
         if !keepCaptureForPausedWaveform {
             audioCapture?.stop()

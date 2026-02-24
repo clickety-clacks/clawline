@@ -811,7 +811,20 @@ struct ChatView: View {
             composeIsEmpty: viewModel.inputContent.isEffectivelyEmpty,
             textFieldFocused: isInputFocused,
             selectionLength: selectionRange.length,
-            reduceMotionEnabled: UIAccessibility.isReduceMotionEnabled
+            reduceMotionEnabled: UIAccessibility.isReduceMotionEnabled,
+            contextTerms: dictationContextTerms(viewModel: viewModel)
+        )
+    }
+
+    private func dictationContextTerms(viewModel: ChatViewModel) -> [String] {
+        let names = [viewModel.activeSessionDisplayName]
+            + [viewModel.stream(for: viewModel.activeSessionKey)?.displayName].compactMap { $0 }
+        return Array(
+            Set(
+                names
+                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }
+            )
         )
     }
 

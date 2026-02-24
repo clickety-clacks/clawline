@@ -429,6 +429,10 @@ struct MessageInputBar: View {
         motion.settledSurface != .closed || motion.surfaceInteractiveProgress > 0.001 || motion.gesturePhase != .idle
     }
 
+    private var isPausedSurfaceState: Bool {
+        dictation.isSurfaceOpen && !dictation.isListening && dictation.errorMessage == nil
+    }
+
     private var containerPadding: CGFloat {
         ChatFlowTheme.Metrics(isCompact: isCompact).inputBarPaddingHorizontal
     }
@@ -626,15 +630,15 @@ struct MessageInputBar: View {
             reconnectPulseOn = false
         }
         .onAppear {
-            motion.setListeningState(isSurfaceOpen: dictation.isSurfaceOpen, isListening: dictation.isListening)
+            motion.settle(to: dictation.surfaceTarget)
             reconnectPulseOn = false
             guard isReconnecting else { return }
             withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) {
                 reconnectPulseOn = true
             }
         }
-        .onChange(of: dictation.state) { _, _ in
-            motion.setListeningState(isSurfaceOpen: dictation.isSurfaceOpen, isListening: dictation.isListening)
+        .onChange(of: dictation.surfaceTarget) { _, target in
+            motion.settle(to: target)
             if dictation.isSurfaceOpen {
                 micFadeTask?.cancel()
                 micTransientVisible = false
@@ -1059,10 +1063,10 @@ struct MessageInputBar: View {
     private var dictationWaveformContent: some View {
         let statusText: String
         let statusColor: Color
-        if dictation.state == .error, let message = dictation.errorMessage {
+        if let message = dictation.errorMessage {
             statusText = message
             statusColor = .red
-        } else if dictation.state == .dictatingPaused {
+        } else if isPausedSurfaceState {
             statusText = "Paused"
             statusColor = .secondary
         } else {
@@ -1087,7 +1091,7 @@ struct MessageInputBar: View {
                         dictation.endWalkieTalkieIfNeeded()
                     },
                     perform: {
-                        guard dictation.state == .dictatingPaused else { return }
+                        guard isPausedSurfaceState else { return }
                         waveformDidStartWalkie = true
                         dictation.startWalkieTalkieFromPausedSurface()
                     }
@@ -1098,12 +1102,12 @@ struct MessageInputBar: View {
                 .foregroundStyle(statusColor)
                 .frame(maxWidth: .infinity, alignment: .center)
                 .onAppear {
-                    if dictation.state == .error, let message = dictation.errorMessage {
+                    if let message = dictation.errorMessage {
                         logDictation("DICTATION_ERROR ui_display ts=\(Date().timeIntervalSince1970) message=\(message)")
                     }
                 }
                 .onChange(of: dictation.errorMessage) { _, newValue in
-                    if dictation.state == .error, let message = newValue {
+                    if let message = newValue {
                         logDictation("DICTATION_ERROR ui_display ts=\(Date().timeIntervalSince1970) message=\(message)")
                     }
                 }
@@ -1187,7 +1191,7 @@ struct MessageInputBar: View {
                 let midY = height * 0.5
                 let t = CGFloat(context.date.timeIntervalSinceReferenceDate)
                 let rawAudio = max(0, (dictation.audioLevel - 0.35) / 8.65)
-                let isPaused = dictation.state == .dictatingPaused
+                let isPaused = isPausedSurfaceState
                 let pauseMultiplier: CGFloat = isPaused ? 0.70 : 1.0
                 let idleDrift = 0.070 + 0.022 * sin(t * 1.9)
                 let pausedAudioScale: CGFloat = isPaused ? 0.80 : 1.0

@@ -302,19 +302,6 @@ final class DictationMotion {
         }
     }
 
-    func setListeningState(isSurfaceOpen: Bool, isListening: Bool) {
-        guard gesturePhase == .idle else { return }
-        let target: SurfaceTarget = isSurfaceOpen ? .open : .closed
-        settle(to: target)
-        if target == .closed {
-            pendingCommit = .init(target: .closed, reason: "sync_closed")
-        } else if isListening {
-            pendingCommit = .init(target: .openListening, reason: "sync_open_listening")
-        } else {
-            pendingCommit = .init(target: .openPaused, reason: "sync_open_paused")
-        }
-    }
-
     func commitSettledState(_ target: SettledSurface) {
         if target == .closed {
             settle(to: .closed)

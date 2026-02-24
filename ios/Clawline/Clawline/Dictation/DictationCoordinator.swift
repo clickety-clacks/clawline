@@ -218,7 +218,6 @@ final class DictationSession {
     private var preDictationSnapshot: ComposeDraftSnapshot = .empty
     private var transcriptBuffer = DictationTranscriptBuffer()
     private var pendingTranscriptText: String?
-    private var lastAppliedTranscriptText: String = ""
     private var pendingActivationMode: DictationMode?
     private var mode: DictationMode?
     private var sessionStartedAt: Date?
@@ -634,7 +633,6 @@ final class DictationSession {
             logDictation("DICTATION_PERF ts=\(Date().timeIntervalSince1970) event=capture_snapshot_end session=\(currentSessionKey)")
             self.transcriptBuffer.reset()
             self.pendingTranscriptText = nil
-            self.lastAppliedTranscriptText = ""
         }
         self.finishedReceived = false
         self.sessionStartedAt = Date()
@@ -1298,7 +1296,6 @@ final class DictationSession {
             originSessionKey = nil
             preDictationSnapshot = .empty
             pendingTranscriptText = nil
-            lastAppliedTranscriptText = ""
             pendingActivationMode = nil
         }
         pendingStopContext = nil
@@ -1519,12 +1516,10 @@ final class DictationSession {
     }
 
     private func applyTranscriptIfNeeded(_ transcriptText: String) {
-        guard transcriptText != lastAppliedTranscriptText else { return }
         guard let originSessionKey else { return }
         let wallTs = Date().timeIntervalSince1970
         logDictation("DICTATION_PERF ts=\(wallTs) event=apply_transcript_begin chars=\(transcriptText.count)")
         let startedAt = CFAbsoluteTimeGetCurrent()
-        lastAppliedTranscriptText = transcriptText
         bridge.apply(transcript: transcriptText, baseSnapshot: preDictationSnapshot, to: originSessionKey)
         let elapsedMs = Int((CFAbsoluteTimeGetCurrent() - startedAt) * 1_000)
         logDictation("DICTATION_PERF ts=\(Date().timeIntervalSince1970) event=apply_transcript_end elapsedMs=\(elapsedMs)")

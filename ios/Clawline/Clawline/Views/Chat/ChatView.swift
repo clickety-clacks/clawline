@@ -116,14 +116,18 @@ struct ChatView: View {
     @State private var scrollButtonTapSuppressionTask: Task<Void, Never>?
     @AppStorage("chat.scrollButton.horizontalDetent") private var scrollButtonDetentRawValue = ScrollButtonHorizontalDetent.center.rawValue
 
+    @MainActor
     init(viewModel: ChatViewModel, toastManager: ToastManager) {
         self._viewModel = Bindable(wrappedValue: viewModel)
         self.toastManager = toastManager
-        _dictationCoordinator = State(
-            initialValue: DictationCoordinator(
-                bridge: ComposeInputDictationBridge(host: viewModel)
-            )
+        let session = DictationCoordinator(
+            bridge: ComposeInputDictationBridge(host: viewModel),
+            keyStore: SonioxKeyStore()
         )
+        _dictationCoordinator = State(
+            initialValue: session
+        )
+        _dictationMotion = State(initialValue: DictationMotion(session: session))
     }
 
     @Environment(\.colorScheme) private var colorScheme
@@ -138,6 +142,7 @@ struct ChatView: View {
     @State private var streamToastBusySince: Date?
     @State private var streamToastBusyClearTask: Task<Void, Never>?
     @State private var dictationCoordinator: DictationCoordinator
+    @State private var dictationMotion: DictationMotion
 
     private let streamToastMinimumBusySeconds: TimeInterval = 0.45
 
@@ -939,6 +944,7 @@ struct ChatView: View {
                     composerMotionOffsetY = offsetY
                 },
                 onPasteImages: handlePastedImages,
+                motion: dictationMotion,
                 isCompact: horizontalSizeClass == .compact
             )
         }
@@ -2486,47 +2492,4 @@ private struct AttachmentActionButton: View {
 private final class PreviewUploadService: UploadServicing {
     func upload(data: Data, mimeType: String, filename: String?) async throws -> String { "preview-asset" }
     func download(assetId: String) async throws -> Data { Data() }
-}
-
-#Preview("Empty Chat") {
-    let device = PreviewDevice()
-    let auth = AuthManager()
-    auth.storeCredentials(token: "preview-token", userId: "preview-user")
-    let toastManager = ToastManager()
-    let viewModel = ChatViewModel(
-        auth: auth,
-        chatService: PreviewChatService(),
-        settings: SettingsManager(),
-        device: device,
-        uploadService: PreviewUploadService(),
-        toastManager: toastManager,
-        salientHighlightService: SalientHighlightService()
-    )
-    return ChatView(
-        viewModel: viewModel,
-        toastManager: toastManager
-    )
-    .environment(auth)
-}
-
-#Preview("With Messages") {
-    let device = PreviewDevice()
-    let auth = AuthManager()
-    auth.storeCredentials(token: "preview-token", userId: "preview-user")
-    auth.updateAdminStatus(true)
-    let toastManager = ToastManager()
-    let viewModel = ChatViewModel(
-        auth: auth,
-        chatService: PreviewChatService(),
-        settings: SettingsManager(),
-        device: device,
-        uploadService: PreviewUploadService(),
-        toastManager: toastManager,
-        salientHighlightService: SalientHighlightService()
-    )
-    return ChatView(
-        viewModel: viewModel,
-        toastManager: toastManager
-    )
-    .environment(auth)
 }

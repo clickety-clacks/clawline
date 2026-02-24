@@ -85,9 +85,14 @@ final class UIKitDictationFeedbackProvider: DictationFeedbackProviding {
     }
 }
 
+enum SurfaceTarget: Sendable {
+    case closed
+    case open
+}
+
 @Observable
 @MainActor
-final class DictationCoordinator {
+final class DictationSession {
     private enum WaveformDefaults {
         static let amplitudeFloor: CGFloat = 0.35
         static let amplitudeRange: CGFloat = 8.65
@@ -116,10 +121,11 @@ final class DictationCoordinator {
         }
     }
     private(set) var errorMessage: String?
-    private(set) var waveformDisplacement: CGFloat = 1
+    private(set) var audioLevel: CGFloat = 1
     private(set) var reduceMotionEnabled: Bool = UIAccessibility.isReduceMotionEnabled
-    private(set) var inlineKeyText: String = SonioxConfigurationStore.editableAPIKey
-    private(set) var inlineKeyStatus: SonioxKeyVerificationStatus = SonioxConfigurationStore.keyStatus
+    var surfaceTarget: SurfaceTarget {
+        isSurfaceOpen ? .open : .closed
+    }
 
     private func setSystemIdleSleepDisabled(_ disabled: Bool) {
 #if os(iOS)
@@ -127,12 +133,21 @@ final class DictationCoordinator {
 #endif
     }
 
+    var inlineKeyText: String {
+        get { keyStore.editableKey }
+        set { keyStore.setKey(newValue) }
+    }
+
+    var inlineKeyStatus: SonioxKeyVerificationStatus {
+        keyStore.keyStatus
+    }
+
     var inlineKeyActionTitle: String {
-        inlineKeyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Get Key" : "Verify"
+        keyStore.ctaTitle
     }
 
     var inlineKeyStatusText: String? {
-        inlineKeyStatus.inlineStatusText
+        keyStore.statusText
     }
 
     var showsComposeKeyPromptModal: Bool {
@@ -186,12 +201,7 @@ final class DictationCoordinator {
     }
 
     private let bridge: ComposeInputDictationBridge
-    private let configuredAPIKey: () -> String?
-    private let editableAPIKeyProvider: () -> String
-    private let keyStatusProvider: () -> SonioxKeyVerificationStatus
-    private let setConfiguredAPIKey: (String?) -> Void
-    private let setKeyStatus: (SonioxKeyVerificationStatus) -> Void
-    private let keyVerifier: any SonioxKeyVerifying
+    private let keyStore: SonioxKeyStore
     private let languageHintProvider: () -> String
     private let audioCaptureFactory: () -> any DictationAudioCapturing
     private let streamingClientFactory: () -> any SonioxStreamingClienting
@@ -277,12 +287,7 @@ final class DictationCoordinator {
 
     init(
         bridge: ComposeInputDictationBridge,
-        configuredAPIKey: @escaping () -> String? = { SonioxConfigurationStore.apiKey },
-        editableAPIKeyProvider: @escaping () -> String = { SonioxConfigurationStore.editableAPIKey },
-        keyStatusProvider: @escaping () -> SonioxKeyVerificationStatus = { SonioxConfigurationStore.keyStatus },
-        setConfiguredAPIKey: @escaping (String?) -> Void = { SonioxConfigurationStore.setAPIKey($0) },
-        setKeyStatus: @escaping (SonioxKeyVerificationStatus) -> Void = { SonioxConfigurationStore.setKeyStatus($0) },
-        keyVerifier: any SonioxKeyVerifying = SonioxKeyVerifier(),
+        keyStore: SonioxKeyStore,
         languageHintProvider: @escaping () -> String = { DictationLanguageHintResolver.resolve() },
         audioCaptureFactory: @escaping () -> any DictationAudioCapturing = { DictationAudioCapture() },
         streamingClientFactory: @escaping () -> any SonioxStreamingClienting = { SonioxStreamingClient() },
@@ -291,12 +296,7 @@ final class DictationCoordinator {
         timing: DictationTiming = DictationTiming()
     ) {
         self.bridge = bridge
-        self.configuredAPIKey = configuredAPIKey
-        self.editableAPIKeyProvider = editableAPIKeyProvider
-        self.keyStatusProvider = keyStatusProvider
-        self.setConfiguredAPIKey = setConfiguredAPIKey
-        self.setKeyStatus = setKeyStatus
-        self.keyVerifier = keyVerifier
+        self.keyStore = keyStore
         self.languageHintProvider = languageHintProvider
         self.audioCaptureFactory = audioCaptureFactory
         self.streamingClientFactory = streamingClientFactory
@@ -304,7 +304,6 @@ final class DictationCoordinator {
         self.feedback = feedback ?? UIKitDictationFeedbackProvider()
         self.timing = timing
         reduceMotionEnabled = self.feedback.isReduceMotionEnabled
-        refreshInlineKeyFromStore()
     }
 
     func updateContext(
@@ -325,10 +324,6 @@ final class DictationCoordinator {
             teardownPhase1(reason: PrewarmTeardownReason.viewInactive.rawValue)
         } else {
             preparePhase1IfNeeded()
-        }
-
-        if state != .keyVerifyingModal {
-            refreshInlineKeyFromStore()
         }
 
         if isDictationActive,
@@ -456,40 +451,21 @@ final class DictationCoordinator {
     }
 
     func updateInlineKeyText(_ value: String) {
-        let previousTrimmed = inlineKeyText.trimmingCharacters(in: .whitespacesAndNewlines)
         inlineKeyText = value
-        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-        setConfiguredAPIKey(trimmed.isEmpty ? nil : trimmed)
-
-        if trimmed.isEmpty {
-            inlineKeyStatus = .missing
-            setKeyStatus(.missing)
-        } else if trimmed != previousTrimmed, inlineKeyStatus != .validating {
-            inlineKeyStatus = .unverified
-            setKeyStatus(.unverified)
-        }
     }
 
     func handleComposeKeyPrimaryAction(openKeyURL: (URL) -> Void) async {
         let trimmed = inlineKeyText.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty {
-            inlineKeyStatus = .missing
-            setConfiguredAPIKey(nil)
-            setKeyStatus(.missing)
             state = .keyPromptModal
             openKeyURL(SonioxConfigurationStore.keyManagementURL)
             return
         }
 
         state = .keyVerifyingModal
-        inlineKeyStatus = .validating
-        setKeyStatus(.validating)
-        setConfiguredAPIKey(trimmed)
-
-        let isValid = await keyVerifier.verify(apiKey: trimmed)
+        keyStore.setKey(trimmed)
+        let isValid = await keyStore.verify()
         if isValid {
-            inlineKeyStatus = .validated
-            setKeyStatus(.validated)
             let requestedMode = pendingActivationMode
             pendingActivationMode = nil
             if let requestedMode {
@@ -498,8 +474,6 @@ final class DictationCoordinator {
                 state = idleStateForCurrentContext()
             }
         } else {
-            inlineKeyStatus = .invalid
-            setKeyStatus(.invalid)
             state = .keyPromptModal
         }
     }
@@ -665,7 +639,7 @@ final class DictationCoordinator {
         self.finishedReceived = false
         self.sessionStartedAt = Date()
         self.lastTokenAt = Date()
-        self.waveformDisplacement = 1
+        self.audioLevel = 1
         self.errorMessage = nil
         self.walkieOrigin = mode == .walkieTalkie ? .pushHold : nil
 
@@ -700,13 +674,8 @@ final class DictationCoordinator {
     }
 
     private func validatedAPIKeyOrNil() -> String? {
-        refreshInlineKeyFromStore()
-        guard inlineKeyStatus == .validated,
-              let apiKey = configuredAPIKey(),
-              !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            return nil
-        }
-        return apiKey
+        let key = keyStore.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        return key.isEmpty ? nil : key
     }
 
     private func attemptContext() -> String {
@@ -762,7 +731,7 @@ final class DictationCoordinator {
                 guard abs(nextDisplacement - lastAppliedDisplacement) >= 0.004 else { continue }
                 lastAppliedDisplacement = nextDisplacement
                 await MainActor.run {
-                    self.waveformDisplacement = nextDisplacement
+                    self.audioLevel = nextDisplacement
                 }
             }
         }
@@ -795,7 +764,7 @@ final class DictationCoordinator {
                     lastError = error
                     logDictation("DICTATION_CONN phase2_connect_failed connect_attempt=\(attempt) error=\(error.localizedDescription) \(attemptContext())")
                     capture.stop()
-                    client.close(code: .goingAway, reason: "phase2_retry", caller: "DictationCoordinator.beginPhase2Prewarm attempt=\(attempt)")
+                    client.close(code: .goingAway, reason: "phase2_retry", caller: "DictationSession.beginPhase2Prewarm attempt=\(attempt)")
                     if attempt < 2 {
                         do {
                             try await Task.sleep(for: .milliseconds(220))
@@ -1126,7 +1095,7 @@ final class DictationCoordinator {
         collapseSurface: Bool = true,
         collapseSurfaceImmediately: Bool = false,
         trigger: String = "unspecified",
-        callSite: String = DictationCoordinator.callSite()
+        callSite: String = DictationSession.callSite()
     ) async -> Bool {
         logDictation(
             "DICTATION_STOP stopKeep_top ts=\(Date().timeIntervalSince1970) reason=\(reason) " +
@@ -1200,7 +1169,7 @@ final class DictationCoordinator {
         streamingClient?.close(
             code: .normalClosure,
             reason: "client_finalize",
-            caller: "DictationCoordinator.stopKeep reason=\(reason) trigger=\(trigger) callSite=\(callSite)"
+            caller: "DictationSession.stopKeep reason=\(reason) trigger=\(trigger) callSite=\(callSite)"
         )
         finalizeSessionCleanup(
             reason: reason,
@@ -1214,7 +1183,7 @@ final class DictationCoordinator {
     private func stopDiscard(
         reason: String,
         trigger: String = "unspecified",
-        callSite: String = DictationCoordinator.callSite()
+        callSite: String = DictationSession.callSite()
     ) {
         guard state == .dictatingSticky || state == .dictatingPaused || state == .dictatingWalkieTalkie || state == .stoppingKeep else { return }
 
@@ -1237,7 +1206,7 @@ final class DictationCoordinator {
         streamingClient?.close(
             code: .normalClosure,
             reason: "client_cancelled",
-            caller: "DictationCoordinator.stopDiscard reason=\(reason) trigger=\(trigger) callSite=\(callSite)"
+            caller: "DictationSession.stopDiscard reason=\(reason) trigger=\(trigger) callSite=\(callSite)"
         )
 
         if let originSessionKey {
@@ -1286,7 +1255,7 @@ final class DictationCoordinator {
         }
 
         if !keepAudioForPausedWaveform {
-            waveformDisplacement = 1
+            audioLevel = 1
         }
         finishedReceived = false
         mode = nil
@@ -1391,7 +1360,7 @@ final class DictationCoordinator {
         streamingClient?.close(
             code: .normalClosure,
             reason: "paused",
-            caller: "DictationCoordinator.pauseListening reason=\(reason)"
+            caller: "DictationSession.pauseListening reason=\(reason)"
         )
 
         eventTask?.cancel()
@@ -1476,7 +1445,7 @@ final class DictationCoordinator {
         streamingClient?.close(
             code: .normalClosure,
             reason: closeReason,
-            caller: "DictationCoordinator.closeAndResetRealtimePipeline"
+            caller: "DictationSession.closeAndResetRealtimePipeline"
         )
 
         eventTask?.cancel()
@@ -1510,11 +1479,6 @@ final class DictationCoordinator {
     private func elapsedSessionMilliseconds() -> Int {
         guard let sessionStartedAt else { return 0 }
         return Int(Date().timeIntervalSince(sessionStartedAt) * 1000)
-    }
-
-    private func refreshInlineKeyFromStore() {
-        inlineKeyText = editableAPIKeyProvider()
-        inlineKeyStatus = keyStatusProvider()
     }
 
     private func queueTranscriptApply(_ transcriptText: String, immediate: Bool) {
@@ -1567,3 +1531,5 @@ final class DictationCoordinator {
         logger.notice("[DICTATION-PERF] applyTranscriptIfNeeded: \(elapsedMs, privacy: .public)ms")
     }
 }
+
+typealias DictationCoordinator = DictationSession

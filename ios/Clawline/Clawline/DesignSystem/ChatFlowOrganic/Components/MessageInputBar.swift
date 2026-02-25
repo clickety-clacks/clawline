@@ -447,23 +447,29 @@ struct MessageInputBar: View {
 
     private var walkieHoldActivationThreshold: CGFloat { 124 }
     private var walkieHoldDurationSeconds: TimeInterval { 0.55 }
-    private var pullToSendEligible: Bool {
+    private var canSendNow: Bool {
         !isSending && canSend && connectionState == .connected
     }
 
-    private var settleDurationMs: Int { 300 }
+    private var pullToSendEligible: Bool {
+        canSendNow
+    }
+
+    private var settleDurationMs: Int {
+        Int((300.0 * max(0.1, motion.settleDurationMultiplier)).rounded())
+    }
 
     private var settleSpring: Animation {
-        .interactiveSpring(response: 0.56, dampingFraction: 0.82, blendDuration: 0.12)
+        .interactiveSpring(
+            response: 0.56 * max(0.1, motion.settleDurationMultiplier),
+            dampingFraction: 0.82,
+            blendDuration: 0.12
+        )
     }
 
     private var pullToSendLift: CGFloat {
         let revealContribution = motion.pushGestureStartedWithSurfaceOpen ? 0 : min(motion.pushDragUpDistance, 100)
         return max(0, motion.pushDragUpDistance - revealContribution)
-    }
-
-    private var isSurfaceVisibleForGesture: Bool {
-        motion.settledSurface != .closed || motion.surfaceInteractiveProgress > 0.001 || motion.gesturePhase != .idle
     }
 
     private var isPausedSurfaceState: Bool {
@@ -587,7 +593,7 @@ struct MessageInputBar: View {
         VStack(alignment: .leading, spacing: 8) {
             inputRow
 
-            if isSurfaceVisibleForGesture {
+            if motion.isSurfaceVisible {
                 dictationSurface
                     .frame(height: 100, alignment: .top)
                     .opacity(motion.surfaceInteractiveProgress)
@@ -615,7 +621,7 @@ struct MessageInputBar: View {
             DictationPanGestureInstaller(
                 shouldBegin: shouldBeginDictationPan(startLocation:velocity:),
                 startsInEditableRegion: startsInEditableRegion(startLocation:),
-                isSurfaceOpen: { isSurfaceVisibleForGesture },
+                isSurfaceOpen: { motion.isSurfaceVisible },
                 onChanged: { event in
                     handlePushChanged(
                         startLocation: event.startLocation,
@@ -774,7 +780,7 @@ struct MessageInputBar: View {
                     }(),
                     onFocusChange: onFocusChange,
                     onSubmit: {
-                        guard !isSending, canSend else { return }
+                        guard canSendNow else { return }
                         onSend()
                     },
                     onEscape: {
@@ -852,7 +858,7 @@ struct MessageInputBar: View {
             }
 
             // Send button - morphs with connection state, keeps frame/anchor stable.
-            let sendActionEnabled = isSending || canSend || isDisconnected
+            let sendActionEnabled = isSending || canSendNow || isDisconnected
             let sendIconOpacity = (sendActionEnabled || isReconnecting) ? 1 : 0.4
             Button(action: {
                 if isSending {
@@ -964,11 +970,11 @@ struct MessageInputBar: View {
 
         if motion.gesturePhase == .idle {
             gestureSettleTask?.cancel()
-            motion.gestureBegan(originWasOpen: isSurfaceVisibleForGesture)
+            motion.gestureBegan(originWasOpen: motion.isSurfaceVisible)
             dictation.beginGesturePrewarm()
         }
 
-        if !isSurfaceVisibleForGesture && !dictation.swipeActivationEnabled {
+        if !motion.isSurfaceVisible && !dictation.swipeActivationEnabled {
             dictation.cancelGesturePrewarmIfNeeded(trigger: "push_changed_activation_disabled")
             withAnimation(settleSpring) {
                 motion.gestureCancelled()
@@ -977,7 +983,7 @@ struct MessageInputBar: View {
             return
         }
 
-        if !isSurfaceVisibleForGesture && up < 1.4 * abs(dx) {
+        if !motion.isSurfaceVisible && up < 1.4 * abs(dx) {
             if abs(dx) > up {
                 dictation.cancelGesturePrewarmIfNeeded(trigger: "push_changed_horizontal_dominant")
             }
@@ -993,7 +999,7 @@ struct MessageInputBar: View {
             velocityY: velocity.y
         )
 
-        if !isSurfaceVisibleForGesture,
+        if !motion.isSurfaceVisible,
            verticalDominant,
            motion.updateWalkieHoldArming(
             up: up,
@@ -1037,7 +1043,7 @@ struct MessageInputBar: View {
                 predictedY: predictedEndTranslation.y,
                 velocityY: velocity.y,
                 context: .init(
-                    pullToSendEligible: pullToSendEligible,
+                    pullToSendEligible: canSendNow,
                     isSwipeActivationEnabled: dictation.swipeActivationEnabled,
                     verticallyDominant: verticalDominant
                 )
@@ -1071,7 +1077,7 @@ struct MessageInputBar: View {
     }
 
     private func shouldBeginDictationPan(startLocation: CGPoint, velocity: CGPoint) -> Bool {
-        if isSurfaceVisibleForGesture {
+        if motion.isSurfaceVisible {
             return true
         }
         if dictation.swipeActivationEnabled {
@@ -1227,17 +1233,21 @@ struct MessageInputBar: View {
                 let height = max(1, proxy.size.height)
                 let midY = height * 0.5
                 let t = CGFloat(context.date.timeIntervalSinceReferenceDate)
-                let rawAudio = max(0, (dictation.audioLevel - 0.35) / 8.65)
+                let rms = max(0, dictation.audioLevel)
+                let minDb: Float = -55
+                let maxDb: Float = -10
+                let db = rms > 0 ? 20 * log10(rms) : minDb
+                let rawAudio = max(0, min(1, (db - minDb) / (maxDb - minDb)))
                 let isPaused = isPausedSurfaceState
                 let pauseMultiplier: CGFloat = isPaused ? 0.70 : 1.0
                 let idleDrift = 0.070 + 0.022 * sin(t * 1.9)
                 let pausedAudioScale: CGFloat = isPaused ? 0.80 : 1.0
                 // Invariant 11: asymptotic amplitude curve (fast rise, bounded approach).
-                let boundedAmplitudeDrive = tanh(rawAudio * 2.4)
+                let boundedAmplitudeDrive = tanh(CGFloat(rawAudio) * 2.4)
                 let targetAmplitude = 0.060 + (0.455 - 0.060) * boundedAmplitudeDrive * pausedAudioScale
                 let baseAmplitude = (idleDrift + targetAmplitude) * pauseMultiplier
                 // Invariant 12: period curve differs from amplitude and keeps increasing.
-                let periodDrive = log1p(rawAudio * 1.8)
+                let periodDrive = log1p(CGFloat(rawAudio) * 1.8)
                 let frequencyAudioScale: CGFloat = isPaused ? 0.64 : 0.95
                 let phaseAudioScale: CGFloat = isPaused ? 0.52 : 0.65
                 let dynamicFrequencyScale: CGFloat = 1.0 + frequencyAudioScale * periodDrive
@@ -1256,32 +1266,50 @@ struct MessageInputBar: View {
                     (3.10, 2.8, 4.0, 0.74)
                 ]
 
-                ZStack {
-                    ForEach(Array(waveConfigs.enumerated()), id: \.offset) { index, config in
-                        let phase = (t * config.speed * dynamicPhaseSpeedScale) + config.phaseOffset
-                        let frequency = config.frequency * dynamicFrequencyScale
-                        // Keep waveform bounded within panel while allowing near-max fill.
-                        let waveAmplitude = min(0.48, max(0.050, baseAmplitude * config.amplitudeScale))
-                        Path { path in
-                            path.move(to: CGPoint(x: 0, y: midY))
-                            let step: CGFloat = 2
-                            var x: CGFloat = 0
-                            while x <= width {
-                                let progress = x / width
-                                let taper = pow(sin(progress * .pi), 0.95)
-                                let y = midY + sin((progress * .pi * 2 * frequency) + phase) * height * waveAmplitude * taper
-                                path.addLine(to: CGPoint(x: x, y: y))
-                                x += step
+                if reduceMotionForDictation {
+                    let activity = max(0.12, min(1.0, CGFloat(rawAudio) * 1.4))
+                    let pulse = 0.70 + 0.30 * sin(t * 2.0)
+                    let alpha = (isPaused ? 0.28 : 0.52) * activity * pulse
+                    ZStack {
+                        Capsule()
+                            .fill(ChatFlowTheme.adminAccent(colorScheme).opacity(alpha))
+                            .frame(height: isPaused ? 4 : 6)
+                        Capsule()
+                            .fill(ChatFlowTheme.sage(colorScheme).opacity(alpha * 0.7))
+                            .frame(width: width * 0.72, height: isPaused ? 3 : 4)
+                        Capsule()
+                            .fill(ChatFlowTheme.softCoral(colorScheme).opacity(alpha * 0.52))
+                            .frame(width: width * 0.48, height: isPaused ? 2 : 3)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                } else {
+                    ZStack {
+                        ForEach(Array(waveConfigs.enumerated()), id: \.offset) { index, config in
+                            let phase = (t * config.speed * dynamicPhaseSpeedScale) + config.phaseOffset
+                            let frequency = config.frequency * dynamicFrequencyScale
+                            // Keep waveform bounded within panel while allowing near-max fill.
+                            let waveAmplitude = min(0.48, max(0.050, baseAmplitude * config.amplitudeScale))
+                            Path { path in
+                                path.move(to: CGPoint(x: 0, y: midY))
+                                let step: CGFloat = 2
+                                var x: CGFloat = 0
+                                while x <= width {
+                                    let progress = x / width
+                                    let taper = pow(sin(progress * .pi), 0.95)
+                                    let y = midY + sin((progress * .pi * 2 * frequency) + phase) * height * waveAmplitude * taper
+                                    path.addLine(to: CGPoint(x: x, y: y))
+                                    x += step
+                                }
                             }
-                        }
-                        .stroke(
-                            colorSet[index].opacity(isPaused ? (0.18 - CGFloat(index) * 0.02) : (0.62 - CGFloat(index) * 0.10)),
-                            style: StrokeStyle(
-                                lineWidth: baseLineWidth + CGFloat(3 - index) * 0.26,
-                                lineCap: .round,
-                                lineJoin: .round
+                            .stroke(
+                                colorSet[index].opacity(isPaused ? (0.18 - CGFloat(index) * 0.02) : (0.62 - CGFloat(index) * 0.10)),
+                                style: StrokeStyle(
+                                    lineWidth: baseLineWidth + CGFloat(3 - index) * 0.26,
+                                    lineCap: .round,
+                                    lineJoin: .round
+                                )
                             )
-                        )
+                        }
                     }
                 }
             }

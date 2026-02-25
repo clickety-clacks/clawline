@@ -27,7 +27,7 @@ struct DictationTiming {
     var maxSessionDuration: Duration = .seconds(60)
     var tokenInactivityTimeout: Duration = .seconds(15)
     var stopKeepFinalizeTimeout: Duration = .milliseconds(1_200)
-    var sendFinalizeTimeout: Duration = .milliseconds(500)
+    var sendFinalizeTimeout: Duration = .milliseconds(1_200)
     var composeUpdateCoalescingInterval: Duration = .milliseconds(75)
 }
 
@@ -93,11 +93,6 @@ enum SurfaceTarget: Sendable {
 @Observable
 @MainActor
 final class DictationSession {
-    private enum WaveformDefaults {
-        static let amplitudeFloor: CGFloat = 0.35
-        static let amplitudeRange: CGFloat = 8.65
-    }
-
     private enum WalkieOrigin {
         case pushHold
         case pausedHold
@@ -115,11 +110,11 @@ final class DictationSession {
             guard oldValue != state else { return }
             let trace = "DICTATION_COORD state \(String(describing: oldValue)) -> \(String(describing: state))"
             logDictation(trace)
-            surfaceTarget = isSurfaceOpen ? .open : .closed
+            surfaceTarget = surfaceTarget(for: state)
         }
     }
     private(set) var errorMessage: String?
-    private(set) var audioLevel: CGFloat = 1
+    private(set) var audioLevel: Float = 0
     private(set) var reduceMotionEnabled: Bool = UIAccessibility.isReduceMotionEnabled
     private(set) var surfaceTarget: SurfaceTarget = .closed {
         didSet {
@@ -132,6 +127,23 @@ final class DictationSession {
 #if os(iOS)
         UIApplication.shared.isIdleTimerDisabled = disabled
 #endif
+    }
+
+    private func surfaceTarget(for state: DictationState) -> SurfaceTarget {
+        switch state {
+        case .idleSurfaceClosed:
+            return .closed
+        case .keyPromptModal,
+                .keyVerifyingModal,
+                .dictatingSticky,
+                .dictatingPaused,
+                .dictatingWalkieTalkie,
+                .finalizing,
+                .stoppingKeep,
+                .stoppingDiscard,
+                .error:
+            return .open
+        }
     }
 
     var inlineKeyText: String {
@@ -190,7 +202,7 @@ final class DictationSession {
     }
 
     var isSurfaceOpen: Bool {
-        isWaveformVisible || state == .error || state == .keyPromptModal || state == .keyVerifyingModal
+        surfaceTarget == .open
     }
 
     var micVisible: Bool {
@@ -548,7 +560,9 @@ final class DictationSession {
     func discardFromEscapeLongPress() {
         guard state == .dictatingSticky || state == .dictatingPaused || state == .dictatingWalkieTalkie else { return }
         logDictation("DICTATION_STOP trace_id=DICTATION_DISCARD_ESCAPE_LONG_PRESS caller=discardFromEscapeLongPress ts=\(Date().timeIntervalSince1970)")
-        stopDiscard(reason: "escape_long_press", trigger: "keyboard_escape_long_press")
+        Task { [weak self] in
+            await self?.stopDiscard(reason: "escape_long_press", trigger: "keyboard_escape_long_press")
+        }
     }
 
     func stopFromVoiceOverAction() {
@@ -566,7 +580,9 @@ final class DictationSession {
     func discardFromVoiceOverAction() {
         guard state == .dictatingSticky || state == .dictatingPaused || state == .dictatingWalkieTalkie else { return }
         logDictation("DICTATION_STOP trace_id=DICTATION_DISCARD_VOICEOVER caller=discardFromVoiceOverAction ts=\(Date().timeIntervalSince1970)")
-        stopDiscard(reason: "voiceover_discard", trigger: "voiceover_discard_action")
+        Task { [weak self] in
+            await self?.stopDiscard(reason: "voiceover_discard", trigger: "voiceover_discard_action")
+        }
     }
 
     func handleSendTapped(sendAction: @escaping () -> Void) {
@@ -632,19 +648,13 @@ final class DictationSession {
             originSessionKey != currentSessionKey
 
         if needsSessionContextInitialization {
-            self.originSessionKey = currentSessionKey
-            bridge.resetTranscriptState(for: currentSessionKey)
-            logDictation("DICTATION_PERF ts=\(Date().timeIntervalSince1970) event=capture_snapshot_begin session=\(currentSessionKey)")
-            self.preDictationSnapshot = bridge.captureSnapshot(for: currentSessionKey)
-            logDictation("DICTATION_PERF ts=\(Date().timeIntervalSince1970) event=capture_snapshot_end session=\(currentSessionKey)")
-            self.transcriptBuffer.reset()
-            self.pendingTranscriptText = nil
+            initializeOriginSessionContext(for: currentSessionKey)
         }
         self.finishedReceived = false
         self.audioDecodeTimeoutRecoveryCount = 0
         self.sessionStartedAt = Date()
         self.lastTokenAt = Date()
-        self.audioLevel = 1
+        self.audioLevel = 0
         self.errorMessage = nil
         self.walkieOrigin = mode == .walkieTalkie ? .pushHold : nil
 
@@ -718,24 +728,13 @@ final class DictationSession {
             guard let self else { return }
             let minimumWaveformUpdateInterval: CFTimeInterval = 1.0 / 60.0
             var lastWaveformUpdateAt = CFAbsoluteTimeGetCurrent() - minimumWaveformUpdateInterval
-            var lastAppliedDisplacement: CGFloat = WaveformDefaults.amplitudeFloor
-            let minDisplacement: CGFloat = WaveformDefaults.amplitudeFloor
-            let maxDisplacement: CGFloat = WaveformDefaults.amplitudeFloor + WaveformDefaults.amplitudeRange
-            let fastAttackAlpha: CGFloat = 0.82
-            let slowReleaseAlpha: CGFloat = 0.18
             for await level in capture.levelStream {
                 let now = CFAbsoluteTimeGetCurrent()
                 guard now - lastWaveformUpdateAt >= minimumWaveformUpdateInterval else { continue }
                 lastWaveformUpdateAt = now
-                let mappedDisplacement = Self.mappedDisplacement(for: level)
-                let targetDisplacement = min(max(mappedDisplacement, minDisplacement), maxDisplacement)
-                let isAttacking = targetDisplacement >= lastAppliedDisplacement
-                let alpha = isAttacking ? fastAttackAlpha : slowReleaseAlpha
-                let nextDisplacement = lastAppliedDisplacement + ((targetDisplacement - lastAppliedDisplacement) * alpha)
-                guard abs(nextDisplacement - lastAppliedDisplacement) >= 0.004 else { continue }
-                lastAppliedDisplacement = nextDisplacement
+                let nextLevel = max(0, level)
                 await MainActor.run {
-                    self.audioLevel = nextDisplacement
+                    self.audioLevel = nextLevel
                 }
             }
         }
@@ -1237,7 +1236,7 @@ final class DictationSession {
         reason: String,
         trigger: String = "unspecified",
         callSite: String = DictationSession.callSite()
-    ) {
+    ) async {
         guard state == .dictatingSticky || state == .dictatingPaused || state == .dictatingWalkieTalkie || state == .stoppingKeep else { return }
 
         pendingStopContext = "trigger=\(trigger) callSite=\(callSite)"
@@ -1251,6 +1250,26 @@ final class DictationSession {
         cancelMaxDurationTimer(reason: "stopDiscard_enter", caller: "stopDiscard")
         cancelTokenInactivityTimer(reason: "stopDiscard_enter")
         cancelPendingTranscriptApply()
+
+        logDictation(
+            "DICTATION_STOP trace_id=DICTATION_STOP_FINALIZATION_HOLD_BEGIN " +
+            "caller=stopDiscard reason=\(reason) timeout=\(timing.stopKeepFinalizeTimeout) ts=\(Date().timeIntervalSince1970)"
+        )
+        do {
+            try await streamingClient?.sendFinalize()
+        } catch {
+            // Best effort for discard path.
+        }
+        do {
+            try await streamingClient?.sendAudioFrame(Data())
+        } catch {
+            // Best effort for discard path.
+        }
+        _ = await waitForFinished(timeout: timing.stopKeepFinalizeTimeout)
+        logDictation(
+            "DICTATION_STOP trace_id=DICTATION_STOP_FINALIZATION_HOLD_END " +
+            "caller=stopDiscard reason=\(reason) ts=\(Date().timeIntervalSince1970)"
+        )
 
         audioCapture?.stop()
         logDictation(
@@ -1308,7 +1327,7 @@ final class DictationSession {
         }
 
         if !keepAudioForPausedWaveform {
-            audioLevel = 1
+            audioLevel = 0
         }
         finishedReceived = false
         mode = nil
@@ -1347,9 +1366,7 @@ final class DictationSession {
         prewarmGeneration = nil
 
         if !keepAudioForPausedWaveform {
-            originSessionKey = nil
-            preDictationSnapshot = .empty
-            pendingTranscriptText = nil
+            clearOriginSessionContext()
             pendingActivationMode = nil
         }
         pendingStopContext = nil
@@ -1514,17 +1531,6 @@ final class DictationSession {
         bufferedAudioFrames.removeAll(keepingCapacity: false)
     }
 
-    private static func mappedDisplacement(for rms: Float) -> CGFloat {
-        guard rms > 0 else { return WaveformDefaults.amplitudeFloor }
-        let db = 20 * log10(rms)
-        let minDb: Float = -55
-        let maxDb: Float = -10
-        let normalized = max(0, (db - minDb) / (maxDb - minDb))
-        let curveGain: Float = 2.4
-        let curved = tanh(normalized * curveGain) / tanh(curveGain)
-        return WaveformDefaults.amplitudeFloor + CGFloat(curved) * WaveformDefaults.amplitudeRange
-    }
-
     private func elapsedSessionMilliseconds() -> Int {
         guard let sessionStartedAt else { return 0 }
         return Int(Date().timeIntervalSince(sessionStartedAt) * 1000)
@@ -1567,12 +1573,27 @@ final class DictationSession {
         print(message)
     }
 
+    private func initializeOriginSessionContext(for sessionKey: String) {
+        originSessionKey = sessionKey
+        bridge.resetTranscriptState(for: sessionKey)
+        logDictation("DICTATION_PERF ts=\(Date().timeIntervalSince1970) event=capture_snapshot_begin session=\(sessionKey)")
+        preDictationSnapshot = bridge.captureSnapshot(for: sessionKey)
+        logDictation("DICTATION_PERF ts=\(Date().timeIntervalSince1970) event=capture_snapshot_end session=\(sessionKey)")
+        transcriptBuffer.reset()
+        pendingTranscriptText = nil
+    }
+
+    private func clearOriginSessionContext() {
+        originSessionKey = nil
+        preDictationSnapshot = .empty
+        pendingTranscriptText = nil
+    }
+
     private func applyTranscriptIfNeeded(_ transcriptText: String) {
-        guard let originSessionKey else { return }
         let wallTs = Date().timeIntervalSince1970
         logDictation("DICTATION_PERF ts=\(wallTs) event=apply_transcript_begin chars=\(transcriptText.count)")
         let startedAt = CFAbsoluteTimeGetCurrent()
-        bridge.apply(transcript: transcriptText, baseSnapshot: preDictationSnapshot, to: originSessionKey)
+        bridge.apply(transcript: transcriptText, baseSnapshot: preDictationSnapshot, originSessionKey: originSessionKey)
         let elapsedMs = Int((CFAbsoluteTimeGetCurrent() - startedAt) * 1_000)
         logDictation("DICTATION_PERF ts=\(Date().timeIntervalSince1970) event=apply_transcript_end elapsedMs=\(elapsedMs)")
         logger.notice("[DICTATION-PERF] applyTranscriptIfNeeded: \(elapsedMs, privacy: .public)ms")

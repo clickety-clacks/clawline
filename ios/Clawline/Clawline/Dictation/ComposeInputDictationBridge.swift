@@ -73,7 +73,11 @@ final class ComposeInputDictationBridge {
         )
     }
 
-    func apply(transcript: String, baseSnapshot: ComposeDraftSnapshot, to sessionKey: String) {
+    func apply(transcript: String, baseSnapshot: ComposeDraftSnapshot, originSessionKey: String?) {
+        guard let sessionKey = originSessionKey,
+              !sessionKey.isEmpty,
+              host?.activeSessionKey == sessionKey
+        else { return }
         guard let host else { return }
         if applyToComposeTextView(transcript: transcript, sessionKey: sessionKey) {
             return

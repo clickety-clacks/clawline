@@ -62,7 +62,6 @@ final class DictationMotion {
     var gesturePhase: GesturePhase = .idle
     var rawDragY: CGFloat = 0
     var surfaceRevealProgress: CGFloat = 0
-    var visualOffsetY: CGFloat = 0
     var originWasOpen: Bool = false
     var holdThresholdReachedTime: Date?
     var walkieStartedThisGesture = false
@@ -136,6 +135,8 @@ final class DictationMotion {
         holdThresholdReachedTime = nil
         if originWasOpen {
             surfaceRevealProgress = 1
+        } else {
+            surfaceRevealProgress = 0
         }
     }
 
@@ -154,7 +155,6 @@ final class DictationMotion {
         } else {
             surfaceRevealProgress = max(0, min(1, up / max(1, Thresholds.reveal)))
         }
-        visualOffsetY = translationY
     }
 
     func gestureEnded(
@@ -243,17 +243,14 @@ final class DictationMotion {
         }
         if target == .open {
             surfaceRevealProgress = 1
-            visualOffsetY = 0
         } else {
             surfaceRevealProgress = 0
-            visualOffsetY = 0
         }
     }
 
     func commitSettledState() {
         gesturePhase = .idle
         rawDragY = 0
-        visualOffsetY = 0
         deferredSettleTarget = nil
         pendingCommit = nil
         holdThresholdReachedTime = nil
@@ -263,12 +260,12 @@ final class DictationMotion {
     func clearGestureState() {
         gesturePhase = .idle
         rawDragY = 0
-        visualOffsetY = 0
         holdThresholdReachedTime = nil
         walkieStartedThisGesture = false
         deferredSettleTarget = nil
         originWasOpen = false
         pendingCommit = nil
+        surfaceRevealProgress = session.surfaceTarget == .open ? 1 : 0
     }
 
     @discardableResult
@@ -294,7 +291,6 @@ final class DictationMotion {
     private func teardownGesture() {
         gesturePhase = .settling
         rawDragY = 0
-        visualOffsetY = 0
         holdThresholdReachedTime = nil
         walkieStartedThisGesture = false
         if let deferredSettleTarget {

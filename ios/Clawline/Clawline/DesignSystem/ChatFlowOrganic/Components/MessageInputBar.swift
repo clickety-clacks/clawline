@@ -101,6 +101,8 @@ private struct DictationPanGestureInstaller: UIViewControllerRepresentable {
         private var gestureStartDate: Date = .distantPast
         private var startedInEditableRegion = false
         private var activeRegionInWindow: CGRect = .zero
+        private weak var activeTextView: UITextView?
+        private var activeTextViewWasScrollEnabled = false
 
         init(
             shouldBegin: @escaping (CGPoint, CGPoint) -> Bool,
@@ -157,7 +159,6 @@ private struct DictationPanGestureInstaller: UIViewControllerRepresentable {
 
         @objc
         private func handlePan(_ gesture: UIPanGestureRecognizer) {
-            logger.info("DICTATION_UI pan_debug_fired state=\(gesture.state.rawValue, privacy: .public)")
             guard let host = attachedView, let window = host.window else { return }
             let event = DictationPanEvent(
                 startLocation: gesture.location(in: window),
@@ -174,6 +175,8 @@ private struct DictationPanGestureInstaller: UIViewControllerRepresentable {
             case .began:
                 gestureStartDate = Date()
                 startedInEditableRegion = startsInEditableRegion(event.startLocation)
+                activeTextView = nearestTextView(at: event.startLocation, in: window)
+                activeTextViewWasScrollEnabled = activeTextView?.isScrollEnabled ?? false
                 intentLock = .undecided
                 promoteIntentIfNeeded(event)
                 if intentLock == .dictation {
@@ -200,6 +203,11 @@ private struct DictationPanGestureInstaller: UIViewControllerRepresentable {
         }
 
         private func resetGestureState() {
+            if let activeTextView {
+                activeTextView.isScrollEnabled = activeTextViewWasScrollEnabled
+            }
+            activeTextView = nil
+            activeTextViewWasScrollEnabled = false
             intentLock = .undecided
             startedInEditableRegion = false
             gestureStartDate = .distantPast
@@ -217,13 +225,15 @@ private struct DictationPanGestureInstaller: UIViewControllerRepresentable {
             if startedInEditableRegion {
                 if isSurfaceOpen(), verticalDominant && down >= 6 {
                     intentLock = .dictation
+                    lockTextScrollForDictationIfNeeded()
                     return
                 }
-                if fastUpVelocity || (up >= 22 && elapsed < 0.18 && verticalDominant) {
+                if fastUpVelocity || (up >= 12 && elapsed < 0.25 && verticalDominant) {
                     intentLock = .dictation
+                    lockTextScrollForDictationIfNeeded()
                     return
                 }
-                if elapsed >= 0.18 || down >= 8 || abs(event.translation.x) >= 20 {
+                if elapsed >= 0.22 || down >= 10 || abs(event.translation.x) >= 20 {
                     intentLock = .textEditing
                     pan.isEnabled = false
                     pan.isEnabled = true
@@ -233,7 +243,26 @@ private struct DictationPanGestureInstaller: UIViewControllerRepresentable {
 
             if verticalDominant && (up >= 6 || (isSurfaceOpen() && down >= 6)) {
                 intentLock = .dictation
+                lockTextScrollForDictationIfNeeded()
             }
+        }
+
+        private func lockTextScrollForDictationIfNeeded() {
+            guard let activeTextView else { return }
+            if activeTextView.isScrollEnabled {
+                activeTextView.isScrollEnabled = false
+            }
+        }
+
+        private func nearestTextView(at location: CGPoint, in window: UIWindow) -> UITextView? {
+            var current = window.hitTest(location, with: nil)
+            while let view = current {
+                if let textView = view as? UITextView {
+                    return textView
+                }
+                current = view.superview
+            }
+            return nil
         }
 
         func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
@@ -255,7 +284,15 @@ private struct DictationPanGestureInstaller: UIViewControllerRepresentable {
             _ gestureRecognizer: UIGestureRecognizer,
             shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
         ) -> Bool {
-            false
+            if gestureRecognizer === pan {
+                if otherGestureRecognizer.view is UITextView {
+                    return true
+                }
+                if let activeTextView, let view = otherGestureRecognizer.view {
+                    return view.isDescendant(of: activeTextView)
+                }
+            }
+            return false
         }
     }
 }
@@ -552,8 +589,9 @@ struct MessageInputBar: View {
 
             if isSurfaceVisibleForGesture {
                 dictationSurface
+                    .frame(height: 100, alignment: .top)
                     .opacity(motion.surfaceInteractiveProgress)
-                    .frame(height: max(0, 100 * motion.surfaceInteractiveProgress), alignment: .top)
+                    .offset(y: (1 - motion.surfaceInteractiveProgress) * 100)
                     .clipped()
             }
 
@@ -913,7 +951,6 @@ struct MessageInputBar: View {
     }
 
     private func handlePushChanged(startLocation: CGPoint, translation: CGPoint, velocity: CGPoint) {
-        logDictation("DICTATION_UI handlePushChanged")
         let dx = translation.x
         let dy = translation.y
         let up = max(0, -dy)
@@ -1317,7 +1354,6 @@ struct MessageInputBar: View {
 
     private func logDictation(_ message: String) {
         logger.notice("\(message, privacy: .public)")
-        print(message)
     }
 }
 

@@ -177,6 +177,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
     private let dynamicContentStack = UIStackView()  // Holds text + code blocks
     private let avatarView = AvatarCircleView()
     private let senderLabel = UILabel()
+    private let senderTimestampSpacer = UIView()
     private let timestampLabel = UILabel()
     private let bodyLabel = UITextView()
     private let bodyTextContainer = UIView()
@@ -335,12 +336,18 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
         senderLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
         senderLabel.setContentHuggingPriority(.defaultHigh, for: .horizontal)
 
+        senderTimestampSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        senderTimestampSpacer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
         timestampLabel.numberOfLines = 1
-        timestampLabel.setContentCompressionResistancePriority(.required, for: .vertical)
-        timestampLabel.setContentHuggingPriority(.required, for: .vertical)
+        timestampLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+        timestampLabel.setContentHuggingPriority(.required, for: .horizontal)
 
         headerStack.addArrangedSubview(avatarView)
         headerStack.addArrangedSubview(senderLabel)
+        headerStack.addArrangedSubview(senderTimestampSpacer)
+        headerStack.addArrangedSubview(timestampLabel)
+        senderLabel.firstBaselineAnchor.constraint(equalTo: timestampLabel.firstBaselineAnchor).isActive = true
 
         bodyLabel.translatesAutoresizingMaskIntoConstraints = false
         UnifiedMarkdownRenderer.configureTextView(bodyLabel, delegate: self)
@@ -419,8 +426,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
         wrapperHeightConstraint.isActive = true
         wrapperPrefersContentHeightConstraint = wrapperHeightConstraint
         contentStack.addArrangedSubview(dynamicContentWrapper)
-        contentStack.setCustomSpacing(4, after: dynamicContentWrapper)
-        contentStack.addArrangedSubview(timestampLabel)
+        
 
         fadeView.translatesAutoresizingMaskIntoConstraints = false
         fadeView.isUserInteractionEnabled = false
@@ -603,7 +609,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
         senderLabel.text = message.displayName
         timestampLabel.font = UIFont.clawline(.timestamp)
         timestampLabel.adjustsFontForContentSizeCategory = true
-        timestampLabel.textColor = palette.textMuted.withAlphaComponent(0.7)
+        timestampLabel.textColor = palette.textMuted.withAlphaComponent(0.4)
         timestampLabel.textAlignment = message.role == .user ? .right : .left
         timestampDate = message.timestamp
         refreshTimestampDisplay()
@@ -1233,7 +1239,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
         // Update sender label color
         let senderColor = (currentStream == .admin) ? palette.adminAccent : palette.warmBrown
         senderLabel.textColor = senderColor.withAlphaComponent(currentStream == .admin ? 1.0 : 0.7)
-        timestampLabel.textColor = palette.textMuted.withAlphaComponent(0.7)
+        timestampLabel.textColor = palette.textMuted.withAlphaComponent(0.4)
 
         // Update body text color - must update attributed string since textColor is ignored for attributed text
         if let attributedText = bodyLabel.attributedText, attributedText.length > 0 {

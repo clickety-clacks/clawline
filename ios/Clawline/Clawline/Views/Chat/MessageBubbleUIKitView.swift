@@ -481,6 +481,17 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
 
     override func layoutSubviews() {
         super.layoutSubviews()
+
+        // Hide timestamp if it would compress the sender name
+        if !headerStack.isHidden, let timestampText = timestampLabel.attributedText, !timestampText.string.isEmpty {
+            let avatarWidth = avatarView.bounds.width + headerStack.spacing
+            let senderSize = senderLabel.intrinsicContentSize.width
+            let spacerMin: CGFloat = 8
+            let timestampSize = timestampLabel.intrinsicContentSize.width
+            let availableWidth = headerStack.bounds.width
+            let needed = avatarWidth + senderSize + spacerMin + timestampSize
+            timestampLabel.isHidden = needed > availableWidth
+        }
         gradientLayer.frame = bubbleBackgroundView.bounds
         maskLayer.frame = bubbleBackgroundView.bounds
         let path: UIBezierPath

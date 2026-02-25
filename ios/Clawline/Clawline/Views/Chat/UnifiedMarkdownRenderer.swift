@@ -221,13 +221,15 @@ enum UnifiedMarkdownRenderer {
                     newFont = UIFont(descriptor: descriptor, size: size)
                 }
             } else if traits.contains(.traitBold) {
-                newFont = UIFont.systemFont(ofSize: size, weight: .bold)
+                if let descriptor = baseFont.fontDescriptor.withSymbolicTraits(.traitBold) {
+                    newFont = UIFont(descriptor: descriptor, size: size)
+                }
             } else if traits.contains(.traitItalic) {
                 if let descriptor = baseFont.fontDescriptor.withSymbolicTraits(.traitItalic) {
                     newFont = UIFont(descriptor: descriptor, size: size)
                 }
             } else if traits.contains(.traitMonoSpace) {
-                newFont = UIFont.monospacedSystemFont(ofSize: max(9, size - 1), weight: .medium)
+                newFont = UIFont.clawlineMonospaced(.secondaryLabel, weight: .regular)
                 nsAttributed.addAttribute(.backgroundColor, value: UIColor.tertiarySystemFill, range: range)
             }
 
@@ -541,30 +543,23 @@ enum UnifiedMarkdownRenderer {
 
             guard let range = foundRange else { continue }
 
-            let sizeMultiplier: CGFloat
-            let weight: UIFont.Weight
+            let role: ClawlineTextRole
             switch heading.level {
             case 1:
-                sizeMultiplier = 1.55
-                weight = .bold
+                role = .sectionHeader
             case 2:
-                sizeMultiplier = 1.42
-                weight = .semibold
+                role = .subsectionHeader
             case 3:
-                sizeMultiplier = 1.30
-                weight = .semibold
+                role = .shortMessage
             case 4:
-                sizeMultiplier = 1.20
-                weight = .semibold
+                role = .mediumMessage
             case 5:
-                sizeMultiplier = 1.12
-                weight = .medium
+                role = .uiLabel
             default:
-                sizeMultiplier = 1.05
-                weight = .medium
+                role = .secondaryLabel
             }
 
-            let headingFont = UIFont.systemFont(ofSize: baseFont.pointSize * sizeMultiplier, weight: weight)
+            let headingFont = UIFont.clawline(role)
             nsAttributed.addAttribute(.font, value: headingFont, range: range)
             searchStart = range.location + range.length
         }

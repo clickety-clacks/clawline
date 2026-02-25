@@ -1521,7 +1521,7 @@ struct ChatView: View {
 
         var body: some View {
             Text(message)
-                .font(.system(size: 15, weight: .medium))
+                .font(.clawline(.uiLabel).weight(.medium))
                 .foregroundColor(.primary)
                 .lineLimit(1)
                 .truncationMode(.tail)
@@ -2385,7 +2385,7 @@ private struct AttachmentSourceSheet: View {
                 Button("Close") {
                     dismiss()
                 }
-                .font(.system(size: 16, weight: .semibold))
+                .font(.clawline(.uiLabel).weight(.semibold))
                 .foregroundStyle(.secondary)
             }
             .padding(.top, 8)
@@ -2397,7 +2397,7 @@ private struct AttachmentSourceSheet: View {
                 .padding(.top, 12)
 
             Text("Add Attachment")
-                .font(.system(size: 20, weight: .semibold, design: .rounded))
+                .font(.clawline(.subsectionHeader))
                 .foregroundStyle(ChatFlowTheme.warmBrown(effectiveColorScheme))
 
             VStack(spacing: 12) {
@@ -2454,18 +2454,18 @@ private struct AttachmentActionButton: View {
         Button(action: action) {
             HStack(spacing: 14) {
                 Image(systemName: icon)
-                    .font(.system(size: 20, weight: .semibold))
+                    .font(.clawline(.subsectionHeader))
                     .foregroundStyle(ChatFlowTheme.sage(effectiveColorScheme))
                     .frame(width: 28)
 
                 Text(title)
-                    .font(.system(size: 17, weight: .semibold))
+                    .font(.clawline(.mediumMessage).weight(.semibold))
                     .foregroundStyle(ChatFlowTheme.warmBrown(effectiveColorScheme))
 
                 Spacer()
 
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.clawline(.uiLabel).weight(.semibold))
                     .foregroundStyle(ChatFlowTheme.warmBrown(effectiveColorScheme).opacity(0.4))
             }
             .padding(.horizontal, 20)

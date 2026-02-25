@@ -1,5 +1,10 @@
 # Dictation Motion Model
 
+## Spirit
+One model governs the intricate state coordination between gestures, UI presentation, and timers — providing a clear picture of what the UX should be at any point in time for the dictation and text input interface.
+
+Every invariant, architecture decision, and implementation choice in this spec serves this principle. When in doubt, ask: "Does this make the picture clearer or muddier?"
+
 ## Goal
 Define a single motion model that owns all vertical dictation interaction (drag, reveal, pull-to-send, dismiss), settled-state transitions, inset commits, and gesture-driven animation for `MessageInputBar` dictation UI.
 

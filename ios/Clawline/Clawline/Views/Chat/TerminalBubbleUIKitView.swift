@@ -145,21 +145,25 @@ final class TerminalBubbleUIKitView: UIView, TerminalViewDelegate {
         topBar.spacing = 10
         topBar.translatesAutoresizingMaskIntoConstraints = false
 
-        titleLabel.font = UIFont.systemFont(ofSize: 12, weight: .semibold)
+        titleLabel.font = UIFont.clawline(.senderName)
+        titleLabel.adjustsFontForContentSizeCategory = true
         titleLabel.textColor = .secondaryLabel
         titleLabel.numberOfLines = 1
         titleLabel.lineBreakMode = .byTruncatingTail
 
-        statusLabel.font = UIFont.monospacedSystemFont(ofSize: 11, weight: .semibold)
+        statusLabel.font = UIFont.clawlineMonospaced(.timestamp, weight: .semibold)
+        statusLabel.adjustsFontForContentSizeCategory = true
         statusLabel.textColor = .tertiaryLabel
         statusLabel.setContentHuggingPriority(.required, for: .horizontal)
 
         expandButton.setTitle("Expand", for: .normal)
-        expandButton.titleLabel?.font = UIFont.systemFont(ofSize: 12, weight: .semibold)
+        expandButton.titleLabel?.font = UIFont.clawline(.senderName)
+        expandButton.titleLabel?.adjustsFontForContentSizeCategory = true
         expandButton.addTarget(self, action: #selector(handleExpandTap), for: .touchUpInside)
 
         closeButton.setTitle("Close", for: .normal)
-        closeButton.titleLabel?.font = UIFont.systemFont(ofSize: 12, weight: .semibold)
+        closeButton.titleLabel?.font = UIFont.clawline(.senderName)
+        closeButton.titleLabel?.adjustsFontForContentSizeCategory = true
         closeButton.addTarget(self, action: #selector(handleCloseTap), for: .touchUpInside)
 
         let left = UIStackView(arrangedSubviews: [titleLabel, UIView()])
@@ -174,7 +178,7 @@ final class TerminalBubbleUIKitView: UIView, TerminalViewDelegate {
         // Terminal surface.
         terminalView.translatesAutoresizingMaskIntoConstraints = false
         terminalView.terminalDelegate = self
-        terminalView.font = UIFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+        terminalView.font = UIFont.clawlineMonospaced(.secondaryLabel)
         terminalView.nativeForegroundColor = .label
         terminalView.nativeBackgroundColor = UIColor.clear
         terminalView.backgroundColor = .clear
@@ -194,13 +198,15 @@ final class TerminalBubbleUIKitView: UIView, TerminalViewDelegate {
         deadOverlay.isHidden = true
 
         deadLabel.translatesAutoresizingMaskIntoConstraints = false
-        deadLabel.font = UIFont.systemFont(ofSize: 13, weight: .semibold)
+        deadLabel.font = UIFont.clawline(.secondaryLabel, weight: .semibold)
+        deadLabel.adjustsFontForContentSizeCategory = true
         deadLabel.textColor = .secondaryLabel
         deadLabel.numberOfLines = 2
         deadLabel.textAlignment = .center
 
         reconnectButton.setTitle("Reconnect", for: .normal)
-        reconnectButton.titleLabel?.font = UIFont.systemFont(ofSize: 13, weight: .semibold)
+        reconnectButton.titleLabel?.font = UIFont.clawline(.secondaryLabel, weight: .semibold)
+        reconnectButton.titleLabel?.adjustsFontForContentSizeCategory = true
         reconnectButton.addTarget(self, action: #selector(handleReconnectTap), for: .touchUpInside)
 
         let deadStack = UIStackView(arrangedSubviews: [deadLabel, reconnectButton])

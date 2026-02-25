@@ -1151,6 +1151,66 @@ struct ChatViewModelTests {
         #expect(secondViewModel.activeSessionKey == adminSessionKey)
     }
 
+    @Test("Relaunch prunes cached stream missing from next server snapshot")
+    @MainActor
+    func relaunchPrunesCachedStreamMissingFromSnapshot() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let staleKey = "agent:main:clawline:user:s_stale1234"
+
+        let firstService = TestChatService()
+        firstService.streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: staleKey, displayName: "Parallelism", kind: "custom", orderIndex: 1, isBuiltIn: false),
+        ]
+        let firstViewModel = ChatViewModel(
+            auth: auth,
+            chatService: firstService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+
+        await firstViewModel.onAppear()
+        firstService.emitServiceEvent(.streamSnapshot(firstService.streams))
+        for _ in 0..<50 {
+            if firstViewModel.stream(for: staleKey) != nil { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(firstViewModel.stream(for: staleKey) != nil)
+        firstViewModel.onDisappear()
+
+        let secondService = TestChatService()
+        secondService.streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+        ]
+        let secondViewModel = ChatViewModel(
+            auth: auth,
+            chatService: secondService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { secondViewModel.onDisappear() }
+
+        await secondViewModel.onAppear()
+        #expect(secondViewModel.stream(for: staleKey) != nil) // Restored from cache before reconciliation.
+
+        secondService.emitServiceEvent(.streamSnapshot(secondService.streams))
+        for _ in 0..<50 {
+            if secondViewModel.stream(for: staleKey) == nil { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(secondViewModel.stream(for: staleKey) == nil)
+        #expect(secondViewModel.orderedSessionKeys == [personalSessionKey])
+    }
+
     @Test("Incremental stream events update metadata")
     @MainActor
     func incrementalStreamEvents() async throws {
@@ -1239,9 +1299,9 @@ struct ChatViewModelTests {
         #expect(viewModel.stream(for: customKey) == nil)
     }
 
-    @Test("Synthetic child stream remains deletable when snapshot omits it")
+    @Test("Snapshot removes child stream omitted by server")
     @MainActor
-    func syntheticChildStreamStillDeletable() async throws {
+    func snapshotRemovesChildStreamOmittedByServer() async throws {
         resetChatPersistence()
         let auth = TestAuthManager()
         auth.storeCredentials(token: "jwt", userId: "user")
@@ -1285,11 +1345,6 @@ struct ChatViewModelTests {
         ]))
         try await Task.sleep(for: .milliseconds(40))
 
-        #expect(viewModel.stream(for: customKey) != nil)
-        #expect(viewModel.canDeleteStream(sessionKey: customKey))
-
-        let deleted = await viewModel.deleteStream(sessionKey: customKey)
-        #expect(deleted)
         #expect(viewModel.stream(for: customKey) == nil)
     }
 

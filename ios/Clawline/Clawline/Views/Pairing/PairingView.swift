@@ -43,7 +43,7 @@ struct PairingView: View {
                 VStack(spacing: 0) {
                     // App icon
                     Image(systemName: "bubble.left.and.bubble.right.fill")
-                        .font(.system(size: 72, weight: .light))
+                        .font(.clawline(.sectionHeader))
                         .foregroundStyle(.tint)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.bottom, 24)
@@ -51,7 +51,7 @@ struct PairingView: View {
                     // Title and subtitle
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Clawline")
-                            .font(.system(size: 38, weight: .light))
+                            .font(.clawline(.sectionHeader))
                             .tracking(1)
 
                         Text(subtitleText)
@@ -147,11 +147,11 @@ struct PairingView: View {
             // Text field with person icon
             HStack(spacing: 12) {
                 Image(systemName: "person")
-                    .font(.system(size: 18))
+                    .font(.clawline(.uiLabel))
                     .foregroundStyle(.secondary)
 
                 TextField("Your name", text: $viewModel.nameInput)
-                    .font(.body)
+                    .font(.clawline(.uiLabel))
                     .textFieldStyle(.plain)
                     .textContentType(.none)
                     .autocorrectionDisabled()
@@ -178,7 +178,7 @@ struct PairingView: View {
                 viewModel.submitName()
             } label: {
                 Image(systemName: "checkmark")
-                    .font(.system(size: 18, weight: .semibold))
+                    .font(.clawline(.uiLabel).weight(.semibold))
                     .foregroundStyle(.white)
             }
             .buttonStyle(.plain)
@@ -196,7 +196,7 @@ struct PairingView: View {
                 viewModel.goBackToName()
             } label: {
                 Image(systemName: "chevron.left")
-                    .font(.system(size: 18, weight: .semibold))
+                    .font(.clawline(.uiLabel).weight(.semibold))
             }
             .buttonStyle(.plain)
             .frame(width: inputHeight, height: inputHeight)
@@ -212,11 +212,11 @@ struct PairingView: View {
             // Text field with server icon
             HStack(spacing: 12) {
                 Image(systemName: "server.rack")
-                    .font(.system(size: 18))
+                    .font(.clawline(.uiLabel))
                     .foregroundStyle(.secondary)
 
                 TextField("Server address", text: $viewModel.addressInput)
-                    .font(.body)
+                    .font(.clawline(.uiLabel))
                     .textFieldStyle(.plain)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
@@ -244,7 +244,7 @@ struct PairingView: View {
                 viewModel.submitAddress()
             } label: {
                 Image(systemName: "paperplane.fill")
-                    .font(.system(size: 18, weight: .semibold))
+                    .font(.clawline(.uiLabel).weight(.semibold))
                     .foregroundStyle(.white)
             }
             .buttonStyle(.plain)
@@ -270,7 +270,7 @@ struct PairingView: View {
                     viewModel.cancelPairing()
                 } label: {
                     Image(systemName: "chevron.left")
-                        .font(.system(size: 18, weight: .semibold))
+                        .font(.clawline(.uiLabel).weight(.semibold))
                 }
                 .buttonStyle(.plain)
                 .frame(width: inputHeight, height: inputHeight)
@@ -290,21 +290,21 @@ struct PairingView: View {
                 if isStalled {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("This might take a while, check back soon")
-                            .font(.body)
+                            .font(.clawline(.uiLabel))
                             .foregroundStyle(.secondary)
                         Text("Tap retry to resubmit the request.")
-                            .font(.footnote)
+                            .font(.clawline(.secondaryLabel))
                             .foregroundStyle(.secondary)
                     }
 
                     Spacer()
 
                     Image(systemName: "clock.arrow.circlepath")
-                        .font(.system(size: 20, weight: .semibold))
+                        .font(.clawline(.subsectionHeader))
                         .foregroundStyle(.secondary)
                 } else {
                     Text("Waiting for owner")
-                        .font(.body)
+                        .font(.clawline(.uiLabel))
                         .foregroundStyle(.secondary)
 
                     Spacer()
@@ -330,7 +330,7 @@ struct PairingView: View {
                     viewModel.retryPendingPairing()
                 } label: {
                     Image(systemName: "arrow.clockwise")
-                        .font(.system(size: 18, weight: .semibold))
+                        .font(.clawline(.uiLabel).weight(.semibold))
                         .foregroundStyle(.white)
                 }
                 .buttonStyle(.plain)
@@ -343,7 +343,7 @@ struct PairingView: View {
                     viewModel.cancelPairing()
                 } label: {
                     Image(systemName: "xmark")
-                        .font(.system(size: 18, weight: .semibold))
+                        .font(.clawline(.uiLabel).weight(.semibold))
                         .foregroundStyle(.white)
                 }
                 .buttonStyle(.plain)
@@ -356,11 +356,11 @@ struct PairingView: View {
     private func errorContent(message: String) -> some View {
         HStack(spacing: 12) {
             Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 24))
+                .font(.clawline(.subsectionHeader))
                 .foregroundStyle(.red)
 
             Text(message)
-                .font(.body)
+                .font(.clawline(.uiLabel))
                 .foregroundStyle(.secondary)
         }
         .onTapGesture {

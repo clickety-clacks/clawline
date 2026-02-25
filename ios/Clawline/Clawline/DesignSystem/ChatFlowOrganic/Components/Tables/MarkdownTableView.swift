@@ -295,7 +295,7 @@ struct MarkdownTableView: View {
 
     private var footerGridLabel: some View {
         Text(footerLabel(for: remainingRowCount))
-            .font(.system(size: 13, weight: .medium))
+            .font(.clawline(.secondaryLabel).weight(.medium))
             .foregroundColor(.secondary)
             .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -303,10 +303,10 @@ struct MarkdownTableView: View {
     private var footerOverlay: some View {
         HStack {
             Text(footerLabel(for: remainingRowCount))
-                .font(.system(size: 13, weight: .medium))
+                .font(.clawline(.secondaryLabel).weight(.medium))
             Spacer()
             Image(systemName: "chevron.down")
-                .font(.system(size: 12, weight: .semibold))
+                .font(.clawline(.secondaryLabel).weight(.semibold))
         }
         .foregroundColor(.secondary)
         .padding(.horizontal, cellPaddingHorizontal)
@@ -374,7 +374,7 @@ struct MarkdownTableView: View {
         Group {
             if cell.isEmpty {
                 Text("—")
-                    .font(.system(size: metrics.bodyFontSize, weight: isHeader ? .semibold : .regular))
+                    .font(isHeader ? .clawline(.mediumMessage) : .clawline(.bodyText))
                     .foregroundColor(Color(uiColor: emptyCellTextColor))
                     .frame(maxWidth: .infinity, alignment: .leading)
             } else {
@@ -430,8 +430,8 @@ struct MarkdownTableView: View {
     private func styledAttributedString(for cell: TableModel.Cell, alignment: ColumnAlignment, isHeader: Bool) -> NSAttributedString {
         let attributed = cell.attributed
         let mutable = NSMutableAttributedString(attributed)
-        let baseFont = UIFont.systemFont(ofSize: metrics.bodyFontSize, weight: isHeader ? .semibold : .regular)
-        let scaledFont = UIFontMetrics.default.scaledFont(for: baseFont)
+        _ = metrics
+        let scaledFont = isHeader ? UIFont.clawline(.mediumMessage) : UIFont.clawline(.bodyText)
         let fullRange = NSRange(location: 0, length: mutable.length)
         mutable.addAttribute(.font, value: scaledFont, range: fullRange)
         mutable.addAttribute(.foregroundColor, value: tableTextColor, range: fullRange)
@@ -443,8 +443,7 @@ struct MarkdownTableView: View {
         for run in attributed.runs {
             if run.inlinePresentationIntent?.contains(.code) == true {
                 let nsRange = NSRange(run.range, in: attributed)
-                let codeFontBase = UIFont.monospacedSystemFont(ofSize: metrics.bodyFontSize * 0.9, weight: .regular)
-                let codeFont = UIFontMetrics.default.scaledFont(for: codeFontBase)
+                let codeFont = UIFont.clawlineMonospaced(.secondaryLabel)
                 mutable.addAttribute(.font, value: codeFont, range: nsRange)
                 mutable.addAttribute(.backgroundColor, value: inlineCodeBackgroundColor(), range: nsRange)
             }
@@ -455,8 +454,8 @@ struct MarkdownTableView: View {
 
     private func measuredCellTextWidth(cell: TableModel.Cell, alignment: ColumnAlignment, isHeader: Bool) -> CGFloat {
         guard !cell.isEmpty else {
-            let baseFont = UIFont.systemFont(ofSize: metrics.bodyFontSize, weight: isHeader ? .semibold : .regular)
-            let scaledFont = UIFontMetrics.default.scaledFont(for: baseFont)
+            _ = metrics
+            let scaledFont = isHeader ? UIFont.clawline(.mediumMessage) : UIFont.clawline(.bodyText)
             let width = ("—" as NSString).size(withAttributes: [.font: scaledFont]).width
             return ceil(width)
         }

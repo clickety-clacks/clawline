@@ -130,7 +130,7 @@ struct StreamManagerSheet: View {
                             .fill(Color.primary.opacity(0.18))
                             .frame(width: 8, height: 8)
                         Text(pendingRow.displayName)
-                            .font(.system(size: 28, weight: .regular))
+                            .font(.clawline(.subsectionHeader).weight(.regular))
                             .foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity, alignment: .leading)
                         ProgressView()
@@ -167,7 +167,7 @@ struct StreamManagerSheet: View {
                 addStreamDirectly()
             } label: {
                 Image(systemName: "plus")
-                    .font(.system(size: 27, weight: .regular))
+                    .font(.clawline(.subsectionHeader).weight(.regular))
                     .foregroundStyle(.primary)
                     .frame(width: functionBarHeight, height: functionBarHeight, alignment: .center)
                     .overlay {
@@ -237,7 +237,7 @@ struct StreamManagerSheet: View {
     private func rowContent(for stream: StreamSession) -> some View {
         if activeEditor == .renaming(stream.sessionKey) {
             TextField("Stream name", text: $draftName)
-                .font(.system(size: 28))
+                .font(.clawline(.subsectionHeader))
                 .textInputAutocapitalization(.words)
                 .autocorrectionDisabled(false)
                 .submitLabel(.done)
@@ -269,7 +269,7 @@ struct StreamManagerSheet: View {
                         )
                         .frame(width: 8, height: 8)
                     Text(stream.displayName)
-                        .font(.system(size: 28, weight: isActive ? .semibold : .regular))
+                        .font(.clawline(.subsectionHeader).weight(isActive ? .semibold : .regular))
                         .frame(maxWidth: .infinity, alignment: .leading)
                     if isDeletingStream(stream.sessionKey) {
                         ProgressView()

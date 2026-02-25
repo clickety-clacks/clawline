@@ -46,19 +46,19 @@ struct CodeBlockView: View {
         VStack(alignment: .leading, spacing: 6) {
             if let language, !language.isEmpty {
                 Text(language.uppercased())
-                    .font(.system(size: 11, weight: .semibold))
+                    .font(.clawline(.secondaryLabel, design: .monospaced).weight(.semibold))
                     .foregroundColor(labelColor)
                     .tracking(0.5)
             }
             ScrollView(.horizontal, showsIndicators: true) {
                 if let highlighted = highlightedCode {
                     Text(highlighted)
-                        .font(.system(size: 13, weight: .regular, design: .monospaced))
+                        .font(.clawline(.secondaryLabel, design: .monospaced))
                         .lineSpacing(4)
                         .fixedSize(horizontal: true, vertical: false)
                 } else {
                     Text(code)
-                        .font(.system(size: 13, weight: .regular, design: .monospaced))
+                        .font(.clawline(.secondaryLabel, design: .monospaced))
                         .foregroundColor(plainTextColor)
                         .lineSpacing(4)
                         .fixedSize(horizontal: true, vertical: false)

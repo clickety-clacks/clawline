@@ -1957,29 +1957,22 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
 
     private func applyStreamSnapshot(_ streams: [StreamSession]) {
         let previousSessionKeys = Set(streamsBySessionKey.keys)
-        var byKey: [String: StreamSession] = Dictionary(uniqueKeysWithValues: streams.map { ($0.sessionKey, $0) })
-        for (sessionKey, cachedMessages) in sessionMessages
-            where byKey[sessionKey] == nil && !cachedMessages.isEmpty {
-            byKey[sessionKey] = StreamSession(
-                sessionKey: sessionKey,
-                displayName: fallbackDisplayName(for: sessionKey),
-                kind: "custom",
-                orderIndex: nextSyntheticOrderIndex(from: byKey.values),
-                isBuiltIn: false,
-                createdAt: Date(),
-                updatedAt: Date()
-            )
-        }
+        let byKey: [String: StreamSession] = Dictionary(uniqueKeysWithValues: streams.map { ($0.sessionKey, $0) })
         let serverKeys = Set(streams.map(\.sessionKey))
         syntheticSessionKeys = Set(byKey.keys).subtracting(serverKeys)
         streamsBySessionKey = byKey
         let validSessionKeys = Set(byKey.keys)
         let removedSessionKeys = previousSessionKeys.subtracting(validSessionKeys)
         for sessionKey in removedSessionKeys {
+            sessionMessages.removeValue(forKey: sessionKey)
+            lastServerMessageIdBySession.removeValue(forKey: sessionKey)
+            lastReadMessageIdBySession.removeValue(forKey: sessionKey)
+            hasUnreadBySession.removeValue(forKey: sessionKey)
+            pendingLocalMessages.removeAll { $0.sessionKey == sessionKey }
+            persistLastServerMessageId(nil, for: sessionKey)
             persistLastReadMessageId(nil, for: sessionKey)
+            persistMessages([], for: sessionKey)
         }
-        hasUnreadBySession = hasUnreadBySession.filter { validSessionKeys.contains($0.key) }
-        lastReadMessageIdBySession = lastReadMessageIdBySession.filter { validSessionKeys.contains($0.key) }
         recalculateOrderedSessionKeys()
         for sessionKey in orderedSessionKeys {
             ensureSessionStorage(for: sessionKey)

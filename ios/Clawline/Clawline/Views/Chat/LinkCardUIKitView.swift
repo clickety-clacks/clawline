@@ -65,21 +65,24 @@ final class LinkCardUIKitView: UIControl {
         indicatorView.layer.cornerCurve = .continuous
 
         domainLabel.translatesAutoresizingMaskIntoConstraints = false
-        domainLabel.font = UIFont.systemFont(ofSize: 11, weight: .regular)
+        domainLabel.font = UIFont.clawline(.timestamp)
+        domainLabel.adjustsFontForContentSizeCategory = true
         domainLabel.numberOfLines = 1
         domainLabel.lineBreakMode = .byTruncatingTail
         domainLabel.setContentCompressionResistancePriority(.required, for: .vertical)
         domainLabel.setContentHuggingPriority(.required, for: .vertical)
 
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
-        titleLabel.font = UIFont.systemFont(ofSize: 14, weight: .semibold)
+        titleLabel.font = UIFont.clawline(.mediumMessage)
+        titleLabel.adjustsFontForContentSizeCategory = true
         titleLabel.numberOfLines = 2
         titleLabel.lineBreakMode = .byTruncatingTail
         titleLabel.setContentCompressionResistancePriority(.required, for: .vertical)
         titleLabel.setContentHuggingPriority(.required, for: .vertical)
 
         descLabel.translatesAutoresizingMaskIntoConstraints = false
-        descLabel.font = UIFont.systemFont(ofSize: 13, weight: .regular)
+        descLabel.font = UIFont.clawline(.secondaryLabel)
+        descLabel.adjustsFontForContentSizeCategory = true
         descLabel.numberOfLines = 2
         descLabel.lineBreakMode = .byTruncatingTail
         descLabel.setContentCompressionResistancePriority(.required, for: .vertical)

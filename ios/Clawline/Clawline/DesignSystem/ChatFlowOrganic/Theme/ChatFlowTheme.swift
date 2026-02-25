@@ -112,17 +112,16 @@ enum ChatFlowTheme {
         var inputBarPaddingHorizontal: CGFloat { isCompact ? 24 : 24 }
         var bubblePaddingVertical: CGFloat { isCompact ? 14 : 16 }
         var bubblePaddingHorizontal: CGFloat { isCompact ? 12 : 20 }
-        var shortFontSize: CGFloat { isCompact ? 18 : 22 }
-        var mediumFontSize: CGFloat { 17 }
-        var bodyFontSize: CGFloat { 15 }
-        var senderFontSize: CGFloat { 12 }
+        var shortFontSize: CGFloat { UIFont.clawline(.shortMessage).pointSize }
+        var mediumFontSize: CGFloat { UIFont.clawline(.mediumMessage).pointSize }
+        var bodyFontSize: CGFloat { UIFont.clawline(.bodyText).pointSize }
+        var senderFontSize: CGFloat { UIFont.clawline(.senderName).pointSize }
         var truncationHeight: CGFloat { isCompact ? 320 : 400 }
     }
 
     // MARK: - Typography helpers
-    static func maxLineWidth(bodyFontSize: CGFloat) -> CGFloat {
-        let baseFont = UIFont.systemFont(ofSize: bodyFontSize, weight: .regular)
-        let scaledFont = UIFontMetrics.default.scaledFont(for: baseFont)
+    static func maxLineWidth(bodyFontSize _: CGFloat = 0) -> CGFloat {
+        let scaledFont = UIFont.clawline(.bodyText)
         let sample = String(repeating: "n", count: 65)
         let size = (sample as NSString).size(withAttributes: [.font: scaledFont])
         return ceil(size.width)

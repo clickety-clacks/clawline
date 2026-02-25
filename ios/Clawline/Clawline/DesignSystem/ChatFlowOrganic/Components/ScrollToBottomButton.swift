@@ -42,7 +42,7 @@ struct ScrollToBottomButton: View {
     var body: some View {
         Button(action: onTap) {
             Image(systemName: "chevron.down")
-                .font(.system(size: 16, weight: .semibold))
+                .font(.clawline(.uiLabel).weight(.semibold))
                 .foregroundStyle(Color.primary)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .contentShape(Circle())
@@ -58,7 +58,7 @@ struct ScrollToBottomButton: View {
         .overlay(alignment: .topTrailing) {
             if unreadCount > 0 {
                 Text(badgeText)
-                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .font(.clawline(.senderName))
                     .foregroundStyle(Color.white)
                     .padding(.horizontal, unreadCount > 9 ? 7 : 6)
                     .padding(.vertical, 3)

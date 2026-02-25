@@ -213,8 +213,8 @@ enum UnifiedMarkdownParser {
     }
 
     private static func intrinsicWidth(for text: String, metrics: ChatFlowTheme.Metrics) -> CGFloat {
-        let baseFont = UIFont.systemFont(ofSize: metrics.bodyFontSize, weight: .regular)
-        let scaledFont = UIFontMetrics.default.scaledFont(for: baseFont)
+        _ = metrics
+        let scaledFont = UIFont.clawline(.bodyText)
         let width = (text as NSString).size(withAttributes: [.font: scaledFont]).width
         return ceil(width)
     }

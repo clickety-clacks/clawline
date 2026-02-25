@@ -75,7 +75,7 @@ struct ExpandedMessageSheet: View {
                 .fill(message.role == .user ? ChatFlowTheme.sage(effectiveColorScheme) : ChatFlowTheme.softCoral(effectiveColorScheme))
                 .frame(width: 8, height: 8)
             Text(message.displayName)
-                .font(.system(size: 14, weight: .semibold))
+                .font(.clawline(.senderName))
                 .foregroundColor(ChatFlowTheme.warmBrown(effectiveColorScheme))
         }
     }
@@ -83,7 +83,7 @@ struct ExpandedMessageSheet: View {
     private var content: some View {
         let markdownContent = UnifiedMarkdownRenderer.makeContent(
             presentation: presentation,
-            baseFont: UIFont.systemFont(ofSize: metrics.bodyFontSize, weight: .regular),
+            baseFont: UIFont.clawline(.bodyText),
             inkColor: UIColor(ChatFlowTheme.ink(effectiveColorScheme)),
             lineSpacing: 4,
             stripDetectedURLs: false,
@@ -101,7 +101,7 @@ struct ExpandedMessageSheet: View {
 
             if presentation.isEmojiOnly, let emojiOnlyText = markdownContent.joinedInlineEmojiValues {
                 Text(emojiOnlyText)
-                    .font(.system(size: 32))
+                    .font(.clawline(.sectionHeader))
             } else {
                 ForEach(Array(markdownContent.renderedBlocks.enumerated()), id: \.offset) { item in
                     switch item.element {
@@ -154,7 +154,7 @@ struct ExpandedMessageSheet: View {
                 mediaPartView(item.element)
             }
         }
-        .font(.system(size: metrics.bodyFontSize, weight: .regular))
+        .font(.clawline(.bodyText))
         .foregroundColor(ChatFlowTheme.ink(effectiveColorScheme))
         .lineSpacing(4)
     }
@@ -273,17 +273,17 @@ private struct FileAttachmentRow: View {
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: "doc.fill")
-                .font(.system(size: 22, weight: .semibold))
+                .font(.clawline(.shortMessage))
                 .foregroundColor(ChatFlowTheme.ink(colorScheme).opacity(0.7))
             VStack(alignment: .leading, spacing: 2) {
                 Text(filename)
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.clawline(.uiLabel).weight(.semibold))
                     .foregroundColor(ChatFlowTheme.ink(colorScheme))
                     .lineLimit(1)
                     .truncationMode(.middle)
                 if let sizeText {
                     Text(sizeText)
-                        .font(.system(size: 12, weight: .regular))
+                        .font(.clawline(.secondaryLabel))
                         .foregroundColor(ChatFlowTheme.ink(colorScheme).opacity(0.7))
                 }
             }

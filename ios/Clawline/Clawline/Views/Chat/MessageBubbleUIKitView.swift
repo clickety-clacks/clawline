@@ -177,7 +177,6 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
     private let dynamicContentStack = UIStackView()  // Holds text + code blocks
     private let avatarView = AvatarCircleView()
     private let senderLabel = UILabel()
-    private let senderTimestampSpacer = UIView()
     private let timestampLabel = UILabel()
     private let bodyLabel = UITextView()
     private let bodyTextContainer = UIView()
@@ -336,18 +335,12 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
         senderLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
         senderLabel.setContentHuggingPriority(.defaultHigh, for: .horizontal)
 
-        senderTimestampSpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        senderTimestampSpacer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-
         timestampLabel.numberOfLines = 1
-        timestampLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
-        timestampLabel.setContentHuggingPriority(.required, for: .horizontal)
+        timestampLabel.setContentCompressionResistancePriority(.required, for: .vertical)
+        timestampLabel.setContentHuggingPriority(.required, for: .vertical)
 
         headerStack.addArrangedSubview(avatarView)
         headerStack.addArrangedSubview(senderLabel)
-        headerStack.addArrangedSubview(senderTimestampSpacer)
-        headerStack.addArrangedSubview(timestampLabel)
-        senderLabel.firstBaselineAnchor.constraint(equalTo: timestampLabel.firstBaselineAnchor).isActive = true
 
         bodyLabel.translatesAutoresizingMaskIntoConstraints = false
         UnifiedMarkdownRenderer.configureTextView(bodyLabel, delegate: self)
@@ -426,6 +419,8 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
         wrapperHeightConstraint.isActive = true
         wrapperPrefersContentHeightConstraint = wrapperHeightConstraint
         contentStack.addArrangedSubview(dynamicContentWrapper)
+        contentStack.setCustomSpacing(4, after: dynamicContentWrapper)
+        contentStack.addArrangedSubview(timestampLabel)
 
         fadeView.translatesAutoresizingMaskIntoConstraints = false
         fadeView.isUserInteractionEnabled = false
@@ -602,11 +597,14 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
         Self.logger.debug("configure: isDark=\(isDark.map { String($0) } ?? "nil", privacy: .public) effectiveIsDark=\(effectiveIsDark, privacy: .public) role=\(String(describing: message.role), privacy: .public)")
         let palette = ChatFlowUIKitTheme.palette(isDark: effectiveIsDark)
         let senderColor = (message.stream == .admin) ? palette.adminAccent : palette.warmBrown
-        senderLabel.font = UIFont.systemFont(ofSize: metrics.senderFontSize, weight: .semibold)
+        senderLabel.font = UIFont.clawline(.senderName)
+        senderLabel.adjustsFontForContentSizeCategory = true
         senderLabel.textColor = senderColor.withAlphaComponent(message.stream == .admin ? 1.0 : 0.7)
         senderLabel.text = message.displayName
-        timestampLabel.font = UIFont.systemFont(ofSize: 10, weight: .regular)
-        timestampLabel.textColor = palette.textMuted.withAlphaComponent(0.4)
+        timestampLabel.font = UIFont.clawline(.timestamp)
+        timestampLabel.adjustsFontForContentSizeCategory = true
+        timestampLabel.textColor = palette.textMuted.withAlphaComponent(0.7)
+        timestampLabel.textAlignment = message.role == .user ? .right : .left
         timestampDate = message.timestamp
         refreshTimestampDisplay()
         headerStack.isHidden = !showsHeader
@@ -653,7 +651,8 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
         salientBaseAttributedText = nil
 
         if isChromelessEmoji, let value = markdownContent.firstInlineEmojiValue {
-            let emojiFont = UIFont.systemFont(ofSize: (metrics.shortFontSize + 8) * 2)
+            let baseEmojiFont = UIFont.clawline(.shortMessage)
+            let emojiFont = UIFont(descriptor: baseEmojiFont.fontDescriptor, size: baseEmojiFont.pointSize * 2)
             let paragraph = NSMutableParagraphStyle()
             paragraph.alignment = .center
             bodyLabel.attributedText = NSAttributedString(
@@ -1234,7 +1233,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
         // Update sender label color
         let senderColor = (currentStream == .admin) ? palette.adminAccent : palette.warmBrown
         senderLabel.textColor = senderColor.withAlphaComponent(currentStream == .admin ? 1.0 : 0.7)
-        timestampLabel.textColor = palette.textMuted.withAlphaComponent(0.4)
+        timestampLabel.textColor = palette.textMuted.withAlphaComponent(0.7)
 
         // Update body text color - must update attributed string since textColor is ignored for attributed text
         if let attributedText = bodyLabel.attributedText, attributedText.length > 0 {
@@ -1318,7 +1317,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
 
     func preferredWidth(maxWidth: CGFloat) -> CGFloat {
         let headerWidth: CGFloat = showsHeader
-            ? (32 + 10 + senderLabel.intrinsicContentSize.width + 8 + timestampLabel.intrinsicContentSize.width + 4)
+            ? (32 + headerStack.spacing + senderLabel.intrinsicContentSize.width)
             : 0
         let contentWidth = maxWidth - (currentContentPaddingHorizontal * 2)
         let bodySize = bodyLabel.sizeThatFits(CGSize(width: contentWidth, height: .greatestFiniteMagnitude))
@@ -1386,23 +1385,18 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
         for sizeClass: MessageSizeClass,
         metrics: ChatFlowTheme.Metrics
     ) -> (baseFont: UIFont, lineSpacing: CGFloat) {
+        _ = metrics
         switch sizeClass {
         case .short:
-            return (UIFont.systemFont(ofSize: metrics.shortFontSize, weight: .semibold), 0)
+            return (UIFont.clawline(.shortMessage), 0)
         case .medium:
-            return (UIFont.systemFont(ofSize: metrics.mediumFontSize, weight: .medium), 4)
+            return (UIFont.clawline(.mediumMessage), 4)
         case .long:
-            return (UIFont.systemFont(ofSize: metrics.bodyFontSize, weight: .regular), 4)
+            return (UIFont.clawline(.bodyText), 4)
         }
     }
 
     private func refreshTimestampDisplay(now: Date = Date()) {
-        guard showsHeader else {
-            timestampLabel.attributedText = nil
-            timestampRefreshTimer?.invalidate()
-            timestampRefreshTimer = nil
-            return
-        }
         guard let timestamp = timestampDate else {
             timestampLabel.attributedText = nil
             timestampRefreshTimer?.invalidate()
@@ -1419,27 +1413,11 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
     }
 
     private func updateTimestampVisibilityIfNeeded() {
-        guard showsHeader else {
-            timestampLabel.isHidden = true
-            return
-        }
         guard let timestampText = timestampLabel.attributedText, !timestampText.string.isEmpty else {
             timestampLabel.isHidden = true
             return
         }
-
-        let horizontalMargins = headerStack.directionalLayoutMargins.leading
-            + headerStack.directionalLayoutMargins.trailing
-        let availableWidth = headerStack.bounds.width - horizontalMargins - avatarView.bounds.width - headerStack.spacing
-        guard availableWidth > 0 else {
-            timestampLabel.isHidden = true
-            return
-        }
-
-        let requiredWidth = senderLabel.intrinsicContentSize.width
-            + timestampLabel.intrinsicContentSize.width
-            + (headerStack.spacing * 2)
-        timestampLabel.isHidden = requiredWidth > availableWidth
+        timestampLabel.isHidden = false
     }
 
     private func scheduleTimestampRefreshIfNeeded(now: Date) {
@@ -1448,11 +1426,9 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
         guard let timestamp = timestampDate else { return }
 
         let elapsed = max(0, now.timeIntervalSince(timestamp))
-        guard elapsed < 86_400 else { return }
-
         let calendar = Calendar.autoupdatingCurrent
-        let nextInterval: TimeInterval
-        if elapsed < 3_600 {
+        let nextInterval: TimeInterval?
+        if elapsed < 3_600 || calendar.isDate(timestamp, inSameDayAs: now) {
             let nextMinute = calendar.nextDate(
                 after: now,
                 matching: DateComponents(second: 0),
@@ -1460,13 +1436,26 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
             ) ?? now.addingTimeInterval(60)
             nextInterval = max(1, nextMinute.timeIntervalSince(now))
         } else {
-            let nextHour = calendar.nextDate(
-                after: now,
-                matching: DateComponents(minute: 0, second: 0),
-                matchingPolicy: .nextTime
-            ) ?? now.addingTimeInterval(3_600)
-            nextInterval = max(1, nextHour.timeIntervalSince(now))
+            let sameYear = calendar.component(.year, from: timestamp) == calendar.component(.year, from: now)
+            if !sameYear {
+                nextInterval = nil
+            } else if calendar.isDateInYesterday(timestamp) || calendar.isDate(timestamp, equalTo: now, toGranularity: .weekOfYear) {
+                let startOfTomorrow = calendar.date(
+                    byAdding: .day,
+                    value: 1,
+                    to: calendar.startOfDay(for: now)
+                ) ?? now.addingTimeInterval(86_400)
+                nextInterval = max(60, startOfTomorrow.timeIntervalSince(now))
+            } else {
+                let currentYear = calendar.component(.year, from: now)
+                let startOfNextYear = calendar.date(
+                    from: DateComponents(year: currentYear + 1, month: 1, day: 1)
+                ) ?? now.addingTimeInterval(31_536_000)
+                nextInterval = max(60, startOfNextYear.timeIntervalSince(now))
+            }
         }
+
+        guard let nextInterval else { return }
 
         timestampRefreshTimer = Timer.scheduledTimer(withTimeInterval: nextInterval, repeats: false) { [weak self] _ in
             self?.refreshTimestampDisplay()
@@ -1475,50 +1464,65 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
 
     private static func formattedBubbleTimestamp(_ timestamp: Date, now: Date) -> String {
         let interval = max(0, now.timeIntervalSince(timestamp))
+        if interval < 60 {
+            return "just now"
+        }
         if interval < 3_600 {
-            return "\(max(1, Int(interval / 60)))m ago"
+            return "\(Int(interval / 60))m ago"
         }
         if interval < 86_400 {
-            return "\(Int(interval / 3_600))h ago"
+            let calendar = Calendar.autoupdatingCurrent
+            if calendar.isDate(timestamp, inSameDayAs: now) {
+                return timeFormatter.string(from: timestamp)
+            }
         }
         let calendar = Calendar.autoupdatingCurrent
         if calendar.isDateInYesterday(timestamp) {
-            return "Yesterday \(timeFormatter.string(from: timestamp))"
+            return "\(relativeDayFormatter.string(from: timestamp)), \(timeFormatter.string(from: timestamp))"
         }
         if calendar.component(.year, from: timestamp) != calendar.component(.year, from: now) {
             return differentYearFormatter.string(from: timestamp)
         }
         if calendar.isDate(timestamp, equalTo: now, toGranularity: .weekOfYear) {
-            return "\(weekdayFormatter.string(from: timestamp)) \(timeFormatter.string(from: timestamp))"
+            return "\(weekdayFormatter.string(from: timestamp)), \(timeFormatter.string(from: timestamp))"
         }
-        return olderDateFormatter.string(from: timestamp)
+        return "\(monthDayFormatter.string(from: timestamp)), \(timeFormatter.string(from: timestamp))"
     }
 
     private static let timeFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale.autoupdatingCurrent
-        formatter.dateFormat = "h:mm a"
+        formatter.setLocalizedDateFormatFromTemplate("jm")
         return formatter
     }()
 
-    private static let olderDateFormatter: DateFormatter = {
+    private static let monthDayFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale.autoupdatingCurrent
-        formatter.dateFormat = "MMM d h:mm a"
+        formatter.setLocalizedDateFormatFromTemplate("MMM d")
         return formatter
     }()
 
     private static let weekdayFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale.autoupdatingCurrent
-        formatter.dateFormat = "EEE"
+        formatter.setLocalizedDateFormatFromTemplate("EEEE")
         return formatter
     }()
 
     private static let differentYearFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale.autoupdatingCurrent
-        formatter.dateFormat = "MMM d, yyyy h:mm a"
+        formatter.setLocalizedDateFormatFromTemplate("MMM d, y")
+        return formatter
+    }()
+
+    private static let relativeDayFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale.autoupdatingCurrent
+        formatter.timeStyle = .none
+        formatter.dateStyle = .medium
+        formatter.doesRelativeDateFormatting = true
         return formatter
     }()
 
@@ -1658,14 +1662,17 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
         ])
 
         let nameLabel = UILabel()
-        nameLabel.font = UIFont.systemFont(ofSize: metrics.bodyFontSize, weight: .semibold)
+        _ = metrics
+        nameLabel.font = UIFont.clawline(.uiLabel, weight: .semibold)
+        nameLabel.adjustsFontForContentSizeCategory = true
         nameLabel.textColor = palette.ink
         nameLabel.numberOfLines = 1
         nameLabel.lineBreakMode = .byTruncatingMiddle
         nameLabel.text = name
 
         let sizeLabel = UILabel()
-        sizeLabel.font = UIFont.systemFont(ofSize: metrics.senderFontSize, weight: .regular)
+        sizeLabel.font = UIFont.clawline(.secondaryLabel)
+        sizeLabel.adjustsFontForContentSizeCategory = true
         sizeLabel.textColor = palette.ink.withAlphaComponent(0.7)
         sizeLabel.numberOfLines = 1
         sizeLabel.text = sizeValue.map(Self.formatFileSize)
@@ -1747,7 +1754,8 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
         guard !text.isEmpty else { return 0 }
 
         // Use short size class font for single-line measurement (natural width)
-        let font = UIFont.systemFont(ofSize: metrics.shortFontSize, weight: .semibold)
+        _ = metrics
+        let font = UIFont.clawline(.shortMessage)
         let attributes: [NSAttributedString.Key: Any] = [.font: font]
         let size = (text as NSString).boundingRect(
             with: CGSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude),
@@ -1774,13 +1782,13 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
         let lineSpacing: CGFloat
         switch sizeClass {
         case .short:
-            font = UIFont.systemFont(ofSize: metrics.shortFontSize, weight: .semibold)
+            font = UIFont.clawline(.shortMessage)
             lineSpacing = 0
         case .medium:
-            font = UIFont.systemFont(ofSize: metrics.mediumFontSize, weight: .medium)
+            font = UIFont.clawline(.mediumMessage)
             lineSpacing = 4
         case .long:
-            font = UIFont.systemFont(ofSize: metrics.bodyFontSize, weight: .regular)
+            font = UIFont.clawline(.bodyText)
             lineSpacing = 4
         }
 
@@ -1820,7 +1828,8 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
         }
 
         let lineSpacing: CGFloat = 4
-        let font = UIFont.systemFont(ofSize: metrics.mediumFontSize, weight: .medium)
+        _ = metrics
+        let font = UIFont.clawline(.mediumMessage)
         let lineHeight = font.lineHeight
         return Int(ceil((textHeight + lineSpacing) / (lineHeight + lineSpacing)))
     }
@@ -1994,7 +2003,8 @@ final class AvatarCircleView: UIView {
             label.centerYAnchor.constraint(equalTo: centerYAnchor)
         ])
 
-        label.font = UIFont.systemFont(ofSize: 14, weight: .semibold)
+        label.font = UIFont.clawline(.uiLabel, weight: .semibold)
+        label.adjustsFontForContentSizeCategory = true
         label.textColor = .white
         label.layer.shadowColor = UIColor.black.cgColor
         label.layer.shadowOffset = CGSize(width: 0, height: 1)

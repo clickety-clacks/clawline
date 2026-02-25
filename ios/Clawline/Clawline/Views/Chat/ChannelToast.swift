@@ -48,7 +48,7 @@ struct StreamToast: View {
                         .tint(toastTextColor)
                 }
                 Text(displayName)
-                    .font(.system(size: 32, weight: .semibold, design: .rounded))
+                    .font(.clawline(.sectionHeader))
                     .foregroundStyle(toastTextColor)
                     .lineLimit(1)
                     .minimumScaleFactor(0.6)
@@ -57,7 +57,7 @@ struct StreamToast: View {
             }
 
             Text(sessionKey)
-                .font(.system(size: 14, weight: .regular, design: .rounded))
+                .font(.clawline(.secondaryLabel))
                 .foregroundStyle(toastTextColor.opacity(0.7))
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)

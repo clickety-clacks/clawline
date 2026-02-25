@@ -124,6 +124,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     private static let bottomInsetHeightCapInvalidationDebounceSeconds: TimeInterval = 0.20
 
     private var messagesById: [String: Message] = [:]
+    private var dateSeparatorTextByItemId: [String: String] = [:]
     private var fingerprints: [String: Int] = [:]
     private var lastMeasuredSizes: [String: CGSize] = [:]
     private var sizeCache: [String: CGSize] = [:]
@@ -785,7 +786,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         }
 
         let visibleIds: Set<String> = Set(collectionView.indexPathsForVisibleItems.compactMap { indexPath in
-            guard let id = dataSource.itemIdentifier(for: indexPath), id != TypingIndicatorCell.itemId else {
+            guard let id = dataSource.itemIdentifier(for: indexPath), !isNonMessageItemID(id) else {
                 return nil
             }
             return id
@@ -1225,20 +1226,24 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 allowTailStage: isFirstActivationForSession
             )
         )
-        let snapshotMessageIds: [String]
+        let snapshotMessages: [Message]
         switch materializationPlan.stage {
         case .tail:
-            snapshotMessageIds = stagedMessageIDs(messages: messages, bounds: materializationPlan.windowBounds)
+            let lower = max(0, min(materializationPlan.windowBounds.lowerBound, messages.count))
+            let upper = max(lower, min(materializationPlan.windowBounds.upperBound, messages.count))
+            snapshotMessages = Array(messages[lower..<upper])
         case .full:
-            snapshotMessageIds = fullMessageIds
+            snapshotMessages = messages
         }
+        let snapshotMessageIds = snapshotMessages.map(\.id)
+        let snapshotItemIds = snapshotItemsWithDateSeparators(from: snapshotMessages)
         StreamSwitchTiming.log(
-            "materialization_plan stage=\(materializationPlan.stage.rawValue) items=\(snapshotMessageIds.count) total=\(messageCount)",
+            "materialization_plan stage=\(materializationPlan.stage.rawValue) items=\(snapshotItemIds.count) total=\(messageCount)",
             sessionKey: effectiveSessionKey
         )
         var snapshot = NSDiffableDataSourceSnapshot<Int, String>()
         snapshot.appendSections([0])
-        snapshot.appendItems(snapshotMessageIds)
+        snapshot.appendItems(snapshotItemIds)
         let oldItemIds = Set(dataSource.snapshot().itemIdentifiers)
 
         // Add typing indicator when assistant is typing (server-controlled)
@@ -1412,6 +1417,86 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         guard next < messageIDs.endIndex else { return [] }
         return Array(messageIDs[next...])
     }
+
+    private func isNonMessageItemID(_ id: String) -> Bool {
+        id == TypingIndicatorCell.itemId || DateSeparatorCell.isDateSeparatorItemID(id)
+    }
+
+    private func snapshotItemsWithDateSeparators(from messages: [Message]) -> [String] {
+        guard !messages.isEmpty else {
+            dateSeparatorTextByItemId = [:]
+            return []
+        }
+
+        var items: [String] = []
+        items.reserveCapacity(messages.count * 2)
+
+        var separatorTextByItemID: [String: String] = [:]
+        var previousDayStart: Date?
+        let calendar = Calendar.autoupdatingCurrent
+        let now = Date()
+
+        for message in messages {
+            let dayStart = calendar.startOfDay(for: message.timestamp)
+            if let previousDayStart, !calendar.isDate(dayStart, inSameDayAs: previousDayStart) {
+                let separatorID = DateSeparatorCell.itemID(before: message.id)
+                items.append(separatorID)
+                separatorTextByItemID[separatorID] = Self.dateSeparatorText(for: dayStart, now: now)
+            }
+            previousDayStart = dayStart
+            items.append(message.id)
+        }
+
+        dateSeparatorTextByItemId = separatorTextByItemID
+        return items
+    }
+
+    private static func dateSeparatorText(for day: Date, now: Date) -> String {
+        let calendar = Calendar.autoupdatingCurrent
+        if calendar.isDateInToday(day) {
+            return relativeDayFormatter.string(from: day)
+        }
+        if calendar.isDateInYesterday(day) {
+            return relativeDayFormatter.string(from: day)
+        }
+        if calendar.isDate(day, equalTo: now, toGranularity: .weekOfYear) {
+            return weekdayFormatter.string(from: day)
+        }
+        if calendar.component(.year, from: day) == calendar.component(.year, from: now) {
+            return monthDayFormatter.string(from: day)
+        }
+        return fullDateFormatter.string(from: day)
+    }
+
+    private static let relativeDayFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale.autoupdatingCurrent
+        formatter.timeStyle = .none
+        formatter.dateStyle = .medium
+        formatter.doesRelativeDateFormatting = true
+        return formatter
+    }()
+
+    private static let weekdayFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale.autoupdatingCurrent
+        formatter.setLocalizedDateFormatFromTemplate("EEEE")
+        return formatter
+    }()
+
+    private static let monthDayFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale.autoupdatingCurrent
+        formatter.setLocalizedDateFormatFromTemplate("MMMM d")
+        return formatter
+    }()
+
+    private static let fullDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale.autoupdatingCurrent
+        formatter.setLocalizedDateFormatFromTemplate("MMMM d, y")
+        return formatter
+    }()
 
     private func resolvedSessionKey() -> String {
         channelOverride ?? viewModel?.engineActiveSessionKey ?? ""
@@ -1600,7 +1685,6 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     }
 
     private func updateScrollPersistenceKeyAndPendingRestoreState() {
-        guard let viewModel else { return }
         let newKey = resolvedSessionKey()
         guard newKey != scrollPersistenceKey else { return }
         scrollPersistenceKey = newKey
@@ -1734,6 +1818,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         collectionView.delegate = self
         collectionView.register(MessageBubbleUIKitCell.self, forCellWithReuseIdentifier: MessageBubbleUIKitCell.reuseIdentifier)
         collectionView.register(TypingIndicatorCell.self, forCellWithReuseIdentifier: TypingIndicatorCell.reuseIdentifier)
+        collectionView.register(DateSeparatorCell.self, forCellWithReuseIdentifier: DateSeparatorCell.reuseIdentifier)
 
         view.addSubview(collectionView)
         // Frame will be set in viewDidLayoutSubviews to extend to window bounds
@@ -1744,6 +1829,16 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             collectionView: collectionView
         ) { [weak self] (collectionView: UICollectionView, indexPath: IndexPath, id: String) in
             guard let self, let viewModel = self.viewModel else { return nil }
+
+            if DateSeparatorCell.isDateSeparatorItemID(id) {
+                let cell = collectionView.dequeueReusableCell(
+                    withReuseIdentifier: DateSeparatorCell.reuseIdentifier,
+                    for: indexPath
+                ) as? DateSeparatorCell
+                let text = self.dateSeparatorTextByItemId[id] ?? ""
+                cell?.configure(text: text, isDark: self.currentIsDark)
+                return cell
+            }
 
             // Handle typing indicator
             if id == TypingIndicatorCell.itemId {
@@ -2164,6 +2259,12 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         }
         let metrics = ChatFlowTheme.Metrics(isCompact: isCompact)
         let env = bubbleSizingV2Environment(metrics: metrics)
+
+        if DateSeparatorCell.isDateSeparatorItemID(id) {
+            let rowWidth = effectiveContentWidth(metrics: metrics)
+            let lineHeight = UIFont.clawline(.senderName).lineHeight
+            return CGSize(width: rowWidth, height: ceil(lineHeight + 32))
+        }
 
         // Handle typing indicator size
         if id == TypingIndicatorCell.itemId {
@@ -3149,7 +3250,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         let candidates = collectionView.visibleCells.compactMap { cell -> (String, CGRect)? in
             guard let indexPath = collectionView.indexPath(for: cell),
                   let id = dataSource.itemIdentifier(for: indexPath),
-                  id != TypingIndicatorCell.itemId else {
+                  !isNonMessageItemID(id) else {
                 return nil
             }
             let frame = cell.frame

@@ -356,6 +356,7 @@ struct MessageInputBar: View {
     @State private var reconnectPulseOn: Bool = false
     @State private var textEditorGlobalFrame: CGRect = .zero
     let isCompact: Bool
+    private let verticalDominanceRatio: CGFloat = 1.4
 
     private var metrics: MessageInputBarMetrics {
         MessageInputBarMetrics(
@@ -963,7 +964,7 @@ struct MessageInputBar: View {
         let dy = translation.y
         let up = max(0, -dy)
         let down = max(0, dy)
-        let verticalDominant = max(up, down) >= 1.4 * abs(dx)
+        let verticalDominant = max(up, down) >= verticalDominanceRatio * abs(dx)
 
         if motion.gesturePhase == .settling {
             gestureSettleTask?.cancel()
@@ -986,7 +987,7 @@ struct MessageInputBar: View {
             return
         }
 
-        if !motion.isSurfaceVisible && up < 1.4 * abs(dx) {
+        if !motion.isSurfaceVisible && up < verticalDominanceRatio * abs(dx) {
             if abs(dx) > up {
                 dictation.cancelGesturePrewarmIfNeeded(trigger: "push_changed_horizontal_dominant")
             }
@@ -1039,7 +1040,7 @@ struct MessageInputBar: View {
         let dy = translation.y
         let up = max(0, -dy)
         let down = max(0, dy)
-        let verticalDominant = max(up, down) >= 1.4 * abs(dx)
+        let verticalDominant = max(up, down) >= verticalDominanceRatio * abs(dx)
 
         let intent: DictationMotion.GestureEndIntent = withAnimation(settleSpring) {
             motion.gestureEnded(

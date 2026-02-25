@@ -59,15 +59,15 @@ final class DictationMotion {
 
     let session: DictationSession
 
-    var gesturePhase: GesturePhase = .idle
-    var rawDragY: CGFloat = 0
-    var surfaceRevealProgress: CGFloat = 0
-    var originWasOpen: Bool = false
-    var holdThresholdReachedTime: Date?
-    var walkieStartedThisGesture = false
-    var deferredSettleTarget: SurfaceTarget?
-    var settleDurationMultiplier: Double = 1.0
-    var pendingCommit: SettledCommit?
+    private(set) var gesturePhase: GesturePhase = .idle
+    private(set) var rawDragY: CGFloat = 0
+    private(set) var surfaceRevealProgress: CGFloat = 0
+    private(set) var originWasOpen: Bool = false
+    private(set) var holdThresholdReachedTime: Date?
+    private(set) var walkieStartedThisGesture = false
+    private(set) var deferredSettleTarget: SurfaceTarget?
+    private(set) var settleDurationMultiplier: Double = 1.0
+    private(set) var pendingCommit: SettledCommit?
 
     init(session: DictationSession) {
         self.session = session
@@ -77,8 +77,7 @@ final class DictationMotion {
 
     // Temporary compatibility alias while MessageInputBar is still migrating.
     var surfaceInteractiveProgress: CGFloat {
-        get { surfaceRevealProgress }
-        set { surfaceRevealProgress = newValue }
+        surfaceRevealProgress
     }
 
     var pullToSendProgress: CGFloat {

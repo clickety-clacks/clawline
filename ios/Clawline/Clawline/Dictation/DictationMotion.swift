@@ -106,10 +106,7 @@ final class DictationMotion {
     var settleTarget: SurfaceTarget { session.surfaceTarget }
 
     var composerLiftY: CGFloat {
-        if originWasOpen {
-            return max(0, upDistance)
-        }
-        return max(0, upDistance - Thresholds.reveal)
+        max(0, upDistance)
     }
 
     var pushGestureStartedWithSurfaceOpen: Bool {

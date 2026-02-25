@@ -47,6 +47,7 @@ final class ComposeInputDictationBridge {
     private weak var host: (any DictationComposeDraftHosting)?
     private weak var composeTextView: PastableTextView?
     private var transcriptStateBySession: [String: TranscriptState] = [:]
+    private var preferredSelectionRange: NSRange = NSRange(location: NSNotFound, length: 0)
 
     init(host: any DictationComposeDraftHosting) {
         self.host = host
@@ -60,8 +61,15 @@ final class ComposeInputDictationBridge {
         composeTextView = textView
     }
 
+    func setPreferredSelectionRange(_ selectionRange: NSRange) {
+        preferredSelectionRange = selectionRange
+    }
+
     func resetTranscriptState(for sessionKey: String) {
-        let selectedRange = composeTextView?.selectedRange ?? NSRange(location: NSNotFound, length: 0)
+        let selectedRangeFromView = composeTextView?.selectedRange ?? NSRange(location: NSNotFound, length: 0)
+        let selectedRange: NSRange = preferredSelectionRange.location == NSNotFound
+            ? selectedRangeFromView
+            : preferredSelectionRange
         let insertionPoint = selectedRange.location == NSNotFound
             ? composeTextView?.attributedText.length ?? 0
             : selectedRange.location
@@ -156,8 +164,7 @@ final class ComposeInputDictationBridge {
 
         let selection = textView.selectedRange
         if selection.location != NSNotFound,
-           selection.length > 0,
-           rangesOverlap(selection, serverRegion) {
+           selection.length > 0 {
             let suffix = transcriptSuffix(newTranscript: transcript, previousTranscript: state.previousServerTranscript)
             if let textRange = textRange(in: textView, nsRange: selection) {
                 textView.replace(textRange, withText: suffix)
@@ -208,10 +215,6 @@ final class ComposeInputDictationBridge {
         guard !previousTranscript.isEmpty else { return newTranscript }
         let common = newTranscript.commonPrefix(with: previousTranscript)
         return String(newTranscript.dropFirst(common.count))
-    }
-
-    private func rangesOverlap(_ lhs: NSRange, _ rhs: NSRange) -> Bool {
-        NSIntersectionRange(lhs, rhs).length > 0
     }
 
     private func attributedSubstringString(in attributedText: NSAttributedString, nsRange: NSRange) -> String {

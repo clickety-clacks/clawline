@@ -223,11 +223,6 @@ private struct DictationPanGestureInstaller: UIViewControllerRepresentable {
             let fastUpVelocity = event.velocity.y <= -220 && verticalDominant
 
             if startedInEditableRegion {
-                if isSurfaceOpen(), verticalDominant && down >= 6 {
-                    intentLock = .dictation
-                    lockTextScrollForDictationIfNeeded()
-                    return
-                }
                 if fastUpVelocity || (up >= 12 && elapsed < 0.25 && verticalDominant) {
                     intentLock = .dictation
                     lockTextScrollForDictationIfNeeded()
@@ -667,6 +662,9 @@ struct MessageInputBar: View {
             guard newValue == 0 else { return }
             editorHeight = metrics.inputBarHeight
         }
+        .onChange(of: selectionRange) { _, newValue in
+            dictation.setComposeSelectionRange(newValue)
+        }
         .onDisappear {
             micFadeTask?.cancel()
             gestureSettleTask?.cancel()
@@ -674,6 +672,7 @@ struct MessageInputBar: View {
             reconnectPulseOn = false
         }
         .onAppear {
+            dictation.setComposeSelectionRange(selectionRange)
             motion.settle(to: dictation.surfaceTarget)
             reconnectPulseOn = false
             guard isReconnecting else { return }
@@ -843,10 +842,12 @@ struct MessageInputBar: View {
             )
             .accessibilityAction(named: Text("Start Sticky Dictation")) {
                 guard dictation.micVisible || dictation.swipeActivationEnabled else { return }
+                dictation.setComposeSelectionRange(selectionRange)
                 dictation.startStickyDictation()
             }
             .accessibilityAction(named: Text("Start Walkie-Talkie Dictation")) {
                 guard dictation.micVisible || dictation.swipeActivationEnabled else { return }
+                dictation.setComposeSelectionRange(selectionRange)
                 dictation.startWalkieTalkieDictation()
                 beginMicFadeOut(fromSwipe: !dictation.micVisible)
             }
@@ -948,6 +949,7 @@ struct MessageInputBar: View {
                 if dictation.isStickyDictationActive {
                     dictation.dismissSurfaceFromUserGesture()
                 } else {
+                    dictation.setComposeSelectionRange(selectionRange)
                     dictation.beginGesturePrewarm()
                     dictation.startStickyDictation()
                     beginMicFadeOut(fromSwipe: false)
@@ -971,6 +973,7 @@ struct MessageInputBar: View {
         if motion.gesturePhase == .idle {
             gestureSettleTask?.cancel()
             motion.gestureBegan(originWasOpen: motion.isSurfaceVisible)
+            dictation.setComposeSelectionRange(selectionRange)
             dictation.beginGesturePrewarm()
         }
 
@@ -1007,6 +1010,7 @@ struct MessageInputBar: View {
             holdDuration: walkieHoldDurationSeconds
            ) {
             logDictation("DICTATION_UI gesture_classification=walkie_hold_activated up=\(up) dx=\(dx) dy=\(dy)")
+            dictation.setComposeSelectionRange(selectionRange)
             dictation.startWalkieTalkieDictation()
             beginMicFadeOut(fromSwipe: false)
         }
@@ -1058,6 +1062,7 @@ struct MessageInputBar: View {
             dictation.dismissSurfaceFromUserGesture()
         case .startSticky:
             logDictation("DICTATION_UI gesture_end classification=sticky_start up=\(up) down=\(down)")
+            dictation.setComposeSelectionRange(selectionRange)
             dictation.startStickyDictation()
             beginMicFadeOut(fromSwipe: false)
         case .endWalkieKeepOpen:
@@ -1077,6 +1082,11 @@ struct MessageInputBar: View {
     }
 
     private func shouldBeginDictationPan(startLocation: CGPoint, velocity: CGPoint) -> Bool {
+        if startsInEditableRegion(startLocation: startLocation) {
+            let fastUp = velocity.y < -280
+            let fastDown = velocity.y > 320 && motion.isSurfaceVisible
+            return fastUp || fastDown
+        }
         if motion.isSurfaceVisible {
             return true
         }

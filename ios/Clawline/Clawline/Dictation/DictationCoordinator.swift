@@ -379,6 +379,10 @@ final class DictationSession {
         bridge.setComposeTextView(textView)
     }
 
+    func setComposeSelectionRange(_ selectionRange: NSRange) {
+        bridge.setPreferredSelectionRange(selectionRange)
+    }
+
     func preparePhase1IfNeeded() {
         guard !currentSessionKey.isEmpty else { return }
         guard !isListening else { return }

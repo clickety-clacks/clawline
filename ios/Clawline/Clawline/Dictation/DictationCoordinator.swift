@@ -258,6 +258,7 @@ final class DictationSession {
     private var suppressedPrewarmFailureBudget = 0
     private var dictationAttemptID: UInt64 = 0
     private var activeAttemptID: UInt64?
+    private var audioDecodeTimeoutRecoveryCount: Int = 0
 
     private func durationSeconds(_ duration: Duration) -> Double {
         let components = duration.components
@@ -641,6 +642,7 @@ final class DictationSession {
             self.pendingTranscriptText = nil
         }
         self.finishedReceived = false
+        self.audioDecodeTimeoutRecoveryCount = 0
         self.sessionStartedAt = Date()
         self.lastTokenAt = Date()
         self.audioLevel = 1
@@ -1002,6 +1004,7 @@ final class DictationSession {
             }
 
             if !response.tokens.isEmpty {
+                audioDecodeTimeoutRecoveryCount = 0
                 let ts = Date().timeIntervalSince1970
                 logDictation(
                     "DICTATION_STOP trace_id=DICTATION_STOP_TOKEN_RECEIVED " +
@@ -1056,6 +1059,12 @@ final class DictationSession {
     }
 
     private func handleProtocolError(code: String?, message: String) {
+        if message.localizedCaseInsensitiveContains("audio decode timeout") {
+            Task { [weak self] in
+                await self?.recoverFromAudioDecodeTimeout(message: message)
+            }
+            return
+        }
         analytics.trackError(errorCode: code, stage: "protocol")
         Task { [weak self] in
             guard let self else { return }
@@ -1071,6 +1080,42 @@ final class DictationSession {
             logDictation("DICTATION_ERROR path=handleProtocolError ts=\(Date().timeIntervalSince1970) code=\(code ?? "nil") message=\(message)")
             self.enterError(message: message, source: "handleProtocolError")
         }
+    }
+
+    private func recoverFromAudioDecodeTimeout(message: String) async {
+        guard isDictationActive else { return }
+        guard audioDecodeTimeoutRecoveryCount < 1 else {
+            analytics.trackError(errorCode: nil, stage: "protocol")
+            logDictation("DICTATION_STOP trace_id=DICTATION_STOP_PROTOCOL_ERROR caller=audio_decode_timeout_exhausted ts=\(Date().timeIntervalSince1970)")
+            await stopKeep(
+                reason: "protocol_error",
+                timeout: .zero,
+                announceStop: false,
+                gracefulFinalize: false,
+                collapseSurface: false,
+                trigger: "protocol_error_event"
+            )
+            logDictation("DICTATION_ERROR path=recoverFromAudioDecodeTimeout ts=\(Date().timeIntervalSince1970) message=\(message)")
+            enterError(message: message, source: "audio_decode_timeout")
+            return
+        }
+
+        audioDecodeTimeoutRecoveryCount += 1
+        logDictation(
+            "DICTATION_CONN audio_decode_timeout_recovering recovery_count=\(audioDecodeTimeoutRecoveryCount) " +
+            "ts=\(Date().timeIntervalSince1970) \(attemptContext())"
+        )
+        closeAndResetRealtimePipeline(closeReason: "audio_decode_timeout_retry")
+        guard let apiKey = validatedAPIKeyOrNil() else {
+            enterError(message: message, source: "audio_decode_timeout_missing_key")
+            return
+        }
+
+        let generation = nextActivationGeneration()
+        beginPhase2Prewarm(apiKey: apiKey, generation: generation)
+        isPhase3StreamingAudio = true
+        resetTokenInactivityTimer()
+        armSessionDurationTimer()
     }
 
     private func handleTransportFailure(stage: SonioxStreamingClientStage, message: String) async {

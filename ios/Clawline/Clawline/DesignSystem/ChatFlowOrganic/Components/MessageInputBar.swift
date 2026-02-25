@@ -724,7 +724,7 @@ struct MessageInputBar: View {
                     pendingInsertions: $pendingInsertions,
                     resetToken: resetToken,
                     focusTrigger: focusTrigger,
-                    isEditable: !motion.isTextInteractionLocked,
+                    isEditable: true,
                     tintColor: inputTintUIColor,
                     textColor: {
 #if os(visionOS)

@@ -172,10 +172,11 @@ final class DictationMotion {
         let projectedDown = max(0, predictedY)
         let fastUp = predictedY < -120 || velocityY < -900
         let fastDown = predictedY > 120 || velocityY > 900
+        let pullToSendArmed = isPullToSendArmed
 
         teardownGesture()
 
-        if isPullToSendArmed && context.pullToSendEligible {
+        if pullToSendArmed && context.pullToSendEligible {
             pendingCommit = .init(target: originWasOpen ? .openPaused : .closed, reason: "pull_to_send")
             surfaceRevealProgress = originWasOpen ? 1 : 0
             return .send

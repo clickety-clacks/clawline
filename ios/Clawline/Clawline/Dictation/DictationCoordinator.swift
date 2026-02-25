@@ -383,11 +383,10 @@ final class DictationSession {
         schedulePhase1IdleTeardown()
         guard !isSurfaceOpen else { return }
         guard !isListening else { return }
-        guard prewarmConnectTask == nil else { return }
-        guard let apiKey = validatedAPIKeyOrNil() else { return }
-        let generation = prewarmGeneration ?? nextActivationGeneration()
-        prewarmGeneration = generation
-        beginPhase2Prewarm(apiKey: apiKey, generation: generation)
+        // Do not open Soniox sockets during gesture prewarm.
+        // Opening phase-2 connections before phase-3 audio streaming can lead to
+        // server-side decode timeouts when the user abandons the gesture.
+        logDictation("DICTATION_CONN gesture_prewarm_phase2_skipped strategy=phase3_only")
     }
 
     func cancelGesturePrewarmIfNeeded(trigger: String = "gesture_abandon") {

@@ -41,13 +41,11 @@ struct DictationCoordinatorTests {
         )
 
         coordinator.startStickyDictation()
-        #expect(coordinator.state == .dictatingSticky)
+        #expect(coordinator.isStickyDictationActive)
 
         harness.client.emit(.closed(code: nil, reason: "transport drop"))
 
-        await waitUntil {
-            coordinator.state == .idleMicVisible || coordinator.state == .idleMicHidden
-        }
+        await waitUntil { !coordinator.isDictationActive }
 
         #expect(harness.client.closeCalls.count >= 1)
         #expect(harness.analytics.stopEvents.contains(where: { $0.reason == "socket_drop" }))
@@ -61,9 +59,7 @@ struct DictationCoordinatorTests {
                 maxSessionDuration: .seconds(30),
                 tokenInactivityTimeout: .milliseconds(120),
                 stopKeepFinalizeTimeout: .milliseconds(50),
-                sendFinalizeTimeout: .milliseconds(40),
-                errorAutoDismissTimeout: .milliseconds(30),
-                errorAutoDismissVoiceOverTimeout: .milliseconds(30)
+                sendFinalizeTimeout: .milliseconds(40)
             )
         )
         let coordinator = harness.makeCoordinator()
@@ -77,7 +73,7 @@ struct DictationCoordinatorTests {
         )
 
         coordinator.startStickyDictation()
-        #expect(coordinator.state == .dictatingSticky)
+        #expect(coordinator.isStickyDictationActive)
 
         await waitUntil(timeoutMs: 1_500) {
             harness.analytics.stopEvents.contains(where: { $0.reason == "token_inactivity" })
@@ -92,9 +88,7 @@ struct DictationCoordinatorTests {
                 maxSessionDuration: .seconds(30),
                 tokenInactivityTimeout: .seconds(30),
                 stopKeepFinalizeTimeout: .milliseconds(80),
-                sendFinalizeTimeout: .milliseconds(60),
-                errorAutoDismissTimeout: .milliseconds(30),
-                errorAutoDismissVoiceOverTimeout: .milliseconds(30)
+                sendFinalizeTimeout: .milliseconds(60)
             )
         )
         let coordinator = harness.makeCoordinator()
@@ -192,7 +186,7 @@ struct DictationCoordinatorTests {
         #expect(coordinator.micVisible)
         coordinator.startStickyDictation()
 
-        #expect(coordinator.state == .keyPromptModal)
+        #expect(coordinator.showsComposeKeyPromptModal)
         #expect(coordinator.showsComposeKeyPromptModal)
         #expect(coordinator.micVisible)
         #expect(!coordinator.isDictationActive)
@@ -216,10 +210,10 @@ struct DictationCoordinatorTests {
         coordinator.updateInlineKeyText("good-key")
 
         #expect(coordinator.inlineKeyStatus == .validated)
-        #expect(harness.keyStatus == .validated)
+        #expect(harness.keyStore.keyStatus == .validated)
 
         coordinator.startStickyDictation()
-        #expect(coordinator.state == .dictatingSticky)
+        #expect(coordinator.isStickyDictationActive)
     }
 
     @Test("Modal key CTA opens Soniox key page when key is empty")
@@ -236,7 +230,7 @@ struct DictationCoordinatorTests {
             reduceMotionEnabled: false
         )
         coordinator.startStickyDictation()
-        #expect(coordinator.state == .keyPromptModal)
+        #expect(coordinator.showsComposeKeyPromptModal)
         #expect(coordinator.inlineKeyActionTitle == "Get Key")
 
         var openedURL: URL?
@@ -245,9 +239,9 @@ struct DictationCoordinatorTests {
         }
 
         #expect(openedURL == SonioxConfigurationStore.keyManagementURL)
-        #expect(coordinator.state == .keyPromptModal)
+        #expect(coordinator.showsComposeKeyPromptModal)
         #expect(coordinator.inlineKeyStatus == .missing)
-        #expect(harness.keyStatus == .missing)
+        #expect(harness.keyStore.keyStatus == .missing)
     }
 
     @Test("Modal verify failure shows Invalid and keeps prompt visible")
@@ -266,15 +260,15 @@ struct DictationCoordinatorTests {
         )
 
         coordinator.startStickyDictation()
-        #expect(coordinator.state == .keyPromptModal)
+        #expect(coordinator.showsComposeKeyPromptModal)
         #expect(coordinator.inlineKeyActionTitle == "Verify")
 
         await coordinator.handleComposeKeyPrimaryAction { _ in }
 
-        #expect(coordinator.state == .keyPromptModal)
+        #expect(coordinator.showsComposeKeyPromptModal)
         #expect(coordinator.inlineKeyStatus == .invalid)
         #expect(coordinator.inlineKeyStatusText == "Invalid")
-        #expect(harness.keyStatus == .invalid)
+        #expect(harness.keyStore.keyStatus == .invalid)
         #expect(!coordinator.isDictationActive)
     }
 
@@ -294,7 +288,7 @@ struct DictationCoordinatorTests {
         )
 
         coordinator.startWalkieTalkieDictation()
-        #expect(coordinator.state == .keyPromptModal)
+        #expect(coordinator.showsComposeKeyPromptModal)
         #expect(!coordinator.isDictationActive)
 
         await coordinator.handleComposeKeyPrimaryAction { _ in }
@@ -302,10 +296,10 @@ struct DictationCoordinatorTests {
             harness.client.connected
         }
 
-        #expect(coordinator.state == .dictatingWalkieTalkie)
+        #expect(coordinator.isWalkieTalkieActive)
         #expect(coordinator.isDictationActive)
         #expect(coordinator.inlineKeyStatus == .validated)
-        #expect(harness.keyStatus == .validated)
+        #expect(harness.keyStore.keyStatus == .validated)
         #expect(harness.client.connected)
     }
 
@@ -323,12 +317,12 @@ struct DictationCoordinatorTests {
             reduceMotionEnabled: false
         )
         coordinator.startStickyDictation()
-        #expect(coordinator.state == .keyPromptModal)
+        #expect(coordinator.showsComposeKeyPromptModal)
         #expect(coordinator.showsComposeKeyPromptModal)
 
         coordinator.dismissComposeKeyPrompt()
 
-        #expect(coordinator.state == .idleMicVisible)
+        #expect(!coordinator.isDictationActive)
         #expect(!coordinator.showsComposeKeyPromptModal)
         #expect(coordinator.micVisible)
         #expect(!coordinator.isDictationActive)
@@ -351,11 +345,8 @@ struct DictationCoordinatorTests {
 
         coordinator.startStickyDictation()
 
-        await waitUntil {
-            coordinator.state == .error
-        }
+        await waitUntil { coordinator.errorMessage == "Dictation failed" }
 
-        #expect(coordinator.state == .error)
         #expect(coordinator.errorMessage == "Dictation failed")
         #expect(!coordinator.isDictationActive)
         #expect(harness.analytics.stopEvents.contains(where: { $0.reason == "transport_failure" }))
@@ -376,12 +367,12 @@ struct DictationCoordinatorTests {
         )
 
         coordinator.startStickyDictation()
-        #expect(coordinator.state == .dictatingSticky)
+        #expect(coordinator.isStickyDictationActive)
 
         harness.audio.emit(event: .interruptionBegan)
         try? await Task.sleep(for: .milliseconds(50))
 
-        #expect(coordinator.state == .dictatingSticky)
+        #expect(coordinator.isStickyDictationActive)
         #expect(harness.client.closeCalls.isEmpty)
     }
 
@@ -400,13 +391,11 @@ struct DictationCoordinatorTests {
         )
 
         coordinator.startStickyDictation()
-        #expect(coordinator.state == .dictatingSticky)
+        #expect(coordinator.isStickyDictationActive)
 
         harness.audio.emit(event: .failed(message: "route-change recovery failed"))
 
-        await waitUntil {
-            coordinator.state == .error
-        }
+        await waitUntil { coordinator.errorMessage == "Dictation failed" }
 
         #expect(coordinator.errorMessage == "Dictation failed")
         #expect(harness.analytics.stopEvents.contains(where: { $0.reason == "transport_failure" }))
@@ -438,9 +427,7 @@ struct DictationCoordinatorTests {
             )
         )
 
-        await waitUntil {
-            coordinator.state == .error
-        }
+        await waitUntil { coordinator.errorMessage == "input_too_slow" }
 
         #expect(coordinator.errorMessage == "input_too_slow")
         let sawProtocolError = harness.analytics.errorEvents.contains { event in
@@ -460,41 +447,34 @@ private final class DictationTestHarness {
     let analytics = MockDictationAnalytics()
     let feedback = MockDictationFeedback()
     let keyVerifier = MockSonioxKeyVerifier()
+    let keyStore: SonioxKeyStore
     let timing: DictationTiming
-    var apiKey: String?
-    var editableAPIKey: String
-    var keyStatus: SonioxKeyVerificationStatus
 
     init(
         timing: DictationTiming = DictationTiming(
             maxSessionDuration: .seconds(30),
             tokenInactivityTimeout: .seconds(30),
             stopKeepFinalizeTimeout: .milliseconds(120),
-            sendFinalizeTimeout: .milliseconds(80),
-            errorAutoDismissTimeout: .milliseconds(50),
-            errorAutoDismissVoiceOverTimeout: .milliseconds(50)
+            sendFinalizeTimeout: .milliseconds(80)
         ),
         apiKey: String? = "test-key",
         keyStatus: SonioxKeyVerificationStatus = .validated
     ) {
         self.timing = timing
-        self.apiKey = apiKey
-        self.editableAPIKey = apiKey ?? ""
-        self.keyStatus = keyStatus
+        SonioxConfigurationStore.setAPIKey(apiKey)
+        SonioxConfigurationStore.setKeyStatus(keyStatus)
+        self.keyStore = SonioxKeyStore(verifier: keyVerifier)
+    }
+
+    deinit {
+        SonioxConfigurationStore.setAPIKey(nil)
+        SonioxConfigurationStore.setKeyStatus(.missing)
     }
 
     func makeCoordinator() -> DictationCoordinator {
         DictationCoordinator(
             bridge: ComposeInputDictationBridge(host: host),
-            configuredAPIKey: { self.apiKey },
-            editableAPIKeyProvider: { self.editableAPIKey },
-            keyStatusProvider: { self.keyStatus },
-            setConfiguredAPIKey: {
-                self.apiKey = $0
-                self.editableAPIKey = $0 ?? ""
-            },
-            setKeyStatus: { self.keyStatus = $0 },
-            keyVerifier: keyVerifier,
+            keyStore: keyStore,
             languageHintProvider: { "en" },
             audioCaptureFactory: { self.audio },
             streamingClientFactory: { self.client },
@@ -512,6 +492,20 @@ private final class MockComposeDraftHost: DictationComposeDraftHosting {
 
     func captureComposeDraftSnapshot(for sessionKey: String) -> ComposeDraftSnapshot {
         drafts[sessionKey] ?? .empty
+    }
+
+    func applyComposeDraftDelta(
+        baseSnapshot: ComposeDraftSnapshot,
+        previousTranscriptUTF16Length: Int,
+        replacementText: NSAttributedString,
+        to sessionKey: String,
+        moveCursorToEnd: Bool
+    ) {
+        let _ = previousTranscriptUTF16Length
+        let _ = moveCursorToEnd
+        let mutable = NSMutableAttributedString(attributedString: baseSnapshot.content)
+        mutable.append(replacementText)
+        drafts[sessionKey] = ComposeDraftSnapshot(content: mutable, attachments: baseSnapshot.attachments)
     }
 
     func applyComposeDraftSnapshot(_ snapshot: ComposeDraftSnapshot,

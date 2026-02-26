@@ -61,6 +61,51 @@ struct ComposeInputDictationBridgeModeSwitchTests {
         bridge.apply(transcript: "hello wonderful world!", baseSnapshot: .empty, originSessionKey: host.activeSessionKey)
         #expect(textView.attributedText.string == "seed hello wonderful world!")
     }
+
+    @Test("Append-only mode persists until a successful append")
+    func appendOnlyPersistsUntilSuccessfulAppend() {
+        let host = BridgeModeTestHost()
+        let bridge = ComposeInputDictationBridge(host: host)
+        let textView = PastableTextView()
+
+        host.setText("seed ", for: host.activeSessionKey)
+        textView.attributedText = NSAttributedString(string: "seed ")
+        textView.selectedRange = NSRange(location: textView.attributedText.length, length: 0)
+
+        bridge.setComposeTextView(textView)
+        bridge.resetTranscriptState(for: host.activeSessionKey)
+
+        bridge.apply(transcript: "hello world", baseSnapshot: .empty, originSessionKey: host.activeSessionKey)
+        bridge.noteUserInteraction(originSessionKey: host.activeSessionKey)
+
+        bridge.apply(transcript: "hello brave world", baseSnapshot: .empty, originSessionKey: host.activeSessionKey)
+        #expect(textView.attributedText.string == "seed hello world")
+
+        bridge.apply(transcript: "hello brave world", baseSnapshot: .empty, originSessionKey: host.activeSessionKey)
+        #expect(textView.attributedText.string == "seed hello world")
+
+        textView.selectedRange = NSRange(location: textView.attributedText.length, length: 0)
+        bridge.apply(transcript: "hello world!", baseSnapshot: .empty, originSessionKey: host.activeSessionKey)
+        #expect(textView.attributedText.string == "seed hello world!")
+    }
+
+    @Test("UIKit selectedRange remains cursor source of truth")
+    func uiKitSelectedRangeIsCursorSourceOfTruth() {
+        let host = BridgeModeTestHost()
+        let bridge = ComposeInputDictationBridge(host: host)
+        let textView = PastableTextView()
+
+        host.setText("seed middle end", for: host.activeSessionKey)
+        textView.attributedText = NSAttributedString(string: "seed middle end")
+        textView.selectedRange = NSRange(location: 5, length: 6) // select "middle"
+
+        bridge.setComposeTextView(textView)
+        bridge.resetTranscriptState(for: host.activeSessionKey)
+        bridge.setPreferredSelectionRange(NSRange(location: textView.attributedText.length, length: 0))
+
+        bridge.apply(transcript: "DICT", baseSnapshot: .empty, originSessionKey: host.activeSessionKey)
+        #expect(textView.attributedText.string == "seed DICT end")
+    }
 }
 
 @MainActor

@@ -2,14 +2,14 @@ import Foundation
 import Testing
 @testable import Clawline
 
+@MainActor
 struct SettingsManagerTests {
     @Test("CTA label is Get Key when empty and Verify when key is present")
-    @MainActor
     func ctaLabelSwitchesWithKeyPresence() {
         resetSonioxDefaultsForTest()
         defer { resetSonioxDefaultsForTest() }
 
-        let manager = SettingsManager(sonioxVerifier: MockSettingsKeyVerifier())
+        let manager = SettingsManager(sonioxKeyStore: SonioxKeyStore(verifier: MockSettingsKeyVerifier()))
         manager.sonioxAPIKey = ""
         #expect(manager.sonioxCTATitle == "Get Key")
 
@@ -19,12 +19,11 @@ struct SettingsManagerTests {
     }
 
     @Test("Empty key primary action opens Soniox key page and remains missing")
-    @MainActor
     func emptyKeyPrimaryActionOpensManagePage() async {
         resetSonioxDefaultsForTest()
         defer { resetSonioxDefaultsForTest() }
 
-        let manager = SettingsManager(sonioxVerifier: MockSettingsKeyVerifier())
+        let manager = SettingsManager(sonioxKeyStore: SonioxKeyStore(verifier: MockSettingsKeyVerifier()))
         manager.sonioxAPIKey = ""
 
         var openedURL: URL?
@@ -38,13 +37,12 @@ struct SettingsManagerTests {
     }
 
     @Test("Verify success sets Validated status")
-    @MainActor
     func verifySuccessSetsValidated() async {
         resetSonioxDefaultsForTest()
         defer { resetSonioxDefaultsForTest() }
 
         let verifier = MockSettingsKeyVerifier(results: [true])
-        let manager = SettingsManager(sonioxVerifier: verifier)
+        let manager = SettingsManager(sonioxKeyStore: SonioxKeyStore(verifier: verifier))
         manager.sonioxAPIKey = "valid-key"
 
         let result = await manager.handleSonioxPrimaryAction { _ in }
@@ -55,13 +53,12 @@ struct SettingsManagerTests {
     }
 
     @Test("Verify failure sets Invalid status")
-    @MainActor
     func verifyFailureSetsInvalid() async {
         resetSonioxDefaultsForTest()
         defer { resetSonioxDefaultsForTest() }
 
         let verifier = MockSettingsKeyVerifier(results: [false])
-        let manager = SettingsManager(sonioxVerifier: verifier)
+        let manager = SettingsManager(sonioxKeyStore: SonioxKeyStore(verifier: verifier))
         manager.sonioxAPIKey = "bad-key"
 
         let result = await manager.verifySonioxKey()

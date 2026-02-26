@@ -22,7 +22,7 @@ struct ChatViewModelTests {
         let viewModel = ChatViewModel(
             auth: auth,
             chatService: chatService,
-            settings: SettingsManager(),
+            settings: SettingsManager(sonioxKeyStore: SonioxKeyStore()),
             device: TestDevice(),
             uploadService: TestUploadService(),
             toastManager: ToastManager(),
@@ -69,7 +69,7 @@ struct ChatViewModelTests {
         let viewModel = ChatViewModel(
             auth: auth,
             chatService: chatService,
-            settings: SettingsManager(),
+            settings: SettingsManager(sonioxKeyStore: SonioxKeyStore()),
             device: TestDevice(),
             uploadService: TestUploadService(),
             toastManager: toastManager,
@@ -142,7 +142,7 @@ struct ChatViewModelTests {
         let viewModel = ChatViewModel(
             auth: auth,
             chatService: chatService,
-            settings: SettingsManager(),
+            settings: SettingsManager(sonioxKeyStore: SonioxKeyStore()),
             device: TestDevice(),
             uploadService: TestUploadService(),
             toastManager: toastManager,
@@ -189,7 +189,7 @@ struct ChatViewModelTests {
         let viewModel = ChatViewModel(
             auth: auth,
             chatService: chatService,
-            settings: SettingsManager(),
+            settings: SettingsManager(sonioxKeyStore: SonioxKeyStore()),
             device: TestDevice(),
             uploadService: TestUploadService(),
             toastManager: toastManager,
@@ -235,7 +235,7 @@ struct ChatViewModelTests {
         let viewModel = ChatViewModel(
             auth: auth,
             chatService: chatService,
-            settings: SettingsManager(),
+            settings: SettingsManager(sonioxKeyStore: SonioxKeyStore()),
             device: TestDevice(),
             uploadService: TestUploadService(),
             toastManager: toastManager,
@@ -275,7 +275,7 @@ struct ChatViewModelTests {
         let viewModel = ChatViewModel(
             auth: auth,
             chatService: chatService,
-            settings: SettingsManager(),
+            settings: SettingsManager(sonioxKeyStore: SonioxKeyStore()),
             device: TestDevice(),
             uploadService: TestUploadService(),
             toastManager: toastManager,
@@ -314,7 +314,7 @@ struct ChatViewModelTests {
         let viewModel = ChatViewModel(
             auth: auth,
             chatService: chatService,
-            settings: SettingsManager(),
+            settings: SettingsManager(sonioxKeyStore: SonioxKeyStore()),
             device: TestDevice(),
             uploadService: TestUploadService(),
             toastManager: ToastManager(),
@@ -345,7 +345,7 @@ struct ChatViewModelTests {
         let viewModel = ChatViewModel(
             auth: auth,
             chatService: chatService,
-            settings: SettingsManager(),
+            settings: SettingsManager(sonioxKeyStore: SonioxKeyStore()),
             device: TestDevice(),
             uploadService: TestUploadService(),
             toastManager: ToastManager(),
@@ -377,7 +377,7 @@ struct ChatViewModelTests {
         let viewModel = ChatViewModel(
             auth: auth,
             chatService: chatService,
-            settings: SettingsManager(),
+            settings: SettingsManager(sonioxKeyStore: SonioxKeyStore()),
             device: TestDevice(),
             uploadService: TestUploadService(),
             toastManager: ToastManager(),
@@ -403,7 +403,7 @@ struct ChatViewModelTests {
         let viewModel = ChatViewModel(
             auth: auth,
             chatService: TestChatService(),
-            settings: SettingsManager(),
+            settings: SettingsManager(sonioxKeyStore: SonioxKeyStore()),
             device: TestDevice(),
             uploadService: TestUploadService(),
             toastManager: ToastManager(),
@@ -457,7 +457,7 @@ struct ChatViewModelTests {
         let viewModel = ChatViewModel(
             auth: auth,
             chatService: chatService,
-            settings: SettingsManager(),
+            settings: SettingsManager(sonioxKeyStore: SonioxKeyStore()),
             device: TestDevice(),
             uploadService: TestUploadService(),
             toastManager: ToastManager(),
@@ -515,7 +515,7 @@ struct ChatViewModelTests {
         let viewModel = ChatViewModel(
             auth: auth,
             chatService: chatService,
-            settings: SettingsManager(),
+            settings: SettingsManager(sonioxKeyStore: SonioxKeyStore()),
             device: TestDevice(),
             uploadService: uploadService,
             toastManager: ToastManager(),
@@ -577,7 +577,7 @@ struct ChatViewModelTests {
         let viewModel = ChatViewModel(
             auth: auth,
             chatService: chatService,
-            settings: SettingsManager(),
+            settings: SettingsManager(sonioxKeyStore: SonioxKeyStore()),
             device: TestDevice(),
             uploadService: uploadService,
             toastManager: ToastManager(),
@@ -650,7 +650,7 @@ struct ChatViewModelTests {
         let viewModel = ChatViewModel(
             auth: auth,
             chatService: TestChatService(),
-            settings: SettingsManager(),
+            settings: SettingsManager(sonioxKeyStore: SonioxKeyStore()),
             device: TestDevice(),
             uploadService: TestUploadService(),
             toastManager: ToastManager(),
@@ -686,7 +686,7 @@ struct ChatViewModelTests {
         let viewModel = ChatViewModel(
             auth: auth,
             chatService: chatService,
-            settings: SettingsManager(),
+            settings: SettingsManager(sonioxKeyStore: SonioxKeyStore()),
             device: TestDevice(),
             uploadService: TestUploadService(),
             toastManager: ToastManager(),
@@ -764,7 +764,7 @@ struct ChatViewModelTests {
         let viewModel = ChatViewModel(
             auth: auth,
             chatService: chatService,
-            settings: SettingsManager(),
+            settings: SettingsManager(sonioxKeyStore: SonioxKeyStore()),
             device: TestDevice(),
             uploadService: TestUploadService(),
             toastManager: toastManager,
@@ -814,7 +814,7 @@ struct ChatViewModelTests {
         let viewModel = ChatViewModel(
             auth: auth,
             chatService: chatService,
-            settings: SettingsManager(),
+            settings: SettingsManager(sonioxKeyStore: SonioxKeyStore()),
             device: TestDevice(),
             uploadService: TestUploadService(),
             toastManager: toastManager,
@@ -867,7 +867,7 @@ struct ChatViewModelTests {
         let viewModel = ChatViewModel(
             auth: auth,
             chatService: chatService,
-            settings: SettingsManager(),
+            settings: SettingsManager(sonioxKeyStore: SonioxKeyStore()),
             device: TestDevice(),
             uploadService: TestUploadService(),
             toastManager: toastManager,
@@ -930,7 +930,7 @@ struct ChatViewModelTests {
         let viewModel = ChatViewModel(
             auth: auth,
             chatService: chatService,
-            settings: SettingsManager(),
+            settings: SettingsManager(sonioxKeyStore: SonioxKeyStore()),
             device: TestDevice(),
             uploadService: TestUploadService(),
             toastManager: ToastManager(),
@@ -1009,7 +1009,7 @@ struct ChatViewModelTests {
         let viewModel = ChatViewModel(
             auth: auth,
             chatService: chatService,
-            settings: SettingsManager(),
+            settings: SettingsManager(sonioxKeyStore: SonioxKeyStore()),
             device: TestDevice(),
             uploadService: TestUploadService(),
             toastManager: ToastManager(),
@@ -1067,7 +1067,7 @@ struct ChatViewModelTests {
         let viewModel = ChatViewModel(
             auth: auth,
             chatService: chatService,
-            settings: SettingsManager(),
+            settings: SettingsManager(sonioxKeyStore: SonioxKeyStore()),
             device: TestDevice(),
             uploadService: TestUploadService(),
             toastManager: ToastManager(),
@@ -1110,7 +1110,7 @@ struct ChatViewModelTests {
         let firstViewModel = ChatViewModel(
             auth: auth,
             chatService: firstService,
-            settings: SettingsManager(),
+            settings: SettingsManager(sonioxKeyStore: SonioxKeyStore()),
             device: TestDevice(),
             uploadService: TestUploadService(),
             toastManager: ToastManager(),
@@ -1133,7 +1133,7 @@ struct ChatViewModelTests {
         let secondViewModel = ChatViewModel(
             auth: auth,
             chatService: secondService,
-            settings: SettingsManager(),
+            settings: SettingsManager(sonioxKeyStore: SonioxKeyStore()),
             device: TestDevice(),
             uploadService: TestUploadService(),
             toastManager: ToastManager(),
@@ -1167,7 +1167,7 @@ struct ChatViewModelTests {
         let firstViewModel = ChatViewModel(
             auth: auth,
             chatService: firstService,
-            settings: SettingsManager(),
+            settings: SettingsManager(sonioxKeyStore: SonioxKeyStore()),
             device: TestDevice(),
             uploadService: TestUploadService(),
             toastManager: ToastManager(),
@@ -1190,7 +1190,7 @@ struct ChatViewModelTests {
         let secondViewModel = ChatViewModel(
             auth: auth,
             chatService: secondService,
-            settings: SettingsManager(),
+            settings: SettingsManager(sonioxKeyStore: SonioxKeyStore()),
             device: TestDevice(),
             uploadService: TestUploadService(),
             toastManager: ToastManager(),
@@ -1224,7 +1224,7 @@ struct ChatViewModelTests {
         let viewModel = ChatViewModel(
             auth: auth,
             chatService: chatService,
-            settings: SettingsManager(),
+            settings: SettingsManager(sonioxKeyStore: SonioxKeyStore()),
             device: TestDevice(),
             uploadService: TestUploadService(),
             toastManager: ToastManager(),
@@ -1270,7 +1270,7 @@ struct ChatViewModelTests {
         let viewModel = ChatViewModel(
             auth: auth,
             chatService: chatService,
-            settings: SettingsManager(),
+            settings: SettingsManager(sonioxKeyStore: SonioxKeyStore()),
             device: TestDevice(),
             uploadService: TestUploadService(),
             toastManager: ToastManager(),
@@ -1309,7 +1309,7 @@ struct ChatViewModelTests {
         let viewModel = ChatViewModel(
             auth: auth,
             chatService: chatService,
-            settings: SettingsManager(),
+            settings: SettingsManager(sonioxKeyStore: SonioxKeyStore()),
             device: TestDevice(),
             uploadService: TestUploadService(),
             toastManager: ToastManager(),
@@ -1361,7 +1361,7 @@ struct ChatViewModelTests {
         let viewModel = ChatViewModel(
             auth: auth,
             chatService: chatService,
-            settings: SettingsManager(),
+            settings: SettingsManager(sonioxKeyStore: SonioxKeyStore()),
             device: TestDevice(),
             uploadService: TestUploadService(),
             toastManager: ToastManager(),
@@ -1400,7 +1400,7 @@ struct ChatViewModelTests {
         let viewModel = ChatViewModel(
             auth: auth,
             chatService: chatService,
-            settings: SettingsManager(),
+            settings: SettingsManager(sonioxKeyStore: SonioxKeyStore()),
             device: TestDevice(),
             uploadService: TestUploadService(),
             toastManager: ToastManager(),
@@ -1443,7 +1443,7 @@ struct ChatViewModelTests {
         let viewModel = ChatViewModel(
             auth: auth,
             chatService: chatService,
-            settings: SettingsManager(),
+            settings: SettingsManager(sonioxKeyStore: SonioxKeyStore()),
             device: TestDevice(),
             uploadService: TestUploadService(),
             toastManager: ToastManager(),
@@ -1483,7 +1483,7 @@ struct ChatViewModelTests {
         let viewModel = ChatViewModel(
             auth: auth,
             chatService: chatService,
-            settings: SettingsManager(),
+            settings: SettingsManager(sonioxKeyStore: SonioxKeyStore()),
             device: TestDevice(),
             uploadService: TestUploadService(),
             toastManager: toastManager,

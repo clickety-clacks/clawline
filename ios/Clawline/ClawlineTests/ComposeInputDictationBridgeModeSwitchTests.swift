@@ -106,6 +106,28 @@ struct ComposeInputDictationBridgeModeSwitchTests {
         bridge.apply(transcript: "DICT", baseSnapshot: .empty, originSessionKey: host.activeSessionKey)
         #expect(textView.attributedText.string == "seed DICT end")
     }
+
+    @Test("Subsequent transcript updates stay anchored at initial insertion point")
+    func transcriptUpdatesRemainAnchoredAtInitialInsertion() {
+        let host = BridgeModeTestHost()
+        let bridge = ComposeInputDictationBridge(host: host)
+        let textView = PastableTextView()
+
+        host.setText("start middle tail", for: host.activeSessionKey)
+        textView.attributedText = NSAttributedString(string: "start middle tail")
+        textView.selectedRange = NSRange(location: 6, length: 6) // "middle"
+
+        bridge.setComposeTextView(textView)
+        bridge.resetTranscriptState(for: host.activeSessionKey)
+
+        bridge.apply(transcript: "hi", baseSnapshot: .empty, originSessionKey: host.activeSessionKey)
+        #expect(textView.attributedText.string == "start hi tail")
+
+        // Server revision should continue updating the anchored dictated segment,
+        // not jump to the end of the document.
+        bridge.apply(transcript: "hi there", baseSnapshot: .empty, originSessionKey: host.activeSessionKey)
+        #expect(textView.attributedText.string == "start hi there tail")
+    }
 }
 
 @MainActor

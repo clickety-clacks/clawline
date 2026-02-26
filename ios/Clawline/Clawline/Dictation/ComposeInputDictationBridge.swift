@@ -219,6 +219,7 @@ final class ComposeInputDictationBridge {
     private func replaceText(in textView: UITextView, range: NSRange, with text: String) {
         guard let textRange = textRange(in: textView, nsRange: range) else { return }
         if let textView = textView as? PastableTextView {
+            textView.dictationIgnoreNextSelectionInteraction = true
             textView.dictationProgrammaticUpdateInFlight = true
             defer { textView.dictationProgrammaticUpdateInFlight = false }
             textView.replace(textRange, withText: text)
@@ -230,6 +231,7 @@ final class ComposeInputDictationBridge {
     private func appendText(_ textView: UITextView, _ text: String) {
         guard !text.isEmpty else { return }
         if let textView = textView as? PastableTextView {
+            textView.dictationIgnoreNextSelectionInteraction = true
             textView.dictationProgrammaticUpdateInFlight = true
             defer { textView.dictationProgrammaticUpdateInFlight = false }
             textView.insertText(text)

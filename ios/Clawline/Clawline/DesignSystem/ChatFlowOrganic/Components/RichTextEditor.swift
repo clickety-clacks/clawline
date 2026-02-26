@@ -190,14 +190,17 @@ struct RichTextEditor: UIViewRepresentable {
         func textViewDidChangeSelection(_ textView: UITextView) {
             guard textView.selectedRange.location != NSNotFound else { return }
             parent.selectionRange = textView.selectedRange
-            if let textView = textView as? PastableTextView,
-               !textView.dictationProgrammaticUpdateInFlight {
+            if let textView = textView as? PastableTextView {
+                if textView.dictationIgnoreNextSelectionInteraction {
+                    textView.dictationIgnoreNextSelectionInteraction = false
+                } else if !textView.dictationProgrammaticUpdateInFlight {
                 // Ignore terminal caret updates caused by programmatic transcript insertion.
                 // Treat only non-terminal cursor/selection moves as explicit user interaction.
-                let length = textView.attributedText.length
-                let range = textView.selectedRange
-                if range.length > 0 || range.location < length {
-                    parent.onUserInteraction?()
+                    let length = textView.attributedText.length
+                    let range = textView.selectedRange
+                    if range.length > 0 || range.location < length {
+                        parent.onUserInteraction?()
+                    }
                 }
             }
             if isApplyingLocalEdit {
@@ -348,6 +351,7 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
     var onEscapeLongPress: (() -> Void)?
     var onLayout: ((CGFloat) -> Void)?
     var dictationProgrammaticUpdateInFlight: Bool = false
+    var dictationIgnoreNextSelectionInteraction: Bool = false
     var isInputEnabled: Bool = true {
         didSet {
             guard oldValue != isInputEnabled else { return }

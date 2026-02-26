@@ -220,7 +220,8 @@ private struct DictationPanGestureInstaller: UIViewControllerRepresentable {
             let up = max(0, -event.translation.y)
             let down = max(0, event.translation.y)
             let verticalDominant = max(up, down) >= 1.25 * abs(event.translation.x)
-            let fastUpVelocity = event.velocity.y <= -220 && verticalDominant
+            let velocityDominantUp = abs(event.velocity.y) >= 1.15 * abs(event.velocity.x)
+            let fastUpVelocity = event.velocity.y <= -220 && velocityDominantUp
 
             if startedInEditableRegion {
                 if fastUpVelocity || (up >= 12 && elapsed < 0.25 && verticalDominant) {

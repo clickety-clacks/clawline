@@ -51,6 +51,50 @@ struct DictationCoordinatorTests {
         #expect(harness.analytics.stopEvents.contains(where: { $0.reason == "socket_drop" }))
     }
 
+    @Test("Stream switch while listening deterministically stops listening")
+    @MainActor
+    func streamSwitchStopsListeningDeterministically() async {
+        let harness = DictationTestHarness()
+        let coordinator = harness.makeCoordinator()
+
+        coordinator.updateContext(
+            sessionKey: harness.host.activeSessionKey,
+            composeIsEmpty: true,
+            textFieldFocused: false,
+            selectionLength: 0,
+            reduceMotionEnabled: false
+        )
+        coordinator.startStickyDictation()
+        #expect(coordinator.isListening)
+
+        let newSessionKey = "agent:main:test:switched"
+        harness.host.activeSessionKey = newSessionKey
+        coordinator.updateContext(
+            sessionKey: newSessionKey,
+            composeIsEmpty: true,
+            textFieldFocused: false,
+            selectionLength: 0,
+            reduceMotionEnabled: false
+        )
+
+        // If streaming events arrive while session keys are mismatched, we should still stop listening.
+        harness.client.emit(
+            .response(
+                SonioxStreamingResponse(
+                    tokens: [SonioxTranscriptToken(text: "hello", isFinal: false)],
+                    finished: false,
+                    errorCode: nil,
+                    errorMessage: nil
+                )
+            )
+        )
+
+        await waitUntil(timeoutMs: 1_500) { !coordinator.isListening }
+        #expect(!coordinator.isListening)
+        #expect(harness.analytics.stopEvents.contains(where: { $0.reason == "stream_switch" }))
+        #expect(harness.client.closeCalls.count >= 1)
+    }
+
     @Test("Token inactivity timeout stops dictation")
     @MainActor
     func inactivityTimeoutStopsSession() async {

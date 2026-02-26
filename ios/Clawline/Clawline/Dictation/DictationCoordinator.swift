@@ -328,7 +328,6 @@ final class DictationSession {
         reduceMotionEnabled: Bool,
         contextTerms: [String] = []
     ) {
-        let previousSession = currentSessionKey
         self.currentSessionKey = sessionKey
         self.composeIsEmpty = composeIsEmpty
         self.isTextFieldFocused = textFieldFocused
@@ -348,23 +347,8 @@ final class DictationSession {
            let originSessionKey,
            !originSessionKey.isEmpty,
            !sessionKey.isEmpty,
-           sessionKey != originSessionKey,
-           previousSession != sessionKey {
-            guard streamSwitchStopTask == nil else { return }
-            streamSwitchStopTask = Task { [weak self] in
-                guard let self else { return }
-                logDictation("DICTATION_STOP trace_id=DICTATION_STOP_STREAM_SWITCH caller=stream_switch_handler ts=\(Date().timeIntervalSince1970)")
-                await self.stopKeep(
-                    reason: "stream_switch",
-                    timeout: self.timing.stopKeepFinalizeTimeout,
-                    announceStop: false,
-                    collapseSurface: false,
-                    trigger: "stream_switch_context_update"
-                )
-                await MainActor.run {
-                    self.streamSwitchStopTask = nil
-                }
-            }
+           sessionKey != originSessionKey {
+            requestStreamSwitchStopIfNeeded(trigger: "stream_switch_context_update")
         }
 
         if !isDictationActive,
@@ -372,6 +356,28 @@ final class DictationSession {
            state != .keyPromptModal,
            state != .keyVerifyingModal {
             state = .idleSurfaceClosed
+        }
+    }
+
+    private func requestStreamSwitchStopIfNeeded(trigger: String) {
+        if let streamSwitchStopTask, !streamSwitchStopTask.isCancelled {
+            return
+        }
+        streamSwitchStopTask = Task { [weak self] in
+            guard let self else { return }
+            defer {
+                Task { @MainActor [weak self] in
+                    self?.streamSwitchStopTask = nil
+                }
+            }
+            logDictation("DICTATION_STOP trace_id=DICTATION_STOP_STREAM_SWITCH caller=stream_switch_handler trigger=\(trigger) ts=\(Date().timeIntervalSince1970)")
+            await self.stopKeep(
+                reason: "stream_switch",
+                timeout: self.timing.stopKeepFinalizeTimeout,
+                announceStop: false,
+                collapseSurface: false,
+                trigger: trigger
+            )
         }
     }
 
@@ -681,7 +687,12 @@ final class DictationSession {
         logDictation("DICTATION_ATTEMPT mode_committed \(attemptContext())")
 
         analytics.trackStart(mode: mode, sessionKey: currentSessionKey)
-        if prewarmGeneration != generation {
+        let needsFreshPhase2Connection =
+            prewarmGeneration != generation ||
+            streamingClient == nil ||
+            audioCapture == nil ||
+            (!isSocketConnected && prewarmConnectTask == nil)
+        if needsFreshPhase2Connection {
             beginPhase2Prewarm(apiKey: apiKey, generation: generation)
         }
         isPhase3StreamingAudio = true
@@ -1599,6 +1610,15 @@ final class DictationSession {
     }
 
     private func applyTranscriptIfNeeded(_ transcriptText: String) {
+        if isDictationActive,
+           let originSessionKey,
+           !originSessionKey.isEmpty,
+           !currentSessionKey.isEmpty,
+           originSessionKey != currentSessionKey {
+            logDictation("DICTATION_STOP stream_switch_guard_apply_mismatch origin=\(originSessionKey) current=\(currentSessionKey)")
+            requestStreamSwitchStopIfNeeded(trigger: "stream_switch_apply_guard")
+            return
+        }
         let wallTs = Date().timeIntervalSince1970
         logDictation("DICTATION_PERF ts=\(wallTs) event=apply_transcript_begin chars=\(transcriptText.count)")
         let startedAt = CFAbsoluteTimeGetCurrent()

@@ -103,6 +103,7 @@ private struct DictationPanGestureInstaller: UIViewControllerRepresentable {
         private var activeRegionInWindow: CGRect = .zero
         private weak var activeTextView: UITextView?
         private var activeTextViewWasScrollEnabled = false
+        private var activeTextViewWasSelectable = false
 
         init(
             shouldBegin: @escaping (CGPoint, CGPoint) -> Bool,
@@ -177,6 +178,7 @@ private struct DictationPanGestureInstaller: UIViewControllerRepresentable {
                 startedInEditableRegion = startsInEditableRegion(event.startLocation)
                 activeTextView = nearestTextView(at: event.startLocation, in: window)
                 activeTextViewWasScrollEnabled = activeTextView?.isScrollEnabled ?? false
+                activeTextViewWasSelectable = activeTextView?.isSelectable ?? false
                 intentLock = .undecided
                 promoteIntentIfNeeded(event)
                 if intentLock == .dictation {
@@ -205,9 +207,11 @@ private struct DictationPanGestureInstaller: UIViewControllerRepresentable {
         private func resetGestureState() {
             if let activeTextView {
                 activeTextView.isScrollEnabled = activeTextViewWasScrollEnabled
+                activeTextView.isSelectable = activeTextViewWasSelectable
             }
             activeTextView = nil
             activeTextViewWasScrollEnabled = false
+            activeTextViewWasSelectable = false
             intentLock = .undecided
             startedInEditableRegion = false
             gestureStartDate = .distantPast
@@ -245,9 +249,13 @@ private struct DictationPanGestureInstaller: UIViewControllerRepresentable {
 
         private func lockTextScrollForDictationIfNeeded() {
             guard let activeTextView else { return }
+            activeTextViewWasSelectable = activeTextView.isSelectable
             if activeTextView.isScrollEnabled {
                 activeTextView.isScrollEnabled = false
             }
+            // While dictation pan owns this touch, disable text selection movement so
+            // cursor/selection gestures cannot race the dictation drag path.
+            activeTextView.isSelectable = false
         }
 
         private func nearestTextView(at location: CGPoint, in window: UIWindow) -> UITextView? {

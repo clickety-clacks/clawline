@@ -8,6 +8,8 @@ import UIKit
 final class DateSeparatorCell: UICollectionViewCell {
     static let reuseIdentifier = "DateSeparatorCell"
     static let itemIdPrefix = "__date_separator__|"
+    static let topPadding: CGFloat = 24
+    static let bottomPadding: CGFloat = 8
 
     private let label = UILabel()
 
@@ -17,17 +19,17 @@ final class DateSeparatorCell: UICollectionViewCell {
         backgroundColor = .clear
 
         label.translatesAutoresizingMaskIntoConstraints = false
-        label.textAlignment = .center
+        label.textAlignment = .left
         label.numberOfLines = 1
-        label.font = UIFont.clawline(.senderName)
+        label.font = UIFont.clawline(.uiLabel, weight: .semibold)
         label.adjustsFontForContentSizeCategory = true
         contentView.addSubview(label)
 
         NSLayoutConstraint.activate([
-            label.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
-            label.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
-            label.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 16),
-            label.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -16)
+            label.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 12),
+            label.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -12),
+            label.topAnchor.constraint(equalTo: contentView.topAnchor, constant: Self.topPadding),
+            label.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -Self.bottomPadding)
         ])
     }
 
@@ -37,7 +39,7 @@ final class DateSeparatorCell: UICollectionViewCell {
 
     func configure(text: String, isDark: Bool) {
         let palette = ChatFlowUIKitTheme.palette(isDark: isDark)
-        label.textColor = palette.textMuted.withAlphaComponent(0.7)
+        label.textColor = palette.ink.withAlphaComponent(isDark ? 0.98 : 0.9)
         label.text = text
     }
 

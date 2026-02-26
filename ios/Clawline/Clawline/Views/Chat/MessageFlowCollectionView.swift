@@ -2262,8 +2262,11 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
 
         if DateSeparatorCell.isDateSeparatorItemID(id) {
             let rowWidth = effectiveContentWidth(metrics: metrics)
-            let lineHeight = UIFont.clawline(.senderName).lineHeight
-            return CGSize(width: rowWidth, height: ceil(lineHeight + 32))
+            let lineHeight = UIFont.clawline(.uiLabel, weight: .semibold).lineHeight
+            return CGSize(
+                width: rowWidth,
+                height: ceil(lineHeight + DateSeparatorCell.topPadding + DateSeparatorCell.bottomPadding)
+            )
         }
 
         // Handle typing indicator size

@@ -6,6 +6,11 @@ import Testing
 private let personalSessionKey = SessionKey.clawlineMain(userId: "user")
 private let adminSessionKey = SessionKey.admin
 
+@MainActor
+private final class HapticCounter {
+    var count = 0
+}
+
 struct ChatViewModelTests {
     @Test("Records last server message id for reconnects")
     @MainActor
@@ -1051,6 +1056,179 @@ struct ChatViewModelTests {
         }
         #expect(routedMessages.count == 1)
         #expect(routedMessages.first?.id == "s_admin")
+    }
+
+    @Test("Assistant incoming append fires light haptic when chat is visible and app is foreground")
+    @MainActor
+    func assistantIncomingAppendFiresHapticWhenVisibleAndForeground() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        _ = chatService.incomingMessages
+        _ = chatService.connectionState
+        _ = chatService.serviceEvents
+        let hapticCounter = HapticCounter()
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService(),
+            assistantIncomingHaptic: {
+                hapticCounter.count += 1
+            }
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        chatService.emit(
+            Message(
+                id: "s_haptic_visible",
+                role: .assistant,
+                content: "hello",
+                timestamp: Date(),
+                streaming: false,
+                attachments: [],
+                deviceId: nil,
+                sessionKey: personalSessionKey
+            )
+        )
+
+        for _ in 0..<50 {
+            if hapticCounter.count == 1 { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(hapticCounter.count == 1)
+    }
+
+    @Test("Assistant incoming append does not fire haptic when app is backgrounded")
+    @MainActor
+    func assistantIncomingAppendDoesNotFireHapticInBackground() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        _ = chatService.incomingMessages
+        _ = chatService.connectionState
+        _ = chatService.serviceEvents
+        let hapticCounter = HapticCounter()
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService(),
+            assistantIncomingHaptic: {
+                hapticCounter.count += 1
+            }
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        viewModel.handleSceneActiveStateChanged(isActive: false)
+        chatService.emit(
+            Message(
+                id: "s_haptic_background",
+                role: .assistant,
+                content: "hello",
+                timestamp: Date(),
+                streaming: false,
+                attachments: [],
+                deviceId: nil,
+                sessionKey: personalSessionKey
+            )
+        )
+
+        try await Task.sleep(for: .milliseconds(40))
+        #expect(hapticCounter.count == 0)
+    }
+
+    @Test("Assistant incoming haptic is debounced to one event per second")
+    @MainActor
+    func assistantIncomingHapticIsDebounced() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        _ = chatService.incomingMessages
+        _ = chatService.connectionState
+        _ = chatService.serviceEvents
+        let hapticCounter = HapticCounter()
+        var now = Date()
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService(),
+            nowProvider: { now },
+            assistantIncomingHaptic: {
+                hapticCounter.count += 1
+            }
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+
+        chatService.emit(
+            Message(
+                id: "s_haptic_1",
+                role: .assistant,
+                content: "one",
+                timestamp: Date(),
+                streaming: false,
+                attachments: [],
+                deviceId: nil,
+                sessionKey: personalSessionKey
+            )
+        )
+        for _ in 0..<50 {
+            if hapticCounter.count == 1 { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(hapticCounter.count == 1)
+
+        now = now.addingTimeInterval(0.2)
+        chatService.emit(
+            Message(
+                id: "s_haptic_2",
+                role: .assistant,
+                content: "two",
+                timestamp: Date(),
+                streaming: false,
+                attachments: [],
+                deviceId: nil,
+                sessionKey: personalSessionKey
+            )
+        )
+        try await Task.sleep(for: .milliseconds(40))
+        #expect(hapticCounter.count == 1)
+
+        now = now.addingTimeInterval(1.0)
+        chatService.emit(
+            Message(
+                id: "s_haptic_3",
+                role: .assistant,
+                content: "three",
+                timestamp: Date(),
+                streaming: false,
+                attachments: [],
+                deviceId: nil,
+                sessionKey: personalSessionKey
+            )
+        )
+        for _ in 0..<50 {
+            if hapticCounter.count == 2 { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(hapticCounter.count == 2)
     }
 
     @Test("Stream snapshot replaces metadata and falls back when active is removed")

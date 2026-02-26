@@ -27,6 +27,7 @@ struct RichTextEditor: UIViewRepresentable {
     var onEscape: (() -> Void)?
     var onEscapeLongPress: (() -> Void)?
     var onPasteImages: (([UIImage]) -> Void)?
+    var onUserInteraction: (() -> Void)?
     var onTextViewReady: ((PastableTextView) -> Void)?
     var trailingPadding: CGFloat = 20
 
@@ -189,6 +190,10 @@ struct RichTextEditor: UIViewRepresentable {
         func textViewDidChangeSelection(_ textView: UITextView) {
             guard textView.selectedRange.location != NSNotFound else { return }
             parent.selectionRange = textView.selectedRange
+            if let textView = textView as? PastableTextView,
+               !textView.dictationProgrammaticUpdateInFlight {
+                parent.onUserInteraction?()
+            }
             if isApplyingLocalEdit {
                 ensureCaretVisible(in: textView)
             }
@@ -198,6 +203,10 @@ struct RichTextEditor: UIViewRepresentable {
         func textView(_ textView: UITextView,
                       shouldChangeTextIn range: NSRange,
                       replacementText text: String) -> Bool {
+            if let textView = textView as? PastableTextView,
+               !textView.dictationProgrammaticUpdateInFlight {
+                parent.onUserInteraction?()
+            }
             if text == "\n" {
                 parent.onSubmit?()
                 return false
@@ -332,6 +341,7 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
     var onEscape: (() -> Void)?
     var onEscapeLongPress: (() -> Void)?
     var onLayout: ((CGFloat) -> Void)?
+    var dictationProgrammaticUpdateInFlight: Bool = false
     var isInputEnabled: Bool = true {
         didSet {
             guard oldValue != isInputEnabled else { return }

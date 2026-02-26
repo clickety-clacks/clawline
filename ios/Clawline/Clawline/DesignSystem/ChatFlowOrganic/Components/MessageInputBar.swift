@@ -593,7 +593,6 @@ struct MessageInputBar: View {
                 dictationSurface
                     .frame(height: 100, alignment: .top)
                     .opacity(motion.surfaceInteractiveProgress)
-                    .offset(y: (1 - motion.surfaceInteractiveProgress) * 100)
                     .clipped()
             }
 
@@ -790,6 +789,9 @@ struct MessageInputBar: View {
                         dictation.discardFromEscapeLongPress()
                     },
                     onPasteImages: onPasteImages,
+                    onUserInteraction: {
+                        dictation.noteComposeUserInteractionDuringDictation()
+                    },
                     onTextViewReady: { textView in
                         dictation.setComposeTextView(textView)
                     },

@@ -192,7 +192,13 @@ struct RichTextEditor: UIViewRepresentable {
             parent.selectionRange = textView.selectedRange
             if let textView = textView as? PastableTextView,
                !textView.dictationProgrammaticUpdateInFlight {
-                parent.onUserInteraction?()
+                // Ignore terminal caret updates caused by programmatic transcript insertion.
+                // Treat only non-terminal cursor/selection moves as explicit user interaction.
+                let length = textView.attributedText.length
+                let range = textView.selectedRange
+                if range.length > 0 || range.location < length {
+                    parent.onUserInteraction?()
+                }
             }
             if isApplyingLocalEdit {
                 ensureCaretVisible(in: textView)

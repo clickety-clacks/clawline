@@ -232,7 +232,6 @@ final class DictationSession {
     private var preDictationSnapshot: ComposeDraftSnapshot = .empty
     private var transcriptBuffer = DictationTranscriptBuffer()
     private var pendingTranscriptText: String?
-    private var lastAppliedTranscriptText: String = ""
     private var pendingActivationMode: DictationMode?
     private(set) var mode: DictationMode?
     private var sessionStartedAt: Date?
@@ -1586,7 +1585,6 @@ final class DictationSession {
     private func initializeOriginSessionContext(for sessionKey: String) {
         originSessionKey = sessionKey
         bridge.resetTranscriptState(for: sessionKey)
-        lastAppliedTranscriptText = ""
         logDictation("DICTATION_PERF ts=\(Date().timeIntervalSince1970) event=capture_snapshot_begin session=\(sessionKey)")
         preDictationSnapshot = bridge.captureSnapshot(for: sessionKey)
         logDictation("DICTATION_PERF ts=\(Date().timeIntervalSince1970) event=capture_snapshot_end session=\(sessionKey)")
@@ -1598,16 +1596,13 @@ final class DictationSession {
         originSessionKey = nil
         preDictationSnapshot = .empty
         pendingTranscriptText = nil
-        lastAppliedTranscriptText = ""
     }
 
     private func applyTranscriptIfNeeded(_ transcriptText: String) {
-        guard transcriptText != lastAppliedTranscriptText else { return }
         let wallTs = Date().timeIntervalSince1970
         logDictation("DICTATION_PERF ts=\(wallTs) event=apply_transcript_begin chars=\(transcriptText.count)")
         let startedAt = CFAbsoluteTimeGetCurrent()
         bridge.apply(transcript: transcriptText, baseSnapshot: preDictationSnapshot, originSessionKey: originSessionKey)
-        lastAppliedTranscriptText = transcriptText
         let elapsedMs = Int((CFAbsoluteTimeGetCurrent() - startedAt) * 1_000)
         logDictation("DICTATION_PERF ts=\(Date().timeIntervalSince1970) event=apply_transcript_end elapsedMs=\(elapsedMs)")
         logger.notice("[DICTATION-PERF] applyTranscriptIfNeeded: \(elapsedMs, privacy: .public)ms")

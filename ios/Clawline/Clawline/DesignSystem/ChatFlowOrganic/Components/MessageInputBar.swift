@@ -1086,9 +1086,8 @@ struct MessageInputBar: View {
 
     private func shouldBeginDictationPan(startLocation: CGPoint, velocity: CGPoint) -> Bool {
         if startsInEditableRegion(startLocation: startLocation) {
-            let fastUp = velocity.y < -280
-            let fastDown = velocity.y > 320 && motion.isSurfaceVisible
-            return fastUp || fastDown
+            if motion.isSurfaceVisible { return true }
+            return dictation.swipeActivationEnabled
         }
         if motion.isSurfaceVisible {
             return true

@@ -105,7 +105,11 @@ final class DictationMotion {
     var settleTarget: SurfaceTarget { session.surfaceTarget }
 
     var composerLiftY: CGFloat {
-        max(0, upDistance)
+        if originWasOpen {
+            // Track finger in both directions while surface is open.
+            return -rawDragY
+        }
+        return max(0, upDistance)
     }
 
     var pushGestureStartedWithSurfaceOpen: Bool {

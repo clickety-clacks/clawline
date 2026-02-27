@@ -211,7 +211,10 @@ final class DictationSession {
     }
 
     var micVisible: Bool {
-        !isSurfaceOpen
+        if state == .keyPromptModal || state == .keyVerifyingModal {
+            return true
+        }
+        return !isSurfaceOpen
     }
 
     var swipeActivationEnabled: Bool {
@@ -742,7 +745,9 @@ final class DictationSession {
 
     private func validatedAPIKeyOrNil() -> String? {
         let key = keyStore.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        return key.isEmpty ? nil : key
+        guard !key.isEmpty else { return nil }
+        guard keyStore.keyStatus == .validated else { return nil }
+        return key
     }
 
     private func attemptContext() -> String {

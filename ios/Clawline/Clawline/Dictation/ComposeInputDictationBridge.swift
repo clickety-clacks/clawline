@@ -74,11 +74,6 @@ final class ComposeInputDictationBridge {
         _ = selectionRange
     }
 
-    // Kept as temporary compatibility surface during endpoint-commit migration.
-    func noteUserInteraction(originSessionKey: String?) {
-        _ = originSessionKey
-    }
-
     func noteUserEdit(
         editedRangeUTF16: NSRange,
         replacementUTF16Length: Int,
@@ -145,21 +140,6 @@ final class ComposeInputDictationBridge {
             provisionalText: initialProvisionalText,
             suppressedUntilNextEndpoint: false,
             committedText: ""
-        )
-    }
-
-    // Kept as temporary compatibility surface during endpoint-commit migration.
-    func apply(transcript: String, baseSnapshot: ComposeDraftSnapshot, originSessionKey: String?) {
-        applySegmentUpdate(
-            DictationSegmentUpdate(
-                provisionalText: transcript,
-                committedSegments: [],
-                finished: false,
-                sawEndpoint: false,
-                hadAnyTokens: !transcript.isEmpty
-            ),
-            baseSnapshot: baseSnapshot,
-            originSessionKey: originSessionKey
         )
     }
 

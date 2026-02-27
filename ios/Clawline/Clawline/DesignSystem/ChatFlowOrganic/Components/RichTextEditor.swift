@@ -27,7 +27,7 @@ struct RichTextEditor: UIViewRepresentable {
     var onEscape: (() -> Void)?
     var onEscapeLongPress: (() -> Void)?
     var onPasteImages: (([UIImage]) -> Void)?
-    var onUserInteraction: (() -> Void)?
+    var onUserEdit: ((NSRange, Int) -> Void)?
     var onTextViewReady: ((PastableTextView) -> Void)?
     var trailingPadding: CGFloat = 20
 
@@ -193,14 +193,6 @@ struct RichTextEditor: UIViewRepresentable {
             if let textView = textView as? PastableTextView {
                 if textView.dictationIgnoreNextSelectionInteraction {
                     textView.dictationIgnoreNextSelectionInteraction = false
-                } else if !textView.dictationProgrammaticUpdateInFlight {
-                // Ignore terminal caret updates caused by programmatic transcript insertion.
-                // Treat only non-terminal cursor/selection moves as explicit user interaction.
-                    let length = textView.attributedText.length
-                    let range = textView.selectedRange
-                    if range.length > 0 || range.location < length {
-                        parent.onUserInteraction?()
-                    }
                 }
             }
             if isApplyingLocalEdit {
@@ -214,7 +206,7 @@ struct RichTextEditor: UIViewRepresentable {
                       replacementText text: String) -> Bool {
             if let textView = textView as? PastableTextView,
                !textView.dictationProgrammaticUpdateInFlight {
-                parent.onUserInteraction?()
+                parent.onUserEdit?(range, text.utf16.count)
             }
             if text == "\n" {
                 parent.onSubmit?()

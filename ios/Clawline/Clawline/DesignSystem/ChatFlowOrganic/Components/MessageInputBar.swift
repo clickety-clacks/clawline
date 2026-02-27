@@ -886,8 +886,11 @@ struct MessageInputBar: View {
                         dictation.discardFromEscapeLongPress()
                     },
                     onPasteImages: onPasteImages,
-                    onUserInteraction: {
-                        dictation.noteComposeUserInteractionDuringDictation()
+                    onUserEdit: { range, replacementUTF16Length in
+                        dictation.noteComposeUserEditDuringDictation(
+                            editedRangeUTF16: range,
+                            replacementUTF16Length: replacementUTF16Length
+                        )
                     },
                     onTextViewReady: { textView in
                         dictation.setComposeTextView(textView)

@@ -239,7 +239,7 @@ final class DictationSession {
     private var originSessionKey: String?
     private var preDictationSnapshot: ComposeDraftSnapshot = .empty
     private var transcriptBuffer = DictationTranscriptBuffer()
-    private var pendingTranscriptText: String?
+    private var pendingTranscriptUpdate: DictationSegmentUpdate?
     private var pendingActivationMode: DictationMode?
     private(set) var mode: DictationMode?
     private var sessionStartedAt: Date?
@@ -419,9 +419,13 @@ final class DictationSession {
         bridge.setPreferredSelectionRange(selectionRange)
     }
 
-    func noteComposeUserInteractionDuringDictation() {
+    func noteComposeUserEditDuringDictation(editedRangeUTF16: NSRange, replacementUTF16Length: Int) {
         guard isDictationActive else { return }
-        bridge.noteUserInteraction(originSessionKey: originSessionKey)
+        bridge.noteUserEdit(
+            editedRangeUTF16: editedRangeUTF16,
+            replacementUTF16Length: replacementUTF16Length,
+            originSessionKey: originSessionKey
+        )
     }
 
     func preparePhase1IfNeeded() {
@@ -1064,8 +1068,11 @@ final class DictationSession {
             }
 
             if !response.tokens.isEmpty || response.finished {
-                _ = transcriptBuffer.apply(tokens: response.tokens, finished: response.finished)
-                queueTranscriptApply(transcriptBuffer.renderedText, immediate: response.finished)
+                let update = transcriptBuffer.apply(tokens: response.tokens, finished: response.finished)
+                queueTranscriptApply(
+                    update,
+                    immediate: update.finished || update.sawEndpoint
+                )
             }
 
             if !response.tokens.isEmpty {
@@ -1622,9 +1629,16 @@ final class DictationSession {
         return Int(Date().timeIntervalSince(sessionStartedAt) * 1000)
     }
 
-    private func queueTranscriptApply(_ transcriptText: String, immediate: Bool) {
-        logDictation("DICTATION_PERF ts=\(Date().timeIntervalSince1970) event=queue_transcript_apply immediate=\(immediate) chars=\(transcriptText.count)")
-        pendingTranscriptText = transcriptText
+    private func queueTranscriptApply(_ update: DictationSegmentUpdate, immediate: Bool) {
+        logDictation(
+            "DICTATION_PERF ts=\(Date().timeIntervalSince1970) event=queue_transcript_apply immediate=\(immediate) " +
+            "committed_segments=\(update.committedSegments.count) provisional_chars=\(update.provisionalText.count) finished=\(update.finished)"
+        )
+        if let pending = pendingTranscriptUpdate {
+            pendingTranscriptUpdate = mergeTranscriptUpdates(pending, update)
+        } else {
+            pendingTranscriptUpdate = update
+        }
         if immediate {
             flushPendingTranscriptApply()
             return
@@ -1642,16 +1656,16 @@ final class DictationSession {
         logDictation("DICTATION_PERF ts=\(Date().timeIntervalSince1970) event=flush_transcript_apply_begin")
         transcriptApplyTask?.cancel()
         transcriptApplyTask = nil
-        guard let transcriptText = pendingTranscriptText else { return }
-        pendingTranscriptText = nil
-        applyTranscriptIfNeeded(transcriptText)
+        guard let update = pendingTranscriptUpdate else { return }
+        pendingTranscriptUpdate = nil
+        applyTranscriptIfNeeded(update)
         logDictation("DICTATION_PERF ts=\(Date().timeIntervalSince1970) event=flush_transcript_apply_end")
     }
 
     private func cancelPendingTranscriptApply() {
         transcriptApplyTask?.cancel()
         transcriptApplyTask = nil
-        pendingTranscriptText = nil
+        pendingTranscriptUpdate = nil
     }
 
     private func logDictation(_ message: String) {
@@ -1666,16 +1680,16 @@ final class DictationSession {
         preDictationSnapshot = bridge.captureSnapshot(for: sessionKey)
         logDictation("DICTATION_PERF ts=\(Date().timeIntervalSince1970) event=capture_snapshot_end session=\(sessionKey)")
         transcriptBuffer.reset()
-        pendingTranscriptText = nil
+        pendingTranscriptUpdate = nil
     }
 
     private func clearOriginSessionContext() {
         originSessionKey = nil
         preDictationSnapshot = .empty
-        pendingTranscriptText = nil
+        pendingTranscriptUpdate = nil
     }
 
-    private func applyTranscriptIfNeeded(_ transcriptText: String) {
+    private func applyTranscriptIfNeeded(_ update: DictationSegmentUpdate) {
         if isDictationActive,
            let originSessionKey,
            !originSessionKey.isEmpty,
@@ -1689,12 +1703,32 @@ final class DictationSession {
             return
         }
         let wallTs = Date().timeIntervalSince1970
-        logDictation("DICTATION_PERF ts=\(wallTs) event=apply_transcript_begin chars=\(transcriptText.count)")
+        logDictation(
+            "DICTATION_PERF ts=\(wallTs) event=apply_transcript_begin " +
+            "committed_segments=\(update.committedSegments.count) provisional_chars=\(update.provisionalText.count) finished=\(update.finished)"
+        )
         let startedAt = CFAbsoluteTimeGetCurrent()
-        bridge.apply(transcript: transcriptText, baseSnapshot: preDictationSnapshot, originSessionKey: originSessionKey)
+        bridge.applySegmentUpdate(
+            update,
+            baseSnapshot: preDictationSnapshot,
+            originSessionKey: originSessionKey
+        )
         let elapsedMs = Int((CFAbsoluteTimeGetCurrent() - startedAt) * 1_000)
         logDictation("DICTATION_PERF ts=\(Date().timeIntervalSince1970) event=apply_transcript_end elapsedMs=\(elapsedMs)")
         logger.notice("[DICTATION-PERF] applyTranscriptIfNeeded: \(elapsedMs, privacy: .public)ms")
+    }
+
+    private func mergeTranscriptUpdates(
+        _ lhs: DictationSegmentUpdate,
+        _ rhs: DictationSegmentUpdate
+    ) -> DictationSegmentUpdate {
+        DictationSegmentUpdate(
+            provisionalText: rhs.provisionalText,
+            committedSegments: lhs.committedSegments + rhs.committedSegments,
+            finished: lhs.finished || rhs.finished,
+            sawEndpoint: lhs.sawEndpoint || rhs.sawEndpoint,
+            hadAnyTokens: lhs.hadAnyTokens || rhs.hadAnyTokens
+        )
     }
 
     private func isPrewarmConnectStale(maxAge seconds: TimeInterval) -> Bool {

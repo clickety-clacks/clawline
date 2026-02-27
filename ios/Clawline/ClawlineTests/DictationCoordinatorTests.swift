@@ -186,6 +186,111 @@ struct DictationCoordinatorTests {
         }
     }
 
+    @Test("Endpoint commit updates flush immediately without coalescing delay")
+    @MainActor
+    func endpointCommitFlushesImmediately() async {
+        let harness = DictationTestHarness(
+            timing: DictationTiming(
+                maxSessionDuration: .seconds(30),
+                tokenInactivityTimeout: .seconds(10),
+                stopKeepFinalizeTimeout: .milliseconds(120),
+                sendFinalizeTimeout: .milliseconds(80),
+                composeUpdateCoalescingInterval: .milliseconds(600)
+            )
+        )
+        let coordinator = harness.makeCoordinator()
+
+        coordinator.updateContext(
+            sessionKey: harness.host.activeSessionKey,
+            composeIsEmpty: true,
+            textFieldFocused: false,
+            selectionLength: 0,
+            reduceMotionEnabled: false
+        )
+        coordinator.startStickyDictation()
+
+        harness.client.emit(
+            .response(
+                SonioxStreamingResponse(
+                    tokens: [
+                        SonioxTranscriptToken(text: "hello", isFinal: true),
+                        SonioxTranscriptToken(text: "<end>", isFinal: true)
+                    ],
+                    finished: false,
+                    errorCode: nil,
+                    errorMessage: nil
+                )
+            )
+        )
+
+        await waitUntil(timeoutMs: 150) {
+            harness.host.currentText(for: harness.host.activeSessionKey) == "hello"
+        }
+        #expect(harness.host.currentText(for: harness.host.activeSessionKey) == "hello")
+    }
+
+    @Test("Token activity resets inactivity timer while provisional updates are suppressed")
+    @MainActor
+    func suppressionStillResetsInactivityTimer() async {
+        let harness = DictationTestHarness(
+            timing: DictationTiming(
+                maxSessionDuration: .seconds(30),
+                tokenInactivityTimeout: .milliseconds(120),
+                stopKeepFinalizeTimeout: .milliseconds(50),
+                sendFinalizeTimeout: .milliseconds(40)
+            )
+        )
+        let coordinator = harness.makeCoordinator()
+
+        coordinator.updateContext(
+            sessionKey: harness.host.activeSessionKey,
+            composeIsEmpty: true,
+            textFieldFocused: false,
+            selectionLength: 0,
+            reduceMotionEnabled: false
+        )
+        coordinator.startStickyDictation()
+
+        harness.client.emit(
+            .response(
+                SonioxStreamingResponse(
+                    tokens: [SonioxTranscriptToken(text: "hello", isFinal: false)],
+                    finished: false,
+                    errorCode: nil,
+                    errorMessage: nil
+                )
+            )
+        )
+        await waitUntil {
+            harness.host.currentText(for: harness.host.activeSessionKey) == "hello"
+        }
+
+        coordinator.noteComposeUserEditDuringDictation(
+            editedRangeUTF16: NSRange(location: 0, length: 0),
+            replacementUTF16Length: 1
+        )
+
+        for idx in 0..<3 {
+            try? await Task.sleep(for: .milliseconds(70))
+            harness.client.emit(
+                .response(
+                    SonioxStreamingResponse(
+                        tokens: [SonioxTranscriptToken(text: "hello\(idx)", isFinal: false)],
+                        finished: false,
+                        errorCode: nil,
+                        errorMessage: nil
+                    )
+                )
+            )
+        }
+
+        #expect(!harness.analytics.stopEvents.contains(where: { $0.reason == "token_inactivity" }))
+
+        await waitUntil(timeoutMs: 1_500) {
+            harness.analytics.stopEvents.contains(where: { $0.reason == "token_inactivity" })
+        }
+    }
+
     @Test("Send while active uses timeout path and still sends current draft")
     @MainActor
     func sendWhileActiveTimeoutSendsCurrentText() async {

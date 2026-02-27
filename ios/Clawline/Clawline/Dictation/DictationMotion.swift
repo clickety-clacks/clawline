@@ -175,6 +175,7 @@ final class DictationMotion {
         let fastDown = predictedY > 120 || velocityY > 900
         let pullToSendArmed = isPullToSendArmed
 
+        let wasSurfaceOpenAtGestureStart = originWasOpen
         teardownGesture()
 
         if pullToSendArmed && context.pullToSendEligible {
@@ -183,7 +184,7 @@ final class DictationMotion {
             return .send
         }
 
-        if isSurfaceVisible {
+        if wasSurfaceOpenAtGestureStart {
             if session.isWalkieTalkieActive {
                 if originWasOpen {
                     pendingCommit = .init(target: .openPaused, reason: "walkie_release_keep_open")

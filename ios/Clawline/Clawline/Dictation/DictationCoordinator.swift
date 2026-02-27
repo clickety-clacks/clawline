@@ -402,8 +402,9 @@ final class DictationSession {
             logDictation("DICTATION_STOP trace_id=DICTATION_STOP_STREAM_SWITCH caller=stream_switch_handler trigger=\(trigger) ts=\(Date().timeIntervalSince1970)")
             await self.stopKeep(
                 reason: "stream_switch",
-                timeout: self.timing.stopKeepFinalizeTimeout,
+                timeout: .zero,
                 announceStop: false,
+                gracefulFinalize: false,
                 collapseSurface: false,
                 trigger: trigger
             )
@@ -1093,7 +1094,14 @@ final class DictationSession {
                state == .dictatingSticky || state == .dictatingWalkieTalkie {
                 let elapsed = elapsedSessionMilliseconds()
                 analytics.trackSocketDrop(mode: mode, elapsedMs: elapsed)
-                await pauseListening(reason: "socket_drop")
+                await stopKeep(
+                    reason: "socket_drop",
+                    timeout: .zero,
+                    announceStop: false,
+                    gracefulFinalize: false,
+                    collapseSurface: true,
+                    trigger: "socket_drop"
+                )
             }
         case .failed(let stage, let code, let message):
             logDictation("DICTATION_CONN soniox_event_failed stage=\(stage.rawValue) code=\(code ?? "nil") message=\(message) \(attemptContext())")

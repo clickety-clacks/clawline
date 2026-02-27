@@ -1285,6 +1285,9 @@ struct ChatViewModelTests {
 
         let firstService = TestChatService()
         firstService.streams = streams
+        _ = firstService.incomingMessages
+        _ = firstService.connectionState
+        _ = firstService.serviceEvents
         let firstViewModel = ChatViewModel(
             auth: auth,
             chatService: firstService,
@@ -1308,6 +1311,9 @@ struct ChatViewModelTests {
 
         let secondService = TestChatService()
         secondService.streams = streams
+        _ = secondService.incomingMessages
+        _ = secondService.connectionState
+        _ = secondService.serviceEvents
         let secondViewModel = ChatViewModel(
             auth: auth,
             chatService: secondService,
@@ -1342,6 +1348,9 @@ struct ChatViewModelTests {
             makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
             makeStreamSession(sessionKey: staleKey, displayName: "Parallelism", kind: "custom", orderIndex: 1, isBuiltIn: false),
         ]
+        _ = firstService.incomingMessages
+        _ = firstService.connectionState
+        _ = firstService.serviceEvents
         let firstViewModel = ChatViewModel(
             auth: auth,
             chatService: firstService,
@@ -1365,6 +1374,9 @@ struct ChatViewModelTests {
         secondService.streams = [
             makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
         ]
+        _ = secondService.incomingMessages
+        _ = secondService.connectionState
+        _ = secondService.serviceEvents
         let secondViewModel = ChatViewModel(
             auth: auth,
             chatService: secondService,
@@ -1377,6 +1389,10 @@ struct ChatViewModelTests {
         defer { secondViewModel.onDisappear() }
 
         await secondViewModel.onAppear()
+        for _ in 0..<50 {
+            if secondViewModel.stream(for: staleKey) != nil { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
         #expect(secondViewModel.stream(for: staleKey) != nil) // Restored from cache before reconciliation.
 
         secondService.emitServiceEvent(.streamSnapshot(secondService.streams))

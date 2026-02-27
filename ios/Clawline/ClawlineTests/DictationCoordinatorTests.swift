@@ -3,14 +3,17 @@ import Testing
 @testable import Clawline
 
 struct DictationCoordinatorTests {
-    @Test("Transcript buffer appends finals and replaces non-finals")
+    @Test("Transcript buffer emits endpoint commit updates")
     func transcriptBufferReconciliation() {
         let buffer = DictationTranscriptBuffer()
 
         let first = buffer.apply(tokens: [
             SonioxTranscriptToken(text: "hel", isFinal: false)
         ], finished: false)
-        #expect(first.text == "hel")
+        #expect(first.provisionalText == "hel")
+        #expect(first.committedSegments.isEmpty)
+        #expect(first.sawEndpoint == false)
+        #expect(first.hadAnyTokens == true)
 
         let second = buffer.apply(tokens: [
             SonioxTranscriptToken(text: "hello ", isFinal: true),
@@ -18,12 +21,34 @@ struct DictationCoordinatorTests {
             SonioxTranscriptToken(text: "<end>", isFinal: true),
             SonioxTranscriptToken(text: "<fin>", isFinal: true)
         ], finished: false)
-        #expect(second.text == "hello wor")
+        #expect(second.committedSegments == ["hello wor"])
+        #expect(second.provisionalText.isEmpty)
+        #expect(second.sawEndpoint == true)
+        #expect(second.hadAnyTokens == true)
 
         let third = buffer.apply(tokens: [
             SonioxTranscriptToken(text: "world", isFinal: false)
         ], finished: true)
-        #expect(third.text == "hello ")
+        #expect(third.committedSegments.isEmpty)
+        #expect(third.provisionalText == "world")
+        #expect(third.finished == true)
+    }
+
+    @Test("Transcript buffer emits multiple committed segments from one update")
+    func transcriptBufferCommitsMultipleSegmentsInOneUpdate() {
+        let buffer = DictationTranscriptBuffer()
+        let update = buffer.apply(tokens: [
+            SonioxTranscriptToken(text: "hello", isFinal: true),
+            SonioxTranscriptToken(text: "<end>", isFinal: true),
+            SonioxTranscriptToken(text: " world", isFinal: true),
+            SonioxTranscriptToken(text: "<end>", isFinal: true),
+            SonioxTranscriptToken(text: "!", isFinal: false)
+        ], finished: false)
+
+        #expect(update.committedSegments == ["hello", " world"])
+        #expect(update.provisionalText == "!")
+        #expect(update.sawEndpoint == true)
+        #expect(update.hadAnyTokens == true)
     }
 
     @Test("Socket drop forces stop_keep and exits active dictation")

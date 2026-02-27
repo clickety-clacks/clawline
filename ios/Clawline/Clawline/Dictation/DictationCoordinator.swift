@@ -1064,8 +1064,8 @@ final class DictationSession {
             }
 
             if !response.tokens.isEmpty || response.finished {
-                let snapshot = transcriptBuffer.apply(tokens: response.tokens, finished: response.finished)
-                queueTranscriptApply(snapshot.text, immediate: response.finished)
+                _ = transcriptBuffer.apply(tokens: response.tokens, finished: response.finished)
+                queueTranscriptApply(transcriptBuffer.renderedText, immediate: response.finished)
             }
 
             if !response.tokens.isEmpty {

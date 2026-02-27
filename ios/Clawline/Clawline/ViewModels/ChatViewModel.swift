@@ -323,6 +323,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
     private var messageFailures: [String: MessageFailure] = [:]
     private var presentationCache: [PresentationCacheKey: PresentationCacheEntry] = [:]
     private var tableParseStates: [String: StreamingTableParseState] = [:]
+    private var presentationCacheTrimCount: Int = 0
     private var uploadedAssetIds: [UUID: String] = [:]
     private var downloadedAssetData: [String: Data] = [:]
     private let streamDefaults = UserDefaults.standard
@@ -2297,7 +2298,11 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
     private func trimPresentationCache() {
         let activeIds = Set(messages.map(\.id))
         guard !activeIds.isEmpty else { return }
+        let previousCount = presentationCache.count
         presentationCache = presentationCache.filter { activeIds.contains($0.key.messageID) }
+        if presentationCache.count < previousCount {
+            presentationCacheTrimCount += 1
+        }
     }
 
     private func trimStreamingStates(maxEntries: Int = 120) {
@@ -2400,6 +2405,10 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
 
     func debugPresentationCacheSize() -> Int {
         presentationCache.count
+    }
+
+    func debugPresentationCacheTrimCount() -> Int {
+        presentationCacheTrimCount
     }
 
     func debugTableParseStateSize() -> Int {

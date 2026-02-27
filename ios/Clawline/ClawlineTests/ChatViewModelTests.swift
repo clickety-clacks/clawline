@@ -432,6 +432,103 @@ struct ChatViewModelTests {
         #expect(chatService.sendCallCount == 1)
     }
 
+    @Test("dictation session lifecycle changes must not affect baseline send/connect behavior")
+    @MainActor
+    func dictationLifecycleParityForSendConnectBehavior() async throws {
+        let baseline = try await runSendConnectScenario(dictationLifecycleEnabled: false)
+        let withDictationLifecycle = try await runSendConnectScenario(dictationLifecycleEnabled: true)
+
+        #expect(baseline == withDictationLifecycle)
+        #expect(baseline.sendCallCount == 1)
+        #expect(withDictationLifecycle.sendCallCount == 1)
+        #expect(baseline.notConnectedToastShown == false)
+        #expect(withDictationLifecycle.notConnectedToastShown == false)
+    }
+
+    @MainActor
+    private func runSendConnectScenario(dictationLifecycleEnabled: Bool) async throws -> SendConnectScenarioResult {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let toastManager = ToastManager()
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(sonioxKeyStore: SonioxKeyStore()),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: toastManager,
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        try await setReadyToSend(chatService: chatService, viewModel: viewModel)
+
+        let sendCommandPort: any SendCommandPort = viewModel
+        viewModel.inputContent = NSAttributedString(string: "parity-send")
+        var lifecycleCoordinator: DictationCoordinator?
+
+        if dictationLifecycleEnabled {
+            SonioxConfigurationStore.setAPIKey("test-key")
+            SonioxConfigurationStore.setKeyStatus(.validated)
+            defer {
+                SonioxConfigurationStore.setAPIKey(nil)
+                SonioxConfigurationStore.setKeyStatus(.missing)
+            }
+
+            let coordinator = DictationCoordinator(
+                bridge: ComposeInputDictationBridge(host: viewModel),
+                keyStore: SonioxKeyStore(verifier: AlwaysValidSonioxKeyVerifier()),
+                languageHintProvider: { "en" },
+                audioCaptureFactory: { NoopDictationAudioCapture() },
+                streamingClientFactory: { NoopSonioxStreamingClient() },
+                feedback: NoopDictationFeedback(),
+                timing: DictationTiming(
+                    maxSessionDuration: .seconds(10),
+                    tokenInactivityTimeout: .seconds(10),
+                    stopKeepFinalizeTimeout: .milliseconds(80),
+                    sendFinalizeTimeout: .milliseconds(60),
+                    composeUpdateCoalescingInterval: .milliseconds(30),
+                    phase2ConnectAttemptTimeout: .milliseconds(300)
+                )
+            )
+            lifecycleCoordinator = coordinator
+
+            coordinator.updateContext(
+                sessionKey: viewModel.activeSessionKey,
+                composeIsEmpty: false,
+                textFieldFocused: true,
+                selectionLength: 0,
+                reduceMotionEnabled: false
+            )
+            coordinator.startStickyDictation()
+            for _ in 0..<50 {
+                if coordinator.isDictationActive { break }
+                try await Task.sleep(for: .milliseconds(20))
+            }
+            #expect(coordinator.isDictationActive)
+
+            coordinator.handleSendTapped(sendAction: sendCommandPort.sendCommand)
+        } else {
+            sendCommandPort.sendCommand()
+        }
+
+        for _ in 0..<80 {
+            if chatService.sendCallCount >= 1 { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        lifecycleCoordinator?.handleAppBackgrounded()
+
+        return SendConnectScenarioResult(
+            connectCallCount: chatService.connectCallCount,
+            sendCallCount: chatService.sendCallCount,
+            lastSessionKey: chatService.lastSessionKey,
+            notConnectedToastShown: toastManager.debugMessages.contains("Could not send; not connected.")
+        )
+    }
+
     @Test("Manual reconnect triggers immediate connect attempt")
     @MainActor
     func manualReconnectIsImmediate() async throws {
@@ -1840,6 +1937,13 @@ struct ChatViewModelTests {
     }
 }
 
+private struct SendConnectScenarioResult: Equatable {
+    let connectCallCount: Int
+    let sendCallCount: Int
+    let lastSessionKey: String?
+    let notConnectedToastShown: Bool
+}
+
 @MainActor
 private final class TestAuthManager: AuthManaging {
     var isAuthenticated: Bool = false
@@ -2110,4 +2214,54 @@ private func makeStreamSession(
 
 private struct TestDevice: DeviceIdentifying {
     let deviceId: String = "device"
+}
+
+private final class AlwaysValidSonioxKeyVerifier: SonioxKeyVerifying {
+    func verify(apiKey: String) async -> Bool {
+        let _ = apiKey
+        return true
+    }
+}
+
+private final class NoopDictationAudioCapture: DictationAudioCapturing {
+    let frameStream = AsyncStream<Data> { _ in }
+    let levelStream = AsyncStream<Float> { _ in }
+    let eventStream = AsyncStream<DictationAudioCaptureEvent> { _ in }
+
+    func start() throws {}
+    func stop() {}
+}
+
+private final class NoopSonioxStreamingClient: SonioxStreamingClienting {
+    let events = AsyncStream<SonioxStreamingEvent> { _ in }
+
+    func connect(config: SonioxStreamingConfig) async throws {
+        let _ = config
+    }
+
+    func sendAudioFrame(_ frame: Data) async throws {
+        let _ = frame
+    }
+
+    func sendFinalize() async throws {}
+
+    func close(code: URLSessionWebSocketTask.CloseCode, reason: String?, caller: String) {
+        let _ = code
+        let _ = reason
+        let _ = caller
+    }
+}
+
+@MainActor
+private final class NoopDictationFeedback: DictationFeedbackProviding {
+    var isVoiceOverRunning: Bool = false
+    var isReduceMotionEnabled: Bool = false
+
+    func announce(_ message: String) {
+        let _ = message
+    }
+
+    func impactLight() {}
+    func notifySuccess() {}
+    func notifyError() {}
 }

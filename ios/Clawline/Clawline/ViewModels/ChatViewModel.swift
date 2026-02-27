@@ -16,6 +16,16 @@ enum SendButtonConnectionState: Equatable {
     case disconnected
 }
 
+@MainActor
+protocol SendCommandPort: AnyObject {
+    func sendCommand()
+}
+
+@MainActor
+protocol ChatRuntimePort: AnyObject {
+    var sendButtonConnectionState: SendButtonConnectionState { get }
+}
+
 protocol ChatViewModelHosting: AnyObject {
     func handleSceneDidBecomeActive()
 }
@@ -31,7 +41,7 @@ protocol ChatViewModelHosting: AnyObject {
 
 @Observable
 @MainActor
-final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
+final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, SendCommandPort, ChatRuntimePort {
     private let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "MessagePipeline")
     private let instanceId = UUID().uuidString
     private static let richDocumentMimeTypesNeedingPayload: Set<String> = [
@@ -588,6 +598,10 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
         case .unavailable:
             toastManager.show("This stream is unavailable. Switch streams and try again.")
         }
+    }
+
+    func sendCommand() {
+        send()
     }
 
     private func beginSend(content: String,

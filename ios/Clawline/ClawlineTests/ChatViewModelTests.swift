@@ -340,6 +340,98 @@ struct ChatViewModelTests {
         #expect(state == .disconnected)
     }
 
+    @Test("Send command port matches direct send behavior")
+    @MainActor
+    func sendCommandPortMatchesDirectSendBehavior() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(sonioxKeyStore: SonioxKeyStore()),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        try await setReadyToSend(chatService: chatService, viewModel: viewModel)
+
+        viewModel.inputContent = NSAttributedString(string: "direct send")
+        viewModel.send()
+        for _ in 0..<50 {
+            if chatService.sendCallCount >= 1 { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(chatService.sendCallCount == 1)
+
+        let sendCommandPort: any SendCommandPort = viewModel
+        viewModel.inputContent = NSAttributedString(string: "port send")
+        sendCommandPort.sendCommand()
+        for _ in 0..<50 {
+            if chatService.sendCallCount >= 2 { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(chatService.sendCallCount == 2)
+    }
+
+    @Test("Chat runtime port reflects connection-state send gating")
+    @MainActor
+    func chatRuntimePortReflectsConnectionStateSendGating() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let toastManager = ToastManager()
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(sonioxKeyStore: SonioxKeyStore()),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: toastManager,
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        let runtimePort: any ChatRuntimePort = viewModel
+        let sendCommandPort: any SendCommandPort = viewModel
+
+        #expect(runtimePort.sendButtonConnectionState == .disconnected)
+        viewModel.inputContent = NSAttributedString(string: "blocked")
+        sendCommandPort.sendCommand()
+        #expect(toastManager.debugMessages.contains("Could not send; not connected."))
+        #expect(chatService.sendCallCount == 0)
+
+        chatService.emitConnectionState(.connected)
+        chatService.emitServiceEvent(.sessionInfo(
+            SessionInfo(
+                userId: "user",
+                isAdmin: false,
+                dmScope: "dm",
+                sessionKeys: [personalSessionKey]
+            )
+        ))
+        for _ in 0..<50 {
+            if runtimePort.sendButtonConnectionState == .connected { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(runtimePort.sendButtonConnectionState == .connected)
+
+        viewModel.inputContent = NSAttributedString(string: "allowed")
+        sendCommandPort.sendCommand()
+        for _ in 0..<50 {
+            if chatService.sendCallCount >= 1 { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(chatService.sendCallCount == 1)
+    }
+
     @Test("Manual reconnect triggers immediate connect attempt")
     @MainActor
     func manualReconnectIsImmediate() async throws {
@@ -1783,6 +1875,7 @@ private final class TestChatService: ChatServicing {
     private(set) var lastSentAttachments: [WireAttachment] = []
     private(set) var lastSentId: String?
     private(set) var lastSessionKey: String?
+    private(set) var sendCallCount: Int = 0
     private(set) var connectCallCount: Int = 0
     var emitConnectedOnConnect: Bool = true
     var emitInitialDisconnectedState: Bool = true
@@ -1831,6 +1924,7 @@ private final class TestChatService: ChatServicing {
         if let sendError {
             throw sendError
         }
+        sendCallCount += 1
         lastSentId = id
         lastSentAttachments = attachments
         lastSessionKey = sessionKey

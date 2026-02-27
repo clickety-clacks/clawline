@@ -864,6 +864,8 @@ struct ChatView: View {
                                  isKeyboardVisible: Bool,
                                  layoutKey: ChatLayoutKey,
                                  streamSelectorMaxHeight: CGFloat) -> some View {
+        let sendCommandPort: any SendCommandPort = viewModel
+        let chatRuntimePort: any ChatRuntimePort = viewModel
         let sessionKey = viewModel.uiSelectedSessionKey
         let effectiveSessionKeys = effectiveStreams.map(\.sessionKey)
         let state = scrollButtonState(for: sessionKey)
@@ -931,15 +933,13 @@ struct ChatView: View {
                 resetToken: viewModel.inputResetToken,
                 canSend: viewModel.canSend,
                 isSending: viewModel.isSending,
-                connectionState: viewModel.sendButtonConnectionState,
+                connectionState: chatRuntimePort.sendButtonConnectionState,
                 focusTrigger: focusRequestID,
                 isTextFieldFocused: isInputFocused,
                 bottomSafeAreaInset: geometry.safeAreaInsets.bottom,
                 isKeyboardVisible: isKeyboardVisible,
                 onSend: {
-                    dictationCoordinator.handleSendTapped {
-                        viewModel.send()
-                    }
+                    dictationCoordinator.handleSendTapped(sendAction: sendCommandPort.sendCommand)
                 },
                 onCancel: { viewModel.cancelSend() },
                 onReconnect: { viewModel.reconnect() },

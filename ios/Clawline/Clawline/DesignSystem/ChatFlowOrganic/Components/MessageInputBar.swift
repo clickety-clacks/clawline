@@ -73,6 +73,7 @@ struct DictationPanGestureInstaller: UIViewControllerRepresentable {
     var shouldBegin: (CGPoint, CGPoint) -> Bool
     var startsInEditableRegion: (CGPoint) -> Bool
     var isSurfaceOpen: () -> Bool
+    var scenePhase: ScenePhase
     var onChanged: (DictationPanEvent) -> Void
     var onEnded: (DictationPanEvent, Bool) -> Void
 
@@ -99,6 +100,7 @@ struct DictationPanGestureInstaller: UIViewControllerRepresentable {
         context.coordinator.isSurfaceOpen = isSurfaceOpen
         context.coordinator.onChanged = onChanged
         context.coordinator.onEnded = onEnded
+        context.coordinator.handleScenePhaseChanged(scenePhase)
         context.coordinator.attachIfNeeded(from: uiViewController)
     }
 
@@ -164,6 +166,7 @@ struct DictationPanGestureInstaller: UIViewControllerRepresentable {
         private var activeTextView: UITextView?
         private var activeTextViewWasScrollEnabled = false
         private var activeTextViewWasSelectable = false
+        private var lastScenePhase: ScenePhase?
 
         init(
             shouldBegin: @escaping (CGPoint, CGPoint) -> Bool,
@@ -209,6 +212,14 @@ struct DictationPanGestureInstaller: UIViewControllerRepresentable {
             resetGestureState()
             attachedView?.removeGestureRecognizer(pan)
             attachedView = nil
+        }
+
+        func handleScenePhaseChanged(_ scenePhase: ScenePhase) {
+            guard scenePhase != lastScenePhase else { return }
+            lastScenePhase = scenePhase
+            if scenePhase == .background {
+                resetGestureState()
+            }
         }
 
         func updateActiveRegion(from installerViewController: InstallerViewController) {
@@ -406,6 +417,7 @@ struct MessageInputBar: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.settingsManager) private var settings
     @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
+    @Environment(\.scenePhase) private var scenePhase
     @Environment(\.openURL) private var openURL
     @Binding var content: NSAttributedString
     @Binding var selectionRange: NSRange
@@ -701,6 +713,7 @@ struct MessageInputBar: View {
                 shouldBegin: shouldBeginDictationPan(startLocation:velocity:),
                 startsInEditableRegion: startsInEditableRegion(startLocation:),
                 isSurfaceOpen: { motion.isSurfaceVisible },
+                scenePhase: scenePhase,
                 onChanged: { event in
                     handlePushChanged(
                         startLocation: event.startLocation,

@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import SwiftUI
 import UIKit
 import Testing
 @testable import Clawline
@@ -47,6 +48,22 @@ struct MessageInputBarPanIntentTests {
         #expect(textView.isSelectable == false)
 
         coordinator.prepareForInstallerDisappear()
+        #expect(textView.isSelectable == true)
+        #expect(textView.isScrollEnabled == true)
+    }
+
+    @MainActor
+    @Test("Text selection lock restores when app backgrounds mid-drag")
+    func textSelectionLockRestoresWhenAppBackgrounds() {
+        let coordinator = DictationPanGestureInstaller.debugCoordinatorForTests()
+        let textView = UITextView()
+        textView.isSelectable = true
+        textView.isScrollEnabled = true
+
+        coordinator.debugPrimeTextViewLock(textView)
+        #expect(textView.isSelectable == false)
+
+        coordinator.handleScenePhaseChanged(.background)
         #expect(textView.isSelectable == true)
         #expect(textView.isScrollEnabled == true)
     }

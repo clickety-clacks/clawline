@@ -851,8 +851,11 @@ final class DictationSession {
                 if let lastError {
                     self.logDictation("DICTATION_CONN phase2_connect_final_failed error=\(lastError.localizedDescription) \(self.attemptContext())")
                 }
-                self.enterError(message: "Dictation failed", source: "phase2_connect")
             }
+            await self.handleTransportFailure(
+                stage: .connect,
+                message: lastError?.localizedDescription ?? "phase2_connect_failed"
+            )
         }
     }
 
@@ -1176,14 +1179,23 @@ final class DictationSession {
 
     private func handleTransportFailure(stage: SonioxStreamingClientStage, message: String) async {
         guard isDictationActive || prewarmConnectTask != nil else { return }
-        if prewarmConnectTask != nil, suppressedPrewarmFailureBudget > 0 {
+        if stage == .connect, prewarmConnectTask != nil, suppressedPrewarmFailureBudget > 0 {
             suppressedPrewarmFailureBudget -= 1
             logDictation("DICTATION_COORD suppressed_prewarm_failure stage=\(stage.rawValue) message=\(message) \(attemptContext())")
             return
         }
         logDictation("DICTATION_STOP trace_id=DICTATION_STOP_TRANSPORT_FAILURE caller=handleTransportFailure ts=\(Date().timeIntervalSince1970) stage=\(stage.rawValue) message=\(message) \(attemptContext())")
         analytics.trackError(errorCode: nil, stage: stage.rawValue)
+        let shouldTrackTransportStop =
+            state == .dictatingSticky ||
+            state == .dictatingWalkieTalkie ||
+            state == .dictatingPaused ||
+            state == .finalizing
+        let stopDuration = elapsedSessionMilliseconds()
         await pauseListening(reason: "transport_failure")
+        if shouldTrackTransportStop {
+            analytics.trackStop(reason: "transport_failure", durationMs: stopDuration)
+        }
         guard shouldPresentDictationErrorSurface else {
             logDictation("DICTATION_COORD transport_failure_suppressed_to_idle stage=\(stage.rawValue) message=\(message) \(attemptContext())")
             errorMessage = nil

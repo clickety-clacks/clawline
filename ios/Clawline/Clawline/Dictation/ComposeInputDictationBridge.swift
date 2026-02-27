@@ -174,7 +174,13 @@ final class ComposeInputDictationBridge {
             }
             let suffix = String(transcript.dropFirst(state.previousServerTranscript.count))
             if !suffix.isEmpty {
-                appendText(textView, suffix)
+                // Keep dictated text anchored to the original insertion segment.
+                // Do not rely on the current caret, which may move due to UIKit/SwiftUI focus churn.
+                let appendLocation = min(
+                    textView.attributedText.length,
+                    max(0, state.insertionLocation + state.previousTranscriptUTF16Length)
+                )
+                replaceText(in: textView, range: NSRange(location: appendLocation, length: 0), with: suffix)
                 state.previousServerTranscript = transcript
                 state.previousTranscriptUTF16Length = transcript.utf16.count
                 // Immediate return to correction mode after one successful append.
@@ -226,18 +232,6 @@ final class ComposeInputDictationBridge {
             return
         }
         textView.replace(textRange, withText: text)
-    }
-
-    private func appendText(_ textView: UITextView, _ text: String) {
-        guard !text.isEmpty else { return }
-        if let textView = textView as? PastableTextView {
-            textView.dictationIgnoreNextSelectionInteraction = true
-            textView.dictationProgrammaticUpdateInFlight = true
-            defer { textView.dictationProgrammaticUpdateInFlight = false }
-            textView.insertText(text)
-            return
-        }
-        textView.insertText(text)
     }
 
     private func textRange(in textView: UITextView, nsRange: NSRange) -> UITextRange? {

@@ -26,6 +26,49 @@ private struct DictationPanEvent {
     let velocity: CGPoint
 }
 
+enum DictationPanIntentDecision: Equatable {
+    case undecided
+    case dictation
+    case textEditing
+}
+
+struct DictationPanIntentContext {
+    let startedInEditableRegion: Bool
+    let isSurfaceOpen: Bool
+    let elapsed: TimeInterval
+    let translation: CGPoint
+    let velocity: CGPoint
+}
+
+func classifyDictationPanIntent(_ context: DictationPanIntentContext) -> DictationPanIntentDecision {
+    let up = max(0, -context.translation.y)
+    let down = max(0, context.translation.y)
+    let verticalDominant = max(up, down) >= 1.25 * abs(context.translation.x)
+    let velocityDominantUp = abs(context.velocity.y) >= 1.15 * abs(context.velocity.x)
+    let fastUpVelocity = context.velocity.y <= -220 && velocityDominantUp
+
+    if context.startedInEditableRegion {
+        if context.isSurfaceOpen && verticalDominant && down >= 6 {
+            return .dictation
+        }
+        if fastUpVelocity || (up >= 22 && context.elapsed < 0.18 && verticalDominant) {
+            return .dictation
+        }
+        // Prefer text editing quickly when a touch starts in the editor and does not
+        // clearly indicate dictation intent. This preserves tap-to-focus behavior.
+        if context.elapsed >= 0.06 || down >= 8 || abs(context.translation.x) >= 20 || up >= 8 {
+            return .textEditing
+        }
+        return .undecided
+    }
+
+    if verticalDominant && (up >= 6 || (context.isSurfaceOpen && down >= 6)) {
+        return .dictation
+    }
+
+    return .undecided
+}
+
 private struct DictationPanGestureInstaller: UIViewControllerRepresentable {
     var shouldBegin: (CGPoint, CGPoint) -> Bool
     var startsInEditableRegion: (CGPoint) -> Bool
@@ -220,30 +263,25 @@ private struct DictationPanGestureInstaller: UIViewControllerRepresentable {
         private func promoteIntentIfNeeded(_ event: DictationPanEvent) {
             guard intentLock == .undecided else { return }
 
-            let elapsed = Date().timeIntervalSince(gestureStartDate)
-            let up = max(0, -event.translation.y)
-            let down = max(0, event.translation.y)
-            let verticalDominant = max(up, down) >= 1.25 * abs(event.translation.x)
-            let velocityDominantUp = abs(event.velocity.y) >= 1.15 * abs(event.velocity.x)
-            let fastUpVelocity = event.velocity.y <= -220 && velocityDominantUp
-
-            if startedInEditableRegion {
-                if fastUpVelocity || (up >= 12 && elapsed < 0.25 && verticalDominant) {
-                    intentLock = .dictation
-                    lockTextScrollForDictationIfNeeded()
-                    return
-                }
-                if elapsed >= 0.22 || down >= 10 || abs(event.translation.x) >= 20 {
-                    intentLock = .textEditing
-                    pan.isEnabled = false
-                    pan.isEnabled = true
-                }
-                return
-            }
-
-            if verticalDominant && (up >= 6 || (isSurfaceOpen() && down >= 6)) {
+            let decision = classifyDictationPanIntent(
+                .init(
+                    startedInEditableRegion: startedInEditableRegion,
+                    isSurfaceOpen: isSurfaceOpen(),
+                    elapsed: Date().timeIntervalSince(gestureStartDate),
+                    translation: event.translation,
+                    velocity: event.velocity
+                )
+            )
+            switch decision {
+            case .dictation:
                 intentLock = .dictation
                 lockTextScrollForDictationIfNeeded()
+            case .textEditing:
+                intentLock = .textEditing
+                pan.isEnabled = false
+                pan.isEnabled = true
+            case .undecided:
+                break
             }
         }
 
@@ -984,12 +1022,15 @@ struct MessageInputBar: View {
 
         if motion.gesturePhase == .idle {
             gestureSettleTask?.cancel()
-            motion.gestureBegan(originWasOpen: motion.isSurfaceVisible)
+            motion.gestureBegan(
+                originWasOpen: motion.isSurfaceVisible,
+                swipeActivationEnabled: dictation.swipeActivationEnabled
+            )
             dictation.setComposeSelectionRange(selectionRange)
             dictation.beginGesturePrewarm()
         }
 
-        if !motion.isSurfaceVisible && !dictation.swipeActivationEnabled {
+        if !motion.isSurfaceVisible && !motion.swipeActivationEnabledAtGestureStart {
             dictation.cancelGesturePrewarmIfNeeded(trigger: "push_changed_activation_disabled")
             withAnimation(settleSpring) {
                 motion.gestureCancelled()
@@ -1060,7 +1101,6 @@ struct MessageInputBar: View {
                 velocityY: velocity.y,
                 context: .init(
                     pullToSendEligible: canSendNow,
-                    isSwipeActivationEnabled: dictation.swipeActivationEnabled,
                     verticallyDominant: verticalDominant
                 )
             )

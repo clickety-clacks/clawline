@@ -29,6 +29,7 @@ struct DictationTiming {
     var stopKeepFinalizeTimeout: Duration = .milliseconds(1_200)
     var sendFinalizeTimeout: Duration = .milliseconds(1_200)
     var composeUpdateCoalescingInterval: Duration = .milliseconds(75)
+    var phase2ConnectAttemptTimeout: Duration = .seconds(3)
 }
 
 @MainActor
@@ -102,6 +103,10 @@ final class DictationSession {
         case gestureAbandon = "gesture_abandon"
         case phase1IdleTimeout = "phase1_idle_timeout"
         case viewInactive = "view_inactive"
+    }
+
+    private enum Phase2ConnectTimeoutError: Error {
+        case timeout
     }
 
     private let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "DictationCoordinator")
@@ -259,6 +264,7 @@ final class DictationSession {
     private var transcriptApplyTask: Task<Void, Never>?
     private var phase1IdleTeardownTask: Task<Void, Never>?
     private var prewarmConnectTask: Task<Void, Never>?
+    private var prewarmConnectStartedAt: Date?
     private var pauseListeningInFlight = false
     private var activationGeneration: UInt64 = 0
     private var prewarmGeneration: UInt64?
@@ -276,6 +282,26 @@ final class DictationSession {
         let components = duration.components
         let attoseconds = Double(components.attoseconds) / 1_000_000_000_000_000_000
         return Double(components.seconds) + attoseconds
+    }
+
+    private func runWithTimeout<T>(
+        timeout: Duration,
+        operation: @escaping @Sendable () async throws -> T
+    ) async throws -> T {
+        try await withThrowingTaskGroup(of: T.self) { group in
+            group.addTask {
+                try await operation()
+            }
+            group.addTask {
+                try await Task.sleep(for: timeout)
+                throw Phase2ConnectTimeoutError.timeout
+            }
+            defer { group.cancelAll() }
+            guard let result = try await group.next() else {
+                throw CancellationError()
+            }
+            return result
+        }
     }
 
     private func cancelMaxDurationTimer(reason: String, caller: String) {
@@ -424,6 +450,7 @@ final class DictationSession {
         prewarmGeneration = nil
         prewarmConnectTask?.cancel()
         prewarmConnectTask = nil
+        prewarmConnectStartedAt = nil
         bufferedAudioFrames.removeAll(keepingCapacity: false)
         isPhase3StreamingAudio = false
         isSocketConnected = false
@@ -691,8 +718,14 @@ final class DictationSession {
             prewarmGeneration != generation ||
             streamingClient == nil ||
             audioCapture == nil ||
-            (!isSocketConnected && prewarmConnectTask == nil)
+            (!isSocketConnected && prewarmConnectTask == nil) ||
+            (!isSocketConnected && isPrewarmConnectStale(maxAge: 3))
         if needsFreshPhase2Connection {
+            if isPrewarmConnectStale(maxAge: 3) {
+                prewarmConnectTask?.cancel()
+                prewarmConnectTask = nil
+                prewarmConnectStartedAt = nil
+            }
             beginPhase2Prewarm(apiKey: apiKey, generation: generation)
         }
         isPhase3StreamingAudio = true
@@ -766,6 +799,7 @@ final class DictationSession {
             }
         }
 
+        prewarmConnectStartedAt = Date()
         prewarmConnectTask = Task { [weak self] in
             guard let self else { return }
             var lastError: Error?
@@ -773,18 +807,21 @@ final class DictationSession {
                 do {
                     logDictation("DICTATION_CONN phase2_connect_begin connect_attempt=\(attempt) \(attemptContext())")
                     try capture.start()
-                    try await client.connect(
-                        config: SonioxStreamingConfig(
-                            apiKey: apiKey,
-                            languageHint: languageHintProvider(),
-                            contextTerms: self.contextTerms
+                    try await runWithTimeout(timeout: timing.phase2ConnectAttemptTimeout) {
+                        try await client.connect(
+                            config: SonioxStreamingConfig(
+                                apiKey: apiKey,
+                                languageHint: self.languageHintProvider(),
+                                contextTerms: self.contextTerms
+                            )
                         )
-                    )
+                    }
                     await MainActor.run {
                         guard self.prewarmGeneration == generation else { return }
                         self.isSocketConnected = true
                         self.logDictation("DICTATION_CONN phase2_connect_success connect_attempt=\(attempt) \(self.attemptContext())")
                         self.prewarmConnectTask = nil
+                        self.prewarmConnectStartedAt = nil
                         self.suppressedPrewarmFailureBudget = 0
                         self.flushBufferedFramesIfPossible()
                     }
@@ -808,6 +845,7 @@ final class DictationSession {
             await MainActor.run {
                 guard self.prewarmGeneration == generation else { return }
                 self.prewarmConnectTask = nil
+                self.prewarmConnectStartedAt = nil
                 self.suppressedPrewarmFailureBudget = 0
                 self.closeAndResetRealtimePipeline(closeReason: "phase2_connect_failed")
                 if let lastError {
@@ -1375,6 +1413,7 @@ final class DictationSession {
         streamSwitchStopTask = nil
         transcriptApplyTask = nil
         prewarmConnectTask = nil
+        prewarmConnectStartedAt = nil
 
         if !keepAudioForPausedWaveform {
             audioCapture = nil
@@ -1441,6 +1480,7 @@ final class DictationSession {
         flushPendingTranscriptApply()
         prewarmConnectTask?.cancel()
         prewarmConnectTask = nil
+        prewarmConnectStartedAt = nil
         suppressedPrewarmFailureBudget = 0
 
         await finalizeForPendingStopAction(reason: reason, timeout: timing.sendFinalizeTimeout)
@@ -1527,6 +1567,7 @@ final class DictationSession {
         logDictation("DICTATION_CONN close_and_reset reason=\(closeReason) \(attemptContext())")
         prewarmConnectTask?.cancel()
         prewarmConnectTask = nil
+        prewarmConnectStartedAt = nil
         audioCapture?.stop()
         streamingClient?.close(
             code: .normalClosure,
@@ -1616,6 +1657,9 @@ final class DictationSession {
            !currentSessionKey.isEmpty,
            originSessionKey != currentSessionKey {
             logDictation("DICTATION_STOP stream_switch_guard_apply_mismatch origin=\(originSessionKey) current=\(currentSessionKey)")
+            if state == .dictatingSticky || state == .dictatingWalkieTalkie {
+                state = .stoppingKeep
+            }
             requestStreamSwitchStopIfNeeded(trigger: "stream_switch_apply_guard")
             return
         }
@@ -1626,6 +1670,12 @@ final class DictationSession {
         let elapsedMs = Int((CFAbsoluteTimeGetCurrent() - startedAt) * 1_000)
         logDictation("DICTATION_PERF ts=\(Date().timeIntervalSince1970) event=apply_transcript_end elapsedMs=\(elapsedMs)")
         logger.notice("[DICTATION-PERF] applyTranscriptIfNeeded: \(elapsedMs, privacy: .public)ms")
+    }
+
+    private func isPrewarmConnectStale(maxAge seconds: TimeInterval) -> Bool {
+        guard let startedAt = prewarmConnectStartedAt else { return false }
+        guard prewarmConnectTask != nil else { return false }
+        return Date().timeIntervalSince(startedAt) >= seconds
     }
 }
 

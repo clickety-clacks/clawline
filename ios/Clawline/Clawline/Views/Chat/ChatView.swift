@@ -488,6 +488,7 @@ struct ChatView: View {
             resetScrollButtonInteractionState()
         }
         .onChange(of: scenePhase) { _, phase in
+            viewModel.handleSceneActiveStateChanged(isActive: phase == .active)
             if phase == .active {
                 viewModel.handleSceneDidBecomeActive()
                 keyboardRefreshToken &+= 1

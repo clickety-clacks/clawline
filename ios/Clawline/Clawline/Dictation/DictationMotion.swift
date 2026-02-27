@@ -47,7 +47,6 @@ final class DictationMotion {
 
     struct GestureEndContext {
         let pullToSendEligible: Bool
-        let isSwipeActivationEnabled: Bool
         let verticallyDominant: Bool
     }
 
@@ -68,6 +67,7 @@ final class DictationMotion {
     private(set) var deferredSettleTarget: SurfaceTarget?
     private(set) var settleDurationMultiplier: Double = 1.0
     private(set) var pendingCommit: SettledCommit?
+    private(set) var swipeActivationEnabledAtGestureStart = false
 
     init(session: DictationSession) {
         self.session = session
@@ -126,10 +126,11 @@ final class DictationMotion {
         return false
     }
 
-    func gestureBegan(originWasOpen: Bool) {
+    func gestureBegan(originWasOpen: Bool, swipeActivationEnabled: Bool) {
         guard gesturePhase == .idle else { return }
         gesturePhase = .dragging
         self.originWasOpen = originWasOpen
+        self.swipeActivationEnabledAtGestureStart = swipeActivationEnabled
         rawDragY = 0
         walkieStartedThisGesture = false
         holdThresholdReachedTime = nil
@@ -204,7 +205,7 @@ final class DictationMotion {
             return .settleOpen
         }
 
-        guard context.isSwipeActivationEnabled else {
+        guard swipeActivationEnabledAtGestureStart else {
             pendingCommit = .init(target: .closed, reason: "activation_disabled")
             surfaceRevealProgress = 0
             return .settleClosed
@@ -264,6 +265,7 @@ final class DictationMotion {
         walkieStartedThisGesture = false
         deferredSettleTarget = nil
         originWasOpen = false
+        swipeActivationEnabledAtGestureStart = false
         pendingCommit = nil
         surfaceRevealProgress = session.surfaceTarget == .open ? 1 : 0
     }

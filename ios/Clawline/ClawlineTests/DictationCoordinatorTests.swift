@@ -95,6 +95,43 @@ struct DictationCoordinatorTests {
         #expect(harness.client.closeCalls.count >= 1)
     }
 
+    @Test("Flick-up sticky honors activation eligibility captured at gesture begin")
+    @MainActor
+    func flickUpStickyUsesGestureStartActivationSnapshot() {
+        let harness = DictationTestHarness()
+        let coordinator = harness.makeCoordinator()
+
+        coordinator.updateContext(
+            sessionKey: harness.host.activeSessionKey,
+            composeIsEmpty: true,
+            textFieldFocused: false,
+            selectionLength: 0,
+            reduceMotionEnabled: false
+        )
+
+        let eligibleMotion = DictationMotion(session: coordinator)
+        eligibleMotion.gestureBegan(originWasOpen: false, swipeActivationEnabled: true)
+        eligibleMotion.gestureChanged(translationY: -60, velocityY: -1_100)
+        let eligibleIntent = eligibleMotion.gestureEnded(
+            translationY: -60,
+            predictedY: -140,
+            velocityY: -1_100,
+            context: .init(pullToSendEligible: false, verticallyDominant: true)
+        )
+        #expect(eligibleIntent == .startSticky)
+
+        let ineligibleMotion = DictationMotion(session: coordinator)
+        ineligibleMotion.gestureBegan(originWasOpen: false, swipeActivationEnabled: false)
+        ineligibleMotion.gestureChanged(translationY: -60, velocityY: -1_100)
+        let ineligibleIntent = ineligibleMotion.gestureEnded(
+            translationY: -60,
+            predictedY: -140,
+            velocityY: -1_100,
+            context: .init(pullToSendEligible: false, verticallyDominant: true)
+        )
+        #expect(ineligibleIntent == .settleClosed)
+    }
+
     @Test("Token inactivity timeout stops dictation")
     @MainActor
     func inactivityTimeoutStopsSession() async {
@@ -396,6 +433,38 @@ struct DictationCoordinatorTests {
         #expect(harness.analytics.stopEvents.contains(where: { $0.reason == "transport_failure" }))
     }
 
+    @Test("Walkie connect hang times out instead of staying stuck in connecting")
+    @MainActor
+    func walkieConnectHangTimesOut() async {
+        let harness = DictationTestHarness(
+            timing: DictationTiming(
+                maxSessionDuration: .seconds(30),
+                tokenInactivityTimeout: .seconds(30),
+                stopKeepFinalizeTimeout: .milliseconds(120),
+                sendFinalizeTimeout: .milliseconds(80),
+                phase2ConnectAttemptTimeout: .milliseconds(90)
+            )
+        )
+        harness.client.connectBehavior = .hangUntilCancelled
+        let coordinator = harness.makeCoordinator()
+
+        coordinator.updateContext(
+            sessionKey: harness.host.activeSessionKey,
+            composeIsEmpty: true,
+            textFieldFocused: false,
+            selectionLength: 0,
+            reduceMotionEnabled: false
+        )
+
+        coordinator.startWalkieTalkieDictation()
+
+        await waitUntil(timeoutMs: 1_500) { coordinator.errorMessage == "Dictation failed" }
+
+        #expect(coordinator.errorMessage == "Dictation failed")
+        #expect(!coordinator.isListeningReady)
+        #expect(harness.client.connectCallCount >= 2)
+    }
+
     @Test("Audio interruption does not force dictation stop")
     @MainActor
     func interruptionBeganKeepsSessionAlive() async {
@@ -632,6 +701,12 @@ private final class MockSonioxKeyVerifier: SonioxKeyVerifying {
 }
 
 private final class SonioxMockFixtureClient: SonioxStreamingClienting {
+    enum ConnectBehavior {
+        case succeed
+        case fail(any Error)
+        case hangUntilCancelled
+    }
+
     private var continuation: AsyncStream<SonioxStreamingEvent>.Continuation?
     let events: AsyncStream<SonioxStreamingEvent>
 
@@ -639,6 +714,8 @@ private final class SonioxMockFixtureClient: SonioxStreamingClienting {
     private(set) var finalized = false
     private(set) var sentFrames: [Data] = []
     private(set) var closeCalls: [(code: Int, reason: String?, caller: String)] = []
+    private(set) var connectCallCount = 0
+    var connectBehavior: ConnectBehavior = .succeed
 
     init() {
         var continuation: AsyncStream<SonioxStreamingEvent>.Continuation?
@@ -647,7 +724,19 @@ private final class SonioxMockFixtureClient: SonioxStreamingClienting {
     }
 
     func connect(config: SonioxStreamingConfig) async throws {
-        connected = true
+        let _ = config
+        connectCallCount += 1
+        switch connectBehavior {
+        case .succeed:
+            connected = true
+        case .fail(let error):
+            throw error
+        case .hangUntilCancelled:
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(50))
+            }
+            throw CancellationError()
+        }
     }
 
     func sendAudioFrame(_ frame: Data) async throws {

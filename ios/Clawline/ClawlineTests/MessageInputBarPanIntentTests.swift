@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import UIKit
 import Testing
 @testable import Clawline
 
@@ -32,5 +33,21 @@ struct MessageInputBarPanIntentTests {
         )
 
         #expect(decision == .dictation)
+    }
+
+    @MainActor
+    @Test("Text selection lock restores on installer teardown")
+    func textSelectionLockRestoresOnInstallerTeardown() {
+        let coordinator = DictationPanGestureInstaller.debugCoordinatorForTests()
+        let textView = UITextView()
+        textView.isSelectable = true
+        textView.isScrollEnabled = true
+
+        coordinator.debugPrimeTextViewLock(textView)
+        #expect(textView.isSelectable == false)
+
+        coordinator.prepareForInstallerDisappear()
+        #expect(textView.isSelectable == true)
+        #expect(textView.isScrollEnabled == true)
     }
 }

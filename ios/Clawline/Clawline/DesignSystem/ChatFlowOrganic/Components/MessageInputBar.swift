@@ -19,7 +19,7 @@ private struct MessageInputBarTextEditorFramePreferenceKey: PreferenceKey {
     }
 }
 
-private struct DictationPanEvent {
+struct DictationPanEvent {
     let startLocation: CGPoint
     let translation: CGPoint
     let predictedEndTranslation: CGPoint
@@ -69,7 +69,7 @@ func classifyDictationPanIntent(_ context: DictationPanIntentContext) -> Dictati
     return .undecided
 }
 
-private struct DictationPanGestureInstaller: UIViewControllerRepresentable {
+struct DictationPanGestureInstaller: UIViewControllerRepresentable {
     var shouldBegin: (CGPoint, CGPoint) -> Bool
     var startsInEditableRegion: (CGPoint) -> Bool
     var isSurfaceOpen: () -> Bool
@@ -102,6 +102,18 @@ private struct DictationPanGestureInstaller: UIViewControllerRepresentable {
         context.coordinator.attachIfNeeded(from: uiViewController)
     }
 
+#if DEBUG
+    static func debugCoordinatorForTests() -> Coordinator {
+        Coordinator(
+            shouldBegin: { _, _ in false },
+            startsInEditableRegion: { _ in false },
+            isSurfaceOpen: { false },
+            onChanged: { _ in },
+            onEnded: { _, _ in }
+        )
+    }
+#endif
+
     final class InstallerViewController: UIViewController {
         weak var coordinator: Coordinator?
 
@@ -121,6 +133,11 @@ private struct DictationPanGestureInstaller: UIViewControllerRepresentable {
         override func viewDidLayoutSubviews() {
             super.viewDidLayoutSubviews()
             coordinator?.updateActiveRegion(from: self)
+        }
+
+        override func viewWillDisappear(_ animated: Bool) {
+            super.viewWillDisappear(animated)
+            coordinator?.prepareForInstallerDisappear()
         }
     }
 
@@ -144,7 +161,7 @@ private struct DictationPanGestureInstaller: UIViewControllerRepresentable {
         private var gestureStartDate: Date = .distantPast
         private var startedInEditableRegion = false
         private var activeRegionInWindow: CGRect = .zero
-        private weak var activeTextView: UITextView?
+        private var activeTextView: UITextView?
         private var activeTextViewWasScrollEnabled = false
         private var activeTextViewWasSelectable = false
 
@@ -169,6 +186,10 @@ private struct DictationPanGestureInstaller: UIViewControllerRepresentable {
             pan.delaysTouchesEnded = false
         }
 
+        deinit {
+            prepareForInstallerDisappear()
+        }
+
         func attachIfNeeded(from installerViewController: InstallerViewController) {
             self.installerViewController = installerViewController
             updateActiveRegion(from: installerViewController)
@@ -177,10 +198,17 @@ private struct DictationPanGestureInstaller: UIViewControllerRepresentable {
             guard let host else { return }
 
             guard attachedView !== host else { return }
+            resetGestureState()
             attachedView?.removeGestureRecognizer(pan)
             host.addGestureRecognizer(pan)
             attachedView = host
             logger.info("DICTATION_UI pan_attach host=\(String(describing: type(of: host)), privacy: .public)")
+        }
+
+        func prepareForInstallerDisappear() {
+            resetGestureState()
+            attachedView?.removeGestureRecognizer(pan)
+            attachedView = nil
         }
 
         func updateActiveRegion(from installerViewController: InstallerViewController) {
@@ -259,6 +287,15 @@ private struct DictationPanGestureInstaller: UIViewControllerRepresentable {
             startedInEditableRegion = false
             gestureStartDate = .distantPast
         }
+
+#if DEBUG
+        func debugPrimeTextViewLock(_ textView: UITextView) {
+            activeTextView = textView
+            activeTextViewWasScrollEnabled = textView.isScrollEnabled
+            activeTextViewWasSelectable = textView.isSelectable
+            lockTextScrollForDictationIfNeeded()
+        }
+#endif
 
         private func promoteIntentIfNeeded(_ event: DictationPanEvent) {
             guard intentLock == .undecided else { return }

@@ -413,12 +413,14 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
     }
 
     func onAppear() async {
-        guard observationTask == nil, auth.token != nil else { return }
+        guard auth.token != nil else { return }
         isChatVisible = true
         isAppInForeground = true
 
         logger.info("ChatViewModel onAppear id=\(self.instanceId, privacy: .public)")
-        startObserving()
+        if observationTask == nil {
+            startObserving()
+        }
         scheduleReconnect(immediate: true, reason: .onAppear)
     }
 

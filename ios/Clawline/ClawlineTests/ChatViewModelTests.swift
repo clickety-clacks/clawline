@@ -372,6 +372,50 @@ struct ChatViewModelTests {
         #expect(chatService.connectCallCount > initialConnectCalls)
     }
 
+    @Test("onAppear schedules reconnect even when observation is already active")
+    @MainActor
+    func onAppearSchedulesReconnectWhenAlreadyObserving() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        let chatService = TestChatService()
+        chatService.emitInitialDisconnectedState = false
+        chatService.emitConnectedOnConnect = false
+        let toastManager = ToastManager()
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(sonioxKeyStore: SonioxKeyStore()),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: toastManager,
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        auth.storeCredentials(token: "jwt", userId: "user")
+
+        // First onAppear starts observation and schedules one immediate reconnect.
+        await viewModel.onAppear()
+        for _ in 0..<50 {
+            if chatService.connectCallCount >= 1 { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(chatService.connectCallCount == 1)
+
+        // Second onAppear should still schedule an immediate reconnect.
+        await viewModel.onAppear()
+        for _ in 0..<50 {
+            if chatService.connectCallCount >= 2 { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(chatService.connectCallCount == 2)
+
+        // Transport remains disconnected in this harness, so send guard should still surface not-connected.
+        #expect(viewModel.sendButtonConnectionState == .disconnected)
+        viewModel.send()
+        #expect(toastManager.debugMessages.contains("Could not send; not connected."))
+    }
+
     @Test("canSend becomes true when attachments exist even without text")
     @MainActor
     func canSendWithAttachmentOnly() async throws {
@@ -1740,6 +1784,8 @@ private final class TestChatService: ChatServicing {
     private(set) var lastSentId: String?
     private(set) var lastSessionKey: String?
     private(set) var connectCallCount: Int = 0
+    var emitConnectedOnConnect: Bool = true
+    var emitInitialDisconnectedState: Bool = true
     var sendError: Swift.Error?
     var createStreamError: Error?
     var deleteStreamError: Error?
@@ -1756,7 +1802,9 @@ private final class TestChatService: ChatServicing {
     private(set) lazy var connectionState: AsyncStream<ConnectionState> = {
         AsyncStream { continuation in
             self.stateContinuation = continuation
-            continuation.yield(.disconnected)
+            if emitInitialDisconnectedState {
+                continuation.yield(.disconnected)
+            }
         }
     }()
 
@@ -1770,7 +1818,9 @@ private final class TestChatService: ChatServicing {
 
     func connect(token: String, lastMessageId: String?) async throws {
         connectCallCount += 1
-        stateContinuation?.yield(.connected)
+        if emitConnectedOnConnect {
+            stateContinuation?.yield(.connected)
+        }
     }
 
     func disconnect() {

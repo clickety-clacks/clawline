@@ -182,6 +182,38 @@ struct ProviderServiceTests {
         #expect(connector.connectedURLs.last?.absoluteString == "ws://example.com/ws")
     }
 
+    @Test("Overlapping chat connect calls join in-flight connect without notConnected failure")
+    func overlappingChatConnectCallsJoinInFlight() async throws {
+        let mockSocket = MockWebSocketClient()
+        let connector = DelayedMockWebSocketConnector(
+            client: mockSocket,
+            connectDelay: .milliseconds(120)
+        )
+        let baseURL = URL(string: "https://example.com")!
+        let service = ProviderChatService(
+            connector: connector,
+            deviceId: "device_123",
+            baseURLProvider: { baseURL }
+        )
+
+        Task {
+            try await Task.sleep(forDuration: .milliseconds(170))
+            mockSocket.enqueue(text: #"{ "type": "auth_result", "success": true }"#)
+        }
+
+        async let first: Void = service.connect(token: "jwt", lastMessageId: nil)
+        try await Task.sleep(forDuration: .milliseconds(15))
+        async let second: Void = service.connect(token: "jwt", lastMessageId: nil)
+
+        try await first
+        try await second
+
+        #expect(connector.connectCallCount == 1)
+        #expect(
+            mockSocket.sentTexts.filter { $0.contains("\"type\":\"auth\"") }.count == 1
+        )
+    }
+
     @Test("Chat send serializes message payload")
     func chatSendSerializesPayload() async throws {
         let mockSocket = MockWebSocketClient()
@@ -324,6 +356,24 @@ private final class FallbackMockWebSocketConnector: WebSocketConnecting {
         if url.scheme == "wss" {
             throw URLError(.secureConnectionFailed)
         }
+        return client
+    }
+}
+
+private final class DelayedMockWebSocketConnector: WebSocketConnecting {
+    let client: MockWebSocketClient
+    private let connectDelay: Duration
+    private(set) var connectCallCount: Int = 0
+
+    init(client: MockWebSocketClient, connectDelay: Duration) {
+        self.client = client
+        self.connectDelay = connectDelay
+    }
+
+    func connect(to url: URL) async throws -> any WebSocketClient {
+        let _ = url
+        connectCallCount += 1
+        try await Task.sleep(forDuration: connectDelay)
         return client
     }
 }

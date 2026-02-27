@@ -44,6 +44,29 @@ private final class AsyncStreamBroadcaster<Element> {
 }
 
 final class ProviderChatService: ChatServicing {
+    private actor ConnectJoinGate {
+        private var inFlight: (id: UInt64, task: Task<Void, Swift.Error>)?
+        private var nextID: UInt64 = 0
+
+        func taskForConnect(
+            makeTask: () -> Task<Void, Swift.Error>
+        ) -> (id: UInt64, task: Task<Void, Swift.Error>, joinedExisting: Bool) {
+            if let inFlight {
+                return (inFlight.id, inFlight.task, true)
+            }
+            nextID &+= 1
+            let task = makeTask()
+            let id = nextID
+            inFlight = (id, task)
+            return (id, task, false)
+        }
+
+        func clearIfMatches(_ id: UInt64) {
+            guard let inFlight, inFlight.id == id else { return }
+            self.inFlight = nil
+        }
+    }
+
     private let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "ProviderChatService")
     private let messageLogger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "MessagePipeline")
     enum Error: Swift.Error, LocalizedError {
@@ -214,7 +237,7 @@ final class ProviderChatService: ChatServicing {
     private var pendingMessages: [String: PendingMessage] = [:]
     private var shouldNotifyDisconnect = true
     private var pendingDisconnectReason: String?
-    private var isConnecting = false
+    private let connectJoinGate = ConnectJoinGate()
     private var authToken: String?
 
     init(connector: any WebSocketConnecting,
@@ -282,14 +305,25 @@ final class ProviderChatService: ChatServicing {
     }
 
     func connect(token: String, lastMessageId: String?) async throws {
-        if isConnecting {
-            logger.info("connect suppressed: already connecting")
-            resolveAuthContinuation(with: .failure(Error.notConnected))
-            return
+        let connectEntry = await connectJoinGate.taskForConnect {
+            Task {
+                try await self.performConnect(token: token, lastMessageId: lastMessageId)
+            }
         }
-        isConnecting = true
-        defer { isConnecting = false }
+        if connectEntry.joinedExisting {
+            logger.info("connect joined: already connecting")
+        }
 
+        do {
+            try await connectEntry.task.value
+            await connectJoinGate.clearIfMatches(connectEntry.id)
+        } catch {
+            await connectJoinGate.clearIfMatches(connectEntry.id)
+            throw error
+        }
+    }
+
+    private func performConnect(token: String, lastMessageId: String?) async throws {
         guard let baseURL = baseURLProvider() else {
             throw Error.missingBaseURL
         }

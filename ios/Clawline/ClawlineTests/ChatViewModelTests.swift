@@ -1650,8 +1650,10 @@ private final class TestChatService: ChatServicing {
     private var messageContinuation: AsyncStream<Message>.Continuation?
     private var stateContinuation: AsyncStream<ConnectionState>.Continuation?
     private var eventContinuation: AsyncStream<ChatServiceEvent>.Continuation?
+    private var lifecycleContinuation: AsyncStream<LifecycleTransportEvent>.Continuation?
     private var bufferedMessages: [Message] = []
     private var bufferedEvents: [ChatServiceEvent] = []
+    private var replayCursorBySessionKey: [String: String] = [:]
     private(set) var lastSentAttachments: [WireAttachment] = []
     private(set) var lastSentId: String?
     private(set) var lastSessionKey: String?
@@ -1684,13 +1686,57 @@ private final class TestChatService: ChatServicing {
         }
     }()
 
-    func connect(token: String, lastMessageId: String?) async throws {
+    private(set) lazy var lifecycleTransportEvents: AsyncStream<LifecycleTransportEvent> = {
+        AsyncStream { continuation in
+            self.lifecycleContinuation = continuation
+        }
+    }()
+
+    func connect(token: String, activeSessionKey: String?) async throws {
+        _ = activeSessionKey
         connectCallCount += 1
         stateContinuation?.yield(.connected)
     }
 
+    func startConnectionAttempt(epoch: Int, lastMessageId: String?, token: String) {
+        _ = lastMessageId
+        _ = token
+        connectCallCount += 1
+        lifecycleContinuation?.yield(.init(epoch: epoch, payload: .transportOpened))
+        lifecycleContinuation?.yield(
+            .init(
+                epoch: epoch,
+                payload: .authResult(
+                    success: true,
+                    replayCount: 0,
+                    replayTruncated: false,
+                    historyReset: false,
+                    failureReason: nil
+                )
+            )
+        )
+    }
+
+    func stopConnectionAttempt() {}
+
     func disconnect() {
         stateContinuation?.yield(.disconnected)
+    }
+
+    func replayCursorSnapshot() -> [String: String] {
+        replayCursorBySessionKey
+    }
+
+    func setReplayCursor(_ cursor: String?, for sessionKey: String) {
+        if let cursor, !cursor.isEmpty {
+            replayCursorBySessionKey[sessionKey] = cursor
+        } else {
+            replayCursorBySessionKey.removeValue(forKey: sessionKey)
+        }
+    }
+
+    func clearReplayCursors() {
+        replayCursorBySessionKey.removeAll()
     }
 
     func send(id: String, content: String, attachments: [WireAttachment], sessionKey: String?) async throws {
@@ -1716,6 +1762,26 @@ private final class TestChatService: ChatServicing {
 
     func emitConnectionState(_ state: ConnectionState) {
         stateContinuation?.yield(state)
+        switch state {
+        case .connected:
+            lifecycleContinuation?.yield(.init(epoch: 1, payload: .transportOpened))
+            lifecycleContinuation?.yield(
+                .init(
+                    epoch: 1,
+                    payload: .authResult(
+                        success: true,
+                        replayCount: 0,
+                        replayTruncated: false,
+                        historyReset: false,
+                        failureReason: nil
+                    )
+                )
+            )
+        case .disconnected:
+            lifecycleContinuation?.yield(.init(epoch: 1, payload: .transportClosed(reason: .error)))
+        default:
+            break
+        }
     }
 
     func emitServiceEvent(_ event: ChatServiceEvent) {

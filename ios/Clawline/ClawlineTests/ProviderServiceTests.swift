@@ -293,6 +293,202 @@ struct ProviderServiceTests {
         #expect(sawUpdated)
         #expect(sawDeleted)
     }
+
+    @Test("Lifecycle attempt emits coordinator epoch on transport and auth events")
+    func lifecycleAttemptUsesProvidedEpoch() async throws {
+        let mockSocket = MockWebSocketClient()
+        let connector = MockWebSocketConnector(client: mockSocket)
+        let baseURL = URL(string: "https://example.com")!
+        let service = ProviderChatService(
+            connector: connector,
+            deviceId: "device_123",
+            baseURLProvider: { baseURL }
+        )
+
+        var iterator = service.lifecycleTransportEvents.makeAsyncIterator()
+        let epoch = 42
+
+        Task {
+            try await Task.sleep(forDuration: .milliseconds(20))
+            mockSocket.enqueue(text: #"{ "type": "auth_result", "success": true, "replayCount": 0, "replayTruncated": false, "historyReset": false }"#)
+        }
+
+        service.startConnectionAttempt(epoch: epoch, lastMessageId: "s_0", token: "jwt")
+
+        var openedEvent: LifecycleTransportEvent?
+        var authEvent: LifecycleTransportEvent?
+
+        for _ in 0..<4 {
+            guard let event = await iterator.next() else { continue }
+            switch event.payload {
+            case .transportOpened:
+                openedEvent = event
+            case .authResult:
+                authEvent = event
+            default:
+                break
+            }
+            if openedEvent != nil, authEvent != nil { break }
+        }
+
+        #expect(openedEvent?.epoch == epoch)
+        #expect(authEvent?.epoch == epoch)
+    }
+
+    @Test("Lifecycle attempts echo the epoch received for each attempt")
+    func lifecycleAttemptsEchoReceivedEpoch() async throws {
+        let mockSocket = MockWebSocketClient()
+        let connector = MockWebSocketConnector(client: mockSocket)
+        let baseURL = URL(string: "https://example.com")!
+        let service = ProviderChatService(
+            connector: connector,
+            deviceId: "device_123",
+            baseURLProvider: { baseURL }
+        )
+
+        var iterator = service.lifecycleTransportEvents.makeAsyncIterator()
+        let firstEpoch = 7
+        let secondEpoch = 19
+
+        Task {
+            try await Task.sleep(forDuration: .milliseconds(20))
+            mockSocket.enqueue(text: #"{ "type": "auth_result", "success": true, "replayCount": 0, "replayTruncated": false, "historyReset": false }"#)
+            try await Task.sleep(forDuration: .milliseconds(20))
+            mockSocket.enqueue(text: #"{ "type": "auth_result", "success": true, "replayCount": 0, "replayTruncated": false, "historyReset": false }"#)
+        }
+
+        service.startConnectionAttempt(epoch: firstEpoch, lastMessageId: nil, token: "jwt")
+        var firstAuthEpoch: Int?
+        for _ in 0..<4 {
+            guard let event = await iterator.next() else { continue }
+            if case .authResult = event.payload {
+                firstAuthEpoch = event.epoch
+                break
+            }
+        }
+
+        service.startConnectionAttempt(epoch: secondEpoch, lastMessageId: nil, token: "jwt")
+        var secondAuthEpoch: Int?
+        for _ in 0..<4 {
+            guard let event = await iterator.next() else { continue }
+            if case .authResult = event.payload {
+                secondAuthEpoch = event.epoch
+                break
+            }
+        }
+
+        #expect(firstAuthEpoch == firstEpoch)
+        #expect(secondAuthEpoch == secondEpoch)
+    }
+
+    @Test("Stale fallback close cannot knock coordinator out of authenticating for active attempt")
+    func staleFallbackCloseDoesNotMoveCoordinatorOutOfAuthenticating() async throws {
+        let firstSocket = FailingLifecycleWebSocketClient()
+        let secondSocket = AuthResultLifecycleWebSocketClient(
+            authResultText: #"{ "type": "auth_result", "success": true, "replayCount": 0, "replayTruncated": false, "historyReset": false }"#,
+            authResultDelay: .milliseconds(80)
+        )
+        let connector = LifecycleFallbackRaceConnector(first: firstSocket, second: secondSocket)
+        let baseURL = URL(string: "https://example.com")!
+        let service = ProviderChatService(
+            connector: connector,
+            deviceId: "device_123",
+            baseURLProvider: { baseURL }
+        )
+
+        let coordinator = ConnectionLifecycleCoordinator(startAttempt: { _, _, _ in }, stopAttempt: {})
+        let outputRecorder = LifecycleOutputRecorder()
+
+        let outputs = await coordinator.outputs
+        let outputTask = Task {
+            var iterator = outputs.makeAsyncIterator()
+            while let output = await iterator.next() {
+                await outputRecorder.append(output)
+            }
+        }
+
+        let forwardTask = Task {
+            var iterator = service.lifecycleTransportEvents.makeAsyncIterator()
+            while let event = await iterator.next() {
+                await coordinator.handleTransportEvent(event)
+            }
+        }
+
+        await coordinator.setAuthToken("jwt")
+        await coordinator.startIfNeeded()
+        try await Task.sleep(forDuration: .milliseconds(10))
+        service.startConnectionAttempt(epoch: 1, lastMessageId: nil, token: "jwt")
+
+        var reachedLive = false
+        for _ in 0..<60 {
+            if await coordinator.phase == .live {
+                reachedLive = true
+                break
+            }
+            try await Task.sleep(forDuration: .milliseconds(25))
+        }
+
+        #expect(reachedLive)
+
+        let transitions = await outputRecorder.phaseTransitions()
+        #expect(!transitions.contains { transition in
+            transition.from == .authenticating
+                && transition.to == .recovering
+                && transition.epoch == 1
+        })
+
+        service.disconnect()
+        forwardTask.cancel()
+        outputTask.cancel()
+    }
+
+    @Test("Late auth success after transport close keeps same epoch and reaches live")
+    func authSuccessAfterRecoveringRaceReachesLive() async {
+        let coordinator = ConnectionLifecycleCoordinator(startAttempt: { _, _, _ in }, stopAttempt: {})
+        await coordinator.setAuthToken("jwt")
+        await coordinator.startIfNeeded()
+
+        await coordinator.handleTransportEvent(.init(epoch: 1, payload: .transportOpened))
+        await coordinator.handleTransportEvent(.init(epoch: 1, payload: .transportClosed(reason: .error)))
+        await coordinator.handleTransportEvent(
+            .init(
+                epoch: 1,
+                payload: .authResult(
+                    success: true,
+                    replayCount: 0,
+                    replayTruncated: false,
+                    historyReset: false,
+                    failureReason: nil
+                )
+            )
+        )
+
+        #expect(await coordinator.phase == .live)
+    }
+
+    @Test("History reset auth does not trigger immediate timeout failure")
+    func historyResetAuthDoesNotImmediatelyFail() async throws {
+        let coordinator = ConnectionLifecycleCoordinator(startAttempt: { _, _, _ in }, stopAttempt: {})
+        await coordinator.setAuthToken("jwt")
+        await coordinator.startIfNeeded()
+
+        await coordinator.handleTransportEvent(.init(epoch: 1, payload: .transportOpened))
+        await coordinator.handleTransportEvent(
+            .init(
+                epoch: 1,
+                payload: .authResult(
+                    success: true,
+                    replayCount: 27,
+                    replayTruncated: false,
+                    historyReset: true,
+                    failureReason: nil
+                )
+            )
+        )
+
+        try await Task.sleep(forDuration: .milliseconds(100))
+        #expect(await coordinator.phase == .authenticating)
+    }
 }
 
 // MARK: - Test doubles
@@ -395,4 +591,112 @@ private final class HangingWebSocketClient: WebSocketClient {
     }
 
     func close(with code: URLSessionWebSocketTask.CloseCode?) {}
+}
+
+private actor LifecycleOutputRecorder {
+    struct PhaseTransitionRecord: Equatable {
+        let from: ConnectionLifecyclePhase
+        let to: ConnectionLifecyclePhase
+        let epoch: Int
+    }
+
+    private var transitions: [PhaseTransitionRecord] = []
+
+    func append(_ output: ConnectionLifecycleOutput) {
+        guard case .phaseTransition(let from, let to, let epoch, _) = output else { return }
+        transitions.append(.init(from: from, to: to, epoch: epoch))
+    }
+
+    func phaseTransitions() -> [PhaseTransitionRecord] {
+        transitions
+    }
+}
+
+private final class LifecycleFallbackRaceConnector: WebSocketConnecting {
+    private let first: FailingLifecycleWebSocketClient
+    private let second: AuthResultLifecycleWebSocketClient
+    private var attemptCount = 0
+
+    init(first: FailingLifecycleWebSocketClient, second: AuthResultLifecycleWebSocketClient) {
+        self.first = first
+        self.second = second
+    }
+
+    func connect(to url: URL) async throws -> any WebSocketClient {
+        attemptCount += 1
+        if attemptCount == 1 {
+            return first
+        }
+        if attemptCount == 2 {
+            first.finishAsStaleClose(after: .milliseconds(20))
+            return second
+        }
+        return second
+    }
+}
+
+private final class FailingLifecycleWebSocketClient: WebSocketClient {
+    private let stream: AsyncStream<String>
+    private let continuation: AsyncStream<String>.Continuation
+    private(set) var lastCloseInfo: WebSocketCloseInfo?
+
+    init() {
+        var continuation: AsyncStream<String>.Continuation!
+        self.stream = AsyncStream { continuation = $0 }
+        self.continuation = continuation
+    }
+
+    var incomingTextMessages: AsyncStream<String> { stream }
+
+    func send(text: String) async throws {
+        throw URLError(.cannotConnectToHost)
+    }
+
+    func close(with code: URLSessionWebSocketTask.CloseCode?) {
+        lastCloseInfo = WebSocketCloseInfo(code: Int((code ?? .normalClosure).rawValue), reason: nil)
+        continuation.finish()
+    }
+
+    func finishAsStaleClose(after delay: Duration) {
+        Task { [weak self] in
+            try? await Task.sleep(forDuration: delay)
+            guard let self else { return }
+            self.lastCloseInfo = WebSocketCloseInfo(code: 1006, reason: "stale_fallback_close")
+            self.continuation.finish()
+        }
+    }
+}
+
+private final class AuthResultLifecycleWebSocketClient: WebSocketClient {
+    private let stream: AsyncStream<String>
+    private let continuation: AsyncStream<String>.Continuation
+    private let authResultText: String
+    private let authResultDelay: Duration
+    private(set) var lastCloseInfo: WebSocketCloseInfo?
+
+    init(authResultText: String, authResultDelay: Duration) {
+        self.authResultText = authResultText
+        self.authResultDelay = authResultDelay
+        var continuation: AsyncStream<String>.Continuation!
+        self.stream = AsyncStream { continuation = $0 }
+        self.continuation = continuation
+    }
+
+    var incomingTextMessages: AsyncStream<String> { stream }
+
+    func send(text: String) async throws {
+        guard text.contains(#""type":"auth""#) else { return }
+        let authResultText = self.authResultText
+        let authResultDelay = self.authResultDelay
+        let continuation = self.continuation
+        Task {
+            try? await Task.sleep(forDuration: authResultDelay)
+            continuation.yield(authResultText)
+        }
+    }
+
+    func close(with code: URLSessionWebSocketTask.CloseCode?) {
+        lastCloseInfo = WebSocketCloseInfo(code: Int((code ?? .normalClosure).rawValue), reason: nil)
+        continuation.finish()
+    }
 }

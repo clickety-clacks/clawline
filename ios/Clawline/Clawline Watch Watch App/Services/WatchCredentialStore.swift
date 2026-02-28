@@ -113,7 +113,7 @@ final class WatchKeychainStore {
     private let service: String
     private let accessGroup: String?
 
-    init(service: String = "co.clicketyclacks.Clawline.watch", accessGroup: String? = "group.co.clicketyclacks.Clawline") {
+    init(service: String = "co.clicketyclacks.Clawline.watch", accessGroup: String? = nil) {
         self.service = service
         self.accessGroup = accessGroup
     }

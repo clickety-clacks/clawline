@@ -327,6 +327,7 @@ final class ChatViewModel: ChatViewModelHosting {
     private let deviceId: String
     let salientHighlightService: any SalientHighlightServicing
     private var observationTask: Task<Void, Never>?
+    private var observationStartupTask: Task<Void, Never>?
     private var lifecycleTransportEventsSubscription: AsyncStream<LifecycleTransportEvent>?
     private var lifecycleOutputsSubscription: AsyncStream<ConnectionLifecycleOutput>?
     private var sessionMessages: [String: [Message]] = [:]
@@ -356,6 +357,9 @@ final class ChatViewModel: ChatViewModelHosting {
     private var restoreTaskBySessionKey: [String: Task<Void, Never>] = [:]
     private var writerCurrentEpoch: Int?
     private var firstReplayAppliedEpoch: Int?
+#if DEBUG
+    private var observationStartupCount: Int = 0
+#endif
     private let messageCacheLimit = 500
     private var restoredSessionKeys: Set<String> = []
     private var restoredStreamMetadataForUserId: String?
@@ -471,6 +475,8 @@ final class ChatViewModel: ChatViewModelHosting {
     func onDisappear() {
         isChatVisible = false
         logger.info("ChatViewModel onDisappear id=\(self.instanceId, privacy: .public)")
+        observationStartupTask?.cancel()
+        observationStartupTask = nil
         observationTask?.cancel()
         observationTask = nil
         lifecycleTransportEventsSubscription = nil
@@ -513,6 +519,8 @@ final class ChatViewModel: ChatViewModelHosting {
             ensureDefaultActiveSessionIfNeeded()
         } else {
             didRestoreActiveSessionKey = false
+            observationStartupTask?.cancel()
+            observationStartupTask = nil
             observationTask?.cancel()
             observationTask = nil
             lifecycleTransportEventsSubscription = nil
@@ -549,25 +557,43 @@ final class ChatViewModel: ChatViewModelHosting {
     }
 
     private func startObservingIfNeeded() async {
-        guard observationTask == nil else { return }
-        await ensureLifecycleOutputsSubscription()
-        ensureLifecycleTransportSubscription()
-        logger.info("ChatViewModel startObserving id=\(self.instanceId, privacy: .public)")
-        observationTask = Task {
-            await withTaskGroup(of: Void.self) { group in
-                group.addTask { [weak self] in
-                    await self?.observeLifecycleTransportEvents()
-                }
+        if observationTask != nil { return }
+        if let observationStartupTask {
+            // Cold launch can hit this from onAppear/auth-change/scene-active concurrently.
+            // Join the in-flight startup so only one observer set is ever created.
+            await observationStartupTask.value
+            return
+        }
 
-                group.addTask { [weak self] in
-                    await self?.observeLifecycleOutputs()
-                }
+        let startupTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.ensureLifecycleOutputsSubscription()
+            if Task.isCancelled { return }
+            self.ensureLifecycleTransportSubscription()
+            if Task.isCancelled { return }
+#if DEBUG
+            self.observationStartupCount += 1
+#endif
+            self.logger.info("ChatViewModel startObserving id=\(self.instanceId, privacy: .public)")
+            self.observationTask = Task {
+                await withTaskGroup(of: Void.self) { group in
+                    group.addTask { [weak self] in
+                        await self?.observeLifecycleTransportEvents()
+                    }
 
-                group.addTask { [weak self] in
-                    await self?.observeServiceEvents()
+                    group.addTask { [weak self] in
+                        await self?.observeLifecycleOutputs()
+                    }
+
+                    group.addTask { [weak self] in
+                        await self?.observeServiceEvents()
+                    }
                 }
             }
         }
+        observationStartupTask = startupTask
+        await startupTask.value
+        observationStartupTask = nil
     }
 
     private func ensureLifecycleTransportSubscription() {
@@ -748,9 +774,12 @@ final class ChatViewModel: ChatViewModelHosting {
 
     func logout() {
         cancelSend()
+        observationStartupTask?.cancel()
+        observationStartupTask = nil
         observationTask?.cancel()
         observationTask = nil
         lifecycleTransportEventsSubscription = nil
+        lifecycleOutputsSubscription = nil
         lifecycleTransportTask?.cancel()
         lifecycleTransportTask = nil
         lifecycleOutputTask?.cancel()
@@ -2319,6 +2348,10 @@ final class ChatViewModel: ChatViewModelHosting {
 #if DEBUG
     func debugConnectionSnapshot() -> (token: String?, lastMessageId: String?) {
         connectionSnapshot()
+    }
+
+    func debugObservationStartupCount() -> Int {
+        observationStartupCount
     }
 
     func debugPresentationCacheSize() -> Int {

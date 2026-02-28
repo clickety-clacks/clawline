@@ -1618,6 +1618,40 @@ struct ChatViewModelTests {
         }
         #expect(auth.isAdmin == false)
     }
+
+    @Test("Concurrent startup triggers initialize lifecycle observers once")
+    @MainActor
+    func concurrentStartupTriggersInitializeObservationOnce() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask { await viewModel.onAppear() }
+            group.addTask { await viewModel.onAppear() }
+            group.addTask { await MainActor.run { viewModel.handleSceneDidBecomeActive() } }
+            group.addTask {
+                NotificationCenter.default.post(name: Notification.Name("AuthStateDidChange"), object: nil)
+            }
+        }
+
+        for _ in 0..<50 {
+            if viewModel.debugObservationStartupCount() > 0 { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(viewModel.debugObservationStartupCount() == 1)
+    }
 }
 
 @MainActor

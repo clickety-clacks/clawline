@@ -227,6 +227,8 @@ final class ProviderChatService: ChatServicing {
     private var replayCursorBySessionKey: [String: String] = [:]
     private var knownSessionKeys: Set<String> = []
 
+    private static let serverEventIDPrefix = "s_"
+
     init(connector: any WebSocketConnecting,
          deviceId: String,
          baseURLProvider: @escaping () -> URL? = { ProviderBaseURLStore.baseURL },
@@ -379,12 +381,11 @@ final class ProviderChatService: ChatServicing {
     func setReplayCursor(_ cursor: String?, for sessionKey: String) {
         let trimmedKey = sessionKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedKey.isEmpty else { return }
-        let trimmedCursor = cursor?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedCursor = normalizeServerEventID(cursor)
         let previousCursor = replayCursorBySessionKey[trimmedKey]
-        let normalizedCursor = (trimmedCursor?.isEmpty == false) ? trimmedCursor : nil
         if previousCursor == normalizedCursor { return }
-        if let trimmedCursor, !trimmedCursor.isEmpty {
-            replayCursorBySessionKey[trimmedKey] = trimmedCursor
+        if let normalizedCursor {
+            replayCursorBySessionKey[trimmedKey] = normalizedCursor
         } else {
             replayCursorBySessionKey.removeValue(forKey: trimmedKey)
         }
@@ -563,10 +564,11 @@ final class ProviderChatService: ChatServicing {
     }
 
     private func sendAuth(client: any WebSocketClient, token: String, lastMessageId: String?) async throws {
+        let sanitizedLastMessageId = normalizeServerEventID(lastMessageId)
         let authPayload = AuthPayload(
             token: token,
             deviceId: deviceId,
-            lastMessageId: lastMessageId,
+            lastMessageId: sanitizedLastMessageId,
             replayCursorsBySessionKey: nil,
             clientFeatures: supportedClientFeatures,
             client: ClientDescriptor(
@@ -811,6 +813,26 @@ final class ProviderChatService: ChatServicing {
             updateState(.failed(error))
             performDisconnect(shouldNotify: false, reason: error.localizedDescription)
         case "invalid_message", "payload_too_large", "invalid_channel":
+            let invalidLastMessageId = payload.code == "invalid_message"
+                && isInvalidLastMessageIdMessage(payload.message)
+            if invalidLastMessageId {
+                clearReplayCursors()
+                if let lifecycleEpoch {
+                    emitLifecycleEvent(
+                        epoch: lifecycleEpoch,
+                        payload: .authResult(
+                            success: false,
+                            replayCount: nil,
+                            replayTruncated: nil,
+                            historyReset: nil,
+                            failureReason: .invalidLastMessageId
+                        ),
+                        lifecycleConnectionToken: lifecycleConnectionToken
+                    )
+                } else {
+                    resolveAuthContinuation(with: .failure(Error.authFailed("Invalid lastMessageId")))
+                }
+            }
             logger.info("message-level error without messageId code=\(payload.code, privacy: .public)")
             if !pendingMessages.isEmpty {
                 for (messageId, pending) in pendingMessages {
@@ -962,6 +984,14 @@ final class ProviderChatService: ChatServicing {
         default:
             return nil
         }
+    }
+
+    private func isInvalidLastMessageIdMessage(_ message: String?) -> Bool {
+        let normalized = (message ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: " ", with: "")
+        return normalized == "invalidlastmessageid"
     }
 
     private static let clientID = "openclaw"
@@ -1152,10 +1182,11 @@ final class ProviderChatService: ChatServicing {
                     Task {
                         do {
                             let replayCursorSnapshot = self.replayCursorSnapshot()
-                            let lastMessageId = forcedLastMessageId ?? self.resolveAuthLastMessageId(
+                            let candidateLastMessageId = forcedLastMessageId ?? self.resolveAuthLastMessageId(
                                 replayCursorSnapshot: replayCursorSnapshot,
                                 knownSessionKeys: self.knownSessionKeys
                             )
+                            let lastMessageId = self.normalizeServerEventID(candidateLastMessageId)
                             let authPayload = AuthPayload(
                                 token: token,
                                 deviceId: self.deviceId,
@@ -1201,7 +1232,13 @@ final class ProviderChatService: ChatServicing {
     private func restoreReplayCursorSnapshot() -> [String: String] {
         guard let data = replayCursorDefaults.data(forKey: replayCursorDefaultsKey()) else { return [:] }
         guard let decoded = try? JSONDecoder().decode([String: String].self, from: data) else { return [:] }
-        return decoded.filter { !$0.key.isEmpty && !$0.value.isEmpty }
+        var sanitized: [String: String] = [:]
+        for (rawKey, rawCursor) in decoded {
+            let key = rawKey.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !key.isEmpty, let cursor = normalizeServerEventID(rawCursor) else { continue }
+            sanitized[key] = cursor
+        }
+        return sanitized
     }
 
     private func persistReplayCursorSnapshot() {
@@ -1219,9 +1256,21 @@ final class ProviderChatService: ChatServicing {
         guard !normalizedKnownKeys.isEmpty else {
             return nil
         }
-        guard normalizedKnownKeys.allSatisfy({ replayCursorSnapshot[$0]?.isEmpty == false }) else {
+        guard normalizedKnownKeys.allSatisfy({
+            guard let candidate = replayCursorSnapshot[$0] else { return false }
+            return normalizeServerEventID(candidate) != nil
+        }) else {
             return nil
         }
-        return replayCursorSnapshot.values.max()
+        return replayCursorSnapshot.values.compactMap(normalizeServerEventID).max()
+    }
+
+    private func normalizeServerEventID(_ raw: String?) -> String? {
+        guard let raw else { return nil }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix(Self.serverEventIDPrefix) else { return nil }
+        let uuidPortion = String(trimmed.dropFirst(Self.serverEventIDPrefix.count))
+        guard UUID(uuidString: uuidPortion) != nil else { return nil }
+        return trimmed
     }
 }

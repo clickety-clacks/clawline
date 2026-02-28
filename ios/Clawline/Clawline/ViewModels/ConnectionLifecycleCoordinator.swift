@@ -16,6 +16,7 @@ enum AuthFailureReason: Equatable {
     case sessionReplaced
     case tokenRevoked
     case protocolMismatch
+    case invalidLastMessageId
 }
 
 enum TransportCloseReason: Equatable {
@@ -117,6 +118,7 @@ actor ConnectionLifecycleCoordinator {
     private var consecutiveReplayOvershoots: Int = 0
     private var recoveringAttemptCount: Int = 0
     private var reconnectBackoff: Duration = .seconds(1)
+    private var retriedInvalidLastMessageId = false
     private var backgroundedAt: Date?
     private var awaitingHistoryResetAckEpoch: Int?
     private var bufferedServerMessages: [Data] = []
@@ -320,6 +322,9 @@ actor ConnectionLifecycleCoordinator {
                 return
             case .protocolMismatch:
                 fail(.protocolMismatch)
+                return
+            case .invalidLastMessageId:
+                handleInvalidLastMessageIdFailure()
                 return
             case nil:
                 break
@@ -553,6 +558,19 @@ actor ConnectionLifecycleCoordinator {
         }
     }
 
+    private func handleInvalidLastMessageIdFailure() {
+        guard phase == .authenticating else { return }
+        if !retriedInvalidLastMessageId {
+            retriedInvalidLastMessageId = true
+            canonicalCursor = nil
+            transition(to: .recovering, reason: .transportInterrupted)
+            stopAttempt()
+            scheduleReconnect(after: .zero, incrementRecoveringAttempt: false)
+            return
+        }
+        fail(.protocolMismatch)
+    }
+
     private func startConnecting(reason: ConnectionLifecycleReason) {
         guard let authToken, !authToken.isEmpty else { return }
         switch phase {
@@ -708,5 +726,6 @@ actor ConnectionLifecycleCoordinator {
     private func resetRecoveringState() {
         recoveringAttemptCount = 0
         reconnectBackoff = .seconds(1)
+        retriedInvalidLastMessageId = false
     }
 }

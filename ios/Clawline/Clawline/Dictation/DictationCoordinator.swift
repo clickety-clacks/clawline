@@ -1639,7 +1639,9 @@ final class DictationSession {
         } else {
             pendingTranscriptUpdate = update
         }
-        if immediate {
+        // Endpoint commits (committedSegments) must never wait behind provisional coalescing.
+        let shouldFlushImmediately = immediate || !update.committedSegments.isEmpty
+        if shouldFlushImmediately {
             flushPendingTranscriptApply()
             return
         }

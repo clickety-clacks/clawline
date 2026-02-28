@@ -91,6 +91,9 @@ final class WatchConnectivityService: NSObject, WatchConnectivityServicing {
         if let key = cartesiaKeyStore.apiKey { userInfo["cartesiaApiKey"] = key }
         if let id = cartesiaKeyStore.selectedVoiceId { userInfo["cartesiaVoiceId"] = id }
 
+        // Update application context so Watch can recover credentials on activation
+        // even if transferUserInfo queue was never delivered (fresh install, reinstall, etc.)
+        try? WCSession.default.updateApplicationContext(userInfo)
         WCSession.default.transferUserInfo(userInfo)
     }
 

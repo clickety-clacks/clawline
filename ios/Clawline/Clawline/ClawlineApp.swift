@@ -15,6 +15,9 @@ import Observation
 struct ClawlineApp: App {
     @State private var authManager: AuthManager
     @State private var settingsManager: SettingsManager
+    @State private var sonioxKeyStore: SonioxKeyStore
+    @State private var cartesiaKeyStore: CartesiaKeyStore
+    @State private var watchConnectivityService: WatchConnectivityService
 
     private let deviceIdentifier: any DeviceIdentifying
     private let connectionService: any ConnectionServicing
@@ -43,12 +46,26 @@ struct ClawlineApp: App {
         let connector = URLSessionWebSocketConnector(connectTimeout: 20, resourceTimeout: 360)
         self.deviceIdentifier = device
         self.connectionService = ProviderConnectionService(connector: connector)
-        self.chatService = ProviderChatService(
+        let chatService = ProviderChatService(
             connector: connector,
             deviceId: device.deviceId,
             userIdProvider: { authManager.currentUserId }
         )
+        self.chatService = chatService
         self.uploadService = UploadService(auth: authManager)
+
+        let sharedKeychain = KeychainSecureStore(accessGroup: "group.co.clicketyclacks.Clawline")
+        let sonioxKeyStore = SonioxKeyStore(keychain: sharedKeychain)
+        let cartesiaKeyStore = CartesiaKeyStore(keychain: sharedKeychain)
+        let watchService = WatchConnectivityService(
+            authManager: authManager,
+            sonioxKeyStore: sonioxKeyStore,
+            cartesiaKeyStore: cartesiaKeyStore,
+            chatService: chatService
+        )
+        _sonioxKeyStore = State(initialValue: sonioxKeyStore)
+        _cartesiaKeyStore = State(initialValue: cartesiaKeyStore)
+        _watchConnectivityService = State(initialValue: watchService)
     }
 
     var body: some Scene {
@@ -60,8 +77,14 @@ struct ClawlineApp: App {
                 .environment(\.deviceIdentifier, deviceIdentifier)
                 .environment(\.chatService, chatService)
                 .environment(\.settingsManager, settingsManager)
+                .environment(sonioxKeyStore)
+                .environment(cartesiaKeyStore)
+                .environment(\.watchConnectivityService, watchConnectivityService)
                 .sheet(isPresented: $settingsManager.isSettingsPresented) {
                     SettingsView(settings: settingsManager)
+                }
+                .onAppear {
+                    watchConnectivityService.activate()
                 }
         }
         .commands {

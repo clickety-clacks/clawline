@@ -66,6 +66,7 @@ struct ClawlineApp: App {
         _sonioxKeyStore = State(initialValue: sonioxKeyStore)
         _cartesiaKeyStore = State(initialValue: cartesiaKeyStore)
         _watchConnectivityService = State(initialValue: watchService)
+        print("[WC_DIAG] ClawlineApp.init — calling watchService.activate()")
         watchService.activate()
     }
 

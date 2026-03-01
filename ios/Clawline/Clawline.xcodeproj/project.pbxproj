@@ -15,6 +15,7 @@
 		27ST00102F7B000000A1B2C3 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = 27ST00022F7B000000A1B2C3 /* SwiftTerm */; };
 		F679AC8CEBF54DF08B2AB80D /* HighlightSwift in Frameworks */ = {isa = PBXBuildFile; productRef = 27HL00022F1000000073BF45 /* HighlightSwift */; };
 		F67ST0102F7B000000A1B2C3 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = 27ST00022F7B000000A1B2C3 /* SwiftTerm */; };
+		CCAA00012F0F24F30073BF45 /* Clawline Watch Watch App.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = 274F7BA82F0F24F20073BF45 /* Clawline Watch Watch App.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -60,6 +61,13 @@
 			remoteGlobalIDString = 274F7BA72F0F24F20073BF45;
 			remoteInfo = "Clawline Watch Watch App";
 		};
+		CCAA00032F0F24F30073BF45 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 274F7B632F0F22B50073BF45 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 274F7BA72F0F24F20073BF45;
+			remoteInfo = "Clawline Watch Watch App";
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -70,6 +78,17 @@
 			dstSubfolderSpec = 16;
 			files = (
 				274F7BA92F0F24F20073BF45 /* Clawline Watch Watch App.app in Embed Watch Content */,
+			);
+			name = "Embed Watch Content";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		CCAA00022F0F24F30073BF45 /* Embed Watch Content */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "$(CONTENTS_FOLDER_PATH)/Watch";
+			dstSubfolderSpec = 16;
+			files = (
+				CCAA00012F0F24F30073BF45 /* Clawline Watch.app in Embed Watch Content */,
 			);
 			name = "Embed Watch Content";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -312,10 +331,12 @@
 				274F7B672F0F22B50073BF45 /* Sources */,
 				274F7B682F0F22B50073BF45 /* Frameworks */,
 				274F7B692F0F22B50073BF45 /* Resources */,
+				CCAA00022F0F24F30073BF45 /* Embed Watch Content */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				CCAA00042F0F24F30073BF45 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				274F7B6D2F0F22B50073BF45 /* Clawline */,
@@ -695,6 +716,11 @@
 			target = 274F7BA72F0F24F20073BF45 /* Clawline Watch Watch App */;
 			targetProxy = 274F7BC22F0F24F30073BF45 /* PBXContainerItemProxy */;
 		};
+		CCAA00042F0F24F30073BF45 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 274F7BA72F0F24F20073BF45 /* Clawline Watch Watch App */;
+			targetProxy = CCAA00032F0F24F30073BF45 /* PBXContainerItemProxy */;
+		};
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
@@ -938,7 +964,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = "Clawline/Clawline.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1571;
+				CURRENT_PROJECT_VERSION = 1572;
 				DEVELOPMENT_TEAM = Z7R59J7QV8;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -972,7 +998,7 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = "Clawline/Clawline.entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1571;
+				CURRENT_PROJECT_VERSION = 1572;
 				DEVELOPMENT_TEAM = Z7R59J7QV8;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -1004,7 +1030,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1571;
+				CURRENT_PROJECT_VERSION = 1572;
 				DEVELOPMENT_TEAM = Z7R59J7QV8;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
@@ -1026,7 +1052,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1571;
+				CURRENT_PROJECT_VERSION = 1572;
 				DEVELOPMENT_TEAM = Z7R59J7QV8;
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 26.0;
@@ -1047,7 +1073,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1571;
+				CURRENT_PROJECT_VERSION = 1572;
 				DEVELOPMENT_TEAM = Z7R59J7QV8;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 1.0;
@@ -1067,7 +1093,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1571;
+				CURRENT_PROJECT_VERSION = 1572;
 				DEVELOPMENT_TEAM = Z7R59J7QV8;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 1.0;
@@ -1087,9 +1113,10 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1571;
+				CURRENT_PROJECT_VERSION = 1572;
 				DEVELOPMENT_TEAM = Z7R59J7QV8;
 				INFOPLIST_KEY_CFBundleDisplayName = "Clawline Watch";
+				INFOPLIST_KEY_WKWatchKitApp = YES;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "co.clicketyclacks.Clawline-Watch";
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -1103,9 +1130,10 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1571;
+				CURRENT_PROJECT_VERSION = 1572;
 				DEVELOPMENT_TEAM = Z7R59J7QV8;
 				INFOPLIST_KEY_CFBundleDisplayName = "Clawline Watch";
+				INFOPLIST_KEY_WKWatchKitApp = YES;
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = "co.clicketyclacks.Clawline-Watch";
 				PRODUCT_NAME = "$(TARGET_NAME)";
@@ -1121,20 +1149,19 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1571;
+				CURRENT_PROJECT_VERSION = 1572;
 				DEVELOPMENT_TEAM = Z7R59J7QV8;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "Clawline Watch";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
 				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = "co.clicketyclacks.Clawline";
-				INFOPLIST_KEY_WKWatchOnly = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "co.clicketyclacks.Clawline-Watch.watchkitapp";
+				PRODUCT_BUNDLE_IDENTIFIER = "co.clicketyclacks.Clawline.watchkitapp";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = watchos;
 				SKIP_INSTALL = YES;
@@ -1155,20 +1182,19 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1571;
+				CURRENT_PROJECT_VERSION = 1572;
 				DEVELOPMENT_TEAM = Z7R59J7QV8;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "Clawline Watch";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
 				INFOPLIST_KEY_WKCompanionAppBundleIdentifier = "co.clicketyclacks.Clawline";
-				INFOPLIST_KEY_WKWatchOnly = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "co.clicketyclacks.Clawline-Watch.watchkitapp";
+				PRODUCT_BUNDLE_IDENTIFIER = "co.clicketyclacks.Clawline.watchkitapp";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = watchos;
 				SKIP_INSTALL = YES;
@@ -1188,7 +1214,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1571;
+				CURRENT_PROJECT_VERSION = 1572;
 				DEVELOPMENT_TEAM = Z7R59J7QV8;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 1.0;
@@ -1211,7 +1237,7 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1571;
+				CURRENT_PROJECT_VERSION = 1572;
 				DEVELOPMENT_TEAM = Z7R59J7QV8;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 1.0;
@@ -1233,7 +1259,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1571;
+				CURRENT_PROJECT_VERSION = 1572;
 				DEVELOPMENT_TEAM = Z7R59J7QV8;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 1.0;
@@ -1255,7 +1281,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1571;
+				CURRENT_PROJECT_VERSION = 1572;
 				DEVELOPMENT_TEAM = Z7R59J7QV8;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 1.0;

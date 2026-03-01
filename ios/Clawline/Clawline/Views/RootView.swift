@@ -58,6 +58,7 @@ struct RootView: View {
             if auth.isAuthenticated && !isProviderConfigured && !didForceRecoveryLogout {
                 didForceRecoveryLogout = true
                 auth.clearCredentials()
+                chatViewModel?.prepareForReplacement()
                 chatViewModel = nil
                 return
             }
@@ -65,6 +66,7 @@ struct RootView: View {
             if auth.isAuthenticated && isProviderConfigured {
                 ensureChatViewModel()
             } else {
+                chatViewModel?.prepareForReplacement()
                 chatViewModel = nil
             }
         }

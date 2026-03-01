@@ -123,6 +123,10 @@ actor ConnectionLifecycleCoordinator {
     private var awaitingHistoryResetAckEpoch: Int?
     private var bufferedServerMessages: [Data] = []
 
+    private func coordinatorDiag(_ message: String) {
+        print("[T099-COORD] \(Date().ISO8601Format()) coordinator phase=\(String(describing: phase)) epoch=\(currentEpoch) \(message)")
+    }
+
     init(
         startAttempt: @escaping StartAttemptHandler,
         stopAttempt: @escaping StopAttemptHandler,
@@ -137,16 +141,20 @@ actor ConnectionLifecycleCoordinator {
 
     var outputs: AsyncStream<ConnectionLifecycleOutput> {
         AsyncStream(bufferingPolicy: .unbounded) { continuation in
+            self.coordinatorDiag("outputs subscribed replacingExisting=\(self.continuation != nil)")
             self.continuation = continuation
         }
     }
 
     func setAuthToken(_ token: String?) {
+        coordinatorDiag("setAuthToken called incomingNil=\(token == nil)")
         authToken = token?.trimmingCharacters(in: .whitespacesAndNewlines)
         if authToken?.isEmpty == true {
             authToken = nil
         }
+        coordinatorDiag("setAuthToken stored tokenPresent=\(authToken != nil)")
         if authToken == nil {
+            coordinatorDiag("setAuthToken token-cleared -> moveToIdleIfNeeded")
             resetRecoveringState()
             moveToIdleIfNeeded(reason: .explicitTeardown)
         }
@@ -165,12 +173,16 @@ actor ConnectionLifecycleCoordinator {
     }
 
     func appDidBecomeActive() {
+        coordinatorDiag("appDidBecomeActive called reconnectEnabled=\(reconnectEnabled) tokenPresent=\(authToken != nil)")
         let lastBackgroundedAt = backgroundedAt
         if let lastBackgroundedAt, now().timeIntervalSince(lastBackgroundedAt) >= 60 {
             resetRecoveringState()
         }
         backgroundedAt = nil
-        guard reconnectEnabled, phase == .idle else { return }
+        guard reconnectEnabled, phase == .idle else {
+            coordinatorDiag("appDidBecomeActive early-return reconnectEnabled=\(reconnectEnabled) phase=\(String(describing: phase))")
+            return
+        }
         let sinceBackground = now().timeIntervalSince(lastBackgroundedAt ?? .distantPast)
         if sinceBackground < 2 {
             reconnectTask?.cancel()
@@ -182,6 +194,7 @@ actor ConnectionLifecycleCoordinator {
                 }
                 await self.startIfNeeded()
             }
+            coordinatorDiag("appDidBecomeActive delayed startIfNeeded in \(2 - sinceBackground)s")
             return
         }
         startConnecting(reason: .appForegrounded)
@@ -195,7 +208,11 @@ actor ConnectionLifecycleCoordinator {
     }
 
     func startIfNeeded() {
-        guard reconnectEnabled, phase == .idle else { return }
+        coordinatorDiag("startIfNeeded called reconnectEnabled=\(reconnectEnabled) tokenPresent=\(authToken != nil)")
+        guard reconnectEnabled, phase == .idle else {
+            coordinatorDiag("startIfNeeded early-return reconnectEnabled=\(reconnectEnabled) phase=\(String(describing: phase))")
+            return
+        }
         startConnecting(reason: .appForegrounded)
     }
 
@@ -208,6 +225,7 @@ actor ConnectionLifecycleCoordinator {
     }
 
     func manualRetry() {
+        coordinatorDiag("manualRetry called tokenPresent=\(authToken != nil)")
         guard authToken != nil else { return }
         switch phase {
         case .failed:
@@ -572,17 +590,23 @@ actor ConnectionLifecycleCoordinator {
     }
 
     private func startConnecting(reason: ConnectionLifecycleReason) {
-        guard let authToken, !authToken.isEmpty else { return }
+        coordinatorDiag("startConnecting called reason=\(String(describing: reason)) tokenPresent=\(authToken != nil) cursor=\(canonicalCursor ?? "nil")")
+        guard let authToken, !authToken.isEmpty else {
+            coordinatorDiag("startConnecting early-return missingAuthToken reason=\(String(describing: reason))")
+            return
+        }
         switch phase {
         case .idle, .recovering, .failed:
             break
         default:
+            coordinatorDiag("startConnecting early-return phase=\(String(describing: phase))")
             return
         }
         reconnectTask?.cancel()
         reconnectTask = nil
         currentEpoch += 1
         let epoch = currentEpoch
+        coordinatorDiag("startConnecting dispatch startAttempt epoch=\(epoch) reason=\(String(describing: reason))")
         transition(to: .connecting, reason: reason, epochOverride: epoch)
         emit(.restoreCacheRequested(epoch: epoch))
         connectTimeoutTask?.cancel()
@@ -720,6 +744,7 @@ actor ConnectionLifecycleCoordinator {
     }
 
     private func emit(_ output: ConnectionLifecycleOutput) {
+        coordinatorDiag("emit output=\(String(describing: output))")
         continuation?.yield(output)
     }
 

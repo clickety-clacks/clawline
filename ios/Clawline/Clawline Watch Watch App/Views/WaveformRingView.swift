@@ -9,7 +9,7 @@ struct WaveformRingView: View {
     @State private var phase: CGFloat = 0
 
     var body: some View {
-        TimelineView(.animation) { timeline in
+        TimelineView(.animation(paused: !isActive)) { timeline in
             let now = timeline.date.timeIntervalSinceReferenceDate
             let base = reduceMotion ? 0.0 : now
             let displacement = displacementForLevel(audioLevel)

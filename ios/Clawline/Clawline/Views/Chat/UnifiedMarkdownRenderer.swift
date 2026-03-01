@@ -122,6 +122,16 @@ enum UnifiedMarkdownRenderer {
         textView.dataDetectorTypes = [.link]
         textView.delegate = delegate
         textView.linkTextAttributes = linkTextAttributes
+        // Display-only text views never need to insert adaptive image glyphs (Genmoji).
+        // Leaving this enabled causes UIKeyboardStateManager to make a synchronous
+        // pasteboard XPC call on becomeFirstResponder; if the device locks mid-flight
+        // the XPC never returns and the watchdog kills the app (0x8BADF00D).
+        // The Swift overlay doesn't surface adaptiveImageGlyphEnabled on UITextView
+        // even though the ObjC property exists (iOS 18+, always present on 26.0 target).
+        let disableAdaptive = NSSelectorFromString("setAdaptiveImageGlyphEnabled:")
+        if textView.responds(to: disableAdaptive) {
+            textView.perform(disableAdaptive, with: NSNumber(value: false))
+        }
     }
 
     static func render(

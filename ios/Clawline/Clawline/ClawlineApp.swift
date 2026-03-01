@@ -85,6 +85,17 @@ struct ClawlineApp: App {
                 .sheet(isPresented: $settingsManager.isSettingsPresented) {
                     SettingsView(settings: settingsManager)
                 }
+                // Resign any active text-view first responder before the app backgrounds.
+                // Defense-in-depth against the pasteboard-XPC deadlock: if a UITextView
+                // is in the middle of becomeFirstResponder when the device locks, the
+                // synchronous XPC call to the pasteboard daemon never returns (0x8BADF00D).
+                // Eagerly resigning on willResignActive prevents this for the auto-lock case.
+                .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
+                    UIApplication.shared.sendAction(
+                        #selector(UIResponder.resignFirstResponder),
+                        to: nil, from: nil, for: nil
+                    )
+                }
 
         }
         .commands {

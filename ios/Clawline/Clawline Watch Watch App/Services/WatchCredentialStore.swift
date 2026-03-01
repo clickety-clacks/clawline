@@ -39,6 +39,13 @@ final class WatchCredentialStore {
         self.sonioxApiKey = keychain.getString(Keys.sonioxApiKey)
         self.cartesiaApiKey = keychain.getString(Keys.cartesiaApiKey)
         self.cartesiaVoiceId = keychain.getString(Keys.cartesiaVoiceId)
+#if DEBUG
+        // TEMP: simulator UI validation seed — remove before shipping
+        if ProcessInfo.processInfo.environment["SEED_WATCH_KEYS"] == "1" {
+            self.sonioxApiKey = "sim-test-soniox-key"
+            self.cartesiaApiKey = "sim-test-cartesia-key"
+        }
+#endif
     }
 
     var hasProviderCredentials: Bool {

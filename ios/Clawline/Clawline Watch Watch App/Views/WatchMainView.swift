@@ -82,6 +82,7 @@ struct WatchMainView: View {
                 RouteIndicatorChip(transportState: transport.transportState)
                 Spacer(minLength: 0)
                 keyStatusBadges
+                    .padding(.trailing, 44)
             }
 
             ZStack {

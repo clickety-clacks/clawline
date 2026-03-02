@@ -48,19 +48,9 @@ final class WatchConnectivityService: NSObject, WatchConnectivityServicing {
     // MARK: - Activation
 
     func activate() {
-        let supported = WCSession.isSupported()
-        let state = WCSession.default.activationState.rawValue
-        print("[WC_DIAG] activate called — isSupported=\(supported) activationState=\(state)")
-        guard supported else {
-            print("[WC_DIAG] activate ABORT: not supported")
-            return
-        }
-        guard WCSession.default.activationState == .notActivated else {
-            print("[WC_DIAG] activate ABORT: state not notActivated (state=\(state))")
-            return
-        }
+        guard WCSession.isSupported() else { return }
+        guard WCSession.default.activationState == .notActivated else { return }
         WCSession.default.delegate = self
-        print("[WC_DIAG] delegate set, calling WCSession.activate()")
         WCSession.default.activate()
 
         // Register credential change observers
@@ -84,23 +74,11 @@ final class WatchConnectivityService: NSObject, WatchConnectivityServicing {
     // MARK: - Credential Sync
 
     func syncCredentials() {
-        let paired = WCSession.default.isPaired
-        let installed = WCSession.default.isWatchAppInstalled
-        let hasToken = authManager.token != nil
-        let hasUserId = authManager.currentUserId != nil
-        let hasURL = ProviderBaseURLStore.baseURL != nil
-        print("[WC_DIAG] syncCredentials — isPaired=\(paired) isWatchAppInstalled=\(installed) hasToken=\(hasToken) hasUserId=\(hasUserId) hasProviderURL=\(hasURL)")
-        guard WCSession.default.isPaired else {
-            print("[WC_DIAG] syncCredentials ABORT: not paired")
-            return
-        }
+        guard WCSession.default.isPaired else { return }
         guard let token = authManager.token,
               let userId = authManager.currentUserId,
               let providerURL = ProviderBaseURLStore.baseURL?.absoluteString
-        else {
-            print("[WC_DIAG] syncCredentials ABORT: missing token=\(hasToken) userId=\(hasUserId) providerURL=\(hasURL)")
-            return
-        }
+        else { return }
 
         var userInfo: [String: Any] = [
             "type": "credential_push",
@@ -117,12 +95,10 @@ final class WatchConnectivityService: NSObject, WatchConnectivityServicing {
         // even if transferUserInfo queue was never delivered (fresh install, reinstall, etc.)
         do {
             try WCSession.default.updateApplicationContext(userInfo)
-            print("[WC_DIAG] updateApplicationContext succeeded")
         } catch {
-            print("[WC_DIAG] updateApplicationContext FAILED: \(error)")
+            logger.warning("updateApplicationContext failed: \(error.localizedDescription, privacy: .public)")
         }
         WCSession.default.transferUserInfo(userInfo)
-        print("[WC_DIAG] transferUserInfo enqueued")
     }
 
     @objc private func handleCredentialChange() {
@@ -459,19 +435,14 @@ extension WatchConnectivityService: WCSessionDelegate {
         activationDidCompleteWith activationState: WCSessionActivationState,
         error: Error?
     ) {
-        print("[WC_DIAG] activationDidCompleteWith state=\(activationState.rawValue) isPaired=\(session.isPaired) isWatchAppInstalled=\(session.isWatchAppInstalled) isReachable=\(session.isReachable) error=\(error?.localizedDescription ?? "nil")")
         Task { @MainActor [weak self] in
             guard let self else { return }
             isWatchPaired = session.isPaired
             isWatchReachable = session.isReachable
             if activationState == .activated, session.isPaired {
-                print("[WC_DIAG] activationDidCompleteWith → calling syncCredentials")
                 syncCredentials()
-            } else {
-                print("[WC_DIAG] activationDidCompleteWith → NOT syncing: activated=\(activationState == .activated) isPaired=\(session.isPaired)")
             }
             if let error {
-                print("[WC_DIAG] activationDidCompleteWith ERROR: \(error)")
                 logger.error("WCSession activation error: \(error.localizedDescription, privacy: .public)")
             }
         }
@@ -489,13 +460,11 @@ extension WatchConnectivityService: WCSessionDelegate {
     }
 
     nonisolated func sessionReachabilityDidChange(_ session: WCSession) {
-        print("[WC_DIAG] sessionReachabilityDidChange isReachable=\(session.isReachable)")
         Task { @MainActor [weak self] in
             guard let self else { return }
             let wasReachable = isWatchReachable
             isWatchReachable = session.isReachable
             if session.isReachable, !wasReachable {
-                print("[WC_DIAG] reachability became true → syncCredentials")
                 syncCredentials()
             }
         }

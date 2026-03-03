@@ -38,4 +38,6 @@ final class DeviceIdentifier: DeviceIdentifying {
         secureStore.setString(newId, forKey: key)
         deviceId = newId
     }
+
+    nonisolated deinit {}
 }

@@ -70,6 +70,14 @@ The seam preparation (steps 1-6 above) must run before any offscreen early retur
 Implementation ordering constraint: in `update(...)`, stream-context seam steps 1-6 execute before `isRenderPolicyFrozen` and offscreen early-return guards. Those guards apply only to step 7 and later heavy render work.
 Coordinator obligation: when `isRenderPolicyFrozen` transitions from `true` to `false`, coordinator must schedule a follow-up `update(...)` for the same controller context so suspended step-7 work resumes.
 
+### Adversarial Review Resolution Notes
+The following blocking review items are normative and incorporated in this spec:
+- `lastAppliedEffectiveSessionKey` is the authoritative seam key and is set at step 8 above (before heavy render work).
+- Scroll delegate callback writes are bound to `lastAppliedEffectiveSessionKey` (no dynamic key fallback during seam execution).
+- Restore phase initialization is stage-aware (`pendingTail` for tail stage, `pendingFullConfirmation` when tail stage is skipped/full-only).
+- Incoming SBB initialization derives from persisted `atBottom` on switch-in.
+- Frozen render/unfreeze requires coordinator-driven follow-up `update(...)` to resume suspended step-7 work.
+
 ## State Ownership Model
 
 ## Per-stream aggregate
@@ -196,8 +204,8 @@ Normalized reload triggers:
 4. Siri intent connect path (intent-driven connect without prior in-process stream context).
 
 Rule:
-- `forceReRead` is the single manual/same-key re-read entry point into `MessageFlowCollectionViewController.update(...)`.
-- Trigger sources above must explicitly arm `forceReRead` for the affected `sessionKey`.
+- `forceReReadGeneration` is the single manual/same-key re-read entry point into `MessageFlowCollectionViewController.update(...)`.
+- Trigger sources above must explicitly increment `forceReReadGeneration` for the affected `sessionKey`.
 - No other path may infer re-read implicitly from global state.
 
 ## Scroll Persistence + Restore Lifecycle
@@ -267,8 +275,8 @@ A same-session re-read/initial-repopulate must be able to re-arm restore even wh
 - If the user scrolls during pending restore for that generation, cancel pending restore, set `restorePhase = .confirmed`, and resume normal persistence immediately (user intent overrides restore intent).
 
 Re-read signal definition:
-- Same-key re-read is explicitly signaled by `forceReRead == true` on `update(...)`.
-- Normal same-key `update(...)` calls with `forceReRead == false` must not rearm restore generation.
+- Same-key re-read is explicitly signaled by a `forceReReadGeneration` advance on `update(...)`.
+- Normal same-key `update(...)` calls with unchanged `forceReReadGeneration` must not rearm restore generation.
 
 ## SBB Encapsulation + Threshold Alignment
 
@@ -376,7 +384,7 @@ SBB invariants alignment note:
 
 1. Introduce `PerStreamRuntimeState` and storage map in `MessageFlowCollectionViewController`.
 2. Add mutation seam helpers (`readState(for:)`, `mutateState(for:_:)`).
-   - Extend `update(...)` to include explicit `forceReRead: Bool = false`.
+   - Extend `update(...)` to include explicit `forceReReadGeneration: Int = 0`.
 3. Migrate SBB fields first (`sbbState`, `lastReportedHideIndicator`, `lastSeenBottomInsetForSBB`) and update all write paths.
 4. Migrate scroll persistence fields and convert persistence/restore APIs to explicit `sessionKey` args.
 5. Migrate timers/queues into per-stream entries; attach owner-key checks in callbacks.
@@ -415,7 +423,7 @@ SBB invariants alignment note:
 21. Replay callbacks with stale `(sessionKey, generation)` no-op and do not apply into another stream context.
 22. Message writes remain exclusively in T105 canonical insertion seam; no direct message-store writes are introduced by per-stream-state migration.
 23. On-message-load callback registry fires once per `(sessionKey, messageId)`, fires immediately when already materialized, and expires on stream switch-away and message deletion.
-24. Reload trigger normalization: cache restore, reconnect replay, cursor clear, and Siri intent paths each arm the single re-read seam (`forceReRead`) for the affected stream context.
+24. Reload trigger normalization: cache restore, reconnect replay, cursor clear, and Siri intent paths each increment the single re-read seam (`forceReReadGeneration`) for the affected stream context.
 25. Transport replay cursor storage is owned by transport layer; `ChatViewModel` holds no per-stream replay cursor persistence map.
 
 ## Success Criteria by Ticket

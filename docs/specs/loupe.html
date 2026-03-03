@@ -1,0 +1,1295 @@
+<!DOCTYPE html>
+<html><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Loupe</title>
+<style>
+body { font-family: -apple-system, sans-serif; max-width: 800px; margin: 2em auto; padding: 0 1em; line-height: 1.6; color: #222; background: #fff; }
+@media (prefers-color-scheme: dark) { body { background: #1a1a1a; color: #ddd; } a { color: #6cb4ee; } }
+pre { background: #f5f5f5; padding: 1em; overflow-x: auto; border-radius: 6px; font-size: 0.85em; }
+@media (prefers-color-scheme: dark) { pre { background: #2a2a2a; } }
+code { font-size: 0.9em; }
+table { border-collapse: collapse; width: 100%; margin: 1em 0; }
+th, td { border: 1px solid #ccc; padding: 0.5em; text-align: left; }
+th { background: #f0f0f0; }
+@media (prefers-color-scheme: dark) { th { background: #2a2a2a; } td, th { border-color: #444; } }
+h1 { border-bottom: 2px solid #333; padding-bottom: 0.3em; }
+h2 { border-bottom: 1px solid #ccc; padding-bottom: 0.2em; margin-top: 2em; }
+blockquote { border-left: 3px solid #ccc; margin-left: 0; padding-left: 1em; color: #666; }
+</style>
+</head><body>
+<h1 id="loupe">Loupe</h1>
+<p>Status: Design draft
+Last updated: 2026-02-25
+Depends on: <code>specs/clawline-invariants.md</code>, <code>specs/generative-ui-guidance.md</code></p>
+<h2 id="2-what-is-a-surf-ace">2. What Is a Surf Ace</h2>
+<p>A surf ace is a screen that CLU can draw on. Any screen — phone, tablet, monitor, Vision Pro window, LED ticker. CLU pushes content to it, the user looks at it, and CLU knows what they're looking at.</p>
+<p>Surf Aces are not apps. They don't have opinions about what to show. They render what CLU tells them to render and report back what the user is doing — scrolling, selecting, drawing. CLU decides everything else.</p>
+<h2 id="1-concept">1. Concept</h2>
+<p>A jeweler's loupe is pressed against something to look closely. Loupe is the same idea applied to screens: CLU presses content against a display so you can examine it together.</p>
+<p>Loupe is a standalone app — separate from Clawline, own codebase, own binary. It turns any device into a dumb screen that CLU can push content to. A Mac, an iPad, a Raspberry Pi with a monitor, a Vision Pro window. The screen broadcasts itself on the local network. CLU's provider on TARS discovers it, connects, and starts pushing content. The screen renders what it's told and reports what the user is looking at.</p>
+<p>Screens are ownerless. Like a projector in a conference room — it doesn't belong to anyone. You walk up, pair with it, use it, leave. The screen forgets you.</p>
+<p>Phone-specific contextual interactions are just surf ace behavior on one surf ace.</p>
+<h2 id="2-goal">2. Goal</h2>
+<ol>
+<li><strong>Standalone app.</strong> Loupe is its own app for iOS, iPadOS, macOS, visionOS (one SwiftUI codebase) and Linux (Electron). Not embedded in Clawline.</li>
+<li><strong>Zero-config discovery.</strong> Screens broadcast <code>_loupe._tcp</code> on Bonjour. CLU's provider discovers them automatically. No registry, no manual setup.</li>
+<li><strong>Direct connection.</strong> The provider on TARS is on the LAN. It connects to screens via HTTP directly. No relay, no phone middleman.</li>
+<li><strong>Ownerless screens.</strong> No user accounts, no persistent ownership. Session-scoped.</li>
+<li><strong>Shared screens.</strong> Visit a friend's house, their screens show up. AirPlay-style PIN pairing for untrusted screens. Trusted screens auto-connect.</li>
+<li><strong>CLU decides.</strong> CLU decides what goes on which screen. Screens don't decide anything.</li>
+</ol>
+<h2 id="3-non-goals">3. Non-Goals</h2>
+<ol>
+<li>Embedding Loupe inside Clawline. They are separate apps.</li>
+<li>Cloud-hosted screen connections. Screens are local network only.</li>
+<li>Multi-user on one screen simultaneously. One session per screen.</li>
+<li>Screen-to-screen communication. All coordination goes through CLU.</li>
+<li>Video or audio streaming. Content is document-like.</li>
+<li>Persistent screen state. Screens are stateless across sessions.</li>
+</ol>
+<h2 id="5-architecture">5. Architecture</h2>
+<pre class="codehilite"><code>┌───────────┐  ┌───────────┐  ┌───────────┐
+│  Loupe    │  │  Loupe    │  │  Loupe    │
+│  macOS    │  │  iPad     │  │  Raspi    │
+│  Monitor  │  │  Kitchen  │  │  Office   │
+└─────┬─────┘  └─────┬─────┘  └─────┬─────┘
+      │               │               │
+      │  _loupe._tcp  │  _loupe._tcp  │  _loupe._tcp
+      │               │               │
+      └───────────────┼───────────────┘
+                      │  LAN (HTTP)
+               ┌──────┴──────┐
+               │    TARS     │
+               │  Provider   │     ← mDNS browser discovers screens
+               │  CLU        │     ← HTTP to each paired screen
+               └──────┬──────┘
+                      │  (existing Clawline WS, may traverse Tailscale)
+               ┌──────┴──────┐
+               │  Clawline   │
+               │  (phone)    │     ← chat with CLU
+               └─────────────┘
+</code></pre>
+
+<p><strong>TARS connects directly.</strong> The provider runs an mDNS browser, discovers screens on the LAN, and talks to them over HTTP. No intermediary. No persistent socket needed for basic operation.</p>
+<p><strong>Protocol is HTTP, both directions.</strong> Each screen runs a tiny HTTP server. The provider POSTs frames to it and GETs snapshots from it. The provider also runs an HTTP server (port 18800, already exists). When the screen has events to report (watch mode, pencil strokes), it POSTs to the provider's callback URL. Every request is stateless and self-contained. No persistent socket, no connection state, no reconnect logic. If a socket is ever needed later for high-frequency events, same payloads, trivial upgrade.</p>
+<p><strong>Two surf ace intake paths.</strong> Standalone screens are discovered via Bonjour — the provider reaches out. Spawned surf aces (e.g., Apple Pencil annotation on a chat bubble) phone home over Clawline's existing WebSocket. Both paths end the same way: the provider has an address and can push frames or request snapshots.</p>
+<p><strong>Clawline and Loupe are separate apps.</strong> On iPhone, the user runs one at a time — foreground determines which. On iPad, they run side-by-side in split view. On Vision Pro, they're separate windows. On macOS, they're separate apps.</p>
+<p><strong>Loupe on a phone IS a screen.</strong> When the Loupe app is in the foreground on an iPhone that's on the same LAN as TARS, it broadcasts <code>_loupe._tcp</code> and TARS connects to it like any other screen. The phone is just another dumb display.</p>
+<h2 id="6-screen-protocol">6. Screen Protocol</h2>
+<h3 id="61-bonjour-advertisement">6.1 Bonjour Advertisement</h3>
+<p>Every Loupe instance broadcasts:</p>
+<p>Service type: <code>_loupe._tcp</code></p>
+<p>TXT records:</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Value</th>
+<th>Example</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>name</code></td>
+<td>Human-readable screen name</td>
+<td><code>Kitchen Display</code></td>
+</tr>
+<tr>
+<td><code>v</code></td>
+<td>Protocol version</td>
+<td><code>1</code></td>
+</tr>
+<tr>
+<td><code>w</code></td>
+<td>Viewport width (points)</td>
+<td><code>1920</code></td>
+</tr>
+<tr>
+<td><code>h</code></td>
+<td>Viewport height (points)</td>
+<td><code>1080</code></td>
+</tr>
+<tr>
+<td><code>s</code></td>
+<td>Display scale factor</td>
+<td><code>2</code></td>
+</tr>
+<tr>
+<td><code>cap</code></td>
+<td>Content type bitmask</td>
+<td><code>31</code></td>
+</tr>
+<tr>
+<td><code>busy</code></td>
+<td>Active session exists</td>
+<td><code>0</code> or <code>1</code></td>
+</tr>
+<tr>
+<td><code>pk</code></td>
+<td>Public key fingerprint (first 8 hex of SHA-256)</td>
+<td><code>a1b2c3d4</code></td>
+</tr>
+</tbody>
+</table>
+<p>Content type bitmask:</p>
+<table>
+<thead>
+<tr>
+<th>Bit</th>
+<th>Type</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><code>html</code></td>
+</tr>
+<tr>
+<td>2</td>
+<td><code>image</code></td>
+</tr>
+<tr>
+<td>4</td>
+<td><code>pdf</code></td>
+</tr>
+<tr>
+<td>8</td>
+<td><code>terminal</code></td>
+</tr>
+<tr>
+<td>16</td>
+<td><code>markdown</code></td>
+</tr>
+</tbody>
+</table>
+<p><code>busy</code> is updated in real-time as sessions start and end. The provider uses this to avoid connecting to occupied screens.</p>
+<h3 id="62-screen-identity">6.2 Screen Identity</h3>
+<p>On first launch, the Loupe app generates an Ed25519 keypair. The public key is the screen's identity — stable across reboots. The fingerprint (first 8 hex of SHA-256 of the public key) is advertised in the <code>pk</code> TXT record.</p>
+<p>The private key proves identity during the TLS handshake (self-signed cert derived from the keypair). The keypair is the only persistent state on the screen.</p>
+<h3 id="63-surf-ace-api">6.3 Surf Ace API</h3>
+<p>Each screen runs a tiny HTTPS server. The provider POSTs to the screen to push content and GETs to read state. The screen POSTs outbound to the provider for events (watch mode, pencil strokes).</p>
+<p><strong>Screen HTTP server (provider → screen):</strong></p>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Path</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>POST</code></td>
+<td><code>/pair</code></td>
+<td>Create session (PIN exchange or auto-connect)</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/frame</code></td>
+<td>Push a content frame</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/frame/append</code></td>
+<td>Append to terminal frame</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/frame/patch</code></td>
+<td>Patch HTML frame</td>
+</tr>
+<tr>
+<td><code>DELETE</code></td>
+<td><code>/frame</code></td>
+<td>Clear screen content</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/snapshot</code></td>
+<td>Get current screen state</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/watch</code></td>
+<td>Subscribe to real-time events</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/unwatch</code></td>
+<td>Unsubscribe from events</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Provider HTTP server (screen → provider):</strong></p>
+<p>The provider's existing HTTP server on port 18800 receives events from screens at a new path:</p>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Path</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>POST</code></td>
+<td><code>/loupe/events/&lt;screenId&gt;</code></td>
+<td>Watch mode events, pencil strokes, debounced snapshots</td>
+</tr>
+</tbody>
+</table>
+<p>The screen learns the callback URL from <code>POST /watch</code>. All outbound POSTs from the screen go to this URL. Each POST is self-contained — no session state on the wire.</p>
+<p>TLS uses the screen's self-signed certificate (derived from its Ed25519 keypair) for the screen's server. The provider pins the public key after first pairing. The provider's server uses its own certificate (already configured).</p>
+<p>All screen-side endpoints except <code>POST /pair</code> require <code>Authorization: Bearer &lt;sessionToken&gt;</code>. The session token is returned by a successful <code>POST /pair</code>.</p>
+<h3 id="64-session-lifetime">6.4 Session Lifetime</h3>
+<p>Sessions have <strong>no TTL</strong>. Content stays on screen indefinitely until the provider explicitly clears it, pushes a new frame, or the network connection is lost. If you're sitting there reading, nothing disappears.</p>
+<p>When the session ends:
+- Screen clears all content.
+- Screen goes idle, sets <code>busy=0</code> in Bonjour TXT.
+- Session token is invalidated.</p>
+<p>The provider can also end a session explicitly by sending <code>DELETE /frame</code> followed by not renewing. There is no explicit disconnect endpoint — TTL expiry handles cleanup.</p>
+<h3 id="65-occupancy">6.5 Occupancy</h3>
+<p>One active session per screen. If a second client sends <code>POST /pair</code> while the screen is busy:</p>
+<pre class="codehilite"><code>409 Conflict
+{ &quot;error&quot;: &quot;busy&quot; }
+</code></pre>
+
+<p>The provider sees <code>busy=1</code> in Bonjour TXT and skips connection attempts.</p>
+<h3 id="66-grace-period">6.6 Grace Period</h3>
+<p>When the provider stops sending requests (crash, network blip, iPhone app backgrounded), the screen doesn't immediately go idle. The screen holds the last displayed frame until the provider reconnects or a network timeout is detected.</p>
+<p>For iPhone backgrounding specifically: user switches away from Loupe, Loupe's HTTP server may become unreachable (iOS suspends it). The provider can't reach the screen. When the user switches back, Loupe wakes up, the server comes back online. The provider's next request (frame push or snapshot) resets the TTL and the session continues. If the provider becomes permanently unreachable (e.g., TARS goes offline), the screen holds the last frame indefinitely. It only goes idle on explicit clear or app quit.</p>
+<p>The provider holds its own session state (current frame, source refs) so it can re-push the current frame on reconnect without asking CLU.</p>
+<h3 id="67-error-reporting">6.7 Error Reporting</h3>
+<p>Errors are reported via HTTP response codes on frame push requests:</p>
+<pre class="codehilite"><code>POST /frame → 200 OK (rendered successfully)
+POST /frame → 422 Unprocessable Entity
+{
+  &quot;error&quot;: {
+    &quot;code&quot;: &quot;render_failed&quot;,
+    &quot;message&quot;: &quot;HTML exceeded maximum DOM node count&quot;
+  }
+}
+</code></pre>
+
+<p>Error codes:
+- <code>render_failed</code> — content couldn't be rendered.
+- <code>content_too_large</code> — frame payload exceeds screen's memory budget.
+- <code>unsupported_type</code> — content type not in screen's capability set.
+- <code>decode_failed</code> — base64 or payload couldn't be decoded.</p>
+<p>In watch mode, errors during live updates (append/patch) are reported as error events on the callback URL.</p>
+<p>The provider surf aces errors to CLU so it can retry with different content or choose a different screen.</p>
+<h2 id="7-discovery-and-pairing">7. Discovery and Pairing</h2>
+<h3 id="71-provider-side-discovery">7.1 Provider-Side Discovery</h3>
+<p>The provider on TARS runs an mDNS browser for <code>_loupe._tcp</code>. Discovered screens are parsed from TXT records into an in-memory screen table:</p>
+<pre class="codehilite"><code class="language-typescript">interface DiscoveredScreen {
+  instanceName: string       // Bonjour instance name
+  host: string               // resolved IP/hostname
+  port: number               // resolved port
+  name: string               // from TXT &quot;name&quot;
+  protocolVersion: number    // from TXT &quot;v&quot;
+  width: number              // from TXT &quot;w&quot;
+  height: number             // from TXT &quot;h&quot;
+  scale: number              // from TXT &quot;s&quot;
+  contentTypes: number       // from TXT &quot;cap&quot; bitmask
+  busy: boolean              // from TXT &quot;busy&quot;
+  fingerprint: string        // from TXT &quot;pk&quot;
+  status: 'discovered' | 'pairing' | 'paired' | 'busy'
+}
+</code></pre>
+
+<p>The screen table is ephemeral — rebuilt from live mDNS on provider restart. No database persistence.</p>
+<h3 id="72-trust-store">7.2 Trust Store</h3>
+<p>The provider maintains a trust store (persisted to disk as JSON) mapping screen fingerprints to trusted status:</p>
+<pre class="codehilite"><code class="language-typescript">interface TrustedScreen {
+  fingerprint: string        // 8 hex chars from pk TXT
+  publicKey: string          // full Ed25519 public key, hex
+  displayName: string        // name at time of trust
+  trustedAt: number          // epoch ms
+}
+</code></pre>
+
+<p>When a discovered screen's <code>pk</code> matches a trusted entry, the provider auto-connects without PIN. Otherwise, PIN pairing is required.</p>
+<h3 id="73-auto-connect-v1-home-networks">7.3 Auto-Connect (v1 Home Networks)</h3>
+<p>For v1, auto-connect without auth is fine on home networks. When the provider discovers a screen:</p>
+<ol>
+<li>If <code>busy=1</code>, skip.</li>
+<li>If the screen's fingerprint is in the trust store, connect via <code>POST /pair</code> with auto mode.</li>
+<li>If the screen is unknown, leave it in <code>discovered</code> state until CLU or the user initiates pairing.</li>
+</ol>
+<p><strong>Auto-connect flow:</strong></p>
+<pre class="codehilite"><code>Provider                                Screen
+   │                                       │
+   ├── POST /pair                          │
+   │   { &quot;mode&quot;: &quot;auto&quot; }  ─────────────► │
+   │                                       │  (screen checks: not busy)
+   │  ◄── 200 OK                           │
+   │   { &quot;sessionToken&quot;: &quot;&lt;token&gt;&quot; }  ──── │
+   │                                       │
+   │  [provider verifies TLS cert pk       │
+   │   matches trusted fingerprint]        │
+   │                                       │
+   │  [session active, provider can        │
+   │   now POST /frame, GET /snapshot]     │
+</code></pre>
+
+<p>The provider verifies the screen's TLS certificate public key matches the trusted fingerprint. If it doesn't match (screen was reset, or MITM), the provider refuses and marks the screen as untrusted.</p>
+<h3 id="74-pin-pairing-untrusted-screen">7.4 PIN Pairing (Untrusted Screen)</h3>
+<p>When CLU wants to use an untrusted screen, or the user asks to pair one:</p>
+<pre class="codehilite"><code>Provider                                Screen
+   │                                       │
+   ├── POST /pair                          │
+   │   { &quot;mode&quot;: &quot;pin&quot; }  ──────────────► │
+   │                                       │  ← screen shows &quot;1847&quot;
+   │  ◄── 200 OK                           │
+   │   { &quot;status&quot;: &quot;pin_required&quot;,         │
+   │     &quot;pin_hash&quot;: &quot;&lt;sha256&gt;&quot;,           │
+   │     &quot;nonce&quot;: &quot;&lt;32 hex bytes&gt;&quot; }  ──── │
+   │                                       │
+   │  [CLU asks user for PIN via           │
+   │   Clawline chat: &quot;Kitchen Display     │
+   │   is showing a PIN. What is it?&quot;]     │
+   │                                       │
+   ├── POST /pair                          │
+   │   { &quot;mode&quot;: &quot;pin&quot;,                   │
+   │     &quot;pin&quot;: &quot;1847&quot;,                    │
+   │     &quot;nonce&quot;: &quot;&lt;32 hex bytes&gt;&quot; } ────► │
+   │                                       │
+   │  ◄── 200 OK                           │
+   │   { &quot;status&quot;: &quot;ok&quot;,                   │
+   │     &quot;sessionToken&quot;: &quot;&lt;token&gt;&quot; }  ──── │
+   │                                       │
+   │  [provider stores screen pubkey       │
+   │   in trust store]                     │
+</code></pre>
+
+<p>PIN details:
+- 4-digit numeric (0000–9999). Displayed large and centered on the screen.
+- Valid for 60 seconds, then auto-rotates.
+- <code>pin_hash</code> = SHA-256(pin + nonce). The provider can't learn the PIN from the challenge.
+- 3 failed attempts = 30-second lockout.
+- CLU asks the user for the PIN via Clawline chat. The user reads the number off the physical screen and types it into chat. CLU relays it to the provider.</p>
+<h3 id="75-session-lifecycle">7.5 Session Lifecycle</h3>
+<p>A session starts at <code>POST /pair</code> success and ends when:
+1. The provider explicitly clears the frame or becomes permanently unreachable.
+2. The screen is shut down.
+3. The screen is power-cycled or factory-reset.</p>
+<p>On session end, the screen clears all content, goes idle, and sets <code>busy=0</code>.</p>
+<p>There is no explicit disconnect endpoint. The provider simply stops sending requests. The provider explicitly clears frames when done. No silent timeouts.</p>
+<h2 id="8-content-frames">8. Content Frames</h2>
+<h3 id="81-pushing-a-frame">8.1 Pushing a Frame</h3>
+<pre class="codehilite"><code>POST /frame
+Authorization: Bearer &lt;sessionToken&gt;
+Content-Type: application/json
+
+{
+  &quot;frameId&quot;: &quot;fr_&lt;8hex&gt;&quot;,
+  &quot;contentType&quot;: &quot;html&quot;,
+  &quot;content&quot;: {
+    &quot;html&quot;: &quot;&lt;html&gt;...&lt;/html&gt;&quot;
+  },
+  &quot;display&quot;: {
+    &quot;title&quot;: &quot;Build Output&quot;,
+    &quot;scrollable&quot;: true,
+    &quot;interactive&quot;: false
+  }
+}
+</code></pre>
+
+<p>Response: <code>200 OK</code> on success, <code>422</code> with error body on failure.</p>
+<p>One screen, one frame. Pushing a new frame replaces the old one. <code>frameId</code> is generated by the provider (8 lowercase hex chars, prefixed <code>fr_</code>).</p>
+<h3 id="82-content-types">8.2 Content Types</h3>
+<table>
+<thead>
+<tr>
+<th>Type</th>
+<th><code>content</code> shape</th>
+<th>Limits</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>html</code></td>
+<td><code>{ html: string, baseUrl?: string }</code></td>
+<td>256KB</td>
+</tr>
+<tr>
+<td><code>image</code></td>
+<td><code>{ data: string, mediaType: string, alt?: string }</code></td>
+<td>10MB (base64)</td>
+</tr>
+<tr>
+<td><code>pdf</code></td>
+<td><code>{ data: string }</code></td>
+<td>10MB (base64)</td>
+</tr>
+<tr>
+<td><code>terminal</code></td>
+<td><code>{ lines: string[], scrollback: number }</code></td>
+<td>10,000 lines</td>
+</tr>
+<tr>
+<td><code>markdown</code></td>
+<td><code>{ markdown: string }</code></td>
+<td>64KB</td>
+</tr>
+</tbody>
+</table>
+<p>Images and PDFs are base64-encoded inline. Screens are local devices with no guaranteed internet access. All content must be self-contained.</p>
+<h3 id="83-source-references">8.3 Source References</h3>
+<p>Source references link frame content back to a Clawline stream message. They are provider-side metadata — never sent to the screen. The screen has no concept of session keys or streams.</p>
+<p>The provider maintains a mapping: <code>(screenFingerprint, frameId) → sourceRef</code>. When the screen reports viewport or selection, the provider attaches the source ref before including it in CLU's context.</p>
+<pre class="codehilite"><code class="language-typescript">interface SourceRef {
+  sessionKey: string
+  messageId: string
+}
+</code></pre>
+
+<h3 id="84-live-updates">8.4 Live Updates</h3>
+<p><strong>Append (terminal):</strong></p>
+<pre class="codehilite"><code>POST /frame/append
+Authorization: Bearer &lt;sessionToken&gt;
+Content-Type: application/json
+
+{
+  &quot;frameId&quot;: &quot;fr_8e9f0a1b&quot;,
+  &quot;append&quot;: {
+    &quot;lines&quot;: [&quot;[14:32:01] Build succeeded&quot;, &quot;[14:32:01] Running tests...&quot;]
+  }
+}
+</code></pre>
+
+<p><strong>Patch (HTML):</strong></p>
+<pre class="codehilite"><code>POST /frame/patch
+Authorization: Bearer &lt;sessionToken&gt;
+Content-Type: application/json
+
+{
+  &quot;frameId&quot;: &quot;fr_8e9f0a1b&quot;,
+  &quot;patch&quot;: {
+    &quot;selector&quot;: &quot;#build-status&quot;,
+    &quot;action&quot;: &quot;replace_inner&quot;,
+    &quot;html&quot;: &quot;&lt;span class='success'&gt;Passed&lt;/span&gt;&quot;
+  }
+}
+</code></pre>
+
+<p>Patch actions: <code>replace_inner</code>, <code>replace_outer</code>, <code>insert_before</code>, <code>insert_after</code>, <code>remove</code>.</p>
+<p>Rules:
+1. Append: only for <code>terminal</code>. Patch: only for <code>html</code>.
+2. Stale <code>frameId</code> → <code>409 Conflict</code> with <code>{ "error": "stale_frame" }</code>.
+3. Response: <code>200 OK</code> on success, <code>422</code> on render error.</p>
+<h3 id="85-clear">8.5 Clear</h3>
+<pre class="codehilite"><code>DELETE /frame
+Authorization: Bearer &lt;sessionToken&gt;
+</code></pre>
+
+<p>Response: <code>204 No Content</code>.</p>
+<p>Screen clears content. Shows connected-idle state (screen name, subtle "connected" indicator).</p>
+<h3 id="86-frame-lifecycle">8.6 Frame Lifecycle</h3>
+<pre class="codehilite"><code>POST /frame (new)         → [active, rendering]
+POST /frame/append        → [active, updating]
+POST /frame/patch         → [active, updating]
+POST /frame (replace)     → old frame discarded, new frame active
+DELETE /frame             → [connected, idle]
+provider clears frame     → [idle, standby]
+</code></pre>
+
+<h2 id="9-snapshot-and-watch-mode">9. Snapshot and Watch Mode</h2>
+<p>Two ways to know what's on a screen: ask (snapshot) or subscribe (watch). Snapshot is the default. Watch is opt-in for real-time awareness.</p>
+<h3 id="91-query-time-snapshot-default">9.1 Query-Time Snapshot (Default)</h3>
+<p>When the user sends a message, the provider queries each active surf ace for its current state. One GET per surf ace, attached to the user's message as context. Zero idle token cost — only queries when the user asks something.</p>
+<pre class="codehilite"><code>GET /snapshot
+Authorization: Bearer &lt;sessionToken&gt;
+</code></pre>
+
+<p>Response:</p>
+<pre class="codehilite"><code class="language-json">{
+  &quot;frameId&quot;: &quot;fr_8e9f0a1b&quot;,
+  &quot;contentType&quot;: &quot;html&quot;,
+  &quot;title&quot;: &quot;Build Output&quot;,
+  &quot;viewport&quot;: {
+    &quot;scrollOffset&quot;: { &quot;x&quot;: 0, &quot;y&quot;: 1240 },
+    &quot;visibleRect&quot;: { &quot;x&quot;: 0, &quot;y&quot;: 1240, &quot;width&quot;: 1920, &quot;height&quot;: 1080 },
+    &quot;contentSize&quot;: { &quot;width&quot;: 1920, &quot;height&quot;: 4800 },
+    &quot;zoomLevel&quot;: 1.0
+  },
+  &quot;visibleText&quot;: &quot;[text content currently visible on screen]&quot;,
+  &quot;selection&quot;: null,
+  &quot;annotations&quot;: []
+}
+</code></pre>
+
+<p><code>visibleText</code> is the screen's extraction of what's currently visible in the viewport:
+- <strong>HTML:</strong> DOM <code>textContent</code> of elements intersecting the visible rect.
+- <strong>Terminal:</strong> The visible lines.
+- <strong>Markdown:</strong> Rendered text in the visible region.
+- <strong>PDF:</strong> Text on the visible page(s).
+- <strong>Image:</strong> The <code>alt</code> text.</p>
+<p>Truncated to 4KB. This keeps CLU's context window manageable.</p>
+<p><code>selection</code> is the current user selection, if any:</p>
+<pre class="codehilite"><code class="language-json">{
+  &quot;kind&quot;: &quot;text&quot;,
+  &quot;text&quot;: &quot;Error: connection refused on port 8080&quot;,
+  &quot;boundingRect&quot;: { &quot;x&quot;: 12, &quot;y&quot;: 1340, &quot;width&quot;: 360, &quot;height&quot;: 20 }
+}
+</code></pre>
+
+<p>Selection kinds: <code>text</code> (highlighted range), <code>point</code> (tap/long-press), <code>region</code> (drawn rectangle).</p>
+<p><code>annotations</code> is reserved for future use (pencil strokes, circles, arrows). Empty array in v1.</p>
+<p>This is the core of contextual awareness. User says "what's this error?" → provider GETs snapshot from each screen → one screen has a text selection of "Error: connection refused" → CLU answers contextually.</p>
+<h3 id="92-watch-mode-opt-in-streaming">9.2 Watch Mode (Opt-In Streaming)</h3>
+<p>For real-time awareness, the provider subscribes to events from a screen.</p>
+<p><strong>Subscribe:</strong></p>
+<pre class="codehilite"><code>POST /watch
+Authorization: Bearer &lt;sessionToken&gt;
+Content-Type: application/json
+
+{
+  &quot;callbackUrl&quot;: &quot;https://tars.local:18789/loupe/events/sf_a1b2c3d4&quot;,
+  &quot;events&quot;: [&quot;text_selected&quot;, &quot;point&quot;, &quot;region&quot;, &quot;scroll_settle&quot;, &quot;zoom_settle&quot;, &quot;page_change&quot;],
+  &quot;debounce&quot;: {
+    &quot;scroll_settle&quot;: 500,
+    &quot;zoom_settle&quot;: 500,
+    &quot;text_selected&quot;: 0,
+    &quot;point&quot;: 0,
+    &quot;region&quot;: 0,
+    &quot;page_change&quot;: 0
+  }
+}
+</code></pre>
+
+<p>Response: <code>200 OK</code>.</p>
+<p>The screen POSTs discrete events to the callback URL as they happen. All events fire on settled state, not continuously — the screen debounces internally per the provided config.</p>
+<p><strong>Unsubscribe:</strong></p>
+<pre class="codehilite"><code>POST /unwatch
+Authorization: Bearer &lt;sessionToken&gt;
+</code></pre>
+
+<p>Response: <code>200 OK</code>. Screen stops sending events.</p>
+<h3 id="93-watch-mode-events-v1">9.3 Watch Mode Events (v1)</h3>
+<p>All events POSTed to the callback URL as JSON. Selection and navigation events only in v1.</p>
+<p><strong><code>text_selected</code></strong> — user highlighted text:</p>
+<pre class="codehilite"><code class="language-json">{
+  &quot;event&quot;: &quot;text_selected&quot;,
+  &quot;frameId&quot;: &quot;fr_8e9f0a1b&quot;,
+  &quot;text&quot;: &quot;Error: connection refused on port 8080&quot;,
+  &quot;boundingRect&quot;: { &quot;x&quot;: 12, &quot;y&quot;: 1340, &quot;width&quot;: 360, &quot;height&quot;: 20 },
+  &quot;timestamp&quot;: 1771905600000
+}
+</code></pre>
+
+<p><strong><code>point</code></strong> — user tapped or long-pressed:</p>
+<pre class="codehilite"><code class="language-json">{
+  &quot;event&quot;: &quot;point&quot;,
+  &quot;frameId&quot;: &quot;fr_8e9f0a1b&quot;,
+  &quot;position&quot;: { &quot;x&quot;: 450, &quot;y&quot;: 1340 },
+  &quot;nearestContent&quot;: &quot;connection refused on port 8080&quot;,
+  &quot;timestamp&quot;: 1771905600000
+}
+</code></pre>
+
+<p><strong><code>region</code></strong> — user drew a selection rectangle:</p>
+<pre class="codehilite"><code class="language-json">{
+  &quot;event&quot;: &quot;region&quot;,
+  &quot;frameId&quot;: &quot;fr_8e9f0a1b&quot;,
+  &quot;rect&quot;: { &quot;x&quot;: 10, &quot;y&quot;: 1300, &quot;width&quot;: 400, &quot;height&quot;: 100 },
+  &quot;containedText&quot;: &quot;Error: connection refused on port 8080\nRetrying in 5s...&quot;,
+  &quot;timestamp&quot;: 1771905600000
+}
+</code></pre>
+
+<p><strong><code>scroll_settle</code></strong> — user stopped scrolling:</p>
+<pre class="codehilite"><code class="language-json">{
+  &quot;event&quot;: &quot;scroll_settle&quot;,
+  &quot;frameId&quot;: &quot;fr_8e9f0a1b&quot;,
+  &quot;viewport&quot;: {
+    &quot;scrollOffset&quot;: { &quot;x&quot;: 0, &quot;y&quot;: 1240 },
+    &quot;visibleRect&quot;: { &quot;x&quot;: 0, &quot;y&quot;: 1240, &quot;width&quot;: 1920, &quot;height&quot;: 1080 },
+    &quot;contentSize&quot;: { &quot;width&quot;: 1920, &quot;height&quot;: 4800 },
+    &quot;zoomLevel&quot;: 1.0
+  },
+  &quot;visibleText&quot;: &quot;[visible text at settled position]&quot;,
+  &quot;timestamp&quot;: 1771905600000
+}
+</code></pre>
+
+<p><strong><code>zoom_settle</code></strong> — user finished pinch-zoom:</p>
+<pre class="codehilite"><code class="language-json">{
+  &quot;event&quot;: &quot;zoom_settle&quot;,
+  &quot;frameId&quot;: &quot;fr_8e9f0a1b&quot;,
+  &quot;viewport&quot;: {
+    &quot;scrollOffset&quot;: { &quot;x&quot;: 0, &quot;y&quot;: 600 },
+    &quot;visibleRect&quot;: { &quot;x&quot;: 0, &quot;y&quot;: 600, &quot;width&quot;: 960, &quot;height&quot;: 540 },
+    &quot;contentSize&quot;: { &quot;width&quot;: 1920, &quot;height&quot;: 4800 },
+    &quot;zoomLevel&quot;: 2.0
+  },
+  &quot;visibleText&quot;: &quot;[visible text at settled zoom]&quot;,
+  &quot;timestamp&quot;: 1771905600000
+}
+</code></pre>
+
+<p><strong><code>page_change</code></strong> — PDF page navigation:</p>
+<pre class="codehilite"><code class="language-json">{
+  &quot;event&quot;: &quot;page_change&quot;,
+  &quot;frameId&quot;: &quot;fr_8e9f0a1b&quot;,
+  &quot;page&quot;: 3,
+  &quot;totalPages&quot;: 12,
+  &quot;pageText&quot;: &quot;[text on the new page]&quot;,
+  &quot;timestamp&quot;: 1771905600000
+}
+</code></pre>
+
+<h3 id="94-future-watch-events-not-v1">9.4 Future Watch Events (Not v1)</h3>
+<table>
+<thead>
+<tr>
+<th>Event</th>
+<th>Trigger</th>
+<th>Payload</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>gaze_dwell</code></td>
+<td>Vision Pro gaze settled on area</td>
+<td>Gaze point, dwell duration, content</td>
+</tr>
+</tbody>
+</table>
+<p>Pencil/stylus input is handled by the Pencil Markup System (§13), not watch mode. The surf ace sends raw strokes and screenshots — CLU interprets everything. No gesture recognition on the surf ace side.</p>
+<h3 id="95-two-tier-watch-processing">9.5 Two-Tier Watch Processing</h3>
+<p>Raw watch events are noisy. Scroll events, zoom events — most of them don't need CLU's attention. Running every event through the main agent wastes tokens.</p>
+<p><strong>Architecture:</strong></p>
+<pre class="codehilite"><code>Screen events  →  Cheap/fast model (Haiku-level)  →  Main agent (only when actionable)
+</code></pre>
+
+<p>The provider routes real-time watch events to a cheap, fast model for pattern recognition. The cheap model filters noise and only escalates to the main CLU agent when something actionable happens.</p>
+<p><strong>Examples of escalation:</strong>
+- <code>scroll_settle</code> alone → no escalation (user is just browsing).
+- <code>text_selected</code> with error-like content → escalate ("user highlighted an error, they may ask about it soon").
+- <code>scroll_settle</code> + <code>text_selected</code> + user sends a message within 5 seconds → escalate with full context.
+- <code>point</code> on a specific UI element → escalate if the element is actionable.</p>
+<p><strong>Examples of suppression:</strong>
+- Rapid scroll_settle events (user scanning through a document) → suppress all, cache latest position.
+- zoom_settle without selection → suppress (user is just adjusting view).</p>
+<p><strong>Cost model:</strong> The cheap model processes watch events at ~0.1% the token cost of the main agent. A screen producing 100 events/minute costs negligible tokens. Only escalated events (maybe 2-3/minute) hit the main agent.</p>
+<p>The two-tier model is a provider-side concern. The screen knows nothing about it. The screen just POSTs events to the callback URL.</p>
+<h2 id="10-clu-integration">10. CLU Integration</h2>
+<h3 id="101-provider-screen-management">10.1 Provider Screen Management</h3>
+<p>The provider maintains the screen table in memory. It exposes screen state to CLU through:</p>
+<ol>
+<li><strong>System prompt injection.</strong> On every user message, the provider queries snapshots and includes current screen context.</li>
+<li><strong><code>loupe_push</code> action.</strong> CLU invokes this to push content to a screen.</li>
+<li><strong><code>loupe_pair</code> action.</strong> CLU invokes this to initiate PIN pairing with an untrusted screen.</li>
+<li><strong><code>loupe_clear</code> action.</strong> CLU invokes this to clear a screen.</li>
+<li><strong><code>loupe_watch</code> action.</strong> CLU invokes this to start/stop watch mode on a screen.</li>
+</ol>
+<h3 id="102-query-time-context-injection">10.2 Query-Time Context Injection</h3>
+<p>When processing a user message, the provider:</p>
+<ol>
+<li>Identifies all paired screens (Bonjour-discovered and spawned).</li>
+<li>Sends <code>GET /snapshot</code> to each one.</li>
+<li>Attaches source refs from the provider's mapping.</li>
+<li>Injects the combined context into CLU's system prompt.</li>
+</ol>
+<pre class="codehilite"><code>## Loupe Screens
+- &quot;Kitchen Display&quot; (1920x1080, paired): showing terminal &quot;Build Output&quot;
+  visible: [last 30 lines of build output...]
+  selection: none
+- &quot;Office Monitor&quot; (2560x1440, paired): showing HTML &quot;Diff View&quot;
+  visible: [visible portion of diff...]
+  selection: &quot;Error: connection refused on port 8080&quot;
+- &quot;Living Room TV&quot; (3840x2160, available — not paired)
+</code></pre>
+
+<p><strong>Zero idle cost.</strong> When the user isn't sending messages, no snapshots are requested, no tokens are spent. Context is assembled on-demand at message time.</p>
+<h3 id="103-clu-actions">10.3 CLU Actions</h3>
+<p><strong><code>loupe_push</code></strong> — push a frame to a paired screen:</p>
+<pre class="codehilite"><code class="language-json">{
+  &quot;action&quot;: &quot;loupe_push&quot;,
+  &quot;screen&quot;: &quot;Kitchen Display&quot;,
+  &quot;contentType&quot;: &quot;html&quot;,
+  &quot;content&quot;: { &quot;html&quot;: &quot;&lt;html&gt;...&lt;/html&gt;&quot; },
+  &quot;title&quot;: &quot;Build Output&quot;,
+  &quot;sourceRef&quot;: {
+    &quot;sessionKey&quot;: &quot;agent:main:clawline:flynn:main&quot;,
+    &quot;messageId&quot;: &quot;s_123&quot;
+  }
+}
+</code></pre>
+
+<p><code>screen</code> is the human-readable name. The provider resolves it to a fingerprint and address. If ambiguous (two screens with the same name), the provider asks CLU to disambiguate.</p>
+<p><strong><code>loupe_pair</code></strong> — initiate PIN pairing:</p>
+<pre class="codehilite"><code class="language-json">{
+  &quot;action&quot;: &quot;loupe_pair&quot;,
+  &quot;screen&quot;: &quot;Living Room TV&quot;
+}
+</code></pre>
+
+<p>The provider sends <code>POST /pair</code> to the screen, receives the PIN challenge, and CLU asks the user via Clawline chat: "The Living Room TV is showing a 4-digit code. What is it?" User responds, CLU relays, pairing completes.</p>
+<p><strong><code>loupe_clear</code></strong> — clear a screen:</p>
+<pre class="codehilite"><code class="language-json">{
+  &quot;action&quot;: &quot;loupe_clear&quot;,
+  &quot;screen&quot;: &quot;Kitchen Display&quot;
+}
+</code></pre>
+
+<p><strong><code>loupe_watch</code></strong> — start or stop watch mode:</p>
+<pre class="codehilite"><code class="language-json">{
+  &quot;action&quot;: &quot;loupe_watch&quot;,
+  &quot;screen&quot;: &quot;Office Monitor&quot;,
+  &quot;enabled&quot;: true,
+  &quot;events&quot;: [&quot;text_selected&quot;, &quot;point&quot;, &quot;scroll_settle&quot;]
+}
+</code></pre>
+
+<h3 id="104-contextual-awareness-flow">10.4 Contextual Awareness Flow</h3>
+<p>User says "what's this error?" in Clawline:</p>
+<ol>
+<li>Provider receives message, sends <code>GET /snapshot</code> to each paired screen.</li>
+<li>"Office Monitor" snapshot returns: selection "Error: connection refused on port 8080".</li>
+<li>Provider attaches the source ref (frame came from message s_123 in main stream).</li>
+<li>Provider injects screen context into CLU's system prompt.</li>
+<li>CLU sees the selection, the frame title ("Build Output"), and the source ref.</li>
+<li>CLU answers contextually, referencing both the screen content and the conversation history.</li>
+</ol>
+<h3 id="105-screen-addressing">10.5 Screen Addressing</h3>
+<p>Users reference screens by name in Clawline chat:</p>
+<blockquote>
+<p>"Show this on the kitchen display"
+"Pull up the diff on the big monitor"
+"Clear the office screen"</p>
+</blockquote>
+<p>CLU resolves names using the screen table. Ambiguity resolved by asking.</p>
+<h2 id="11-spawned-surf-aces">11. Spawned Surf Aces</h2>
+<h3 id="111-concept">11.1 Concept</h3>
+<p>Not all surf aces are standalone screens discovered on the network. Some surf aces are born inside Clawline — temporary, purpose-built, and pre-wired to a conversation.</p>
+<p>The canonical example: user picks up Apple Pencil and starts drawing on a chat bubble in Clawline. Clawline captures a screenshot of that bubble, creates a temporary Loupe surf ace, and tells the provider about it immediately. The user draws annotations (circles, arrows, highlights), then lifts the pencil or hits send. The annotated screenshot goes to CLU as context with the message. The temporary surf ace disappears.</p>
+<p>This also works in the Loupe app itself — pencil on pushed content creates an annotation layer.</p>
+<h3 id="112-spawn-flow">11.2 Spawn Flow</h3>
+<pre class="codehilite"><code>Clawline App                                    Provider
+     │                                              │
+     │  [user picks up Apple Pencil,                │
+     │   starts drawing on a chat bubble]           │
+     │                                              │
+     │  [Clawline captures screenshot,              │
+     │   spins up a temporary HTTP server]          │
+     │                                              │
+     ├── (existing Clawline WebSocket) ───────────► │
+     │   { &quot;type&quot;: &quot;surf ace_spawned&quot;,               │
+     │     &quot;surf aceId&quot;: &quot;sp_&lt;8hex&gt;&quot;,                │
+     │     &quot;streamKey&quot;: &quot;agent:main:clawline:...&quot;,  │
+     │     &quot;callbackUrl&quot;: &quot;https://phone:port/...&quot; }│
+     │                                              │
+     │  [provider now knows about the surf ace,      │
+     │   which stream it belongs to, and            │
+     │   where to reach it]                         │
+     │                                              │
+     │  [user draws annotations...]                 │
+     │                                              │
+     │  [user lifts pencil or taps send]            │
+     │                                              │
+     ├── (existing Clawline WebSocket) ───────────► │
+     │   { &quot;type&quot;: &quot;surf ace_submitted&quot;,             │
+     │     &quot;surf aceId&quot;: &quot;sp_&lt;8hex&gt;&quot; }               │
+     │                                              │
+     │  [provider GETs /snapshot from               │
+     │   the spawned surf ace to capture             │
+     │   annotations, then attaches to              │
+     │   the user's message context]                │
+     │                                              │
+     │  [surf ace disappears]                        │
+</code></pre>
+
+<h3 id="113-key-properties">11.3 Key Properties</h3>
+<ul>
+<li><strong>Zero discovery latency.</strong> The surf ace is pre-wired at birth — the <code>surf ace_spawned</code> message over the existing Clawline WebSocket tells the provider everything it needs (address, stream context).</li>
+<li><strong>No new API endpoint.</strong> Uses the existing Clawline WebSocket. <code>surf ace_spawned</code> and <code>surf ace_submitted</code> are new message types on an existing connection.</li>
+<li><strong>Same API on the surf ace.</strong> The spawned surf ace runs the same HTTP server as a standalone Loupe screen (GET /snapshot works). The provider doesn't need to know if it's talking to a standalone screen or a spawned surf ace.</li>
+<li><strong>Stream-bound.</strong> The <code>streamKey</code> in the spawn message tells the provider which conversation this annotation belongs to. Source ref is automatic.</li>
+<li><strong>Ephemeral.</strong> The surf ace exists only for the duration of the annotation. After submission, it's gone. No cleanup needed — the HTTP server shuts down with the annotation session.</li>
+</ul>
+<h3 id="114-annotation-as-context">11.4 Annotation as Context</h3>
+<p>When the user submits the annotation, the provider <code>GET /snapshot</code>s the spawned surf ace. The snapshot includes:
+- The original screenshot.
+- Any drawn annotations (strokes, circles, arrows, text notes) as an overlay.
+- Any text selections within the screenshot.</p>
+<p>This snapshot is attached to the user's message as visual context. CLU sees the annotated screenshot and can reason about what the user circled, pointed at, or highlighted.</p>
+<h2 id="12-two-surf-ace-intake-paths">12. Two Surf Ace Intake Paths</h2>
+<p>The provider has two ways to learn about surf aces:</p>
+<h3 id="121-path-1-bonjour-discovery-standalone-screens">12.1 Path 1: Bonjour Discovery (Standalone Screens)</h3>
+<ul>
+<li>Screen broadcasts <code>_loupe._tcp</code> on the LAN.</li>
+<li>Provider's mDNS browser discovers it.</li>
+<li>Provider initiates pairing via <code>POST /pair</code>.</li>
+<li>Provider manages the session.</li>
+</ul>
+<p><strong>Provider reaches out to the surf ace.</strong></p>
+<h3 id="122-path-2-surf-ace_spawned-message-spawned-surf-aces">12.2 Path 2: <code>surf ace_spawned</code> Message (Spawned Surf Aces)</h3>
+<ul>
+<li>User triggers an annotation in Clawline or Loupe.</li>
+<li>App sends <code>surf ace_spawned</code> over its existing WebSocket to the provider.</li>
+<li>Provider receives the callback URL and connects immediately.</li>
+</ul>
+<p><strong>Surf Ace phones home to the provider.</strong></p>
+<h3 id="123-convergence">12.3 Convergence</h3>
+<p>Both paths end the same way: the provider has a surf ace address (host + port) and a session (token for standalone, inherent for spawned). It can <code>POST /frame</code>, <code>GET /snapshot</code>, <code>POST /watch</code> — the same Surf Ace API regardless of how the surf ace was discovered.</p>
+<p>The provider's screen table holds both types:</p>
+<pre class="codehilite"><code class="language-typescript">interface ActiveSurf Ace {
+  id: string                   // fingerprint for standalone, sp_&lt;hex&gt; for spawned
+  name: string
+  address: string              // host:port
+  sessionToken: string | null  // null for spawned (no pairing needed)
+  intake: 'bonjour' | 'spawned'
+  streamKey: string | null     // set for spawned, null for standalone
+  sourceRef: SourceRef | null
+  // ... capabilities, viewport, etc.
+}
+</code></pre>
+
+<p>CLU doesn't need to know which intake path was used. It just sees "Kitchen Display" and "annotation on message s_123" as available surf aces.</p>
+<h2 id="13-pencil-markup-system">13. Pencil Markup System</h2>
+<p>The user can draw on any Loupe surf ace with Apple Pencil (or mouse, or finger). CLU interprets the strokes in context and responds by modifying the surf ace content in real-time.</p>
+<p>This is not an annotation overlay. It's a conversation with CLU through ink.</p>
+<h3 id="131-no-prescribed-gesture-vocabulary">13.1 No Prescribed Gesture Vocabulary</h3>
+<p>The surf ace does NOT interpret strokes. No gesture recognition on the surf ace side. No circle detector, no arrow detector, no handwriting recognizer. The surf ace captures raw stroke paths and screenshots, sends them to the provider, and CLU does all interpretation using vision models.</p>
+<p>The model is smart enough to figure out intent from raw strokes + visual context + change history. Examples of things that just work without explicit gesture code:</p>
+<ul>
+<li>Scribble out text → CLU deletes it.</li>
+<li>Write a word between other words → CLU inserts it.</li>
+<li>Draw a rough circle around something → CLU cleans it to a perfect circle, or interprets it as "look at this."</li>
+<li>Underline something → CLU emphasizes it.</li>
+<li>Write a correction over a word → CLU replaces the word.</li>
+<li>Draw a rough table or flowchart → CLU snaps it to a clean version.</li>
+<li>Write <code>?</code> next to something → CLU explains it.</li>
+<li>Write a name → CLU pops up contextual info about that person/thing.</li>
+<li>Write <code>oops</code> next to a deletion → CLU undoes the change.</li>
+<li>Draw an arrow from A to B → CLU moves A to B, or connects them, depending on context.</li>
+<li>Cross out an entire paragraph → CLU removes it.</li>
+<li>Draw a bracket spanning multiple items → CLU groups them.</li>
+</ul>
+<p>None of these are coded as gestures. The model infers intent from strokes + visual context + what CLU has already placed on the surf ace + the conversation history.</p>
+<h3 id="132-two-debounce-tiers">13.2 Two Debounce Tiers</h3>
+<p>The surf ace runs two debounce timers for stroke input:</p>
+<p><strong>Short debounce (~500ms after pencil lifts):</strong> Sends the raw strokes plus a local crop screenshot of the area around the strokes. Covers instant-feedback interactions — corrections, insertions, quick annotations. CLU responds fast with local context.</p>
+<p><strong>Long debounce (~3–5s of no new strokes):</strong> Sends a full surf ace screenshot plus all strokes since the last full snapshot. CLU does a holistic pass — catches cross-surf ace connections, cleans up stale artifacts, fixes anything the short pass missed, resolves ambiguities.</p>
+<p>Short gives speed. Long gives completeness. Both are single-pass, no correction loops.</p>
+<p>The user experiences it as: <em>magic happened immediately, then a moment later it got even smarter.</em></p>
+<h3 id="133-what-the-surf-ace-sends">13.3 What the Surf Ace Sends</h3>
+<p>Both payloads are POSTed to the provider's callback URL (same as watch mode events, at <code>/loupe/events/&lt;screenId&gt;</code>).</p>
+<p><strong>Short debounce payload:</strong></p>
+<pre class="codehilite"><code class="language-json">{
+  &quot;event&quot;: &quot;strokes&quot;,
+  &quot;frameId&quot;: &quot;fr_8e9f0a1b&quot;,
+  &quot;strokes&quot;: [
+    {
+      &quot;points&quot;: [
+        { &quot;x&quot;: 120, &quot;y&quot;: 340, &quot;pressure&quot;: 0.8, &quot;timestamp&quot;: 1771905600000 },
+        { &quot;x&quot;: 125, &quot;y&quot;: 342, &quot;pressure&quot;: 0.7, &quot;timestamp&quot;: 1771905600016 }
+      ],
+      &quot;tool&quot;: &quot;pencil&quot;
+    }
+  ],
+  &quot;crop&quot;: &quot;&lt;base64 image of local area around strokes&gt;&quot;,
+  &quot;cropRect&quot;: { &quot;x&quot;: 80, &quot;y&quot;: 300, &quot;w&quot;: 200, &quot;h&quot;: 120 },
+  &quot;timestamp&quot;: 1771905600500
+}
+</code></pre>
+
+<p><strong>Long debounce payload:</strong></p>
+<pre class="codehilite"><code class="language-json">{
+  &quot;event&quot;: &quot;surf ace_snapshot&quot;,
+  &quot;frameId&quot;: &quot;fr_8e9f0a1b&quot;,
+  &quot;image&quot;: &quot;&lt;base64 full surf ace screenshot&gt;&quot;,
+  &quot;strokesSinceLastSnapshot&quot;: [
+    {
+      &quot;points&quot;: [ ... ],
+      &quot;tool&quot;: &quot;pencil&quot;
+    }
+  ],
+  &quot;timestamp&quot;: 1771905604000
+}
+</code></pre>
+
+<p>The crop screenshot shows the strokes rendered on top of the underlying content — exactly what the user sees. The full screenshot shows everything: CLU's pushed content, any previous CLU modifications, and all new strokes. This is the primary input for vision model interpretation.</p>
+<p><code>tool</code> is one of: <code>pencil</code> (Apple Pencil), <code>finger</code>, <code>mouse</code>. Pressure data is available for Pencil, absent for finger/mouse.</p>
+<h3 id="134-clu-responds-with-frame-updates">13.4 CLU Responds with Frame Updates</h3>
+<p>CLU interprets the strokes and responds by pushing updated content to the surf ace. Same <code>POST /frame</code> as regular content push. No special markup protocol.</p>
+<p>CLU can:
+- <strong>Push a new frame</strong> that incorporates the changes (deleted text removed, inserted text added, cleaned-up shapes replacing rough ones).
+- <strong>Patch the existing frame</strong> via <code>POST /frame/patch</code> for small changes (replace a word, add emphasis).
+- <strong>Push artifacts</strong> — info cards, expanded explanations, cleaned-up diagrams — as new frame content overlaid on or replacing the original.</p>
+<p>The surf ace maintains a <strong>change stack</strong> — an ordered list of frames CLU has pushed during this session. This enables:
+- CLU referencing previous changes ("undo the last thing I did").
+- The user writing "oops" or scribbling to trigger undo — CLU pops the change stack and re-pushes the previous frame.
+- CLU seeing its own modification history when interpreting new strokes in the long-debounce full screenshot.</p>
+<h3 id="135-context-payload">13.5 Context Payload</h3>
+<p>What CLU receives to make interpretation decisions:</p>
+<ol>
+<li><strong>Raw stroke paths</strong> — what the user drew. Points, pressure, timestamps. No pre-interpretation.</li>
+<li><strong>Screenshot</strong> — local crop (short debounce) or full surf ace (long debounce). Shows strokes rendered on top of the underlying content. This is what the vision model sees.</li>
+<li><strong>Underlying semantic content</strong> — the actual text, HTML, or data beneath the strokes. Not just pixels. The provider knows what it pushed to the surf ace and attaches it.</li>
+<li><strong>Change history</strong> — what CLU has modified this session. Enables undo and prevents CLU from re-interpreting its own previous modifications as new user input.</li>
+<li><strong>CLU's previously placed artifacts</strong> — visible in the full screenshot. CLU can see what it already put on the surf ace and revise.</li>
+<li><strong>Source ref</strong> — which stream message this content came from, if any. Links the markup back to conversation context.</li>
+</ol>
+<h3 id="136-speculative-interpretation-with-revision">13.6 Speculative Interpretation with Revision</h3>
+<p>CLU's interpretation on the short debounce is provisional. The user may still be drawing.</p>
+<p>Example: user writes "George Washington." Short debounce fires. CLU pops up an info card about George Washington. User continues writing "Carver." Long debounce fires with full screenshot. CLU sees "George Washington Carver" alongside its own previously placed George Washington card. CLU realizes the mistake, pushes an updated card for George Washington Carver.</p>
+<p>No special revision protocol needed. CLU just pushes updated frames that replace previous content. The full screenshot on the long debounce shows CLU its own previous output alongside new strokes, giving it everything it needs to self-correct.</p>
+<p>The change stack makes this clean: CLU pushes a speculative frame on short debounce, then pushes a corrected frame on long debounce. Both are recorded. If the user writes "no, the first one was right," CLU can reference the stack.</p>
+<h3 id="137-two-tier-processing">13.7 Two-Tier Processing</h3>
+<p>Same architecture as watch mode two-tier processing (§9.5):</p>
+<pre class="codehilite"><code>Short debounce events  →  Cheap/fast model (Haiku-level)  →  Immediate surf ace updates
+Long debounce events   →  Main agent                      →  Holistic pass, revisions
+</code></pre>
+
+<p>The cheap model handles short-debounce strokes: simple transforms, text insertion, deletion, emphasis. Fast feedback, low token cost. It has access to the crop screenshot and local context — enough for most instant interactions.</p>
+<p>The main agent handles long-debounce snapshots: full-surf ace reasoning, cross-reference with conversation history, complex diagram cleanup, speculative revision. Higher cost, but fires much less frequently (every 3–5 seconds of idle, not every 500ms).</p>
+<p><strong>Cost model:</strong> Short debounce events average ~200 tokens each at Haiku pricing. A heavy markup session (user drawing constantly for 5 minutes) produces maybe 100 short events and 20 long events. Total cost is dominated by the 20 main-agent calls, which is comparable to 20 chat messages.</p>
+<h3 id="138-what-the-surf-ace-does-not-do">13.8 What the Surf Ace Does NOT Do</h3>
+<p>The surf ace has no intelligence about markup. Specifically:</p>
+<ul>
+<li>No gesture recognition (circle, arrow, underline, etc.).</li>
+<li>No handwriting recognition.</li>
+<li>No shape snapping or cleanup.</li>
+<li>No stroke classification.</li>
+<li>No intent inference.</li>
+</ul>
+<p>The surf ace captures raw input, renders strokes as-is on a transparent overlay above the content, takes screenshots, and sends them to the provider. All interpretation is CLU's job. This keeps the surf ace dumb and ensures behavior improves as models improve, not as surf ace code is updated.</p>
+<p>The surf ace does handle:
+- PencilKit (Apple) or equivalent for smooth stroke capture and rendering.
+- Pressure sensitivity for Apple Pencil.
+- Palm rejection.
+- Screenshot capture of the current rendered state with strokes overlaid.
+- Debounce timers (500ms short, 3–5s long).
+- Change stack (ordered list of frames received from the provider).</p>
+<h2 id="14-loupe-app">14. Loupe App</h2>
+<h3 id="131-platforms">13.1 Platforms</h3>
+<table>
+<thead>
+<tr>
+<th>Platform</th>
+<th>Framework</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>iOS</td>
+<td>SwiftUI</td>
+<td>Phone is a screen. Foreground = broadcasting. Background = HTTP server suspended, 5min TTL grace.</td>
+</tr>
+<tr>
+<td>iPadOS</td>
+<td>SwiftUI</td>
+<td>Split view with Clawline. Or full-screen Loupe.</td>
+</tr>
+<tr>
+<td>macOS</td>
+<td>SwiftUI</td>
+<td>Chromeless window option. Menu bar icon.</td>
+</tr>
+<tr>
+<td>visionOS</td>
+<td>SwiftUI</td>
+<td>Separate window from Clawline.</td>
+</tr>
+<tr>
+<td>Linux</td>
+<td>Electron</td>
+<td>Raspberry Pi, standalone monitors. Kiosk mode.</td>
+</tr>
+</tbody>
+</table>
+<p>One SwiftUI codebase for all Apple platforms. Electron for Linux.</p>
+<h3 id="132-what-the-app-does">13.2 What the App Does</h3>
+<ol>
+<li><strong>Generates identity</strong> on first launch (Ed25519 keypair, stored in Keychain / filesystem).</li>
+<li><strong>Broadcasts</strong> <code>_loupe._tcp</code> with screen metadata in TXT records.</li>
+<li><strong>Runs HTTP server</strong> on the advertised port (Surf Ace API: /pair, /frame, /snapshot, /watch, /unwatch).</li>
+<li><strong>Handles pairing</strong> — PIN display or auto-connect acceptance.</li>
+<li><strong>Renders content</strong> — HTML (WKWebView / Electron webview), PDF (native viewer), images, terminal (monospace view), markdown (rendered view).</li>
+<li><strong>Responds to snapshots</strong> — extracts visible text, selection, viewport position on GET /snapshot.</li>
+<li><strong>Reports events</strong> — POSTs watch mode events and pencil stroke data to the provider's callback URL.</li>
+<li><strong>Captures pencil input</strong> — PencilKit (Apple) or equivalent for raw stroke capture, debounced at two tiers, with crop and full screenshots.</li>
+<li><strong>Maintains change stack</strong> — ordered history of frames received from the provider, enabling CLU-driven undo.</li>
+<li><strong>Manages session</strong> — one active session, 5-minute TTL, idle on expiry.</li>
+</ol>
+<p>That's all. No CLU knowledge. No Clawline knowledge. No user accounts. No cloud connections. No gesture recognition. No handwriting recognition. No stroke interpretation. The surf ace is dumb. CLU is smart.</p>
+<h3 id="133-screen-states">13.3 Screen States</h3>
+<pre class="codehilite"><code>┌──────────┐    pair     ┌──────────┐   frame   ┌──────────┐
+│  Standby │───────────►│Connected │─────────►│Displaying│
+│          │◄───────────│  (idle)  │◄─────────│          │
+└──────────┘  TTL        └──────────┘   clear   └──────────┘
+              expiry           ▲                      │
+                               │    DELETE /frame     │
+                               └──────────────────────┘
+</code></pre>
+
+<p><strong>Standby:</strong> No active session. Screen shows its name and a subtle network indicator. Broadcasting <code>_loupe._tcp</code> with <code>busy=0</code>.</p>
+<p><strong>Pairing:</strong> PIN displayed large and centered. Waiting for response.</p>
+<p><strong>Connected (idle):</strong> Session active, no content pushed yet. Shows screen name and "Connected" indicator.</p>
+<p><strong>Displaying:</strong> Rendering a frame. Responding to GET /snapshot and watch mode events.</p>
+<p><strong>TTL expiry:</strong> Session timed out (5 minutes without any request). Screen clears content, transitions to Standby.</p>
+<h3 id="134-standby-display">13.4 Standby Display</h3>
+<p>When idle, the screen shows:
+- Screen name (large, centered).
+- Network status icon.
+- Public key fingerprint (small, bottom corner) for manual identification if needed.</p>
+<p>No clock, no weather, no ambient content. Loupe is a tool, not a dashboard.</p>
+<h3 id="135-content-rendering">13.5 Content Rendering</h3>
+<table>
+<thead>
+<tr>
+<th>Content Type</th>
+<th>Apple Platforms</th>
+<th>Electron</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>html</code></td>
+<td><code>WKWebView</code></td>
+<td>Chromium webview</td>
+</tr>
+<tr>
+<td><code>image</code></td>
+<td>Native image view</td>
+<td><code>&lt;img&gt;</code></td>
+</tr>
+<tr>
+<td><code>pdf</code></td>
+<td><code>PDFKit</code> / <code>PDFView</code></td>
+<td><code>pdf.js</code></td>
+</tr>
+<tr>
+<td><code>terminal</code></td>
+<td>Custom monospace <code>NSAttributedString</code> view with ANSI color</td>
+<td><code>xterm.js</code></td>
+</tr>
+<tr>
+<td><code>markdown</code></td>
+<td>Native markdown rendering</td>
+<td><code>marked</code> + custom CSS</td>
+</tr>
+</tbody>
+</table>
+<p>HTML frames use CSS variables for theming: <code>--loupe-bg</code>, <code>--loupe-fg</code>, <code>--loupe-accent</code>, <code>--loupe-font-size</code>, <code>--loupe-width</code>, <code>--loupe-height</code>. The Loupe app injects these based on screen characteristics.</p>
+<h3 id="136-iphone-behavior">13.6 iPhone Behavior</h3>
+<p>When the Loupe app is in the foreground:
+- Broadcasting <code>_loupe._tcp</code>.
+- HTTP server running, accepting requests, rendering content.
+- User sees CLU's pushed content full-screen.</p>
+<p>When the user switches to Clawline (or any other app):
+- Loupe moves to background. iOS suspends the HTTP server.
+- Provider can't reach the screen.
+- Session TTL (5 minutes) acts as grace period.
+- User switches back to Loupe within 5 minutes: HTTP server wakes up. Provider's next request resets TTL. Session continues. Provider re-pushes current frame if needed.
+- User doesn't switch back within 5 minutes: session expires, screen goes idle.</p>
+<p>This is fine. Background death on iPhone is expected and handled by the TTL.</p>
+<h3 id="137-ipad-behavior">13.7 iPad Behavior</h3>
+<p>iPad supports Split View and Slide Over. User can run Clawline on one side and Loupe on the other — chat with CLU while seeing CLU's pushed content. Both apps maintain their own connections: Clawline to the gateway (potentially over Tailscale), Loupe's HTTP server serving the provider on the LAN.</p>
+<h3 id="138-vision-pro-behavior">13.8 Vision Pro Behavior</h3>
+<p>Loupe runs as a separate window from Clawline. Multiple Loupe windows can exist, each a separate surf ace with its own Bonjour advertisement and session. CLU sees each window as a distinct screen.</p>
+<h3 id="139-macos-behavior">13.9 macOS Behavior</h3>
+<p>Loupe runs as a regular macOS app. Options:
+- Windowed mode: resizable window.
+- Chromeless mode: borderless window for dedicated displays.
+- Menu bar mode: Loupe runs in the background, activates a window when content is pushed.</p>
+<h3 id="1310-linux-electron-behavior">13.10 Linux / Electron Behavior</h3>
+<p>Electron app with kiosk mode for dedicated displays (Raspberry Pi). Uses system-level mDNS (Avahi on Linux) for Bonjour advertisement. HTTP server via Node.js. Renders HTML via Chromium, other types via JS libraries.</p>
+<h2 id="15-security">15. Security</h2>
+<h3 id="151-pairing-as-authentication">15.1 Pairing as Authentication</h3>
+<p>PIN pairing proves physical proximity — the user can see the screen's display. After first pairing, the provider trusts the screen's public key. Future connections verify identity via TLS certificate pinning.</p>
+<p>Auto-connect without PIN is fine for v1 on home networks. The provider auto-connects to trusted screens. For untrusted screens, CLU asks the user for the PIN via Clawline chat.</p>
+<h3 id="152-transport">15.2 Transport</h3>
+<p>All Surf Ace API requests use HTTPS with the screen's self-signed certificate (derived from its Ed25519 keypair). The provider pins the public key after first pairing. No CA chain needed.</p>
+<p>Prevents passive eavesdropping on the LAN. Active MITM is prevented by public key pinning.</p>
+<h3 id="153-session-tokens">15.3 Session Tokens</h3>
+<p>Session tokens are opaque random strings (32 bytes, hex-encoded) generated by the screen on successful pairing. Tokens are short-lived (5-minute TTL, refreshed on use). A stolen token expires quickly. Tokens are transmitted only over TLS.</p>
+<h3 id="154-screen-impersonation">15.4 Screen Impersonation</h3>
+<p>A malicious device broadcasting <code>_loupe._tcp</code> with a spoofed name. Mitigated by:
+1. PIN pairing requires visual verification of the physical screen.
+2. After trust, public key pinning catches identity changes.
+3. If a trusted screen's key changes (factory reset or impersonation), the provider flags it and requires re-pairing.</p>
+<h3 id="155-content-on-shared-screens">15.5 Content on Shared Screens</h3>
+<p>Content pushed to screens is visible to anyone in the room. This is inherent to physical displays. CLU should be aware that Loupe screens are physically public and avoid pushing sensitive content unless explicitly asked.</p>
+<h3 id="156-watch-mode-callback-security">15.6 Watch Mode Callback Security</h3>
+<p>The callback URL for watch mode points to the provider (TARS). Events from the screen are POSTed to this URL over HTTPS. The provider validates that incoming events match an active watch subscription (by source IP and session). Spoofed events from other devices are rejected.</p>
+<h2 id="16-edge-cases">16. Edge Cases</h2>
+<h3 id="161-screen-unreachable">16.1 Screen Unreachable</h3>
+<p>Provider sends POST /frame but the screen is unreachable (powered off, network gone). HTTP request times out. Provider marks the screen as unreachable, retries with exponential backoff. After 3 failures, marks screen as disconnected. If the screen reappears on mDNS later, provider re-pairs.</p>
+<h3 id="162-provider-restart">16.2 Provider Restart</h3>
+<p>TARS restarts. Provider rebuilds screen table from mDNS. Sessions on screens haven't expired yet (5-minute TTL). Provider re-pairs with trusted screens and can resume pushing content. Screens that have expired their TTL during the restart window will need fresh pairing.</p>
+<h3 id="163-screen-name-collision">16.3 Screen Name Collision</h3>
+<p>Two screens named "Monitor" on the same network. Provider disambiguates by fingerprint. CLU reports to user: "There are two screens named 'Monitor'. Which one? Monitor (a1b2) or Monitor (c3d4)?"</p>
+<h3 id="164-content-too-large">16.4 Content Too Large</h3>
+<p>Provider sends a 256KB HTML frame to a screen with limited memory. Screen responds <code>422</code> with <code>content_too_large</code>. Provider surf aces to CLU. CLU retries with simpler content or chooses a different screen.</p>
+<h3 id="165-no-screens-on-network">16.5 No Screens on Network</h3>
+<p>No Loupe screens discovered. CLU falls back to inline display — generative UI bubbles in Clawline chat. Loupe enhances the experience when screens are available but never requires them.</p>
+<h3 id="166-screen-factory-reset">16.6 Screen Factory Reset</h3>
+<p>Screen regenerates keypair. Provider's trusted entry no longer matches the fingerprint in Bonjour TXT. Provider treats it as a new untrusted screen. PIN pairing required to re-establish trust.</p>
+<h3 id="167-multiple-providers-on-same-network">16.7 Multiple Providers on Same Network</h3>
+<p>Two TARS instances (or dev + prod) discover the same screens. First to <code>POST /pair</code> occupies the screen (<code>busy=1</code>). Second sees it as busy. No conflict — occupancy is first-come-first-served.</p>
+<h3 id="168-snapshot-during-render">16.8 Snapshot During Render</h3>
+<p>Provider sends <code>GET /snapshot</code> while the screen is still rendering a just-pushed frame. Screen returns the snapshot of whatever is currently visible (may be partial render). The <code>frameId</code> in the snapshot tells the provider which frame the snapshot corresponds to. Provider can re-request after a delay if it needs the settled state.</p>
+<h3 id="169-watch-mode-callback-unreachable">16.9 Watch Mode Callback Unreachable</h3>
+<p>Screen is in watch mode, POSTing events to the provider's callback URL. Provider becomes temporarily unreachable. Screen's event POST fails. Screen retries once after 1 second, then drops the event. Events are best-effort, not guaranteed delivery. The provider can always <code>GET /snapshot</code> for authoritative state.</p>
+<h3 id="1610-pencil-strokes-during-frame-push">16.10 Pencil Strokes During Frame Push</h3>
+<p>User is drawing while CLU pushes a new frame in response to earlier strokes. The surf ace must not lose in-flight strokes. The surf ace buffers strokes during frame render. After the new frame is applied, buffered strokes are rendered on the overlay and included in the next debounce event. The change stack records the new frame so CLU knows its update was applied.</p>
+<h3 id="1611-rapid-pencil-input">16.11 Rapid Pencil Input</h3>
+<p>User draws continuously for 30 seconds without lifting the pencil. Short debounce never fires (pencil never lifts). Long debounce fires once at the 3–5s mark, then again at the next idle gap. The surf ace accumulates strokes and sends them all in the long-debounce payload. CLU may receive a large stroke set. This is fine — the vision model sees the full screenshot and doesn't need to process strokes sequentially.</p>
+<h2 id="17-surf-ace-api-reference">17. Surf Ace API Reference</h2>
+<h3 id="171-post-pair">17.1 POST /pair</h3>
+<p>Create a session with the screen.</p>
+<p><strong>Request (auto mode):</strong></p>
+<pre class="codehilite"><code class="language-json">{ &quot;mode&quot;: &quot;auto&quot; }
+</code></pre>
+
+<p><strong>Response (success):</strong></p>
+<pre class="codehilite"><code class="language-json">{ &quot;status&quot;: &quot;ok&quot;, &quot;sessionToken&quot;: &quot;&lt;token&gt;&quot; }
+</code></pre>
+
+<p><strong>Request (PIN mode, step 1):</strong></p>
+<pre class="codehilite"><code class="language-json">{ &quot;mode&quot;: &quot;pin&quot; }
+</code></pre>
+
+<p><strong>Response (challenge):</strong></p>
+<pre class="codehilite"><code class="language-json">{
+  &quot;status&quot;: &quot;pin_required&quot;,
+  &quot;pin_hash&quot;: &quot;&lt;sha256(pin + nonce)&gt;&quot;,
+  &quot;nonce&quot;: &quot;&lt;32 hex bytes&gt;&quot;
+}
+</code></pre>
+
+<p><strong>Request (PIN mode, step 2):</strong></p>
+<pre class="codehilite"><code class="language-json">{ &quot;mode&quot;: &quot;pin&quot;, &quot;pin&quot;: &quot;1847&quot;, &quot;nonce&quot;: &quot;&lt;32 hex bytes&gt;&quot; }
+</code></pre>
+
+<p><strong>Response (success):</strong></p>
+<pre class="codehilite"><code class="language-json">{ &quot;status&quot;: &quot;ok&quot;, &quot;sessionToken&quot;: &quot;&lt;token&gt;&quot; }
+</code></pre>
+
+<p><strong>Error responses:</strong>
+- <code>409 Conflict</code> — screen is busy.
+- <code>403 Forbidden</code> — PIN incorrect or lockout active.
+- <code>429 Too Many Requests</code> — lockout (3 failed attempts).</p>
+<h3 id="172-post-frame">17.2 POST /frame</h3>
+<p>Push a content frame. Replaces any existing frame.</p>
+<p><strong>Request:</strong> Frame JSON (see §8.1).
+<strong>Response:</strong> <code>200 OK</code> or <code>422</code> with error body (see §6.7).</p>
+<h3 id="173-post-frameappend">17.3 POST /frame/append</h3>
+<p>Append to a terminal frame.</p>
+<p><strong>Request:</strong> Append JSON (see §8.4).
+<strong>Response:</strong> <code>200 OK</code> or <code>409 Conflict</code> (stale frameId) or <code>422</code> (error).</p>
+<h3 id="174-post-framepatch">17.4 POST /frame/patch</h3>
+<p>Patch an HTML frame.</p>
+<p><strong>Request:</strong> Patch JSON (see §8.4).
+<strong>Response:</strong> <code>200 OK</code> or <code>409 Conflict</code> (stale frameId) or <code>422</code> (error).</p>
+<h3 id="175-delete-frame">17.5 DELETE /frame</h3>
+<p>Clear screen content.</p>
+<p><strong>Response:</strong> <code>204 No Content</code>.</p>
+<h3 id="176-get-snapshot">17.6 GET /snapshot</h3>
+<p>Get current screen state.</p>
+<p><strong>Response:</strong> Snapshot JSON (see §9.1).</p>
+<p>Returns <code>204 No Content</code> if no frame is displayed (connected-idle state).</p>
+<h3 id="177-post-watch">17.7 POST /watch</h3>
+<p>Subscribe to real-time events.</p>
+<p><strong>Request:</strong> Watch config JSON (see §9.2).
+<strong>Response:</strong> <code>200 OK</code>.</p>
+<h3 id="178-post-unwatch">17.8 POST /unwatch</h3>
+<p>Unsubscribe from events.</p>
+<p><strong>Response:</strong> <code>200 OK</code>.</p>
+<h2 id="18-open-questions">18. Open Questions</h2>
+<ol>
+<li>
+<p><strong>mDNS across subnets.</strong> Bonjour works within a broadcast domain. If TARS is on a different subnet from the screens (common in larger networks), mDNS won't work without an mDNS reflector or Tailscale's MagicDNS. Should the provider support manual screen addresses as a fallback?</p>
+</li>
+<li>
+<p><strong>Screen input.</strong> Should screens support keyboard input for terminal frames? This would make Loupe a lightweight remote terminal. Significant scope increase — deferred for now, but the Surf Ace API could add a <code>POST /input</code> endpoint later.</p>
+</li>
+<li>
+<p><strong>Multi-frame screens.</strong> V1 is one frame per screen. Should v2 support split-screen (multiple frames on one display)? This requires a layout protocol. The frame model is designed so this could be additive.</p>
+</li>
+<li>
+<p><strong>Discovery beyond LAN.</strong> Should Tailscale MagicDNS be supported for discovering screens on the Tailscale network but not the local LAN? This would let TARS reach screens at a remote location.</p>
+</li>
+<li>
+<p><strong>Watch mode cost ceiling.</strong> Should the provider enforce a max events/minute rate per screen to prevent runaway token costs from the two-tier processing model?</p>
+</li>
+<li>
+<p><strong>Pencil markup latency budget.</strong> What's the acceptable latency from pencil-lift to CLU's response appearing on screen? 500ms debounce + network + model inference + frame push. If total exceeds ~1.5s, the "magic" feeling breaks. Is Haiku fast enough for the short-debounce path?</p>
+</li>
+<li>
+<p><strong>Change stack depth.</strong> How deep should the change stack be? Unlimited risks memory bloat on long sessions. But limiting it means CLU can't undo far back. 50 frames?</p>
+</li>
+</ol>
+<h2 id="19-implementation-phases">19. Implementation Phases</h2>
+<h3 id="phase-1-core">Phase 1: Core</h3>
+<ul>
+<li>Loupe macOS app (SwiftUI): Bonjour broadcast, HTTP server, HTML frame rendering, GET /snapshot.</li>
+<li>Loupe Electron app (Linux): same capabilities.</li>
+<li>Provider mDNS browser and screen table.</li>
+<li>Provider HTTP client to screens.</li>
+<li>Auto-connect (trusted screens, no PIN).</li>
+<li><code>POST /frame</code> (HTML only).</li>
+<li><code>GET /snapshot</code> with <code>visibleText</code> extraction.</li>
+<li>Query-time context injection into CLU system prompt.</li>
+<li><code>loupe_push</code> provider action.</li>
+<li>Session TTL (5 minutes).</li>
+<li>Error reporting via HTTP responses.</li>
+</ul>
+<h3 id="phase-2-full-content-pairing">Phase 2: Full Content + Pairing</h3>
+<ul>
+<li>All content types: image, PDF, terminal, markdown.</li>
+<li><code>POST /frame/append</code> for terminal.</li>
+<li><code>POST /frame/patch</code> for HTML.</li>
+<li>PIN pairing protocol (<code>POST /pair</code>).</li>
+<li>Trust store persistence.</li>
+<li>Selection in snapshots.</li>
+<li><code>loupe_pair</code> and <code>loupe_clear</code> CLU actions.</li>
+</ul>
+<h3 id="phase-3-watch-mode">Phase 3: Watch Mode</h3>
+<ul>
+<li><code>POST /watch</code> and <code>POST /unwatch</code>.</li>
+<li>Provider callback endpoint at <code>/loupe/events/&lt;screenId&gt;</code>.</li>
+<li>v1 event types: text_selected, point, region, scroll_settle, zoom_settle, page_change.</li>
+<li>Two-tier watch processing (Haiku-level filter + main agent escalation).</li>
+<li><code>loupe_watch</code> CLU action.</li>
+<li>Watch mode callback security.</li>
+</ul>
+<h3 id="phase-4-pencil-markup">Phase 4: Pencil Markup</h3>
+<ul>
+<li>PencilKit / equivalent stroke capture on Loupe surf aces.</li>
+<li>Two debounce tiers (500ms short, 3–5s long).</li>
+<li>Stroke + crop screenshot POST to provider callback.</li>
+<li>Full surf ace screenshot POST on long debounce.</li>
+<li>Haiku-level fast model for short-debounce interpretation.</li>
+<li>Main agent for long-debounce holistic pass.</li>
+<li>Change stack on surf ace (frame history for undo).</li>
+<li>CLU responds via <code>POST /frame</code> with interpreted content.</li>
+</ul>
+<h3 id="phase-5-spawned-surf-aces">Phase 5: Spawned Surf Aces</h3>
+<ul>
+<li><code>surf ace_spawned</code> and <code>surf ace_submitted</code> messages on Clawline WebSocket.</li>
+<li>Temporary HTTP server in Clawline for annotation surf aces.</li>
+<li>Apple Pencil annotation capture and snapshot.</li>
+<li>Annotation-as-context in CLU messages.</li>
+</ul>
+<h3 id="phase-6-mobile-spatial">Phase 6: Mobile + Spatial</h3>
+<ul>
+<li>Loupe iOS app.</li>
+<li>Loupe iPadOS app (split view with Clawline).</li>
+<li>Loupe visionOS app (spatial windows).</li>
+<li>iPhone background/foreground lifecycle handling.</li>
+</ul>
+<h3 id="phase-7-polish">Phase 7: Polish</h3>
+<ul>
+<li>macOS chromeless/menu-bar mode.</li>
+<li>Electron kiosk mode.</li>
+<li>Screen name collision handling.</li>
+<li>Provider screen disambiguation in CLU prompts.</li>
+</ul>
+</body></html>

@@ -18,6 +18,8 @@ final class InMemorySecureStore: SecureStoring {
     private var storage: [String: String] = [:]
     private let lock = NSLock()
 
+    nonisolated deinit {}
+
     func getString(_ key: String) -> String? {
         lock.lock()
         defer { lock.unlock() }
@@ -36,4 +38,3 @@ final class InMemorySecureStore: SecureStoring {
         lock.unlock()
     }
 }
-

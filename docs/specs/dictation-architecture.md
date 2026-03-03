@@ -124,6 +124,9 @@ Dictation never silently drops or migrates transcript across sessions.
 **B7. First-attempt retry.**
 Phase 2 pre-warm (audio engine start + Soniox connect) has a retry budget of 1. If the first attempt fails (transient audio session error, connection timeout), the session retries once with a 220ms delay before surfacing an error. The retry is invisible to the user. This ensures first-attempt reliability matches subsequent attempts.
 
+**B7a. No idle-connected Soniox sockets.**
+If the Soniox WebSocket is connected, decodable audio must begin streaming immediately, or buffered frames must flush immediately on connect. The system must not hold an open Soniox connection in an idle state waiting for a later phase gate. If audio is not yet ready to stream, the socket must not be opened yet.
+
 **B8. No key validation gate.**
 The session does not check `keyStore.keyStatus == .validated` before connecting. It checks `keyStore.apiKey != nil`:
 - If key is present → connect to Soniox. If auth fails, Soniox returns an error; session shows it.
@@ -345,45 +348,135 @@ App-scoped (singleton or `@Environment`). Initialized from `SonioxConfigurationS
 ### Job
 Apply transcript text from the session to the UITextView, respecting user edits. Own all "last applied" tracking.
 
-### The Delete-Reinsert Problem
+### Active Reconciliation Model (Endpoint Commit Boundary)
 
-The current bridge uses prefix matching: if the new server transcript starts with the previous server transcript, append only the suffix. But `"".hasPrefix("")` is always true, so when the user deletes all dictated text and the server sends a new transcript, the entire transcript gets re-appended. Deleted text reappears.
+Decision:
+- Endpoint detection is the primary commit signal.
+- Before endpoint, dictated text is provisional and mutable.
+- At endpoint (`<end>`), the current dictated segment is committed and no longer mutable by Soniox.
 
-### The Selection-Replace Problem
+This model replaces correction/append-only mode toggling.
 
-The current bridge captures the selection at dictation start and replaces it on first application. But if the user selects text mid-dictation, subsequent transcript updates don't respect the selection — they append at the cursor position regardless.
+### Bridge State (SSOT)
 
-### Reconciliation Algorithm
-
-The bridge maintains per-session state:
+Per session, the bridge owns:
 
 ```
-insertionPoint: Int             // where the server's text region starts in the text view
-serverTextLength: Int           // UTF-16 length of the server's text region
-previousServerTranscript: String // the full server transcript as of last application
-hasAppliedTranscript: Bool
+dictationStartUTF16: Int
+committedLenUTF16: Int
+provisionalText: String
+suppressedUntilNextEndpoint: Bool
 ```
 
-**Key concept: the "server text region."** This is the range `[insertionPoint, insertionPoint + serverTextLength)` in the text view where server-controlled text lives. Everything outside this range is user-owned text.
+Derived ranges:
+- `provisionalLenUTF16 = provisionalText.utf16.count` (derived, never independently stored)
+- `committedRange = [dictationStart, dictationStart + committedLen)`
+- `provisionalRange = [dictationStart + committedLen, dictationStart + committedLen + provisionalLenUTF16)`
 
-**On first application:**
-1. If user has a selection, replace the selection with the transcript. Set insertionPoint to selection start, serverTextLength to transcript length.
-2. If no selection, insert at cursor position. Set insertionPoint to cursor position, serverTextLength to transcript length.
+Ownership rules:
+1. Soniox may mutate only `provisionalRange`.
+2. Soniox may never mutate `committedRange`.
+3. User edits always win.
 
-**On subsequent applications:**
-1. Compute the diff between `previousServerTranscript` and the new transcript.
-2. Check if the server text region in the text view still matches `previousServerTranscript`:
-   - Read the actual text in the text view at `[insertionPoint, insertionPoint + serverTextLength)`.
-   - If it matches `previousServerTranscript`: user hasn't edited the region. Apply the diff (replace the server region with the new transcript). Update `serverTextLength`.
-   - If it does NOT match: the user edited within the server region. The server region is now "user-owned." Do not replace it. Instead, append the new suffix (new transcript minus the old) at the end of the (now user-modified) region. Shrink `serverTextLength` to zero (the entire region is user-owned now). Future appends go after the old region.
+### Bridge Mutation Seam API
 
-**On user selection during dictation:**
-- If the user has an active selection when a transcript update arrives, and the selection overlaps the server text region: replace the selected portion with the new transcript suffix. Adjust `serverTextLength` accordingly.
-- If the selection is outside the server text region: insert at cursor position, starting a new server text region there.
+Bridge writes flow through two entry points only:
 
-**Invariant:** User deletions are permanent. If the user deletes text from the server region, the bridge detects the mismatch and never reinserts the deleted text. This is the core fix for the delete-reinsert bug.
+```
+applySegmentUpdate(update, baseSnapshot, originSessionKey)
+noteUserEdit(editedRangeUTF16, replacementUTF16Length, originSessionKey)
+```
 
-**Invariant:** The bridge is the sole owner of "what was last applied." DictationSession does not cache `lastAppliedTranscriptText`. The bridge tracks `previousServerTranscript` and makes all comparison/diff decisions internally.
+### Buffer Output Contract
+
+`DictationTranscriptBuffer` produces structured updates:
+
+```
+provisionalText: String
+committedSegments: [String]
+finished: Bool
+sawEndpoint: Bool
+hadAnyTokens: Bool
+```
+
+Behavior:
+1. Marker tokens (`<end>`, `<fin>`) are filtered from rendered text.
+2. On `<end>`, current segment is emitted to `committedSegments` and the segment buffer resets.
+3. Remaining in-flight text is returned as `provisionalText`.
+
+### Apply Rules
+
+1. **Provisional update (no endpoint):**
+- If `suppressedUntilNextEndpoint == false`, replace only `provisionalRange` with new `provisionalText`.
+- If suppressed, ignore provisional insertion updates.
+
+2. **Endpoint commit:**
+- If not suppressed:
+  - Replace `provisionalRange` with endpoint-final segment text.
+  - Advance committed boundary by that segment length.
+  - Clear provisional state.
+- If suppressed:
+  - Clear suppression on the first endpoint in this update.
+  - Skip that first endpoint commit (already handled locally by user action).
+  - If the same update carries additional endpoint-committed segments, process those remaining segments normally.
+  - Leave provisional state empty before continuing.
+
+3. **Finished without endpoint:**
+- If not suppressed and provisional text remains, promote provisional to committed locally, then clear provisional.
+- If suppressed, do not apply suppressed provisional text at finish; clear suppression and keep user-local content unchanged.
+
+### User Typing Rules
+
+1. Edit outside dictation-managed range:
+- Keep user edit.
+- Shift `dictationStartUTF16` only if edit occurs before the anchor.
+
+2. Edit intersects committed range:
+- Keep user edit.
+- Adjust committed boundary length as needed.
+- Soniox still cannot rewrite committed range.
+
+3. Edit intersects provisional range (suppression rule):
+- Collapse current provisional to committed locally (user wins).
+- Clear provisional text/range.
+- Set `suppressedUntilNextEndpoint = true`.
+- While suppressed, ignore all Soniox provisional updates.
+- On next endpoint, clear suppression and skip that endpoint commit.
+- Do not send finalize. Do not relocate text. Wait for natural endpoint.
+
+### Session-Key Guard
+
+- Bridge applies only when `originSessionKey` matches active session key.
+- Mismatches are ignored and handled by stream-switch stop logic in the session.
+
+### Invariants
+
+1. Bridge is sole owner of transcript-application state.
+2. Endpoint defines the immutable Soniox boundary.
+3. User edits inside provisional range silence Soniox provisional output until endpoint.
+4. In suppression windows, token activity still resets inactivity timer (do not auto-timeout due to suppression).
+5. `UITextView.selectedRange` remains the cursor/selection SSOT.
+6. `provisionalLenUTF16` is derived from `provisionalText` and has no independent write path.
+
+### Coordinator Integration Contract
+
+1. Session consumes `hadAnyTokens` from `DictationSegmentUpdate` to drive inactivity-timer activity resets.
+2. During suppression, token activity still resets inactivity using `hadAnyTokens`; this is independent from whether bridge text insertion is suppressed.
+3. Session/bridge apply calls run on the main actor to avoid split mutation paths between UIKit edits and Soniox updates.
+
+### SUPERSEDED — Correction/Append-Only Mode-Switch Model (Reference Only)
+
+This model is retained only for decision history and is not normative:
+
+1. Correction mode rewrote dictated tail using `commonPrefix` diffing.
+2. User interaction flipped bridge into temporary append-only mode.
+3. Append-only accepted monotonic suffix growth only, then flipped back to correction mode.
+4. The model relied on behavioral mode switches rather than endpoint-defined commit boundaries.
+
+Why superseded:
+1. It remained vulnerable to user/dictation write contention in active turns.
+2. It encoded boundary semantics implicitly instead of using Soniox endpoint as explicit commit signal.
+3. It was harder to reason about and test under concurrent user edits.
 
 ---
 
@@ -457,6 +550,8 @@ The gesture recognizer maintains an `IntentLock` state machine that classifies e
 2. Otherwise → undecided (eventually text editing if not promoted)
 
 **Invariant (gesture coexistence, inv 21):** Cursor drag, pickup (text loupe), and selection-handle drags inside the focused text editor never arm dictation drag. The intent detection prioritizes text editing when the touch starts in the text field and the motion is ambiguous. Dictation drag is only armed for clear vertical-dominant gestures or gestures starting outside the text field.
+
+**Explicit arbitration case (multi-line editor):** When `UITextView.isScrollEnabled` flips to `true` (text grows past the non-scrolling threshold), dictation fling/reveal must still arm for clear vertical-dominant dictation gestures. The text view's internal scroll pan recognizer must not starve dictation pan for those gestures. This is a required coexistence path, not an implementation detail.
 
 ### Pan eligibility
 
@@ -564,14 +659,14 @@ session.surfaceTarget changes (e.g., timeout causes .open → .open [no change],
 ```
 Soniox yields .response(tokens, finished)
   → DictationSession event handler
-  → buffer.apply(tokens:, finished:) → DictationTranscriptSnapshot
-  → bridge.apply(transcript: snapshot.text, for: originSessionKey)
-  → bridge: detect user edits to server text region
-  → bridge: apply diff (append suffix or replace region)
-  → bridge updates own previousServerTranscript + serverTextLength
+  → buffer.apply(tokens:, finished:) → DictationSegmentUpdate
+  → bridge.applySegmentUpdate(update, baseSnapshot:, originSessionKey:)
+  → bridge mutates provisionalRange only (unless suppression is active)
+  → endpoint (<end>) advances committed boundary
+  → user edit in provisionalRange enables suppression until next endpoint
 ```
 
-The session does not cache "last applied text." The bridge is the sole authority.
+The session does not cache transcript-application state. The bridge is the sole authority.
 
 **Key Resolution on Activation:**
 ```
@@ -616,8 +711,8 @@ No validation gate. Connect-and-see.
 | Key status | SonioxKeyStore | stored | Settings, Key prompt | setKey, verify |
 | Mic visible | **View** | **derived** | MessageInputBar | from surfaceTarget + content + focus |
 | Send eligible | **View** | **derived** | MessageInputBar | from isSending + canSend + connection |
-| Last applied transcript | Bridge | stored | (self) | apply() |
-| Server text region | Bridge | stored | (self) | apply() |
+| Dictation text boundaries (`dictationStart`, `committedLen`, `provisionalText`) | Bridge | stored (`provisionalLen` derived) | (self) | applySegmentUpdate() + noteUserEdit() |
+| Suppression state (`suppressedUntilNextEndpoint`) | Bridge | stored | (self) | noteUserEdit() + applySegmentUpdate(endpoint) |
 
 ---
 
@@ -687,10 +782,10 @@ Session contract B4: idle timer is driven by surfaceTarget, not by scattered cal
 Waveform rendering contract: tanh-like curve. No hard clipping. The session provides raw audio level; the view applies the asymptotic mapping.
 
 **Delete-reinsert.**
-Bridge reconciliation: the bridge detects that the text view content in the server text region no longer matches `previousServerTranscript`. When a mismatch is detected, the bridge does not replace the region. Instead, it appends only new suffix content after the (now user-modified) region. Deleted text is never reinserted.
+Bridge reconciliation: Soniox may rewrite only provisional text before endpoint. Once endpoint commits, that segment is immutable from Soniox. Deleted committed text is never reinserted by Soniox revisions.
 
 **Selection-replace mid-dictation.**
-Bridge reconciliation: on each transcript application, the bridge checks the current selection. If the user has an active selection overlapping the server text region or at the cursor position, the new transcript content replaces the selection.
+Bridge reconciliation: user edits in provisional range collapse provisional locally and enable suppression until next endpoint. Soniox provisional updates are ignored during suppression, so user edits do not fight incoming revisions.
 
 **Soniox context terms.**
 Session contract B10: `SonioxStreamingConfig` includes `contextTerms: [String]`. Session receives context terms from the chat context and includes them in the initial config payload.
@@ -725,7 +820,7 @@ Motion stored state: `settleDurationMultiplier: Double = 1.0`. Set to 2.0 to slo
 8. ChatView reads `motion.shouldFreezeLayout` and `motion.composerLiftY` directly. No `onDictationSurfaceDragActiveChange` or `onComposerMotionOffsetChange` callbacks.
 9. `isTextInteractionLocked` is computed: `gesturePhase == .dragging`. Not stored.
 10. `pullToSendProgress` is computed from drag distance and thresholds. Not stored.
-11. ComposeInputDictationBridge is the sole tracker of "last applied." Session has no `lastAppliedTranscriptText`.
+11. ComposeInputDictationBridge is the sole owner of transcript-application state (boundaries + suppression). Session has no duplicate transcript reconciliation state.
 12. Session provides `audioLevel: Float` (raw RMS). Waveform view owns all visual mapping constants and curves.
 13. A single `canSendNow` predicate is used by send button, keyboard submit, and pull-to-send.
 
@@ -761,14 +856,18 @@ Motion stored state: `settleDurationMultiplier: Double = 1.0`. Set to 2.0 to slo
 
 ### Transcript
 
-35. User deletions within the server text region are permanent: bridge detects mismatch and never reinserts.
-36. Active selection during dictation: new transcript content replaces the selection.
-37. Bridge checks originSessionKey on every application; nil or mismatch is a safety-net skip, not normal flow.
+35. Bridge tracks committed/provisional dictation boundaries and Soniox mutates only provisional range.
+36. On endpoint (`<end>`), current provisional segment is committed and cannot be revised by Soniox after commit.
+37. User edit intersecting provisional range triggers suppression: provisional collapses locally, Soniox provisional updates are ignored until next endpoint, and the first endpoint after suppression is skipped.
+38. If multiple endpoint commits arrive in one update while suppression is active, only the first endpoint is skipped; remaining endpoint segments are applied normally.
+39. During suppression, incoming token activity still resets inactivity timer (suppression must not cause auto-timeout).
+40. If stream finishes while suppression is active, suppressed provisional text is not applied; suppression clears and user-local content remains authoritative.
+41. Bridge checks `originSessionKey` on every apply; mismatches are skipped and stream-switch stop logic remains authoritative.
 
 ### Layout
 
-38. Bottom inset commits only when `motion.shouldFreezeLayout` is false (gesturePhase == .idle).
-39. Surface visibility and inset derive from the same source (session.surfaceTarget, via motion model).
+42. Bottom inset commits only when `motion.shouldFreezeLayout` is false (gesturePhase == .idle).
+43. Surface visibility and inset derive from the same source (session.surfaceTarget, via motion model).
 
 ---
 
@@ -776,6 +875,10 @@ Motion stored state: `settleDurationMultiplier: Double = 1.0`. Set to 2.0 to slo
 
 1. **SwiftUI observation transitivity.** DictationMotion reads `session.surfaceTarget` in computed properties. The Observation framework (Swift 5.9+) tracks access transitively across @Observable boundaries. If this doesn't work as expected, fallback: `onChange(of: session.surfaceTarget)` in the view calls `motion.settle(to:)`.
 
-2. **Bridge mismatch detection.** The reconciliation algorithm must handle multi-byte Unicode correctly (emoji, combining characters) when comparing the server text region against the text view's actual content. UTF-16 offsets from `NSAttributedString` must be used consistently.
+2. **Boundary math correctness.** The endpoint-commit bridge mutates UTF-16 ranges under concurrent user edits and provisional updates. UTF-16 offsets must be applied consistently for emoji/combining characters and overlapping edits.
 
 3. **Migration scope.** This touches ChatView, MessageInputBar, DictationCoordinator (→ Session), DictationSurfaceMotionModel (→ Motion), ComposeInputDictationBridge, SettingsManager, and introduces SonioxKeyStore. Incremental commits, each passing existing tests.
+
+4. **UITextView mutation coverage.** `noteUserEdit()` must observe all user mutation paths (typing, paste, autocorrect, undo/redo). Missing a path can desync bridge UTF-16 boundary state.
+
+5. **Suppression tradeoff.** Skipping the first endpoint commit after suppression intentionally drops Soniox late-turn corrections for that segment. This is expected by design ("user wins"), but should be treated as an explicit product tradeoff.

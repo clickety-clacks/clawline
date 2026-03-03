@@ -19,6 +19,7 @@ enum ProviderBaseURLStore {
 
     static func setBaseURL(_ url: URL) {
         UserDefaults.standard.set(url.absoluteString, forKey: key)
+        NotificationCenter.default.post(name: .providerBaseURLDidChange, object: nil)
     }
 }
 

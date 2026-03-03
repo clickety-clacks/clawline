@@ -11,6 +11,7 @@
 		274F7BA92F0F24F20073BF45 /* Clawline Watch Watch App.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = 274F7BA82F0F24F20073BF45 /* Clawline Watch Watch App.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		278B578A2F248E2C00E501B1 /* HighlightSwift in Frameworks */ = {isa = PBXBuildFile; productRef = 27HL00022F1000000073BF45 /* HighlightSwift */; };
 		27MD00102F90000000A1B2C3 /* Markdown in Frameworks */ = {isa = PBXBuildFile; productRef = 27MD00022F90000000A1B2C3 /* Markdown */; };
+		27MD00112F90000000A1B2C3 /* Markdown in Frameworks */ = {isa = PBXBuildFile; productRef = 27MD00022F90000000A1B2C3 /* Markdown */; };
 		27ST00102F7B000000A1B2C3 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = 27ST00022F7B000000A1B2C3 /* SwiftTerm */; };
 		F679AC8CEBF54DF08B2AB80D /* HighlightSwift in Frameworks */ = {isa = PBXBuildFile; productRef = 27HL00022F1000000073BF45 /* HighlightSwift */; };
 		F67ST0102F7B000000A1B2C3 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = 27ST00022F7B000000A1B2C3 /* SwiftTerm */; };
@@ -151,6 +152,7 @@
 			files = (
 				2747398E2F2AE61500FEE90E /* RealityKitContent in Frameworks */,
 				F679AC8CEBF54DF08B2AB80D /* HighlightSwift in Frameworks */,
+				27MD00112F90000000A1B2C3 /* Markdown in Frameworks */,
 				F67ST0102F7B000000A1B2C3 /* SwiftTerm in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -273,6 +275,7 @@
 			packageProductDependencies = (
 				2747398D2F2AE61500FEE90E /* RealityKitContent */,
 				27HL00022F1000000073BF45 /* HighlightSwift */,
+				27MD00022F90000000A1B2C3 /* Markdown */,
 				27ST00022F7B000000A1B2C3 /* SwiftTerm */,
 			);
 			productName = "Clawline Spatial";
@@ -933,6 +936,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "Clawline/Clawline.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1591;
 				DEVELOPMENT_TEAM = Z7R59J7QV8;
@@ -966,6 +970,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = "Clawline/Clawline.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1591;
 				DEVELOPMENT_TEAM = Z7R59J7QV8;

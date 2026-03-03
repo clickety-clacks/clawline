@@ -314,10 +314,20 @@ struct BubbleScrollTests {
 
         let presentationWithPreview = buildPresentation(message, metrics: metrics, enableLinkPreviews: true)
         let presentationWithoutPreview = buildPresentation(message, metrics: metrics, enableLinkPreviews: false)
+        let presentationWithoutLinkCards = MessagePresentation(
+            parts: presentationWithoutPreview.parts,
+            wordCount: presentationWithoutPreview.wordCount,
+            hasTextualContent: presentationWithoutPreview.hasTextualContent,
+            isEmojiOnly: presentationWithoutPreview.isEmojiOnly,
+            hasMediaOnly: presentationWithoutPreview.hasMediaOnly,
+            detectedURLs: [],
+            detectedURLCount: 0,
+            hasSingleURL: false
+        )
 
         let expandsWithoutPreview = expandCallbackCount(
             message: message,
-            presentation: presentationWithoutPreview,
+            presentation: presentationWithoutLinkCards,
             metrics: metrics
         )
         let expandsWithPreview = expandCallbackCount(

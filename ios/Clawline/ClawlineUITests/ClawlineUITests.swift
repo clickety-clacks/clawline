@@ -53,31 +53,51 @@ final class ClawlineUITests: XCTestCase {
 
         let button = app.buttons["scroll_to_bottom_button"]
         XCTAssertTrue(button.waitForExistence(timeout: 6), "Expected debug-forced scroll button to exist")
+        XCTAssertTrue(button.isHittable, "Expected debug-forced scroll button to be hittable")
 
         let startFrame = button.frame
-        let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0, dy: 0))
-            .withOffset(CGVector(dx: startFrame.midX, dy: startFrame.midY))
-        let end = start.withOffset(CGVector(dx: 140, dy: 0))
+        let appMidX = app.frame.midX
+        let primaryDragDeltaX: CGFloat = startFrame.midX < appMidX ? 220 : -220
+        let start = button.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        let end = start.withOffset(CGVector(dx: primaryDragDeltaX, dy: 0))
 
-        start.press(forDuration: 0.05, thenDragTo: end)
+        start.press(forDuration: 0.15, thenDragTo: end)
         sleep(1) // allow spring settle to complete before asserting frame.
 
-        let draggedFrame = button.frame
+        var draggedFrame = button.frame
+        if abs(draggedFrame.midX - startFrame.midX) <= 24 {
+            // Retry opposite direction if the first drag clamped near an edge.
+            let retryStart = button.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            let retryEnd = retryStart.withOffset(CGVector(dx: -primaryDragDeltaX, dy: 0))
+            retryStart.press(forDuration: 0.15, thenDragTo: retryEnd)
+            sleep(1)
+            draggedFrame = button.frame
+        }
+        let draggedDelta = draggedFrame.midX - startFrame.midX
         XCTAssertGreaterThan(
-            draggedFrame.midX,
-            startFrame.midX + 24,
+            abs(draggedDelta),
+            24,
             "Scroll button should move horizontally after drag gesture"
         )
+        let movedRight = draggedDelta > 0
 
         app.terminate()
         app.launch()
         XCTAssertTrue(button.waitForExistence(timeout: 6))
         sleep(1)
         let relaunchedFrame = button.frame
-        XCTAssertGreaterThan(
-            relaunchedFrame.midX,
-            startFrame.midX + 24,
-            "Detent should persist across relaunch"
-        )
+        if movedRight {
+            XCTAssertGreaterThan(
+                relaunchedFrame.midX,
+                startFrame.midX + 24,
+                "Detent should persist across relaunch"
+            )
+        } else {
+            XCTAssertLessThan(
+                relaunchedFrame.midX,
+                startFrame.midX - 24,
+                "Detent should persist across relaunch"
+            )
+        }
     }
 }

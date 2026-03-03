@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html><head>
+<meta charset="utf-8">
+<title>Loupe Design Doc</title>
+<style>
+body { font-family: -apple-system, sans-serif; max-width: 800px; margin: 2em auto; padding: 0 1em; line-height: 1.6; color: #222; background: #fff; }
+@media (prefers-color-scheme: dark) { body { background: #1a1a1a; color: #ddd; } }
+pre { background: #f5f5f5; padding: 1em; overflow-x: auto; border-radius: 6px; font-size: 0.85em; }
+@media (prefers-color-scheme: dark) { pre { background: #2a2a2a; } }
+code { font-size: 0.9em; }
+table { border-collapse: collapse; width: 100%; margin: 1em 0; }
+td { border: 1px solid #ccc; padding: 0.5em; }
+h1 { border-bottom: 2px solid #333; padding-bottom: 0.3em; }
+h2 { border-bottom: 1px solid #ccc; padding-bottom: 0.2em; margin-top: 2em; }
+</style>
+</head><body>
+<h1>Loupe Spec — Adversarial Architecture Review</h1>
+<br>
+<p>Reviewer: Claude (adversarial review agent)</p>
+<p>Date: 2026-02-24</p>
+<p>Spec reviewed: <code>specs/loupe.md</code> (design draft, 2026-02-24)</p>
+<p>Post-spec design decisions also incorporated (numbered 1-7, provided by Flynn).</p>
+<br>
+<p>---</p>
+<br>
+<h2>1. Blocking Issues</h2>
+<br>
+<h3>1.1 FATAL: &quot;CLU connects directly to screens&quot; is physically impossible as specified</h3>
+<br>
+<p><strong>The contradiction:</strong> The spec&#x27;s entire architecture (Section 5) is built on &quot;phone is the bridge&quot; — content flows CLU → gateway → phone → screen. Post-spec decision #5 reverses this: &quot;CLU (provider on TARS) connects DIRECTLY to screens — phone is NOT a middleman.&quot;</p>
+<br>
+<p><strong>Why this breaks:</strong> Screens are local-network mDNS devices. TARS is a remote server. mDNS does not cross network boundaries. There is no mechanism for a remote CLU to reach a <code>_loupe._tcp</code> device on someone&#x27;s home Wi-Fi. The phone-as-bridge was the *solution* to this reachability gap. Removing the bridge without replacing it creates an impossible topology.</p>
+<br>
+<p><strong>Possible resolutions (pick one):</strong></p>
+<br>
+<table>
+<tr><td>Option</td><td>How it works</td><td>Trade-offs</td></tr>
+<tr><td>**A: Phone relays (spec as-is)**</td><td>Phone bridges LAN ↔ WAN. Content flows through phone.</td><td>Decision #5 must be retracted. Phone battery/bandwidth cost.</td></tr>
+<tr><td>**B: Screen connects outbound to gateway**</td><td>Screen maintains a WebSocket to TARS (like Clawline app does). CLU pushes directly over that connection.</td><td>Screens are no longer &quot;dumb&quot; — they need internet, gateway auth, and CLU awareness. Violates core &quot;dumb projector&quot; metaphor. Doesn&#x27;t work for friend&#x27;s screens (they&#x27;d need YOUR gateway creds).</td></tr>
+<tr><td>**C: Phone opens a tunnel**</td><td>Phone discovers screens locally, then opens a relay tunnel (e.g., TCP proxy, WebSocket tunnel) so TARS can reach them.</td><td>Phone is still a middleman — just for the transport layer, not the application layer. Complexity. But preserves &quot;dumb screen&quot; model.</td></tr>
+<tr><td>**D: Dual-mode — direct when on same network, relayed otherwise**</td><td>TARS tries direct mDNS (Tailscale home network) first, falls back to phone relay (friend&#x27;s house).</td><td>Two code paths. &quot;Direct&quot; only works on Tailscale/same-LAN. Most real-world use still goes through phone.</td></tr>
+</table>
+<br>
+<p><strong>Recommendation:</strong> Option C or A. Option C gives the *spirit* of decision #5 (CLU owns the logical connection, phone is just plumbing) without requiring screens to be internet-aware. But it&#x27;s still a phone relay at the transport layer, so call it what it is. If the goal is &quot;CLU&#x27;s protocol session is directly with the screen, not proxied through app-layer logic,&quot; then the phone opens a dumb TCP/WS tunnel and CLU speaks Loupe protocol directly through it. The phone doesn&#x27;t interpret or enrich frames — it&#x27;s a pipe.</p>
+<br>
+<p><strong>This must be resolved before any implementation work begins.</strong> Every component&#x27;s design depends on who talks to whom.</p>
+<br>
+<h3>1.2 BLOCKING: Separate Loupe app (decision #6) invalidates the entire iOS implementation section</h3>
+<br>
+<p><strong>The contradiction:</strong> Section 12 describes all Loupe code living inside the Clawline app (<code>ios/Clawline/Clawline/Services/Loupe/...</code>). Decision #6 says Loupe is a separate app on iPhone.</p>
+<br>
+<p><strong>What breaks:</strong></p>
+<p>- All 14 file paths in Section 12.6 are wrong.</p>
+<p>- The ScreenRelay (Section 12.3) can&#x27;t share the Clawline app&#x27;s gateway WebSocket — separate app, separate process.</p>
+<p>- The Loupe app needs its own gateway authentication and connection.</p>
+<p>- The mDNS browser, pair manager, and relay all move to the Loupe app.</p>
+<p>- Clawline loses the screen picker UI, or it becomes a deep-link launcher to Loupe.</p>
+<p>- The &quot;surface view&quot; (Section 12.5) on iPhone is now the Loupe app itself, not a modal in Clawline.</p>
+<br>
+<p><strong>Cascading questions:</strong></p>
+<p>1. How does the Loupe app authenticate to the gateway? Does it share Clawline&#x27;s auth token (keychain sharing via app group)?</p>
+<p>2. Does the Loupe app maintain its own persistent gateway WebSocket, or does it only connect when foregrounded?</p>
+<p>3. If CLU pushes a frame while Loupe is backgrounded, where does it go? Is there a notification to open Loupe?</p>
+<p>4. How does the Clawline app trigger Loupe? Universal link? Custom URL scheme?</p>
+<p>5. What does the iPad story look like? Two separate apps in split view means two gateway connections.</p>
+<br>
+<p><strong>Recommendation:</strong> The spec needs a new &quot;Loupe App Architecture&quot; section that replaces Section 12. Must cover: app-to-app communication, shared auth, gateway connection lifecycle, and the exact surface boundary between Clawline (chat) and Loupe (display). Consider whether Loupe is also the app that runs on Mac/TV/etc. as a screen, or if the &quot;screen&quot; and &quot;viewer&quot; are different things.</p>
+<br>
+<h3>1.3 BLOCKING: Auto-connect has zero authentication</h3>
+<br>
+<p>Section 7.4 explicitly states: &quot;The screen accepts any connection that completes the handshake... Anyone who can reach it on the network can use it.&quot;</p>
+<br>
+<p>For <code>pair_auto</code>, the screen doesn&#x27;t verify the client at all. Any device on the local network that sends <code>{ type: &quot;pair_auto&quot; }</code> gets a session token. The <code>busy</code> flag is the only barrier, and it&#x27;s advisory (race condition between checking Bonjour and connecting).</p>
+<br>
+<p><strong>Attack scenario:</strong> Attacker on same Wi-Fi (coffee shop, hotel, conference) sends <code>pair_auto</code> to every Loupe screen on the network. Any idle screen immediately grants a session. Attacker can push arbitrary content to strangers&#x27; screens.</p>
+<br>
+<p><strong>This isn&#x27;t theoretical edge-case security theater — it&#x27;s the default behavior on any shared network.</strong></p>
+<br>
+<p><strong>Recommendation:</strong> Auto-connect must have mutual authentication. Options:</p>
+<p>- Screen remembers trusted client public keys (contradicts &quot;stateless screen&quot; but necessary).</p>
+<p>- Screen requires PIN every time on untrusted networks (user configures &quot;home&quot; vs &quot;public&quot; mode).</p>
+<p>- Screen requires a pre-shared token derived from first pairing (stored on both sides).</p>
+<br>
+<p>The simplest fix: screen stores a set of trusted client public key fingerprints (just like the app stores trusted screen fingerprints). Symmetric trust. During <code>pair_auto</code>, the client proves identity by signing a challenge with its private key, and the screen checks against its trust store. This adds maybe 200 bytes of persistent state to the screen. Still &quot;dumb,&quot; but not &quot;exploitable.&quot;</p>
+<br>
+<p>---</p>
+<br>
+<h2>2. Design Tensions</h2>
+<br>
+<h3>2.1 &quot;Dumb stateless screen&quot; vs. security requirements</h3>
+<br>
+<p>The spec wants screens to store nothing except a keypair. But security requires the screen to remember *something* about trusted clients (see 1.3). Every authentication scheme that isn&#x27;t &quot;anyone can connect&quot; requires persistent state.</p>
+<br>
+<p><strong>The tension:</strong> The more stateless the screen, the less secure. The more secure, the less dumb.</p>
+<br>
+<p><strong>Decision needed:</strong> What&#x27;s the minimum persistent state a screen must hold? Proposal: keypair + a set of trusted client public key fingerprints (max ~100 entries, ~3KB). Still trivially simple. Still no user accounts, no CLU knowledge.</p>
+<br>
+<h3>2.2 Session scoping vs. reconnection UX</h3>
+<br>
+<p>Decision #4 says: leave the network, screen forgets you. Decision #7 says: background socket death is fine, Loupe reconnects on foreground. Section 15.2 says: after reconnection, &quot;CLU decides whether to re-push.&quot;</p>
+<br>
+<p><strong>The tension:</strong> If the phone goes to sleep for 30 seconds (lock screen), the WebSocket drops, the screen clears, and when the phone wakes up, everything has to be re-pushed. Every time you lock your phone, every screen goes blank. Is that acceptable UX?</p>
+<br>
+<p><strong>Decision needed:</strong> Should there be a grace period? e.g., screen holds its last frame for 60 seconds after WebSocket drop before clearing. This adds trivial state (one frame buffer, one timer) but vastly improves the experience. The screen is still &quot;session-scoped&quot; — it just has a reconnect window.</p>
+<br>
+<h3>2.3 Phone as relay vs. phone battery life</h3>
+<br>
+<p>If the phone remains the relay (because blocking issue 1.1 requires it), then for N screens, the phone maintains N+1 WebSocket connections (N local + 1 gateway) and relays all content bidirectionally. During active use with viewport reports every 500ms per screen:</p>
+<br>
+<p>- 3 screens = 6 viewport reports/second through the phone</p>
+<p>- Plus content pushes (potentially multi-MB)</p>
+<p>- Plus the phone&#x27;s own Clawline traffic</p>
+<br>
+<p><strong>Decision needed:</strong> Is this acceptable? If not, the tunnel approach (option C in 1.1) is better — the phone opens dumb TCP tunnels and doesn&#x27;t process the traffic, letting the OS handle it more efficiently. Or: viewport report throttling should be much more aggressive (2s, or scroll-end-only).</p>
+<br>
+<h3>2.4 One screen, one session vs. collaborative scenarios</h3>
+<br>
+<p>Section 11.4 describes a &quot;collaborative review&quot; where two colleagues look at the same screen. But Section 7.6 says one active session per screen, and Section 3 (non-goals) explicitly excludes multi-user on one screen.</p>
+<br>
+<p><strong>The tension:</strong> The collaborative scenario works ONLY because one person controls the screen and the other just physically looks at it. The second person&#x27;s CLU has no awareness of what&#x27;s on the screen. They can&#x27;t say &quot;what&#x27;s this error?&quot; and have their CLU understand the screen context.</p>
+<br>
+<p><strong>Decision needed:</strong> Is this acceptable for v1? If yes, document the limitation explicitly. If not, consider read-only observer sessions (screen accepts multiple connections, only one can push frames, others receive viewport-read-only access).</p>
+<br>
+<p>---</p>
+<br>
+<h2>3. Missing Pieces</h2>
+<br>
+<h3>3.1 No error reporting from screens</h3>
+<br>
+<p>The screen has no way to tell the client &quot;I couldn&#x27;t render that.&quot; Failed render, out of memory, unsupported content type despite capability advertisement — all silent failures. CLU pushes a frame and assumes it worked. The user sees a broken render or nothing, and CLU doesn&#x27;t know.</p>
+<br>
+<p><strong>Add:</strong> A <code>frame_error</code> message from screen → client:</p>
+<pre><code class="json">
+{
+  &quot;type&quot;: &quot;frame_error&quot;,
+  &quot;frameId&quot;: &quot;fr_8e9f0a1b&quot;,
+  &quot;error&quot;: &quot;render_failed&quot;,
+  &quot;detail&quot;: &quot;HTML exceeded memory limit&quot;
+}
+</code></pre>
+<br>
+<h3>3.2 No keepalive/heartbeat</h3>
+<br>
+<p>WebSocket connections over Wi-Fi can go stale silently (NAT timeout, AP roaming, phone sleep). TCP keepalive defaults are often 2+ hours. Without an application-layer ping, the screen thinks it&#x27;s connected for minutes after the client is gone. The client thinks the screen is alive for minutes after it&#x27;s unreachable.</p>
+<br>
+<p><strong>Add:</strong> WebSocket ping/pong at 15-second intervals. Screen drops connection after 3 missed pongs (45s). This also informs the grace period decision in 2.2.</p>
+<br>
+<h3>3.3 No graceful disconnect message</h3>
+<br>
+<p>The only way to disconnect is WebSocket close. There&#x27;s no way to distinguish:</p>
+<p>- Intentional disconnect (&quot;I&#x27;m done with this screen&quot;)</p>
+<p>- Network failure (Wi-Fi dropped)</p>
+<p>- App backgrounding (iOS suspended the socket)</p>
+<br>
+<p>These should have different screen-side behaviors (e.g., intentional = clear immediately, network failure = grace period, backgrounding = grace period).</p>
+<br>
+<p><strong>Add:</strong> A <code>disconnect</code> message type with a <code>reason</code> field, sent before intentional WebSocket close.</p>
+<br>
+<h3>3.4 Occupancy leak: `occupant_name` is unimplemented</h3>
+<br>
+<p>Section 7.6 returns <code>occupant_name: &quot;Flynn&#x27;s iPhone&quot;</code> when a screen is busy. But the pairing protocol never transmits the user&#x27;s name or device name. Where does the screen learn this? This field is specified in the response but impossible to populate.</p>
+<br>
+<p><strong>Fix:</strong> Either add <code>device_name</code> to the pairing handshake (privacy implication on shared networks), or remove <code>occupant_name</code> from the busy response and let the Clawline app show only &quot;This screen is in use.&quot;</p>
+<br>
+<h3>3.5 No mechanism for CLU to learn about `loupe_push`</h3>
+<br>
+<p>The spec says CLU invokes <code>loupe_push</code> as a provider action. But there&#x27;s no specification of how CLU discovers this capability. Is <code>loupe_push</code> a tool in CLU&#x27;s tool list? Is it injected when screens are available and removed when they aren&#x27;t? How does CLU know the schema?</p>
+<br>
+<p><strong>Add:</strong> A section specifying the tool definition that the provider registers with CLU when screens are reported, and removes when no screens are available.</p>
+<br>
+<h3>3.6 No content size enforcement</h3>
+<br>
+<p>Section 8.2 says &quot;Max 256KB&quot; for HTML. Who enforces this? What happens when CLU generates 300KB of HTML? The spec doesn&#x27;t define enforcement points or overflow behavior.</p>
+<br>
+<p><strong>Add:</strong> Enforcement at the relay layer. If content exceeds limits, the relay truncates or rejects with an error to the provider. Define limits per content type:</p>
+<p>- HTML: 256KB</p>
+<p>- Image: 5MB (or whatever is practical)</p>
+<p>- PDF: 10MB</p>
+<p>- Terminal: 64KB</p>
+<p>- Markdown: 128KB</p>
+<br>
+<h3>3.7 No reconnection state</h3>
+<br>
+<p>After disconnect and reconnect (Section 15.2), CLU has no record of what was on each screen. The <code>frameId → sourceRef</code> mapping in the ScreenRelay dies with the relay instance. CLU must re-derive what to show from conversation context alone. For &quot;follow mode&quot; this might work. For &quot;sticky mode&quot; (user said &quot;keep this up&quot;), CLU has no way to know what was sticky.</p>
+<br>
+<p><strong>Add:</strong> The provider&#x27;s screen context cache should persist the last pushed frame metadata per screen (not the content — just the frame ID, content type, title, and source ref). On reconnect, CLU can re-push the same content. Cache is still in-memory and ephemeral to the provider process, but survives screen-level reconnections.</p>
+<br>
+<h3>3.8 First-pairing TLS chicken-and-egg</h3>
+<br>
+<p>Section 14.2 says the local WebSocket uses TLS with the screen&#x27;s self-signed cert, and the app pins the key after first pairing. But during FIRST pairing, the app hasn&#x27;t yet learned the screen&#x27;s public key. The TLS connection is established BEFORE the pairing handshake (it&#x27;s a WebSocket over TLS). So on first connect, the app accepts an unverified self-signed cert.</p>
+<br>
+<p>This means the first pairing is vulnerable to MITM: an attacker could intercept the TLS connection, present their own cert, relay the PIN challenge, and learn the PIN when the user types it. The app would then pin the ATTACKER&#x27;s key.</p>
+<br>
+<p><strong>Fix:</strong> The first pairing flow should verify the screen&#x27;s TLS certificate fingerprint matches the <code>pk</code> advertised in the Bonjour TXT record. The app knows the expected fingerprint from mDNS before connecting. If the TLS cert doesn&#x27;t match the advertised <code>pk</code>, reject the connection before sending any pairing messages.</p>
+<br>
+<h3>3.9 No wire protocol version in WebSocket messages</h3>
+<br>
+<p>The Bonjour TXT has <code>v=1</code> but the actual WebSocket messages have no version field. If the wire format evolves, there&#x27;s no negotiation after the WebSocket is established. Bonjour version only tells you the protocol is supported, not which message shapes to expect.</p>
+<br>
+<p><strong>Add:</strong> Include <code>v: 1</code> in WebSocket messages, or add a version handshake immediately after WebSocket connect and before pairing begins.</p>
+<br>
+<h3>3.10 8-hex fingerprint is too short</h3>
+<br>
+<p>8 hex characters = 32 bits. While birthday-collision probability is negligible for small home networks, a determined attacker can brute-force an Ed25519 key with a specific 32-bit fingerprint prefix in seconds on modern hardware. They could then impersonate a screen&#x27;s Bonjour advertisement.</p>
+<br>
+<p>The Bonjour TXT <code>pk</code> fingerprint is the identity shorthand used for auto-connect trust matching. If it&#x27;s spoofable, auto-connect is spoofable.</p>
+<br>
+<p><strong>Fix:</strong> Minimum 16 hex characters (64 bits). Still compact for TXT records. Makes brute-force impractical.</p>
+<br>
+<p>---</p>
+<br>
+<h2>4. Strengths</h2>
+<br>
+<h3>4.1 Session-scoped stateless screens are exactly right</h3>
+<p>The &quot;projector in a conference room&quot; metaphor is excellent and should be preserved. No user accounts, no persistent state, no ownership. This is a genuine insight that simplifies everything downstream.</p>
+<br>
+<h3>4.2 Surfaces vs. Streams separation is clean</h3>
+<p>Section 4 draws a crisp boundary. Surfaces are not conversations. <code>sourceRef</code> links them without coupling them. This preserves Invariant #1 (session keys for routing) without forcing surfaces into the stream model.</p>
+<br>
+<h3>4.3 Bonjour zero-config discovery is the right choice</h3>
+<p>No registry, no server coordination, no manual IP entry. Screens appear. This leverages existing Apple ecosystem infrastructure and makes the &quot;visit a friend&#x27;s house&quot; scenario work naturally.</p>
+<br>
+<h3>4.4 Content frames as the display unit</h3>
+<p>One screen, one frame, simple lifecycle. The frame model is easy to reason about and implement. The append/patch extensions for live content are pragmatic.</p>
+<br>
+<h3>4.5 Inline content (no external URLs) is correct</h3>
+<p>Screens may not have internet access. Base64-inlining images and PDFs keeps screens truly isolated. This was a good call.</p>
+<br>
+<h3>4.6 Phased implementation plan is well-scoped</h3>
+<p>Phase 1 is genuinely minimal (HTML-only, single screen). Each phase has clear value. The ordering makes sense.</p>
+<br>
+<h3>4.7 Gateway restart resilience</h3>
+<p>Section 15.8&#x27;s observation that screen connections survive gateway restart is a real architectural win over a registry-based approach.</p>
+<br>
+<p>---</p>
+<br>
+<h2>5. Recommended Changes</h2>
+<br>
+<h3>5.1 Resolve the network topology (BLOCKING)</h3>
+<p>Decide how CLU reaches local-network screens. Write a new Section 5 that reflects the chosen topology. Every other component depends on this. See options in 1.1.</p>
+<br>
+<h3>5.2 Write a Loupe App Architecture section (BLOCKING)</h3>
+<p>Replace Section 12 with the separate-app architecture. Define: auth sharing, gateway connection lifecycle, app-to-app communication, notification strategy for background pushes.</p>
+<br>
+<h3>5.3 Add mutual authentication to auto-connect (BLOCKING)</h3>
+<p>Screens must store trusted client fingerprints. Add a <code>trusted_clients</code> persistent set to the screen&#x27;s state (alongside the keypair). Update Section 7.4 with client identity verification.</p>
+<br>
+<h3>5.4 Add TLS fingerprint verification on first connect</h3>
+<p>Before pairing begins, verify the TLS cert matches the Bonjour-advertised <code>pk</code>. Closes the first-pairing MITM gap. Update Section 7.3.</p>
+<br>
+<h3>5.5 Increase fingerprint length to 16 hex chars</h3>
+<p>Update Sections 6.2, 7.2, and 10.1. Minimal spec change, meaningful security improvement.</p>
+<br>
+<h3>5.6 Add a reconnect grace period</h3>
+<p>Screen holds its last frame for 60 seconds after WebSocket drop. Clears after grace period expires or on explicit <code>disconnect</code> with <code>reason: &quot;intentional&quot;</code>. Add to Section 7.5.</p>
+<br>
+<h3>5.7 Add error, heartbeat, and disconnect messages</h3>
+<p>Three new message types: <code>frame_error</code> (screen → client), ping/pong (bidirectional, 15s interval), <code>disconnect</code> (client → screen). Add to Section 8.</p>
+<br>
+<h3>5.8 Define the `loupe_push` tool schema</h3>
+<p>Add a subsection to Section 10 with the exact tool definition CLU receives, including when it&#x27;s registered and unregistered.</p>
+<br>
+<h3>5.9 Add content size limits with enforcement points</h3>
+<p>Define per-content-type limits and where enforcement happens. Add to Section 8.2.</p>
+<br>
+<h3>5.10 Remove `occupant_name` or specify how it&#x27;s populated</h3>
+<p>Either add <code>device_name</code> to the pairing handshake or drop the field from the busy response. Update Section 7.6.</p>
+<br>
+<h3>5.11 Move viewport text extraction to scroll-end only</h3>
+<p>Resolve open question #1 as a design constraint: <code>visibleText</code> is only extracted and sent on scroll-end, not during active scrolling. Viewport reports during scrolling include position data only. This keeps scrolling smooth on all screen implementations.</p>
+<br>
+<p>---</p>
+<br>
+<h2>Architecture Principles Audit</h2>
+<br>
+<table>
+<tr><td>Principle</td><td>Status</td><td>Notes</td></tr>
+<tr><td>Pattern propagation</td><td>OK</td><td>Frame model is clean and copyable.</td></tr>
+<tr><td>Right-weight</td><td>OK</td><td>Minimal structure — frames, screens, relay. Not over-engineered.</td></tr>
+<tr><td>Separation of concerns</td><td>VIOLATION</td><td>Network topology conflates discovery (phone), transport (phone or CLU?), and protocol (CLU). Must be separated.</td></tr>
+<tr><td>Mutation seam</td><td>WARNING</td><td>&quot;What&#x27;s on screen&quot; has three write paths: CLU push, CLU clear, and disconnect-auto-clear. Screen is SSOT for display state, but CLU&#x27;s cached view can be stale. Provider cache partially addresses this but reconnection gap remains.</td></tr>
+<tr><td>SSOT</td><td>WARNING</td><td>Screen status has two sources: Bonjour `busy` TXT and `loupe_screens` status from app. Can disagree during races. Designate one as authoritative (Bonjour is real-time, app report is best-effort).</td></tr>
+<tr><td>DRY</td><td>OK</td><td>No obvious duplication in the protocol.</td></tr>
+<tr><td>Spec compliance</td><td>N/A</td><td>Spec itself under review.</td></tr>
+</table>
+<br>
+</body></html>

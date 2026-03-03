@@ -932,7 +932,8 @@ struct ChatViewModelTests {
         )
         defer { viewModel.onDisappear() }
 
-        await resetViewModelForTest(viewModel, auth: auth)
+        await viewModel.onAppear()
+        try await setConnected(chatService: chatService, viewModel: viewModel)
         chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
         for _ in 0..<50 {
             if viewModel.orderedSessionKeys.contains(adminSessionKey) { break }
@@ -954,8 +955,6 @@ struct ChatViewModelTests {
 
         viewModel.setActiveSessionKeyForTesting(adminSessionKey)
         #expect(viewModel.activeSessionKey == adminSessionKey)
-        viewModel.inputContent = NSAttributedString(string: "Admin ping")
-        chatService.emitConnectionState(.connected)
         chatService.emitServiceEvent(.sessionInfo(
             SessionInfo(
                 userId: "user",
@@ -964,28 +963,18 @@ struct ChatViewModelTests {
                 sessionKeys: [personalSessionKey, adminSessionKey]
             )
         ))
+
         for _ in 0..<50 {
             if viewModel.sendButtonConnectionState == .connected { break }
             try await Task.sleep(for: .milliseconds(20))
         }
-        for _ in 0..<5 {
-            viewModel.send()
-            for _ in 0..<25 {
-                if chatService.lastSessionKey == adminSessionKey { break }
-                try await Task.sleep(for: .milliseconds(20))
-            }
+        #expect(viewModel.sendButtonConnectionState == .connected)
+
+        viewModel.inputContent = NSAttributedString(string: "Admin ping")
+        viewModel.send()
+        for _ in 0..<50 {
             if chatService.lastSessionKey == adminSessionKey { break }
-            // Reassert connected/provisioned state before another retry.
-            chatService.emitConnectionState(.connected)
-            chatService.emitServiceEvent(.sessionInfo(
-                SessionInfo(
-                    userId: "user",
-                    isAdmin: true,
-                    dmScope: "global_dm",
-                    sessionKeys: [personalSessionKey, adminSessionKey]
-                )
-            ))
-            viewModel.inputContent = NSAttributedString(string: "Admin ping")
+            try await Task.sleep(for: .milliseconds(20))
         }
 
         #expect(chatService.lastSessionKey == adminSessionKey)

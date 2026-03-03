@@ -89,12 +89,18 @@ enum BubbleSizingV2 {
                 bottomInset: max(env.bottomInset, env.truncationBottomInset),
                 flowPadding: metrics.containerPadding
             )
-            let singleLinkCap = availableHeightCap(
-                containerHeight: env.singleLinkContainerHeight,
-                topInset: env.topInset,
-                bottomInset: env.bottomInset,
-                flowPadding: metrics.containerPadding
-            )
+            let singleLinkCap: CGFloat = {
+                if env.isVisionOS {
+                    // Spatial requirement: single-link bubbles cap at 75% of current window height.
+                    return max(120, floor(env.singleLinkContainerHeight * 0.75))
+                }
+                return availableHeightCap(
+                    containerHeight: env.singleLinkContainerHeight,
+                    topInset: env.topInset,
+                    bottomInset: env.bottomInset,
+                    flowPadding: metrics.containerPadding
+                )
+            }()
             let heightCapMode: HeightCapMode = (isSingleLinkPreview || prefersScreenAwareHeightCap) ? .screenAware : .designSystem
             let heightCap: CGFloat = {
                 if isSingleLinkPreview {

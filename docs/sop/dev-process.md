@@ -265,6 +265,10 @@ When working in away mode (agents on TARS instead of eezo):
 - Same process applies: worktrees from the TARS canonical repo (`~/src/clawline/`).
 - TARS agents use `notify` (on PATH) for alerts.
 - Deploy from TARS canonical repo when devices are reachable; otherwise deploy from eezo.
+- Gateway restart policy (provider deploys): use service-managed restart only (`openclaw gateway restart`), never manual `node ... gateway` starts.
+- Post-restart verification is required: exactly one process owns TCP `18789`, and the launchd job (`ai.openclaw.gateway` or legacy `bot.molt.gateway`) reports healthy state.
+- If split ownership is detected, run recovery in order: `openclaw gateway stop` -> confirm `18789` is free -> `openclaw gateway start` -> re-verify single ownership.
+- Failure signature to recognize: `already running`, `port/address in use`, or repeated launchd restart churn.
 
 ---
 

@@ -71,3 +71,14 @@ private struct StubUploadService: UploadServicing {
         throw AttachmentError.missingAuth
     }
 }
+
+private struct WatchConnectivityServiceKey: EnvironmentKey {
+    static let defaultValue: any WatchConnectivityServicing = StubWatchConnectivityService()
+}
+
+extension EnvironmentValues {
+    var watchConnectivityService: any WatchConnectivityServicing {
+        get { self[WatchConnectivityServiceKey.self] }
+        set { self[WatchConnectivityServiceKey.self] = newValue }
+    }
+}

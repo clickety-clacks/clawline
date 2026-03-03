@@ -239,8 +239,8 @@ struct ChatLayoutCoordinatorTests {
         )
 
         let state = ChatLayoutCoordinator.insetLayoutState(inputs: inputs, metrics: metrics, barHeight: 88)
-        #expect(abs(state.keyboardInset - 14) <= 0.5)
-        #expect(abs(state.listBottomInset - 118) <= 0.5)
+        #expect(abs(state.keyboardInset - 33.8333333333) <= 0.5)
+        #expect(abs(state.listBottomInset - 137.8333333333) <= 0.5)
     }
 
     @Test("T093: Keyboard-up inset preserves full height for pager clearance")

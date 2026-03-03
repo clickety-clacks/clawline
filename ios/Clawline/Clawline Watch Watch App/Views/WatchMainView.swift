@@ -46,9 +46,9 @@ struct WatchMainView: View {
             let text: String
             switch newValue {
             case .direct:
-                text = "Direct restored"
+                text = "Connected"
             case .relay:
-                text = "Switched to Via iPhone"
+                text = "Relaying"
             case .probing:
                 text = "Reconnecting..."
             case .disconnected:
@@ -81,6 +81,8 @@ struct WatchMainView: View {
             HStack {
                 RouteIndicatorChip(transportState: transport.transportState)
                 Spacer(minLength: 0)
+                keyStatusBadges
+                    .padding(.trailing, 44)
             }
 
             ZStack {
@@ -137,6 +139,23 @@ struct WatchMainView: View {
         }
     }
 
+    private var keyStatusBadges: some View {
+        HStack(spacing: 5) {
+            keyBadge("S", hasKey: credentials.sonioxApiKey?.isEmpty == false)
+            keyBadge("C", hasKey: credentials.cartesiaApiKey?.isEmpty == false)
+        }
+    }
+
+    private func keyBadge(_ initial: String, hasKey: Bool) -> some View {
+        HStack(spacing: 2) {
+            Text(initial)
+                .font(.system(size: 9, weight: .bold, design: .monospaced))
+            Image(systemName: hasKey ? "checkmark" : "xmark")
+                .font(.system(size: 8, weight: .bold))
+        }
+        .foregroundStyle(hasKey ? Color.green : Color.red)
+    }
+
     private var statusLine: String {
         if let statusOverride {
             return statusOverride
@@ -146,7 +165,7 @@ struct WatchMainView: View {
         case .idle:
             switch transport.transportState {
             case .relay:
-                return voiceSession.canUseVoice ? "Via iPhone" : "Voice unavailable — text only via iPhone"
+                return voiceSession.canUseVoice ? "Relaying" : "Voice unavailable — text only"
             case .disconnected:
                 return "No Connection"
             case .direct, .probing:

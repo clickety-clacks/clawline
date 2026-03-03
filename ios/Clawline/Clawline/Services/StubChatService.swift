@@ -10,10 +10,12 @@ import Foundation
 final class StubChatService: ChatServicing {
     var responseDelay: TimeInterval = 1.5
     private var streams: [StreamSession] = []
+    private var replayCursorBySessionKey: [String: String] = [:]
 
     private var messageContinuation: AsyncStream<Message>.Continuation?
     private var stateContinuation: AsyncStream<ConnectionState>.Continuation?
     private var serviceEventContinuation: AsyncStream<ChatServiceEvent>.Continuation?
+    private var lifecycleContinuation: AsyncStream<LifecycleTransportEvent>.Continuation?
 
     private(set) lazy var incomingMessages: AsyncStream<Message> = {
         AsyncStream { continuation in
@@ -40,7 +42,14 @@ final class StubChatService: ChatServicing {
         }
     }()
 
-    func connect(token: String, lastMessageId: String?) async throws {
+    private(set) lazy var lifecycleTransportEvents: AsyncStream<LifecycleTransportEvent> = {
+        AsyncStream { continuation in
+            self.lifecycleContinuation = continuation
+        }
+    }()
+
+    func connect(token: String, activeSessionKey: String?) async throws {
+        _ = activeSessionKey
         stateContinuation?.yield(.connecting)
         try await Task.sleep(forDuration: .milliseconds(500))
         if streams.isEmpty {
@@ -61,8 +70,43 @@ final class StubChatService: ChatServicing {
         stateContinuation?.yield(.connected)
     }
 
+    func startConnectionAttempt(epoch: Int, lastMessageId: String?, token: String) {
+        _ = lastMessageId
+        Task {
+            do {
+                try await connect(token: token, activeSessionKey: nil)
+                lifecycleContinuation?.yield(.init(
+                    epoch: epoch,
+                    payload: .authResult(success: true, replayCount: 0, replayTruncated: false, historyReset: false, failureReason: nil)
+                ))
+            } catch {
+                lifecycleContinuation?.yield(.init(epoch: epoch, payload: .transportClosed(reason: .error)))
+            }
+        }
+    }
+
+    func stopConnectionAttempt() {
+        disconnect()
+    }
+
     func disconnect() {
         stateContinuation?.yield(.disconnected)
+    }
+
+    func replayCursorSnapshot() -> [String: String] {
+        replayCursorBySessionKey
+    }
+
+    func setReplayCursor(_ cursor: String?, for sessionKey: String) {
+        if let cursor, !cursor.isEmpty {
+            replayCursorBySessionKey[sessionKey] = cursor
+        } else {
+            replayCursorBySessionKey.removeValue(forKey: sessionKey)
+        }
+    }
+
+    func clearReplayCursors() {
+        replayCursorBySessionKey.removeAll()
     }
 
     func send(

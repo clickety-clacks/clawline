@@ -84,6 +84,19 @@ struct ClawlineApp: App {
                 .sheet(isPresented: $settingsManager.isSettingsPresented) {
                     SettingsView(settings: settingsManager)
                 }
+                // Clear first responders before the app backgrounds.
+                // UITextView.becomeFirstResponder triggers a synchronous pasteboard XPC call
+                // (UIKeyboardStateManager.canInsertAdaptiveImageGlyph). If the device locks
+                // while that XPC is in-flight, the pasteboard daemon suspends, the call never
+                // returns, and the watchdog kills the app (0x8BADF00D).
+                // Calling endEditing(true) on every window during willResignActive ensures no
+                // UITextView holds focus or can gain focus during the background transition.
+                .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
+                    UIApplication.shared.connectedScenes
+                        .compactMap { $0 as? UIWindowScene }
+                        .flatMap { $0.windows }
+                        .forEach { $0.endEditing(true) }
+                }
 
         }
         .commands {

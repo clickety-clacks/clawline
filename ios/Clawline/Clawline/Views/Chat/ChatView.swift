@@ -944,6 +944,7 @@ struct ChatView: View {
             },
             layoutCoordinator: layoutCoordinator,
             sessionKey: sessionKey,
+            forceReReadGeneration: viewModel.forceReReadGeneration(for: sessionKey),
             onScrollEvent: handleMessageFlowScrollEvent
         )
         // We manage keyboard avoidance manually inside the collection view.
@@ -1087,6 +1088,7 @@ struct ChatView: View {
                 // Do not register prewarm shells as live session list views.
                 shouldRegisterWithLayoutCoordinator: false,
                 sessionKey: sessionKey,
+                forceReReadGeneration: viewModel.forceReReadGeneration(for: sessionKey),
                 onScrollEvent: nil
             )
             .hidden()
@@ -2210,8 +2212,16 @@ private final class PreviewChatService: ChatServicing {
     var serviceEvents: AsyncStream<ChatServiceEvent> {
         AsyncStream { _ in }
     }
-    func connect(token: String, lastMessageId: String?) async throws {}
+    var lifecycleTransportEvents: AsyncStream<LifecycleTransportEvent> {
+        AsyncStream { _ in }
+    }
+    func connect(token: String, activeSessionKey: String?) async throws {}
+    func startConnectionAttempt(epoch: Int, lastMessageId: String?, token: String) {}
+    func stopConnectionAttempt() {}
     func disconnect() {}
+    func replayCursorSnapshot() -> [String: String] { [:] }
+    func setReplayCursor(_ cursor: String?, for sessionKey: String) {}
+    func clearReplayCursors() {}
     func send(id: String, content: String, attachments: [WireAttachment], sessionKey: String?) async throws {}
     func sendInteractiveCallback(sourceMessageId: String, action: String, data: JSONValue?) async throws {}
     func fetchStreams() async throws -> [StreamSession] { [] }

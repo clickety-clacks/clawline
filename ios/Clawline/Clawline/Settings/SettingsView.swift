@@ -12,6 +12,11 @@ struct SettingsView: View {
     @Bindable var settings: SettingsManager
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(SonioxKeyStore.self) private var sonioxKeyStore
+    @Environment(CartesiaKeyStore.self) private var cartesiaKeyStore
+
+    @State private var sonioxKeyText = ""
+    @State private var cartesiaKeyText = ""
 
     private var effectiveColorScheme: ColorScheme {
 #if os(visionOS)
@@ -54,6 +59,27 @@ struct SettingsView: View {
                     Text("Server TLS")
                 } footer: {
                     Text("When enabled, Clawline accepts self-signed TLS certificates for provider WebSocket connections. Add a SHA-256 leaf certificate fingerprint to pin a specific cert.")
+                }
+
+                Section {
+                    SecureField("Soniox API Key", text: $sonioxKeyText)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .onSubmit { sonioxKeyStore.apiKey = sonioxKeyText.isEmpty ? nil : sonioxKeyText }
+                        .onChange(of: sonioxKeyText) { _, value in
+                            sonioxKeyStore.apiKey = value.isEmpty ? nil : value
+                        }
+                    SecureField("Cartesia API Key", text: $cartesiaKeyText)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .onSubmit { cartesiaKeyStore.apiKey = cartesiaKeyText.isEmpty ? nil : cartesiaKeyText }
+                        .onChange(of: cartesiaKeyText) { _, value in
+                            cartesiaKeyStore.apiKey = value.isEmpty ? nil : value
+                        }
+                } header: {
+                    Text("Voice")
+                } footer: {
+                    Text("API keys are synced to Apple Watch for STT (Soniox) and TTS (Cartesia).")
                 }
 
                 if settings.effectConfig.isEnabled {
@@ -105,6 +131,10 @@ struct SettingsView: View {
                     Text("Preview")
                 }
 
+            }
+            .onAppear {
+                sonioxKeyText = sonioxKeyStore.apiKey ?? ""
+                cartesiaKeyText = cartesiaKeyStore.apiKey ?? ""
             }
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)

@@ -36,11 +36,11 @@ struct RouteIndicatorChip: View {
     private var label: String {
         switch transportState {
         case .direct:
-            return "Direct"
+            return "Connected"
         case .probing:
             return "Reconnecting..."
         case .relay:
-            return "Via iPhone"
+            return "Relaying"
         case .disconnected:
             return "No Connection"
         }

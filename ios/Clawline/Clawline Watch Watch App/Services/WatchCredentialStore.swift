@@ -26,7 +26,7 @@ final class WatchCredentialStore {
     var onCredentialsChanged: (() -> Void)?
 
     convenience init() {
-        self.init(keychain: WatchKeychainStore())
+        self.init(keychain: WatchKeychainStore(accessGroup: "group.co.clicketyclacks.Clawline"))
     }
 
     init(keychain: WatchKeychainStore) {
@@ -113,7 +113,7 @@ final class WatchKeychainStore {
     private let service: String
     private let accessGroup: String?
 
-    init(service: String = "co.clicketyclacks.Clawline.watch", accessGroup: String? = nil) {
+    init(service: String = "co.clicketyclacks.Clawline.watch", accessGroup: String? = "group.co.clicketyclacks.Clawline") {
         self.service = service
         self.accessGroup = accessGroup
     }

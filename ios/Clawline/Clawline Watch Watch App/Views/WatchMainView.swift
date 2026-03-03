@@ -13,48 +13,67 @@ struct WatchMainView: View {
 
     @State private var statusOverride: String?
     @State private var statusOverrideTask: Task<Void, Never>?
+    @State private var connectionInterruptionReason: String?
 
     @State private var showTextInputSheet = false
     @State private var textInput = ""
 
     var body: some View {
-        Group {
-            if !credentials.hasProviderCredentials {
-                VStack(spacing: 8) {
-                    Text("Open Clawline")
-                        .font(.system(size: 16, weight: .semibold, design: .rounded))
-                    Text("on iPhone to pair")
-                        .font(.system(size: 13, weight: .medium, design: .rounded))
-                        .foregroundStyle(.secondary)
+        VStack(spacing: 8) {
+            HStack {
+                RouteIndicatorChip(transportState: transport.transportState)
+                Spacer(minLength: 0)
+                if credentials.hasProviderCredentials {
+                    keyStatusBadges
+                        .padding(.trailing, 44)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .padding()
-            } else {
-                content
+            }
+
+            Group {
+                if !credentials.hasProviderCredentials {
+                    VStack(spacing: 8) {
+                        Text("Open Clawline")
+                            .font(.system(size: 16, weight: .semibold, design: .rounded))
+                        Text("on iPhone to pair")
+                            .font(.system(size: 13, weight: .medium, design: .rounded))
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .padding()
+                } else {
+                    content
+                }
             }
         }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
         .task {
             guard !didBind else { return }
             didBind = true
             channelManager.bind(transport: transport)
             observeIncomingResponses()
+            observeTransportEvents()
         }
-        .onChange(of: transport.transportState) { _, newValue in
+        .onChange(of: transport.transportState) { oldValue, newValue in
             voiceSession.routeChanged(to: newValue)
             WKInterfaceDevice.current().play(.click)
 
-            let text: String
-            switch newValue {
-            case .direct:
-                text = "Connected"
-            case .relay:
-                text = "Relaying"
-            case .probing:
-                text = "Reconnecting..."
-            case .disconnected:
-                text = "No Connection"
+            if newValue != .disconnected {
+                connectionInterruptionReason = nil
             }
-            showTemporaryStatus(text)
+
+            switch (oldValue, newValue) {
+            case (.relay, .direct):
+                showTemporaryStatus("Direct restored")
+            case (_, .relay):
+                showTemporaryStatus("Switched to Via iPhone")
+            case (_, .probing):
+                showTemporaryStatus("Reconnecting...")
+            case (_, .disconnected):
+                showTemporaryStatus(connectionInterruptionReason ?? "No Connection")
+            default:
+                break
+            }
         }
         .sheet(isPresented: $showTextInputSheet) {
             VStack(spacing: 10) {
@@ -78,13 +97,6 @@ struct WatchMainView: View {
 
     private var content: some View {
         VStack(spacing: 8) {
-            HStack {
-                RouteIndicatorChip(transportState: transport.transportState)
-                Spacer(minLength: 0)
-                keyStatusBadges
-                    .padding(.trailing, 44)
-            }
-
             ZStack {
                 WaveformRingView(audioLevel: voiceSession.audioLevel, isActive: isVoiceActive)
                     .frame(width: 128, height: 128)
@@ -114,8 +126,6 @@ struct WatchMainView: View {
                 .font(.system(size: 13, weight: .semibold, design: .rounded))
                 .foregroundStyle(.secondary)
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 6)
         .simultaneousGesture(channelSwipeGesture)
     }
 
@@ -165,9 +175,9 @@ struct WatchMainView: View {
         case .idle:
             switch transport.transportState {
             case .relay:
-                return voiceSession.canUseVoice ? "Relaying" : "Voice unavailable — text only"
+                return voiceSession.canUseVoice ? "Via iPhone" : "Voice unavailable — text only via iPhone"
             case .disconnected:
-                return "No Connection"
+                return connectionInterruptionReason ?? "No Connection"
             case .direct, .probing:
                 return "Tap or hold to talk"
             }
@@ -280,6 +290,25 @@ struct WatchMainView: View {
 
                 await MainActor.run {
                     voiceSession.handleResponse(text: message.content)
+                }
+            }
+        }
+    }
+
+    private func observeTransportEvents() {
+        Task {
+            for await event in transport.serviceEvents {
+                guard case .connectionInterrupted(let reason) = event,
+                      let reason,
+                      !reason.isEmpty else {
+                    continue
+                }
+
+                await MainActor.run {
+                    connectionInterruptionReason = reason
+                    if transport.transportState == .disconnected {
+                        showTemporaryStatus(reason)
+                    }
                 }
             }
         }

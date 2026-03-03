@@ -21,6 +21,7 @@ final class WatchConnectivityService: NSObject, WatchConnectivityServicing {
     private var incomingMessageTask: Task<Void, Never>?
     private var serviceEventsTask: Task<Void, Never>?
     private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
+    private var didRegisterCredentialObservers = false
 
     // Injected — same instances the iOS app uses
     private let authManager: any AuthManaging
@@ -49,25 +50,41 @@ final class WatchConnectivityService: NSObject, WatchConnectivityServicing {
 
     func activate() {
         guard WCSession.isSupported() else { return }
-        guard WCSession.default.activationState == .notActivated else { return }
-        WCSession.default.delegate = self
-        WCSession.default.activate()
 
-        // Register credential change observers
-        let names: [Notification.Name] = [
-            .authStateDidChange,
-            .sonioxApiKeyDidChange,
-            .cartesiaApiKeyDidChange,
-            .cartesiaVoiceIdDidChange,
-            .providerBaseURLDidChange
-        ]
-        for name in names {
-            NotificationCenter.default.addObserver(
-                self,
-                selector: #selector(handleCredentialChange),
-                name: name,
-                object: nil
-            )
+        WCSession.default.delegate = self
+
+        if !didRegisterCredentialObservers {
+            didRegisterCredentialObservers = true
+
+            // Register credential change observers once for service lifetime.
+            let names: [Notification.Name] = [
+                .authStateDidChange,
+                .sonioxApiKeyDidChange,
+                .cartesiaApiKeyDidChange,
+                .cartesiaVoiceIdDidChange,
+                .providerBaseURLDidChange
+            ]
+            for name in names {
+                NotificationCenter.default.addObserver(
+                    self,
+                    selector: #selector(handleCredentialChange),
+                    name: name,
+                    object: nil
+                )
+            }
+        }
+
+        let activationState = WCSession.default.activationState
+        if activationState == .notActivated || activationState == .inactive {
+            WCSession.default.activate()
+            return
+        }
+
+        let session = WCSession.default
+        isWatchPaired = session.isPaired
+        isWatchReachable = session.isReachable
+        if session.activationState == .activated, session.isPaired {
+            syncCredentials()
         }
     }
 

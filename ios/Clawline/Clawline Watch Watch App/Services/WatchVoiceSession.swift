@@ -106,7 +106,7 @@ final class WatchVoiceSession {
         }
 
         guard canUseVoice else {
-            transitionToError("Voice unavailable — text only")
+            transitionToError("Voice unavailable — text only via iPhone")
             return
         }
 
@@ -123,7 +123,7 @@ final class WatchVoiceSession {
         }
 
         guard canUseVoice else {
-            transitionToError("Voice unavailable — text only")
+            transitionToError("Voice unavailable — text only via iPhone")
             return
         }
 
@@ -162,9 +162,15 @@ final class WatchVoiceSession {
     }
 
     func routeChanged(to route: WatchProviderTransportState) {
+        let previousRoute = currentRoute
         currentRoute = route
 
-        guard route == .disconnected else {
+        let shouldForceStop =
+            route == .disconnected ||
+            route == .relay ||
+            (previousRoute == .relay && route == .direct)
+
+        guard shouldForceStop else {
             return
         }
 

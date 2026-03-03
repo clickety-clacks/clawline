@@ -601,6 +601,7 @@ struct ChatViewModelTests {
 
         // Transport remains disconnected in this harness, so send guard should still surface not-connected.
         #expect(viewModel.sendButtonConnectionState == .disconnected)
+        viewModel.inputContent = NSAttributedString(string: "reconnect probe")
         viewModel.send()
         #expect(toastManager.debugMessages.contains("Could not send; not connected."))
     }

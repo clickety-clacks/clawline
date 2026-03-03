@@ -87,7 +87,8 @@ final class WatchConnectivityService: NSObject, WatchConnectivityServicing {
             "providerBaseURL": providerURL,
             "pushedAt": Date().timeIntervalSince1970 * 1000
         ]
-        if let key = sonioxKeyStore.apiKey { userInfo["sonioxApiKey"] = key }
+        let sonioxApiKey = sonioxKeyStore.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !sonioxApiKey.isEmpty { userInfo["sonioxApiKey"] = sonioxApiKey }
         if let key = cartesiaKeyStore.apiKey { userInfo["cartesiaApiKey"] = key }
         if let id = cartesiaKeyStore.selectedVoiceId { userInfo["cartesiaVoiceId"] = id }
 
@@ -367,7 +368,8 @@ final class WatchConnectivityService: NSObject, WatchConnectivityServicing {
         if let providerBaseURL = ProviderBaseURLStore.baseURL?.absoluteString {
             payload["providerBaseURL"] = providerBaseURL
         }
-        if let sonioxApiKey = sonioxKeyStore.apiKey {
+        let sonioxApiKey = sonioxKeyStore.apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !sonioxApiKey.isEmpty {
             payload["sonioxApiKey"] = sonioxApiKey
         }
         if let cartesiaApiKey = cartesiaKeyStore.apiKey {

@@ -841,6 +841,9 @@ final class DictationSession {
                     capture.stop()
                     client.close(code: .goingAway, reason: "phase2_retry", caller: "DictationSession.beginPhase2Prewarm attempt=\(attempt)")
                     if attempt < 2 {
+                        guard !Task.isCancelled else {
+                            return
+                        }
                         do {
                             try await Task.sleep(for: .milliseconds(220))
                         } catch is CancellationError {
@@ -1590,6 +1593,7 @@ final class DictationSession {
         phase1IdleTeardownTask?.cancel()
         phase1IdleTeardownTask = Task { [weak self] in
             guard let self else { return }
+            guard !Task.isCancelled else { return }
             do {
                 try await Task.sleep(for: .seconds(60))
             } catch is CancellationError {

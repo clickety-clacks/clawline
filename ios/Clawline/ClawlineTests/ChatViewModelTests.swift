@@ -1499,7 +1499,8 @@ struct ChatViewModelTests {
     func relaunchRestoresPreviouslyActiveStream() async throws {
         resetChatPersistence()
         let auth = TestAuthManager()
-        auth.storeCredentials(token: "jwt", userId: "user")
+        let userId = "user-relaunch-restore"
+        auth.storeCredentials(token: "jwt", userId: userId)
 
         let streams = [
             makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
@@ -1529,7 +1530,12 @@ struct ChatViewModelTests {
         }
         firstViewModel.setActiveSessionKeyForTesting(adminSessionKey)
         #expect(firstViewModel.activeSessionKey == adminSessionKey)
-        #expect(UserDefaults.standard.string(forKey: "clawline.lastSessionKey.user") == adminSessionKey)
+        #expect(UserDefaults.standard.string(forKey: "clawline.lastSessionKey.\(userId)") == adminSessionKey)
+        let streamCachePersisted = await waitForStreamMetadataCache(
+            userId: userId,
+            contains: [personalSessionKey, adminSessionKey]
+        )
+        #expect(streamCachePersisted)
         firstViewModel.onDisappear()
 
         let secondService = TestChatService()
@@ -1563,7 +1569,8 @@ struct ChatViewModelTests {
     func relaunchPrunesCachedStreamMissingFromSnapshot() async throws {
         resetChatPersistence()
         let auth = TestAuthManager()
-        auth.storeCredentials(token: "jwt", userId: "user")
+        let userId = "user-relaunch-prune"
+        auth.storeCredentials(token: "jwt", userId: userId)
         let staleKey = "agent:main:clawline:user:s_stale1234"
 
         let firstService = TestChatService()
@@ -1591,6 +1598,11 @@ struct ChatViewModelTests {
             try await Task.sleep(for: .milliseconds(20))
         }
         #expect(firstViewModel.stream(for: staleKey) != nil)
+        let streamCachePersisted = await waitForStreamMetadataCache(
+            userId: userId,
+            contains: [personalSessionKey, staleKey]
+        )
+        #expect(streamCachePersisted)
         firstViewModel.onDisappear()
 
         let secondService = TestChatService()
@@ -2136,6 +2148,43 @@ private func resetChatPersistence() {
         .appendingPathComponent("Clawline", isDirectory: true)
         .appendingPathComponent("StreamCache", isDirectory: true)
     try? fileManager.removeItem(at: streamDirectoryURL)
+}
+
+private func waitForStreamMetadataCache(
+    userId: String,
+    contains expectedSessionKeys: Set<String>,
+    timeoutMs: Int = 1_500
+) async -> Bool {
+    guard let cacheURL = streamMetadataCacheURL(forUserId: userId) else {
+        return false
+    }
+    let decoder = JSONDecoder()
+    let attempts = max(1, timeoutMs / 20)
+    for _ in 0..<attempts {
+        if let data = try? Data(contentsOf: cacheURL),
+           let streams = try? decoder.decode([StreamSession].self, from: data) {
+            let keys = Set(streams.map(\.sessionKey))
+            if expectedSessionKeys.isSubset(of: keys) {
+                return true
+            }
+        }
+        try? await Task.sleep(for: .milliseconds(20))
+    }
+    return false
+}
+
+private func streamMetadataCacheURL(forUserId userId: String) -> URL? {
+    let fileManager = FileManager.default
+    guard let baseURL = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
+        return nil
+    }
+    let filename = userId
+        .replacingOccurrences(of: ":", with: "-")
+        .replacingOccurrences(of: "/", with: "-")
+    return baseURL
+        .appendingPathComponent("Clawline", isDirectory: true)
+        .appendingPathComponent("StreamCache", isDirectory: true)
+        .appendingPathComponent("\(filename).json")
 }
 
 @MainActor

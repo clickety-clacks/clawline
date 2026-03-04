@@ -653,8 +653,7 @@ final class DictationSession {
                     trigger: "send_tap_finalization_walkie"
                 )
             } else {
-                await self.pauseListening(reason: "send_tap_pause")
-                finalizedWithinTimeout = true
+                finalizedWithinTimeout = await self.pauseListening(reason: "send_tap_pause")
             }
             await MainActor.run {
                 sendAction()
@@ -1491,14 +1490,15 @@ final class DictationSession {
         .idleSurfaceClosed
     }
 
-    private func pauseListening(reason: String) async {
-        guard state == .dictatingSticky || state == .dictatingWalkieTalkie || state == .dictatingPaused || state == .finalizing else { return }
+    @discardableResult
+    private func pauseListening(reason: String) async -> Bool {
+        guard state == .dictatingSticky || state == .dictatingWalkieTalkie || state == .dictatingPaused || state == .finalizing else { return false }
         guard !pauseListeningInFlight else {
             logDictation(
                 "DICTATION_STOP trace_id=DICTATION_STOP_PAUSE_DUPLICATE_SUPPRESSED " +
                 "caller=pauseListening reason=\(reason) ts=\(Date().timeIntervalSince1970) \(attemptContext())"
             )
-            return
+            return false
         }
         pauseListeningInFlight = true
         defer { pauseListeningInFlight = false }
@@ -1515,7 +1515,10 @@ final class DictationSession {
         prewarmConnectStartedAt = nil
         suppressedPrewarmFailureBudget = 0
 
-        await finalizeForPendingStopAction(reason: reason, timeout: timing.sendFinalizeTimeout)
+        let finalizedWithinTimeout = await finalizeForPendingStopAction(
+            reason: reason,
+            timeout: timing.sendFinalizeTimeout
+        )
         streamingClient?.close(
             code: .normalClosure,
             reason: "paused",
@@ -1547,10 +1550,12 @@ final class DictationSession {
 
         state = .dictatingPaused
         schedulePhase1IdleTeardown()
+        return finalizedWithinTimeout
     }
 
-    private func finalizeForPendingStopAction(reason: String, timeout: Duration) async {
-        guard streamingClient != nil else { return }
+    @discardableResult
+    private func finalizeForPendingStopAction(reason: String, timeout: Duration) async -> Bool {
+        guard streamingClient != nil else { return false }
         logDictation(
             "DICTATION_STOP trace_id=DICTATION_STOP_FINALIZATION_HOLD_BEGIN " +
             "caller=finalizeForPendingStopAction reason=\(reason) timeout=\(timeout) ts=\(Date().timeIntervalSince1970)"
@@ -1570,6 +1575,7 @@ final class DictationSession {
             "DICTATION_STOP trace_id=DICTATION_STOP_FINALIZATION_HOLD_END " +
             "caller=finalizeForPendingStopAction reason=\(reason) finalized_within_timeout=\(finalizedWithinTimeout) ts=\(Date().timeIntervalSince1970)"
         )
+        return finalizedWithinTimeout
     }
 
     private func resumeFromPaused() {

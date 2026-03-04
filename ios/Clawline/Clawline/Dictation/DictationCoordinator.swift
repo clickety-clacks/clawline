@@ -1386,6 +1386,9 @@ final class DictationSession {
             if finishedReceived {
                 return true
             }
+            guard !Task.isCancelled else {
+                return finishedReceived
+            }
             do {
                 try await Task.sleep(for: .milliseconds(20))
             } catch is CancellationError {

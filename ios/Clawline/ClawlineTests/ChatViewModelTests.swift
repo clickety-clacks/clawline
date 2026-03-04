@@ -384,7 +384,7 @@ struct ChatViewModelTests {
     func chatRuntimePortReflectsConnectionStateSendGating() async throws {
         resetChatPersistence()
         let auth = TestAuthManager()
-        auth.storeCredentials(token: "jwt", userId: "user")
+        auth.storeCredentials(token: "jwt", userId: "user-runtime-port")
         let chatService = TestChatService()
         let toastManager = ToastManager()
         let viewModel = ChatViewModel(
@@ -408,15 +408,7 @@ struct ChatViewModelTests {
         #expect(toastManager.debugMessages.contains("Could not send; not connected."))
         #expect(chatService.sendCallCount == 0)
 
-        chatService.emitConnectionState(.connected)
-        chatService.emitServiceEvent(.sessionInfo(
-            SessionInfo(
-                userId: "user",
-                isAdmin: false,
-                dmScope: "dm",
-                sessionKeys: [personalSessionKey]
-            )
-        ))
+        try await setReadyToSend(chatService: chatService, viewModel: viewModel)
         for _ in 0..<50 {
             if runtimePort.sendButtonConnectionState == .connected { break }
             try await Task.sleep(for: .milliseconds(20))

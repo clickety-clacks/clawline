@@ -14,6 +14,19 @@ import os.log
 
 private let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "ChatView")
 
+#if DEBUG
+@MainActor
+private final class T099OnDisappearProbeStore {
+    struct PendingActiveDisappear {
+        let vmObject: String
+        let chatViewId: String
+    }
+
+    static let shared = T099OnDisappearProbeStore()
+    var pendingActiveDisappear: PendingActiveDisappear?
+}
+#endif
+
 // MARK: - ⚠️⚠️⚠️ CRITICAL: DO NOT MODIFY WITHOUT READING ⚠️⚠️⚠️
 //
 // This file contains a non-obvious keyboard positioning fix that took 7+ iterations to solve.
@@ -128,6 +141,26 @@ struct ChatView: View {
     @State private var streamToastManager = StreamToastManager()
     @State private var streamToastBusySince: Date?
     @State private var streamToastBusyClearTask: Task<Void, Never>?
+    @State private var chatViewTraceId = UUID().uuidString
+#if DEBUG
+    @State private var lifecycleDebugOverlayVisible = true
+    @State private var lifecycleDebugOverlayDismissTask: Task<Void, Never>?
+    @State private var probeTaskEnterCount = 0
+    @State private var probeOnAppearCount = 0
+    @State private var probeOnDisappearCount = 0
+    @State private var probeLatestOnAppearConnState = "unknown"
+    @State private var probeLatestInstanceId = ""
+    @State private var probeLatestVmObject = ""
+    @State private var probeLastOnDisappearCause = "unknown"
+    @State private var probeLastOnDisappearPreviousVMObject = "-"
+    @State private var probeLastOnDisappearPreviousChatViewId = "-"
+    @State private var probeLastOnDisappearCurrentVMObject = "-"
+    @State private var probeLastOnDisappearCurrentChatViewId = "-"
+
+    private var isLifecycleDebugOverlayEnabled: Bool {
+        settings.isLifecycleDebugOverlayEnabled
+    }
+#endif
 
     private let streamToastMinimumBusySeconds: TimeInterval = 0.45
 
@@ -456,18 +489,71 @@ struct ChatView: View {
 #endif
         }
         .task {
+#if DEBUG
+            recordProbeEvent(
+                kind: .taskEnter,
+                instanceId: viewModel.debugInstanceId,
+                vmObject: String(describing: ObjectIdentifier(viewModel)),
+                connState: String(describing: viewModel.connectionState)
+            )
+#endif
+            logger.info(
+                "[T099-PIN] chatView=\(self.chatViewTraceId, privacy: .public) event=task_enter vm=\(self.viewModel.debugInstanceId, privacy: .public) vmObject=\(String(describing: ObjectIdentifier(self.viewModel)), privacy: .public) scenePhase=\(String(describing: scenePhase), privacy: .public)"
+            )
             viewModel.handleSceneActiveStateChanged(isActive: scenePhase == .active)
-            await viewModel.onAppear()
+            await viewModel.onAppear(origin: "ChatView.task[\(chatViewTraceId)] scene=\(String(describing: scenePhase))")
+        }
+        .onAppear {
+#if DEBUG
+            recordProbeEvent(
+                kind: .onAppear,
+                instanceId: viewModel.debugInstanceId,
+                vmObject: String(describing: ObjectIdentifier(viewModel)),
+                connState: String(describing: viewModel.connectionState)
+            )
+#endif
+            logger.info(
+                "[T099-PIN] chatView=\(self.chatViewTraceId, privacy: .public) event=onAppear vm=\(self.viewModel.debugInstanceId, privacy: .public) vmObject=\(String(describing: ObjectIdentifier(self.viewModel)), privacy: .public) scenePhase=\(String(describing: scenePhase), privacy: .public) connState=\(String(describing: self.viewModel.connectionState), privacy: .public)"
+            )
         }
         .onDisappear {
-            viewModel.onDisappear()
+#if DEBUG
+            recordProbeEvent(
+                kind: .onDisappear,
+                instanceId: viewModel.debugInstanceId,
+                vmObject: String(describing: ObjectIdentifier(viewModel)),
+                connState: String(describing: viewModel.connectionState)
+            )
+#endif
+            logger.info(
+                "[T099-PIN] chatView=\(self.chatViewTraceId, privacy: .public) event=onDisappear vm=\(self.viewModel.debugInstanceId, privacy: .public) vmObject=\(String(describing: ObjectIdentifier(self.viewModel)), privacy: .public) scenePhase=\(String(describing: scenePhase), privacy: .public)"
+            )
+            viewModel.onDisappear(origin: "ChatView.onDisappear[\(chatViewTraceId)] scene=\(String(describing: scenePhase))")
             resetScrollButtonInteractionState()
+#if DEBUG
+            lifecycleDebugOverlayDismissTask?.cancel()
+            lifecycleDebugOverlayDismissTask = nil
+#endif
         }
         .onChange(of: scenePhase) { _, phase in
             viewModel.handleSceneActiveStateChanged(isActive: phase == .active)
             guard phase == .active else { return }
             keyboardRefreshToken &+= 1
         }
+#if DEBUG
+        .onChange(of: viewModel.lifecycleDebugSequence) { _, _ in
+            showLifecycleDebugOverlay()
+        }
+        .onChange(of: settings.isLifecycleDebugOverlayEnabled) { _, enabled in
+            if enabled {
+                showLifecycleDebugOverlay()
+            } else {
+                lifecycleDebugOverlayVisible = false
+                lifecycleDebugOverlayDismissTask?.cancel()
+                lifecycleDebugOverlayDismissTask = nil
+            }
+        }
+#endif
         .background(
             KeyboardLayoutGuideReader(refreshToken: keyboardRefreshToken) { height, duration, curve in
                 if abs(height - keyboardHeight) > 0.5 {
@@ -497,7 +583,9 @@ struct ChatView: View {
         .onChange(of: photoPickerItems) { _, newItems in
             guard !newItems.isEmpty else { return }
             Task {
-                await handlePhotoPickerItems(newItems)
+                await withAttachmentStaging {
+                    await handlePhotoPickerItems(newItems)
+                }
                 await MainActor.run {
                     photoPickerItems = []
                     restoreFocusIfNeeded()
@@ -512,7 +600,9 @@ struct ChatView: View {
             switch result {
             case .success(let urls):
                 Task {
-                    await handleDocumentResults(urls)
+                    await withAttachmentStaging {
+                        await handleDocumentResults(urls)
+                    }
                     await MainActor.run { restoreFocusIfNeeded() }
                 }
             case .failure:
@@ -740,7 +830,233 @@ struct ChatView: View {
             EmptyView()
 #endif
         }
+#if DEBUG
+        .overlay(alignment: .topTrailing) {
+            lifecycleDebugOverlay(viewModel: viewModel)
+        }
+#endif
     }
+
+#if DEBUG
+    @ViewBuilder
+    private func lifecycleDebugOverlay(viewModel: ChatViewModel) -> some View {
+        if isLifecycleDebugOverlayEnabled, lifecycleDebugOverlayVisible {
+            ScrollView(.vertical, showsIndicators: true) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("probe t:\(probeTaskEnterCount) a:\(probeOnAppearCount) d:\(probeOnDisappearCount)")
+                        .font(.caption2.weight(.semibold))
+                        .monospacedDigit()
+                    Text("appear state: \(probeLatestOnAppearConnState)")
+                        .font(.caption2)
+                        .lineLimit(1)
+                    Text("vm: \(probeLatestInstanceId)")
+                        .font(.caption2)
+                        .lineLimit(1)
+                    Text("obj: \(probeLatestVmObject)")
+                        .font(.caption2)
+                        .lineLimit(1)
+                    Text("disappear cause: \(probeLastOnDisappearCause)")
+                        .font(.caption2.weight(.semibold))
+                        .lineLimit(1)
+                    Text("dis prev vm/chat: \(probeLastOnDisappearPreviousVMObject) / \(probeLastOnDisappearPreviousChatViewId)")
+                        .font(.caption2)
+                        .lineLimit(1)
+                    Text("dis curr vm/chat: \(probeLastOnDisappearCurrentVMObject) / \(probeLastOnDisappearCurrentChatViewId)")
+                        .font(.caption2)
+                        .lineLimit(1)
+                    Text("lifecycle: \(String(describing: viewModel.lifecycleDebugPhase))")
+                        .font(.caption2.weight(.semibold))
+                    Text("last gate: \(viewModel.lifecycleDebugLastGateDecision)")
+                        .font(.caption2.weight(.semibold))
+                        .lineLimit(1)
+                    ForEach(Array(viewModel.lifecycleDebugSignals.suffix(6))) { record in
+                        Text("\(record.signal.rawValue) @ \(record.timestamp.formatted(date: .omitted, time: .standard))")
+                            .font(.caption2)
+                            .monospacedDigit()
+                            .lineLimit(1)
+                    }
+                    if !viewModel.lifecycleDebugStartupGateEvents.isEmpty {
+                        Text("gate:")
+                            .font(.caption2.weight(.semibold))
+                        ForEach(Array(viewModel.lifecycleDebugStartupGateEvents.suffix(6).enumerated()), id: \.offset) { _, event in
+                            Text(
+                                "\(event.kind.rawValue) @ \(event.timestamp.formatted(date: .omitted, time: .standard)) t:\(event.hasToken ? "1" : "0") v:\(event.hasViewAppeared ? "1" : "0") r:\(event.reconnectEnabled ? "1" : "0") p:\(String(describing: event.phase))"
+                            )
+                            .font(.caption2)
+                            .monospacedDigit()
+                            .lineLimit(1)
+                        }
+                    }
+                    if !viewModel.lifecycleDebugObserverEvents.isEmpty {
+                        Text("obs:")
+                            .font(.caption2.weight(.semibold))
+                        ForEach(Array(viewModel.lifecycleDebugObserverEvents.suffix(4))) { record in
+                            Text(
+                                "\(record.event.rawValue) @ \(record.timestamp.formatted(date: .omitted, time: .standard)) o:\(record.hasObservationTask ? "1" : "0") t:\(record.hasTransportSubscription ? "1" : "0") out:\(record.hasOutputsSubscription ? "1" : "0")"
+                            )
+                            .font(.caption2)
+                            .monospacedDigit()
+                            .lineLimit(1)
+                        }
+                    }
+                    if !viewModel.imageSendDebugRecords.isEmpty {
+                        Text("image/send:")
+                            .font(.caption2.weight(.semibold))
+                        Text("send snapshot: \(viewModel.imageSendLastTransportSnapshot)")
+                            .font(.caption2)
+                            .monospacedDigit()
+                            .lineLimit(1)
+                        ForEach(Array(viewModel.imageSendDebugRecords.suffix(6))) { record in
+                            Text(
+                                "\(record.kind.rawValue) @ \(record.timestamp.formatted(date: .omitted, time: .standard)) \(record.detail)"
+                            )
+                            .font(.caption2)
+                            .monospacedDigit()
+                            .lineLimit(1)
+                        }
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+            }
+            .frame(maxHeight: UIScreen.main.bounds.height * 0.5)
+            .padding(.horizontal, 10)
+            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(Color.white.opacity(0.2), lineWidth: 1)
+            }
+            .padding(.top, 12)
+            .padding(.trailing, 12)
+            .onAppear {
+                showLifecycleDebugOverlay()
+            }
+            .onTapGesture {
+                lifecycleDebugOverlayVisible = false
+                lifecycleDebugOverlayDismissTask?.cancel()
+                lifecycleDebugOverlayDismissTask = nil
+            }
+            .contextMenu {
+                Button("Copy all") {
+                    UIPasteboard.general.string = lifecycleDebugOverlayCopyText(viewModel: viewModel)
+                }
+            }
+        }
+    }
+
+    private enum ProbeEventKind {
+        case taskEnter
+        case onAppear
+        case onDisappear
+    }
+
+    private func recordProbeEvent(
+        kind: ProbeEventKind,
+        instanceId: String,
+        vmObject: String,
+        connState: String
+    ) {
+        probeLatestInstanceId = instanceId
+        probeLatestVmObject = vmObject
+        switch kind {
+        case .taskEnter:
+            probeTaskEnterCount &+= 1
+        case .onAppear:
+            probeOnAppearCount &+= 1
+            probeLatestOnAppearConnState = connState
+            if scenePhase == .active {
+                let pending = T099OnDisappearProbeStore.shared.pendingActiveDisappear
+                if let pending {
+                    probeLastOnDisappearPreviousVMObject = pending.vmObject
+                    probeLastOnDisappearPreviousChatViewId = pending.chatViewId
+                    probeLastOnDisappearCurrentVMObject = vmObject
+                    probeLastOnDisappearCurrentChatViewId = chatViewTraceId
+                    if pending.vmObject != vmObject || pending.chatViewId != chatViewTraceId {
+                        probeLastOnDisappearCause = "view_replacement"
+                    } else {
+                        probeLastOnDisappearCause = "active_same_identity"
+                    }
+                    T099OnDisappearProbeStore.shared.pendingActiveDisappear = nil
+                }
+            }
+        case .onDisappear:
+            probeOnDisappearCount &+= 1
+            probeLastOnDisappearPreviousVMObject = vmObject
+            probeLastOnDisappearPreviousChatViewId = chatViewTraceId
+            probeLastOnDisappearCurrentVMObject = "-"
+            probeLastOnDisappearCurrentChatViewId = "-"
+            if scenePhase == .active {
+                probeLastOnDisappearCause = "pending_active_disappear"
+                T099OnDisappearProbeStore.shared.pendingActiveDisappear = .init(
+                    vmObject: vmObject,
+                    chatViewId: chatViewTraceId
+                )
+            } else {
+                probeLastOnDisappearCause = "app_background"
+                T099OnDisappearProbeStore.shared.pendingActiveDisappear = nil
+            }
+        }
+    }
+
+    private func showLifecycleDebugOverlay() {
+        guard isLifecycleDebugOverlayEnabled else { return }
+        lifecycleDebugOverlayVisible = true
+        lifecycleDebugOverlayDismissTask?.cancel()
+        lifecycleDebugOverlayDismissTask = Task {
+            do {
+                try await Task.sleep(for: .seconds(30))
+            } catch {
+                return
+            }
+            await MainActor.run {
+                lifecycleDebugOverlayVisible = false
+                lifecycleDebugOverlayDismissTask = nil
+            }
+        }
+    }
+
+    private func lifecycleDebugOverlayCopyText(viewModel: ChatViewModel) -> String {
+        var lines: [String] = []
+        lines.append("probe t:\(probeTaskEnterCount) a:\(probeOnAppearCount) d:\(probeOnDisappearCount)")
+        lines.append("appear state: \(probeLatestOnAppearConnState)")
+        lines.append("vm: \(probeLatestInstanceId)")
+        lines.append("obj: \(probeLatestVmObject)")
+        lines.append("disappear cause: \(probeLastOnDisappearCause)")
+        lines.append("dis prev vm/chat: \(probeLastOnDisappearPreviousVMObject) / \(probeLastOnDisappearPreviousChatViewId)")
+        lines.append("dis curr vm/chat: \(probeLastOnDisappearCurrentVMObject) / \(probeLastOnDisappearCurrentChatViewId)")
+        lines.append("lifecycle: \(String(describing: viewModel.lifecycleDebugPhase))")
+        lines.append("last gate: \(viewModel.lifecycleDebugLastGateDecision)")
+        for record in viewModel.lifecycleDebugSignals {
+            lines.append("\(record.signal.rawValue) @ \(record.timestamp.formatted(date: .omitted, time: .standard))")
+        }
+        if !viewModel.lifecycleDebugStartupGateEvents.isEmpty {
+            lines.append("gate:")
+            for event in viewModel.lifecycleDebugStartupGateEvents {
+                lines.append(
+                    "\(event.kind.rawValue) @ \(event.timestamp.formatted(date: .omitted, time: .standard)) t:\(event.hasToken ? "1" : "0") v:\(event.hasViewAppeared ? "1" : "0") r:\(event.reconnectEnabled ? "1" : "0") p:\(String(describing: event.phase))"
+                )
+            }
+        }
+        if !viewModel.lifecycleDebugObserverEvents.isEmpty {
+            lines.append("obs:")
+            for record in viewModel.lifecycleDebugObserverEvents {
+                lines.append(
+                    "\(record.event.rawValue) @ \(record.timestamp.formatted(date: .omitted, time: .standard)) o:\(record.hasObservationTask ? "1" : "0") t:\(record.hasTransportSubscription ? "1" : "0") out:\(record.hasOutputsSubscription ? "1" : "0")"
+                )
+            }
+        }
+        if !viewModel.imageSendDebugRecords.isEmpty {
+            lines.append("image/send:")
+            lines.append("send snapshot: \(viewModel.imageSendLastTransportSnapshot)")
+            for record in viewModel.imageSendDebugRecords {
+                lines.append(
+                    "\(record.kind.rawValue) @ \(record.timestamp.formatted(date: .omitted, time: .standard)) \(record.detail)"
+                )
+            }
+        }
+        return lines.joined(separator: "\n")
+    }
+#endif
 
     private var appVersionLabel: AttributedString? {
         let version = Bundle.main.object(
@@ -1263,7 +1579,7 @@ struct ChatView: View {
             return
         }
         await MainActor.run {
-            insertAttachments([attachment])
+            insertAttachments([attachment], source: "camera")
         }
     }
 
@@ -1271,13 +1587,26 @@ struct ChatView: View {
     private func handlePastedImages(_ images: [UIImage]) {
         logger.info("Pasted \(images.count) image(s) from clipboard")
         Task { @MainActor in
-            let attachments = await Self.buildPastedAttachments(from: images)
+            let attachments = await withAttachmentStaging {
+                await Self.buildPastedAttachments(from: images)
+            }
             guard !attachments.isEmpty else {
                 toastManager.show(error: .invalidData)
                 return
             }
-            insertAttachments(attachments)
+            insertAttachments(attachments, source: "paste")
         }
+    }
+
+    private func withAttachmentStaging<T>(_ operation: () async -> T) async -> T {
+        await MainActor.run {
+            viewModel.beginAttachmentStaging()
+        }
+        let result = await operation()
+        await MainActor.run {
+            viewModel.endAttachmentStaging()
+        }
+        return result
     }
 
     private func handlePhotoPickerItems(_ items: [PhotosPickerItem]) async {
@@ -1300,7 +1629,7 @@ struct ChatView: View {
             return
         }
         await MainActor.run {
-            insertAttachments(attachments)
+            insertAttachments(attachments, source: "photo_picker")
         }
     }
 
@@ -1335,14 +1664,14 @@ struct ChatView: View {
         }
         guard !attachments.isEmpty else { return }
         await MainActor.run {
-            insertAttachments(attachments)
+            insertAttachments(attachments, source: "file_importer")
         }
     }
 
     @MainActor
-    private func insertAttachments(_ attachments: [PendingAttachment]) {
+    private func insertAttachments(_ attachments: [PendingAttachment], source: String) {
         guard !attachments.isEmpty else { return }
-        viewModel.stageAttachments(attachments)
+        viewModel.stageAttachments(attachments, source: source)
         pendingInputInsertions = attachments
     }
 
@@ -2215,6 +2544,7 @@ private final class PreviewChatService: ChatServicing {
     var lifecycleTransportEvents: AsyncStream<LifecycleTransportEvent> {
         AsyncStream { _ in }
     }
+    var isTransportReadyForSend: Bool { true }
     func connect(token: String, activeSessionKey: String?) async throws {}
     func startConnectionAttempt(epoch: Int, lastMessageId: String?, token: String) {}
     func stopConnectionAttempt() {}

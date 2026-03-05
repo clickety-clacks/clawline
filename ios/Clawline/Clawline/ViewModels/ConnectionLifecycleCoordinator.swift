@@ -85,6 +85,25 @@ enum ConnectionLifecycleOutput: Equatable {
     case historyTruncated(epoch: Int)
 }
 
+/// Debug-only event emitted when the startup gate is evaluated.
+struct StartupGateDebugEvent: Sendable {
+    enum Kind: String, Sendable {
+        case authChanged
+        case viewAppeared
+        case sceneActivated
+        case appDidBecomeActive
+        case startIfNeeded
+        case startIfNeededExitMissingAuthToken
+        case startIfNeededExitMissingViewAppeared
+    }
+    let kind: Kind
+    let timestamp: Date
+    let hasToken: Bool
+    let hasViewAppeared: Bool
+    let reconnectEnabled: Bool
+    let phase: ConnectionLifecyclePhase
+}
+
 actor ConnectionLifecycleCoordinator {
     typealias StartAttemptHandler = (_ epoch: Int, _ lastMessageId: String?, _ token: String) -> Void
     typealias StopAttemptHandler = () -> Void
@@ -96,10 +115,12 @@ actor ConnectionLifecycleCoordinator {
     private let now: () -> Date
 
     private var continuation: AsyncStream<ConnectionLifecycleOutput>.Continuation?
+    private var startupGateContinuation: AsyncStream<StartupGateDebugEvent>.Continuation?
 
     private(set) var phase: ConnectionLifecyclePhase = .idle
     private var currentEpoch: Int = 0
     private var authToken: String?
+    private var hasViewAppeared: Bool = false
     private var reconnectEnabled: Bool = true
     private var canonicalCursor: String?
 
@@ -142,7 +163,16 @@ actor ConnectionLifecycleCoordinator {
     var outputs: AsyncStream<ConnectionLifecycleOutput> {
         AsyncStream(bufferingPolicy: .unbounded) { continuation in
             self.coordinatorDiag("outputs subscribed replacingExisting=\(self.continuation != nil)")
+            self.continuation?.finish()
             self.continuation = continuation
+        }
+    }
+
+    /// Debug stream of startup-gate evaluation events. Only meaningful in DEBUG builds.
+    var startupGateDebugEvents: AsyncStream<StartupGateDebugEvent> {
+        AsyncStream(bufferingPolicy: .bufferingNewest(32)) { continuation in
+            self.startupGateContinuation?.finish()
+            self.startupGateContinuation = continuation
         }
     }
 
@@ -154,10 +184,33 @@ actor ConnectionLifecycleCoordinator {
         }
         coordinatorDiag("setAuthToken stored tokenPresent=\(authToken != nil)")
         if authToken == nil {
+            hasViewAppeared = false
             coordinatorDiag("setAuthToken token-cleared -> moveToIdleIfNeeded")
             resetRecoveringState()
             moveToIdleIfNeeded(reason: .explicitTeardown)
         }
+    }
+
+    func authChanged(token: String?) {
+        coordinatorDiag("authChanged signal tokenNil=\(token == nil) viewAppeared=\(hasViewAppeared) phase=\(String(describing: phase))")
+        setAuthToken(token)
+        emitStartupGateEvent(kind: .authChanged)
+        guard authToken != nil else { return }
+        startIfNeeded()
+    }
+
+    func viewAppeared() {
+        hasViewAppeared = true
+        coordinatorDiag("viewAppeared signal tokenPresent=\(authToken != nil) viewAppeared=\(hasViewAppeared) phase=\(String(describing: phase))")
+        emitStartupGateEvent(kind: .viewAppeared)
+        startIfNeeded()
+    }
+
+    func sceneActivated() {
+        coordinatorDiag("sceneActivated signal tokenPresent=\(authToken != nil) phase=\(String(describing: phase))")
+        emitStartupGateEvent(kind: .sceneActivated)
+        guard authToken != nil else { return }
+        appDidBecomeActive()
     }
 
     func setReconnectEnabled(_ enabled: Bool) {
@@ -183,7 +236,15 @@ actor ConnectionLifecycleCoordinator {
             coordinatorDiag("appDidBecomeActive early-return reconnectEnabled=\(reconnectEnabled) phase=\(String(describing: phase))")
             return
         }
-        let sinceBackground = now().timeIntervalSince(lastBackgroundedAt ?? .distantPast)
+        // Only trigger a reconnect if the app was previously backgrounded.
+        // Fresh connections are initiated by viewAppeared(), which fires after scene activation.
+        // This prevents stale hasViewAppeared state (set before authentication) from causing
+        // premature reconnects on sceneActivated.
+        guard lastBackgroundedAt != nil else {
+            coordinatorDiag("appDidBecomeActive skip-startIfNeeded no-prior-background")
+            return
+        }
+        let sinceBackground = now().timeIntervalSince(lastBackgroundedAt!)
         if sinceBackground < 2 {
             reconnectTask?.cancel()
             reconnectTask = Task {
@@ -197,7 +258,7 @@ actor ConnectionLifecycleCoordinator {
             coordinatorDiag("appDidBecomeActive delayed startIfNeeded in \(2 - sinceBackground)s")
             return
         }
-        startConnecting(reason: .appForegrounded)
+        startIfNeeded()
     }
 
     func appDidEnterBackground() {
@@ -208,9 +269,20 @@ actor ConnectionLifecycleCoordinator {
     }
 
     func startIfNeeded() {
-        coordinatorDiag("startIfNeeded called reconnectEnabled=\(reconnectEnabled) tokenPresent=\(authToken != nil)")
+        coordinatorDiag("startIfNeeded called reconnectEnabled=\(reconnectEnabled) tokenPresent=\(authToken != nil) viewAppeared=\(hasViewAppeared)")
+        emitStartupGateEvent(kind: .startIfNeeded)
         guard reconnectEnabled, phase == .idle else {
             coordinatorDiag("startIfNeeded early-return reconnectEnabled=\(reconnectEnabled) phase=\(String(describing: phase))")
+            return
+        }
+        guard authToken != nil else {
+            coordinatorDiag("startIfNeeded early-return missing-auth-token")
+            emitStartupGateEvent(kind: .startIfNeededExitMissingAuthToken)
+            return
+        }
+        guard hasViewAppeared else {
+            coordinatorDiag("startIfNeeded early-return view-not-appeared")
+            emitStartupGateEvent(kind: .startIfNeededExitMissingViewAppeared)
             return
         }
         startConnecting(reason: .appForegrounded)
@@ -635,7 +707,10 @@ actor ConnectionLifecycleCoordinator {
     private func scheduleReconnect(after delay: Duration, incrementRecoveringAttempt: Bool) {
         guard reconnectEnabled else { return }
         guard phase == .recovering else { return }
-        guard reconnectTask == nil else { return }
+        guard reconnectTask == nil else {
+            coordinatorDiag("scheduleReconnect suppressed existing-task delay=\(delay.components.seconds)s")
+            return
+        }
 
         reconnectTask = Task {
             do {
@@ -746,6 +821,18 @@ actor ConnectionLifecycleCoordinator {
     private func emit(_ output: ConnectionLifecycleOutput) {
         coordinatorDiag("emit output=\(String(describing: output))")
         continuation?.yield(output)
+    }
+
+    private func emitStartupGateEvent(kind: StartupGateDebugEvent.Kind, now nowDate: Date? = nil) {
+        let event = StartupGateDebugEvent(
+            kind: kind,
+            timestamp: nowDate ?? now(),
+            hasToken: authToken != nil,
+            hasViewAppeared: hasViewAppeared,
+            reconnectEnabled: reconnectEnabled,
+            phase: phase
+        )
+        startupGateContinuation?.yield(event)
     }
 
     private func resetRecoveringState() {

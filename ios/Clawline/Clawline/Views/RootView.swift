@@ -6,13 +6,16 @@
 //
 
 import SwiftUI
+import OSLog
 
 struct RootView: View {
+    private let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "RootView")
     let uploadService: any UploadServicing
     @State private var toastManager = ToastManager()
     @State private var salientHighlightService = SalientHighlightService()
     @State private var chatViewModel: ChatViewModel?
     @State private var didForceRecoveryLogout = false
+    @State private var rootViewTraceId = UUID().uuidString
     @Environment(AuthManager.self) private var auth
     @Environment(\.connectionService) private var connection
     @Environment(\.deviceIdentifier) private var device
@@ -43,7 +46,12 @@ struct RootView: View {
                 ChatView(viewModel: chatViewModel, toastManager: toastManager)
             } else {
                 ProgressView()
-                    .task { ensureChatViewModel() }
+                    .task {
+                        logger.info(
+                            "[T099-PIN] root=\(self.rootViewTraceId, privacy: .public) event=progress_task_ensureChatViewModel auth=\(self.auth.isAuthenticated, privacy: .public) providerConfigured=\(self.isProviderConfigured, privacy: .public)"
+                        )
+                        ensureChatViewModel(origin: "RootView.ProgressView.task")
+                    }
             }
         }
         .modifier(KeyboardSafeAreaMode(isActive: auth.isAuthenticated && isProviderConfigured))
@@ -64,8 +72,14 @@ struct RootView: View {
             }
 
             if auth.isAuthenticated && isProviderConfigured {
-                ensureChatViewModel()
+                logger.info(
+                    "[T099-PIN] root=\(self.rootViewTraceId, privacy: .public) event=auth_task_ensureChatViewModel auth=\(self.auth.isAuthenticated, privacy: .public) providerConfigured=\(self.isProviderConfigured, privacy: .public) hasVM=\(self.chatViewModel != nil, privacy: .public)"
+                )
+                ensureChatViewModel(origin: "RootView.authTask")
             } else {
+                logger.info(
+                    "[T099-PIN] root=\(self.rootViewTraceId, privacy: .public) event=auth_task_clearChatViewModel auth=\(self.auth.isAuthenticated, privacy: .public) providerConfigured=\(self.isProviderConfigured, privacy: .public) hasVM=\(self.chatViewModel != nil, privacy: .public)"
+                )
                 chatViewModel?.prepareForReplacement()
                 chatViewModel = nil
             }
@@ -89,9 +103,22 @@ struct RootView: View {
     }
 
     @MainActor
-    private func ensureChatViewModel() {
-        guard chatViewModel == nil else { return }
-        guard isProviderConfigured else { return }
+    private func ensureChatViewModel(origin: String) {
+        if let existing = chatViewModel {
+            logger.info(
+                "[T099-PIN] root=\(self.rootViewTraceId, privacy: .public) event=ensureChatViewModel_reuse origin=\(origin, privacy: .public) vm=\(existing.debugInstanceId, privacy: .public) vmObject=\(String(describing: ObjectIdentifier(existing)), privacy: .public)"
+            )
+            return
+        }
+        guard isProviderConfigured else {
+            logger.info(
+                "[T099-PIN] root=\(self.rootViewTraceId, privacy: .public) event=ensureChatViewModel_skipNoProvider origin=\(origin, privacy: .public)"
+            )
+            return
+        }
+        logger.info(
+            "[T099-PIN] root=\(self.rootViewTraceId, privacy: .public) event=ensureChatViewModel_create origin=\(origin, privacy: .public)"
+        )
         chatViewModel = ChatViewModel(
             auth: auth,
             chatService: chatService,
@@ -101,6 +128,14 @@ struct RootView: View {
             toastManager: toastManager,
             salientHighlightService: salientHighlightService
         )
+        if let created = chatViewModel {
+            logger.info(
+                "[T099-PIN] root=\(self.rootViewTraceId, privacy: .public) event=ensureChatViewModel_created origin=\(origin, privacy: .public) vm=\(created.debugInstanceId, privacy: .public) vmObject=\(String(describing: ObjectIdentifier(created)), privacy: .public)"
+            )
+            Task {
+                await created.activate(origin: "RootView.ensureChatViewModel[\(origin)]")
+            }
+        }
     }
 }
 

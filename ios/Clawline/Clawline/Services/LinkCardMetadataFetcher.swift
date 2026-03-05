@@ -89,7 +89,7 @@ actor LinkCardMetadataFetcher {
 
             let meta = OpenGraphParser.parse(html: html, baseURL: baseURL)
             let title = (meta.title ?? meta.fallbackTitle)?.trimmingCharacters(in: .whitespacesAndNewlines)
-            let finalTitle = (title?.isEmpty == false) ? title! : resolvedURL.absoluteString
+            let finalTitle = title.flatMap { $0.isEmpty ? nil : $0 } ?? resolvedURL.absoluteString
 
             let desc = meta.description?.trimmingCharacters(in: .whitespacesAndNewlines)
             let finalDesc = (desc?.isEmpty == false) ? desc : nil

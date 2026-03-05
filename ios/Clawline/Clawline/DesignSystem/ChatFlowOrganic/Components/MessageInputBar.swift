@@ -154,14 +154,27 @@ struct MessageInputBar: View {
             : Color.white.opacity(0.5)
     }
 
-    private var placeholderColor: Color {
-#if os(visionOS)
-        return isLightModeForInputBar
-            ? ChatFlowTheme.ink(.light).opacity(0.6)
-            : ChatFlowTheme.ink(.dark).opacity(0.6)
-#else
-        return .secondary
-#endif
+    private var hasSubmittableDraft: Bool {
+        !content.isEffectivelyEmpty
+    }
+
+    private var editorOpacity: Double {
+        isSending ? 0.5 : 1
+    }
+
+    static func shouldDispatchEditorSubmitIntent(
+        isSending: Bool,
+        hasSubmittableDraft: Bool
+    ) -> Bool {
+        !isSending && hasSubmittableDraft
+    }
+
+    private func handleEditorSubmitIntent() {
+        guard Self.shouldDispatchEditorSubmitIntent(
+            isSending: isSending,
+            hasSubmittableDraft: hasSubmittableDraft
+        ) else { return }
+        onSend()
     }
 
     var body: some View {
@@ -228,15 +241,13 @@ struct MessageInputBar: View {
                 editorHeight: $editorHeight,
                 resetToken: resetToken,
                 focusTrigger: focusTrigger,
-                canSend: canSend,
-                isSending: isSending,
                 inputHeight: inputHeight,
                 inputShape: inputShape,
-                onSend: onSend,
+                editorOpacity: editorOpacity,
+                onSubmitRequested: handleEditorSubmitIntent,
                 onFocusChange: onFocusChange,
                 onPasteImages: onPasteImages,
                 placeholderText: placeholderText,
-                placeholderColor: placeholderColor,
                 isLightModeForInputBar: isLightModeForInputBar,
                 visionOSBorderColor: visionOSBorderColor
             )
@@ -276,26 +287,34 @@ private struct MessageEditorChrome: View {
     @Binding var editorHeight: CGFloat
     let resetToken: Int
     let focusTrigger: Int
-    let canSend: Bool
-    let isSending: Bool
     let inputHeight: CGFloat
     let inputShape: AnyShape
-    let onSend: () -> Void
+    let editorOpacity: Double
+    let onSubmitRequested: () -> Void
     let onFocusChange: (Bool) -> Void
     var onPasteImages: (([UIImage]) -> Void)?
     let placeholderText: String
-    let placeholderColor: Color
     let isLightModeForInputBar: Bool
     let visionOSBorderColor: Color
 
     // Local single source of truth for editor chrome without introducing a new formal type yet.
-    private var chrome: (tintColor: UIColor, textColor: UIColor, editorOpacity: Double) {
+    private var chrome: (tintColor: UIColor, textColor: UIColor) {
 #if os(visionOS)
         let tint = isLightModeForInputBar ? ChatFlowTheme.ink(.light) : ChatFlowTheme.ink(.dark)
-        return (UIColor(tint), .white, isSending ? 0.5 : 1)
+        return (UIColor(tint), .white)
 #else
         let tint = isLightModeForInputBar ? ChatFlowTheme.sage(.light) : ChatFlowTheme.sage(.dark)
-        return (UIColor(tint), .label, isSending ? 0.5 : 1)
+        return (UIColor(tint), .label)
+#endif
+    }
+
+    private var placeholderColor: Color {
+#if os(visionOS)
+        isLightModeForInputBar
+            ? ChatFlowTheme.ink(.light).opacity(0.6)
+            : ChatFlowTheme.ink(.dark).opacity(0.6)
+#else
+        .secondary
 #endif
     }
 
@@ -313,13 +332,12 @@ private struct MessageEditorChrome: View {
                 textColor: chrome.textColor,
                 onFocusChange: onFocusChange,
                 onSubmit: {
-                    guard !isSending, canSend else { return }
-                    onSend()
+                    onSubmitRequested()
                 },
                 onPasteImages: onPasteImages,
                 trailingPadding: 20
             )
-            .opacity(chrome.editorOpacity)
+            .opacity(editorOpacity)
 
             if content.length == 0 {
                 Text(placeholderText)

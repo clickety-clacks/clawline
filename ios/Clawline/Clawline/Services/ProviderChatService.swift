@@ -229,6 +229,11 @@ final class ProviderChatService: ChatServicing {
 
     private static let serverEventIDPrefix = "s_"
 
+    var isTransportReadyForSend: Bool {
+        guard socket != nil, authToken != nil else { return false }
+        return lastConnectionState == .connected
+    }
+
     init(connector: any WebSocketConnecting,
          deviceId: String,
          baseURLProvider: @escaping () -> URL? = { ProviderBaseURLStore.baseURL },
@@ -284,11 +289,14 @@ final class ProviderChatService: ChatServicing {
     }
 
     func deleteStream(sessionKey: String, idempotencyKey: String?) async throws -> String {
+        guard let token = authToken else {
+            throw Error.notConnected
+        }
         do {
             return try await streamAPIClient.deleteStream(
                 sessionKey: sessionKey,
                 idempotencyKey: idempotencyKey,
-                token: authToken
+                token: token
             )
         } catch {
             throw mapStreamAPIError(error)
@@ -444,7 +452,13 @@ final class ProviderChatService: ChatServicing {
             sessionKey: sessionKey
         )
         let data = try encoder.encode(payload)
-        guard let text = String(data: data, encoding: .utf8) else { return }
+        guard let text = String(data: data, encoding: .utf8) else {
+            logger.error("Failed to encode outbound message payload as UTF-8 id=\(id, privacy: .public)")
+            throw Error.serverError(
+                code: "client_encode_failed",
+                message: "Failed to encode outbound message payload."
+            )
+        }
 
         pendingMessages[id]?.retryTask?.cancel()
         let retryTask = scheduleRetry(for: payload)
@@ -466,7 +480,13 @@ final class ProviderChatService: ChatServicing {
             payload: .init(action: action, data: data)
         )
         let encoded = try encoder.encode(payload)
-        guard let text = String(data: encoded, encoding: .utf8) else { return }
+        guard let text = String(data: encoded, encoding: .utf8) else {
+            logger.error("Failed to encode interactive callback payload as UTF-8 sourceMessageId=\(sourceMessageId, privacy: .public)")
+            throw Error.serverError(
+                code: "client_encode_failed",
+                message: "Failed to encode interactive callback payload."
+            )
+        }
         try await socket.send(text: text)
     }
 
@@ -1141,13 +1161,45 @@ final class ProviderChatService: ChatServicing {
         Task { [weak self] in
             guard let self else { return }
             while !Task.isCancelled {
-                try? await Task.sleep(forDuration: ackInterval)
+                do {
+                    try await Task.sleep(forDuration: ackInterval)
+                } catch is CancellationError {
+                    return
+                } catch {
+                    logger.error("retry sleep failed for messageId=\(payload.id, privacy: .public) error=\(error.localizedDescription, privacy: .public)")
+                    return
+                }
+                guard !Task.isCancelled else { return }
                 guard let socket = self.socket else { return }
                 guard self.pendingMessages[payload.id] != nil else { return }
-                if let data = try? self.encoder.encode(payload),
-                   let text = String(data: data, encoding: .utf8) {
-                    try? await socket.send(text: text)
+
+                let text: String
+                do {
+                    let data = try self.encoder.encode(payload)
+                    guard let encodedText = String(data: data, encoding: .utf8) else {
+                        self.pendingMessages.removeValue(forKey: payload.id)
+                        self.emitServiceEvent(.messageError(
+                            messageId: payload.id,
+                            code: "client_encode_failed",
+                            message: "Failed to encode outbound retry payload."
+                        ))
+                        logger.error("retry encode produced non-UTF8 payload for messageId=\(payload.id, privacy: .public)")
+                        return
+                    }
+                    text = encodedText
+                } catch {
+                    self.pendingMessages.removeValue(forKey: payload.id)
+                    self.emitServiceEvent(.messageError(
+                        messageId: payload.id,
+                        code: "client_encode_failed",
+                        message: "Failed to encode outbound retry payload."
+                    ))
+                    logger.error("retry encode failed for messageId=\(payload.id, privacy: .public) error=\(error.localizedDescription, privacy: .public)")
+                    return
                 }
+
+                guard !Task.isCancelled else { return }
+                try? await socket.send(text: text)
             }
         }
     }

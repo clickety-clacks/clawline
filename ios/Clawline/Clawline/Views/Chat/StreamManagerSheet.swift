@@ -18,6 +18,7 @@ struct StreamManagerSheet: View {
     let onSelectStream: (String) -> Void
 
     @State private var draftName = ""
+    @State private var searchQuery = ""
     @State private var activeEditor: EditorMode?
     @State private var isWorking = false
     @State private var deletingSessionKeys: Set<String> = []
@@ -38,6 +39,7 @@ struct StreamManagerSheet: View {
     private let listRowHeight: CGFloat = 52
     private let listRowSpacing: CGFloat = 2
     private let listRowHorizontalInset: CGFloat = 12
+    private let searchBarHeight: CGFloat = 56
     private let functionBarHeight: CGFloat = 40
     private let listOuterVerticalPadding: CGFloat = 20
     private let minimumPopoverHeight: CGFloat = 140
@@ -48,7 +50,20 @@ struct StreamManagerSheet: View {
     private let plusBorderWidth: CGFloat = 1
 
     private var listItemCount: Int {
-        streams.count + pendingCreateRows.count
+        filteredStreams.count + filteredPendingCreateRows.count
+    }
+
+    private var filteredStreams: [StreamSession] {
+        StreamSelectorLayout.filter(streams: streams, query: searchQuery)
+    }
+
+    private var filteredPendingCreateRows: [PendingCreateRow] {
+        guard !searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return pendingCreateRows
+        }
+        return pendingCreateRows.filter {
+            StreamSelectorLayout.matchesStreamName($0.displayName, query: searchQuery)
+        }
     }
 
     private var listContentHeight: CGFloat {
@@ -69,7 +84,7 @@ struct StreamManagerSheet: View {
     }
 
     private var listViewportHeight: CGFloat {
-        max(0, effectiveContainerHeight - functionBarHeight)
+        max(0, effectiveContainerHeight - functionBarHeight - searchBarHeight)
     }
 
     private var allowsListScrolling: Bool {
@@ -82,7 +97,7 @@ struct StreamManagerSheet: View {
             showsCreateInlineRow: false,
             rowHeight: listRowHeight,
             rowSpacing: listRowSpacing,
-            functionBarHeight: functionBarHeight,
+            functionBarHeight: functionBarHeight + searchBarHeight,
             outerVerticalPadding: listOuterVerticalPadding,
             maxAvailableHeight: maxAvailableHeight,
             minimumPopoverHeight: minimumPopoverHeight
@@ -91,8 +106,27 @@ struct StreamManagerSheet: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+                TextField("Search streams", text: $searchQuery)
+                    .font(.clawline(.uiLabel))
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+            }
+            .padding(.horizontal, 12)
+            .frame(height: 38)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color.primary.opacity(colorScheme == .dark ? 0.10 : 0.08))
+            )
+            .padding(.horizontal, listRowHorizontalInset)
+            .padding(.top, 12)
+            .padding(.bottom, 6)
+            .frame(height: searchBarHeight)
+
             List {
-                ForEach(streams) { stream in
+                ForEach(filteredStreams) { stream in
                     rowContent(for: stream)
                         .frame(height: listRowHeight, alignment: .center)
                         .listRowInsets(
@@ -124,7 +158,7 @@ struct StreamManagerSheet: View {
                         }
                 }
 
-                ForEach(pendingCreateRows) { pendingRow in
+                ForEach(filteredPendingCreateRows) { pendingRow in
                     HStack(spacing: 10) {
                         Circle()
                             .fill(Color.primary.opacity(0.18))
@@ -149,6 +183,24 @@ struct StreamManagerSheet: View {
                         )
                     )
                     .contentShape(Rectangle())
+                }
+
+                if filteredStreams.isEmpty && filteredPendingCreateRows.isEmpty {
+                    Text("No streams found")
+                        .font(.clawline(.secondaryLabel))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .frame(height: listRowHeight, alignment: .center)
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
+                        .listRowInsets(
+                            EdgeInsets(
+                                top: 0,
+                                leading: listRowHorizontalInset,
+                                bottom: 0,
+                                trailing: listRowHorizontalInset
+                            )
+                        )
                 }
             }
             .listStyle(.plain)
@@ -211,6 +263,7 @@ struct StreamManagerSheet: View {
         .onChange(of: isPresented) { _, presented in
             if !presented {
                 resetInlineEditing()
+                searchQuery = ""
             }
         }
         .alert(
@@ -358,6 +411,20 @@ struct StreamManagerSheet: View {
 }
 
 enum StreamSelectorLayout {
+    static func filter(streams: [StreamSession], query: String) -> [StreamSession] {
+        let normalized = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return streams }
+        return streams.filter { stream in
+            matchesStreamName(stream.displayName, query: normalized)
+        }
+    }
+
+    static func matchesStreamName(_ displayName: String, query: String) -> Bool {
+        let normalized = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return true }
+        return displayName.localizedCaseInsensitiveContains(normalized)
+    }
+
     static func listContentHeight(
         itemCount: Int,
         showsCreateInlineRow: Bool,

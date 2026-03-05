@@ -152,6 +152,16 @@ final class ChatLayoutCoordinator {
         listViews[sessionKey]?.value?.scheduleScrollToBottom(animated: animated)
     }
 
+    func scrollToTop(animated: Bool) {
+        dispatchPrecondition(condition: .onQueue(.main))
+        scrollToTop(sessionKey: activeSessionKey, animated: animated)
+    }
+
+    func scrollToTop(sessionKey: String, animated: Bool) {
+        dispatchPrecondition(condition: .onQueue(.main))
+        listViews[sessionKey]?.value?.scrollToTop(animated: animated)
+    }
+
     func scrollToMessageCentered(messageId: String, sessionKey: String, animated: Bool) {
         dispatchPrecondition(condition: .onQueue(.main))
         listViews[sessionKey]?.value?.scrollToMessageCentered(messageId: messageId, animated: animated)

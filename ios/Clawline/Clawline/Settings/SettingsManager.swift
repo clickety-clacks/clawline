@@ -32,10 +32,23 @@ final class SettingsManager {
         didSet { savePinnedLeafCertificateSHA256() }
     }
 
+    var fontScale: CGFloat {
+        didSet { saveFontScale() }
+    }
+
+    var isLifecycleDebugOverlayEnabled: Bool {
+        didSet { saveLifecycleDebugOverlayEnabled() }
+    }
+
+    private(set) var fontScaleChangeSequence: Int = 0
+    private(set) var fontScaleToastSequence: Int = 0
+    private var pendingFontScaleToastMessage: String?
+
     var isSettingsPresented: Bool = false
 
     private static let effectConfigKey = "backgroundEffectConfiguration"
     private static let appearanceModeKey = "appearanceMode"
+    private static let lifecycleDebugOverlayEnabledKey = "debug.lifecycleOverlayEnabled"
 
     init() {
         if let data = UserDefaults.standard.data(forKey: Self.effectConfigKey),
@@ -54,6 +67,8 @@ final class SettingsManager {
 
         self.trustSelfSignedCertificates = ProviderTLSSettingsStore.trustSelfSignedCertificates
         self.pinnedLeafCertificateSHA256 = ProviderTLSSettingsStore.pinnedLeafCertificateSHA256 ?? ""
+        self.fontScale = AppFontScale.persistedValue()
+        self.isLifecycleDebugOverlayEnabled = UserDefaults.standard.bool(forKey: Self.lifecycleDebugOverlayEnabledKey)
     }
 
     private func save() {
@@ -74,11 +89,24 @@ final class SettingsManager {
         ProviderTLSSettingsStore.pinnedLeafCertificateSHA256 = pinnedLeafCertificateSHA256
     }
 
+    private func saveFontScale() {
+        AppFontScale.persist(fontScale)
+    }
+
+    private func saveLifecycleDebugOverlayEnabled() {
+        UserDefaults.standard.set(
+            isLifecycleDebugOverlayEnabled,
+            forKey: Self.lifecycleDebugOverlayEnabledKey
+        )
+    }
+
     func resetToDefaults() {
         effectConfig = .default
         appearanceMode = .dark
         trustSelfSignedCertificates = true
         pinnedLeafCertificateSHA256 = ""
+        fontScale = AppFontScale.defaultValue
+        isLifecycleDebugOverlayEnabled = false
     }
 
     func toggleSettings() {
@@ -91,6 +119,29 @@ final class SettingsManager {
 
     func toggleAppearanceMode() {
         appearanceMode = appearanceMode == .dark ? .light : .dark
+    }
+
+    func increaseFontScale() {
+        adjustFontScale(by: AppFontScale.step)
+    }
+
+    func decreaseFontScale() {
+        adjustFontScale(by: -AppFontScale.step)
+    }
+
+    func consumePendingFontScaleToastMessage() -> String? {
+        defer { pendingFontScaleToastMessage = nil }
+        return pendingFontScaleToastMessage
+    }
+
+    private func adjustFontScale(by delta: CGFloat) {
+        let next = AppFontScale.clamp(fontScale + delta)
+        if next != fontScale {
+            fontScale = next
+            fontScaleChangeSequence &+= 1
+        }
+        pendingFontScaleToastMessage = AppFontScale.toastMessage(for: next)
+        fontScaleToastSequence &+= 1
     }
 }
 

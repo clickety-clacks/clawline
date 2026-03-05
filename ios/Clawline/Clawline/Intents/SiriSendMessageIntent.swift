@@ -34,13 +34,13 @@ struct SendMessageIntent: AppIntent {
     func perform() async throws -> some IntentResult & ProvidesDialog {
         NSLog("[SiriIntent][1] perform() entered – message=%@ botName=%@", String(describing: message), String(describing: botName))
 
-        if message == nil || message!.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        if message?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true {
             NSLog("[SiriIntent][2] message nil/empty – calling requestValue")
             try await $message.requestValue("What do you want to say?")
             NSLog("[SiriIntent][3] after requestValue – message=%@", String(describing: message))
         }
-        let trimmedMessage = message!.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedMessage.isEmpty else {
+        guard let trimmedMessage = message?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !trimmedMessage.isEmpty else {
             NSLog("[SiriIntent][!] trimmedMessage still empty after resolution – throwing emptyMessage")
             throw SiriSendMessageIntentError.emptyMessage
         }

@@ -487,7 +487,7 @@ enum UnifiedMarkdownRenderer {
             let spacing = nsLine.substring(with: match.range(at: 4))
             let content = nsLine.substring(with: match.range(at: 5))
 
-            let key = "\(prefix)|\(delimiter)"
+            let key = orderedListContextKey(prefix: prefix, delimiter: delimiter)
             let startValue = Int(rawNumber) ?? 1
             let value: Int
             if activeListKey == key, let nextOrderedValue {
@@ -502,6 +502,29 @@ enum UnifiedMarkdownRenderer {
         }
 
         return normalized.joined(separator: "\n")
+    }
+
+    private static func orderedListContextKey(prefix: String, delimiter: String) -> String {
+        var blockQuoteDepth = 0
+        var indentColumns = 0
+
+        for scalar in prefix.unicodeScalars {
+            if scalar == ">" {
+                blockQuoteDepth += 1
+                continue
+            }
+            if scalar == "\t" {
+                indentColumns += 4
+                continue
+            }
+            if CharacterSet.whitespaces.contains(scalar) {
+                indentColumns += 1
+            }
+        }
+
+        // Group into coarse list-depth bands so harmless spacing variation doesn't reset numbering.
+        let indentLevel = indentColumns / 2
+        return "\(blockQuoteDepth)|\(indentLevel)|\(delimiter)"
     }
 
     private static func countConsecutiveBackticks(_ characters: [Character], from start: Int) -> Int {

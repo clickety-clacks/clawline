@@ -8,6 +8,8 @@
 import SwiftUI
 
 enum StreamDotColor {
+    private static let avatarGreen = Color(red: 0.42, green: 0.61, blue: 0.42)
+
     static func resolve(
         isActive: Bool,
         hasUnread: Bool,
@@ -17,7 +19,7 @@ enum StreamDotColor {
             return ChatFlowTheme.connectionDisconnected(colorScheme)
         }
         if isActive {
-            return ChatFlowTheme.sage(colorScheme)
+            return avatarGreen
         }
         return ChatFlowTheme.stone(colorScheme)
     }

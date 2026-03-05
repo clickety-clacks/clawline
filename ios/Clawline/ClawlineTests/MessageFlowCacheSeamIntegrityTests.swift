@@ -48,4 +48,35 @@ struct MessageFlowCacheSeamIntegrityTests {
             }
         }
     }
+
+    @Test("T138: date separators use full available row width")
+    func dateSeparatorsUseAvailableContentWidth() throws {
+        let sourceURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent() // ClawlineTests
+            .deletingLastPathComponent() // Clawline
+            .appendingPathComponent("Clawline/Views/Chat/MessageFlowCollectionView.swift")
+        let contents = try String(contentsOf: sourceURL, encoding: .utf8)
+        let lines = contents.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+
+        guard let sizeForItemStart = lines.firstIndex(where: { $0.contains("private func sizeForItem(at indexPath: IndexPath)") }),
+              let sizeForItemEnd = lines[sizeForItemStart...]
+                .firstIndex(where: { $0.contains("// Handle typing indicator size") }),
+              let branchStart = lines[sizeForItemStart..<sizeForItemEnd]
+                .firstIndex(where: { $0.contains("if DateSeparatorCell.isDateSeparatorItemID(id)") }) else {
+            Issue.record("Unable to locate date separator sizing branch inside sizeForItem(at:).")
+            return
+        }
+
+        let windowEnd = min(lines.count, branchStart + 12)
+        let branchWindow = lines[branchStart..<windowEnd]
+
+        #expect(
+            branchWindow.contains(where: { $0.contains("let rowWidth = availableContentWidth()") }),
+            "Date separator width should use availableContentWidth() so separators remain full-row dividers."
+        )
+        #expect(
+            !branchWindow.contains(where: { $0.contains("effectiveContentWidth(metrics: metrics)") }),
+            "Date separator width must not use bubble-capped effectiveContentWidth()."
+        )
+    }
 }

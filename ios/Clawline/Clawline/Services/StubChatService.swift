@@ -11,6 +11,7 @@ final class StubChatService: ChatServicing {
     var responseDelay: TimeInterval = 1.5
     private var streams: [StreamSession] = []
     private var replayCursorBySessionKey: [String: String] = [:]
+    private var latestConnectionState: ConnectionState = .disconnected
 
     private var messageContinuation: AsyncStream<Message>.Continuation?
     private var stateContinuation: AsyncStream<ConnectionState>.Continuation?
@@ -48,9 +49,14 @@ final class StubChatService: ChatServicing {
         }
     }()
 
+    var isTransportReadyForSend: Bool {
+        latestConnectionState == .connected
+    }
+
     func connect(token: String, activeSessionKey: String?) async throws {
         _ = activeSessionKey
         stateContinuation?.yield(.connecting)
+        latestConnectionState = .connecting
         try await Task.sleep(forDuration: .milliseconds(500))
         if streams.isEmpty {
             let now = Date()
@@ -68,6 +74,7 @@ final class StubChatService: ChatServicing {
         }
         serviceEventContinuation?.yield(.streamSnapshot(streams))
         stateContinuation?.yield(.connected)
+        latestConnectionState = .connected
     }
 
     func startConnectionAttempt(epoch: Int, lastMessageId: String?, token: String) {
@@ -91,6 +98,7 @@ final class StubChatService: ChatServicing {
 
     func disconnect() {
         stateContinuation?.yield(.disconnected)
+        latestConnectionState = .disconnected
     }
 
     func replayCursorSnapshot() -> [String: String] {

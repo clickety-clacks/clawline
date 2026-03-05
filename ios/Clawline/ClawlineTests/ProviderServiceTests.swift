@@ -216,6 +216,116 @@ struct ProviderServiceTests {
         })
     }
 
+    @Test("Retry cancellation does not send message frame after disconnect")
+    func retryCancellationDoesNotSendAfterDisconnect() async throws {
+        let mockSocket = MockWebSocketClient()
+        let connector = MockWebSocketConnector(client: mockSocket)
+        let baseURL = URL(string: "https://example.com")!
+        let service = ProviderChatService(
+            connector: connector,
+            deviceId: "device_123",
+            baseURLProvider: { baseURL }
+        )
+
+        Task {
+            try await Task.sleep(forDuration: .milliseconds(10))
+            mockSocket.enqueue(text: #"{ "type": "auth_result", "success": true }"#)
+        }
+
+        try await service.connect(token: "jwt", lastMessageId: nil)
+        try await service.send(
+            id: "c_retry_cancel",
+            content: "Hello",
+            attachments: [],
+            sessionKey: nil
+        )
+
+        let sentBeforeDisconnect = mockSocket.sentTexts.filter {
+            $0.contains("\"type\":\"message\"") && $0.contains("\"id\":\"c_retry_cancel\"")
+        }.count
+        #expect(sentBeforeDisconnect == 1)
+
+        service.disconnect()
+        try await Task.sleep(forDuration: .milliseconds(50))
+
+        let sentAfterDisconnect = mockSocket.sentTexts.filter {
+            $0.contains("\"type\":\"message\"") && $0.contains("\"id\":\"c_retry_cancel\"")
+        }.count
+        #expect(sentAfterDisconnect == sentBeforeDisconnect)
+    }
+
+    @Test("Malformed inbound auth/message frames are dropped and valid frames still process")
+    func malformedInboundFramesAreDropped() async throws {
+        let mockSocket = MockWebSocketClient()
+        let connector = MockWebSocketConnector(client: mockSocket)
+        let baseURL = URL(string: "https://example.com")!
+        let service = ProviderChatService(
+            connector: connector,
+            deviceId: "device_123",
+            baseURLProvider: { baseURL }
+        )
+        var messageIterator = service.incomingMessages.makeAsyncIterator()
+
+        Task {
+            try await Task.sleep(forDuration: .milliseconds(20))
+            mockSocket.enqueue(text: "{ this is not json")
+            try await Task.sleep(forDuration: .milliseconds(20))
+            mockSocket.enqueue(text: #"{ "type": "auth_result", "success": true }"#)
+            try await Task.sleep(forDuration: .milliseconds(20))
+            mockSocket.enqueue(text: #"{ "type": "message", "id": "s_bad", "role": "assistant", "content": "bad", "streaming": false, "sessionKey": "agent:main:main", "attachments": [] }"#)
+            try await Task.sleep(forDuration: .milliseconds(20))
+            mockSocket.enqueue(text: #"{ "type": "message", "id": "s_good", "role": "assistant", "content": "ok", "timestamp": 1700000000000, "streaming": false, "sessionKey": "agent:main:main", "attachments": [] }"#)
+        }
+
+        try await service.connect(token: "jwt", lastMessageId: nil)
+        let message = await messageIterator.next()
+        #expect(message?.id == "s_good")
+        #expect(message?.content == "ok")
+    }
+
+    @Test("Malformed ack frame is dropped and valid ack still emits")
+    func malformedAckFrameIsDropped() async throws {
+        let mockSocket = MockWebSocketClient()
+        let connector = MockWebSocketConnector(client: mockSocket)
+        let baseURL = URL(string: "https://example.com")!
+        let service = ProviderChatService(
+            connector: connector,
+            deviceId: "device_123",
+            baseURLProvider: { baseURL }
+        )
+        var eventIterator = service.serviceEvents.makeAsyncIterator()
+
+        Task {
+            try await Task.sleep(forDuration: .milliseconds(20))
+            mockSocket.enqueue(text: #"{ "type": "auth_result", "success": true }"#)
+        }
+        try await service.connect(token: "jwt", lastMessageId: nil)
+        try await service.send(
+            id: "c_ack_drop",
+            content: "Ack me",
+            attachments: [],
+            sessionKey: nil
+        )
+
+        Task {
+            try await Task.sleep(forDuration: .milliseconds(20))
+            mockSocket.enqueue(text: #"{ "type": "ack" }"#)
+            try await Task.sleep(forDuration: .milliseconds(20))
+            mockSocket.enqueue(text: #"{ "type": "ack", "id": "c_ack_drop" }"#)
+        }
+
+        var acked = false
+        for _ in 0..<10 {
+            guard let event = await eventIterator.next() else { continue }
+            if case .messageAcked(let id) = event, id == "c_ack_drop" {
+                acked = true
+                break
+            }
+        }
+
+        #expect(acked)
+    }
+
     @Test("Chat service emits stream snapshot events")
     func chatStreamSnapshotEvent() async throws {
         let mockSocket = MockWebSocketClient()
@@ -296,6 +406,35 @@ struct ProviderServiceTests {
         #expect(sawCreated)
         #expect(sawUpdated)
         #expect(sawDeleted)
+    }
+
+    // T140: deleteStream must fail fast with notConnected when authToken is nil (not authenticated).
+    // Previously, the nil token was passed through to StreamAPIClient which omitted the Authorization
+    // header, causing the server to return 401 "Missing authorization" — confusing the user.
+    @Test("T140: deleteStream fails with notConnected when not authenticated")
+    func deleteStreamFailsNotConnectedWhenUnauthenticated() async throws {
+        let mockSocket = MockWebSocketClient()
+        let connector = MockWebSocketConnector(client: mockSocket)
+        let baseURL = URL(string: "https://example.com")!
+        let service = ProviderChatService(
+            connector: connector,
+            deviceId: "device_123",
+            baseURLProvider: { baseURL }
+        )
+        // Do NOT connect — authToken remains nil.
+        do {
+            _ = try await service.deleteStream(sessionKey: "agent:main:clawline:user:s_abcd1234", idempotencyKey: nil)
+            Issue.record("Expected notConnected error, but deleteStream succeeded")
+        } catch let error as ProviderChatService.Error {
+            switch error {
+            case .notConnected:
+                break // ✓ expected
+            default:
+                Issue.record("Expected notConnected, got \(error)")
+            }
+        } catch {
+            Issue.record("Unexpected error type: \(error)")
+        }
     }
 
     @Test("Lifecycle attempt emits coordinator epoch on transport and auth events")
@@ -455,6 +594,7 @@ struct ProviderServiceTests {
         }
 
         await coordinator.setAuthToken("jwt")
+        await coordinator.viewAppeared()
         await coordinator.startIfNeeded()
         try await Task.sleep(forDuration: .milliseconds(10))
         service.startConnectionAttempt(epoch: 1, lastMessageId: nil, token: "jwt")
@@ -486,6 +626,7 @@ struct ProviderServiceTests {
     func authSuccessAfterRecoveringRaceReachesLive() async {
         let coordinator = ConnectionLifecycleCoordinator(startAttempt: { _, _, _ in }, stopAttempt: {})
         await coordinator.setAuthToken("jwt")
+        await coordinator.viewAppeared()
         await coordinator.startIfNeeded()
 
         await coordinator.handleTransportEvent(.init(epoch: 1, payload: .transportOpened))
@@ -510,6 +651,7 @@ struct ProviderServiceTests {
     func historyResetAuthDoesNotImmediatelyFail() async throws {
         let coordinator = ConnectionLifecycleCoordinator(startAttempt: { _, _, _ in }, stopAttempt: {})
         await coordinator.setAuthToken("jwt")
+        await coordinator.viewAppeared()
         await coordinator.startIfNeeded()
 
         await coordinator.handleTransportEvent(.init(epoch: 1, payload: .transportOpened))
@@ -542,6 +684,7 @@ struct ProviderServiceTests {
 
         await coordinator.seedCanonicalCursor(Self.validServerEventID)
         await coordinator.setAuthToken("jwt")
+        await coordinator.viewAppeared()
         await coordinator.startIfNeeded()
 
         #expect(capture.snapshot().count == 1)
@@ -585,6 +728,93 @@ struct ProviderServiceTests {
         )
 
         #expect(await coordinator.phase == .failed)
+    }
+
+    @Test("authChanged waits for viewAppeared and does not auto-retry from failed")
+    func authChangedRequiresViewAppearedAndSkipsFailedAutoRetry() async {
+        let capture = StartAttemptCapture()
+        let coordinator = ConnectionLifecycleCoordinator(
+            startAttempt: { epoch, lastMessageId, _ in
+                capture.append(epoch: epoch, lastMessageId: lastMessageId)
+            },
+            stopAttempt: {}
+        )
+
+        await coordinator.authChanged(token: "jwt")
+        #expect(capture.snapshot().isEmpty)
+        #expect(await coordinator.phase == .idle)
+
+        await coordinator.viewAppeared()
+        #expect(capture.snapshot().count == 1)
+        #expect(await coordinator.phase == .connecting)
+
+        await coordinator.handleTransportEvent(.init(epoch: 1, payload: .transportOpened))
+        await coordinator.handleTransportEvent(
+            .init(
+                epoch: 1,
+                payload: .authResult(
+                    success: false,
+                    replayCount: nil,
+                    replayTruncated: nil,
+                    historyReset: nil,
+                    failureReason: .rejected
+                )
+            )
+        )
+        #expect(await coordinator.phase == .failed)
+
+        await coordinator.authChanged(token: "jwt_refreshed")
+        #expect(await coordinator.phase == .failed)
+        #expect(capture.snapshot().count == 1)
+    }
+
+    @Test("viewAppeared and sceneActivated honor token presence and idle-phase gating")
+    func startupSignalsHonorTokenAndPhaseGates() async {
+        let capture = StartAttemptCapture()
+        let coordinator = ConnectionLifecycleCoordinator(
+            startAttempt: { epoch, lastMessageId, _ in
+                capture.append(epoch: epoch, lastMessageId: lastMessageId)
+            },
+            stopAttempt: {}
+        )
+
+        await coordinator.viewAppeared()
+        await coordinator.sceneActivated()
+        #expect(capture.snapshot().isEmpty)
+
+        await coordinator.setAuthToken("jwt")
+        await coordinator.sceneActivated()
+        #expect(capture.snapshot().isEmpty)
+        #expect(await coordinator.phase == .idle)
+
+        await coordinator.viewAppeared()
+        #expect(capture.snapshot().count == 1)
+        #expect(await coordinator.phase == .connecting)
+
+        await coordinator.sceneActivated()
+        #expect(capture.snapshot().count == 1)
+    }
+
+    @Test("Startup signal burst results in one connect attempt")
+    func startupSignalBurstStartsOnce() async {
+        let capture = StartAttemptCapture()
+        let coordinator = ConnectionLifecycleCoordinator(
+            startAttempt: { epoch, lastMessageId, _ in
+                capture.append(epoch: epoch, lastMessageId: lastMessageId)
+            },
+            stopAttempt: {}
+        )
+
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask { await coordinator.authChanged(token: "jwt") }
+            group.addTask { await coordinator.viewAppeared() }
+            group.addTask { await coordinator.sceneActivated() }
+        }
+
+        let attempts = capture.snapshot()
+        #expect(attempts.count == 1)
+        #expect(attempts.first?.epoch == 1)
+        #expect(await coordinator.phase == .connecting)
     }
 }
 

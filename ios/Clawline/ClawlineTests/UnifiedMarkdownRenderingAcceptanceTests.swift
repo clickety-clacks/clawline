@@ -305,6 +305,23 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
         #expect(!text.contains("AlphaBetaNested Beta OneNested Beta TwoGamma"))
     }
 
+    @Test("T137: ordered list markers render as 1,2,3 instead of repeating 1")
+    func t137_orderedListMarkersIncrement() {
+        let markdown = """
+        1. First
+         1. Second
+          1. Third
+        """
+        let plan = UnifiedMarkdownParser.parse(markdown: markdown, messageID: "t137", metrics: metrics)
+        let rendered = UnifiedMarkdownRenderer.render(plan: plan, options: expandedOptions())
+        let text = joinedText(from: rendered)
+
+        #expect(text.contains("1. First"))
+        #expect(text.contains("2. Second"))
+        #expect(text.contains("3. Third"))
+        #expect(containsInOrder(text, tokens: ["1. First", "2. Second", "3. Third"]))
+    }
+
     private enum BlockType: Equatable {
         case richText
         case code

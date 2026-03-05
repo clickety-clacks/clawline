@@ -7,6 +7,7 @@
 
 import Testing
 import CoreGraphics
+import Foundation
 @testable import Clawline
 
 struct StreamSelectorLayoutTests {
@@ -73,5 +74,62 @@ struct StreamSelectorLayoutTests {
         )
 
         #expect(isOverflowing == true)
+    }
+
+    @Test("Stream filter matches display names case-insensitively")
+    func streamFilterMatchesCaseInsensitively() {
+        let streams = [
+            StreamSession(
+                sessionKey: "agent:main:main",
+                displayName: "Main",
+                kind: "main",
+                orderIndex: 0,
+                isBuiltIn: true,
+                createdAt: Date(),
+                updatedAt: Date()
+            ),
+            StreamSession(
+                sessionKey: "agent:main:clawline:user:s_1",
+                displayName: "Research Notes",
+                kind: "custom",
+                orderIndex: 1,
+                isBuiltIn: false,
+                createdAt: Date(),
+                updatedAt: Date()
+            )
+        ]
+
+        let filtered = StreamSelectorLayout.filter(streams: streams, query: "research")
+
+        #expect(filtered.count == 1)
+        #expect(filtered.first?.displayName == "Research Notes")
+    }
+
+    @Test("Blank stream filter returns all streams")
+    func blankStreamFilterReturnsAll() {
+        let streams = [
+            StreamSession(
+                sessionKey: "agent:main:main",
+                displayName: "Main",
+                kind: "main",
+                orderIndex: 0,
+                isBuiltIn: true,
+                createdAt: Date(),
+                updatedAt: Date()
+            ),
+            StreamSession(
+                sessionKey: "agent:main:clawline:user:s_2",
+                displayName: "Planning",
+                kind: "custom",
+                orderIndex: 1,
+                isBuiltIn: false,
+                createdAt: Date(),
+                updatedAt: Date()
+            )
+        ]
+
+        let filtered = StreamSelectorLayout.filter(streams: streams, query: "   ")
+
+        #expect(filtered.count == streams.count)
     }
 }

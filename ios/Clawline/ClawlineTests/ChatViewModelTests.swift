@@ -183,6 +183,47 @@ struct ChatViewModelTests {
         #expect(messages.first?.id == "s_user_echo")
     }
 
+    @Test("Interactive callback fallback echoes are suppressed from visible messages")
+    @MainActor
+    func interactiveCallbackFallbackEchoesAreSuppressed() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        chatService.emit(
+            Message(
+                id: "s_callback_1",
+                role: .user,
+                content: #"[Interactive: "Quick Survey"] action=submit - {"name":"Flynn"}"#,
+                timestamp: Date(),
+                streaming: false,
+                attachments: [],
+                deviceId: "device",
+                sessionKey: personalSessionKey
+            )
+        )
+
+        for _ in 0..<50 {
+            if viewModel.debugConnectionSnapshot().lastMessageId == "s_callback_1" { break }
+            try await Task.sleep(forDuration: .milliseconds(20))
+        }
+
+        #expect(viewModel.messages.isEmpty)
+        #expect(viewModel.debugConnectionSnapshot().lastMessageId == "s_callback_1")
+    }
+
     @Test("Message-level errors annotate placeholders and show toast")
     @MainActor
     func messageErrorsMarkFailedMessages() async throws {
@@ -372,6 +413,125 @@ struct ChatViewModelTests {
         #expect(chatService.connectCallCount > initialConnectCalls)
     }
 
+    @Test("Cancelled reconnect delay does not trigger an extra reconnect attempt")
+    @MainActor
+    func cancelledReconnectDelayDoesNotTriggerExtraReconnect() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        for _ in 0..<50 {
+            if chatService.connectCallCount > 0 { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        let baselineConnectCalls = chatService.connectCallCount
+        chatService.emitConnectionState(.disconnected)
+        try await Task.sleep(for: .milliseconds(30))
+        viewModel.reconnect()
+
+        for _ in 0..<80 {
+            if chatService.connectCallCount >= baselineConnectCalls + 1 { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        let connectCallsAfterImmediateReconnect = chatService.connectCallCount
+        #expect(connectCallsAfterImmediateReconnect == baselineConnectCalls + 1)
+
+        try await Task.sleep(for: .milliseconds(2300))
+        #expect(chatService.connectCallCount == connectCallsAfterImmediateReconnect)
+    }
+
+    @Test("Persist debounce cancellation does not flush cache early")
+    @MainActor
+    func persistDebounceCancellationDoesNotFlushEarly() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        func cacheURL(for sessionKey: String) -> URL? {
+            guard let baseURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
+                return nil
+            }
+            let directoryURL = baseURL
+                .appendingPathComponent("Clawline", isDirectory: true)
+                .appendingPathComponent("MessageCache", isDirectory: true)
+            let filename = sessionKey
+                .replacingOccurrences(of: ":", with: "-")
+                .replacingOccurrences(of: "/", with: "-")
+            return directoryURL.appendingPathComponent("\(filename.isEmpty ? "session" : filename).json")
+        }
+
+        guard let cacheURL = cacheURL(for: personalSessionKey) else {
+            Issue.record("Expected cache URL for personal session")
+            return
+        }
+        try? FileManager.default.removeItem(at: cacheURL)
+
+        await viewModel.onAppear()
+        chatService.emit(
+            Message(
+                id: "s_cache_1",
+                role: .assistant,
+                content: "one",
+                timestamp: Date(),
+                streaming: false,
+                attachments: [],
+                deviceId: nil,
+                sessionKey: personalSessionKey
+            )
+        )
+        try await Task.sleep(for: .milliseconds(50))
+        chatService.emit(
+            Message(
+                id: "s_cache_2",
+                role: .assistant,
+                content: "two",
+                timestamp: Date(),
+                streaming: false,
+                attachments: [],
+                deviceId: nil,
+                sessionKey: personalSessionKey
+            )
+        )
+
+        try await Task.sleep(for: .milliseconds(120))
+        #expect(FileManager.default.fileExists(atPath: cacheURL.path) == false)
+
+        var persisted = false
+        for _ in 0..<30 {
+            if FileManager.default.fileExists(atPath: cacheURL.path) {
+                persisted = true
+                break
+            }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        #expect(persisted)
+    }
+
     @Test("canSend becomes true when attachments exist even without text")
     @MainActor
     func canSendWithAttachmentOnly() async throws {
@@ -504,6 +664,93 @@ struct ChatViewModelTests {
 
         #expect(viewModel.attachmentData.isEmpty)
         #expect(viewModel.inputContent.string.isEmpty)
+    }
+
+    @Test("send during attachment staging gap does not prune and retries cleanly after token insertion")
+    @MainActor
+    func sendDuringAttachmentStagingGapDefersThenSucceeds() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        chatService.streams = [
+            makeStreamSession(
+                sessionKey: personalSessionKey,
+                displayName: "Personal",
+                kind: "main",
+                orderIndex: 0,
+                isBuiltIn: true
+            )
+        ]
+        _ = chatService.incomingMessages
+        _ = chatService.connectionState
+        _ = chatService.serviceEvents
+        let uploadService = TestUploadService()
+        let toastManager = ToastManager()
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: uploadService,
+            toastManager: toastManager,
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        try await setConnected(chatService: chatService, viewModel: viewModel)
+        chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
+        for _ in 0..<50 {
+            if viewModel.orderedSessionKeys.contains(personalSessionKey) { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        viewModel.setActiveSessionKeyForTesting(personalSessionKey)
+        chatService.emitServiceEvent(.sessionInfo(
+            SessionInfo(
+                userId: "user",
+                isAdmin: false,
+                dmScope: "dm",
+                sessionKeys: [personalSessionKey]
+            )
+        ))
+        for _ in 0..<50 {
+            if viewModel.sendButtonConnectionState == .connected { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(viewModel.sendButtonConnectionState == .connected)
+
+        let staged = makePendingAttachment(dataSize: 1024, mimeType: "image/png")
+        viewModel.stageAttachments([staged])
+        #expect(viewModel.attachmentData[staged.id] != nil)
+
+        // Trigger didSet prune path while staging gap exists (no attachment token yet).
+        viewModel.inputContent = NSAttributedString(string: "hello")
+        #expect(viewModel.attachmentData[staged.id] != nil)
+
+        viewModel.send()
+        try await Task.sleep(for: .milliseconds(20))
+        #expect(chatService.lastSentId == nil)
+        #expect(toastManager.debugMessages.contains("Finishing attachment…"))
+        #expect(viewModel.attachmentData[staged.id] != nil)
+
+        viewModel.inputContent = makeAttributedContent(with: [staged.id])
+        try await Task.sleep(for: .milliseconds(20))
+        viewModel.send()
+        try await viewModel.sendTask?.value
+
+        #expect(chatService.lastSentId != nil)
+        #expect(chatService.lastSentAttachments.count == 1)
+        let hasAttachment = chatService.lastSentAttachments.contains { attachment in
+            switch attachment {
+            case .image:
+                return true
+            case .asset:
+                return true
+            }
+        }
+        #expect(hasAttachment)
+        #expect(viewModel.attachmentData.isEmpty)
     }
 
     @Test("Asset-backed interactive HTML document hydrates for inline render path")
@@ -1321,6 +1568,82 @@ struct ChatViewModelTests {
         #expect(secondViewModel.orderedSessionKeys == [personalSessionKey])
     }
 
+    @Test("Replay message does not resurrect stream pruned by snapshot")
+    @MainActor
+    func replayDoesNotResurrectPrunedStream() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let staleKey = "agent:main:clawline:user:s_stale1234"
+
+        let firstService = TestChatService()
+        firstService.streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: staleKey, displayName: "Parallelism", kind: "custom", orderIndex: 1, isBuiltIn: false),
+        ]
+        let firstViewModel = ChatViewModel(
+            auth: auth,
+            chatService: firstService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+
+        await firstViewModel.onAppear()
+        firstService.emitServiceEvent(.streamSnapshot(firstService.streams))
+        for _ in 0..<50 {
+            if firstViewModel.stream(for: staleKey) != nil { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(firstViewModel.stream(for: staleKey) != nil)
+        firstViewModel.onDisappear()
+
+        let secondService = TestChatService()
+        secondService.streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+        ]
+        let secondViewModel = ChatViewModel(
+            auth: auth,
+            chatService: secondService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { secondViewModel.onDisappear() }
+
+        await secondViewModel.onAppear()
+        #expect(secondViewModel.stream(for: staleKey) != nil)
+
+        secondService.emitServiceEvent(.streamSnapshot(secondService.streams))
+        for _ in 0..<50 {
+            if secondViewModel.stream(for: staleKey) == nil { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(secondViewModel.stream(for: staleKey) == nil)
+
+        secondService.emit(
+            Message(
+                id: "s_stale_replay",
+                role: .assistant,
+                content: "stale replay",
+                timestamp: Date(),
+                streaming: false,
+                attachments: [],
+                deviceId: nil,
+                sessionKey: staleKey
+            )
+        )
+        try await Task.sleep(for: .milliseconds(40))
+
+        #expect(secondViewModel.stream(for: staleKey) == nil)
+        #expect(secondViewModel.messages(for: staleKey).isEmpty)
+        #expect(secondViewModel.orderedSessionKeys == [personalSessionKey])
+    }
+
     @Test("Incremental stream events update metadata")
     @MainActor
     func incrementalStreamEvents() async throws {
@@ -1619,9 +1942,9 @@ struct ChatViewModelTests {
         #expect(auth.isAdmin == false)
     }
 
-    @Test("Concurrent startup triggers initialize lifecycle observers once")
+    @Test("activate is idempotent and initializes lifecycle observers once")
     @MainActor
-    func concurrentStartupTriggersInitializeObservationOnce() async throws {
+    func activateInitializesObservationOnce() async throws {
         resetChatPersistence()
         let auth = TestAuthManager()
         auth.storeCredentials(token: "jwt", userId: "user")
@@ -1635,11 +1958,11 @@ struct ChatViewModelTests {
             toastManager: ToastManager(),
             salientHighlightService: SalientHighlightService()
         )
-        defer { viewModel.onDisappear() }
+        defer { viewModel.prepareForReplacement() }
 
         await withTaskGroup(of: Void.self) { group in
-            group.addTask { await viewModel.onAppear() }
-            group.addTask { await viewModel.onAppear() }
+            group.addTask { await viewModel.activate(origin: "test.concurrent.1") }
+            group.addTask { await viewModel.activate(origin: "test.concurrent.2") }
             group.addTask { await MainActor.run { viewModel.handleSceneDidBecomeActive() } }
             group.addTask {
                 NotificationCenter.default.post(name: Notification.Name("AuthStateDidChange"), object: nil)
@@ -1650,6 +1973,46 @@ struct ChatViewModelTests {
             if viewModel.debugObservationStartupCount() > 0 { break }
             try await Task.sleep(for: .milliseconds(10))
         }
+        #expect(viewModel.debugObservationStartupCount() == 1)
+    }
+
+    @Test("Transient view disappearance does not tear down lifecycle observation")
+    @MainActor
+    func transientDisappearPreservesLifecycleObservation() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.prepareForReplacement() }
+
+        await viewModel.activate(origin: "test.transientDisappear")
+        for _ in 0..<50 {
+            if viewModel.debugObservationStartupCount() > 0 { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(viewModel.debugObservationStartupCount() == 1)
+
+        viewModel.onDisappear(origin: "test.transient")
+        chatService.emitConnectionState(.connected)
+
+        var becameConnected = false
+        for _ in 0..<100 {
+            if viewModel.sendButtonConnectionState == .connected {
+                becameConnected = true
+                break
+            }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(becameConnected)
         #expect(viewModel.debugObservationStartupCount() == 1)
     }
 }
@@ -1692,6 +2055,7 @@ private final class TestChatService: ChatServicing {
     private(set) var lastSentId: String?
     private(set) var lastSessionKey: String?
     private(set) var connectCallCount: Int = 0
+    var isTransportReadyForSend: Bool = false
     var sendError: Swift.Error?
     var createStreamError: Error?
     var deleteStreamError: Error?
@@ -1729,6 +2093,7 @@ private final class TestChatService: ChatServicing {
     func connect(token: String, activeSessionKey: String?) async throws {
         _ = activeSessionKey
         connectCallCount += 1
+        isTransportReadyForSend = true
         stateContinuation?.yield(.connected)
     }
 
@@ -1754,6 +2119,7 @@ private final class TestChatService: ChatServicing {
     func stopConnectionAttempt() {}
 
     func disconnect() {
+        isTransportReadyForSend = false
         stateContinuation?.yield(.disconnected)
     }
 
@@ -1795,6 +2161,7 @@ private final class TestChatService: ChatServicing {
     }
 
     func emitConnectionState(_ state: ConnectionState) {
+        isTransportReadyForSend = (state == .connected)
         stateContinuation?.yield(state)
         switch state {
         case .connected:

@@ -73,6 +73,18 @@ struct InteractiveHTMLBubbleUIKitViewTests {
 
         let renderedText = try await evaluateString(webView: webView, js: "document.body.innerText || ''")
         #expect(renderedText.contains("Visible Content"))
+
+        let viewportMeta = try await evaluateString(
+            webView: webView,
+            js: "(() => { const m = document.querySelector('meta[name=\"viewport\"]'); return m ? (m.getAttribute('content') || '') : ''; })()"
+        )
+        #expect(viewportMeta.contains("width=device-width"))
+
+        let textSizeAdjust = try await evaluateString(
+            webView: webView,
+            js: "getComputedStyle(document.body).webkitTextSizeAdjust || ''"
+        )
+        #expect(textSizeAdjust.contains("100"))
     }
 }
 

@@ -3818,6 +3818,20 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         NSLog("[KBTIMING] scrollToBottom animated=%d targetY=%.1f dt=%.4f", animated ? 1 : 0, clampedY, CFAbsoluteTimeGetCurrent() - t0)
     }
 
+    func scrollToTop(animated: Bool) {
+        let t0 = CFAbsoluteTimeGetCurrent()
+        collectionView.layoutIfNeeded()
+        let minY = -collectionView.contentInset.top
+        if abs(collectionView.contentOffset.y - minY) <= 0.5 {
+            return
+        }
+        collectionView.setContentOffset(CGPoint(x: 0, y: minY), animated: animated)
+        if !animated, let sessionKey = callbackSessionKey() {
+            refreshLastKnownScrollSnapshot(sessionKey: sessionKey)
+        }
+        NSLog("[KBTIMING] scrollToTop animated=%d targetY=%.1f dt=%.4f", animated ? 1 : 0, minY, CFAbsoluteTimeGetCurrent() - t0)
+    }
+
     func scrollToMessageCentered(messageId: String, animated: Bool) {
         guard let sessionKey = callbackSessionKey() else { return }
         guard let indexPath = dataSource.indexPath(for: messageId) else {

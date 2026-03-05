@@ -159,7 +159,7 @@ protocol WatchConnectivityServicing: AnyObject {
 }
 ```
 
-The protocol surface is deliberately narrow. Relay activation is internal — the service responds to Watch-originated `relay.activate` / `relay.deactivate` messages autonomously. Callers (ClawlineApp) do not control relay state.
+The protocol surface is deliberately narrow. Relay activation is internal — the service responds to Watch-originated `relay.activated` / `relay.deactivated` messages autonomously. Callers (ClawlineApp) do not control relay state.
 
 ### 4.2 Implementation
 
@@ -357,8 +357,8 @@ Responses (via `replyHandler`) include either `payload` or `error`:
 
 | Message Type | Direction | iOS Action | Reply |
 |-------------|-----------|-----------|-------|
-| `relay.activate` | Watch → iPhone | Start forwarding provider messages to Watch | `relay.activate.ack` |
-| `relay.deactivate` | Watch → iPhone | Stop forwarding provider messages to Watch | `relay.deactivate.ack` |
+| `relay.activated` | Watch → iPhone | Start forwarding provider messages to Watch | `relay.activate.ack` |
+| `relay.deactivated` | Watch → iPhone | Stop forwarding provider messages to Watch | `relay.deactivate.ack` |
 | `chat.send` | Watch → iPhone | Call `chatService.send(content:sessionKey:)` | `chat.send.ack` with `acked: true` or error |
 | `streams.fetch` | Watch → iPhone | Call `chatService.fetchStreams()` | `streams.fetch.ack` with `streams: [StreamSession JSON]` |
 | `streams.create` | Watch → iPhone | Call `chatService.createStream(displayName:)` | `streams.create.ack` with `stream: StreamSession JSON` |
@@ -368,23 +368,23 @@ Responses (via `replyHandler`) include either `payload` or `error`:
 | `chat.incoming` | iPhone → Watch | Push incoming provider message to Watch | (no reply — fire and forget) |
 | `event` | iPhone → Watch | Push `ChatServiceEvent` to Watch | (no reply — fire and forget) |
 
-### 5.4 `relay.activate` / `relay.deactivate`
+### 5.4 `relay.activated` / `relay.deactivated`
 
-When Watch transitions to relay mode, it sends `relay.activate`. iOS responds by:
+When Watch transitions to relay mode, it sends `relay.activated`. iOS responds by:
 
 1. Setting `relayActive = true`
 2. Beginning observation of `chatService.incomingMessages` and `chatService.serviceEvents`
 3. Starting a background task to keep the relay alive (see §6.3)
 4. Replying with `relay.activate.ack`
 
-When Watch recovers direct connectivity, it sends `relay.deactivate`. iOS responds by:
+When Watch recovers direct connectivity, it sends `relay.deactivated`. iOS responds by:
 
 1. Setting `relayActive = false`
 2. Cancelling observation tasks (`incomingMessageTask?.cancel()`, `serviceEventsTask?.cancel()`)
 3. Ending the background task
 4. Replying with `relay.deactivate.ack`
 
-**Relay deactivation guard:** If `relay.deactivate` is received while a `chat.send` is in flight, the in-flight send completes normally. The deactivation only stops the forward-push subscription.
+**Relay deactivation guard:** If `relay.deactivated` is received while a `chat.send` is in flight, the in-flight send completes normally. The deactivation only stops the forward-push subscription.
 
 ### 5.5 `chat.incoming` Push (iPhone → Watch)
 
@@ -398,7 +398,7 @@ incomingMessageTask = Task {
         let msg: [String: Any] = [
             "type": "chat.incoming",
             "requestId": "push_\(UUID().uuidString)",
-            "payload": ["messageJson": String(data: payload ?? Data(), encoding: .utf8) ?? ""]
+            "payload": ["json": String(data: payload ?? Data(), encoding: .utf8) ?? ""]
         ]
         WCSession.default.sendMessage(msg, replyHandler: nil, errorHandler: { err in
             // Log but do not retry — Watch dropped message is acceptable
@@ -409,7 +409,7 @@ incomingMessageTask = Task {
 
 Similarly for `chatService.serviceEvents` → `event` push.
 
-**Duplicate delivery guard:** The relay push is only active when `relayActive == true`. When Watch switches back to direct, `relay.deactivate` stops the subscription before Watch reconnects the direct WebSocket. This prevents Watch from receiving the same message via both relay and direct. There is a brief race window (relay deactivated but direct not yet connected) — messages in this window are not forwarded via relay. The Watch handles this by buffering pending messages during its `probing` state transition.
+**Duplicate delivery guard:** The relay push is only active when `relayActive == true`. When Watch switches back to direct, `relay.deactivated` stops the subscription before Watch reconnects the direct WebSocket. This prevents Watch from receiving the same message via both relay and direct. There is a brief race window (relay deactivated but direct not yet connected) — messages in this window are not forwarded via relay. The Watch handles this by buffering pending messages during its `probing` state transition.
 
 ### 5.6 `chat.send` Handling
 
@@ -440,7 +440,7 @@ case "chat.send":
 
 ### 5.7 Serialization
 
-`ServerMessagePayload` and `StreamSession` are serialized as JSON strings embedded in the `messageJson` / `streamJson` payload fields. This avoids `NSPropertyListSerialization` restrictions on `[String: Any]` (WCSession requires property-list-compatible types). JSON strings are property-list-safe.
+`ServerMessagePayload` and `StreamSession` are serialized as JSON strings embedded in the `json` payload field. This avoids `NSPropertyListSerialization` restrictions on `[String: Any]` (WCSession requires property-list-compatible types). JSON strings are property-list-safe.
 
 ---
 
@@ -459,7 +459,7 @@ This is an accepted limitation. The Watch UI degrades gracefully: if relay push 
 
 ### 6.2 Background Task for Relay Continuity
 
-When `relay.activate` is received, the iOS service begins a UIKit background task:
+When `relay.activated` is received, the iOS service begins a UIKit background task:
 
 ```swift
 backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "ClawlineWatchRelay") {
@@ -468,7 +468,7 @@ backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "ClawlineWat
 }
 ```
 
-This gives ~30 seconds of background execution after iOS is backgrounded. If the background task expires before `relay.deactivate` is received, push delivery stops but `sendMessage` requests from Watch continue to work via system wake.
+This gives ~30 seconds of background execution after iOS is backgrounded. If the background task expires before `relay.deactivated` is received, push delivery stops but `sendMessage` requests from Watch continue to work via system wake.
 
 **No background mode entitlement required** for this basic relay behavior. The background task API (`beginBackgroundTask`) works without entitlements.
 
@@ -542,10 +542,10 @@ New state introduced by Watch support features. Existing state (authManager, cha
 | WCSession activated | `Bool` | `WatchConnectivityService` | None (internal) | `WCSessionDelegate` callbacks |
 | `isWatchPaired` | `Bool` | `WatchConnectivityService` | ClawlineApp (for debug logging only) | WCSession `isPaired` at activation |
 | `isWatchReachable` | `Bool` | `WatchConnectivityService` | None external | `sessionReachabilityDidChange` |
-| `relayActive` | `Bool` | `WatchConnectivityService` | None external | `relay.activate` / `relay.deactivate` WC messages |
-| Background task ID | `UIBackgroundTaskIdentifier` | `WatchConnectivityService` | None | `relay.activate` / `relay.deactivate` / expiration |
-| `incomingMessageTask` | `Task` | `WatchConnectivityService` | None | `relay.activate` starts; `relay.deactivate` cancels |
-| `serviceEventsTask` | `Task` | `WatchConnectivityService` | None | `relay.activate` starts; `relay.deactivate` cancels |
+| `relayActive` | `Bool` | `WatchConnectivityService` | None external | `relay.activated` / `relay.deactivated` WC messages |
+| Background task ID | `UIBackgroundTaskIdentifier` | `WatchConnectivityService` | None | `relay.activated` / `relay.deactivated` / expiration |
+| `incomingMessageTask` | `Task` | `WatchConnectivityService` | None | `relay.activated` starts; `relay.deactivated` cancels |
+| `serviceEventsTask` | `Task` | `WatchConnectivityService` | None | `relay.activated` starts; `relay.deactivated` cancels |
 | Soniox API key | `String?` | `SonioxKeyStore` (Keychain) | `WatchConnectivityService`, Settings UI | Keychain write via `SonioxKeyStore.apiKey` setter |
 | Cartesia API key | `String?` | `CartesiaKeyStore` (Keychain) | `WatchConnectivityService`, Settings UI | Keychain write via `CartesiaKeyStore.apiKey` setter |
 | Cartesia voice ID | `String?` | `CartesiaKeyStore` (Keychain) | `WatchConnectivityService`, Settings UI | Keychain write via `CartesiaKeyStore.selectedVoiceId` setter |
@@ -664,11 +664,11 @@ If any of these three are nil (unpaired state, logged out), `syncCredentials()` 
 **C6. Relay does not create a new provider connection.**
 The relay proxy routes through the existing `ProviderChatService` instance. If iOS is not connected to the provider, `chat.send` fails with `code: "not_connected"`. The iOS relay is not responsible for connecting to the provider on Watch's behalf.
 
-**C7. `relay.activate` is idempotent.**
-If Watch sends `relay.activate` while relay is already active (e.g., due to WCSession reconnect), iOS re-initializes the push subscriptions without error. The old observation tasks are cancelled and new ones started.
+**C7. `relay.activated` is idempotent.**
+If Watch sends `relay.activated` while relay is already active (e.g., due to WCSession reconnect), iOS re-initializes the push subscriptions without error. The old observation tasks are cancelled and new ones started.
 
-**C8. `relay.deactivate` stops push delivery immediately.**
-On receipt of `relay.deactivate`, `relayActive` is set to false synchronously before any async cleanup. Messages arriving at the iOS subscription after this point are not forwarded.
+**C8. `relay.deactivated` stops push delivery immediately.**
+On receipt of `relay.deactivated`, `relayActive` is set to false synchronously before any async cleanup. Messages arriving at the iOS subscription after this point are not forwarded.
 
 **C9. Relay background task expires gracefully.**
 When the ~30s background task expires, the expiration handler calls `endBackgroundTask()` and sets `relayActive = false`. This stops push delivery. WCSession-wake-based delivery (Watch→iPhone requests) continues. iOS does NOT crash or behave incorrectly on expiration.
@@ -676,8 +676,8 @@ When the ~30s background task expires, the expiration handler calls `endBackgrou
 **C10. One relay session at a time.**
 `WatchConnectivityService` handles one Watch client (there is only one paired Watch). Session multiplexing is not needed — WCSession is inherently one-to-one.
 
-**C11. In-flight `chat.send` completes even after `relay.deactivate`.**
-If Watch sends `relay.deactivate` while a `chat.send` Task is awaiting `chatService.send()`, the in-flight Task completes and replies to the Watch's `replyHandler`. Deactivation does not cancel in-flight request Tasks.
+**C11. In-flight `chat.send` completes even after `relay.deactivated`.**
+If Watch sends `relay.deactivated` while a `chat.send` Task is awaiting `chatService.send()`, the in-flight Task completes and replies to the Watch's `replyHandler`. Deactivation does not cancel in-flight request Tasks.
 
 **C12. `chat.incoming` push errors are ignored.**
 If `sendMessage` to Watch fails (reachability lost mid-push), the error is logged but not retried. The Watch's transport FSM handles lost messages by transitioning to a reconnect state.
@@ -712,13 +712,13 @@ If `authManager.token == nil`, iOS replies with `error: ["code": "not_authentica
 18. `streams.create` relay creates a stream and returns the new `StreamSession`.
 19. `streams.rename` relay renames a stream and returns updated `StreamSession`.
 20. `streams.delete` relay deletes a stream and returns `deletedKey`.
-21. `relay.activate` causes iOS to begin forwarding `chat.incoming` to Watch.
-22. `relay.deactivate` causes iOS to stop forwarding `chat.incoming` to Watch.
+21. `relay.activated` causes iOS to begin forwarding `chat.incoming` to Watch.
+22. `relay.deactivated` causes iOS to stop forwarding `chat.incoming` to Watch.
 23. Provider message arriving while relay is active is forwarded to Watch via `sendMessage`.
 24. Provider message arriving while relay is inactive is NOT forwarded to Watch.
 25. `auth.refresh` request results in a reply containing current `token` and `userId`.
 26. `auth.refresh` when token is nil results in an error reply.
-27. Background task starts on `relay.activate` and ends on `relay.deactivate` or expiration.
+27. Background task starts on `relay.activated` and ends on `relay.deactivated` or expiration.
 28. `KeychainSecureStore` writes for `SonioxKeyStore` / `CartesiaKeyStore` include the shared access group `group.co.clicketyclacks.Clawline`.
 29. No new iOS UI is visible to the user as a result of any of these changes.
 30. WatchConnectivityService is injected via SwiftUI environment and accessible to any view that needs it (Settings UI for manual sync trigger, if any).
@@ -808,6 +808,6 @@ All three Round 1 blockers have been resolved:
 5. `ProviderBaseURLStore` notification post on URL change
 6. `WatchConnectivityService` protocol + `StubWatchConnectivityService`
 7. `WatchConnectivityService` implementation: WCSession activation + NotificationCenter observers + credential sync
-8. Relay message dispatch (`relay.activate`, `chat.send`, `streams.*`, `auth.refresh`)
+8. Relay message dispatch (`relay.activated`, `chat.send`, `streams.*`, `auth.refresh`)
 9. Relay push subscription (`chat.incoming`, `event` forwarding) + background task
 10. `ClawlineApp.swift` integration + `EnvironmentKeys.swift` additions

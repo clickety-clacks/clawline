@@ -521,23 +521,24 @@ extension InteractiveHTMLBubbleUIKitView: WKScriptMessageHandler {
 private enum InteractiveHTMLHTMLInjector {
     static func inject(rawHTML: String, isDark: Bool) -> String {
         let csp = #"<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:;">"#
+        let viewport = #"<meta name="viewport" content="width=device-width, initial-scale=1">"#
         let themeStyle = themeVariablesStyle(isDark: isDark)
 
         var html = rawHTML
 
         // Ensure there's a <head> to insert into.
         if let headRange = html.range(of: "<head>", options: [.caseInsensitive]) {
-            let insertion = "\n\(csp)\n\(themeStyle)\n"
+            let insertion = "\n\(viewport)\n\(csp)\n\(themeStyle)\n"
             html.insert(contentsOf: insertion, at: headRange.upperBound)
         } else if let htmlRange = html.range(of: "<html", options: [.caseInsensitive]) {
             if let tagEnd = html[htmlRange.lowerBound...].firstIndex(of: ">") {
-                let insertion = "\n<head>\n\(csp)\n\(themeStyle)\n</head>\n"
+                let insertion = "\n<head>\n\(viewport)\n\(csp)\n\(themeStyle)\n</head>\n"
                 html.insert(contentsOf: insertion, at: html.index(after: tagEnd))
             } else {
-                html = "<head>\n\(csp)\n\(themeStyle)\n</head>\n" + html
+                html = "<head>\n\(viewport)\n\(csp)\n\(themeStyle)\n</head>\n" + html
             }
         } else {
-            html = "<head>\n\(csp)\n\(themeStyle)\n</head>\n" + html
+            html = "<head>\n\(viewport)\n\(csp)\n\(themeStyle)\n</head>\n" + html
         }
 
         return html
@@ -563,6 +564,8 @@ private enum InteractiveHTMLHTMLInjector {
           color: var(--clawline-fg);
           font-family: var(--clawline-font-family);
           font-size: var(--clawline-font-size);
+          -webkit-text-size-adjust: 100%;
+          text-size-adjust: 100%;
           margin: 0;
           padding: 0;
         }

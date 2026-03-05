@@ -24,6 +24,13 @@ $HOME/.claude/local/claude --model claude-opus-4-5-20251101 \
 
 Note: "ultrathink" is appended to the prompt to enable extended thinking mode.
 
+## Swift Safety Rules
+
+- Do not use `try? await Task.sleep(...)` in cancellable flows unless the next line is an explicit cancellation guard before any side effect.
+- Prefer `do { try await Task.sleep(...) } catch is CancellationError { return }` for cancellable delay paths.
+- Avoid postfix force unwraps (`!`) in production code, except static URL literals with explicit code-review sign-off.
+- In protocol/message handlers, do not silently drop decode/transform failures; log or surface an explicit failure path.
+
 ## GitHub Issue Hygiene
 
 When working on GitHub issues, follow these rules:

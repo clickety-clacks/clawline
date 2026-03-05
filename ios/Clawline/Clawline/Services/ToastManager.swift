@@ -37,6 +37,7 @@ final class ToastManager {
             } catch {
                 return
             }
+            guard !Task.isCancelled else { return }
             await MainActor.run {
                 self?.dismiss()
             }

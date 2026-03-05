@@ -95,12 +95,15 @@ enum ClawlineTextRole {
 }
 
 extension Font {
+    private static func scaledPointSize(for role: ClawlineTextRole) -> CGFloat {
+        UIFont.clawline(role).pointSize
+    }
+
     static func clawline(_ role: ClawlineTextRole, design: Font.Design = .default) -> Font {
-        var font = Font.system(role.swiftUITextStyle, design: design)
         if let weight = role.fontWeight {
-            font = font.weight(weight)
+            return Font.system(size: scaledPointSize(for: role), weight: weight, design: design)
         }
-        return font
+        return Font.system(size: scaledPointSize(for: role), design: design)
     }
 
     static func clawline(
@@ -108,7 +111,7 @@ extension Font {
         weight: Font.Weight,
         design: Font.Design = .default
     ) -> Font {
-        Font.system(role.swiftUITextStyle, design: design).weight(weight)
+        Font.system(size: scaledPointSize(for: role), weight: weight, design: design)
     }
 }
 
@@ -171,6 +174,9 @@ extension UIFont {
             ])
         }
         let baseFont = UIFont(descriptor: descriptor, size: preferredDescriptor.pointSize)
-        return UIFontMetrics(forTextStyle: textStyle).scaledFont(for: baseFont, compatibleWith: traitCollection)
+        let dynamicTypeFont = UIFontMetrics(forTextStyle: textStyle)
+            .scaledFont(for: baseFont, compatibleWith: traitCollection)
+        let appScale = AppFontScale.persistedValue()
+        return dynamicTypeFont.withSize(dynamicTypeFont.pointSize * appScale)
     }
 }

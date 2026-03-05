@@ -543,6 +543,13 @@ struct MessageInputBar: View {
         !isSending && canSend && connectionState == .connected
     }
 
+    static func shouldDispatchEditorSubmitIntent(
+        isSending: Bool,
+        hasSubmittableDraft: Bool
+    ) -> Bool {
+        !isSending && hasSubmittableDraft
+    }
+
     private var pullToSendEligible: Bool {
         canSendNow
     }

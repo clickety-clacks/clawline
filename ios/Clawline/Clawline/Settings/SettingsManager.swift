@@ -58,6 +58,18 @@ final class SettingsManager {
         didSet { savePinnedLeafCertificateSHA256() }
     }
 
+    var fontScale: CGFloat {
+        didSet { saveFontScale() }
+    }
+
+    var isLifecycleDebugOverlayEnabled: Bool {
+        didSet { saveLifecycleDebugOverlayEnabled() }
+    }
+
+    private(set) var fontScaleChangeSequence: Int = 0
+    private(set) var fontScaleToastSequence: Int = 0
+    private var pendingFontScaleToastMessage: String?
+
     var sonioxAPIKey: String {
         get { sonioxKeyStore.editableKey }
         set { sonioxKeyStore.setKey(newValue) }
@@ -71,20 +83,24 @@ final class SettingsManager {
 
     private static let effectConfigKey = "backgroundEffectConfiguration"
     private static let appearanceModeKey = "appearanceMode"
+    private static let lifecycleDebugOverlayEnabledKey = "debug.lifecycleOverlayEnabled"
     private static let dictationCausticsBaselineSpeedKey = "dictation.caustics.baselineSpeed"
     private static let dictationCausticsMaxSpeedKey = "dictation.caustics.maxSpeed"
     private static let dictationCausticsBrightnessKey = "dictation.caustics.brightness"
     private static let dictationCausticsScaleKey = "dictation.caustics.scale"
     private static let dictationCausticsSharpnessKey = "dictation.caustics.sharpness"
     private static let dictationCausticsColor1Key = "dictation.caustics.color1"
+
     static let defaultDictationCausticsBaselineSpeed: Double = 0.600
     static let defaultDictationCausticsMaxSpeed: Double = 2.140
     static let defaultDictationCausticsBrightness: Double = 0.373
     static let defaultDictationCausticsScale: Double = 5.000
     static let defaultDictationCausticsSharpness: Double = 1.065
     static let defaultDictationCausticsColor1 = CodableColor(red: 1.000, green: 1.000, blue: 1.000, alpha: 1.000)
+
     init(sonioxKeyStore: SonioxKeyStore) {
         self.sonioxKeyStore = sonioxKeyStore
+
         if let data = UserDefaults.standard.data(forKey: Self.effectConfigKey),
            let config = try? JSONDecoder().decode(BackgroundEffectConfiguration.self, from: data) {
             self.effectConfig = config
@@ -113,8 +129,15 @@ final class SettingsManager {
             forKey: Self.dictationCausticsColor1Key,
             fallback: Self.defaultDictationCausticsColor1
         )
+
         self.trustSelfSignedCertificates = ProviderTLSSettingsStore.trustSelfSignedCertificates
         self.pinnedLeafCertificateSHA256 = ProviderTLSSettingsStore.pinnedLeafCertificateSHA256 ?? ""
+        self.fontScale = AppFontScale.persistedValue()
+        self.isLifecycleDebugOverlayEnabled = UserDefaults.standard.bool(forKey: Self.lifecycleDebugOverlayEnabledKey)
+    }
+
+    convenience init() {
+        self.init(sonioxKeyStore: SonioxKeyStore())
     }
 
     private func save() {
@@ -146,6 +169,17 @@ final class SettingsManager {
         ProviderTLSSettingsStore.pinnedLeafCertificateSHA256 = pinnedLeafCertificateSHA256
     }
 
+    private func saveFontScale() {
+        AppFontScale.persist(fontScale)
+    }
+
+    private func saveLifecycleDebugOverlayEnabled() {
+        UserDefaults.standard.set(
+            isLifecycleDebugOverlayEnabled,
+            forKey: Self.lifecycleDebugOverlayEnabledKey
+        )
+    }
+
     func resetToDefaults() {
         effectConfig = .default
         appearanceMode = .dark
@@ -157,6 +191,8 @@ final class SettingsManager {
         dictationCausticsColor1 = Self.defaultDictationCausticsColor1
         trustSelfSignedCertificates = true
         pinnedLeafCertificateSHA256 = ""
+        fontScale = AppFontScale.defaultValue
+        isLifecycleDebugOverlayEnabled = false
     }
 
     func toggleSettings() {
@@ -191,6 +227,29 @@ final class SettingsManager {
         return await sonioxKeyStore.verify()
     }
 
+    func increaseFontScale() {
+        adjustFontScale(by: AppFontScale.step)
+    }
+
+    func decreaseFontScale() {
+        adjustFontScale(by: -AppFontScale.step)
+    }
+
+    func consumePendingFontScaleToastMessage() -> String? {
+        defer { pendingFontScaleToastMessage = nil }
+        return pendingFontScaleToastMessage
+    }
+
+    private func adjustFontScale(by delta: CGFloat) {
+        let next = AppFontScale.clamp(fontScale + delta)
+        if next != fontScale {
+            fontScale = next
+            fontScaleChangeSequence &+= 1
+        }
+        pendingFontScaleToastMessage = AppFontScale.toastMessage(for: next)
+        fontScaleToastSequence &+= 1
+    }
+
     private static func loadCodableColor(forKey key: String, fallback: CodableColor) -> CodableColor {
         guard let data = UserDefaults.standard.data(forKey: key),
               let color = try? JSONDecoder().decode(CodableColor.self, from: data) else {
@@ -203,7 +262,7 @@ final class SettingsManager {
 // MARK: - Environment Key
 
 private struct SettingsManagerKey: EnvironmentKey {
-    @MainActor static let defaultValue: SettingsManager = SettingsManager(sonioxKeyStore: SonioxKeyStore())
+    @MainActor static let defaultValue: SettingsManager = SettingsManager()
 }
 
 extension EnvironmentValues {

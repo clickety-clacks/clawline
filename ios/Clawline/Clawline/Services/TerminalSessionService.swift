@@ -420,8 +420,10 @@ final class TerminalSessionService {
             } catch {
                 return
             }
+            guard !Task.isCancelled else { return }
             await MainActor.run {
                 guard let self else { return }
+                guard !Task.isCancelled else { return }
                 self.isReady = true
                 self.logger.debug("terminal_messages_enabled terminalSessionId=\(self.descriptor.terminalSessionId, privacy: .public)")
                 if let pendingResize = self.pendingResize {

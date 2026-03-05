@@ -138,7 +138,12 @@ private actor Worker {
     private let baseURL: URL
 
     init() {
-        let caches = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first!
+        let caches: URL
+        if let directory = fileManager.urls(for: .cachesDirectory, in: .userDomainMask).first {
+            caches = directory
+        } else {
+            caches = fileManager.temporaryDirectory
+        }
         baseURL = caches.appendingPathComponent("SalientHighlights/v1", isDirectory: true)
     }
 
@@ -295,12 +300,15 @@ private actor Worker {
                     do {
                         try await Task.sleep(nanoseconds: UInt64(max(0, delay) * 1_000_000_000))
                     } catch is CancellationError {
+                        self.clearThrottleWake()
                         return
                     } catch {
+                        self.clearThrottleWake()
                         return
                     }
-                    await self.clearThrottleWake()
-                    await self.schedulePermitGrant()
+                    self.clearThrottleWake()
+                    guard !Task.isCancelled else { return }
+                    self.schedulePermitGrant()
                 }
             }
             return

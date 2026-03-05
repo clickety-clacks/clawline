@@ -44,10 +44,66 @@ protocol ChatViewModelHosting: AnyObject {
 final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, SendCommandPort, ChatRuntimePort {
     private let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "MessagePipeline")
     private let instanceId = UUID().uuidString
+    @MainActor
+    private static var currentConnectionOwnerId: String?
     private static let richDocumentMimeTypesNeedingPayload: Set<String> = [
         InteractiveHTMLDescriptor.mimeType,
         TerminalSessionDescriptor.mimeType
     ]
+
+    private func coordinatorDiag(_ message: String) {
+        print("[T099-COORD] \(Date().ISO8601Format()) vm=\(instanceId) \(message)")
+    }
+
+    var debugInstanceId: String { instanceId }
+
+    private func observationStateFlags() -> String {
+        #if DEBUG
+        return "obsTask=\(observationTask != nil) startupTask=\(observationStartupTask != nil) transportSub=\(lifecycleTransportEventsSubscription != nil) outputsSub=\(lifecycleOutputsSubscription != nil) gateSub=\(lifecycleStartupGateDebugSubscription != nil) startupCount=\(observationStartupCount)"
+        #else
+        return "obsTask=\(observationTask != nil) startupTask=\(observationStartupTask != nil) transportSub=\(lifecycleTransportEventsSubscription != nil) outputsSub=\(lifecycleOutputsSubscription != nil) gateSub=\(lifecycleStartupGateDebugSubscription != nil)"
+        #endif
+    }
+
+    private func ownerStateFlags() -> String {
+        "isOwner=\(isConnectionOwner) currentOwner=\(Self.currentConnectionOwnerId ?? "nil") isRetired=\(isRetired) isChatVisible=\(isChatVisible) isAppInForeground=\(isAppInForeground)"
+    }
+
+    private func emitPinpointLog(event: String, origin: String, phaseHint: ConnectionLifecyclePhase? = nil) {
+        let phase = phaseHint ?? connectionLifecyclePhase
+        logger.info(
+            "[T099-PIN] vm=\(self.instanceId, privacy: .public) event=\(event, privacy: .public) origin=\(origin, privacy: .public) phaseHint=\(String(describing: phase), privacy: .public) \(self.ownerStateFlags(), privacy: .public) \(self.observationStateFlags(), privacy: .public)"
+        )
+        Task { [weak self] in
+            guard let self else { return }
+            let actorPhase = await lifecycleCoordinator.phase
+            logger.info(
+                "[T099-PIN] vm=\(self.instanceId, privacy: .public) event=\(event, privacy: .public) origin=\(origin, privacy: .public) actorPhase=\(String(describing: actorPhase), privacy: .public)"
+            )
+        }
+    }
+
+    private var isConnectionOwner: Bool {
+        Self.currentConnectionOwnerId == instanceId
+    }
+
+    private func claimConnectionOwnership(reason: String) {
+        let previousOwner = Self.currentConnectionOwnerId ?? "none"
+        Self.currentConnectionOwnerId = instanceId
+        logger.info(
+            "ChatViewModel connection-owner claim id=\(self.instanceId, privacy: .public) previous=\(previousOwner, privacy: .public) reason=\(reason, privacy: .public)"
+        )
+        emitPinpointLog(event: "connectionOwner_claim", origin: reason)
+    }
+
+    private func releaseConnectionOwnershipIfNeeded(reason: String) {
+        guard Self.currentConnectionOwnerId == instanceId else { return }
+        Self.currentConnectionOwnerId = nil
+        logger.info(
+            "ChatViewModel connection-owner release id=\(self.instanceId, privacy: .public) reason=\(reason, privacy: .public)"
+        )
+        emitPinpointLog(event: "connectionOwner_release", origin: reason)
+    }
     private(set) var messages: [Message] = []
     private(set) var streamsBySessionKey: [String: StreamSession] = [:]
     private(set) var orderedSessionKeys: [String] = []
@@ -59,6 +115,15 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
     enum StreamSwitchSource: Equatable {
         case pager
         case programmatic
+    }
+
+    private struct StreamSwitchCoordinator {
+        let resetHandler: @MainActor () -> Void
+
+        @MainActor
+        func reset() {
+            resetHandler()
+        }
     }
 
     // UI-intent key: updates immediately on stream-switch intent.
@@ -249,16 +314,14 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
     private func applyActiveSessionKey(_ sessionKey: String) {
         StreamSwitchTiming.log("applyActiveSessionKey_enter", sessionKey: sessionKey)
         engineActiveSessionKey = sessionKey
-        restoreLastServerMessageIdIfNeeded(for: sessionKey)
         restoreCachedMessagesIfNeeded(for: sessionKey)
         ensureSessionStorage(for: sessionKey)
         messages = sessionMessages[sessionKey] ?? []
         StreamSwitchTiming.log("messages_assigned", sessionKey: sessionKey)
-        lastServerMessageId = lastServerMessageIdBySession[sessionKey]
         persistActiveSessionKey(sessionKey)
     }
 
-    private func clearActiveSession() {
+    private func clearActiveSession(clearPersistedActiveSessionKey: Bool = true) {
         setEngineActiveSessionKey("")
         setUISelectedSessionKey("")
         pendingEngineActivationTarget = nil
@@ -267,14 +330,29 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         pendingEngineActivationTask = nil
         engineActivationInFlightSessionKey = nil
         messages = []
-        lastServerMessageId = nil
-        streamDefaults.removeObject(forKey: activeSessionDefaultsKey())
+        if clearPersistedActiveSessionKey {
+            streamDefaults.removeObject(forKey: activeSessionDefaultsKey())
+        }
+    }
+
+    private func resetStreamSwitchState() {
+        pendingEngineActivationTask?.cancel()
+        pendingEngineActivationTask = nil
+        pendingEngineActivationTarget = nil
+        pendingEngineActivationEpoch = nil
+        engineActivationInFlightSessionKey = nil
+        bindStreamSwitchCoordinatorIfNeeded()
+    }
+
+    private func makeStreamSwitchCoordinator() -> StreamSwitchCoordinator {
+        StreamSwitchCoordinator(resetHandler: { [weak self] in
+            self?.resetStreamSwitchState()
+        })
     }
 
     var activeSessionDisplayName: String {
         streamsBySessionKey[uiSelectedSessionKey]?.displayName ?? fallbackDisplayName(for: uiSelectedSessionKey)
     }
-    private(set) var lastServerMessageId: String?
     var inputContent: NSAttributedString = NSAttributedString() {
         didSet {
             pruneAttachmentData()
@@ -282,6 +360,8 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         }
     }
     var attachmentData: [UUID: PendingAttachment] = [:]
+    private(set) var pendingAttachmentStageCount: Int = 0
+    private var stagedAttachmentProtection: Set<UUID> = []
     private(set) var isSending: Bool = false
     private(set) var isAssistantTyping: Bool = false
     private(set) var typingSessionKey: String?
@@ -290,6 +370,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
     private(set) var sendTask: Task<Void, Never>?
     /// Tracks if typing indicator was visible when a message arrives (for morph transition).
     private(set) var shouldMorphTypingIndicator: Bool = false
+    private var isRetired = false
 
     private var temporarySendButtonOverride: SendButtonConnectionState?
     private var temporarySendButtonOverrideTask: Task<Void, Never>?
@@ -307,11 +388,13 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
     }
 
     var canSend: Bool {
-        transportSendButtonConnectionState == .connected && !inputContent.isEffectivelyEmpty
+        pendingAttachmentStageCount == 0
+            && transportSendButtonConnectionState == .connected
+            && !inputContent.isEffectivelyEmpty
     }
 
     var sendButtonConnectionState: SendButtonConnectionState {
-        temporarySendButtonOverride ?? transportSendButtonConnectionState
+        return temporarySendButtonOverride ?? transportSendButtonConnectionState
     }
 
     let toastManager: ToastManager
@@ -323,18 +406,19 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
     private let deviceId: String
     let salientHighlightService: any SalientHighlightServicing
     private var observationTask: Task<Void, Never>?
+    private var observationStartupTask: Task<Void, Never>?
+    private var activationTask: Task<Void, Never>?
+    private var hasActivatedLifecycleOwnership = false
+    private var lifecycleTransportEventsSubscription: AsyncStream<LifecycleTransportEvent>?
+    private var lifecycleOutputsSubscription: AsyncStream<ConnectionLifecycleOutput>?
+    private var lifecycleStartupGateDebugSubscription: AsyncStream<StartupGateDebugEvent>?
     private var sessionMessages: [String: [Message]] = [:]
-    private var lastServerMessageIdBySession: [String: String] = [:]
+    private var forceReReadGenerationBySession: [String: Int] = [:]
     private var pendingLocalMessages: [PendingLocalMessage] = []
-    private var reconnectTask: Task<Void, Never>?
-    private var reconnectBackoff: Duration = .seconds(1)
-    private let authRejectionInitialBackoff: Duration = .seconds(30)
-    private let authRejectionMaxBackoff: Duration = .seconds(900)
-    private var lastReconnectAttemptAt: Date?
-    private let minimumReconnectInterval: TimeInterval = 1.0
-    private var lastReconnectRequestAt: Date?
-    private var lastForegroundReconnectTrigger: Date?
-    private let foregroundReconnectDebounceInterval: TimeInterval = 5
+    private let lifecycleCoordinator: ConnectionLifecycleCoordinator
+    private var lifecycleTransportTask: Task<Void, Never>?
+    private var lifecycleOutputTask: Task<Void, Never>?
+    private var connectionLifecyclePhase: ConnectionLifecyclePhase = .idle
     private var connectionStableTask: Task<Void, Never>?
     private let stableConnectionInterval: Duration = .seconds(5)
     private var activeClientMessageId: String?
@@ -353,6 +437,20 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
     private let assistantIncomingHaptic: @MainActor () -> Void
     private var persistDebounceTasks: [String: Task<Void, Never>] = [:]
     private var pendingPersistPayloads: [String: [Message]] = [:]
+    private var restoreTaskBySessionKey: [String: Task<Void, Never>] = [:]
+    private var writerCurrentEpoch: Int?
+    private var firstReplayAppliedEpoch: Int?
+#if DEBUG
+    private var observationStartupCount: Int = 0
+    private(set) var lifecycleDebugPhase: ConnectionLifecyclePhase = .idle
+    private(set) var lifecycleDebugSignals: [LifecycleDebugSignalRecord] = []
+    private(set) var lifecycleDebugObserverEvents: [LifecycleObserverDebugRecord] = []
+    private(set) var lifecycleDebugStartupGateEvents: [StartupGateDebugEvent] = []
+    private(set) var lifecycleDebugLastGateDecision: String = "none"
+    private(set) var imageSendDebugRecords: [ImageSendDebugRecord] = []
+    private(set) var imageSendLastTransportSnapshot: String = "-"
+    private(set) var lifecycleDebugSequence: Int = 0
+#endif
     private let messageCacheLimit = 500
     private var restoredSessionKeys: Set<String> = []
     private var restoredStreamMetadataForUserId: String?
@@ -361,6 +459,15 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
     private var hasReceivedSessionProvisioning = false
     private var provisionedSessionKeys: Set<String> = []
     private var pendingProvisionedSend: PendingProvisionedSend?
+
+    func forceReReadGeneration(for sessionKey: String) -> Int {
+        forceReReadGenerationBySession[sessionKey] ?? 0
+    }
+
+    private func armForceReRead(for sessionKey: String) {
+        guard !sessionKey.isEmpty else { return }
+        forceReReadGenerationBySession[sessionKey, default: 0] &+= 1
+    }
 
     private struct PendingLocalMessage: Equatable {
         let id: String
@@ -373,6 +480,51 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         let sessionKey: String
     }
 
+#if DEBUG
+    enum ImageSendDebugEventKind: String, Equatable {
+        case attachmentAdded = "attachment_added"
+        case attachmentStagingStarted = "attachment_staging_started"
+        case attachmentStagingCompleted = "attachment_staging_completed"
+        case sendTapped = "send_tapped"
+        case sendDispatched = "send_dispatched"
+        case sendResult = "send_result"
+    }
+
+    struct ImageSendDebugRecord: Equatable, Identifiable {
+        let id = UUID()
+        let kind: ImageSendDebugEventKind
+        let timestamp: Date
+        let detail: String
+    }
+
+    enum LifecycleDebugSignal: String, Equatable {
+        case authChangedToken = "authChanged(token)"
+        case authChangedNil = "authChanged(nil)"
+        case viewAppeared = "viewAppeared"
+        case sceneActivated = "sceneActivated"
+    }
+
+    struct LifecycleDebugSignalRecord: Equatable, Identifiable {
+        let id = UUID()
+        let signal: LifecycleDebugSignal
+        let timestamp: Date
+    }
+
+    enum LifecycleObserverDebugEvent: String, Equatable {
+        case onDisappear = "onDisappear"
+        case startObservingIfNeeded = "startObservingIfNeeded"
+    }
+
+    struct LifecycleObserverDebugRecord: Equatable, Identifiable {
+        let id = UUID()
+        let event: LifecycleObserverDebugEvent
+        let timestamp: Date
+        let hasObservationTask: Bool
+        let hasTransportSubscription: Bool
+        let hasOutputsSubscription: Bool
+    }
+#endif
+
     private enum SendProvisioningState {
         case ready
         case waiting
@@ -380,10 +532,71 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
     }
 
     private enum ConnectionStateMutationSource: String {
-        case stateStream
-        case manualReconnect
-        case serviceInterruption
+        case lifecycleCoordinator
     }
+
+#if DEBUG
+    private func recordLifecycleDebugSignal(_ signal: LifecycleDebugSignal) {
+        if signal == .authChangedToken {
+            lifecycleDebugSignals.removeAll(keepingCapacity: true)
+            lifecycleDebugObserverEvents.removeAll(keepingCapacity: true)
+            lifecycleDebugStartupGateEvents.removeAll(keepingCapacity: true)
+            lifecycleDebugLastGateDecision = "none"
+            imageSendDebugRecords.removeAll(keepingCapacity: true)
+            imageSendLastTransportSnapshot = "-"
+        }
+        lifecycleDebugSignals.append(.init(signal: signal, timestamp: Date()))
+        if lifecycleDebugSignals.count > 12 {
+            lifecycleDebugSignals.removeFirst(lifecycleDebugSignals.count - 12)
+        }
+        lifecycleDebugSequence &+= 1
+    }
+
+    private func recordImageSendDebugEvent(_ kind: ImageSendDebugEventKind, detail: String) {
+        imageSendDebugRecords.append(.init(kind: kind, timestamp: Date(), detail: detail))
+        if imageSendDebugRecords.count > 12 {
+            imageSendDebugRecords.removeFirst(imageSendDebugRecords.count - 12)
+        }
+        lifecycleDebugSequence &+= 1
+    }
+
+    private func recordLifecycleDebugPhase(_ phase: ConnectionLifecyclePhase) {
+        lifecycleDebugPhase = phase
+        lifecycleDebugSequence &+= 1
+    }
+
+    private func recordLifecycleObserverDebugEvent(_ event: LifecycleObserverDebugEvent) {
+        lifecycleDebugObserverEvents.append(
+            .init(
+                event: event,
+                timestamp: Date(),
+                hasObservationTask: observationTask != nil,
+                hasTransportSubscription: lifecycleTransportEventsSubscription != nil,
+                hasOutputsSubscription: lifecycleOutputsSubscription != nil
+            )
+        )
+        if lifecycleDebugObserverEvents.count > 12 {
+            lifecycleDebugObserverEvents.removeFirst(lifecycleDebugObserverEvents.count - 12)
+        }
+        lifecycleDebugSequence &+= 1
+    }
+
+    private func recordLifecycleStartupGateEvent(_ event: StartupGateDebugEvent) {
+        lifecycleDebugStartupGateEvents.append(event)
+        if lifecycleDebugStartupGateEvents.count > 12 {
+            lifecycleDebugStartupGateEvents.removeFirst(lifecycleDebugStartupGateEvents.count - 12)
+        }
+        switch event.kind {
+        case .startIfNeededExitMissingAuthToken:
+            lifecycleDebugLastGateDecision = "missing_auth_token"
+        case .startIfNeededExitMissingViewAppeared:
+            lifecycleDebugLastGateDecision = "missing_view_appeared"
+        default:
+            break
+        }
+        lifecycleDebugSequence &+= 1
+    }
+#endif
 
     init(auth: any AuthManaging,
          chatService: any ChatServicing,
@@ -408,6 +621,14 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         self.uploadService = uploadService
         self.toastManager = toastManager
         self.salientHighlightService = salientHighlightService
+        self.lifecycleCoordinator = ConnectionLifecycleCoordinator(
+            startAttempt: { [weak chatService] epoch, lastMessageId, token in
+                chatService?.startConnectionAttempt(epoch: epoch, lastMessageId: lastMessageId, token: token)
+            },
+            stopAttempt: { [weak chatService] in
+                chatService?.stopConnectionAttempt()
+            }
+        )
         self.nowProvider = nowProvider
         self.assistantIncomingHaptic = assistantIncomingHaptic
         _ = connectionAlertGracePeriod
@@ -423,48 +644,98 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
             name: Notification.Name("AuthStateDidChange"),
             object: nil
         )
-        handleAuthStateChange()
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleDidEnterBackgroundNotification),
+            name: UIApplication.didEnterBackgroundNotification,
+            object: nil
+        )
+        claimConnectionOwnership(reason: "init")
     }
 
     deinit {
         logger.info("ChatViewModel deinit id=\(self.instanceId, privacy: .public)")
         NotificationCenter.default.removeObserver(self, name: UIApplication.didReceiveMemoryWarningNotification, object: nil)
         NotificationCenter.default.removeObserver(self, name: Notification.Name("AuthStateDidChange"), object: nil)
+        NotificationCenter.default.removeObserver(self, name: UIApplication.didEnterBackgroundNotification, object: nil)
     }
 
-    func onAppear() async {
+    func activate(origin: String = "RootView.ensureChatViewModel") async {
+        guard !isRetired else {
+            coordinatorDiag("activate ignored retired-vm")
+            return
+        }
+        guard isConnectionOwner else {
+            coordinatorDiag("activate ignored non-owner")
+            return
+        }
+        if hasActivatedLifecycleOwnership {
+            coordinatorDiag("activate early-return already-activated")
+            return
+        }
+        if let activationTask {
+            coordinatorDiag("activate joining in-flight activation task")
+            await activationTask.value
+            return
+        }
+
+        let task = Task { @MainActor [weak self] in
+            guard let self else { return }
+            self.coordinatorDiag("activate begin")
+            await self.startObservingIfNeeded(origin: "activate[\(origin)]")
+#if DEBUG
+            self.recordLifecycleDebugSignal(.viewAppeared)
+#endif
+            await self.lifecycleCoordinator.viewAppeared()
+            self.hasActivatedLifecycleOwnership = true
+            self.coordinatorDiag("activate after viewAppeared -> handleAuthStateChange")
+            self.handleAuthStateChange()
+        }
+        activationTask = task
+        await task.value
+        activationTask = nil
+        coordinatorDiag("activate complete")
+    }
+
+    func onAppear(origin: String = "ChatView.task") async {
+        guard !isRetired else {
+            coordinatorDiag("onAppear ignored retired-vm")
+            return
+        }
+        guard isConnectionOwner else {
+            coordinatorDiag("onAppear ignored non-owner")
+            return
+        }
+        coordinatorDiag("onAppear enter tokenPresent=\(auth.token != nil)")
+        emitPinpointLog(event: "onAppear_enter", origin: origin)
         isChatVisible = true
         isAppInForeground = true
-        guard auth.token != nil else { return }
-
         logger.info("ChatViewModel onAppear id=\(self.instanceId, privacy: .public)")
-        if observationTask == nil {
-            startObserving()
-        }
-        scheduleReconnect(immediate: true, reason: .onAppear)
+
+        guard auth.token != nil else { return }
+        await startObservingIfNeeded(origin: "onAppear[\(origin)]")
+        await lifecycleCoordinator.manualRetry()
     }
 
-    func onDisappear() {
+    func onDisappear(origin: String = "ChatView.onDisappear") {
+#if DEBUG
+        recordLifecycleObserverDebugEvent(.onDisappear)
+#endif
+        emitPinpointLog(event: "onDisappear_enter", origin: origin)
+        logger.info("ChatViewModel onDisappear FIRED id=\(self.instanceId, privacy: .public) isChatVisible=\(self.isChatVisible) isOwner=\(self.isConnectionOwner) hasObsTask=\(self.observationTask != nil) hasTransportSub=\(self.lifecycleTransportEventsSubscription != nil) hasOutputsSub=\(self.lifecycleOutputsSubscription != nil)")
         isChatVisible = false
-        logger.info("ChatViewModel onDisappear id=\(self.instanceId, privacy: .public)")
-        observationTask?.cancel()
-        observationTask = nil
-        reconnectTask?.cancel()
-        reconnectTask = nil
-        connectionStableTask?.cancel()
-        connectionStableTask = nil
-        clearTemporarySendButtonOverride()
-        cancelSend()
-        chatService.disconnect()
+        logger.info("ChatViewModel onDisappear id=\(self.instanceId, privacy: .public) visibility-only")
     }
 
     func reconnect() {
+        guard !isRetired else { return }
+        guard isConnectionOwner else { return }
         guard auth.token != nil else { return }
-        guard transportSendButtonConnectionState == .disconnected else { return }
-        transitionConnectionState(.reconnecting, source: .manualReconnect)
-        reconnectTask?.cancel()
-        reconnectTask = nil
-        scheduleReconnect(immediate: true, reason: .manualReconnect)
+        guard sendButtonConnectionState == .disconnected else { return }
+        Task {
+            await startObservingIfNeeded(origin: "reconnect")
+            await lifecycleCoordinator.manualRetry()
+        }
     }
 
     @objc private func handleAuthStateChangeNotification() {
@@ -472,57 +743,77 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
     }
 
     private func handleAuthStateChange() {
+        guard !isRetired else {
+            coordinatorDiag("handleAuthStateChange ignored retired-vm tokenPresent=\(auth.token != nil)")
+            return
+        }
+        guard hasActivatedLifecycleOwnership else {
+            coordinatorDiag("handleAuthStateChange deferred until activate tokenPresent=\(auth.token != nil)")
+            return
+        }
+        guard isConnectionOwner else {
+            coordinatorDiag("handleAuthStateChange ignored non-owner tokenPresent=\(auth.token != nil)")
+            if auth.token == nil {
+                stopObservingLifecycle(origin: "handleAuthStateChange.nonOwnerTokenNil")
+            }
+            return
+        }
+        coordinatorDiag("handleAuthStateChange enter tokenPresent=\(auth.token != nil)")
         if auth.token != nil {
-            if observationTask == nil {
-                startObserving()
+            let seededCursor = chatService.replayCursorSnapshot().values.max()
+            coordinatorDiag("handleAuthStateChange auth-path seededCursor=\(seededCursor ?? "nil")")
+            Task {
+                self.coordinatorDiag("handleAuthStateChange task before startObservingIfNeeded")
+                await self.startObservingIfNeeded(origin: "handleAuthStateChange.authPath")
+                self.coordinatorDiag("handleAuthStateChange task after startObservingIfNeeded before seedCanonicalCursor")
+                await lifecycleCoordinator.seedCanonicalCursor(seededCursor)
+                self.coordinatorDiag("handleAuthStateChange task after seedCanonicalCursor before authChanged signal")
+#if DEBUG
+                self.recordLifecycleDebugSignal(.authChangedToken)
+#endif
+                await lifecycleCoordinator.authChanged(token: auth.token)
+                self.coordinatorDiag("handleAuthStateChange task after authChanged signal")
             }
             restoreStreamMetadataIfNeeded()
             restoreActiveSessionKeyIfNeeded()
             ensureDefaultActiveSessionIfNeeded()
-            restoreLastServerMessageIdIfNeeded()
-            if !engineActiveSessionKey.isEmpty {
-                restoreLastServerMessageIdIfNeeded(for: engineActiveSessionKey)
-                restoreCachedMessagesIfNeeded(for: engineActiveSessionKey)
-            }
-            for sessionKey in orderedSessionKeys where sessionKey != engineActiveSessionKey {
-                restoreLastServerMessageIdIfNeeded(for: sessionKey)
-                restoreCachedMessagesIfNeeded(for: sessionKey)
-            }
-            switch connectionState {
-            case .connected, .connecting, .reconnecting:
-                break
-            default:
-                scheduleReconnect(immediate: true, reason: .authStateChange)
-            }
         } else {
+            coordinatorDiag("handleAuthStateChange logout-path")
             didRestoreActiveSessionKey = false
-            observationTask?.cancel()
-            observationTask = nil
-            reconnectTask?.cancel()
-            reconnectTask = nil
-            connectionStableTask?.cancel()
-            connectionStableTask = nil
+            stopObservingLifecycle(origin: "handleAuthStateChange.logoutPath")
+#if DEBUG
+            recordLifecycleDebugSignal(.authChangedNil)
+#endif
+            Task { await lifecycleCoordinator.authChanged(token: nil) }
             chatService.disconnect()
         }
     }
 
     func handleSceneDidBecomeActive() {
+        guard !isRetired else { return }
+        guard isConnectionOwner else { return }
         isAppInForeground = true
+        guard hasActivatedLifecycleOwnership else {
+            coordinatorDiag("sceneDidBecomeActive deferred until activate")
+            return
+        }
         guard auth.token != nil else { return }
         logger.info("ChatViewModel sceneDidBecomeActive id=\(self.instanceId, privacy: .public) state=\(String(describing: self.connectionState), privacy: .public)")
-        switch connectionState {
-        case .connected, .connecting, .reconnecting:
-            break
-        default:
-            guard reconnectTask == nil else { return }
-            let now = Date()
-            if let last = lastForegroundReconnectTrigger,
-               now.timeIntervalSince(last) < foregroundReconnectDebounceInterval {
-                return
-            }
-            lastForegroundReconnectTrigger = now
-            scheduleReconnect(immediate: false, reason: .sceneDidBecomeActive)
+        coordinatorDiag("sceneDidBecomeActive tokenPresent=true observationTaskNil=\(observationTask == nil)")
+        Task {
+            self.coordinatorDiag("sceneDidBecomeActive task before startObservingIfNeeded")
+            await startObservingIfNeeded(origin: "sceneDidBecomeActive")
+            self.coordinatorDiag("sceneDidBecomeActive task before sceneActivated signal")
+#if DEBUG
+            self.recordLifecycleDebugSignal(.sceneActivated)
+#endif
+            await lifecycleCoordinator.sceneActivated()
+            self.coordinatorDiag("sceneDidBecomeActive task after sceneActivated signal")
         }
+    }
+
+    @objc private func handleDidEnterBackgroundNotification() {
+        Task { await lifecycleCoordinator.appDidEnterBackground() }
     }
 
     func handleSceneActiveStateChanged(isActive: Bool) {
@@ -531,37 +822,168 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         handleSceneDidBecomeActive()
     }
 
-    private func startObserving() {
-        logger.info("ChatViewModel startObserving id=\(self.instanceId, privacy: .public)")
-        observationTask = Task {
-            await withTaskGroup(of: Void.self) { group in
-                group.addTask { [weak self] in
-                    await self?.observeMessages()
-                }
+    private func startObservingIfNeeded(origin: String) async {
+#if DEBUG
+        recordLifecycleObserverDebugEvent(.startObservingIfNeeded)
+#endif
+        emitPinpointLog(event: "startObserving_enter", origin: origin)
+        logger.info("startObservingIfNeeded CALLED id=\(self.instanceId, privacy: .public) hasObsTask=\(self.observationTask != nil) hasTransportSub=\(self.lifecycleTransportEventsSubscription != nil)")
+        guard !isRetired else {
+            coordinatorDiag("startObservingIfNeeded ignored retired-vm")
+            return
+        }
+        guard isConnectionOwner else {
+            coordinatorDiag("startObservingIfNeeded ignored non-owner")
+            return
+        }
+        coordinatorDiag("startObservingIfNeeded enter observationTaskNil=\(observationTask == nil) startupTaskNil=\(observationStartupTask == nil) transportSubNil=\(lifecycleTransportEventsSubscription == nil) outputsSubNil=\(lifecycleOutputsSubscription == nil)")
+        if observationTask != nil {
+            coordinatorDiag("startObservingIfNeeded early-return observationTaskExists")
+            emitPinpointLog(event: "startObserving_earlyReturn_existingObservationTask", origin: origin)
+            return
+        }
+        if let observationStartupTask {
+            // Cold launch can hit this from onAppear/auth-change/scene-active concurrently.
+            // Join the in-flight startup so only one observer set is ever created.
+            coordinatorDiag("startObservingIfNeeded joining in-flight startup task")
+            await observationStartupTask.value
+            coordinatorDiag("startObservingIfNeeded joined in-flight startup task")
+            emitPinpointLog(event: "startObserving_joinedExistingStartupTask", origin: origin)
+            return
+        }
 
-                group.addTask { [weak self] in
-                    await self?.observeConnectionState()
-                }
+        let startupTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            self.coordinatorDiag("startObservingIfNeeded startupTask begin")
+            await self.ensureLifecycleOutputsSubscription()
+            self.coordinatorDiag("startObservingIfNeeded after ensureLifecycleOutputsSubscription")
+            if Task.isCancelled { return }
+            await self.ensureLifecycleStartupGateDebugSubscription()
+            self.coordinatorDiag("startObservingIfNeeded after ensureLifecycleStartupGateDebugSubscription")
+            if Task.isCancelled { return }
+            self.ensureLifecycleTransportSubscription()
+            self.coordinatorDiag("startObservingIfNeeded after ensureLifecycleTransportSubscription")
+            if Task.isCancelled { return }
+#if DEBUG
+            self.observationStartupCount += 1
+#endif
+            self.logger.info("ChatViewModel startObserving id=\(self.instanceId, privacy: .public)")
+            self.coordinatorDiag("startObservingIfNeeded creating observationTask")
+            self.observationTask = Task {
+                await withTaskGroup(of: Void.self) { group in
+                    group.addTask { [weak self] in
+                        await self?.observeLifecycleTransportEvents()
+                    }
 
-                group.addTask { [weak self] in
-                    await self?.observeServiceEvents()
+                    group.addTask { [weak self] in
+                        await self?.observeLifecycleOutputs()
+                    }
+
+                    group.addTask { [weak self] in
+                        await self?.observeLifecycleStartupGateDebugEvents()
+                    }
+
+                    group.addTask { [weak self] in
+                        await self?.observeServiceEvents()
+                    }
                 }
             }
+            self.emitPinpointLog(event: "startObserving_observationTaskAssigned", origin: origin)
+        }
+        observationStartupTask = startupTask
+        await startupTask.value
+        observationStartupTask = nil
+        emitPinpointLog(event: "startObserving_complete", origin: origin)
+        coordinatorDiag("startObservingIfNeeded complete")
+    }
+
+    private func stopObservingLifecycle(origin: String) {
+        emitPinpointLog(event: "stopObserving_enter", origin: origin)
+        observationStartupTask?.cancel()
+        observationStartupTask = nil
+        activationTask?.cancel()
+        activationTask = nil
+        observationTask?.cancel()
+        observationTask = nil
+        lifecycleTransportEventsSubscription = nil
+        lifecycleOutputsSubscription = nil
+        lifecycleStartupGateDebugSubscription = nil
+        lifecycleTransportTask?.cancel()
+        lifecycleTransportTask = nil
+        lifecycleOutputTask?.cancel()
+        lifecycleOutputTask = nil
+        connectionStableTask?.cancel()
+        connectionStableTask = nil
+        emitPinpointLog(event: "stopObserving_complete", origin: origin)
+    }
+
+    func prepareForReplacement() {
+        guard !isRetired else { return }
+        isRetired = true
+        hasActivatedLifecycleOwnership = false
+        stopObservingLifecycle(origin: "prepareForReplacement")
+        cancelSend()
+        guard isConnectionOwner else { return }
+        Task { await lifecycleCoordinator.disconnectRequested() }
+        chatService.disconnect()
+        releaseConnectionOwnershipIfNeeded(reason: "prepareForReplacement")
+    }
+
+    private func ensureLifecycleTransportSubscription() {
+        guard lifecycleTransportEventsSubscription == nil else {
+            coordinatorDiag("ensureLifecycleTransportSubscription already-subscribed")
+            return
+        }
+        // Subscribe synchronously so lifecycle transport events cannot be dropped
+        // before the first coordinator startup signal dispatch.
+        lifecycleTransportEventsSubscription = chatService.lifecycleTransportEvents
+        coordinatorDiag("ensureLifecycleTransportSubscription created")
+    }
+
+    private func ensureLifecycleOutputsSubscription() async {
+        guard lifecycleOutputsSubscription == nil else {
+            coordinatorDiag("ensureLifecycleOutputsSubscription already-subscribed")
+            return
+        }
+        // Subscribe before coordinator start paths so early lifecycle outputs are not dropped.
+        lifecycleOutputsSubscription = await lifecycleCoordinator.outputs
+        coordinatorDiag("ensureLifecycleOutputsSubscription created")
+    }
+
+    private func ensureLifecycleStartupGateDebugSubscription() async {
+        guard lifecycleStartupGateDebugSubscription == nil else {
+            coordinatorDiag("ensureLifecycleStartupGateDebugSubscription already-subscribed")
+            return
+        }
+        lifecycleStartupGateDebugSubscription = await lifecycleCoordinator.startupGateDebugEvents
+        coordinatorDiag("ensureLifecycleStartupGateDebugSubscription created")
+    }
+
+    @MainActor
+    private func observeLifecycleTransportEvents() async {
+        guard let lifecycleTransportEventsSubscription else { return }
+        for await event in lifecycleTransportEventsSubscription {
+            coordinatorDiag("observeLifecycleTransportEvents event epoch=\(event.epoch) payload=\(String(describing: event.payload))")
+            await lifecycleCoordinator.handleTransportEvent(event)
         }
     }
 
     @MainActor
-    private func observeMessages() async {
-        for await message in chatService.incomingMessages {
-            handleIncoming(message)
+    private func observeLifecycleOutputs() async {
+        guard let lifecycleOutputsSubscription else { return }
+        for await output in lifecycleOutputsSubscription {
+            coordinatorDiag("observeLifecycleOutputs output=\(String(describing: output))")
+            handleLifecycleOutput(output)
         }
     }
 
     @MainActor
-    private func observeConnectionState() async {
-        for await state in chatService.connectionState {
-            logger.info("ChatViewModel stateStream id=\(self.instanceId, privacy: .public) state=\(String(describing: state), privacy: .public)")
-            transitionConnectionState(state, source: .stateStream)
+    private func observeLifecycleStartupGateDebugEvents() async {
+        guard let lifecycleStartupGateDebugSubscription else { return }
+        for await event in lifecycleStartupGateDebugSubscription {
+#if DEBUG
+            recordLifecycleStartupGateEvent(event)
+#endif
         }
     }
 
@@ -572,13 +994,42 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         }
     }
 
+    private func sendTransportSnapshot() -> String {
+        let providerReady = ProviderBaseURLStore.baseURL != nil
+        let transportReady = chatService.isTransportReadyForSend
+        return "connectionState=\(String(describing: connectionState)) providerReady=\(providerReady ? "1" : "0") transportReady=\(transportReady ? "1" : "0")"
+    }
+
     func send() {
         guard !isSending else { return }
+        let referencedIds = Set(inputContent.pendingAttachmentIds())
+#if DEBUG
+        let transportSnapshot = sendTransportSnapshot()
+        imageSendLastTransportSnapshot = transportSnapshot
+        recordImageSendDebugEvent(
+            .sendTapped,
+            detail: "textLen=\(inputContent.length) attachmentCount=\(referencedIds.count) \(transportSnapshot)"
+        )
+#endif
+        let stagedOnly = attachmentData.keys.filter { !referencedIds.contains($0) }
+        if !stagedOnly.isEmpty {
+#if DEBUG
+            recordImageSendDebugEvent(
+                .sendResult,
+                detail: "failure reason=staging_incomplete pending=\(stagedOnly.count)"
+            )
+#endif
+            toastManager.show("Finishing attachment…")
+            return
+        }
         pruneAttachmentData()
         let (text, pendingIds) = inputContent.contentForSending()
         let pendingAttachments = pendingIds.compactMap { attachmentData[$0] }
 
         guard !text.isEmpty || !pendingAttachments.isEmpty else {
+#if DEBUG
+            recordImageSendDebugEvent(.sendResult, detail: "failure reason=empty_input")
+#endif
             return
         }
 
@@ -586,28 +1037,48 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
             return
         }
 
-        guard transportSendButtonConnectionState == .connected else {
-            toastManager.show("Could not send; not connected.")
-            return
-        }
-
         ensureDefaultActiveSessionIfNeeded()
         let outboundSessionKey = engineActiveSessionKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !outboundSessionKey.isEmpty else {
+#if DEBUG
+            recordImageSendDebugEvent(.sendResult, detail: "failure reason=no_stream_selected")
+#endif
             toastManager.show("No stream selected.")
             return
         }
 
         switch sendProvisioningState(for: outboundSessionKey) {
         case .ready:
+            guard transportSendButtonConnectionState == .connected else {
+#if DEBUG
+                recordImageSendDebugEvent(
+                    .sendResult,
+                    detail: "failure reason=not_connected \(sendTransportSnapshot())"
+                )
+#endif
+                toastManager.show("Could not send; not connected.")
+                return
+            }
             beginSend(content: text, pendingAttachments: pendingAttachments, sessionKey: outboundSessionKey)
         case .waiting:
+#if DEBUG
+            recordImageSendDebugEvent(
+                .sendResult,
+                detail: "queued reason=provisioning_waiting \(sendTransportSnapshot())"
+            )
+#endif
             pendingProvisionedSend = PendingProvisionedSend(
                 content: text,
                 attachments: pendingAttachments,
                 sessionKey: outboundSessionKey
             )
         case .unavailable:
+#if DEBUG
+            recordImageSendDebugEvent(
+                .sendResult,
+                detail: "failure reason=stream_unavailable \(sendTransportSnapshot())"
+            )
+#endif
             toastManager.show("This stream is unavailable. Switch streams and try again.")
         }
     }
@@ -621,6 +1092,12 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
                            sessionKey: String) {
         let clientId = "c_\(UUID().uuidString)"
         activeClientMessageId = clientId
+#if DEBUG
+        recordImageSendDebugEvent(
+            .sendDispatched,
+            detail: "localId=\(clientId) at=\(Date().formatted(date: .omitted, time: .standard))"
+        )
+#endif
 
         isSending = true  // Set immediately to prevent double-tap race condition
         let placeholder = Message(
@@ -713,31 +1190,75 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         isSending = false
     }
 
-    func stageAttachments(_ attachments: [PendingAttachment]) {
-        attachments.forEach { attachmentData[$0.id] = $0 }
+    func stageAttachments(_ attachments: [PendingAttachment], source: String = "unknown") {
+        attachments.forEach {
+            attachmentData[$0.id] = $0
+            stagedAttachmentProtection.insert($0.id)
+        }
+#if DEBUG
+        recordImageSendDebugEvent(
+            .attachmentAdded,
+            detail: "count=\(attachments.count) source=\(source)"
+        )
+#endif
+    }
+
+    func beginAttachmentStaging() {
+        pendingAttachmentStageCount += 1
+#if DEBUG
+        recordImageSendDebugEvent(
+            .attachmentStagingStarted,
+            detail: "pending=\(pendingAttachmentStageCount)"
+        )
+#endif
+    }
+
+    func endAttachmentStaging() {
+        pendingAttachmentStageCount = max(0, pendingAttachmentStageCount - 1)
+#if DEBUG
+        recordImageSendDebugEvent(
+            .attachmentStagingCompleted,
+            detail: "pending=\(pendingAttachmentStageCount)"
+        )
+#endif
     }
 
     func logout() {
         cancelSend()
+        observationStartupTask?.cancel()
+        observationStartupTask = nil
+        activationTask?.cancel()
+        activationTask = nil
+        hasActivatedLifecycleOwnership = false
         clearTemporarySendButtonOverride()
         observationTask?.cancel()
         observationTask = nil
+        lifecycleTransportEventsSubscription = nil
+        lifecycleOutputsSubscription = nil
+        lifecycleStartupGateDebugSubscription = nil
+        lifecycleTransportTask?.cancel()
+        lifecycleTransportTask = nil
+        lifecycleOutputTask?.cancel()
+        lifecycleOutputTask = nil
+        Task {
+            await lifecycleCoordinator.disconnectRequested()
+            await lifecycleCoordinator.setAuthToken(nil)
+        }
         chatService.disconnect()
-        var sessionKeysToClear = Set(lastServerMessageIdBySession.keys)
-        sessionKeysToClear.formUnion(sessionMessages.keys)
+        chatService.clearReplayCursors()
+        var sessionKeysToClear = Set(sessionMessages.keys)
+        sessionKeysToClear.formUnion(streamsBySessionKey.keys)
         for key in sessionKeysToClear {
-            persistLastServerMessageId(nil, for: key)
             persistLastReadMessageId(nil, for: key)
         }
-        lastServerMessageId = nil
-        lastServerMessageIdBySession.removeAll()
         lastReadMessageIdBySession.removeAll()
         hasUnreadBySession.removeAll()
         auth.clearCredentials()
         messageFailures.removeAll()
         clearInput()
+        pendingAttachmentStageCount = 0
         sessionMessages = [:]
-        clearActiveSession()
+        clearActiveSession(clearPersistedActiveSessionKey: false)
         streamsBySessionKey = [:]
         orderedSessionKeys = []
         syntheticSessionKeys = []
@@ -748,6 +1269,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         connectionStableTask?.cancel()
         connectionStableTask = nil
         restoredSessionKeys.removeAll()
+        forceReReadGenerationBySession.removeAll()
         restoredStreamMetadataForUserId = nil
         resetSessionProvisioningState(clearPendingSend: true)
         clearMessageCache()
@@ -860,7 +1382,6 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         if replacePendingMessageIfNeeded(with: resolvedMessage) {
             logger.info("incoming replacePending id=\(resolvedMessage.id, privacy: .public)")
             markUnreadIfNeeded(for: resolvedMessage)
-            updateLastServerMessageIdIfNeeded(with: resolvedMessage)
             resolveAssetAttachmentsIfNeeded(for: resolvedMessage)
             return
         }
@@ -880,8 +1401,44 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         maybeTriggerAssistantIncomingHaptic(for: resolvedMessage, didAppendNewMessage: didAppendNewMessage)
 
         markUnreadIfNeeded(for: resolvedMessage)
-        updateLastServerMessageIdIfNeeded(with: resolvedMessage)
         resolveAssetAttachmentsIfNeeded(for: resolvedMessage)
+    }
+
+    private func handleLifecycleServerMessage(epoch: Int, payload: Data) {
+        firstReplayAppliedEpoch = epoch
+        restoreTaskBySessionKey.values.forEach { $0.cancel() }
+        restoreTaskBySessionKey.removeAll()
+        let decoder = JSONDecoder()
+        guard let envelope = try? decoder.decode(LifecycleEnvelope.self, from: payload) else { return }
+        guard envelope.type == "message" else { return }
+        guard let serverPayload = try? decoder.decode(ServerMessagePayload.self, from: payload),
+              let sessionKey = serverPayload.sessionKey?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !sessionKey.isEmpty else {
+            return
+        }
+        let message = Message(payload: serverPayload, sessionKey: sessionKey)
+        handleIncoming(message)
+        if message.id.hasPrefix("s_") {
+            Task { await lifecycleCoordinator.updateCanonicalCursor(message.id) }
+        }
+    }
+
+    private struct LifecycleEnvelope: Decodable {
+        let type: String
+    }
+
+    private func handleHistoryResetRequired(epoch: Int) {
+        sessionMessages.removeAll()
+        messages.removeAll()
+        pendingLocalMessages.removeAll()
+        messageFailures.removeAll()
+        chatService.clearReplayCursors()
+        clearMessageCache()
+        makeStreamSwitchCoordinator().reset()
+        Task {
+            await lifecycleCoordinator.updateCanonicalCursor(nil)
+            await lifecycleCoordinator.acknowledgeHistoryReset(epoch: epoch)
+        }
     }
 
     private func maybeTriggerAssistantIncomingHaptic(for message: Message, didAppendNewMessage: Bool) {
@@ -1062,7 +1619,14 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
     }
 
     private func setMessages(_ newMessages: [Message], for sessionKey: String) {
+        let oldCount = sessionMessages[sessionKey]?.count ?? 0
         sessionMessages[sessionKey] = newMessages
+        let newCount = newMessages.count
+        if oldCount > 0, newCount == 0 {
+            StreamSwitchTiming.log("stream_messages_unloaded oldCount=\(oldCount) newCount=0", sessionKey: sessionKey)
+        } else if oldCount == 0, newCount > 0 {
+            StreamSwitchTiming.log("stream_messages_reloaded oldCount=0 newCount=\(newCount)", sessionKey: sessionKey)
+        }
         persistMessages(newMessages, for: sessionKey)
         refreshUnreadState(for: sessionKey)
         if sessionKey == engineActiveSessionKey {
@@ -1081,16 +1645,6 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         }
     }
 
-    private func updateLastServerMessageIdIfNeeded(with message: Message) {
-        guard message.id.hasPrefix("s_") else { return }
-        lastServerMessageIdBySession[message.sessionKey] = message.id
-        if message.sessionKey == engineActiveSessionKey {
-            lastServerMessageId = message.id
-        }
-        persistLastServerMessageId(message.id, for: message.sessionKey)
-    }
-
-
     private func removePlaceholder(withId id: String) {
         let keys = Array(sessionMessages.keys)
         for key in keys {
@@ -1107,135 +1661,46 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         messageFailures.removeValue(forKey: id)
     }
 
-    private func handleConnectionState(_ state: ConnectionState) {
-        logger.info("ChatViewModel handleConnectionState id=\(self.instanceId, privacy: .public) state=\(String(describing: state), privacy: .public)")
-        switch state {
-        case .connected:
-            connectionStableTask?.cancel()
-            connectionStableTask = Task { [weak self] in
-                guard let self else { return }
-                try? await Task.sleep(forDuration: self.stableConnectionInterval)
-                await MainActor.run {
-                    if self.connectionState == .connected {
-                        self.reconnectBackoff = .seconds(1)
-                    }
-                }
+    private func handleLifecycleOutput(_ output: ConnectionLifecycleOutput) {
+        switch output {
+        case .phaseTransition(_, let to, let epoch, _):
+            if writerCurrentEpoch != epoch {
+                writerCurrentEpoch = epoch
+                firstReplayAppliedEpoch = nil
+                restoreTaskBySessionKey.values.forEach { $0.cancel() }
+                restoreTaskBySessionKey.removeAll()
             }
-            reconnectTask?.cancel()
-            reconnectTask = nil
-            lastForegroundReconnectTrigger = nil
-            isAssistantTyping = false
-            typingSessionKey = nil
-        case .disconnected:
-            connectionStableTask?.cancel()
-            connectionStableTask = nil
-            resetSessionProvisioningState(clearPendingSend: true)
-            markPendingMessagesAsFailedForConnectionLoss()
-            scheduleReconnect(reason: .connectionStateDisconnected)
-            isAssistantTyping = false
-            typingSessionKey = nil
-        case .failed(let err):
-            connectionStableTask?.cancel()
-            connectionStableTask = nil
-            resetSessionProvisioningState(clearPendingSend: true)
-            markPendingMessagesAsFailedForConnectionLoss()
-            handleConnectionFailure(err)
-            scheduleReconnect(reason: .connectionStateFailed)
-            isAssistantTyping = false
-            typingSessionKey = nil
-        case .connecting, .reconnecting:
-            resetSessionProvisioningState(clearPendingSend: true)
-            isAssistantTyping = false
-            typingSessionKey = nil
+            connectionLifecyclePhase = to
+#if DEBUG
+            recordLifecycleDebugPhase(to)
+#endif
+            let mapped: ConnectionState
+            switch to {
+            case .live:
+                mapped = .connected
+            case .connecting, .authenticating, .replaying, .recovering:
+                mapped = .reconnecting
+            case .idle:
+                mapped = .disconnected
+            case .failed:
+                mapped = .failed(ProviderChatService.Error.notConnected)
+            }
+            transitionConnectionState(mapped, source: .lifecycleCoordinator)
+        case .restoreCacheRequested(let epoch):
+            for sessionKey in orderedSessionKeys {
+                restoreCachedMessagesIfNeeded(for: sessionKey, epoch: epoch)
+            }
+        case .historyResetRequired(let epoch):
+            handleHistoryResetRequired(epoch: epoch)
+        case .replayStarted:
+            break
+        case .serverMessage(let epoch, let payload):
+            handleLifecycleServerMessage(epoch: epoch, payload: payload)
+        case .replayCompleted:
+            break
+        case .historyTruncated(let epoch):
+            logger.info("history truncated for epoch=\(epoch, privacy: .public)")
         }
-    }
-
-    private enum ReconnectTrigger: String {
-        case onAppear
-        case sceneDidBecomeActive
-        case connectionStateDisconnected
-        case connectionStateFailed
-        case authStateChange
-        case manualReconnect
-    }
-
-    private func scheduleReconnect(immediate: Bool = false, reason: ReconnectTrigger = .connectionStateFailed) {
-        let now = Date()
-        lastReconnectRequestAt = now
-        if immediate, reconnectTask != nil {
-            reconnectTask?.cancel()
-            reconnectTask = nil
-        }
-        guard reconnectTask == nil, auth.token != nil else {
-            logger.info("reconnect suppressed reason=\(reason.rawValue, privacy: .public) reconnectTask=\(self.reconnectTask != nil, privacy: .public) hasToken=\(self.auth.token != nil, privacy: .public)")
-            return
-        }
-
-        logger.info("reconnect scheduled id=\(self.instanceId, privacy: .public) reason=\(reason.rawValue, privacy: .public) immediate=\(immediate, privacy: .public) backoff=\(String(describing: self.reconnectBackoff), privacy: .public) state=\(String(describing: self.connectionState), privacy: .public)")
-
-        reconnectTask = Task { [weak self] in
-            guard let self else { return }
-            let jitter = Duration.milliseconds(Int.random(in: 0...1000))
-            var delay = immediate ? Duration.zero : reconnectBackoff + jitter
-            if let lastAttempt = self.lastReconnectAttemptAt {
-                let elapsed = Date().timeIntervalSince(lastAttempt)
-                let minDelay = max(0, self.minimumReconnectInterval - elapsed)
-                delay = max(delay, .seconds(minDelay))
-            }
-            if delay > .zero {
-                do {
-                    try await Task.sleep(forDuration: delay)
-                } catch is CancellationError {
-                    return
-                } catch {
-                    return
-                }
-            }
-            await MainActor.run {
-                self.lastReconnectAttemptAt = Date()
-            }
-            let snapshot = await MainActor.run { self.connectionSnapshot() }
-            guard let token = snapshot.token else { return }
-            await MainActor.run {
-                self.auth.refreshAdminStatusFromToken()
-            }
-
-            do {
-                try await self.chatService.connect(token: token, lastMessageId: snapshot.lastMessageId)
-                await MainActor.run {
-                    self.reconnectBackoff = .seconds(1)
-                    self.reconnectTask = nil
-                }
-            } catch {
-                await MainActor.run {
-                    if let providerError = error as? ProviderChatService.Error {
-                        switch providerError {
-                        case .authFailed:
-                            self.reconnectTask = nil
-                            self.logout()
-                            return
-                        default:
-                            break
-                        }
-                    }
-                    if let providerError = error as? ProviderChatService.Error,
-                       self.shouldUseAuthRejectionBackoff(providerError) {
-                        let current = max(self.reconnectBackoff, self.authRejectionInitialBackoff)
-                        self.reconnectBackoff = min(current * 2, self.authRejectionMaxBackoff)
-                    } else {
-                        self.reconnectBackoff = min(self.reconnectBackoff * 2, .seconds(10))
-                    }
-                    self.reconnectTask = nil
-                    self.scheduleReconnect(reason: .connectionStateFailed)
-                }
-            }
-        }
-    }
-
-    private func shouldUseAuthRejectionBackoff(_ error: ProviderChatService.Error) -> Bool {
-        guard case .policyViolation(_, let reason) = error else { return false }
-        let normalized = (reason ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return normalized == "pairing required" || normalized.hasPrefix("invalid connect params")
     }
 
     private func handleConnectionFailure(_ error: Swift.Error) {
@@ -1270,18 +1735,30 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
                 sessionKey: sessionKey
             )
             await MainActor.run {
+#if DEBUG
+                self.recordImageSendDebugEvent(.sendResult, detail: "success localId=\(clientId)")
+#endif
                 clearInput()
                 isSending = false
                 activeClientMessageId = nil
             }
         } catch is CancellationError {
             await MainActor.run {
+#if DEBUG
+                self.recordImageSendDebugEvent(.sendResult, detail: "failure localId=\(clientId) reason=cancelled")
+#endif
                 removePlaceholder(withId: clientId)
                 isSending = false
                 activeClientMessageId = nil
             }
         } catch let attachmentError as AttachmentError {
             await MainActor.run {
+#if DEBUG
+                self.recordImageSendDebugEvent(
+                    .sendResult,
+                    detail: "failure localId=\(clientId) reason=attachment_\(attachmentError.localizedDescription)"
+                )
+#endif
                 toastManager.show(error: attachmentError)
                 markLocalMessageFailed(
                     id: clientId,
@@ -1293,6 +1770,12 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
             }
         } catch {
             await MainActor.run {
+#if DEBUG
+                self.recordImageSendDebugEvent(
+                    .sendResult,
+                    detail: "failure localId=\(clientId) reason=\(error.localizedDescription)"
+                )
+#endif
                 toastManager.show(error.localizedDescription)
                 markLocalMessageFailed(
                     id: clientId,
@@ -1320,17 +1803,29 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
                 sessionKey: sessionKey
             )
             await MainActor.run {
+#if DEBUG
+                self.recordImageSendDebugEvent(.sendResult, detail: "success localId=\(clientId) retry=1")
+#endif
                 isSending = false
                 activeClientMessageId = nil
             }
         } catch is CancellationError {
             await MainActor.run {
+#if DEBUG
+                self.recordImageSendDebugEvent(.sendResult, detail: "failure localId=\(clientId) reason=cancelled retry=1")
+#endif
                 removePlaceholder(withId: clientId)
                 isSending = false
                 activeClientMessageId = nil
             }
         } catch let attachmentError as AttachmentError {
             await MainActor.run {
+#if DEBUG
+                self.recordImageSendDebugEvent(
+                    .sendResult,
+                    detail: "failure localId=\(clientId) reason=attachment_\(attachmentError.localizedDescription) retry=1"
+                )
+#endif
                 toastManager.show(error: attachmentError)
                 markLocalMessageFailed(
                     id: clientId,
@@ -1342,6 +1837,12 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
             }
         } catch {
             await MainActor.run {
+#if DEBUG
+                self.recordImageSendDebugEvent(
+                    .sendResult,
+                    detail: "failure localId=\(clientId) reason=\(error.localizedDescription) retry=1"
+                )
+#endif
                 toastManager.show(error.localizedDescription)
                 markLocalMessageFailed(
                     id: clientId,
@@ -1476,7 +1977,11 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
 
     private func pruneAttachmentData() {
         let referencedIds = Set(inputContent.pendingAttachmentIds())
-        let orphanedKeys = attachmentData.keys.filter { !referencedIds.contains($0) }
+        stagedAttachmentProtection.formIntersection(Set(attachmentData.keys))
+        stagedAttachmentProtection.subtract(referencedIds)
+        let orphanedKeys = attachmentData.keys.filter {
+            !referencedIds.contains($0) && !stagedAttachmentProtection.contains($0)
+        }
         orphanedKeys.forEach { attachmentData.removeValue(forKey: $0) }
         orphanedKeys.forEach { uploadedAssetIds.removeValue(forKey: $0) }
     }
@@ -1496,6 +2001,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         inputContent = NSAttributedString(string: "")
         attachmentData.removeAll()
         uploadedAssetIds.removeAll()
+        stagedAttachmentProtection.removeAll()
         inputResetToken &+= 1
     }
 
@@ -1561,8 +2067,6 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
             inputResetToken &+= 1
         }
     }
-
-
     func presentation(for message: Message, metrics: ChatFlowTheme.Metrics) -> MessagePresentation {
         let key = PresentationCacheKey(messageID: message.id, isCompact: metrics.isCompact)
         let fingerprint = presentationFingerprint(for: message)
@@ -1631,11 +2135,8 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
             break
         case .connectionInterrupted(let reason):
             logger.info("connection interrupted reason=\(reason ?? "unknown", privacy: .public)")
-            if transportSendButtonConnectionState == .connected {
-                transitionConnectionState(.reconnecting, source: .serviceInterruption)
-            }
             markPendingMessagesAsFailedForConnectionLoss()
-            scheduleReconnect(reason: .connectionStateDisconnected)
+            Task { await lifecycleCoordinator.reconnectIntentTransportInterrupted() }
         case .userInfo(let info):
             auth.updateAdminStatus(info.isAdmin)
         case .typingStateChanged(let isTyping, let sessionKey):
@@ -1721,7 +2222,25 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
                                            source: ConnectionStateMutationSource) {
         connectionState = state
         logger.info("connectionState transition id=\(self.instanceId, privacy: .public) source=\(source.rawValue, privacy: .public) state=\(String(describing: state), privacy: .public)")
-        handleConnectionState(state)
+        switch state {
+        case .connected:
+            connectionStableTask?.cancel()
+            connectionStableTask = nil
+            isAssistantTyping = false
+            typingSessionKey = nil
+            auth.refreshAdminStatusFromToken()
+            attemptPendingProvisionedSendIfPossible()
+        case .connecting, .reconnecting:
+            isAssistantTyping = false
+            typingSessionKey = nil
+        case .disconnected, .failed:
+            connectionStableTask?.cancel()
+            connectionStableTask = nil
+            resetSessionProvisioningState(clearPendingSend: true)
+            markPendingMessagesAsFailedForConnectionLoss()
+            isAssistantTyping = false
+            typingSessionKey = nil
+        }
     }
 
     private func resetSessionProvisioningState(clearPendingSend: Bool) {
@@ -1741,16 +2260,6 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         return "clawline.lastSessionKey"
     }
 
-    private func lastServerMessageDefaultsKey(for sessionKey: String) -> String {
-        var components = ["clawline.lastServerMessageId"]
-        if let userId = auth.currentUserId, !userId.isEmpty {
-            components.append(userId)
-        }
-        components.append(deviceId)
-        components.append(sessionKey)
-        return components.joined(separator: ".")
-    }
-
     private func lastReadMessageDefaultsKey(for sessionKey: String) -> String {
         var components = ["clawline.lastReadMessageId"]
         if let userId = auth.currentUserId, !userId.isEmpty {
@@ -1760,35 +2269,12 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         return components.joined(separator: ".")
     }
 
-    private func persistLastServerMessageId(_ value: String?, for sessionKey: String) {
-        let key = lastServerMessageDefaultsKey(for: sessionKey)
-        if let value, !value.isEmpty {
-            streamDefaults.set(value, forKey: key)
-        } else {
-            streamDefaults.removeObject(forKey: key)
-        }
-    }
-
     private func persistLastReadMessageId(_ value: String?, for sessionKey: String) {
         let key = lastReadMessageDefaultsKey(for: sessionKey)
         if let value, !value.isEmpty {
             streamDefaults.set(value, forKey: key)
         } else {
             streamDefaults.removeObject(forKey: key)
-        }
-    }
-
-    private func restoreLastServerMessageIdIfNeeded() {
-        guard lastServerMessageId == nil else { return }
-        guard !engineActiveSessionKey.isEmpty else { return }
-        restoreLastServerMessageIdIfNeeded(for: engineActiveSessionKey)
-        lastServerMessageId = lastServerMessageIdBySession[engineActiveSessionKey]
-    }
-
-    private func restoreLastServerMessageIdIfNeeded(for sessionKey: String) {
-        guard lastServerMessageIdBySession[sessionKey] == nil else { return }
-        if let stored = streamDefaults.string(forKey: lastServerMessageDefaultsKey(for: sessionKey)) {
-            lastServerMessageIdBySession[sessionKey] = stored
         }
     }
 
@@ -1829,12 +2315,19 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         return sanitized.isEmpty ? "session" : sanitized
     }
 
-    private func restoreCachedMessagesIfNeeded(for sessionKey: String) {
+    private func restoreCachedMessagesIfNeeded(for sessionKey: String, epoch: Int? = nil) {
         StreamSwitchTiming.log("restoreCachedMessagesIfNeeded_start", sessionKey: sessionKey)
-        guard restoredSessionKeys.contains(sessionKey) == false else { return }
-        restoredSessionKeys.insert(sessionKey)
+        if epoch == nil {
+            guard restoredSessionKeys.contains(sessionKey) == false else { return }
+            restoredSessionKeys.insert(sessionKey)
+        }
+        if let epoch {
+            guard writerCurrentEpoch == epoch else { return }
+            if firstReplayAppliedEpoch == epoch { return }
+        }
         guard let url = messageCacheURL(for: sessionKey) else { return }
-        Task.detached { [weak self, sessionKey, url] in
+        restoreTaskBySessionKey[sessionKey]?.cancel()
+        let restoreTask = Task.detached { [weak self, sessionKey, url] in
             guard let self else { return }
             guard let data = try? Data(contentsOf: url) else {
                 await MainActor.run { [weak self] in
@@ -1858,13 +2351,17 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
                 }
                 await MainActor.run { [weak self, filtered] in
                     guard let self else { return }
+                    if let epoch {
+                        guard self.writerCurrentEpoch == epoch else { return }
+                        guard self.firstReplayAppliedEpoch != epoch else { return }
+                    }
                     self.setMessages(filtered, for: sessionKey)
                     let cachedLast = self.lastServerMessageId(from: filtered)
-                    self.lastServerMessageIdBySession[sessionKey] = cachedLast
-                    if self.engineActiveSessionKey == sessionKey {
-                        self.lastServerMessageId = cachedLast
+                    self.chatService.setReplayCursor(cachedLast, for: sessionKey)
+                    if let cachedLast {
+                        Task { await self.lifecycleCoordinator.updateCanonicalCursor(cachedLast) }
                     }
-                    self.persistLastServerMessageId(cachedLast, for: sessionKey)
+                    self.armForceReRead(for: sessionKey)
                     self.logger.info("message cache restored sessionKey=\(sessionKey, privacy: .public) count=\(filtered.count, privacy: .public)")
                     StreamSwitchTiming.log("restoreCachedMessagesIfNeeded_mainactor_apply_complete", sessionKey: sessionKey)
                 }
@@ -1873,14 +2370,13 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
                 logger.error("message cache decode failed sessionKey=\(sessionKey, privacy: .public) error=\(error.localizedDescription, privacy: .public)")
             }
         }
+        restoreTaskBySessionKey[sessionKey] = restoreTask
     }
 
     private func clearCursor(for sessionKey: String) {
-        if self.engineActiveSessionKey == sessionKey {
-            self.lastServerMessageId = nil
-        }
-        self.lastServerMessageIdBySession.removeValue(forKey: sessionKey)
-        self.persistLastServerMessageId(nil, for: sessionKey)
+        self.chatService.setReplayCursor(nil, for: sessionKey)
+        Task { await lifecycleCoordinator.updateCanonicalCursor(nil) }
+        self.armForceReRead(for: sessionKey)
         self.refreshUnreadState(for: sessionKey)
     }
 
@@ -1996,6 +2492,9 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
 
     private func ensureDefaultActiveSessionIfNeeded() {
         if engineActiveSessionKey.isEmpty {
+            guard !orderedSessionKeys.isEmpty else {
+                return
+            }
             if let main = streamMainSessionKey() {
                 ensureStreamEntry(for: main)
                 setEngineActiveSessionKey(main)
@@ -2034,18 +2533,16 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         let removedSessionKeys = previousSessionKeys.subtracting(validSessionKeys)
         for sessionKey in removedSessionKeys {
             sessionMessages.removeValue(forKey: sessionKey)
-            lastServerMessageIdBySession.removeValue(forKey: sessionKey)
             lastReadMessageIdBySession.removeValue(forKey: sessionKey)
             hasUnreadBySession.removeValue(forKey: sessionKey)
             pendingLocalMessages.removeAll { $0.sessionKey == sessionKey }
-            persistLastServerMessageId(nil, for: sessionKey)
+            chatService.setReplayCursor(nil, for: sessionKey)
             persistLastReadMessageId(nil, for: sessionKey)
             persistMessages([], for: sessionKey)
         }
         recalculateOrderedSessionKeys()
         for sessionKey in orderedSessionKeys {
             ensureSessionStorage(for: sessionKey)
-            restoreLastServerMessageIdIfNeeded(for: sessionKey)
             restoreLastReadMessageIdIfNeeded(for: sessionKey)
             restoreCachedMessagesIfNeeded(for: sessionKey)
             refreshUnreadState(for: sessionKey)
@@ -2056,7 +2553,6 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
             applyStreamDeletion(sessionKey: engineActiveSessionKey)
         } else {
             messages = sessionMessages[engineActiveSessionKey] ?? []
-            lastServerMessageId = lastServerMessageIdBySession[engineActiveSessionKey]
         }
         SessionRegistry.shared.replace(with: orderedStreams)
         persistStreamMetadata()
@@ -2067,7 +2563,6 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         syntheticSessionKeys.remove(stream.sessionKey)
         recalculateOrderedSessionKeys()
         ensureSessionStorage(for: stream.sessionKey)
-        restoreLastServerMessageIdIfNeeded(for: stream.sessionKey)
         restoreLastReadMessageIdIfNeeded(for: stream.sessionKey)
         restoreCachedMessagesIfNeeded(for: stream.sessionKey)
         refreshUnreadState(for: stream.sessionKey)
@@ -2081,10 +2576,9 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         syntheticSessionKeys.remove(sessionKey)
         recalculateOrderedSessionKeys()
         sessionMessages.removeValue(forKey: sessionKey)
-        lastServerMessageIdBySession.removeValue(forKey: sessionKey)
         lastReadMessageIdBySession.removeValue(forKey: sessionKey)
         hasUnreadBySession.removeValue(forKey: sessionKey)
-        persistLastServerMessageId(nil, for: sessionKey)
+        chatService.setReplayCursor(nil, for: sessionKey)
         persistLastReadMessageId(nil, for: sessionKey)
         persistMessages([], for: sessionKey)
         pendingLocalMessages.removeAll { $0.sessionKey == sessionKey }
@@ -2105,7 +2599,6 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
             }
         } else if !engineActiveSessionKey.isEmpty {
             messages = sessionMessages[engineActiveSessionKey] ?? []
-            lastServerMessageId = lastServerMessageIdBySession[engineActiveSessionKey]
         }
         SessionRegistry.shared.remove(sessionKey: sessionKey)
         persistStreamMetadata()
@@ -2423,9 +2916,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
 
     @MainActor
     private func connectionSnapshot() -> (token: String?, lastMessageId: String?) {
-        let activeKey = engineActiveSessionKey
-        let cursor = lastServerMessageIdBySession[activeKey] ?? lastServerMessageId
-        return (auth.token, cursor)
+        (auth.token, chatService.replayCursorSnapshot().values.max())
     }
 
     private func markUnreadIfNeeded(for message: Message) {
@@ -2460,6 +2951,10 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
 #if DEBUG
     func debugConnectionSnapshot() -> (token: String?, lastMessageId: String?) {
         connectionSnapshot()
+    }
+
+    func debugObservationStartupCount() -> Int {
+        observationStartupCount
     }
 
     func debugPresentationCacheSize() -> Int {

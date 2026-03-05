@@ -2329,6 +2329,10 @@ private struct PreviewDevice: DeviceIdentifying {
 }
 
 private final class PreviewChatService: ChatServicing {
+    var lifecycleTransportEvents: AsyncStream<LifecycleTransportEvent> {
+        AsyncStream { _ in }
+    }
+    var isTransportReadyForSend: Bool { true }
     var incomingMessages: AsyncStream<Message> {
         AsyncStream { _ in }
     }
@@ -2340,8 +2344,13 @@ private final class PreviewChatService: ChatServicing {
     var serviceEvents: AsyncStream<ChatServiceEvent> {
         AsyncStream { _ in }
     }
-    func connect(token: String, lastMessageId: String?) async throws {}
+    func connect(token: String, activeSessionKey: String?) async throws {}
+    func startConnectionAttempt(epoch: Int, lastMessageId: String?, token: String) {}
+    func stopConnectionAttempt() {}
     func disconnect() {}
+    func replayCursorSnapshot() -> [String: String] { [:] }
+    func setReplayCursor(_ cursor: String?, for sessionKey: String) {}
+    func clearReplayCursors() {}
     func send(id: String, content: String, attachments: [WireAttachment], sessionKey: String?) async throws {}
     func sendInteractiveCallback(sourceMessageId: String, action: String, data: JSONValue?) async throws {}
     func fetchStreams() async throws -> [StreamSession] { [] }

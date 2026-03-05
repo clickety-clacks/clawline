@@ -233,10 +233,19 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
     private var currentMessageId: String?
     private var wasOverflowingOnLastLayout = false
     private var suppressExpandTapForLinkCards = false
+    private var allowSwipeUpExpandForSingleLink = false
     private var timestampDate: Date?
     private var timestampRefreshTimer: Timer?
 
     private var traitObservation: (any NSObjectProtocol)?
+
+    private static func gradientBottomColor(for role: Message.Role, palette: ChatFlowUIKitTheme.Palette) -> UIColor {
+        let gradient = role == .user ? palette.bubbleSelfGradient : palette.bubbleOtherGradient
+        if let bottom = gradient.last ?? gradient.first {
+            return bottom
+        }
+        return role == .user ? palette.sage : palette.cream
+    }
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -263,6 +272,12 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
         bubbleTap.delaysTouchesBegan = false
         bubbleTap.delaysTouchesEnded = false
         bubbleBackgroundView.addGestureRecognizer(bubbleTap)
+        let bubbleSwipeUp = UISwipeGestureRecognizer(target: self, action: #selector(handleBubbleSwipeUp))
+        bubbleSwipeUp.direction = .up
+        bubbleSwipeUp.cancelsTouchesInView = false
+        bubbleSwipeUp.delaysTouchesBegan = false
+        bubbleSwipeUp.delaysTouchesEnded = false
+        bubbleBackgroundView.addGestureRecognizer(bubbleSwipeUp)
         addSubview(bubbleBackgroundView)
         maxWidthConstraint = bubbleBackgroundView.widthAnchor.constraint(lessThanOrEqualToConstant: 320)
         minWidthConstraint = bubbleBackgroundView.widthAnchor.constraint(greaterThanOrEqualToConstant: 120)
@@ -728,6 +743,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
             return nil
         }).first
         let shouldShowInlineReloadButton = isSingleLinkPreview && linkPreviewURL != nil
+        allowSwipeUpExpandForSingleLink = isSingleLinkPreview
 
         // Flynn: URLs should render as tappable cards per the design-system, independent of embedded preview success.
         // For multi-URL messages, cards render for each unique URL; for single-URL messages, card renders above preview.
@@ -784,9 +800,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
 
                 if let linkPreviewURL {
                     let previewView = LinkPreviewView()
-                    let previewChromeBase = message.role == .user
-                        ? palette.bubbleSelfGradient.last!
-                        : palette.bubbleOtherGradient.last!
+                    let previewChromeBase = Self.gradientBottomColor(for: message.role, palette: palette)
                     let rawPreviewMaxHeight: CGFloat = bubbleSizingV2?.linkPreviewMaxHeight
                         ?? bubbleHeightPolicy?.linkPreviewViewportMaxHeight
                         ?? Self.linkPreviewViewportMaxHeight(heightCap: effectiveTruncationHeight, metrics: metrics)
@@ -836,9 +850,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
 
         if let linkPreviewURL, !shouldShowInlineReloadButton {
             let previewView = LinkPreviewView()
-            let previewChromeBase = message.role == .user
-                ? palette.bubbleSelfGradient.last!
-                : palette.bubbleOtherGradient.last!
+            let previewChromeBase = Self.gradientBottomColor(for: message.role, palette: palette)
             let rawPreviewMaxHeight: CGFloat = bubbleSizingV2?.linkPreviewMaxHeight
                 ?? bubbleHeightPolicy?.linkPreviewViewportMaxHeight
                 ?? Self.linkPreviewViewportMaxHeight(heightCap: effectiveTruncationHeight, metrics: metrics)
@@ -1023,7 +1035,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
         gradientLayer.endPoint = message.role == .user ? CGPoint(x: 1.0, y: 1.0) : CGPoint(x: 0.5, y: 1.0)
 
         // Fade mask matches the bubble bottom color when the outer scroll view overflows.
-        let bottomColor = gradientColors.last ?? palette.bubbleOtherGradient.last!
+        let bottomColor = gradientColors.last ?? Self.gradientBottomColor(for: message.role, palette: palette)
         fadeView.updateColors(
             top: bottomColor.withAlphaComponent(0),
             bottom: bottomColor
@@ -1057,6 +1069,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
     func prepareForReuse() {
         currentMessageId = nil
         suppressExpandTapForLinkCards = false
+        allowSwipeUpExpandForSingleLink = false
         timestampDate = nil
         timestampRefreshTimer?.invalidate()
         timestampRefreshTimer = nil
@@ -1283,7 +1296,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
 
         // Update fade view - use bubble gradient end colors
         // Top color must match bottom color (just transparent) to avoid haze
-        let bottomColor = currentMessageRole == .user ? palette.bubbleSelfGradient.last! : palette.bubbleOtherGradient.last!
+        let bottomColor = Self.gradientBottomColor(for: currentMessageRole, palette: palette)
         fadeView.updateColors(
             top: bottomColor.withAlphaComponent(0),
             bottom: bottomColor
@@ -1362,6 +1375,13 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
         if dynamicContentScrollView.contentSize.height > dynamicContentScrollView.bounds.height + 1 {
             onRequestExpand?()
         }
+    }
+
+    @objc private func handleBubbleSwipeUp() {
+        guard allowSwipeUpExpandForSingleLink else {
+            return
+        }
+        onRequestExpand?()
     }
 
     private func stripAttachmentSummaryIfNeeded() {

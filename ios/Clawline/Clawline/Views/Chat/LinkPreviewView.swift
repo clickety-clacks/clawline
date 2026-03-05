@@ -466,20 +466,12 @@ final class LinkPreviewView: UIView, WKNavigationDelegate, WKUIDelegate, UIGestu
         webView.backgroundColor = .clear
         webView.clipsToBounds = true
         webView.insetsLayoutMarginsFromSafeArea = false
-        // Apply consistent rounding to WKWebView internals too (belt + suspenders).
-        webView.layer.cornerRadius = Constants.mediaCornerRadius
-        webView.layer.cornerCurve = .continuous
-        webView.layer.maskedCorners = [
-            .layerMinXMinYCorner,
-            .layerMaxXMinYCorner,
-            .layerMinXMaxYCorner,
-            .layerMaxXMaxYCorner
-        ]
+        // Keep only one visible corner treatment: the outer squircle mask on `webContainer`.
+        // Applying an additional WKWebView corner radius creates a second darker inner rim.
+        webView.layer.cornerRadius = 0
         webView.scrollView.clipsToBounds = true
         webView.scrollView.insetsLayoutMarginsFromSafeArea = false
-        webView.scrollView.layer.cornerRadius = Constants.mediaCornerRadius
-        webView.scrollView.layer.cornerCurve = .continuous
-        webView.scrollView.layer.maskedCorners = webView.layer.maskedCorners
+        webView.scrollView.layer.cornerRadius = 0
         webView.scrollView.isScrollEnabled = true
         webView.scrollView.showsVerticalScrollIndicator = false
         webView.scrollView.alwaysBounceVertical = false

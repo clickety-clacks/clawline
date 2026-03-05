@@ -7,6 +7,7 @@
 
 import Testing
 import UIKit
+import WebKit
 @testable import Clawline
 
 struct BubbleScrollTests {
@@ -299,7 +300,7 @@ struct BubbleScrollTests {
         let url = "https://example.com/very/long/link"
         let repeated = Array(
             repeating: "This sentence exists to force truncation in the message bubble.",
-            count: 24
+            count: 72
         ).joined(separator: " ")
         let message = Message(
             id: "link-card-tap-suppress",
@@ -338,6 +339,74 @@ struct BubbleScrollTests {
 
         #expect(expandsWithoutPreview == 1)
         #expect(expandsWithPreview == 0)
+    }
+
+    @Test("T118: Single-link bubble swipe-up opens expanded viewer")
+    @MainActor
+    func singleLinkSwipeUpRequestsExpand() {
+        let metrics = ChatFlowTheme.Metrics(isCompact: false)
+        let singleLinkMessage = Message(
+            id: "single-link-swipe-up",
+            role: .assistant,
+            content: "Read this:\nhttps://example.com/preview",
+            timestamp: Date(),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: "server:personal"
+        )
+        let multiLinkMessage = Message(
+            id: "multi-link-swipe-up",
+            role: .assistant,
+            content: "Links:\nhttps://a.example\nhttps://b.example",
+            timestamp: Date(),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: "server:personal"
+        )
+
+        let singleLinkPresentation = buildPresentation(singleLinkMessage, metrics: metrics, enableLinkPreviews: true)
+        let multiLinkPresentation = buildPresentation(multiLinkMessage, metrics: metrics, enableLinkPreviews: true)
+        let noPreviewPresentation = buildPresentation(singleLinkMessage, metrics: metrics, enableLinkPreviews: false)
+
+        #expect(
+            swipeUpExpandCallbackCount(
+                message: singleLinkMessage,
+                presentation: singleLinkPresentation,
+                metrics: metrics
+            ) == 1
+        )
+        #expect(
+            swipeUpExpandCallbackCount(
+                message: multiLinkMessage,
+                presentation: multiLinkPresentation,
+                metrics: metrics
+            ) == 0
+        )
+        #expect(
+            swipeUpExpandCallbackCount(
+                message: singleLinkMessage,
+                presentation: noPreviewPresentation,
+                metrics: metrics
+            ) == 0
+        )
+    }
+
+    @Test("T028: Link preview uses one outer squircle radius (no inner webview corner radius)")
+    @MainActor
+    func linkPreviewAvoidsInnerCornerRadiusLayer() {
+        let preview = LinkPreviewView()
+        preview.frame = CGRect(x: 0, y: 0, width: 320, height: 200)
+        preview.layoutIfNeeded()
+
+        guard let webView = firstWebView(in: preview) else {
+            Issue.record("Expected WKWebView in LinkPreviewView hierarchy")
+            return
+        }
+
+        #expect(webView.layer.cornerRadius == 0)
+        #expect(webView.scrollView.layer.cornerRadius == 0)
     }
 
     @Test("T057: Bubble uses per-block text containers without re-merging rich text")
@@ -465,6 +534,47 @@ struct BubbleScrollTests {
             sizeClass: sizeClass,
             metrics: metrics,
             maxWidth: 360,
+            truncationHeightOverride: 44,
+            bubbleSizingV2: nil,
+            showsHeader: true,
+            paddingScale: 1,
+            minWidthOverride: nil,
+            maxWidthOverride: nil,
+            useContinuousCorners: true,
+            isDark: false,
+            onRequestExpand: { count += 1 },
+            onRequestLayout: nil,
+            onInteractiveCallback: nil
+        )
+        let measured = bubble.systemLayoutSizeFitting(
+            CGSize(width: 360, height: UIView.layoutFittingCompressedSize.height),
+            withHorizontalFittingPriority: .required,
+            verticalFittingPriority: .fittingSizeLevel
+        )
+        bubble.frame = CGRect(origin: .zero, size: measured)
+        bubble.layoutIfNeeded()
+        if let inner = innerBubbleScrollView(in: bubble) {
+            inner.contentSize = CGSize(width: max(1, inner.bounds.width), height: inner.bounds.height + 200)
+        }
+
+        _ = bubble.perform(NSSelectorFromString("handleBubbleTap"))
+        return count
+    }
+
+    @MainActor
+    private func swipeUpExpandCallbackCount(message: Message,
+                                            presentation: MessagePresentation,
+                                            metrics: ChatFlowTheme.Metrics) -> Int {
+        let sizeClass = MessageFlowRules.sizeClass(for: presentation)
+        let bubble = MessageBubbleUIKitView(frame: CGRect(x: 0, y: 0, width: 360, height: 1))
+        var count = 0
+
+        bubble.configure(
+            message: message,
+            presentation: presentation,
+            sizeClass: sizeClass,
+            metrics: metrics,
+            maxWidth: 360,
             truncationHeightOverride: 140,
             bubbleSizingV2: nil,
             showsHeader: true,
@@ -485,7 +595,7 @@ struct BubbleScrollTests {
         bubble.frame = CGRect(origin: .zero, size: measured)
         bubble.layoutIfNeeded()
 
-        _ = bubble.perform(NSSelectorFromString("handleBubbleTap"))
+        _ = bubble.perform(NSSelectorFromString("handleBubbleSwipeUp"))
         return count
     }
 
@@ -545,6 +655,18 @@ struct BubbleScrollTests {
             result.append(contentsOf: textViews(in: sub))
         }
         return result
+    }
+
+    private func firstWebView(in view: UIView) -> WKWebView? {
+        if let webView = view as? WKWebView {
+            return webView
+        }
+        for sub in view.subviews {
+            if let found = firstWebView(in: sub) {
+                return found
+            }
+        }
+        return nil
     }
 
     private struct ImmediateHighlightService: SalientHighlightServicing {

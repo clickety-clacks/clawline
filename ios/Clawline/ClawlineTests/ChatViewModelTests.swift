@@ -1818,6 +1818,47 @@ struct ChatViewModelTests {
         #expect(viewModel.stream(for: customKey) == nil)
     }
 
+    @Test("Delete non-active stream retries through active connection when initially not connected")
+    @MainActor
+    func deleteNonActiveStreamRetriesThroughActiveConnection() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let customKey = "agent:main:clawline:user:s_retry_delete"
+        chatService.streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: customKey, displayName: "Retry Delete", kind: "custom", orderIndex: 1, isBuiltIn: false),
+        ]
+        chatService.deleteStreamErrorSequence = [ProviderChatService.Error.notConnected]
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
+        for _ in 0..<50 {
+            if viewModel.stream(for: customKey) != nil { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        let connectCountBeforeDelete = chatService.connectCallCount
+        let deleted = await viewModel.deleteStream(sessionKey: customKey)
+
+        #expect(deleted)
+        #expect(viewModel.stream(for: customKey) == nil)
+        #expect(chatService.deleteStreamCallCount == 2)
+        #expect(chatService.lastDeletedSessionKey == customKey)
+        #expect(chatService.connectCallCount > connectCountBeforeDelete)
+    }
+
     @Test("user_info event updates admin state")
     @MainActor
     func userInfoEventUpdatesAdminState() async throws {
@@ -1895,7 +1936,10 @@ private final class TestChatService: ChatServicing {
     var sendError: Swift.Error?
     var createStreamError: Error?
     var deleteStreamError: Error?
+    var deleteStreamErrorSequence: [Error] = []
     var streams: [StreamSession] = []
+    private(set) var deleteStreamCallCount: Int = 0
+    private(set) var lastDeletedSessionKey: String?
 
     private(set) lazy var incomingMessages: AsyncStream<Message> = {
         AsyncStream { continuation in
@@ -1992,6 +2036,12 @@ private final class TestChatService: ChatServicing {
     }
 
     func deleteStream(sessionKey: String, idempotencyKey: String?) async throws -> String {
+        deleteStreamCallCount += 1
+        lastDeletedSessionKey = sessionKey
+        if !deleteStreamErrorSequence.isEmpty {
+            let error = deleteStreamErrorSequence.removeFirst()
+            throw error
+        }
         if let deleteStreamError { throw deleteStreamError }
         streams.removeAll { $0.sessionKey == sessionKey }
         return sessionKey

@@ -792,17 +792,54 @@ final class ChatViewModel: ChatViewModelHosting {
 
     func deleteStream(sessionKey: String) async -> Bool {
         guard canDeleteStream(sessionKey: sessionKey) else { return false }
+        let idempotencyKey = Self.makeIdempotencyKey()
         do {
             _ = try await chatService.deleteStream(
                 sessionKey: sessionKey,
-                idempotencyKey: Self.makeIdempotencyKey()
+                idempotencyKey: idempotencyKey
             )
             applyStreamDeletion(sessionKey: sessionKey)
             return true
         } catch {
+            if shouldRetryDeleteOnActiveConnection(after: error) {
+                do {
+                    try await reconnectActiveTransportForControlPlane()
+                    _ = try await chatService.deleteStream(
+                        sessionKey: sessionKey,
+                        idempotencyKey: idempotencyKey
+                    )
+                    applyStreamDeletion(sessionKey: sessionKey)
+                    return true
+                } catch {
+                    toastManager.show(error.localizedDescription)
+                    return false
+                }
+            }
             toastManager.show(error.localizedDescription)
             return false
         }
+    }
+
+    private func shouldRetryDeleteOnActiveConnection(after error: Swift.Error) -> Bool {
+        guard auth.token != nil else { return false }
+        if let providerError = error as? ProviderChatService.Error,
+           case .notConnected = providerError {
+            return true
+        }
+        if let streamError = error as? StreamAPIError,
+           streamError.code == "not_connected" {
+            return true
+        }
+        return false
+    }
+
+    private func reconnectActiveTransportForControlPlane() async throws {
+        guard let token = auth.token else {
+            throw ProviderChatService.Error.notConnected
+        }
+        let activeKey = engineActiveSessionKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lastMessageId = activeKey.isEmpty ? nil : lastServerMessageIdBySession[activeKey]
+        try await chatService.connect(token: token, lastMessageId: lastMessageId)
     }
 
     private static func makeIdempotencyKey() -> String {

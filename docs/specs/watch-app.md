@@ -1,7 +1,7 @@
 # Clawline Watch App — Voice Terminal
 
-**Status:** Ready for Implementation
-**Date:** 2026-02-27
+**Status:** Revised — P1/P2 resolved, P3 (swipe gesture conflict on 40mm) pending
+**Date:** 2026-03-05 (revised from 2026-02-27)
 **Owner:** Clawline Apple Watch
 
 ## Overview
@@ -238,11 +238,97 @@ The iPhone proxy maintains a flag for whether the Watch is in relay mode (set vi
 
 The GPS-only Apple Watch (most common model) has no cellular radio. When away from known WiFi, its only network path is Bluetooth relay through the paired iPhone. Dual transport ensures the Watch app can at least send/receive text chat even without direct network. Voice features (Soniox STT, Cartesia TTS) require direct internet — they are never relayed.
 
+## Presentation State Model
+
+The Watch must present a single, coherent user-facing state derived from multiple independent subsystems (transport, network, voice availability, stream state). Without a unified presentation model, the route chip and status text can show contradictory copy — e.g., "Via iPhone" in the route chip while status text says "Direct" from a stale voice session, or "general" as a channel name when no stream is loaded.
+
+### `WatchConnectionPresentationState`
+
+A single `@Observable` type that maps raw subsystem state into user-facing presentation values. **All UI text and status indicators read from this model. No view derives presentation copy directly from transport state, voice session state, or channel manager state.**
+
+```swift
+@Observable
+final class WatchConnectionPresentationState {
+    // Inputs — written by their respective owners
+    var transportState: WatchProviderTransportState = .disconnected
+    var hasDirectInternet: Bool = false   // Watch has WiFi or cellular (independent of provider route)
+    var sonioxKeyPresent: Bool = false
+    var cartesiaKeyPresent: Bool = false
+    var providerTokenPresent: Bool = false
+    var currentStream: StreamSession? = nil
+    var streamListLoaded: Bool = false
+
+    // Derived — UI reads these
+
+    /// Route chip text: "Direct", "Via iPhone", "Reconnecting...", "No Connection"
+    var routeChipText: String { ... }
+
+    /// Route chip color: green, blue, amber, red
+    var routeChipColor: Color { ... }
+
+    /// Route chip icon: filled dot, arrows, pulsing dot, empty dot
+    var routeChipIcon: Image { ... }
+
+    /// Whether Soniox STT is available right now
+    var voiceInputAvailable: Bool {
+        sonioxKeyPresent && hasDirectInternet && transportState != .disconnected
+    }
+
+    /// Whether Cartesia TTS is available right now
+    var voiceOutputAvailable: Bool {
+        cartesiaKeyPresent && hasDirectInternet && transportState != .disconnected
+    }
+
+    /// Single-line status text for the status area (idle state)
+    /// Examples: "Ready", "Via iPhone — text only", "No Connection", "Open Clawline on iPhone to pair"
+    var idleStatusText: String {
+        if !providerTokenPresent { return "Open Clawline on iPhone to pair" }
+        switch transportState {
+        case .disconnected: return "No Connection"
+        case .probing: return "Reconnecting..."
+        case .relay where !voiceInputAvailable:
+            return "Via iPhone — text only"
+        case .relay: return "Via iPhone"  // rare: relay + WiFi
+        case .direct: return "Ready"
+        }
+    }
+
+    /// Channel display name. Never a hardcoded fallback.
+    var channelDisplayName: String? {
+        currentStream?.displayName
+    }
+
+    /// Whether to show channel name at all
+    var showChannelName: Bool {
+        streamListLoaded && currentStream != nil
+    }
+
+    /// Whether to show a loading state for channels
+    var showChannelLoading: Bool {
+        providerTokenPresent && !streamListLoaded
+    }
+}
+```
+
+**Ownership:** `WatchConnectionPresentationState` is instantiated in `ClawlineWatchApp` and injected via `.environment()`. Each subsystem owner writes its respective input properties:
+- `WatchProviderTransport` writes `transportState`
+- `WatchCredentialStore` writes `sonioxKeyPresent`, `cartesiaKeyPresent`, `providerTokenPresent`
+- `WatchChannelManager` writes `currentStream`, `streamListLoaded`
+- Network reachability monitor writes `hasDirectInternet`
+
+**Invariant:** The route chip, status text, and channel name label ALL read from `WatchConnectionPresentationState`. They do not independently query transport state, credential store, or channel manager. This eliminates contradictory copy by construction.
+
+### Replacing `canUseVoice`
+
+The existing `canUseVoice` on `WatchVoiceSession` (defined as "Soniox key present AND direct internet available") is replaced by `WatchConnectionPresentationState.voiceInputAvailable`. The voice session reads this property to decide whether to attempt Soniox connection. The view reads it to decide whether to show the mic button or the system dictation fallback. **One check, one source.**
+
 ## Route Indicator — UI Invariant
 
 **The Watch UI must always prominently show which transport route is active.**
 
 This is a first-class UI element, not a debug affordance. The user should know their connectivity state because it determines whether voice features are available.
+
+**The route chip reads exclusively from `WatchConnectionPresentationState`.** It does not derive its own copy from `WatchProviderTransport.transportState` or any other source.
 
 ### Indicator Behavior
 
@@ -255,7 +341,7 @@ This is a first-class UI element, not a debug affordance. The user should know t
 
 ### Placement
 
-The route indicator occupies the **top edge** of the single-screen layout as a compact status chip — always visible across all voice states (idle, listening, sending, speaking). See [Watch UI — Route Indicator Placement](#route-indicator-placement) for layout details.
+The route indicator occupies the **topmost content position below the safe area** — always visible across all voice states (idle, listening, sending, speaking). It MUST clear the system clock. See [watchOS Safe-Area Layout Policy](#watchos-safe-area-layout-policy) for the hard constraints.
 
 ### Route Change Behavior
 
@@ -659,6 +745,7 @@ struct ClawlineWatchApp: App {
                 .environment(providerTransport)
                 .environment(voiceSession)
                 .environment(channelManager)
+                .environment(presentationState)
         }
     }
 }
@@ -672,6 +759,7 @@ struct ClawlineWatchApp: App {
 | `WatchProviderTransport` | `@Observable` | Dual-transport failover state machine. Manages direct WebSocket + WCSession relay. Provides `ChatServicing`-compatible interface for send/receive. | `transportState: WatchProviderTransportState`, message buffer, reconnect timers |
 | `WatchVoiceSession` | `@Observable` | Voice lifecycle: STT → send → TTS. See [WatchVoiceSession](#watchvoicesession). | Voice phase, Soniox client, Cartesia client, audio engine, timers |
 | `WatchChannelManager` | `@Observable` | Stream/channel selection and switching. Receives stream snapshots from transport. | `currentSessionKey`, `streams: [StreamSession]`, UI selection (debounced 500ms) |
+| `WatchConnectionPresentationState` | `@Observable` | Single source of truth for all user-facing presentation: route chip copy/color, status text, voice availability, channel display. All UI reads from this model. | Route chip text/color/icon, idle status text, voice availability flags, channel display name |
 | `WatchWCSessionDelegate` | `NSObject, WCSessionDelegate` | Receives credential syncs (`transferUserInfo`), relay messages, and activation events. Routes to `WatchCredentialStore` and `WatchProviderTransport`. | WCSession activation state |
 
 ### Dependency Graph
@@ -680,19 +768,27 @@ struct ClawlineWatchApp: App {
 ClawlineWatchApp
   ├── WatchCredentialStore (Keychain + WCSession receiver)
   │     ↑ reads: WatchWCSessionDelegate (credential updates)
+  │     ↓ writes: WatchConnectionPresentationState (key presence flags)
   │
   ├── WatchProviderTransport (failover state machine)
   │     ↑ reads: WatchCredentialStore (token, baseURL)
   │     ↑ reads: WatchWCSessionDelegate (relay messages)
   │     ↓ provides: send/receive chat, transportState, connectionState stream
+  │     ↓ writes: WatchConnectionPresentationState (transportState)
   │
   ├── WatchVoiceSession (voice lifecycle)
-  │     ↑ reads: WatchCredentialStore (sonioxApiKey, cartesiaApiKey, voiceId)
+  │     ↑ reads: WatchConnectionPresentationState (voiceInputAvailable, voiceOutputAvailable)
   │     → emits: onTranscriptReady (app layer routes to transport.send)
   │     ↑ reads: WatchProviderTransport.transportState (route-change force-stop)
   │
-  └── WatchChannelManager (stream selection)
-        ↑ reads: WatchProviderTransport (stream snapshots, CRUD responses)
+  ├── WatchChannelManager (stream selection)
+  │     ↑ reads: WatchProviderTransport (stream snapshots, CRUD responses)
+  │     ↓ writes: WatchConnectionPresentationState (currentStream, streamListLoaded)
+  │
+  └── WatchConnectionPresentationState (unified presentation model)
+        ↑ reads: transport state, credential state, channel state, network reachability
+        ↓ provides: routeChipText/Color/Icon, idleStatusText, voiceAvailability, channelDisplayName
+        All UI views read from this model exclusively for presentation state.
 ```
 
 ### Environment Injection Pattern
@@ -709,33 +805,98 @@ The app layer (in `WatchMainView` or a coordinator) wires `voiceSession.onTransc
 
 ### Layout
 
-The Watch app is a single-screen voice terminal. The layout is centered and vertically stacked:
+The Watch app is a single-screen voice terminal. The layout is centered and vertically stacked.
+
+#### watchOS Safe-Area Layout Policy
+
+**Hard constraint:** All content MUST respect watchOS safe area insets. The system clock occupies the top-center of the display on all Apple Watch models. Content placed in the top safe area inset will collide with the clock and be unreadable.
+
+**Rules:**
+
+1. **Use `.ignoresSafeArea(.container)` only on the background fill**, never on content. Content views must remain inside the safe area.
+2. **The route indicator chip** is the topmost content element. It MUST be positioned at or below the top safe area edge — never above it. Use SwiftUI's default safe area behavior (which insets content below the clock) or explicit `.safeAreaInset(edge: .top)` if custom placement is needed. **Do not use raw `.padding(.top, N)` to approximate safe area clearance** — insets vary across device sizes and watchOS versions.
+3. **The channel name and page dots** are the bottommost content elements. They MUST remain above the bottom safe area edge. On 40mm devices the bottom safe area is significant; content that overflows will be clipped by the display bezel.
+4. **Test on 40mm (Series 7/SE 2nd gen) as the minimum device target.** If layout fits on 40mm, it fits everywhere. The 40mm display is 352×430 pt with the smallest usable content area.
+5. **Use `ScrollView` or `VStack` within the safe area** — never a `ZStack` that ignores safe area to do manual layout. Let the system handle inset math.
+
+#### Layout Diagram
 
 ```
-┌───────────────────────────┐
-│                           │
-│     ╭─── ∿∿∿∿∿∿ ───╮     │  ← circular waveform ring
-│    │                 │    │     (audio-reactive, multicolor)
-│    │    [ mic / ■ ]  │    │  ← mic icon (idle/listening)
-│    │                 │    │     stop icon (speaking/listening)
-│     ╰─── ∿∿∿∿∿∿ ───╯     │
-│                           │
-│       Listening...        │  ← single status text line
-│                           │
-│        ● ● ○ ● ●         │  ← page indicator dots
-│                           │
-│         general           │  ← current channel name
-│                           │
-└───────────────────────────┘
+┌─────────────────────────────┐
+│  ╌╌╌ system clock zone ╌╌╌  │  ← top safe area (DO NOT place content here)
+├─────────────────────────────┤
+│  ● Direct                   │  ← route chip (first element below safe area)
+│                             │
+│     ╭─── ∿∿∿∿∿∿ ───╮       │  ← circular waveform ring
+│    │                 │      │     (adaptive size, audio-reactive)
+│    │    [ mic / ■ ]  │      │  ← mic icon (idle) / stop icon (active)
+│    │                 │      │
+│     ╰─── ∿∿∿∿∿∿ ───╯       │
+│                             │
+│       Listening...          │  ← single status text line
+│                             │
+│        ● ● ○ ● ●           │  ← page indicator dots
+│                             │
+│        #design              │  ← current channel name (from stream state)
+│                             │
+├─────────────────────────────┤
+│  ╌╌╌ bottom safe area ╌╌╌   │  ← DO NOT place content here
+└─────────────────────────────┘
 ```
 
 **Elements (top to bottom):**
 
-1. **Waveform ring** — Circular ring surrounding the mic button. Multicolor gradient. Animates with audio level during listening and TTS playback. Quiescent (subtle idle animation) when not active.
-2. **Mic / Stop button** — Center of the ring. Mic icon when idle, stop icon when listening or speaking. Large tap target (entire ring area is tappable).
-3. **Status text** — Single line below the ring. Shows current state: idle copy, "Listening...", live transcript (partial words), "Speaking...", error text. One line, truncated if needed.
-4. **Page indicator dots** — Horizontal row below status text. One dot per channel/stream. Follows iOS `StreamPageDotsView` pattern: max 11 dots, unread indicators (filled vs hollow), `ultraThinMaterial` capsule background.
-5. **Channel name** — Text label below page dots. Name of the currently active stream.
+1. **Route indicator chip** — Compact status chip showing current transport route. Always visible. Positioned as the topmost content element, below the system clock safe area. See [Route Indicator — UI Invariant](#route-indicator--ui-invariant).
+2. **Waveform ring** — Circular ring surrounding the mic button. Multicolor gradient. Animates with audio level during listening and TTS playback. Quiescent (subtle idle animation) when not active. **Size is adaptive** — see [Adaptive Ring Sizing](#adaptive-ring-sizing).
+3. **Mic / Stop button** — Center of the ring. Mic icon when idle, stop icon when listening or speaking. Large tap target (entire ring area is tappable). Minimum 44×44 pt hit area per Apple HIG.
+4. **Status text** — Single line below the ring. Shows current state derived from `WatchConnectionPresentationState` (see [Presentation State Model](#presentation-state-model)). One line, truncated if needed.
+5. **Page indicator dots** — Horizontal row below status text. One dot per channel/stream. Follows iOS `StreamPageDotsView` pattern: max 11 dots, unread indicators (filled vs hollow), `ultraThinMaterial` capsule background.
+6. **Channel name** — Text label below page dots. Shows the `displayName` of the currently active `StreamSession`. **Never a hardcoded fallback** — see [No Hardcoded Channel Fallbacks](#no-hardcoded-channel-fallbacks).
+
+#### Adaptive Ring Sizing
+
+The waveform ring diameter MUST be derived from available geometry, not hardcoded. A fixed-size ring (e.g., 128 pt) overflows on 40mm devices and wastes space on 49mm Ultra.
+
+**Sizing policy:**
+
+Use `GeometryReader` (or the view's proposed size in a `Layout`) to compute ring diameter from the available content height after accounting for all other elements (route chip, status text, page dots, channel name, inter-element spacing).
+
+**Formula:**
+
+```
+ringDiameter = min(availableWidth, availableContentHeight) * ringFraction
+```
+
+Where:
+- `availableWidth` = geometry width minus horizontal safe area insets
+- `availableContentHeight` = geometry height minus vertical space consumed by route chip (~24 pt), status text (~20 pt), page dots (~16 pt), channel name (~18 pt), and inter-element spacing (~40 pt total)
+- `ringFraction` = proportion of remaining space devoted to the ring. Start with **0.65** and tune per device.
+
+**Per-device guidance (approximate diameters):**
+
+| Device Class | Display (pt) | Approx. Ring Diameter | Notes |
+|---|---|---|---|
+| 40/41mm (Series 7+, SE) | 352×430 | ~100–110 pt | Tight. Status text and channel name must use compact fonts. |
+| 45/46mm (Series 7+) | 396×484 | ~120–130 pt | Comfortable. Primary development target. |
+| 49mm (Ultra) | 410×502 | ~135–145 pt | Spacious. Ring can be larger but don't exceed 145 pt — diminishing returns. |
+
+**Cap:** Clamp ring diameter to `min(computed, 145)` to prevent absurdly large rings on future larger displays.
+
+**Mic button:** The mic/stop icon within the ring should be ~40% of ring diameter, with a minimum of 44×44 pt tap target per Apple HIG.
+
+**40mm policy (Flynn-resolved, 2026-03-05):** All UI elements (route chip, ring, status text, page dots, channel name) are present on ALL device sizes including 40mm. The GeometryReader-driven ring sizing adapts to the available space — no elements are dropped or hidden on smaller screens. The ring scales down to fit; this is the intended behavior.
+
+#### Device Size Targets
+
+The following Apple Watch sizes are explicit test targets. Layout must be verified on each. The 40mm size is the **minimum** — if it works on 40mm, it works everywhere.
+
+| Size Class | Models | Display (pt) | Bezel Shape | Layout Notes |
+|---|---|---|---|---|
+| **40/41mm** | Series 7, 8, 9, 10, SE (2nd/3rd gen) | 352×430 | Rounded rect | Minimum target. Tight vertical space. Route chip font should be `.caption2`. Ring ~100–110 pt. Channel name may truncate. |
+| **45/46mm** | Series 7, 8, 9, 10 | 396×484 | Rounded rect | Primary dev target. Comfortable layout. Route chip `.caption`. Ring ~120–130 pt. |
+| **49mm** | Ultra, Ultra 2 | 410×502 | Rounded rect (flatter corners) | Most spacious. Extra vertical space. Ring can be larger. Action button available (not used in Phase 1). |
+
+**Testing mandate:** Before any Watch deployment is considered "ready for Flynn verification," all three size classes must be tested. Use Simulator for 40mm and 49mm if physical devices are unavailable. Physical device testing on 45mm is the minimum for real deploy.
 
 ### Interaction
 
@@ -763,6 +924,36 @@ The Watch app is a single-screen voice terminal. The layout is centered and vert
 - Page dots update to reflect new position
 - Channel name updates
 - Follows iOS dual-key pattern: UI selection updates immediately, engine stream switch debounced (500ms)
+
+#### Gesture Coordination (Swipe vs. Hold Arbitration)
+
+The main screen has two competing gestures: **horizontal swipe** (channel switching) and **long press / hold** (walkie-talkie mode). These must be explicitly arbitrated to prevent conflicts.
+
+**Arbitration rules:**
+
+1. **Horizontal swipe preempts hold when displacement threshold crossed.** If the user's finger moves ≥10 pt horizontally before the 200ms hold timer fires, the gesture is classified as a swipe. The hold recognizer is cancelled. The 10 pt threshold is low enough to feel responsive but high enough to tolerate finger jitter during a press.
+
+2. **Hold suppresses swipe when active.** Once the 200ms hold timer fires and the gesture is classified as a hold (walkie-talkie listening begins), horizontal movement is ignored. The user can shift their finger without triggering a channel switch. The swipe recognizer is disabled for the duration of the hold.
+
+3. **Tap is the fallback.** If the finger lifts before both the 200ms hold threshold AND the 10 pt swipe threshold, it's a tap (sticky-mode listen start/stop).
+
+**Implementation guidance:**
+
+Use SwiftUI's `simultaneousGesture` with a custom `GestureState` that tracks the arbitration phase:
+
+```
+enum GestureArbitration {
+    case undecided          // finger down, neither threshold crossed
+    case swipe              // horizontal displacement ≥ 10pt
+    case hold               // 200ms elapsed without ≥ 10pt horizontal displacement
+}
+```
+
+The waveform ring / mic button area handles tap and hold. The full-screen area handles swipe. When `undecided`, both recognizers are live. When one wins, the other is suppressed for the duration of that gesture.
+
+**Edge case:** If the user starts a hold (200ms), then lifts quickly (< 100ms after hold starts), this is treated as a hold-then-release — the walkie-talkie session starts and immediately finalizes (very short recording). This is correct behavior — do not retroactively reclassify it as a tap.
+
+4. **Digital Crown is reserved for system use.** Do not attach scroll or rotation gestures to the Digital Crown. watchOS uses it for scrolling and app switching. If the content fits in the safe area (as designed), there is nothing to scroll.
 
 ### Voice States
 
@@ -835,6 +1026,8 @@ On either timeout (tap mode only): finalize Soniox (1.2s hold), send transcript,
 
 The waveform ring is the Watch's primary visual feedback element. It adapts the iOS waveform rendering contract to a circular form factor.
 
+**Size:** The ring diameter is computed adaptively from available geometry — see [Adaptive Ring Sizing](#adaptive-ring-sizing). The ring MUST NOT use a fixed point size. The view uses `GeometryReader` to measure available space and computes the ring diameter per the sizing formula.
+
 **Audio source:** Raw RMS `Float` from the Watch voice session owner (during listening) or TTS output level (during speaking). No normalization. The view owns all visual mapping.
 
 **Two curves, one source (same as iOS):**
@@ -877,17 +1070,34 @@ Main Screen:
 
 ### Route Indicator Placement
 
-The route indicator is a **hard UI invariant** — always visible. On the Watch's single-screen layout, it occupies the **top edge** of the screen as a compact status chip:
+The route indicator is a **hard UI invariant** — always visible. On the Watch's single-screen layout, it occupies the **topmost content position below the system clock safe area**:
 
 ```
-┌───────────────────────────┐
-│  ● Direct                 │  ← route chip (always visible)
-│                           │
-│     ╭─── ∿∿∿∿∿∿ ───╮     │
-│    ...                    │
+┌─────────────────────────────┐
+│  ╌╌╌ system clock zone ╌╌╌  │  ← safe area (no content)
+├─────────────────────────────┤
+│  ● Direct                   │  ← route chip (first element below safe area)
+│                             │
+│     ╭─── ∿∿∿∿∿∿ ───╮       │
+│    ...                      │
 ```
+
+The route chip MUST use the safe area's top edge as its anchor — not a hardcoded padding value. See [watchOS Safe-Area Layout Policy](#watchos-safe-area-layout-policy).
 
 See [Route Indicator — UI Invariant](#route-indicator--ui-invariant) for states, colors, and copy.
+
+### No Hardcoded Channel Fallbacks
+
+**Hard constraint:** The channel name label and all channel-related UI MUST derive from actual stream state. Hardcoded fallback strings (e.g., `"general"`, `"default"`, `"main"`) are **forbidden**.
+
+**Rules:**
+
+1. **If `streamListLoaded == false`:** Show a loading indicator (e.g., small spinner or "..." placeholder). Never show a channel name.
+2. **If `streamListLoaded == true` but `currentStream == nil`:** Show nothing in the channel name area (empty state). Page dots show zero dots. This state means the provider has no streams — it's a valid state, not an error.
+3. **If `currentStream != nil`:** Show `currentStream.displayName`. This is the only path that displays a channel name.
+4. **Never synthesize a display name.** If the `StreamSession.displayName` field is empty or nil, show the session key as a fallback identifier (it's ugly but honest). Never substitute a human-friendly default.
+
+**Rationale:** The previous deployment showed a phantom "general" channel label that appeared before stream state loaded, causing user confusion. Stream state is asynchronous — the Watch may not have stream data until the provider connection is established and a `streams.fetch` (or stream snapshot event) completes. The UI must reflect this reality.
 
 ### Route Change Behavior
 
@@ -904,8 +1114,8 @@ When in relay mode (no direct internet), the Watch degrades gracefully:
 
 - Mic button tap → opens watchOS system dictation keyboard (Apple on-device recognizer)
 - Waveform ring shows quiescent idle animation (no Soniox connection)
-- Status text shows "Via iPhone — text only"
-- Assistant responses read aloud via `AVSpeechSynthesizer` (no Cartesia connection)
+- Status text shows "Via iPhone — text only" (derived from `WatchConnectionPresentationState.idleStatusText`)
+- Assistant responses read aloud via `AVSpeechSynthesizer` (no Cartesia connection). **Completion must use `AVSpeechSynthesizerDelegate.speechSynthesizer(_:didFinish:)` callback** — not time-based approximation — for the SPEAKING→IDLE transition.
 - Channel switching still works (provider chat relay handles stream switching)
 
 ### Barge-In
@@ -963,7 +1173,7 @@ var audioLevel: Float = 0           // raw RMS from mic (listening) or TTS outpu
 var transcript: String = ""         // accumulated transcript text (partial + final tokens)
 var errorMessage: String?           // current error, nil if none
 var mode: VoiceMode?                // .tap | .hold | nil (nil when idle)
-var canUseVoice: Bool               // derived: Soniox key present AND direct internet available
+var canUseVoice: Bool               // DEPRECATED — use WatchConnectionPresentationState.voiceInputAvailable instead. Kept for migration only.
 
 enum VoiceState {
     case idle
@@ -1133,7 +1343,8 @@ Every piece of mutable state has exactly one owner. Other components may read (d
 | Current session key (UI) | `WatchChannelManager` | `String?` (stored, published) | `WatchMainView` (page dots, channel name), `WatchProviderTransport` (message routing) | Swipe gesture (debounced 500ms) |
 | Engine session key | `WatchChannelManager` | `String?` (stored, private) | `WatchProviderTransport` (actual message routing) | Debounce timer fires after UI selection |
 | Stream list | `WatchChannelManager` | `[StreamSession]` (stored, published) | `WatchMainView` (page dots, channel name) | Stream snapshot events from `WatchProviderTransport` |
-| Route indicator copy/color | View | Derived from `WatchProviderTransport.transportState` | (self) | Pure derivation — no stored state |
+| Presentation state (route copy, status text, voice availability, channel display) | `WatchConnectionPresentationState` | Derived from transport state + credential state + channel state + network reachability | Route chip view, status text view, mic button view, channel name view | Input properties written by respective owners (transport, credentials, channels, network monitor) |
+| Route indicator copy/color | `WatchConnectionPresentationState` | Derived from `transportState` input | Route chip view | Pure derivation — view reads `routeChipText`, `routeChipColor`, `routeChipIcon` from presentation state |
 | Waveform ring animation | View | Derived from `WatchVoiceSession.audioLevel` + curves | (self) | Pure derivation — view owns all visual mapping constants |
 | WCSession activation | `WatchWCSessionDelegate` | `WCSessionActivationState` (stored) | `WatchProviderTransport` (relay availability) | WCSession system callbacks |
 | Relay active flag | `WatchProviderTransport` | `Bool` (stored, private) | iOS relay proxy (via `relay.activated`/`relay.deactivated` messages) | Transport state transitions: set true on entering relay, false on leaving |
@@ -1163,8 +1374,8 @@ See [WatchVoiceSession — Behavioral Contracts](#behavioral-contracts) for the 
 **T1. Route indicator is always visible.**
 `WatchProviderTransport.transportState` is always readable. The route indicator view derives display from this state. No screen, state, or transition hides it.
 
-**T2. Transport state transitions are the single source for route indicator.**
-The route indicator view reads `transportState` and nothing else. No duplicate transport-state tracking in the view or other components.
+**T2. Transport state transitions flow through the presentation model.**
+`WatchProviderTransport` writes `transportState` to `WatchConnectionPresentationState`. The route indicator view reads from `WatchConnectionPresentationState` — never from `WatchProviderTransport` directly. No duplicate transport-state tracking in the view or other components.
 
 **T3. Probing buffer is bounded.**
 Max 20 messages, max 60s age. On transition out of probing: flush to new transport or drop expired entries with error callback.
@@ -1197,6 +1408,12 @@ UI selection updates immediately on swipe. Engine session key updates after 500m
 **CH2. Stream list is authoritative from provider.**
 `WatchChannelManager.streams` is set only from stream snapshot events received via `WatchProviderTransport`. The Watch does not independently persist or infer stream lists.
 
+**CH3. No hardcoded channel fallbacks.**
+The channel name label MUST display `currentStream.displayName` when a stream is selected, a loading state when streams have not yet loaded, or nothing when no stream exists. Hardcoded strings like `"general"`, `"default"`, or `"main"` are forbidden anywhere in channel display logic. See [No Hardcoded Channel Fallbacks](#no-hardcoded-channel-fallbacks).
+
+**CH4. Channel display reads from presentation model.**
+The channel name label and page dots read from `WatchConnectionPresentationState.channelDisplayName`, `.showChannelName`, and `.showChannelLoading`. They do not query `WatchChannelManager` directly for display purposes.
+
 ### Acceptance Criteria
 
 1. Voice phase is private to `WatchVoiceSession`. No external code reads it.
@@ -1212,7 +1429,7 @@ UI selection updates immediately on swipe. Engine session key updates after 500m
 11. Route change to relay during SPEAKING: cancel Cartesia, stop playback, IDLE.
 12. Route change to relay during SENDING: no interruption.
 13. Route indicator chip is visible in every voice state (idle, listening, finalizing, sending, speaking, error).
-14. Route indicator derives exclusively from `WatchProviderTransport.transportState`.
+14. Route indicator derives exclusively from `WatchConnectionPresentationState` (which itself derives from `WatchProviderTransport.transportState`).
 15. Transport probing: 3 attempts, 2s/4s/8s backoff. All fail + phone reachable → relay. All fail + phone unreachable → disconnected.
 16. Probing buffer: max 20 messages, max 60s age. Flushed on transport transition.
 17. `WCSession.isReachable` debounced 1s before triggering state transitions.
@@ -1236,6 +1453,13 @@ UI selection updates immediately on swipe. Engine session key updates after 500m
 35. Multi-response: `handleResponse()` during SPEAKING queues the new text. Played after current TTS finishes. Barge-in clears queue.
 36. Relay wire protocol includes `relay.activated`/`relay.deactivated` control messages and `chat.callback` for interactive callbacks — 11 total operation types.
 37. `WatchWCSessionDelegate` is instantiated in the `@main` entry point. `WCSession.default.activate()` called in `init()`.
+38. All content respects watchOS safe area insets. Route chip clears system clock on all device sizes. No content placed in top or bottom safe area zones. Verified on 40mm Simulator.
+39. Waveform ring diameter is computed from `GeometryReader` available space, not hardcoded. Ring fits within available content area on 40mm (≤110 pt), 45mm (≤130 pt), and 49mm (≤145 pt).
+40. `WatchConnectionPresentationState` is the sole source for route chip text/color, idle status text, voice availability, and channel display name. Views do not derive these from transport, credential, or channel state directly.
+41. Channel name label never shows a hardcoded fallback string. Shows `StreamSession.displayName` when loaded, loading indicator when pending, or nothing when no stream exists.
+42. Horizontal swipe gesture preempts hold when ≥10 pt horizontal displacement occurs before 200ms hold threshold. Hold suppresses swipe once 200ms threshold fires. Tap is the fallback when neither threshold is crossed.
+43. Layout verified on all three device size classes (40/41mm, 45/46mm, 49mm) before deployment. 40mm is the minimum target.
+44. Fallback TTS (`AVSpeechSynthesizer`) completion uses `AVSpeechSynthesizerDelegate.speechSynthesizer(_:didFinish:)` delegate callback for SPEAKING→IDLE transition — not time-based approximation.
 
 ## Implementation Phases
 
@@ -1248,8 +1472,11 @@ UI selection updates immediately on swipe. Engine session key updates after 500m
 - `SonioxStreamingClient` in shared package (used by both iOS dictation and Watch STT)
 - `CartesiaTTSClient` in shared package (used by both iOS read-aloud and Watch TTS)
 - Watch provider connection with dual transport failover state machine
-- Route indicator chip (always visible, top edge)
-- Circular waveform ring UI with mic/stop button center
+- `WatchConnectionPresentationState` — unified presentation model for all UI state derivation
+- Route indicator chip (always visible, below safe area, derived from presentation model)
+- Adaptive circular waveform ring UI with mic/stop button center (GeometryReader-based sizing)
+- Safe-area-compliant layout verified on 40mm, 45mm, and 49mm
+- Gesture coordination: swipe/hold/tap arbitration with explicit thresholds
 - Tap mode: tap mic → listen → tap stop → send
 - Hold mode (walkie-talkie): hold mic → listen → release → send
 - STT timeouts matching iOS: 15s inactivity, 60s max (tap mode), no timeouts (hold mode)
@@ -1257,8 +1484,8 @@ UI selection updates immediately on swipe. Engine session key updates after 500m
 - Live transcript in status text line
 - Provider response text → Cartesia direct → PCM audio playback through waveform ring
 - Barge-in: tap mic/stop during TTS playback
-- Channel swiping (swipe L/R) with page dots and channel name
-- AVSpeechSynthesizer offline/missing-key fallback
+- Channel swiping (swipe L/R) with page dots and channel name (no hardcoded fallbacks)
+- AVSpeechSynthesizer offline/missing-key fallback (delegate-based completion)
 - Key bootstrapping via WatchConnectivity
 - Graceful degradation per key availability
 - Route change inline notification (status text + haptic)
@@ -1288,6 +1515,16 @@ UI selection updates immediately on swipe. Engine session key updates after 500m
 5. **Watch-only mode** — Should the Watch work without ever pairing with an iPhone? (cellular Watch, manual key entry). This spec assumes phone-bootstrapped only.
 
 6. **Waveform ring visual design** — Spec describes multicolor gradient. What color palette? Match iOS waveform colors, or distinct Watch identity?
+
+### Pushback Items (Flagged During 2026-03-05 Layout Revision)
+
+These items flag potential incompatibilities between Flynn's UI design and good watchOS UX on certain device sizes. They are not blockers — they are decision points that need Flynn's call.
+
+~~**P1. Ring size vs. 40mm content budget.**~~ **RESOLVED (Flynn, 2026-03-05):** Ring scales down on 40mm via GeometryReader. All elements present on all device sizes. No elements dropped.
+
+~~**P2. Page dots + channel name redundancy on small screens.**~~ **RESOLVED (Flynn, 2026-03-05):** Keep both page dots and channel name on all sizes including 40mm. GeometryReader-driven ring sizing absorbs the constraint.
+
+**P3. Swipe gesture conflict surface.** The full-screen horizontal swipe for channel switching conflicts with the hold gesture on the waveform ring. The spec now defines explicit arbitration (10 pt horizontal threshold vs. 200ms hold threshold), but the swipe target overlaps the ring. On 40mm where the ring fills more of the screen, accidental swipes during press-and-hold are more likely. **Mitigation options:** (a) Limit swipe recognition to the area *below* the ring (status text / page dots region), (b) increase horizontal threshold to 15 pt on 40mm, (c) accept the current arbitration and tune thresholds based on real-device testing.
 
 ### Resolved (formerly open)
 

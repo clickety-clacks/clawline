@@ -148,6 +148,90 @@ struct BubbleScrollTests {
         #expect(abs(scroll.contentOffset.y) < 0.5)
     }
 
+    @Test("T149: Same message id in a different session resets stale inner bubble offset")
+    @MainActor
+    func sessionAwareReuseResetsOffsetForSameMessageId() {
+        let metrics = ChatFlowTheme.Metrics(isCompact: false)
+        let firstMessage = Message(
+            id: "shared-id",
+            role: .assistant,
+            content: Array(repeating: "This sentence is intentionally long for truncation coverage.", count: 36).joined(separator: " "),
+            timestamp: Date(),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: "agent:main:clawline:flynn:main"
+        )
+        let secondMessage = Message(
+            id: "shared-id",
+            role: .assistant,
+            content: "Short follow-up in a different session.",
+            timestamp: Date(),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: "agent:main:clawline:flynn:s_other"
+        )
+
+        let firstPresentation = buildPresentation(firstMessage, metrics: metrics, enableLinkPreviews: false)
+        let secondPresentation = buildPresentation(secondMessage, metrics: metrics, enableLinkPreviews: false)
+        let firstSizeClass = MessageFlowRules.sizeClass(for: firstPresentation)
+        let secondSizeClass = MessageFlowRules.sizeClass(for: secondPresentation)
+
+        let host = UIView(frame: CGRect(x: 0, y: 0, width: 360, height: 600))
+        host.layoutIfNeeded()
+        let bubble = MessageBubbleUIKitView(frame: CGRect(x: 0, y: 0, width: 320, height: 260))
+        host.addSubview(bubble)
+
+        bubble.configure(
+            message: firstMessage,
+            presentation: firstPresentation,
+            sizeClass: firstSizeClass,
+            metrics: metrics,
+            maxWidth: 320,
+            truncationHeightOverride: 140,
+            bubbleSizingV2: nil,
+            showsHeader: true,
+            paddingScale: 1,
+            minWidthOverride: nil,
+            maxWidthOverride: nil,
+            useContinuousCorners: true,
+            isDark: false,
+            onRequestExpand: nil,
+            onRequestLayout: nil,
+            onInteractiveCallback: nil
+        )
+        bubble.layoutIfNeeded()
+
+        guard let scroll = innerBubbleScrollView(in: bubble) else {
+            Issue.record("Expected inner bubble UIScrollView not found")
+            return
+        }
+        scroll.contentOffset = CGPoint(x: 0, y: 48)
+
+        bubble.configure(
+            message: secondMessage,
+            presentation: secondPresentation,
+            sizeClass: secondSizeClass,
+            metrics: metrics,
+            maxWidth: 320,
+            truncationHeightOverride: 240,
+            bubbleSizingV2: nil,
+            showsHeader: true,
+            paddingScale: 1,
+            minWidthOverride: nil,
+            maxWidthOverride: nil,
+            useContinuousCorners: true,
+            isDark: false,
+            onRequestExpand: nil,
+            onRequestLayout: nil,
+            onInteractiveCallback: nil
+        )
+        bubble.layoutIfNeeded()
+
+        #expect(abs(scroll.contentOffset.y) < 0.5)
+    }
+
     @Test("T048: Single-link previews keep fixed full-height viewport using the available-height cap")
     @MainActor
     func linkPreviewCapsHoldOnLargeContainerInputs() {

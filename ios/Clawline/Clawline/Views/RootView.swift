@@ -9,6 +9,7 @@ import SwiftUI
 
 struct RootView: View {
     let uploadService: any UploadServicing
+    let assetDownloadService: any AssetDownloading
     @State private var toastManager = ToastManager()
     @State private var salientHighlightService = SalientHighlightService()
     @State private var chatViewModel: ChatViewModel?
@@ -69,6 +70,7 @@ struct RootView: View {
             }
         }
         .environment(\.uploadService, uploadService)
+        .environment(\.assetDownloadService, assetDownloadService)
         .background {
 #if os(visionOS)
             Color.clear
@@ -96,6 +98,7 @@ struct RootView: View {
             settings: settings,
             device: device,
             uploadService: uploadService,
+            assetDownloadService: assetDownloadService,
             toastManager: toastManager,
             salientHighlightService: salientHighlightService
         )
@@ -117,7 +120,7 @@ private struct KeyboardSafeAreaMode: ViewModifier {
 // MARK: - Previews
 
 #Preview("Unauthenticated") {
-    RootView(uploadService: PreviewUploadService())
+    RootView(uploadService: PreviewUploadService(), assetDownloadService: PreviewAssetDownloadService())
         .environment(AuthManager())
         .environment(\.connectionService, StubConnectionService())
         .environment(\.deviceIdentifier, DeviceIdentifier())
@@ -127,7 +130,7 @@ private struct KeyboardSafeAreaMode: ViewModifier {
 #Preview("Authenticated") {
     let auth = AuthManager()
     auth.storeCredentials(token: "preview-token", userId: "preview-user")
-    return RootView(uploadService: PreviewUploadService())
+    return RootView(uploadService: PreviewUploadService(), assetDownloadService: PreviewAssetDownloadService())
         .environment(auth)
         .environment(\.connectionService, StubConnectionService())
         .environment(\.deviceIdentifier, DeviceIdentifier())
@@ -136,5 +139,8 @@ private struct KeyboardSafeAreaMode: ViewModifier {
 
 private struct PreviewUploadService: UploadServicing {
     func upload(data: Data, mimeType: String, filename: String?) async throws -> String { "preview-asset" }
+}
+
+private struct PreviewAssetDownloadService: AssetDownloading {
     func download(assetId: String) async throws -> Data { Data() }
 }

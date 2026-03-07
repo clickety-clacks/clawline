@@ -18,6 +18,7 @@ struct Clawline_SpatialApp: App {
     private let connectionService: any ConnectionServicing
     private let chatService: any ChatServicing
     private let uploadService: any UploadServicing
+    private let assetDownloadService: any AssetDownloading
 
     init() {
         let authManager = AuthManager()
@@ -28,7 +29,12 @@ struct Clawline_SpatialApp: App {
         let settingsManager = SettingsManager()
         _settingsManager = State(initialValue: settingsManager)
         let device = DeviceIdentifier()
-        let connector = URLSessionWebSocketConnector(connectTimeout: 20, resourceTimeout: 360)
+        let tlsSessionFactory = ProviderTLSSessionFactory()
+        let connector = URLSessionWebSocketConnector(
+            tlsSessionFactory: tlsSessionFactory,
+            connectTimeout: 20,
+            resourceTimeout: 360
+        )
         self.deviceIdentifier = device
         self.connectionService = ProviderConnectionService(connector: connector)
         self.chatService = ProviderChatService(
@@ -36,13 +42,14 @@ struct Clawline_SpatialApp: App {
             deviceId: device.deviceId,
             userIdProvider: { authManager.currentUserId }
         )
-        self.uploadService = UploadService(auth: authManager)
+        self.uploadService = UploadService(auth: authManager, tlsSessionFactory: tlsSessionFactory)
+        self.assetDownloadService = AssetDownloadService(auth: authManager, tlsSessionFactory: tlsSessionFactory)
     }
 
     var body: some Scene {
         WindowGroup {
             @Bindable var settingsManager = settingsManager
-            RootView(uploadService: uploadService)
+            RootView(uploadService: uploadService, assetDownloadService: assetDownloadService)
                 .environment(authManager)
                 .environment(\.connectionService, connectionService)
                 .environment(\.deviceIdentifier, deviceIdentifier)

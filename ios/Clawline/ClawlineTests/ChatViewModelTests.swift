@@ -2103,7 +2103,7 @@ private func resetChatPersistence() {
 }
 
 @MainActor
-private final class TestUploadService: UploadServicing {
+private final class TestUploadService: UploadServicing, AssetDownloading {
     private(set) var uploadedPayloads: [(data: Data, mimeType: String, filename: String?)] = []
     var downloadPayloads: [String: Data] = [:]
     private(set) var downloadedAssetIds: [String] = []

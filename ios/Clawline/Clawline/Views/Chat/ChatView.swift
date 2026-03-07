@@ -2506,6 +2506,9 @@ private struct AttachmentActionButton: View {
 
 private final class PreviewUploadService: UploadServicing {
     func upload(data: Data, mimeType: String, filename: String?) async throws -> String { "preview-asset" }
+}
+
+private final class PreviewAssetDownloadService: AssetDownloading {
     func download(assetId: String) async throws -> Data { Data() }
 }
 
@@ -2520,6 +2523,7 @@ private final class PreviewUploadService: UploadServicing {
         settings: SettingsManager(),
         device: device,
         uploadService: PreviewUploadService(),
+        assetDownloadService: PreviewAssetDownloadService(),
         toastManager: toastManager,
         salientHighlightService: SalientHighlightService()
     )
@@ -2542,6 +2546,7 @@ private final class PreviewUploadService: UploadServicing {
         settings: SettingsManager(),
         device: device,
         uploadService: PreviewUploadService(),
+        assetDownloadService: PreviewAssetDownloadService(),
         toastManager: toastManager,
         salientHighlightService: SalientHighlightService()
     )

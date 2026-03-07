@@ -9,5 +9,8 @@ import Foundation
 
 protocol UploadServicing {
     func upload(data: Data, mimeType: String, filename: String?) async throws -> String
+}
+
+protocol AssetDownloading {
     func download(assetId: String) async throws -> Data
 }

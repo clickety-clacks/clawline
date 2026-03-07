@@ -55,7 +55,20 @@ private struct StubUploadService: UploadServicing {
     func upload(data: Data, mimeType: String, filename: String?) async throws -> String {
         throw AttachmentError.missingAuth
     }
+}
 
+private struct AssetDownloadServiceKey: EnvironmentKey {
+    static let defaultValue: any AssetDownloading = StubAssetDownloadService()
+}
+
+extension EnvironmentValues {
+    var assetDownloadService: any AssetDownloading {
+        get { self[AssetDownloadServiceKey.self] }
+        set { self[AssetDownloadServiceKey.self] = newValue }
+    }
+}
+
+private struct StubAssetDownloadService: AssetDownloading {
     func download(assetId: String) async throws -> Data {
         throw AttachmentError.missingAuth
     }

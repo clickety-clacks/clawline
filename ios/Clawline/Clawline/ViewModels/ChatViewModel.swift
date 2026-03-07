@@ -310,6 +310,7 @@ final class ChatViewModel: ChatViewModelHosting {
     private let auth: any AuthManaging
     private let chatService: any ChatServicing
     private let uploadService: any UploadServicing
+    private let assetDownloadService: any AssetDownloading
     private let settings: SettingsManager
     private let deviceId: String
     let salientHighlightService: any SalientHighlightServicing
@@ -380,6 +381,7 @@ final class ChatViewModel: ChatViewModelHosting {
          settings: SettingsManager,
          device: any DeviceIdentifying,
          uploadService: any UploadServicing,
+         assetDownloadService: any AssetDownloading,
          toastManager: ToastManager,
          salientHighlightService: any SalientHighlightServicing,
          connectionAlertGracePeriod: Duration = .seconds(2),
@@ -396,6 +398,7 @@ final class ChatViewModel: ChatViewModelHosting {
         self.settings = settings
         self.deviceId = device.deviceId
         self.uploadService = uploadService
+        self.assetDownloadService = assetDownloadService
         self.toastManager = toastManager
         self.salientHighlightService = salientHighlightService
         self.nowProvider = nowProvider
@@ -415,6 +418,38 @@ final class ChatViewModel: ChatViewModelHosting {
         )
         handleAuthStateChange()
     }
+
+#if DEBUG
+    convenience init(auth: any AuthManaging,
+                     chatService: any ChatServicing,
+                     settings: SettingsManager,
+                     device: any DeviceIdentifying,
+                     uploadService: any UploadServicing & AssetDownloading,
+                     toastManager: ToastManager,
+                     salientHighlightService: any SalientHighlightServicing,
+                     connectionAlertGracePeriod: Duration = .seconds(2),
+                     nowProvider: @escaping () -> Date = Date.init,
+                     assistantIncomingHaptic: @escaping @MainActor () -> Void = {
+                         #if !os(visionOS)
+                         let generator = UIImpactFeedbackGenerator(style: .light)
+                         generator.impactOccurred()
+                         #endif
+                     }) {
+        self.init(
+            auth: auth,
+            chatService: chatService,
+            settings: settings,
+            device: device,
+            uploadService: uploadService,
+            assetDownloadService: uploadService,
+            toastManager: toastManager,
+            salientHighlightService: salientHighlightService,
+            connectionAlertGracePeriod: connectionAlertGracePeriod,
+            nowProvider: nowProvider,
+            assistantIncomingHaptic: assistantIncomingHaptic
+        )
+    }
+#endif
 
     deinit {
         logger.info("ChatViewModel deinit id=\(self.instanceId, privacy: .public)")
@@ -981,7 +1016,7 @@ final class ChatViewModel: ChatViewModelHosting {
 
                 do {
                     logger.info("attachment download start id=\(attachment.id, privacy: .public) assetId=\(assetId, privacy: .public)")
-                    let data = try await uploadService.download(assetId: assetId)
+                    let data = try await assetDownloadService.download(assetId: assetId)
                     guard !data.isEmpty else { continue }
                     let isImageAttachment = attachment.type == .image
                         || attachment.type == .asset

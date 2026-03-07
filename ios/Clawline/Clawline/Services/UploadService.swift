@@ -13,17 +13,39 @@ final class UploadService: UploadServicing {
         let assetId: String
     }
 
-    private let session: URLSession
     private let auth: any AuthManaging
+    private let tlsSessionFactory: any ProviderTLSSessionFactoring
     private let baseURLProvider: () -> URL?
-    private let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "UploadService")
+    private let sessionStateQueue = DispatchQueue(label: "co.clicketyclacks.Clawline.upload-session")
+    private let requestTimeout: TimeInterval
+    private let resourceTimeout: TimeInterval
+    private var currentSession: ProviderManagedSession?
+    private var policyChangeObserver: NSObjectProtocol?
 
     init(auth: any AuthManaging,
          baseURLProvider: @escaping () -> URL? = { ProviderBaseURLStore.baseURL },
-         session: URLSession = .shared) {
+         tlsSessionFactory: any ProviderTLSSessionFactoring,
+         requestTimeout: TimeInterval = 60,
+         resourceTimeout: TimeInterval = 600) {
         self.auth = auth
         self.baseURLProvider = baseURLProvider
-        self.session = session
+        self.tlsSessionFactory = tlsSessionFactory
+        self.requestTimeout = requestTimeout
+        self.resourceTimeout = resourceTimeout
+        self.policyChangeObserver = NotificationCenter.default.addObserver(
+            forName: tlsSessionFactory.policyChangeNotificationName,
+            object: nil,
+            queue: nil
+        ) { [weak self] _ in
+            self?.invalidateCurrentSession()
+        }
+    }
+
+    deinit {
+        if let policyChangeObserver {
+            NotificationCenter.default.removeObserver(policyChangeObserver)
+        }
+        invalidateCurrentSession()
     }
 
     func upload(data: Data, mimeType: String, filename: String?) async throws -> String {
@@ -50,6 +72,7 @@ final class UploadService: UploadServicing {
         )
         request.httpBody = body
 
+        let session = currentFreshSession()
         let (responseData, response) = try await session.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse else {
             throw AttachmentError.networkFailure
@@ -66,38 +89,37 @@ final class UploadService: UploadServicing {
         return decoded.assetId
     }
 
-    func download(assetId: String) async throws -> Data {
-        try Task.checkCancellation()
-        guard let baseURL = baseURLProvider() else {
-            throw AttachmentError.missingBaseURL
-        }
-        guard let token = auth.token else {
-            throw AttachmentError.missingAuth
-        }
-
-        let downloadURL = try makeDownloadURL(baseURL: baseURL, assetId: assetId)
-        logger.info("asset download url=\(downloadURL.absoluteString, privacy: .public)")
-
-        var request = URLRequest(url: downloadURL)
-        request.httpMethod = "GET"
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-
-        let (data, response) = try await session.data(for: request)
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw AttachmentError.networkFailure
-        }
-        logger.info("asset download status=\(httpResponse.statusCode, privacy: .public) bytes=\(data.count, privacy: .public)")
-        guard (200..<300).contains(httpResponse.statusCode) else {
-            if httpResponse.statusCode == 404 {
-                throw AttachmentError.invalidData
+    private func currentFreshSession() -> URLSession {
+        sessionStateQueue.sync {
+            if let currentSession, currentSession.generation == tlsSessionFactory.currentGeneration {
+                return currentSession.session
             }
-            if httpResponse.statusCode == 401 {
-                throw AttachmentError.missingAuth
-            }
-            throw AttachmentError.networkFailure
+
+            let staleSession = currentSession
+            let freshSession = tlsSessionFactory.makeSession(
+                role: .upload,
+                timeoutIntervalForRequest: requestTimeout,
+                timeoutIntervalForResource: resourceTimeout
+            )
+            currentSession = freshSession
+            staleSession?.session.invalidateAndCancel()
+            return freshSession.session
         }
-        return data
     }
+
+    private func invalidateCurrentSession() {
+        sessionStateQueue.sync {
+            let staleSession = currentSession
+            currentSession = nil
+            staleSession?.session.invalidateAndCancel()
+        }
+    }
+
+#if DEBUG
+    func debugPrepareSessionForTesting() {
+        _ = currentFreshSession()
+    }
+#endif
 
     private func makeMultipartBody(boundary: String,
                                    fieldName: String,
@@ -152,27 +174,4 @@ final class UploadService: UploadServicing {
         return trimmed
     }
 
-    private func makeDownloadURL(baseURL: URL, assetId: String) throws -> URL {
-        guard !assetId.isEmpty else {
-            throw AttachmentError.invalidData
-        }
-        guard var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else {
-            throw AttachmentError.invalidData
-        }
-        guard let encodedAssetId = encodePathComponent(assetId) else {
-            throw AttachmentError.invalidData
-        }
-        let basePath = components.path.hasSuffix("/") ? String(components.path.dropLast()) : components.path
-        components.path = "\(basePath)/download/\(encodedAssetId)"
-        guard let url = components.url else {
-            throw AttachmentError.invalidData
-        }
-        return url
-    }
-
-    private func encodePathComponent(_ value: String) -> String? {
-        var allowed = CharacterSet.urlPathAllowed
-        allowed.remove(charactersIn: "/")
-        return value.addingPercentEncoding(withAllowedCharacters: allowed)
-    }
 }

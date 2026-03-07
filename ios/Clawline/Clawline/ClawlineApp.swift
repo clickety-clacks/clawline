@@ -23,6 +23,7 @@ struct ClawlineApp: App {
     private let connectionService: any ConnectionServicing
     private let chatService: any ChatServicing
     private let uploadService: any UploadServicing
+    private let assetDownloadService: any AssetDownloading
 
     init() {
         if #available(iOS 13.0, *) {
@@ -43,7 +44,12 @@ struct ClawlineApp: App {
         let settingsManager = SettingsManager()
         _settingsManager = State(initialValue: settingsManager)
         let device = DeviceIdentifier()
-        let connector = URLSessionWebSocketConnector(connectTimeout: 20, resourceTimeout: 360)
+        let tlsSessionFactory = ProviderTLSSessionFactory()
+        let connector = URLSessionWebSocketConnector(
+            tlsSessionFactory: tlsSessionFactory,
+            connectTimeout: 20,
+            resourceTimeout: 360
+        )
         self.deviceIdentifier = device
         self.connectionService = ProviderConnectionService(connector: connector)
         let chatService = ProviderChatService(
@@ -52,7 +58,8 @@ struct ClawlineApp: App {
             userIdProvider: { authManager.currentUserId }
         )
         self.chatService = chatService
-        self.uploadService = UploadService(auth: authManager)
+        self.uploadService = UploadService(auth: authManager, tlsSessionFactory: tlsSessionFactory)
+        self.assetDownloadService = AssetDownloadService(auth: authManager, tlsSessionFactory: tlsSessionFactory)
 
         let sharedKeychain = KeychainSecureStore(accessGroup: "group.co.clicketyclacks.Clawline")
         let sonioxKeyStore = SonioxKeyStore(keychain: sharedKeychain)
@@ -72,7 +79,7 @@ struct ClawlineApp: App {
     var body: some Scene {
         WindowGroup {
             @Bindable var settingsManager = settingsManager
-            RootView(uploadService: uploadService)
+            RootView(uploadService: uploadService, assetDownloadService: assetDownloadService)
                 .environment(authManager)
                 .environment(\.connectionService, connectionService)
                 .environment(\.deviceIdentifier, deviceIdentifier)

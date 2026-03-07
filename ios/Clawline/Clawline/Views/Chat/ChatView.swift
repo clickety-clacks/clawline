@@ -1174,6 +1174,7 @@ struct ChatView: View {
                 resetToken: viewModel.inputResetToken,
                 canSend: viewModel.canSend,
                 isSending: viewModel.isSending,
+                isStagingAttachments: viewModel.pendingAttachmentStageCount > 0,
                 connectionState: viewModel.sendButtonConnectionState,
                 focusTrigger: focusRequestID,
                 bottomSafeAreaInset: geometry.safeAreaInsets.bottom,

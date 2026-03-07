@@ -97,6 +97,23 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
 }
 
 final class MessageFlowCollectionViewController: UIViewController, UICollectionViewDelegateFlowLayout {
+    private struct UpdateRequest {
+        let viewModel: ChatViewModel
+        let isCompact: Bool
+        let isActiveSession: Bool
+        let isRenderPolicyFrozen: Bool
+        let isInputActive: Bool
+        let topInset: CGFloat
+        let truncationBottomInset: CGFloat
+        let firstUnreadMessageId: String?
+        let unreadCount: Int
+        let onExpand: ((Message) -> Void)?
+        let sessionKey: String?
+        let forceReReadGeneration: Int
+        let onScrollEvent: (@MainActor (MessageFlowScrollEvent) -> Void)?
+        let isDark: Bool?
+    }
+
     private let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "MessagePipeline")
     private var collectionView: UICollectionView!
     private var channelOverride: String?
@@ -185,6 +202,9 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     }
 
     private var perStreamStateBySessionKey: [String: PerStreamRuntimeState] = [:]
+    private var isUpdatePassInFlight = false
+    private var isSnapshotApplyInFlight = false
+    private var queuedUpdateRequest: UpdateRequest?
     private var lastAppliedEffectiveSessionKey: String?
     private var invalidationScheduled = false
     private var viewModel: ChatViewModel?
@@ -1615,6 +1635,31 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         )
     }
 
+    private func drainQueuedUpdateIfPossible() {
+        guard !isUpdatePassInFlight, !isSnapshotApplyInFlight else { return }
+        guard let request = queuedUpdateRequest else { return }
+        queuedUpdateRequest = nil
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.update(
+                viewModel: request.viewModel,
+                isCompact: request.isCompact,
+                isActiveSession: request.isActiveSession,
+                isRenderPolicyFrozen: request.isRenderPolicyFrozen,
+                isInputActive: request.isInputActive,
+                topInset: request.topInset,
+                truncationBottomInset: request.truncationBottomInset,
+                firstUnreadMessageId: request.firstUnreadMessageId,
+                unreadCount: request.unreadCount,
+                onExpand: request.onExpand,
+                sessionKey: request.sessionKey,
+                forceReReadGeneration: request.forceReReadGeneration,
+                onScrollEvent: request.onScrollEvent,
+                isDark: request.isDark
+            )
+        }
+    }
+
     func update(
         viewModel: ChatViewModel,
         isCompact: Bool,
@@ -1631,6 +1676,33 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         onScrollEvent: (@MainActor (MessageFlowScrollEvent) -> Void)? = nil,
         isDark: Bool? = nil
     ) {
+        let request = UpdateRequest(
+            viewModel: viewModel,
+            isCompact: isCompact,
+            isActiveSession: isActiveSession,
+            isRenderPolicyFrozen: isRenderPolicyFrozen,
+            isInputActive: isInputActive,
+            topInset: topInset,
+            truncationBottomInset: truncationBottomInset,
+            firstUnreadMessageId: firstUnreadMessageId,
+            unreadCount: unreadCount,
+            onExpand: onExpand,
+            sessionKey: sessionKey,
+            forceReReadGeneration: forceReReadGeneration,
+            onScrollEvent: onScrollEvent,
+            isDark: isDark
+        )
+        if isUpdatePassInFlight || isSnapshotApplyInFlight {
+            queuedUpdateRequest = request
+            return
+        }
+
+        isUpdatePassInFlight = true
+        defer {
+            isUpdatePassInFlight = false
+            drainQueuedUpdateIfPossible()
+        }
+
         loadViewIfNeeded()
         let t0 = CFAbsoluteTimeGetCurrent()
         let previousLastMessageId = lastMessageId
@@ -1854,6 +1926,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             : nil
 
         if shouldMorph {
+            isSnapshotApplyInFlight = true
 #if os(visionOS)
             StreamSwitchTiming.log("dataSource_apply_start", sessionKey: effectiveSessionKey)
             applySnapshotWithTypingMorphIfPossible(snapshot: snapshot, targetMessageId: newestMessageId) { [weak self] in
@@ -1861,6 +1934,8 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 self?.scheduleBubbleSizingV2ViewportAnchorCompensation(expansionAnchor)
                 self?.updateVisibleCellOpacity()
                 StreamSwitchTiming.log("dataSource_apply_end", sessionKey: effectiveSessionKey)
+                self?.isSnapshotApplyInFlight = false
+                self?.drainQueuedUpdateIfPossible()
             }
 #else
             StreamSwitchTiming.log("dataSource_apply_start", sessionKey: effectiveSessionKey)
@@ -1868,9 +1943,12 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 afterSnapshotApplied()
                 self?.scheduleBubbleSizingV2ViewportAnchorCompensation(expansionAnchor)
                 StreamSwitchTiming.log("dataSource_apply_end", sessionKey: effectiveSessionKey)
+                self?.isSnapshotApplyInFlight = false
+                self?.drainQueuedUpdateIfPossible()
             }
 #endif
         } else {
+            isSnapshotApplyInFlight = true
 #if os(visionOS)
             StreamSwitchTiming.log("dataSource_apply_start", sessionKey: effectiveSessionKey)
             dataSource.apply(snapshot, animatingDifferences: false) { [weak self] in
@@ -1878,6 +1956,8 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 self?.scheduleBubbleSizingV2ViewportAnchorCompensation(expansionAnchor)
                 self?.updateVisibleCellOpacity()
                 StreamSwitchTiming.log("dataSource_apply_end", sessionKey: effectiveSessionKey)
+                self?.isSnapshotApplyInFlight = false
+                self?.drainQueuedUpdateIfPossible()
             }
 #else
             StreamSwitchTiming.log("dataSource_apply_start", sessionKey: effectiveSessionKey)
@@ -1885,6 +1965,8 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 afterSnapshotApplied()
                 self?.scheduleBubbleSizingV2ViewportAnchorCompensation(expansionAnchor)
                 StreamSwitchTiming.log("dataSource_apply_end", sessionKey: effectiveSessionKey)
+                self?.isSnapshotApplyInFlight = false
+                self?.drainQueuedUpdateIfPossible()
             }
 #endif
         }

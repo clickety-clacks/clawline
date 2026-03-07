@@ -270,6 +270,51 @@ struct ChatViewModelTests {
         #expect(messages.contains("bad content"))
     }
 
+    @Test("Unscoped payload_too_large errors mark pending placeholders and show clear toast")
+    @MainActor
+    func unscopedPayloadTooLargeErrorsMarkPendingPlaceholders() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let toastManager = ToastManager()
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: toastManager,
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        try await setReadyToSend(chatService: chatService, viewModel: viewModel)
+        viewModel.inputContent = NSAttributedString(string: "Large message pending")
+        viewModel.send()
+
+        try await Task.sleep(forDuration: .milliseconds(10))
+        guard let messageId = chatService.lastSentId else {
+            Issue.record("Expected chat service to capture sent message id")
+            return
+        }
+
+        chatService.emitServiceEvent(.messageError(messageId: nil, code: "payload_too_large", message: nil))
+        for _ in 0..<50 {
+            if viewModel.failureMessage(for: messageId) != nil {
+                break
+            }
+            try await Task.sleep(forDuration: .milliseconds(20))
+        }
+
+        #expect(viewModel.failureMessage(for: messageId) == "That message is too large to send.")
+        #expect(viewModel.messages.contains(where: { $0.id == messageId }))
+        #expect(viewModel.isSending == false)
+        let messages = await MainActor.run { toastManager.debugMessages }
+        #expect(messages.contains("That message is too large to send."))
+    }
+
     @Test("Connection interruptions update send button state without passive toast")
     @MainActor
     func connectionInterruptionTriggersAlert() async throws {
@@ -1905,6 +1950,48 @@ struct ChatViewModelTests {
         #expect(viewModel.stream(for: customKey) == nil)
     }
 
+    @Test("Delete non-active stream retries through active connection when initially not connected")
+    @MainActor
+    func deleteNonActiveStreamRetriesThroughActiveConnection() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        chatService.streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+        ]
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
+
+        let created = await viewModel.createStream(displayName: "Retry Delete")
+        #expect(created)
+        let customKeys = viewModel.orderedSessionKeys.filter { $0 != personalSessionKey }
+        #expect(customKeys.count == 1)
+        guard let customKey = customKeys.first else { return }
+
+        chatService.deleteStreamErrorSequence = [ProviderChatService.Error.notConnected]
+
+        let connectCountBeforeDelete = chatService.connectCallCount
+        let deleted = await viewModel.deleteStream(sessionKey: customKey)
+
+        #expect(deleted)
+        #expect(viewModel.stream(for: customKey) == nil)
+        #expect(chatService.deleteStreamCallCount == 2)
+        #expect(chatService.lastDeletedSessionKey == customKey)
+        #expect(chatService.connectCallCount > connectCountBeforeDelete)
+    }
+
     @Test("user_info event updates admin state")
     @MainActor
     func userInfoEventUpdatesAdminState() async throws {
@@ -2059,7 +2146,10 @@ private final class TestChatService: ChatServicing {
     var sendError: Swift.Error?
     var createStreamError: Error?
     var deleteStreamError: Error?
+    var deleteStreamErrorSequence: [Error] = []
     var streams: [StreamSession] = []
+    private(set) var deleteStreamCallCount: Int = 0
+    private(set) var lastDeletedSessionKey: String?
 
     private(set) lazy var incomingMessages: AsyncStream<Message> = {
         AsyncStream { continuation in
@@ -2223,6 +2313,12 @@ private final class TestChatService: ChatServicing {
     }
 
     func deleteStream(sessionKey: String, idempotencyKey: String?) async throws -> String {
+        deleteStreamCallCount += 1
+        lastDeletedSessionKey = sessionKey
+        if !deleteStreamErrorSequence.isEmpty {
+            let error = deleteStreamErrorSequence.removeFirst()
+            throw error
+        }
         if let deleteStreamError { throw deleteStreamError }
         streams.removeAll { $0.sessionKey == sessionKey }
         return sessionKey

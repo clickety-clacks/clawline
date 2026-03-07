@@ -1307,17 +1307,54 @@ final class ChatViewModel: ChatViewModelHosting {
 
     func deleteStream(sessionKey: String) async -> Bool {
         guard canDeleteStream(sessionKey: sessionKey) else { return false }
+        let idempotencyKey = Self.makeIdempotencyKey()
         do {
             _ = try await chatService.deleteStream(
                 sessionKey: sessionKey,
-                idempotencyKey: Self.makeIdempotencyKey()
+                idempotencyKey: idempotencyKey
             )
             applyStreamDeletion(sessionKey: sessionKey)
             return true
         } catch {
+            if shouldRetryDeleteOnActiveConnection(after: error) {
+                do {
+                    try await reconnectActiveTransportForControlPlane()
+                    _ = try await chatService.deleteStream(
+                        sessionKey: sessionKey,
+                        idempotencyKey: idempotencyKey
+                    )
+                    applyStreamDeletion(sessionKey: sessionKey)
+                    return true
+                } catch {
+                    toastManager.show(error.localizedDescription)
+                    return false
+                }
+            }
             toastManager.show(error.localizedDescription)
             return false
         }
+    }
+
+    private func shouldRetryDeleteOnActiveConnection(after error: Swift.Error) -> Bool {
+        guard auth.token != nil else { return false }
+        if let providerError = error as? ProviderChatService.Error,
+           case .notConnected = providerError {
+            return true
+        }
+        if let streamError = error as? StreamAPIError,
+           streamError.code == "not_connected" {
+            return true
+        }
+        return false
+    }
+
+    private func reconnectActiveTransportForControlPlane() async throws {
+        guard let token = auth.token else {
+            throw ProviderChatService.Error.notConnected
+        }
+        let activeKey = engineActiveSessionKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let activeSessionKey = activeKey.isEmpty ? nil : activeKey
+        try await chatService.connect(token: token, activeSessionKey: activeSessionKey)
     }
 
     private static func makeIdempotencyKey() -> String {
@@ -1701,6 +1738,19 @@ final class ChatViewModel: ChatViewModelHosting {
         }
     }
 
+    private func markPendingMessagesFailedForUnscopedMessageError(code: String, message: String?) {
+        guard !pendingLocalMessages.isEmpty else { return }
+        let pendingIds = Set(pendingLocalMessages.map(\.id))
+        for id in pendingIds {
+            messageFailures[id] = MessageFailure(code: code, message: message)
+        }
+        pendingLocalMessages.removeAll()
+        if let activeClientMessageId, pendingIds.contains(activeClientMessageId) {
+            self.activeClientMessageId = nil
+        }
+        self.isSending = false
+    }
+
     private func performSend(clientId: String,
                              content: String,
                              pendingAttachments: [PendingAttachment],
@@ -2041,7 +2091,10 @@ final class ChatViewModel: ChatViewModelHosting {
                 let resolved = userFacingMessage(for: code, fallback: message)
                 toastManager.show(resolved)
             }
-            guard let messageId else { return }
+            guard let messageId else {
+                markPendingMessagesFailedForUnscopedMessageError(code: code, message: message)
+                return
+            }
             messageFailures[messageId] = MessageFailure(code: code, message: message)
             if let pendingIndex = pendingLocalMessages.firstIndex(where: { $0.id == messageId }) {
                 pendingLocalMessages.remove(at: pendingIndex)

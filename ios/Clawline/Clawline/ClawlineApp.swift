@@ -49,10 +49,16 @@ struct ClawlineApp: App {
         let chatService = ProviderChatService(
             connector: connector,
             deviceId: device.deviceId,
-            userIdProvider: { authManager.currentUserId }
+            userIdProvider: { authManager.currentUserId },
+            authTokenProvider: {
+                await MainActor.run { authManager.token }
+            }
         )
         self.chatService = chatService
-        self.uploadService = UploadService(auth: authManager)
+        self.uploadService = UploadService(
+            auth: authManager,
+            session: connector.tlsAwareURLSession
+        )
 
         let sharedKeychain = KeychainSecureStore(accessGroup: "group.co.clicketyclacks.Clawline")
         let sonioxKeyStore = SonioxKeyStore(keychain: sharedKeychain)

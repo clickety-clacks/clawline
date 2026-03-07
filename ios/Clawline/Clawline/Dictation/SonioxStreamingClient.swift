@@ -298,7 +298,7 @@ final class SonioxStreamingClient: SonioxStreamingClienting {
         receiveSequence += 1
         let receiveSeq = receiveSequence
         logger.notice(
-            "Soniox recv seq=\(receiveSeq, privacy: .public) json=\(Self.truncatedLogString(text), privacy: .public)"
+            "Soniox recv seq=\(receiveSeq, privacy: .public) payload=\(Self.redactedPayloadSummary(text), privacy: .public)"
         )
         do {
             let response = try decodeResponseText(text)
@@ -311,7 +311,7 @@ final class SonioxStreamingClient: SonioxStreamingClienting {
             continuation?.yield(.response(response))
         } catch {
             logger.notice(
-                "Soniox decode_error json=\(Self.truncatedLogString(text), privacy: .public) error=\(error.localizedDescription, privacy: .public)"
+                "Soniox decode_error payload=\(Self.redactedPayloadSummary(text), privacy: .public) error=\(error.localizedDescription, privacy: .public)"
             )
             print("SONIOX decode_error error=\(error.localizedDescription)")
             continuation?.yield(.failed(stage: .decode, code: nil, message: "Failed to decode Soniox response."))
@@ -356,12 +356,8 @@ final class SonioxStreamingClient: SonioxStreamingClienting {
         print("SONIOX socket_state=\(nextState.rawValue) context=\(context) closeCode=\(closeCode) closeReason=\(closeReason)")
     }
 
-    private static func truncatedLogString(_ text: String, limit: Int = 200) -> String {
-        if text.count <= limit {
-            return text
-        }
-        let end = text.index(text.startIndex, offsetBy: limit)
-        return String(text[..<end]) + "…"
+    static func redactedPayloadSummary(_ text: String) -> String {
+        "bytes=\(text.utf8.count)"
     }
 
     private func logPerfMarker(functionName: String, startedAt: CFAbsoluteTime) {

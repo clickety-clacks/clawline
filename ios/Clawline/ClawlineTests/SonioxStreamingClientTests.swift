@@ -3,6 +3,15 @@ import Testing
 @testable import Clawline
 
 struct SonioxStreamingClientTests {
+    @Test("Redacted payload summary excludes transcript text")
+    func redactedPayloadSummaryExcludesTranscriptText() {
+        let json = #"{"tokens":[{"text":"hello world","is_final":false}],"finished":false}"#
+        let summary = SonioxStreamingClient.redactedPayloadSummary(json)
+
+        #expect(summary == "bytes=\(json.utf8.count)")
+        #expect(!summary.contains("hello world"))
+    }
+
     @Test("Decodes numeric Soniox error_code as string")
     func decodesNumericErrorCode() throws {
         let client = SonioxStreamingClient()

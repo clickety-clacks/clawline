@@ -104,6 +104,32 @@ private final class PanGestureCoordinatorHarness {
 }
 
 struct MessageInputBarPanIntentTests {
+    @Test("Editor-origin gestures never arm dictation")
+    func editorOriginGesturesNeverArmDictation() {
+        #expect(
+            !shouldBeginDictationPanGesture(
+                startedInEditableRegion: true,
+                isSurfaceVisible: true,
+                swipeActivationEnabled: true,
+                hasSelection: false,
+                startedInSelectionGestureRegion: false
+            )
+        )
+    }
+
+    @Test("Selection-handle region never arms dictation")
+    func selectionHandleRegionNeverArmsDictation() {
+        #expect(
+            !shouldBeginDictationPanGesture(
+                startedInEditableRegion: false,
+                isSurfaceVisible: true,
+                swipeActivationEnabled: true,
+                hasSelection: true,
+                startedInSelectionGestureRegion: true
+            )
+        )
+    }
+
     @Test("Editable-region tap-like gesture resolves to text editing")
     func editableRegionTapResolvesToTextEditing() {
         let decision = classifyDictationPanIntent(
@@ -119,21 +145,6 @@ struct MessageInputBarPanIntentTests {
         #expect(decision == .textEditing)
     }
 
-    @Test("Editable-region quick upward gesture still resolves to dictation")
-    func editableRegionQuickUpResolvesToDictation() {
-        let decision = classifyDictationPanIntent(
-            .init(
-                startedInEditableRegion: true,
-                isSurfaceOpen: false,
-                elapsed: 0.08,
-                translation: CGPoint(x: 0, y: -26),
-                velocity: CGPoint(x: 0, y: -350)
-            )
-        )
-
-        #expect(decision == .dictation)
-    }
-
     @Test("Surface-open editor taps keep text interaction instead of stealing keyboard activation")
     func surfaceOpenEditorTapKeepsTextInteraction() {
         let decision = classifyDictationPanIntent(
@@ -147,21 +158,6 @@ struct MessageInputBarPanIntentTests {
         )
 
         #expect(decision == .textEditing)
-    }
-
-    @Test("Surface-open editor clear downward dismiss still resolves to dictation")
-    func surfaceOpenEditorClearDownDismissResolvesToDictation() {
-        let decision = classifyDictationPanIntent(
-            .init(
-                startedInEditableRegion: true,
-                isSurfaceOpen: true,
-                elapsed: 0.12,
-                translation: CGPoint(x: 0, y: 28),
-                velocity: CGPoint(x: 0, y: 320)
-            )
-        )
-
-        #expect(decision == .dictation)
     }
 
     @MainActor

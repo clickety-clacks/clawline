@@ -51,7 +51,7 @@ struct DictationCoordinatorTests {
         #expect(update.hadAnyTokens == true)
     }
 
-    @Test("Socket drop forces stop_keep and exits active dictation")
+    @Test("Socket drop pauses without collapsing the surface")
     @MainActor
     func socketDropStopsSession() async {
         let harness = DictationTestHarness()
@@ -67,13 +67,15 @@ struct DictationCoordinatorTests {
 
         coordinator.startStickyDictation()
         #expect(coordinator.isStickyDictationActive)
+        await waitUntil { harness.client.connected }
 
         harness.client.emit(.closed(code: nil, reason: "transport drop"))
 
-        await waitUntil { !coordinator.isDictationActive }
+        await waitUntil { !coordinator.isListening }
 
-        #expect(harness.client.closeCalls.count >= 1)
-        #expect(harness.analytics.stopEvents.contains(where: { $0.reason == "socket_drop" }))
+        #expect(coordinator.isSurfaceOpen)
+        #expect(coordinator.isDictationActive)
+        #expect(!coordinator.isListening)
     }
 
     @Test("Stream switch while listening deterministically stops listening")
@@ -291,7 +293,7 @@ struct DictationCoordinatorTests {
         }
     }
 
-    @Test("Send while active uses timeout path and still sends current draft")
+    @Test("Send while active preserves dictation state and still sends current draft")
     @MainActor
     func sendWhileActiveTimeoutSendsCurrentText() async {
         let harness = DictationTestHarness(
@@ -338,6 +340,8 @@ struct DictationCoordinatorTests {
         }
 
         #expect(harness.host.currentText(for: harness.host.activeSessionKey) == "hello")
+        #expect(coordinator.isStickyDictationActive)
+        #expect(coordinator.isListening)
         #expect(harness.analytics.sendWhileActiveEvents.contains(false))
     }
 
@@ -378,6 +382,10 @@ struct DictationCoordinatorTests {
         await waitUntil {
             harness.host.currentText(for: harness.host.activeSessionKey) == "seed text"
         }
+
+        #expect(harness.client.finalized == false)
+        #expect(harness.client.sentFrames.isEmpty)
+        #expect(!coordinator.isSurfaceOpen)
     }
 
     @Test("Editor context changes stay live while dictation remains active")
@@ -411,9 +419,9 @@ struct DictationCoordinatorTests {
         #expect(coordinator.isSurfaceOpen)
     }
 
-    @Test("Attempting dictation without a validated key shows modal prompt and keeps mic visibility rules")
+    @Test("Attempting dictation without a key shows modal prompt and keeps mic visibility rules")
     @MainActor
-    func missingOrUnverifiedKeyRoutesToModalPrompt() {
+    func missingKeyRoutesToModalPrompt() {
         let harness = DictationTestHarness(apiKey: nil, keyStatus: .missing)
         let coordinator = harness.makeCoordinator()
 
@@ -429,9 +437,30 @@ struct DictationCoordinatorTests {
         coordinator.startStickyDictation()
 
         #expect(coordinator.showsComposeKeyPromptModal)
-        #expect(coordinator.showsComposeKeyPromptModal)
         #expect(coordinator.micVisible)
         #expect(!coordinator.isDictationActive)
+    }
+
+    @Test("Attempting dictation with a non-empty unverified key starts dictation")
+    @MainActor
+    func unverifiedKeyStillAllowsActivation() async {
+        let harness = DictationTestHarness(apiKey: "pending-key", keyStatus: .unverified)
+        let coordinator = harness.makeCoordinator()
+
+        coordinator.updateContext(
+            sessionKey: harness.host.activeSessionKey,
+            composeIsEmpty: true,
+            textFieldFocused: false,
+            selectionLength: 0,
+            reduceMotionEnabled: false
+        )
+
+        coordinator.startStickyDictation()
+
+        await waitUntil { harness.client.connected }
+
+        #expect(coordinator.isStickyDictationActive)
+        #expect(harness.client.connected)
     }
 
     @Test("Re-entering unchanged key text preserves validated status and allows dictation")
@@ -486,65 +515,6 @@ struct DictationCoordinatorTests {
         #expect(harness.keyStore.keyStatus == .missing)
     }
 
-    @Test("Modal verify failure shows Invalid and keeps prompt visible")
-    @MainActor
-    func modalVerifyFailureShowsInvalid() async {
-        let harness = DictationTestHarness(apiKey: "bad-key", keyStatus: .unverified)
-        harness.keyVerifier.results = [false]
-        let coordinator = harness.makeCoordinator()
-
-        coordinator.updateContext(
-            sessionKey: harness.host.activeSessionKey,
-            composeIsEmpty: true,
-            textFieldFocused: false,
-            selectionLength: 0,
-            reduceMotionEnabled: false
-        )
-
-        coordinator.startStickyDictation()
-        #expect(coordinator.showsComposeKeyPromptModal)
-        #expect(coordinator.inlineKeyActionTitle == "Verify")
-
-        await coordinator.handleComposeKeyPrimaryAction { _ in }
-
-        #expect(coordinator.showsComposeKeyPromptModal)
-        #expect(coordinator.inlineKeyStatus == .invalid)
-        #expect(coordinator.inlineKeyStatusText == "Invalid")
-        #expect(harness.keyStore.keyStatus == .invalid)
-        #expect(!coordinator.isDictationActive)
-    }
-
-    @Test("Modal verify success immediately enters pending requested dictation mode")
-    @MainActor
-    func modalVerifySuccessStartsRequestedModeImmediately() async {
-        let harness = DictationTestHarness(apiKey: "good-key", keyStatus: .unverified)
-        harness.keyVerifier.results = [true]
-        let coordinator = harness.makeCoordinator()
-
-        coordinator.updateContext(
-            sessionKey: harness.host.activeSessionKey,
-            composeIsEmpty: true,
-            textFieldFocused: false,
-            selectionLength: 0,
-            reduceMotionEnabled: false
-        )
-
-        coordinator.startWalkieTalkieDictation()
-        #expect(coordinator.showsComposeKeyPromptModal)
-        #expect(!coordinator.isDictationActive)
-
-        await coordinator.handleComposeKeyPrimaryAction { _ in }
-        await waitUntil {
-            harness.client.connected
-        }
-
-        #expect(coordinator.isWalkieTalkieActive)
-        #expect(coordinator.isDictationActive)
-        #expect(coordinator.inlineKeyStatus == .validated)
-        #expect(harness.keyStore.keyStatus == .validated)
-        #expect(harness.client.connected)
-    }
-
     @Test("Dismiss modal key prompt returns to normal compose state")
     @MainActor
     func dismissModalPromptReturnsToIdle() {
@@ -590,8 +560,34 @@ struct DictationCoordinatorTests {
         await waitUntil { coordinator.errorMessage == "Dictation failed" }
 
         #expect(coordinator.errorMessage == "Dictation failed")
+        #expect(coordinator.isSurfaceOpen)
         #expect(!coordinator.isDictationActive)
         #expect(harness.analytics.stopEvents.contains(where: { $0.reason == "transport_failure" }))
+    }
+
+    @Test("Transport failure keeps dictation surface open")
+    @MainActor
+    func transportFailureKeepsSurfaceOpen() async {
+        let harness = DictationTestHarness()
+        let coordinator = harness.makeCoordinator()
+
+        coordinator.updateContext(
+            sessionKey: harness.host.activeSessionKey,
+            composeIsEmpty: true,
+            textFieldFocused: false,
+            selectionLength: 0,
+            reduceMotionEnabled: false
+        )
+
+        coordinator.startStickyDictation()
+        #expect(coordinator.isStickyDictationActive)
+
+        harness.audio.emit(event: .failed(message: "transport failed"))
+
+        await waitUntil { coordinator.errorMessage == "Dictation failed" }
+
+        #expect(coordinator.isSurfaceOpen)
+        #expect(coordinator.errorMessage == "Dictation failed")
     }
 
     @Test("Walkie connect hang times out instead of staying stuck in connecting")

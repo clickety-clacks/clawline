@@ -40,6 +40,22 @@ struct DictationPanIntentContext {
     let velocity: CGPoint
 }
 
+func shouldBeginDictationPanGesture(
+    startedInEditableRegion: Bool,
+    isSurfaceVisible: Bool,
+    swipeActivationEnabled: Bool,
+    hasSelection: Bool,
+    startedInSelectionGestureRegion: Bool
+) -> Bool {
+    if startedInEditableRegion || startedInSelectionGestureRegion {
+        return false
+    }
+    if isSurfaceVisible || swipeActivationEnabled {
+        return true
+    }
+    return hasSelection
+}
+
 func classifyDictationPanIntent(_ context: DictationPanIntentContext) -> DictationPanIntentDecision {
     let up = max(0, -context.translation.y)
     let down = max(0, context.translation.y)
@@ -1336,25 +1352,23 @@ struct MessageInputBar: View {
     }
 
     private func shouldBeginDictationPan(startLocation: CGPoint, velocity: CGPoint) -> Bool {
-        if startsInEditableRegion(startLocation: startLocation) {
-            if motion.isSurfaceVisible { return true }
-            return dictation.swipeActivationEnabled
-        }
-        if motion.isSurfaceVisible {
-            return true
-        }
-        if dictation.swipeActivationEnabled {
-            return true
-        }
-        if selectionRange.length > 0 && !startsInEditableRegion(startLocation: startLocation) {
-            return true
-        }
         _ = velocity
-        return false
+        return shouldBeginDictationPanGesture(
+            startedInEditableRegion: startsInEditableRegion(startLocation: startLocation),
+            isSurfaceVisible: motion.isSurfaceVisible,
+            swipeActivationEnabled: dictation.swipeActivationEnabled,
+            hasSelection: selectionRange.length > 0,
+            startedInSelectionGestureRegion: startsInSelectionGestureRegion(startLocation: startLocation)
+        )
     }
 
     private func startsInEditableRegion(startLocation: CGPoint) -> Bool {
         textEditorGlobalFrame != .zero && textEditorGlobalFrame.contains(startLocation)
+    }
+
+    private func startsInSelectionGestureRegion(startLocation: CGPoint) -> Bool {
+        guard selectionRange.length > 0, textEditorGlobalFrame != .zero else { return false }
+        return textEditorGlobalFrame.insetBy(dx: -24, dy: -24).contains(startLocation)
     }
 
     @ViewBuilder

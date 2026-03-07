@@ -231,6 +231,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
     private var useContinuousCorners = true
     private weak var centeredOverlayView: UIView?
     private var currentMessageId: String?
+    private var currentSessionKey: String?
     private var wasOverflowingOnLastLayout = false
     private var suppressExpandTapForLinkCards = false
     private var allowSwipeUpExpandForSingleLink = false
@@ -584,8 +585,11 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
                    onInteractiveCallback: ((String, String, JSONValue?) -> Void)?,
                    salientHighlightService: (any SalientHighlightServicing)? = nil) {
         assert(Thread.isMainThread)
-        let isMessageReuse = (currentMessageId != nil && currentMessageId != message.id)
+        let previousIdentity = currentIdentityKey
+        let incomingIdentity = Self.identityKey(message: message)
+        let isMessageReuse = previousIdentity != nil && previousIdentity != incomingIdentity
         currentMessageId = message.id
+        currentSessionKey = message.sessionKey
         // Store for trait collection updates
         currentMessageRole = message.role
         currentStream = message.stream
@@ -1068,6 +1072,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
 
     func prepareForReuse() {
         currentMessageId = nil
+        currentSessionKey = nil
         suppressExpandTapForLinkCards = false
         allowSwipeUpExpandForSingleLink = false
         timestampDate = nil
@@ -1142,6 +1147,15 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
 
     private func applyBubbleSizingV2(_ state: BubbleSizingV2.LayoutState) {
         dynamicContentHeightConstraint?.constant = max(44, state.measurement.outerScrollViewportHeight)
+    }
+
+    private var currentIdentityKey: String? {
+        guard let currentSessionKey, let currentMessageId else { return nil }
+        return "\(currentSessionKey)|\(currentMessageId)"
+    }
+
+    private static func identityKey(message: Message) -> String {
+        "\(message.sessionKey)|\(message.id)"
     }
 
     private func updateOuterScrollState() {
@@ -2268,6 +2282,7 @@ final class MessageBubbleUIKitCell: UICollectionViewCell {
 
     private let containerView = MessageBubbleUIKitContainerView()
     private var messageId: String = ""
+    private var messageSessionKey: String = ""
     private var messageSnippet: String = ""
     private var lastMismatch: (bounds: CGRect, bubble: CGRect)?
     private var flashOverlayView: UIView?
@@ -2307,9 +2322,10 @@ final class MessageBubbleUIKitCell: UICollectionViewCell {
                    onInteractiveCallback: ((String, String, JSONValue?) -> Void)?,
                    onResend: (() -> Void)?) {
         messageId = message.id
+        messageSessionKey = message.sessionKey
         messageSnippet = String(message.content.prefix(80))
         let guardedRequestLayout: (String) -> Void = { [weak self] requestedId in
-            guard let self, self.messageId == requestedId else { return }
+            guard let self, self.messageId == requestedId, self.messageSessionKey == message.sessionKey else { return }
             onRequestLayout?(requestedId)
         }
         containerView.configure(
@@ -2337,6 +2353,7 @@ final class MessageBubbleUIKitCell: UICollectionViewCell {
         flashOverlayView?.removeFromSuperview()
         flashOverlayView = nil
         messageId = ""
+        messageSessionKey = ""
         messageSnippet = ""
         lastMismatch = nil
     }

@@ -56,6 +56,7 @@ final class ComposeInputDictationBridge {
     private weak var host: (any DictationComposeDraftHosting)?
     private weak var composeTextView: PastableTextView?
     private var transcriptStateBySession: [String: TranscriptState] = [:]
+    private var preferredSelectionRangeBySession: [String: NSRange] = [:]
 
     init(host: any DictationComposeDraftHosting) {
         self.host = host
@@ -69,9 +70,11 @@ final class ComposeInputDictationBridge {
         composeTextView = textView
     }
 
-    // Kept for compatibility with existing call sites. Selection SSOT is always UITextView.selectedRange.
-    func setPreferredSelectionRange(_ selectionRange: NSRange) {
-        _ = selectionRange
+    // Prefer the coordinator-captured selection for dictation start to avoid transient
+    // UIKit selection collapse when gesture/tap focus changes right before activation.
+    func setPreferredSelectionRange(_ selectionRange: NSRange, for sessionKey: String?) {
+        guard let sessionKey, !sessionKey.isEmpty else { return }
+        preferredSelectionRangeBySession[sessionKey] = selectionRange
     }
 
     func noteUserEdit(
@@ -117,7 +120,9 @@ final class ComposeInputDictationBridge {
     }
 
     func resetTranscriptState(for sessionKey: String) {
-        let selectedRange = composeTextView?.selectedRange ?? NSRange(location: NSNotFound, length: 0)
+        let selectedRange = preferredSelectionRangeBySession[sessionKey]
+            ?? composeTextView?.selectedRange
+            ?? NSRange(location: NSNotFound, length: 0)
         let textLength = composeTextView?.attributedText.length ?? 0
         let clampedSelectionRange: NSRange = {
             guard selectedRange.location != NSNotFound else {
@@ -141,6 +146,7 @@ final class ComposeInputDictationBridge {
             suppressedUntilNextEndpoint: false,
             committedText: ""
         )
+        preferredSelectionRangeBySession.removeValue(forKey: sessionKey)
     }
 
     func applySegmentUpdate(

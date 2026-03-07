@@ -75,6 +75,7 @@ struct StreamPageDotsView: View {
             .glassEffect(.regular, in: Capsule())
 #endif
         }
+        .contentShape(Rectangle())
         .buttonStyle(.plain)
         .accessibilityLabel("Manage streams")
         .accessibilityValue("Stream \(activeIndex + 1) of \(sessionKeys.count)")

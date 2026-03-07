@@ -372,7 +372,13 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
     private(set) var shouldMorphTypingIndicator: Bool = false
     private var isRetired = false
 
-    private var temporarySendButtonOverride: SendButtonConnectionState?
+    private enum TemporarySendButtonDebugOverride: Equatable {
+        case connection(SendButtonConnectionState)
+        case sending
+        case preparing
+    }
+
+    private var temporarySendButtonOverride: TemporarySendButtonDebugOverride?
     private var temporarySendButtonOverrideTask: Task<Void, Never>?
     private let temporarySendButtonOverrideDuration: Duration = .seconds(5)
 
@@ -401,8 +407,31 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
             && !inputContent.isEffectivelyEmpty
     }
 
+    var sendButtonIsSending: Bool {
+        if case .sending = temporarySendButtonOverride {
+            return true
+        }
+        return isSending
+    }
+
+    var sendButtonIsPreparing: Bool {
+        if case .preparing = temporarySendButtonOverride {
+            return true
+        }
+        return pendingAttachmentStageCount > 0
+    }
+
     var sendButtonConnectionState: SendButtonConnectionState {
-        return temporarySendButtonOverride ?? transportSendButtonConnectionState
+        if case .connection(let state) = temporarySendButtonOverride {
+            return state
+        }
+        if case .preparing = temporarySendButtonOverride {
+            return .connected
+        }
+        if case .sending = temporarySendButtonOverride {
+            return .connected
+        }
+        return transportSendButtonConnectionState
     }
 
     let toastManager: ToastManager
@@ -2934,13 +2963,33 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
             clearInput()
             setTemporarySendButtonOverride(.disconnected)
             return true
+        case "/sending":
+            clearInput()
+            setTemporarySendButtonSendingOverride()
+            return true
+        case "/preparing":
+            clearInput()
+            setTemporarySendButtonPreparingOverride()
+            return true
         default:
             return false
         }
     }
 
     private func setTemporarySendButtonOverride(_ state: SendButtonConnectionState) {
-        temporarySendButtonOverride = state
+        scheduleTemporarySendButtonOverride(.connection(state))
+    }
+
+    private func setTemporarySendButtonSendingOverride() {
+        scheduleTemporarySendButtonOverride(.sending)
+    }
+
+    private func setTemporarySendButtonPreparingOverride() {
+        scheduleTemporarySendButtonOverride(.preparing)
+    }
+
+    private func scheduleTemporarySendButtonOverride(_ override: TemporarySendButtonDebugOverride) {
+        temporarySendButtonOverride = override
         temporarySendButtonOverrideTask?.cancel()
         let overrideDuration = temporarySendButtonOverrideDuration
         temporarySendButtonOverrideTask = Task { @MainActor [weak self] in

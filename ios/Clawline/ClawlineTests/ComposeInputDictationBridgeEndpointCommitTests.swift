@@ -229,6 +229,32 @@ struct ComposeInputDictationBridgeEndpointCommitTests {
         #expect(textView.attributedText.string == "XAAA dict! CCC")
     }
 
+    @Test("Dictation start uses captured selection to replace selected text instead of appending")
+    func dictationStartUsesCapturedSelectionForReplacement() {
+        let host = BridgeEndpointTestHost()
+        let bridge = ComposeInputDictationBridge(host: host)
+        let textView = PastableTextView()
+        let initial = "alpha BETA omega"
+        let selectedRange = NSRange(location: 6, length: 4)
+
+        seed(textView: textView, with: initial, selectedRange: selectedRange)
+        bridge.setComposeTextView(textView)
+        bridge.setPreferredSelectionRange(selectedRange, for: host.activeSessionKey)
+
+        // Simulate selection collapse caused by the activation touch right before dictation starts.
+        textView.selectedRange = NSRange(location: initial.utf16.count, length: 0)
+        bridge.resetTranscriptState(for: host.activeSessionKey)
+
+        apply(bridge: bridge, update: update(provisional: "spoken"), host: host)
+        apply(
+            bridge: bridge,
+            update: update(committed: ["spoken"], sawEndpoint: true),
+            host: host
+        )
+
+        #expect(textView.attributedText.string == "alpha spoken omega")
+    }
+
     @Test("Session key mismatch skips bridge updates")
     func sessionKeyMismatchSkipsBridgeUpdates() {
         let host = BridgeEndpointTestHost()

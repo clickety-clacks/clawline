@@ -416,7 +416,7 @@ final class DictationSession {
     }
 
     func setComposeSelectionRange(_ selectionRange: NSRange) {
-        bridge.setPreferredSelectionRange(selectionRange)
+        bridge.setPreferredSelectionRange(selectionRange, for: currentSessionKey)
     }
 
     func noteComposeUserEditDuringDictation(editedRangeUTF16: NSRange, replacementUTF16Length: Int) {

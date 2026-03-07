@@ -381,6 +381,60 @@ struct ChatViewModelTests {
         #expect(state == .disconnected)
     }
 
+    @Test("Slash sending debug command shows the stop-button state without sending")
+    @MainActor
+    func slashSendingDebugCommandShowsTemporarySendingState() async {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        let chatService = TestChatService()
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(sonioxKeyStore: SonioxKeyStore()),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        viewModel.inputContent = NSAttributedString(string: "/sending")
+        viewModel.send()
+
+        #expect(viewModel.sendButtonIsSending)
+        #expect(!viewModel.sendButtonIsPreparing)
+        #expect(viewModel.sendButtonConnectionState == .connected)
+        #expect(viewModel.inputContent.length == 0)
+        #expect(chatService.sendCallCount == 0)
+    }
+
+    @Test("Slash preparing debug command shows the spinner state without sending")
+    @MainActor
+    func slashPreparingDebugCommandShowsTemporaryPreparingState() async {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        let chatService = TestChatService()
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(sonioxKeyStore: SonioxKeyStore()),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        viewModel.inputContent = NSAttributedString(string: "/preparing")
+        viewModel.send()
+
+        #expect(!viewModel.sendButtonIsSending)
+        #expect(viewModel.sendButtonIsPreparing)
+        #expect(viewModel.sendButtonConnectionState == .connected)
+        #expect(viewModel.inputContent.length == 0)
+        #expect(chatService.sendCallCount == 0)
+    }
+
     @Test("Send command port matches direct send behavior")
     @MainActor
     func sendCommandPortMatchesDirectSendBehavior() async throws {

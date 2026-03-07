@@ -14,6 +14,14 @@ import os.log
 
 private let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "ChatView")
 
+func runtimeInsetFallbackBarHeight(
+    measuredInputBarHeight: CGFloat,
+    settledInputBarHeight: CGFloat,
+    layoutFrozen: Bool
+) -> CGFloat {
+    max(measuredInputBarHeight, MessageInputBarMetrics.minInputBarHeight)
+}
+
 // MARK: - ⚠️⚠️⚠️ CRITICAL: DO NOT MODIFY WITHOUT READING ⚠️⚠️⚠️
 //
 // This file contains a non-obvious keyboard positioning fix that took 7+ iterations to solve.
@@ -585,8 +593,11 @@ struct ChatView: View {
         }()
         let isCompactLayout = horizontalSizeClass == .compact
         let metrics = ChatFlowTheme.Metrics(isCompact: isCompactLayout)
-        let insetInputHeight = dictationMotion.shouldFreezeLayout ? settledInputBarHeight : inputBarHeight
-        let resolvedInputHeight = max(insetInputHeight, MessageInputBarMetrics.minInputBarHeight)
+        let resolvedInputHeight = runtimeInsetFallbackBarHeight(
+            measuredInputBarHeight: inputBarHeight,
+            settledInputBarHeight: settledInputBarHeight,
+            layoutFrozen: dictationMotion.shouldFreezeLayout
+        )
         let keyboardVisibleHeight = max(0, keyboardHeight - geometry.safeAreaInsets.bottom)
         let isKeyboardVisible = keyboardVisibleHeight > 0.5
         let effectiveStreams = viewModel.orderedStreams
@@ -942,7 +953,8 @@ struct ChatView: View {
                 placeholderText: viewModel.activeSessionDisplayName,
                 resetToken: viewModel.inputResetToken,
                 canSend: viewModel.canSend,
-                isSending: viewModel.isSending,
+                isSending: viewModel.sendButtonIsSending,
+                isPreparing: viewModel.sendButtonIsPreparing,
                 connectionState: chatRuntimePort.sendButtonConnectionState,
                 focusTrigger: focusRequestID,
                 isTextFieldFocused: isInputFocused,
@@ -1859,6 +1871,12 @@ private struct KeyboardPinnedContainer<Content: View>: UIViewRepresentable {
     }
 }
 
+func expandedPageDotsHitRect(frame: CGRect, minimumHeight: CGFloat = 44) -> CGRect {
+    guard frame.height > 0, frame.height < minimumHeight else { return frame }
+    let verticalInset = (minimumHeight - frame.height) / 2
+    return frame.insetBy(dx: 0, dy: -verticalInset)
+}
+
 private final class KeyboardPinnedContainerView<Content: View>: UIView, KeyboardPinnedContainerViewProtocol {
     let hostingController: UIHostingController<Content>
     let versionLabel: UILabel
@@ -2059,13 +2077,30 @@ private final class KeyboardPinnedContainerView<Content: View>: UIView, Keyboard
         if let scrollButtonHost, scrollButtonHost.view.frame.contains(point) {
             return true
         }
-        if let pageDotsHost, pageDotsHost.view.frame.contains(point) {
+        if let pageDotsHost,
+           expandedPageDotsHitRect(frame: pageDotsHost.view.frame).contains(point) {
             return true
         }
         if !versionLabel.isHidden && versionLabel.frame.contains(point) {
             return true
         }
         return false
+    }
+
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        if let pageDotsHost,
+           !pageDotsHost.view.isHidden {
+            let hitRect = expandedPageDotsHitRect(frame: pageDotsHost.view.frame)
+            if hitRect.contains(point) {
+                let convertedPoint = convert(point, to: pageDotsHost.view)
+                let clampedPoint = CGPoint(
+                    x: max(0, min(convertedPoint.x, max(0, pageDotsHost.view.bounds.width - 0.5))),
+                    y: max(0, min(convertedPoint.y, max(0, pageDotsHost.view.bounds.height - 0.5)))
+                )
+                return pageDotsHost.view.hitTest(clampedPoint, with: event) ?? pageDotsHost.view
+            }
+        }
+        return super.hitTest(point, with: event)
     }
 
     override func layoutSubviews() {

@@ -43,7 +43,7 @@ private final class PanGestureCoordinatorHarness {
     private let rootViewController: UIViewController
     private let installerViewController: DictationPanGestureInstaller.InstallerViewController
 
-    init() {
+    init(onEnded: @escaping (DictationPanEvent, Bool) -> Void = { _, _ in }) {
         guard let resolvedWindow = UIApplication.shared.connectedScenes
             .compactMap({ $0 as? UIWindowScene })
             .flatMap(\.windows)
@@ -54,7 +54,7 @@ private final class PanGestureCoordinatorHarness {
             fatalError("Expected active UIWindow for pan coordinator tests")
         }
 
-        coordinator = DictationPanGestureInstaller.debugCoordinatorForTests()
+        coordinator = DictationPanGestureInstaller.debugCoordinatorForTests(onEnded: onEnded)
         textView = UITextView(frame: CGRect(x: 24, y: 30, width: 220, height: 56))
         textView.isSelectable = true
         textView.isScrollEnabled = true
@@ -190,6 +190,36 @@ struct MessageInputBarPanIntentTests {
 
         harness.beginActiveDragThatLocksSelection()
         harness.sendPan(state: .cancelled)
+        #expect(harness.textView.isSelectable == true)
+        #expect(harness.textView.isScrollEnabled == true)
+    }
+
+    @MainActor
+    @Test("Dismiss callback sees editor interaction restored before surface teardown")
+    func dismissCallbackRunsAfterEditorInteractionIsRestored() {
+        var selectableDuringEndedCallback: Bool?
+        var scrollEnabledDuringEndedCallback: Bool?
+        var didReceiveCancellation = false
+        var harness: PanGestureCoordinatorHarness?
+
+        harness = PanGestureCoordinatorHarness { _, wasCancelled in
+            didReceiveCancellation = wasCancelled
+            selectableDuringEndedCallback = harness?.textView.isSelectable
+            scrollEnabledDuringEndedCallback = harness?.textView.isScrollEnabled
+            harness?.coordinator.prepareForInstallerDisappear()
+        }
+
+        guard let harness else {
+            Issue.record("Expected pan harness")
+            return
+        }
+
+        harness.beginActiveDragThatLocksSelection()
+        harness.sendPan(state: .ended)
+
+        #expect(didReceiveCancellation == false)
+        #expect(selectableDuringEndedCallback == true)
+        #expect(scrollEnabledDuringEndedCallback == true)
         #expect(harness.textView.isSelectable == true)
         #expect(harness.textView.isScrollEnabled == true)
     }

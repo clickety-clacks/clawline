@@ -105,13 +105,15 @@ struct DictationPanGestureInstaller: UIViewControllerRepresentable {
     }
 
 #if DEBUG
-    static func debugCoordinatorForTests() -> Coordinator {
+    static func debugCoordinatorForTests(
+        onEnded: @escaping (DictationPanEvent, Bool) -> Void = { _, _ in }
+    ) -> Coordinator {
         Coordinator(
             shouldBegin: { _, _ in false },
             startsInEditableRegion: { _ in false },
             isSurfaceOpen: { false },
             onChanged: { _ in },
-            onEnded: { _, _ in }
+            onEnded: onEnded
         )
     }
 #endif
@@ -273,14 +275,21 @@ struct DictationPanGestureInstaller: UIViewControllerRepresentable {
                 }
             case .ended:
                 if intentLock == .dictation {
+                    // Unlock the text view before callbacks that may immediately
+                    // collapse the surface and tear down this installer host.
+                    resetGestureState()
                     onEnded(event, false)
+                } else {
+                    resetGestureState()
                 }
-                resetGestureState()
             case .cancelled, .failed:
                 if intentLock == .dictation {
+                    // Cleanup must not depend on callback completion.
+                    resetGestureState()
                     onEnded(event, true)
+                } else {
+                    resetGestureState()
                 }
-                resetGestureState()
             default:
                 break
             }
@@ -414,6 +423,13 @@ struct DictationPanGestureInstaller: UIViewControllerRepresentable {
 // ═══════════════════════════════════════════════════════════════════════════════════════════
 
 struct MessageInputBar: View {
+    enum SendButtonBubbleVisualState: Equatable {
+        case ghost
+        case active
+        case reconnecting
+        case error
+    }
+
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.settingsManager) private var settings
     @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
@@ -427,6 +443,7 @@ struct MessageInputBar: View {
     var resetToken: Int
     let canSend: Bool
     let isSending: Bool
+    let isPreparing: Bool
     let connectionState: SendButtonConnectionState
     let focusTrigger: Int
     let isTextFieldFocused: Bool
@@ -449,7 +466,6 @@ struct MessageInputBar: View {
     @State private var micTransientOffset: CGFloat = 0
     @State private var micFadeTask: Task<Void, Never>?
     @State private var gestureSettleTask: Task<Void, Never>?
-    @State private var reconnectPulseOn: Bool = false
     @State private var textEditorGlobalFrame: CGRect = .zero
     let isCompact: Bool
     private let verticalDominanceRatio: CGFloat = 1.4
@@ -550,6 +566,69 @@ struct MessageInputBar: View {
         !isSending && hasSubmittableDraft
     }
 
+    static func sendButtonBubbleVisualState(
+        isSending: Bool,
+        canSend: Bool,
+        isPreparing: Bool,
+        connectionState: SendButtonConnectionState
+    ) -> SendButtonBubbleVisualState {
+        switch connectionState {
+        case .connected:
+            return (isSending || canSend || sendButtonShowsPreparingSpinner(
+                isSending: isSending,
+                canSend: canSend,
+                isPreparing: isPreparing,
+                connectionState: connectionState
+            )) ? .active : .ghost
+        case .reconnecting:
+            return .reconnecting
+        case .disconnected:
+            return .error
+        }
+    }
+
+    static func sendButtonShowsPreparingSpinner(
+        isSending: Bool,
+        canSend: Bool,
+        isPreparing: Bool,
+        connectionState: SendButtonConnectionState
+    ) -> Bool {
+        connectionState == .connected && isPreparing && !isSending && !canSend
+    }
+
+    static func sendButtonShowsPrimaryIcon(
+        isSending: Bool,
+        canSend: Bool,
+        isPreparing: Bool,
+        connectionState: SendButtonConnectionState
+    ) -> Bool {
+        !isSending && !sendButtonShowsPreparingSpinner(
+            isSending: isSending,
+            canSend: canSend,
+            isPreparing: isPreparing,
+            connectionState: connectionState
+        )
+    }
+
+    static func sendButtonPrimarySymbolName(connectionState: SendButtonConnectionState) -> String {
+        connectionState == .disconnected ? "arrow.clockwise" : "paperplane.fill"
+    }
+
+    static func sendButtonBubbleScale(
+        state: SendButtonBubbleVisualState,
+        reconnectPhase: Double = 0
+    ) -> Double {
+        switch state {
+        case .ghost:
+            return 0
+        case .active, .error:
+            return 1
+        case .reconnecting:
+            let clampedPhase = min(1, max(0, reconnectPhase))
+            return 0.75 + (0.25 * clampedPhase)
+        }
+    }
+
     private var pullToSendEligible: Bool {
         canSendNow
     }
@@ -636,24 +715,6 @@ struct MessageInputBar: View {
 #endif
     }
 
-    private var sendIconColor: Color { .white }
-
-    private var sendBackgroundColor: Color {
-        let scheme = inputBarColorScheme
-        switch connectionState {
-        case .connected:
-#if os(visionOS)
-            return ChatFlowTheme.sage(scheme)
-#else
-            return ChatFlowTheme.sage(colorScheme)
-#endif
-        case .reconnecting:
-            return ChatFlowTheme.connectionReconnecting(scheme)
-        case .disconnected:
-            return ChatFlowTheme.connectionDisconnected(scheme)
-        }
-    }
-
     private var placeholderColor: Color {
 #if os(visionOS)
         return isLightModeForInputBar
@@ -672,8 +733,12 @@ struct MessageInputBar: View {
 #endif
     }
 
-    private var inputTintUIColor: UIColor {
-        UIColor(inputTintColor)
+    private var editorTintUIColor: UIColor {
+#if os(visionOS)
+        return UIColor(inputTintColor)
+#else
+        return UIColor(ChatFlowTheme.sage(colorScheme))
+#endif
     }
 
 #if DEBUG
@@ -773,16 +838,10 @@ struct MessageInputBar: View {
             micFadeTask?.cancel()
             gestureSettleTask?.cancel()
             motion.clearGestureState()
-            reconnectPulseOn = false
         }
         .onAppear {
             dictation.setComposeSelectionRange(selectionRange)
             motion.settle(to: dictation.surfaceTarget)
-            reconnectPulseOn = false
-            guard isReconnecting else { return }
-            withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) {
-                reconnectPulseOn = true
-            }
         }
         .onChange(of: dictation.surfaceTarget) { _, target in
             motion.settle(to: target)
@@ -791,16 +850,6 @@ struct MessageInputBar: View {
                 micTransientVisible = false
                 micTransientOpacity = 0
                 micTransientOffset = 0
-            }
-        }
-        .onChange(of: connectionState) { _, newValue in
-            if newValue == .reconnecting {
-                reconnectPulseOn = false
-                withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) {
-                    reconnectPulseOn = true
-                }
-            } else {
-                reconnectPulseOn = false
             }
         }
     }
@@ -872,7 +921,7 @@ struct MessageInputBar: View {
                     resetToken: resetToken,
                     focusTrigger: focusTrigger,
                     isEditable: true,
-                    tintColor: inputTintUIColor,
+                    tintColor: editorTintUIColor,
                     textColor: {
 #if os(visionOS)
                         // #61: Input bar is forced dark on visionOS; ensure typed text is visible.
@@ -968,9 +1017,102 @@ struct MessageInputBar: View {
                 dictation.discardFromVoiceOverAction()
             }
 
-            // Send button - morphs with connection state, keeps frame/anchor stable.
-            let sendActionEnabled = isSending || canSendNow || isDisconnected
-            let sendIconOpacity = (sendActionEnabled || isReconnecting) ? 1 : 0.4
+            MessageSendControl(
+                isSending: isSending,
+                isPreparing: isPreparing,
+                canSend: canSendNow,
+                connectionState: connectionState,
+                sendButtonSize: sendButtonWidth,
+                inputBarColorScheme: inputBarColorScheme,
+                uiColorScheme: colorScheme,
+                visionOSBorderColor: visionOSBorderColor,
+                connectionAlertHint: connectionAlertHint,
+                onSend: onSend,
+                onCancel: onCancel,
+                onReconnect: onReconnect
+            )
+        }
+    }
+
+    private struct MessageSendControl: View {
+        let isSending: Bool
+        let isPreparing: Bool
+        let canSend: Bool
+        let connectionState: SendButtonConnectionState
+        let sendButtonSize: CGFloat
+        let inputBarColorScheme: ColorScheme
+        let uiColorScheme: ColorScheme
+        let visionOSBorderColor: Color
+        let connectionAlertHint: String?
+        let onSend: () -> Void
+        let onCancel: () -> Void
+        let onReconnect: () -> Void
+
+        private var isReconnecting: Bool { connectionState == .reconnecting }
+        private var isDisconnected: Bool { connectionState == .disconnected }
+        private var sendActionEnabled: Bool { isSending || canSend || isDisconnected }
+        private var sendIconColor: Color { .white }
+        private let reconnectPulseDuration: TimeInterval = 0.8
+        private var isPreparingSpinnerVisible: Bool {
+            MessageInputBar.sendButtonShowsPreparingSpinner(
+                isSending: isSending,
+                canSend: canSend,
+                isPreparing: isPreparing,
+                connectionState: connectionState
+            )
+        }
+        private var showsPrimaryIcon: Bool {
+            MessageInputBar.sendButtonShowsPrimaryIcon(
+                isSending: isSending,
+                canSend: canSend,
+                isPreparing: isPreparing,
+                connectionState: connectionState
+            )
+        }
+
+        private var bubbleVisualState: MessageInputBar.SendButtonBubbleVisualState {
+            MessageInputBar.sendButtonBubbleVisualState(
+                isSending: isSending,
+                canSend: canSend,
+                isPreparing: isPreparing,
+                connectionState: connectionState
+            )
+        }
+
+        private var bubbleColor: Color {
+            let activeColor: Color = {
+#if os(visionOS)
+                ChatFlowTheme.sage(inputBarColorScheme)
+#else
+                ChatFlowTheme.sage(uiColorScheme)
+#endif
+            }()
+            switch bubbleVisualState {
+            case .ghost:
+                return activeColor
+            case .active:
+                return activeColor
+            case .reconnecting:
+                return ChatFlowTheme.connectionReconnecting(inputBarColorScheme)
+            case .error:
+                return ChatFlowTheme.connectionDisconnected(inputBarColorScheme)
+            }
+        }
+
+        private func reconnectPulsePhase(at date: Date) -> Double {
+            let phase = date.timeIntervalSinceReferenceDate
+                .truncatingRemainder(dividingBy: reconnectPulseDuration) / reconnectPulseDuration
+            return 0.5 - 0.5 * cos(phase * 2 * .pi)
+        }
+
+        private func bubbleScale(at date: Date) -> Double {
+            MessageInputBar.sendButtonBubbleScale(
+                state: bubbleVisualState,
+                reconnectPhase: reconnectPulsePhase(at: date)
+            )
+        }
+
+        var body: some View {
             Button(action: {
                 if isSending {
                     onCancel()
@@ -986,47 +1128,42 @@ struct MessageInputBar: View {
                 }
             }) {
                 ZStack {
-                    if isReconnecting {
-                        Circle()
-                            .fill(sendBackgroundColor)
-                            .frame(
-                                width: min(12, sendButtonWidth * 0.4),
-                                height: min(12, sendButtonWidth * 0.4)
-                            )
-                            .opacity(reconnectPulseOn ? 1 : 0.4)
-                            .scaleEffect(reconnectPulseOn ? 1.2 : 1.0)
-                    } else {
-                        Image(systemName: "stop.fill")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(sendIconColor)
-                            .opacity(isSending ? 1 : 0)
-                        Image(systemName: isDisconnected ? "arrow.clockwise" : "paperplane.fill")
-                            .font(.system(size: 18, weight: .semibold))
-                            .foregroundStyle(sendIconColor)
-                            .opacity(isSending ? 0 : 1)
-                    }
+                    ProgressView()
+                        .progressViewStyle(.circular)
+                        .tint(sendIconColor)
+                        .scaleEffect(0.9)
+                        .opacity(isPreparingSpinnerVisible ? 1 : 0)
+                        .scaleEffect(isPreparingSpinnerVisible ? 1 : 0.7)
+
+                    Image(systemName: "stop.fill")
+                        .font(.clawline(.uiLabel).weight(.semibold))
+                        .foregroundStyle(sendIconColor)
+                        .opacity(isSending && !isReconnecting && !isPreparingSpinnerVisible ? 1 : 0)
+                        .scaleEffect(isSending && !isReconnecting && !isPreparingSpinnerVisible ? 1 : 0.7)
+
+                    Image(systemName: MessageInputBar.sendButtonPrimarySymbolName(connectionState: connectionState))
+                        .font(.clawline(.uiLabel).weight(.semibold))
+                        .foregroundStyle(sendIconColor)
+                        .opacity(showsPrimaryIcon ? 1 : 0)
+                        .scaleEffect(showsPrimaryIcon ? 1 : 0.7)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .contentShape(Rectangle())
             }
-            .frame(width: sendButtonWidth, height: metrics.inputBarHeight)
+            .frame(width: sendButtonSize, height: sendButtonSize)
+            .background {
+                TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !isReconnecting)) { context in
+                    Circle()
+                        .fill(bubbleColor)
+                        .frame(width: sendButtonSize, height: sendButtonSize)
+                        .scaleEffect(bubbleScale(at: context.date))
+                }
+            }
 #if os(visionOS)
-            .background(
-                Circle().fill(
-                    isReconnecting
-                        ? .clear
-                        : sendBackgroundColor.opacity(sendActionEnabled ? 1 : 0.35)
-                )
-            )
+            .background(.regularMaterial, in: Circle())
             .overlay(Circle().stroke(visionOSBorderColor, lineWidth: 1))
 #else
-            .background(
-                Capsule().fill(
-                    isReconnecting
-                        ? .clear
-                        : sendBackgroundColor.opacity(sendActionEnabled ? 1 : 0.35)
-                )
-            )
+            .glassEffect(.regular.interactive(), in: Circle())
 #endif
             .buttonStyle(.plain)
 #if os(visionOS)
@@ -1034,17 +1171,17 @@ struct MessageInputBar: View {
             .foregroundStyle(sendIconColor)
 #endif
             .allowsHitTesting(sendActionEnabled && !isReconnecting)
-            .opacity(sendIconOpacity)
             .accessibilityLabel(
                 isReconnecting ? "Reconnecting" :
-                    (isDisconnected ? "Disconnected. Tap to reconnect." : "Send message")
+                    (isPreparingSpinnerVisible ? "Staging attachments" :
+                        (isDisconnected ? "Disconnected. Tap to reconnect." : "Send message"))
             )
             .accessibilityHint(connectionAlertHint ?? "")
             .id("send-button")
-            .transaction { $0.animation = nil }
-            .animation(nil, value: isSending)
-            .animation(nil, value: canSend)
-            .animation(nil, value: connectionState)
+            .animation(.spring(response: 0.30, dampingFraction: 0.82), value: isSending)
+            .animation(.spring(response: 0.30, dampingFraction: 0.82), value: canSend)
+            .animation(.spring(response: 0.30, dampingFraction: 0.82), value: connectionState)
+            .animation(.spring(response: 0.30, dampingFraction: 0.82), value: bubbleVisualState)
         }
     }
 
@@ -1555,6 +1692,7 @@ struct DictationMicAffordanceAnimationPlan {
                 resetToken: 0,
                 canSend: true,
                 isSending: false,
+                isPreparing: false,
                 connectionState: .connected,
                 focusTrigger: 0,
                 isTextFieldFocused: false,

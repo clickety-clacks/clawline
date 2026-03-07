@@ -380,6 +380,37 @@ struct DictationCoordinatorTests {
         }
     }
 
+    @Test("Editor context changes stay live while dictation remains active")
+    @MainActor
+    func editorContextChangesDoNotStopDictation() {
+        let harness = DictationTestHarness()
+        let coordinator = harness.makeCoordinator()
+
+        coordinator.updateContext(
+            sessionKey: harness.host.activeSessionKey,
+            composeIsEmpty: true,
+            textFieldFocused: false,
+            selectionLength: 0,
+            reduceMotionEnabled: false
+        )
+
+        coordinator.startStickyDictation()
+        #expect(coordinator.isStickyDictationActive)
+
+        coordinator.updateContext(
+            sessionKey: harness.host.activeSessionKey,
+            composeIsEmpty: true,
+            textFieldFocused: true,
+            selectionLength: 4,
+            reduceMotionEnabled: false
+        )
+
+        #expect(coordinator.isStickyDictationActive)
+        #expect(coordinator.isDictationActive)
+        #expect(coordinator.isListening)
+        #expect(coordinator.isSurfaceOpen)
+    }
+
     @Test("Attempting dictation without a validated key shows modal prompt and keeps mic visibility rules")
     @MainActor
     func missingOrUnverifiedKeyRoutesToModalPrompt() {

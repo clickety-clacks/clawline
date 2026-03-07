@@ -512,8 +512,15 @@ struct ProviderServiceTests {
 
     @Test("Lifecycle attempts echo the epoch received for each attempt")
     func lifecycleAttemptsEchoReceivedEpoch() async throws {
-        let mockSocket = MockWebSocketClient()
-        let connector = MockWebSocketConnector(client: mockSocket)
+        let firstSocket = AuthResultLifecycleWebSocketClient(
+            authResultText: #"{ "type": "auth_result", "success": true, "replayCount": 0, "replayTruncated": false, "historyReset": false }"#,
+            authResultDelay: .milliseconds(20)
+        )
+        let secondSocket = AuthResultLifecycleWebSocketClient(
+            authResultText: #"{ "type": "auth_result", "success": true, "replayCount": 0, "replayTruncated": false, "historyReset": false }"#,
+            authResultDelay: .milliseconds(20)
+        )
+        let connector = SequentialWebSocketConnector(clients: [firstSocket, secondSocket])
         let baseURL = URL(string: "https://example.com")!
         let service = ProviderChatService(
             connector: connector,
@@ -524,13 +531,6 @@ struct ProviderServiceTests {
         var iterator = service.lifecycleTransportEvents.makeAsyncIterator()
         let firstEpoch = 7
         let secondEpoch = 19
-
-        Task {
-            try await Task.sleep(forDuration: .milliseconds(20))
-            mockSocket.enqueue(text: #"{ "type": "auth_result", "success": true, "replayCount": 0, "replayTruncated": false, "historyReset": false }"#)
-            try await Task.sleep(forDuration: .milliseconds(20))
-            mockSocket.enqueue(text: #"{ "type": "auth_result", "success": true, "replayCount": 0, "replayTruncated": false, "historyReset": false }"#)
-        }
 
         service.startConnectionAttempt(epoch: firstEpoch, lastMessageId: nil, token: "jwt")
         var firstAuthEpoch: Int?
@@ -898,6 +898,22 @@ private final class DelayedMockWebSocketConnector: WebSocketConnecting {
         connectCallCount += 1
         try await Task.sleep(forDuration: connectDelay)
         return client
+    }
+}
+
+private final class SequentialWebSocketConnector: WebSocketConnecting {
+    private let clients: [any WebSocketClient]
+    private var nextIndex = 0
+
+    init(clients: [any WebSocketClient]) {
+        self.clients = clients
+    }
+
+    func connect(to url: URL) async throws -> any WebSocketClient {
+        let _ = url
+        let index = min(nextIndex, clients.count - 1)
+        nextIndex += 1
+        return clients[index]
     }
 }
 

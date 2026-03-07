@@ -377,6 +377,14 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
     private let temporarySendButtonOverrideDuration: Duration = .seconds(5)
 
     private var transportSendButtonConnectionState: SendButtonConnectionState {
+        guard chatService.isTransportReadyForSend else {
+            switch connectionState {
+            case .connecting, .reconnecting:
+                return .reconnecting
+            case .connected, .disconnected, .failed:
+                return .disconnected
+            }
+        }
         switch connectionState {
         case .connected:
             return .connected

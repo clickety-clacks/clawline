@@ -247,8 +247,11 @@ final class ProviderChatService: ChatServicing {
     private var connectAttemptTask: Task<Void, Never>?
     private var activeLifecycleConnectionToken: UUID?
     private var authToken: String?
+    private var pendingLifecycleAuthToken: String?
     private var replayCursorBySessionKey: [String: String] = [:]
     private var knownSessionKeys: Set<String> = []
+    private var lifecycleConnectInFlight = false
+    private var lifecycleConnectWaiters: [CheckedContinuation<Void, Swift.Error>] = []
 
     private static let serverEventIDPrefix = "s_"
 
@@ -336,6 +339,10 @@ final class ProviderChatService: ChatServicing {
     }
 
     private func connectInternal(token: String, forcedLastMessageId: String?) async throws {
+        if lifecycleConnectInFlight {
+            try await waitForLifecycleConnectToFinishIfNeeded()
+            return
+        }
         let connectEntry = await connectJoinGate.taskForConnect {
             Task {
                 try await self.performConnect(token: token, lastMessageId: forcedLastMessageId)
@@ -398,6 +405,8 @@ final class ProviderChatService: ChatServicing {
     func startConnectionAttempt(epoch: Int, lastMessageId: String?, token: String) {
         connectAttemptTask?.cancel()
         activeLifecycleConnectionToken = nil
+        pendingLifecycleAuthToken = token
+        lifecycleConnectInFlight = true
         connectAttemptTask = Task { [weak self] in
             await self?.runLifecycleConnectAttempt(epoch: epoch, lastMessageId: lastMessageId, token: token)
         }
@@ -406,6 +415,8 @@ final class ProviderChatService: ChatServicing {
     func stopConnectionAttempt() {
         connectAttemptTask?.cancel()
         connectAttemptTask = nil
+        pendingLifecycleAuthToken = nil
+        finishLifecycleConnectWaiters(.failure(Error.notConnected))
         performDisconnect(shouldNotify: false)
     }
 
@@ -413,6 +424,8 @@ final class ProviderChatService: ChatServicing {
         logger.info("disconnect requested")
         connectAttemptTask?.cancel()
         connectAttemptTask = nil
+        pendingLifecycleAuthToken = nil
+        finishLifecycleConnectWaiters(.failure(Error.notConnected))
         performDisconnect(shouldNotify: false)
     }
 
@@ -553,6 +566,7 @@ final class ProviderChatService: ChatServicing {
 
     private func runLifecycleConnectAttempt(epoch: Int, lastMessageId: String?, token: String) async {
         guard let baseURL = baseURLProvider() else {
+            finishLifecycleConnectWaiters(.failure(Error.missingBaseURL))
             emitLifecycleEvent(
                 epoch: epoch,
                 payload: .authResult(
@@ -567,6 +581,7 @@ final class ProviderChatService: ChatServicing {
         }
         let wsURLs = makeWebSocketURLs(from: baseURL)
         guard !wsURLs.isEmpty else {
+            finishLifecycleConnectWaiters(.failure(Error.missingBaseURL))
             emitLifecycleEvent(
                 epoch: epoch,
                 payload: .authResult(
@@ -606,6 +621,7 @@ final class ProviderChatService: ChatServicing {
                     shouldNotifyDisconnect = false
                     continue
                 }
+                finishLifecycleConnectWaiters(.failure(error))
                 emitLifecycleEvent(
                     epoch: epoch,
                     payload: .transportClosed(reason: .error),
@@ -725,9 +741,15 @@ final class ProviderChatService: ChatServicing {
             )
         }
         if result.success {
+            if lifecycleEpoch != nil {
+                authToken = pendingLifecycleAuthToken
+            }
             resolveAuthContinuation(with: .success(()))
             logger.info("state -> connected (auth success)")
             updateState(.connected)
+            if lifecycleEpoch != nil {
+                finishLifecycleConnectWaiters(.success(()))
+            }
             let supportsSessionProvisioning = result.features?.contains("session_info") ?? false
             emitServiceEvent(.sessionProvisioningAvailable(supportsSessionProvisioning))
             if let info = sessionInfo(from: result) {
@@ -744,6 +766,9 @@ final class ProviderChatService: ChatServicing {
             resolveAuthContinuation(with: .failure(error))
             logger.info("state -> failed (auth result) error=\(error.localizedDescription, privacy: .public)")
             updateState(.failed(error))
+            if lifecycleEpoch != nil {
+                finishLifecycleConnectWaiters(.failure(error))
+            }
             performDisconnect(shouldNotify: false, reason: error.localizedDescription)
         }
     }
@@ -812,6 +837,9 @@ final class ProviderChatService: ChatServicing {
         switch payload.code {
         case "auth_failed":
             let error = Error.authFailed(message)
+            if lifecycleEpoch != nil {
+                finishLifecycleConnectWaiters(.failure(error))
+            }
             if let lifecycleEpoch {
                 emitLifecycleEvent(
                     epoch: lifecycleEpoch,
@@ -831,6 +859,9 @@ final class ProviderChatService: ChatServicing {
             performDisconnect(shouldNotify: false, reason: error.localizedDescription)
         case "token_revoked":
             let error = Error.tokenRevoked(message)
+            if lifecycleEpoch != nil {
+                finishLifecycleConnectWaiters(.failure(error))
+            }
             if let lifecycleEpoch {
                 emitLifecycleEvent(
                     epoch: lifecycleEpoch,
@@ -850,6 +881,9 @@ final class ProviderChatService: ChatServicing {
             performDisconnect(shouldNotify: false, reason: error.localizedDescription)
         case "session_replaced":
             let error = Error.sessionReplaced
+            if lifecycleEpoch != nil {
+                finishLifecycleConnectWaiters(.failure(error))
+            }
             if let lifecycleEpoch {
                 emitLifecycleEvent(
                     epoch: lifecycleEpoch,
@@ -871,6 +905,9 @@ final class ProviderChatService: ChatServicing {
                 && isInvalidLastMessageIdMessage(payload.message)
             if invalidLastMessageId {
                 clearReplayCursors()
+                if lifecycleEpoch != nil {
+                    finishLifecycleConnectWaiters(.failure(Error.authFailed("Invalid lastMessageId")))
+                }
                 if let lifecycleEpoch {
                     emitLifecycleEvent(
                         epoch: lifecycleEpoch,
@@ -1189,6 +1226,32 @@ final class ProviderChatService: ChatServicing {
 
     private func teardownConnection() async throws {
         performDisconnect(shouldNotify: false)
+    }
+
+    private func waitForLifecycleConnectToFinishIfNeeded() async throws {
+        if isTransportReadyForSend {
+            return
+        }
+        try await withCheckedThrowingContinuation { continuation in
+            lifecycleConnectWaiters.append(continuation)
+        }
+    }
+
+    private func finishLifecycleConnectWaiters(_ result: Result<Void, Swift.Error>) {
+        guard lifecycleConnectInFlight || !lifecycleConnectWaiters.isEmpty else { return }
+        lifecycleConnectInFlight = false
+        connectAttemptTask = nil
+        pendingLifecycleAuthToken = nil
+        let waiters = lifecycleConnectWaiters
+        lifecycleConnectWaiters.removeAll()
+        for waiter in waiters {
+            switch result {
+            case .success:
+                waiter.resume()
+            case .failure(let error):
+                waiter.resume(throwing: error)
+            }
+        }
     }
 
     private func scheduleRetry(for payload: ClientMessagePayload) -> Task<Void, Never> {

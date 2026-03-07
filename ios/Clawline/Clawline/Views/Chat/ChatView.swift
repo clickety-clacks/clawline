@@ -886,7 +886,6 @@ struct ChatView: View {
                                  layoutKey: ChatLayoutKey,
                                  streamSelectorMaxHeight: CGFloat) -> some View {
         let sendCommandPort: any SendCommandPort = viewModel
-        let chatRuntimePort: any ChatRuntimePort = viewModel
         let sessionKey = viewModel.uiSelectedSessionKey
         let effectiveSessionKeys = effectiveStreams.map(\.sessionKey)
         let state = scrollButtonState(for: sessionKey)
@@ -955,7 +954,7 @@ struct ChatView: View {
                 canSend: viewModel.canSend,
                 isSending: viewModel.sendButtonIsSending,
                 isPreparing: viewModel.sendButtonIsPreparing,
-                connectionState: chatRuntimePort.sendButtonConnectionState,
+                connectionState: viewModel.sendButtonConnectionState,
                 focusTrigger: focusRequestID,
                 isTextFieldFocused: isInputFocused,
                 bottomSafeAreaInset: geometry.safeAreaInsets.bottom,

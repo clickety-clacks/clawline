@@ -286,6 +286,48 @@ struct ProviderServiceTests {
         #expect(sentAfterDisconnect == sentBeforeDisconnect)
     }
 
+    @Test("Retry send failure emits message error instead of silent drop")
+    func retrySendFailureEmitsMessageError() async throws {
+        let mockSocket = MockWebSocketClient()
+        mockSocket.sendErrorsByAttempt[3] = URLError(.dataLengthExceedsMaximum)
+        let connector = MockWebSocketConnector(client: mockSocket)
+        let baseURL = URL(string: "https://example.com")!
+        let service = ProviderChatService(
+            connector: connector,
+            deviceId: "device_123",
+            baseURLProvider: { baseURL }
+        )
+
+        let recorder = ServiceEventRecorder()
+        let observerTask = Task {
+            for await event in service.serviceEvents {
+                await recorder.append(event)
+            }
+        }
+        defer { observerTask.cancel() }
+
+        Task {
+            try await Task.sleep(forDuration: .milliseconds(10))
+            mockSocket.enqueue(text: #"{ "type": "auth_result", "success": true }"#)
+        }
+
+        try await service.connect(token: "jwt", lastMessageId: nil)
+        try await service.send(
+            id: "c_retry_send_fail",
+            content: "Hello",
+            attachments: [],
+            sessionKey: nil
+        )
+
+        try await Task.sleep(forDuration: .seconds(6))
+
+        let hasRetryFailure = await recorder.containsMessageError(
+            messageId: "c_retry_send_fail",
+            code: "queue_failed"
+        )
+        #expect(hasRetryFailure)
+    }
+
     @Test("Malformed inbound auth/message frames are dropped and valid frames still process")
     func malformedInboundFramesAreDropped() async throws {
         let mockSocket = MockWebSocketClient()
@@ -467,6 +509,49 @@ struct ProviderServiceTests {
         } catch {
             Issue.record("Unexpected error type: \(error)")
         }
+    }
+
+    @Test("Create stream uses fallback auth token provider when transport token is unavailable")
+    func createStreamUsesFallbackAuthTokenProvider() async throws {
+        let baseURL = URL(string: "https://example.com")!
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [StreamAPIMockURLProtocol.self]
+        let session = URLSession(configuration: config)
+        let streamAPIClient = StreamAPIClient(baseURLProvider: { baseURL }, session: session)
+        let service = ProviderChatService(
+            connector: MockWebSocketConnector(client: MockWebSocketClient()),
+            deviceId: "device_123",
+            baseURLProvider: { baseURL },
+            authTokenProvider: { "jwt_fallback" },
+            streamAPIClient: streamAPIClient
+        )
+
+        StreamAPIMockURLProtocol.requestHandler = { request in
+            #expect(request.httpMethod == "POST")
+            #expect(request.url?.path == "/api/streams")
+            #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer jwt_fallback")
+            let body = #"{ "stream": { "sessionKey": "agent:main:clawline:user:s_new", "displayName": "Research", "kind": "custom", "orderIndex": 1, "isBuiltIn": false, "createdAt": 1700000000000, "updatedAt": 1700000000000 } }"#
+            guard let requestURL = request.url else {
+                throw URLError(.badURL)
+            }
+            guard let response = HTTPURLResponse(
+                url: requestURL,
+                statusCode: 200,
+                httpVersion: nil,
+                headerFields: ["Content-Type": "application/json"]
+            ) else {
+                throw URLError(.badServerResponse)
+            }
+            return (response, Data(body.utf8))
+        }
+        defer {
+            StreamAPIMockURLProtocol.requestHandler = nil
+            session.invalidateAndCancel()
+        }
+
+        let stream = try await service.createStream(displayName: "Research", idempotencyKey: "req_1")
+        #expect(stream.sessionKey == "agent:main:clawline:user:s_new")
+        #expect(stream.displayName == "Research")
     }
 
     @Test("Lifecycle attempt emits coordinator epoch on transport and auth events")
@@ -922,6 +1007,8 @@ private final class MockWebSocketClient: WebSocketClient {
     private let continuation: AsyncStream<String>.Continuation
 
     private(set) var sentTexts: [String] = []
+    var sendErrorsByAttempt: [Int: any Swift.Error] = [:]
+    private var sendAttempt: Int = 0
 
     init() {
         var continuation: AsyncStream<String>.Continuation!
@@ -932,6 +1019,10 @@ private final class MockWebSocketClient: WebSocketClient {
     var incomingTextMessages: AsyncStream<String> { stream }
 
     func send(text: String) async throws {
+        sendAttempt += 1
+        if let error = sendErrorsByAttempt[sendAttempt] {
+            throw error
+        }
         sentTexts.append(text)
     }
 
@@ -941,6 +1032,21 @@ private final class MockWebSocketClient: WebSocketClient {
 
     func enqueue(text: String) {
         continuation.yield(text)
+    }
+}
+
+private actor ServiceEventRecorder {
+    private var events: [ChatServiceEvent] = []
+
+    func append(_ event: ChatServiceEvent) {
+        events.append(event)
+    }
+
+    func containsMessageError(messageId: String, code: String) -> Bool {
+        events.contains {
+            guard case .messageError(let eventMessageId, let eventCode, _) = $0 else { return false }
+            return eventMessageId == messageId && eventCode == code
+        }
     }
 }
 
@@ -1114,4 +1220,34 @@ private final class StartAttemptCapture {
         defer { lock.unlock() }
         return attempts
     }
+}
+
+private final class StreamAPIMockURLProtocol: URLProtocol {
+    static var requestHandler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
+
+    override class func canInit(with request: URLRequest) -> Bool {
+        true
+    }
+
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest {
+        request
+    }
+
+    override func startLoading() {
+        guard let handler = Self.requestHandler else {
+            let error = NSError(domain: "StreamAPIMockURLProtocol", code: -1)
+            client?.urlProtocol(self, didFailWithError: error)
+            return
+        }
+        do {
+            let (response, data) = try handler(request)
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: data)
+            client?.urlProtocolDidFinishLoading(self)
+        } catch {
+            client?.urlProtocol(self, didFailWithError: error)
+        }
+    }
+
+    override func stopLoading() {}
 }

@@ -270,6 +270,51 @@ struct ChatViewModelTests {
         #expect(messages.contains("bad content"))
     }
 
+    @Test("Unscoped payload_too_large errors mark pending placeholders and show clear toast")
+    @MainActor
+    func unscopedPayloadTooLargeErrorsMarkPendingPlaceholders() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let toastManager = ToastManager()
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: toastManager,
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        try await setReadyToSend(chatService: chatService, viewModel: viewModel)
+        viewModel.inputContent = NSAttributedString(string: "Large message pending")
+        viewModel.send()
+
+        try await Task.sleep(forDuration: .milliseconds(10))
+        guard let messageId = chatService.lastSentId else {
+            Issue.record("Expected chat service to capture sent message id")
+            return
+        }
+
+        chatService.emitServiceEvent(.messageError(messageId: nil, code: "payload_too_large", message: nil))
+        for _ in 0..<50 {
+            if viewModel.failureMessage(for: messageId) != nil {
+                break
+            }
+            try await Task.sleep(forDuration: .milliseconds(20))
+        }
+
+        #expect(viewModel.failureMessage(for: messageId) == "That message is too large to send.")
+        #expect(viewModel.messages.contains(where: { $0.id == messageId }))
+        #expect(viewModel.isSending == false)
+        let messages = await MainActor.run { toastManager.debugMessages }
+        #expect(messages.contains("That message is too large to send."))
+    }
+
     @Test("Connection interruptions update send button state without passive toast")
     @MainActor
     func connectionInterruptionTriggersAlert() async throws {

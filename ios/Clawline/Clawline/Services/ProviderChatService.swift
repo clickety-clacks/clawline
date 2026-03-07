@@ -223,6 +223,7 @@ final class ProviderChatService: ChatServicing {
     private let deviceId: String
     private let baseURLProvider: () -> URL?
     private let userIdProvider: () -> String?
+    private let authTokenProvider: @Sendable () async -> String?
     private let streamAPIClient: StreamAPIClient
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
@@ -264,6 +265,7 @@ final class ProviderChatService: ChatServicing {
          deviceId: String,
          baseURLProvider: @escaping () -> URL? = { ProviderBaseURLStore.baseURL },
          userIdProvider: @escaping () -> String? = { nil },
+         authTokenProvider: @escaping @Sendable () async -> String? = { nil },
          streamAPIClient: StreamAPIClient? = nil,
          encoder: JSONEncoder = JSONEncoder(),
          decoder: JSONDecoder = JSONDecoder()) {
@@ -271,6 +273,7 @@ final class ProviderChatService: ChatServicing {
         self.deviceId = deviceId
         self.baseURLProvider = baseURLProvider
         self.userIdProvider = userIdProvider
+        self.authTokenProvider = authTokenProvider
         self.encoder = encoder
         self.decoder = decoder
         self.streamAPIClient = streamAPIClient ?? StreamAPIClient(baseURLProvider: baseURLProvider)
@@ -283,19 +286,25 @@ final class ProviderChatService: ChatServicing {
     var lifecycleTransportEvents: AsyncStream<LifecycleTransportEvent> { lifecycleTransportEventBroadcaster.stream() }
 
     func fetchStreams() async throws -> [StreamSession] {
+        guard let token = await resolveControlPlaneToken() else {
+            throw Error.notConnected
+        }
         do {
-            return try await streamAPIClient.fetchStreams(token: authToken)
+            return try await streamAPIClient.fetchStreams(token: token)
         } catch {
             throw mapStreamAPIError(error)
         }
     }
 
     func createStream(displayName: String, idempotencyKey: String) async throws -> StreamSession {
+        guard let token = await resolveControlPlaneToken() else {
+            throw Error.notConnected
+        }
         do {
             return try await streamAPIClient.createStream(
                 displayName: displayName,
                 idempotencyKey: idempotencyKey,
-                token: authToken
+                token: token
             )
         } catch {
             throw mapStreamAPIError(error)
@@ -303,11 +312,14 @@ final class ProviderChatService: ChatServicing {
     }
 
     func renameStream(sessionKey: String, displayName: String) async throws -> StreamSession {
+        guard let token = await resolveControlPlaneToken() else {
+            throw Error.notConnected
+        }
         do {
             return try await streamAPIClient.renameStream(
                 sessionKey: sessionKey,
                 displayName: displayName,
-                token: authToken
+                token: token
             )
         } catch {
             throw mapStreamAPIError(error)
@@ -315,7 +327,7 @@ final class ProviderChatService: ChatServicing {
     }
 
     func deleteStream(sessionKey: String, idempotencyKey: String?) async throws -> String {
-        guard let token = authToken else {
+        guard let token = await resolveControlPlaneToken() else {
             throw Error.notConnected
         }
         do {
@@ -327,6 +339,17 @@ final class ProviderChatService: ChatServicing {
         } catch {
             throw mapStreamAPIError(error)
         }
+    }
+
+    private func resolveControlPlaneToken() async -> String? {
+        if let authToken, !authToken.isEmpty {
+            return authToken
+        }
+        guard let fallback = await authTokenProvider() else {
+            return nil
+        }
+        let trimmed = fallback.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     func connect(token: String, activeSessionKey: String?) async throws {
@@ -510,8 +533,14 @@ final class ProviderChatService: ChatServicing {
         pendingMessages[id]?.retryTask?.cancel()
         let retryTask = scheduleRetry(for: payload)
         pendingMessages[id] = PendingMessage(payload: payload, retryTask: retryTask)
-
-        try await socket.send(text: text)
+        do {
+            try await socket.send(text: text)
+        } catch {
+            if let pending = pendingMessages.removeValue(forKey: id) {
+                pending.retryTask?.cancel()
+            }
+            throw error
+        }
     }
 
     func sendInteractiveCallback(
@@ -1296,7 +1325,22 @@ final class ProviderChatService: ChatServicing {
                 }
 
                 guard !Task.isCancelled else { return }
-                try? await socket.send(text: text)
+                do {
+                    try await socket.send(text: text)
+                } catch is CancellationError {
+                    return
+                } catch {
+                    self.pendingMessages.removeValue(forKey: payload.id)
+                    self.emitServiceEvent(.messageError(
+                        messageId: payload.id,
+                        code: "queue_failed",
+                        message: error.localizedDescription
+                    ))
+                    logger.error(
+                        "retry send failed for messageId=\(payload.id, privacy: .public) error=\(error.localizedDescription, privacy: .public)"
+                    )
+                    return
+                }
             }
         }
     }

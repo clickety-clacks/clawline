@@ -23,6 +23,9 @@ struct SelectableAttributedText: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: UITextView, context: Context) {
+        context.coordinator.isUpdatingFromSwiftUI = true
+        defer { context.coordinator.isUpdatingFromSwiftUI = false }
+
         let style: UIUserInterfaceStyle = colorScheme == .dark ? .dark : .light
         if uiView.overrideUserInterfaceStyle != style {
             uiView.overrideUserInterfaceStyle = style
@@ -58,6 +61,8 @@ struct SelectableAttributedText: UIViewRepresentable {
     final class Coordinator: NSObject, UITextViewDelegate {
         private let onSelectionChange: (Bool) -> Void
         private let onLinkTap: (URL) -> Void
+        var isUpdatingFromSwiftUI = false
+        private var lastHasSelection: Bool?
 
         init(onSelectionChange: @escaping (Bool) -> Void, onLinkTap: @escaping (URL) -> Void) {
             self.onSelectionChange = onSelectionChange
@@ -66,7 +71,13 @@ struct SelectableAttributedText: UIViewRepresentable {
 
         func textViewDidChangeSelection(_ textView: UITextView) {
             let hasSelection = textView.selectedRange.length > 0
-            onSelectionChange(hasSelection)
+            if isUpdatingFromSwiftUI {
+                DispatchQueue.main.async { [weak self] in
+                    self?.emitSelectionChange(hasSelection)
+                }
+                return
+            }
+            emitSelectionChange(hasSelection)
         }
 
         @available(iOS 17.0, *)
@@ -76,6 +87,12 @@ struct SelectableAttributedText: UIViewRepresentable {
                 return nil
             }
             return defaultAction
+        }
+
+        private func emitSelectionChange(_ hasSelection: Bool) {
+            guard lastHasSelection != hasSelection else { return }
+            lastHasSelection = hasSelection
+            onSelectionChange(hasSelection)
         }
     }
 }

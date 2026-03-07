@@ -1794,6 +1794,19 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         }
     }
 
+    private func markPendingMessagesFailedForUnscopedMessageError(code: String, message: String?) {
+        guard !pendingLocalMessages.isEmpty else { return }
+        let pendingIds = Set(pendingLocalMessages.map(\.id))
+        for id in pendingIds {
+            messageFailures[id] = MessageFailure(code: code, message: message)
+        }
+        pendingLocalMessages.removeAll()
+        if let activeClientMessageId, pendingIds.contains(activeClientMessageId) {
+            self.activeClientMessageId = nil
+        }
+        self.isSending = false
+    }
+
     private func performSend(clientId: String,
                              content: String,
                              pendingAttachments: [PendingAttachment],
@@ -2196,7 +2209,10 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
                 let resolved = userFacingMessage(for: code, fallback: message)
                 toastManager.show(resolved)
             }
-            guard let messageId else { return }
+            guard let messageId else {
+                markPendingMessagesFailedForUnscopedMessageError(code: code, message: message)
+                return
+            }
             messageFailures[messageId] = MessageFailure(code: code, message: message)
             if let pendingIndex = pendingLocalMessages.firstIndex(where: { $0.id == messageId }) {
                 pendingLocalMessages.remove(at: pendingIndex)

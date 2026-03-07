@@ -11,6 +11,7 @@ import OSLog
 final class UploadService: UploadServicing {
     private struct UploadResponse: Decodable {
         let assetId: String
+        let mimeType: String?
     }
 
     private let session: URLSession
@@ -50,19 +51,49 @@ final class UploadService: UploadServicing {
         )
         request.httpBody = body
 
-        let (responseData, response) = try await session.data(for: request)
+        let responseData: Data
+        let response: URLResponse
+        do {
+            (responseData, response) = try await session.data(for: request)
+        } catch {
+            logger.error("asset upload request failed error=\(error.localizedDescription, privacy: .public)")
+            throw error
+        }
         guard let httpResponse = response as? HTTPURLResponse else {
+            logger.error("asset upload returned non-HTTP response")
             throw AttachmentError.networkFailure
         }
 
         guard (200..<300).contains(httpResponse.statusCode) else {
+            logger.error(
+                "asset upload failed status=\(httpResponse.statusCode, privacy: .public) body=\(self.summarizeResponseBody(responseData), privacy: .public)"
+            )
             if httpResponse.statusCode == 401 {
                 throw AttachmentError.missingAuth
             }
             throw AttachmentError.uploadFailed
         }
 
-        let decoded = try JSONDecoder().decode(UploadResponse.self, from: responseData)
+        let decoded: UploadResponse
+        do {
+            decoded = try JSONDecoder().decode(UploadResponse.self, from: responseData)
+        } catch {
+            logger.error(
+                "asset upload decode failed status=\(httpResponse.statusCode, privacy: .public) body=\(self.summarizeResponseBody(responseData), privacy: .public) error=\(error.localizedDescription, privacy: .public)"
+            )
+            throw error
+        }
+        if let storedMimeType = decoded.mimeType?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !storedMimeType.isEmpty {
+            logger.info("asset upload stored mimeType=\(storedMimeType, privacy: .public)")
+            if !storedMimeType.lowercased().hasPrefix("image/") {
+                logger.warning(
+                    "asset upload stored non-image mimeType=\(storedMimeType, privacy: .public) assetId=\(decoded.assetId, privacy: .public)"
+                )
+            }
+        } else {
+            logger.warning("asset upload response missing mimeType assetId=\(decoded.assetId, privacy: .public)")
+        }
         return decoded.assetId
     }
 
@@ -174,5 +205,13 @@ final class UploadService: UploadServicing {
         var allowed = CharacterSet.urlPathAllowed
         allowed.remove(charactersIn: "/")
         return value.addingPercentEncoding(withAllowedCharacters: allowed)
+    }
+
+    private func summarizeResponseBody(_ data: Data, maxLength: Int = 512) -> String {
+        guard !data.isEmpty else { return "<empty>" }
+        if let string = String(data: data.prefix(maxLength), encoding: .utf8) {
+            return string.replacingOccurrences(of: "\n", with: "\\n")
+        }
+        return data.prefix(maxLength).base64EncodedString()
     }
 }

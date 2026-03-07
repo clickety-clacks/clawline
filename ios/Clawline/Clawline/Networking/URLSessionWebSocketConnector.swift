@@ -17,6 +17,8 @@ final class URLSessionWebSocketConnector: WebSocketConnecting {
     private let connectTimeout: TimeInterval
     private let resourceTimeout: TimeInterval
 
+    var tlsAwareURLSession: URLSession { session }
+
     init(connectTimeout: TimeInterval = 20,
          resourceTimeout: TimeInterval = 360,
          tlsPolicyProvider: @escaping () -> ProviderTLSPolicy = { ProviderTLSSettingsStore.policy }) {

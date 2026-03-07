@@ -36,7 +36,10 @@ struct Clawline_SpatialApp: App {
             deviceId: device.deviceId,
             userIdProvider: { authManager.currentUserId }
         )
-        self.uploadService = UploadService(auth: authManager)
+        self.uploadService = UploadService(
+            auth: authManager,
+            session: connector.tlsAwareURLSession
+        )
     }
 
     var body: some Scene {

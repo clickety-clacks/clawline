@@ -46,9 +46,14 @@ func classifyDictationPanIntent(_ context: DictationPanIntentContext) -> Dictati
     let verticalDominant = max(up, down) >= 1.25 * abs(context.translation.x)
     let velocityDominantUp = abs(context.velocity.y) >= 1.15 * abs(context.velocity.x)
     let fastUpVelocity = context.velocity.y <= -220 && velocityDominantUp
+    let velocityDominantDown = abs(context.velocity.y) >= 1.15 * abs(context.velocity.x)
+    let clearDownDismissDrag = context.isSurfaceOpen &&
+        verticalDominant &&
+        down >= 24 &&
+        (context.elapsed < 0.22 || (context.velocity.y >= 280 && velocityDominantDown))
 
     if context.startedInEditableRegion {
-        if context.isSurfaceOpen && verticalDominant && down >= 6 {
+        if clearDownDismissDrag {
             return .dictation
         }
         if fastUpVelocity || (up >= 22 && context.elapsed < 0.18 && verticalDominant) {

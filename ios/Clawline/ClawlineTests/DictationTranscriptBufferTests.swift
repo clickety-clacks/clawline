@@ -48,4 +48,27 @@ struct DictationTranscriptBufferTests {
         #expect(update.committedSegments.isEmpty)
         #expect(update.provisionalText.isEmpty)
     }
+
+    @Test("Incremental Soniox snapshots replace provisional text instead of accumulating")
+    func incrementalSnapshotsReplaceProvisionalText() {
+        let buffer = DictationTranscriptBuffer()
+
+        let first = buffer.apply(tokens: [
+            SonioxTranscriptToken(text: "Als", isFinal: false)
+        ], finished: false)
+        #expect(first.provisionalText == "Als")
+
+        let second = buffer.apply(tokens: [
+            SonioxTranscriptToken(text: "Also, ", isFinal: true),
+            SonioxTranscriptToken(text: "dict", isFinal: false)
+        ], finished: false)
+        #expect(second.provisionalText == "Also, dict")
+
+        let third = buffer.apply(tokens: [
+            SonioxTranscriptToken(text: "Also, ", isFinal: true),
+            SonioxTranscriptToken(text: "dictation", isFinal: false)
+        ], finished: false)
+        #expect(third.provisionalText == "Also, dictation")
+        #expect(buffer.renderedText == "Also, dictation")
+    }
 }

@@ -134,6 +134,36 @@ struct MessageInputBarPanIntentTests {
         #expect(decision == .dictation)
     }
 
+    @Test("Surface-open editor taps keep text interaction instead of stealing keyboard activation")
+    func surfaceOpenEditorTapKeepsTextInteraction() {
+        let decision = classifyDictationPanIntent(
+            .init(
+                startedInEditableRegion: true,
+                isSurfaceOpen: true,
+                elapsed: 0.08,
+                translation: CGPoint(x: 0, y: 8),
+                velocity: CGPoint(x: 0, y: 40)
+            )
+        )
+
+        #expect(decision == .textEditing)
+    }
+
+    @Test("Surface-open editor clear downward dismiss still resolves to dictation")
+    func surfaceOpenEditorClearDownDismissResolvesToDictation() {
+        let decision = classifyDictationPanIntent(
+            .init(
+                startedInEditableRegion: true,
+                isSurfaceOpen: true,
+                elapsed: 0.12,
+                translation: CGPoint(x: 0, y: 28),
+                velocity: CGPoint(x: 0, y: 320)
+            )
+        )
+
+        #expect(decision == .dictation)
+    }
+
     @MainActor
     @Test("Text selection lock restores on installer teardown")
     func textSelectionLockRestoresOnInstallerTeardown() {

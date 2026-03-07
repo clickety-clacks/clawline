@@ -38,7 +38,7 @@ final class DictationTranscriptBuffer: Sendable {
             guard !chunkTokens.isEmpty else { return }
             let finals = chunkTokens.filter(\.isFinal).map(\.text)
             let nonFinals = chunkTokens.filter { !$0.isFinal }.map(\.text)
-            currentSegmentFinalTokens.append(contentsOf: finals)
+            currentSegmentFinalTokens = finals
             currentSegmentNonFinalTokens = nonFinals
         }
 

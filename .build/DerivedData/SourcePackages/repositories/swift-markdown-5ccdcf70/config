@@ -8,7 +8,7 @@
 	fsmonitor = false
 	longpaths = true
 [remote "origin"]
-	url = https://github.com/appstefan/HighlightSwift.git
+	url = https://github.com/swiftlang/swift-markdown
 	tagOpt = --no-tags
 	fetch = +refs/*:refs/*
 	mirror = true

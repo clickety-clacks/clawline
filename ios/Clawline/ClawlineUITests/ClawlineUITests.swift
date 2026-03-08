@@ -133,7 +133,7 @@ final class ClawlineUITests: XCTestCase {
     }
 
     @MainActor
-    func testStoppingDictationRestoresNormalKeyboardDismissal() throws {
+    func testWhileDictatingListDragInteractivelyDismissesKeyboard() throws {
         let app = makeKeyboardDictationApp()
         app.launch()
 
@@ -142,6 +142,16 @@ final class ClawlineUITests: XCTestCase {
         waitForKeyboardState(in: app, focused: true, keyboardVisible: true, dictating: true)
 
         swipeDownOnMessageList(in: app)
+        waitForKeyboardState(in: app, focused: false, keyboardVisible: false, dictating: true)
+    }
+
+    @MainActor
+    func testStoppingDictationRestoresNormalKeyboardDismissal() throws {
+        let app = makeKeyboardDictationApp()
+        app.launch()
+
+        showKeyboardForDismissCheck(in: app)
+        swipeUpOnComposeInputToStartDictation(in: app)
         waitForKeyboardState(in: app, focused: true, keyboardVisible: true, dictating: true)
 
         tapControl(named: stopDictationIdentifier, in: app)

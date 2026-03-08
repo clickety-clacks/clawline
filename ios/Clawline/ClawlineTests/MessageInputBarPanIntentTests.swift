@@ -130,6 +130,19 @@ struct MessageInputBarPanIntentTests {
         )
     }
 
+    @Test("Existing text selection keeps drag gestures out of dictation")
+    func existingSelectionKeepsDragGesturesOutOfDictation() {
+        #expect(
+            !shouldBeginDictationPanGesture(
+                startedInEditableRegion: false,
+                isSurfaceVisible: false,
+                swipeActivationEnabled: false,
+                hasSelection: true,
+                startedInSelectionGestureRegion: false
+            )
+        )
+    }
+
     @Test("Editable-region tap-like gesture resolves to text editing")
     func editableRegionTapResolvesToTextEditing() {
         let decision = classifyDictationPanIntent(

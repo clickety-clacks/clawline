@@ -50,10 +50,13 @@ func shouldBeginDictationPanGesture(
     if startedInEditableRegion || startedInSelectionGestureRegion {
         return false
     }
+    if hasSelection {
+        return false
+    }
     if isSurfaceVisible || swipeActivationEnabled {
         return true
     }
-    return hasSelection
+    return false
 }
 
 func classifyDictationPanIntent(_ context: DictationPanIntentContext) -> DictationPanIntentDecision {
@@ -1472,7 +1475,7 @@ struct MessageInputBar: View {
             statusText = "Paused"
             statusColor = .secondary
         } else {
-            statusText = dictation.isListeningReady ? "Listening..." : "Connecting..."
+            statusText = "Listening..."
             statusColor = .secondary
         }
 

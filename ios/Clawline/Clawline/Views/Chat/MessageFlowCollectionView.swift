@@ -47,7 +47,8 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
         isDictationActive: Bool
     ) -> UIScrollView.KeyboardDismissMode {
         let _ = isInputActive
-        return isDictationActive ? .none : .interactive
+        let _ = isDictationActive
+        return .interactive
     }
 #endif
 
@@ -2806,17 +2807,17 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         case .began:
             didRequestKeyboardDismissForCurrentPan = false
         case .changed:
-            guard !didRequestKeyboardDismissForCurrentPan else { return }
             guard isKeyboardVisible else { return }
-            guard !isDictationActive else { return }
 
             let translation = gesture.translation(in: collectionView)
-            guard translation.y > 18 else { return }
-            guard abs(translation.y) > abs(translation.x) else { return }
-
-            didRequestKeyboardDismissForCurrentPan = true
-            dismissKeyboardIfNeeded()
-        case .ended, .cancelled, .failed:
+            didRequestKeyboardDismissForCurrentPan =
+                translation.y > 18 && abs(translation.y) > abs(translation.x)
+        case .ended:
+            if didRequestKeyboardDismissForCurrentPan {
+                dismissKeyboardIfNeeded()
+            }
+            didRequestKeyboardDismissForCurrentPan = false
+        case .cancelled, .failed:
             didRequestKeyboardDismissForCurrentPan = false
         default:
             break

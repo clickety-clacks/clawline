@@ -73,12 +73,7 @@ final class ComposeInputDictationBridge {
 
     func focusComposeTextView() {
         guard let composeTextView else { return }
-        if composeTextView.isFirstResponder {
-            composeTextView.resignFirstResponder()
-            DispatchQueue.main.async { [weak composeTextView] in
-                composeTextView?.becomeFirstResponder()
-            }
-        } else {
+        if !composeTextView.isFirstResponder {
             composeTextView.becomeFirstResponder()
         }
     }
@@ -93,8 +88,13 @@ final class ComposeInputDictationBridge {
     // UIKit selection collapse when gesture/tap focus changes right before activation.
     func setPreferredSelectionRange(_ selectionRange: NSRange, for sessionKey: String?) {
         guard let sessionKey, !sessionKey.isEmpty else { return }
-        let liveSelectionRange = composeTextView?.selectedRange ?? selectionRange
-        preferredSelectionRangeBySession[sessionKey] = liveSelectionRange
+        if selectionRange.location != NSNotFound {
+            preferredSelectionRangeBySession[sessionKey] = selectionRange
+            return
+        }
+        if let liveSelectionRange = composeTextView?.selectedRange {
+            preferredSelectionRangeBySession[sessionKey] = liveSelectionRange
+        }
     }
 
     func noteUserEdit(

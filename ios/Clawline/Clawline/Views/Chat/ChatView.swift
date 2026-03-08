@@ -846,8 +846,7 @@ struct ChatView: View {
         .contentShape(Rectangle())
         .simultaneousGesture(
             DragGesture(minimumDistance: 12)
-                .onChanged { value in
-                    guard !dictationCoordinator.isDictationActive else { return }
+                .onEnded { value in
                     guard isKeyboardVisible else { return }
                     guard value.translation.height > 18 else { return }
                     guard abs(value.translation.height) > abs(value.translation.width) else { return }

@@ -1103,7 +1103,9 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                         animationOptions: UIView.AnimationOptions = []) {
         let previousBottomInset = collectionView.contentInset.bottom
         let delta = totalBottomInset - previousBottomInset
-        let shouldPinToBottom = sbbState.isPinnedToBottomIntent && !isUserInteracting
+        // Keep keyboard/inset anchoring tied to active finger interaction only.
+        // Deceleration must not disable this pinning path.
+        let shouldPinToBottom = sbbState.isPinnedToBottomIntent && !isActivelyDraggingOrTracking
         currentBottomInset = totalBottomInset
         // Avoid re-applying the same inset; on visionOS we can get frequent relayout ticks and
         // touching `contentInset` even with the same value can kick the scroll view.
@@ -3972,8 +3974,13 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
 
     var isUserInteracting: Bool {
         // Shared SBB interaction gate across iOS + visionOS.
-        // Keep show/hide transitions in one state-machine path regardless of render layer.
+        // Include deceleration so SBB state transitions do not settle mid-fling.
         collectionView.isDragging || collectionView.isTracking || collectionView.isDecelerating
+    }
+
+    var isActivelyDraggingOrTracking: Bool {
+        // Keyboard dismiss + inset pinning should only follow active touch interaction.
+        collectionView.isDragging || collectionView.isTracking
     }
 
     var isPinnedToBottomIntent: Bool {

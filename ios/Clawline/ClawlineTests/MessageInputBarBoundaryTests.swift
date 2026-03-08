@@ -113,4 +113,32 @@ struct MessageInputBarBoundaryTests {
                 == "paperplane.fill"
         )
     }
+
+    @Test("Editor tap requests focus when keyboard is hidden")
+    func editorTapRequestsFocusWhenKeyboardHidden() {
+        #expect(MessageInputBar.shouldRequestFocusOnEditorTap(isKeyboardVisible: false))
+        #expect(!MessageInputBar.shouldRequestFocusOnEditorTap(isKeyboardVisible: true))
+    }
+
+    @Test("Focus trigger cycles first responder only when keyboard collapsed under focus")
+    func focusTriggerCyclesFirstResponderOnlyForHiddenKeyboard() {
+        #expect(
+            RichTextEditor.Coordinator.shouldCycleFirstResponder(
+                isFirstResponder: true,
+                isKeyboardVisible: false
+            )
+        )
+        #expect(
+            !RichTextEditor.Coordinator.shouldCycleFirstResponder(
+                isFirstResponder: false,
+                isKeyboardVisible: false
+            )
+        )
+        #expect(
+            !RichTextEditor.Coordinator.shouldCycleFirstResponder(
+                isFirstResponder: true,
+                isKeyboardVisible: true
+            )
+        )
+    }
 }

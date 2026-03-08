@@ -241,6 +241,8 @@ final class DictationSession {
     private var transcriptBuffer = DictationTranscriptBuffer()
     private var pendingTranscriptUpdate: DictationSegmentUpdate?
     private var pendingActivationMode: DictationMode?
+    private var gesturePrewarmGeneration: UInt64?
+    private var gestureActivationFailed = false
     private(set) var mode: DictationMode?
     private var sessionStartedAt: Date?
     private var lastTokenAt: Date?
@@ -431,6 +433,7 @@ final class DictationSession {
     func preparePhase1IfNeeded() {
         guard !currentSessionKey.isEmpty else { return }
         guard !isListening else { return }
+        ensurePhase1Prepared()
         schedulePhase1IdleTeardown()
     }
 
@@ -444,16 +447,23 @@ final class DictationSession {
         schedulePhase1IdleTeardown()
         guard !isSurfaceOpen else { return }
         guard !isListening else { return }
-        // Do not open Soniox sockets during gesture prewarm.
-        // Opening phase-2 connections before phase-3 audio streaming can lead to
-        // server-side decode timeouts when the user abandons the gesture.
-        logDictation("DICTATION_CONN gesture_prewarm_phase2_skipped strategy=phase3_only")
+        gestureActivationFailed = false
+        guard let apiKey = configuredAPIKeyOrNil() else {
+            gesturePrewarmGeneration = nil
+            return
+        }
+        let generation = nextActivationGeneration()
+        gesturePrewarmGeneration = generation
+        ensurePhase1Prepared()
+        beginPhase2Prewarm(apiKey: apiKey, generation: generation)
     }
 
     func cancelGesturePrewarmIfNeeded(trigger: String = "gesture_abandon") {
         guard !isListening else { return }
         guard state == .idleSurfaceClosed || state == .keyPromptModal || state == .keyVerifyingModal else { return }
         logDictation("DICTATION_COORD prewarm_cancel trigger=\(trigger)")
+        gesturePrewarmGeneration = nil
+        gestureActivationFailed = false
         closeAndResetRealtimePipeline(closeReason: "prewarm_cancelled")
         prewarmGeneration = nil
         prewarmConnectTask?.cancel()
@@ -642,7 +652,7 @@ final class DictationSession {
             return
         }
         sendAction()
-        analytics.trackSendWhileActive(finalizedWithinTimeout: false)
+        analytics.trackSendWhileActive(mode: mode, sendSuccess: true)
     }
 
     func handleAppBackgrounded() {
@@ -660,8 +670,19 @@ final class DictationSession {
     }
 
     private func start(mode: DictationMode) {
+        if state == .finalizing || state == .stoppingKeep || state == .stoppingDiscard {
+            pendingActivationMode = mode
+            logDictation("DICTATION_ATTEMPT queued_during_teardown mode=\(mode.rawValue) \(attemptContext())")
+            return
+        }
         guard !isListening else { return }
         guard !currentSessionKey.isEmpty else { return }
+        if gestureActivationFailed {
+            logDictation("DICTATION_ATTEMPT cancelled_after_gesture_prewarm_failure mode=\(mode.rawValue) \(attemptContext())")
+            gestureActivationFailed = false
+            gesturePrewarmGeneration = nil
+            return
+        }
         guard let apiKey = configuredAPIKeyOrNil() else {
             pendingActivationMode = mode
             state = .keyPromptModal
@@ -670,8 +691,9 @@ final class DictationSession {
 
         dictationAttemptID &+= 1
         activeAttemptID = dictationAttemptID
-        let generation = prewarmGeneration ?? nextActivationGeneration()
+        let generation = gesturePrewarmGeneration ?? prewarmGeneration ?? nextActivationGeneration()
         pendingActivationMode = nil
+        gesturePrewarmGeneration = nil
         self.mode = mode
         logDictation("DICTATION_ATTEMPT start_requested start_mode=\(mode.rawValue) \(attemptContext())")
         let needsSessionContextInitialization =
@@ -741,54 +763,14 @@ final class DictationSession {
     }
 
     private func beginPhase2Prewarm(apiKey: String, generation: UInt64) {
-        closeAndResetRealtimePipeline(closeReason: "phase2_replacement")
+        ensurePhase1Prepared()
         prewarmGeneration = generation
         suppressedPrewarmFailureBudget = 1
         isPhase3StreamingAudio = false
         isSocketConnected = false
         bufferedAudioFrames.removeAll(keepingCapacity: true)
 
-        let client = streamingClientFactory()
-        streamingClient = client
-
-        let capture = audioCaptureFactory()
-        audioCapture = capture
-
-        eventTask = Task { [weak self] in
-            guard let self else { return }
-            for await event in client.events {
-                await self.handleSonioxEvent(event)
-            }
-        }
-
-        frameTask = Task { [weak self] in
-            guard let self else { return }
-            for await frame in capture.frameStream {
-                await self.handleCapturedFrame(frame)
-            }
-        }
-
-        levelTask = Task { [weak self] in
-            guard let self else { return }
-            let minimumWaveformUpdateInterval: CFTimeInterval = 1.0 / 60.0
-            var lastWaveformUpdateAt = CFAbsoluteTimeGetCurrent() - minimumWaveformUpdateInterval
-            for await level in capture.levelStream {
-                let now = CFAbsoluteTimeGetCurrent()
-                guard now - lastWaveformUpdateAt >= minimumWaveformUpdateInterval else { continue }
-                lastWaveformUpdateAt = now
-                let nextLevel = max(0, level)
-                await MainActor.run {
-                    self.audioLevel = nextLevel
-                }
-            }
-        }
-
-        audioEventTask = Task { [weak self] in
-            guard let self else { return }
-            for await event in capture.eventStream {
-                await self.handleAudioCaptureEvent(event)
-            }
-        }
+        guard let client = streamingClient, let capture = audioCapture else { return }
 
         prewarmConnectStartedAt = Date()
         prewarmConnectTask = Task { [weak self] in
@@ -842,6 +824,11 @@ final class DictationSession {
                 self.prewarmConnectStartedAt = nil
                 self.suppressedPrewarmFailureBudget = 0
                 self.closeAndResetRealtimePipeline(closeReason: "phase2_connect_failed")
+                if self.gesturePrewarmGeneration == generation {
+                    self.gestureActivationFailed = true
+                    self.gesturePrewarmGeneration = nil
+                    self.enterError(message: "Dictation failed", source: "phase2_connect_failed")
+                }
                 if let lastError {
                     self.logDictation("DICTATION_CONN phase2_connect_final_failed error=\(lastError.localizedDescription) \(self.attemptContext())")
                 }
@@ -1365,6 +1352,7 @@ final class DictationSession {
         collapseSurface: Bool,
         keepAudioForPausedWaveform: Bool = false
     ) {
+        let queuedActivationMode = pendingActivationMode
         let duration = elapsedSessionMilliseconds()
         let stopContext = pendingStopContext ?? "trigger=unknown callSite=unknown"
         logger.notice(
@@ -1419,7 +1407,6 @@ final class DictationSession {
 
         if !keepAudioForPausedWaveform {
             clearOriginSessionContext()
-            pendingActivationMode = nil
         }
         pendingStopContext = nil
 
@@ -1427,6 +1414,11 @@ final class DictationSession {
             state = .idleSurfaceClosed
         } else if !collapseSurface, state != .error {
             state = .dictatingPaused
+        }
+
+        if let queuedActivationMode {
+            pendingActivationMode = nil
+            start(mode: queuedActivationMode)
         }
     }
 
@@ -1591,6 +1583,53 @@ final class DictationSession {
         isPhase3StreamingAudio = false
         prewarmGeneration = nil
         bufferedAudioFrames.removeAll(keepingCapacity: false)
+    }
+
+    private func ensurePhase1Prepared() {
+        if streamingClient == nil {
+            let client = streamingClientFactory()
+            streamingClient = client
+            eventTask = Task { [weak self] in
+                guard let self else { return }
+                for await event in client.events {
+                    await self.handleSonioxEvent(event)
+                }
+            }
+        }
+
+        if audioCapture == nil {
+            let capture = audioCaptureFactory()
+            audioCapture = capture
+
+            frameTask = Task { [weak self] in
+                guard let self else { return }
+                for await frame in capture.frameStream {
+                    await self.handleCapturedFrame(frame)
+                }
+            }
+
+            levelTask = Task { [weak self] in
+                guard let self else { return }
+                let minimumWaveformUpdateInterval: CFTimeInterval = 1.0 / 60.0
+                var lastWaveformUpdateAt = CFAbsoluteTimeGetCurrent() - minimumWaveformUpdateInterval
+                for await level in capture.levelStream {
+                    let now = CFAbsoluteTimeGetCurrent()
+                    guard now - lastWaveformUpdateAt >= minimumWaveformUpdateInterval else { continue }
+                    lastWaveformUpdateAt = now
+                    let nextLevel = max(0, level)
+                    await MainActor.run {
+                        self.audioLevel = nextLevel
+                    }
+                }
+            }
+
+            audioEventTask = Task { [weak self] in
+                guard let self else { return }
+                for await event in capture.eventStream {
+                    await self.handleAudioCaptureEvent(event)
+                }
+            }
+        }
     }
 
     private func elapsedSessionMilliseconds() -> Int {

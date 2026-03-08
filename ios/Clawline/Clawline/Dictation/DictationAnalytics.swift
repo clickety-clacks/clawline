@@ -18,7 +18,7 @@ protocol DictationAnalyticsTracking {
     func trackStart(mode: DictationMode, sessionKey: String)
     func trackStop(reason: String, durationMs: Int)
     func trackError(errorCode: String?, stage: String)
-    func trackSendWhileActive(finalizedWithinTimeout: Bool)
+    func trackSendWhileActive(mode: DictationMode?, sendSuccess: Bool)
     func trackSocketDrop(mode: DictationMode, elapsedMs: Int)
 }
 
@@ -44,8 +44,10 @@ final class DictationAnalytics: DictationAnalyticsTracking {
         logger.error("dictation_error stage=\(stage, privacy: .public) errorCode=\(errorCode ?? "unknown", privacy: .public)")
     }
 
-    func trackSendWhileActive(finalizedWithinTimeout: Bool) {
-        logger.info("dictation_send_while_active finalizedWithinTimeout=\(finalizedWithinTimeout, privacy: .public)")
+    func trackSendWhileActive(mode: DictationMode?, sendSuccess: Bool) {
+        logger.info(
+            "dictation_send_while_active mode=\(mode?.rawValue ?? "unknown", privacy: .public) sendSuccess=\(sendSuccess, privacy: .public)"
+        )
     }
 
     func trackSocketDrop(mode: DictationMode, elapsedMs: Int) {

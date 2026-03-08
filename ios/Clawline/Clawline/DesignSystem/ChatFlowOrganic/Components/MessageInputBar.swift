@@ -477,6 +477,7 @@ struct MessageInputBar: View {
     let onReconnect: () -> Void
     let onAdd: () -> Void
     let onFocusChange: (Bool) -> Void
+    let onRequestFocus: () -> Void
     var onPasteImages: (([UIImage]) -> Void)?
 
     @State private var editorHeight: CGFloat = 44
@@ -486,6 +487,7 @@ struct MessageInputBar: View {
     @State private var micTransientOpacity: Double = 0
     @State private var micTransientOffset: CGFloat = 0
     @State private var micFadeTask: Task<Void, Never>?
+    @State private var micTapActivationTask: Task<Void, Never>?
     @State private var gestureSettleTask: Task<Void, Never>?
     @State private var textEditorGlobalFrame: CGRect = .zero
     let isCompact: Bool
@@ -585,6 +587,10 @@ struct MessageInputBar: View {
         hasSubmittableDraft: Bool
     ) -> Bool {
         !isSending && hasSubmittableDraft
+    }
+
+    static func shouldRequestFocusOnEditorTap(isKeyboardVisible: Bool) -> Bool {
+        !isKeyboardVisible
     }
 
     static func sendButtonBubbleVisualState(
@@ -942,6 +948,7 @@ struct MessageInputBar: View {
                     resetToken: resetToken,
                     focusTrigger: focusTrigger,
                     isEditable: true,
+                    isKeyboardVisible: isKeyboardVisible,
                     tintColor: editorTintUIColor,
                     textColor: {
 #if os(visionOS)
@@ -1217,13 +1224,32 @@ struct MessageInputBar: View {
                 if dictation.isStickyDictationActive {
                     dictation.dismissSurfaceFromUserGesture()
                 } else {
-                    dictation.setComposeSelectionRange(selectionRange)
-                    dictation.beginGesturePrewarm()
-                    dictation.startStickyDictation()
-                    beginMicFadeOut(fromSwipe: false)
+                    startStickyFromMicTap()
                 }
             }
             .accessibilityLabel(dictation.isStickyDictationActive ? "Stop dictation" : "Start dictation")
+    }
+
+    private func startStickyFromMicTap() {
+        micTapActivationTask?.cancel()
+        dictation.setComposeSelectionRange(selectionRange)
+        dictation.beginGesturePrewarm()
+        withAnimation(settleSpring) {
+            motion.beginProgrammaticReveal()
+        }
+        beginMicFadeOut(fromSwipe: false)
+        micTapActivationTask = Task { @MainActor in
+            do {
+                try await Task.sleep(for: .milliseconds(settleDurationMs))
+            } catch is CancellationError {
+                return
+            } catch {
+                return
+            }
+            dictation.startStickyDictation()
+            motion.commitSettledState(.openListening)
+            onRequestFocus()
+        }
     }
 
     private func handlePushChanged(startLocation: CGPoint, translation: CGPoint, velocity: CGPoint) {
@@ -1335,6 +1361,7 @@ struct MessageInputBar: View {
             dictation.setComposeSelectionRange(selectionRange)
             dictation.startStickyDictation()
             beginMicFadeOut(fromSwipe: false)
+            onRequestFocus()
         case .endWalkieKeepOpen:
             logDictation("DICTATION_UI gesture_end classification=walkie_release_keep_open up=\(up) down=\(down)")
             dictation.endWalkieTalkieIfNeeded()
@@ -1544,9 +1571,8 @@ struct MessageInputBar: View {
                 ]
 
                 if reduceMotionForDictation {
-                    let activity = max(0.12, min(1.0, CGFloat(rawAudio) * 1.4))
-                    let pulse = 0.70 + 0.30 * sin(t * 2.0)
-                    let alpha = (isPaused ? 0.28 : 0.52) * activity * pulse
+                    let pulse = 0.825 + (0.175 * sin(t * 2 * .pi))
+                    let alpha = max(0.65, min(1.0, pulse))
                     ZStack {
                         Capsule()
                             .fill(ChatFlowTheme.adminAccent(colorScheme).opacity(alpha))
@@ -1722,6 +1748,7 @@ struct DictationMicAffordanceAnimationPlan {
                 onReconnect: {},
                 onAdd: {},
                 onFocusChange: { _ in },
+                onRequestFocus: {},
                 onPasteImages: nil,
                 motion: motion,
                 isCompact: true

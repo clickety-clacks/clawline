@@ -39,6 +39,12 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.settingsManager) private var settings
 
+#if !os(visionOS)
+    static func keyboardDismissModeForInputFocus(_ isInputActive: Bool) -> UIScrollView.KeyboardDismissMode {
+        isInputActive ? .none : .interactive
+    }
+#endif
+
     func makeUIViewController(context: Context) -> MessageFlowCollectionViewController {
         let controller = MessageFlowCollectionViewController()
         controller.loadViewIfNeeded()
@@ -1726,7 +1732,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         self.isInputActive = isInputActive
         self.isKeyboardVisible = isKeyboardVisible
 #if !os(visionOS)
-        let desiredDismissMode: UIScrollView.KeyboardDismissMode = .interactive
+        let desiredDismissMode = MessageFlowCollectionView.keyboardDismissModeForInputFocus(isInputActive)
         if collectionView.keyboardDismissMode != desiredDismissMode {
             collectionView.keyboardDismissMode = desiredDismissMode
         }
@@ -2741,7 +2747,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         collectionView.contentInsetAdjustmentBehavior = .never
         collectionView.alwaysBounceVertical = true
 #if !os(visionOS)
-        collectionView.keyboardDismissMode = .interactive
+        collectionView.keyboardDismissMode = MessageFlowCollectionView.keyboardDismissModeForInputFocus(isInputActive)
 #endif
         collectionView.allowsSelection = false
         collectionView.allowsMultipleSelection = false

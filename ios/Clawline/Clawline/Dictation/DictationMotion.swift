@@ -8,6 +8,7 @@
 import Foundation
 import Observation
 import CoreGraphics
+import Darwin
 
 @Observable
 @MainActor
@@ -71,6 +72,16 @@ final class DictationMotion {
 
     init(session: DictationSession) {
         self.session = session
+        settleDurationMultiplier = Self.resolveDebugSettleDurationMultiplier()
+    }
+
+    static func resolveDebugSettleDurationMultiplier(environment: [String: String] = ProcessInfo.processInfo.environment) -> Double {
+        guard let raw = environment["CLAWLINE_DICTATION_SETTLE_MULTIPLIER"],
+              let parsed = Double(raw),
+              parsed > 0 else {
+            return 1.0
+        }
+        return parsed
     }
 
     var upDistance: CGFloat { max(0, -rawDragY) }
@@ -236,6 +247,21 @@ final class DictationMotion {
         teardownGesture()
         settle(to: settleTarget)
         pendingCommit = .init(target: settledSurface, reason: "gesture_cancelled")
+    }
+
+    func beginProgrammaticReveal() {
+        gesturePhase = .settling
+        originWasOpen = false
+        rawDragY = 0
+        holdThresholdReachedTime = nil
+        walkieStartedThisGesture = false
+        deferredSettleTarget = nil
+        pendingCommit = .init(target: .openListening, reason: "mic_tap_reveal")
+        surfaceRevealProgress = 1
+    }
+
+    func setSettleDurationMultiplier(_ multiplier: Double) {
+        settleDurationMultiplier = max(0.1, multiplier)
     }
 
     func settle(to target: SurfaceTarget) {

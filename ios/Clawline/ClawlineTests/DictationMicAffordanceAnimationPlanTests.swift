@@ -1,7 +1,24 @@
 import Testing
 @testable import Clawline
 
+@MainActor
 struct DictationMicAffordanceAnimationPlanTests {
+    @Test("Debug settle multiplier honors environment override")
+    func debugSettleMultiplierHonorsEnvironmentOverride() {
+        let resolved = DictationMotion.resolveDebugSettleDurationMultiplier(
+            environment: ["CLAWLINE_DICTATION_SETTLE_MULTIPLIER": "2.0"]
+        )
+
+        #expect(resolved == 2.0)
+    }
+
+    @Test("Debug settle multiplier falls back to default when missing")
+    func debugSettleMultiplierFallsBackToDefault() {
+        let resolved = DictationMotion.resolveDebugSettleDurationMultiplier(environment: [:])
+
+        #expect(resolved == 1.0)
+    }
+
     @Test("Swipe-left plan includes visible right-edge re-entry before fade")
     func swipePlanUsesSlideThenFade() {
         let plan = DictationMicAffordanceAnimationPlan.make(fromSwipe: true)

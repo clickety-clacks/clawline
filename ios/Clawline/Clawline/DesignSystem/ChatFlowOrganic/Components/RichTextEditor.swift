@@ -20,6 +20,7 @@ struct RichTextEditor: UIViewRepresentable {
     var resetToken: Int
     var focusTrigger: Int
     var isEditable: Bool
+    var isKeyboardVisible: Bool
     var tintColor: UIColor
     var textColor: UIColor = .label
     var onFocusChange: (Bool) -> Void
@@ -66,6 +67,11 @@ struct RichTextEditor: UIViewRepresentable {
         textView.smartInsertDeleteType = .yes
         textView.attributedText = attributedText
         textView.isInputEnabled = isEditable
+
+        let focusTap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleEditorTap(_:)))
+        focusTap.cancelsTouchesInView = false
+        focusTap.delegate = context.coordinator
+        textView.addGestureRecognizer(focusTap)
         textView.setContentHuggingPriority(.defaultLow, for: .horizontal)
         textView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         onTextViewReady?(textView)
@@ -140,7 +146,11 @@ struct RichTextEditor: UIViewRepresentable {
                                                        right: trailingPadding)
         }
 
-        context.coordinator.applyFocusIfNeeded(on: textView, trigger: focusTrigger)
+        context.coordinator.applyFocusIfNeeded(
+            on: textView,
+            trigger: focusTrigger,
+            isKeyboardVisible: isKeyboardVisible
+        )
         context.coordinator.updateHeight(for: textView, allowAutoScroll: false)
         context.coordinator.enforceBaseAttributesIfNeeded(on: textView)
         context.coordinator.ensureTypingAttributes(on: textView)
@@ -160,7 +170,7 @@ struct RichTextEditor: UIViewRepresentable {
         Coordinator(parent: self)
     }
 
-    final class Coordinator: NSObject, UITextViewDelegate {
+    final class Coordinator: NSObject, UITextViewDelegate, UIGestureRecognizerDelegate {
         var parent: RichTextEditor
         private var lastFocusTrigger: Int = 0
         var isApplyingLocalEdit = false
@@ -172,6 +182,28 @@ struct RichTextEditor: UIViewRepresentable {
 
         init(parent: RichTextEditor) {
             self.parent = parent
+        }
+
+        @objc func handleEditorTap(_ gesture: UITapGestureRecognizer) {
+            guard let textView = gesture.view as? UITextView else { return }
+            if Self.shouldCycleFirstResponder(
+                isFirstResponder: textView.isFirstResponder,
+                isKeyboardVisible: parent.isKeyboardVisible
+            ) {
+                textView.resignFirstResponder()
+                DispatchQueue.main.async {
+                    textView.becomeFirstResponder()
+                }
+            } else if !textView.isFirstResponder {
+                textView.becomeFirstResponder()
+            }
+        }
+
+        func gestureRecognizer(
+            _ gestureRecognizer: UIGestureRecognizer,
+            shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer
+        ) -> Bool {
+            true
         }
 
         func textViewDidBeginEditing(_ textView: UITextView) {
@@ -266,12 +298,29 @@ struct RichTextEditor: UIViewRepresentable {
             }
         }
 
-        func applyFocusIfNeeded(on textView: UITextView, trigger: Int) {
+        static func shouldCycleFirstResponder(
+            isFirstResponder: Bool,
+            isKeyboardVisible: Bool
+        ) -> Bool {
+            isFirstResponder && !isKeyboardVisible
+        }
+
+        func applyFocusIfNeeded(on textView: UITextView, trigger: Int, isKeyboardVisible: Bool) {
             guard trigger != lastFocusTrigger else { return }
             lastFocusTrigger = trigger
             guard trigger > 0 else { return }
             guard parent.isEditable else { return }
-            textView.becomeFirstResponder()
+            if Self.shouldCycleFirstResponder(
+                isFirstResponder: textView.isFirstResponder,
+                isKeyboardVisible: isKeyboardVisible
+            ) {
+                textView.resignFirstResponder()
+                DispatchQueue.main.async {
+                    textView.becomeFirstResponder()
+                }
+            } else {
+                textView.becomeFirstResponder()
+            }
         }
 
         private func ensureCaretVisible(in textView: UITextView) {

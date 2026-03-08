@@ -970,6 +970,7 @@ struct ChatView: View {
                 // ⚠️ This callback is how focus state survives view recreation.
                 // DO NOT replace with @Binding or try to use @FocusState directly.
                 onFocusChange: { focused in isInputFocused = focused },
+                onRequestFocus: { requestInputFocus() },
                 onPasteImages: handlePastedImages,
                 motion: dictationMotion,
                 isCompact: horizontalSizeClass == .compact
@@ -1314,8 +1315,13 @@ struct ChatView: View {
     @MainActor
     private func restoreFocusIfNeeded() {
         guard shouldRestoreFocusAfterPicker else { return }
-        focusRequestID &+= 1
+        requestInputFocus()
         shouldRestoreFocusAfterPicker = false
+    }
+
+    @MainActor
+    private func requestInputFocus() {
+        focusRequestID &+= 1
     }
 
     @MainActor

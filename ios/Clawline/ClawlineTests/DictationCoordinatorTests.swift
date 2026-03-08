@@ -78,6 +78,74 @@ struct DictationCoordinatorTests {
         #expect(!coordinator.isListening)
     }
 
+    @Test("Phase 1 prewarm prepares resources when compose becomes active")
+    @MainActor
+    func phase1PrewarmPreparesResources() {
+        let harness = DictationTestHarness()
+        let coordinator = harness.makeCoordinator()
+
+        coordinator.updateContext(
+            sessionKey: harness.host.activeSessionKey,
+            composeIsEmpty: true,
+            textFieldFocused: false,
+            selectionLength: 0,
+            reduceMotionEnabled: false
+        )
+
+        #expect(harness.audioFactoryCallCount == 1)
+        #expect(harness.clientFactoryCallCount == 1)
+        #expect(harness.client.connectCallCount == 0)
+        #expect(harness.audio.started == false)
+    }
+
+    @Test("Gesture prewarm starts phase 2 connection before activation commit")
+    @MainActor
+    func gesturePrewarmStartsPhase2Connection() async {
+        let harness = DictationTestHarness()
+        let coordinator = harness.makeCoordinator()
+
+        coordinator.updateContext(
+            sessionKey: harness.host.activeSessionKey,
+            composeIsEmpty: true,
+            textFieldFocused: false,
+            selectionLength: 0,
+            reduceMotionEnabled: false
+        )
+
+        coordinator.beginGesturePrewarm()
+
+        await waitUntil { harness.client.connectCallCount >= 1 }
+
+        #expect(harness.client.connectCallCount >= 1)
+        #expect(harness.audio.started)
+    }
+
+    @Test("Gesture-time phase 2 failure cancels activation before surface opens")
+    @MainActor
+    func gestureTimePhase2FailureCancelsActivation() async {
+        let harness = DictationTestHarness()
+        harness.client.connectBehavior = .fail(DictationTestError.connectFailed)
+        let coordinator = harness.makeCoordinator()
+
+        coordinator.updateContext(
+            sessionKey: harness.host.activeSessionKey,
+            composeIsEmpty: true,
+            textFieldFocused: false,
+            selectionLength: 0,
+            reduceMotionEnabled: false
+        )
+
+        coordinator.beginGesturePrewarm()
+        await waitUntil { coordinator.errorMessage == "Dictation failed" }
+
+        coordinator.startStickyDictation()
+        try? await Task.sleep(for: .milliseconds(50))
+
+        #expect(coordinator.errorMessage == "Dictation failed")
+        #expect(!coordinator.isDictationActive)
+        #expect(!coordinator.isListening)
+    }
+
     @Test("Stream switch while listening deterministically stops listening")
     @MainActor
     func streamSwitchStopsListeningDeterministically() async {
@@ -342,7 +410,44 @@ struct DictationCoordinatorTests {
         #expect(harness.host.currentText(for: harness.host.activeSessionKey) == "hello")
         #expect(coordinator.isStickyDictationActive)
         #expect(coordinator.isListening)
-        #expect(harness.analytics.sendWhileActiveEvents.contains(false))
+        #expect(harness.analytics.sendWhileActiveEvents.contains(where: { $0.mode == .sticky && $0.sendSuccess }))
+    }
+
+    @Test("Activation queues through teardown and restarts after stop settles")
+    @MainActor
+    func activationQueuesThroughTeardown() async {
+        let harness = DictationTestHarness()
+        let coordinator = harness.makeCoordinator()
+
+        coordinator.updateContext(
+            sessionKey: harness.host.activeSessionKey,
+            composeIsEmpty: true,
+            textFieldFocused: false,
+            selectionLength: 0,
+            reduceMotionEnabled: false
+        )
+
+        coordinator.startStickyDictation()
+        await waitUntil { harness.client.connected }
+        harness.client.emitAfter(
+            10,
+            .response(
+                SonioxStreamingResponse(
+                    tokens: [],
+                    finished: true,
+                    errorCode: nil,
+                    errorMessage: nil
+                )
+            )
+        )
+
+        coordinator.stopStickyFromMicTap()
+        coordinator.startStickyDictation()
+
+        await waitUntil(timeoutMs: 1_500) { coordinator.isStickyDictationActive && harness.client.connectCallCount >= 2 }
+
+        #expect(coordinator.isStickyDictationActive)
+        #expect(harness.client.connectCallCount >= 2)
     }
 
     @Test("Discard restores pre-dictation snapshot")
@@ -719,6 +824,8 @@ private final class DictationTestHarness {
     let keyVerifier = MockSonioxKeyVerifier()
     let keyStore: SonioxKeyStore
     let timing: DictationTiming
+    private(set) var audioFactoryCallCount = 0
+    private(set) var clientFactoryCallCount = 0
 
     init(
         timing: DictationTiming = DictationTiming(
@@ -746,8 +853,14 @@ private final class DictationTestHarness {
             bridge: ComposeInputDictationBridge(host: host),
             keyStore: keyStore,
             languageHintProvider: { "en" },
-            audioCaptureFactory: { self.audio },
-            streamingClientFactory: { self.client },
+            audioCaptureFactory: {
+                self.audioFactoryCallCount += 1
+                return self.audio
+            },
+            streamingClientFactory: {
+                self.clientFactoryCallCount += 1
+                return self.client
+            },
             analytics: analytics,
             feedback: feedback,
             timing: timing
@@ -934,7 +1047,12 @@ private final class MockDictationAnalytics: DictationAnalyticsTracking {
 
     private(set) var stopEvents: [StopEvent] = []
     private(set) var errorEvents: [ErrorEvent] = []
-    private(set) var sendWhileActiveEvents: [Bool] = []
+    struct SendWhileActiveEvent {
+        let mode: DictationMode?
+        let sendSuccess: Bool
+    }
+
+    private(set) var sendWhileActiveEvents: [SendWhileActiveEvent] = []
 
     func trackStart(mode: DictationMode, sessionKey: String) {}
 
@@ -946,11 +1064,15 @@ private final class MockDictationAnalytics: DictationAnalyticsTracking {
         errorEvents.append(ErrorEvent(errorCode: errorCode, stage: stage))
     }
 
-    func trackSendWhileActive(finalizedWithinTimeout: Bool) {
-        sendWhileActiveEvents.append(finalizedWithinTimeout)
+    func trackSendWhileActive(mode: DictationMode?, sendSuccess: Bool) {
+        sendWhileActiveEvents.append(.init(mode: mode, sendSuccess: sendSuccess))
     }
 
     func trackSocketDrop(mode: DictationMode, elapsedMs: Int) {}
+}
+
+private enum DictationTestError: Error {
+    case connectFailed
 }
 
 @MainActor

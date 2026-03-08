@@ -25,11 +25,13 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
     var isActiveSession: Bool
     var isRenderPolicyFrozen: Bool
     var isInputActive: Bool
+    var isDictationActive: Bool
     var isKeyboardVisible: Bool
     var truncationBottomInset: CGFloat
     var firstUnreadMessageId: String?
     var unreadCount: Int
     var onExpand: ((Message) -> Void)?
+    var onRequestKeyboardDismiss: (@MainActor () -> Void)?
     var layoutCoordinator: ChatLayoutCoordinator
     var shouldRegisterWithLayoutCoordinator: Bool = true
     /// Optional session override - if provided, shows messages for this session instead of activeSessionKey
@@ -40,8 +42,12 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
     @Environment(\.settingsManager) private var settings
 
 #if !os(visionOS)
-    static func keyboardDismissModeForInputFocus(_ isInputActive: Bool) -> UIScrollView.KeyboardDismissMode {
-        isInputActive ? .none : .interactive
+    static func keyboardDismissModeForInputFocus(
+        _ isInputActive: Bool,
+        isDictationActive: Bool
+    ) -> UIScrollView.KeyboardDismissMode {
+        let _ = isInputActive
+        return isDictationActive ? .none : .interactive
     }
 #endif
 
@@ -59,12 +65,14 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
             isActiveSession: isActiveSession,
             isRenderPolicyFrozen: isRenderPolicyFrozen,
             isInputActive: isInputActive,
+            isDictationActive: isDictationActive,
             isKeyboardVisible: isKeyboardVisible,
             topInset: topInset,
             truncationBottomInset: truncationBottomInset,
             firstUnreadMessageId: firstUnreadMessageId,
             unreadCount: unreadCount,
             onExpand: onExpand,
+            onRequestKeyboardDismiss: onRequestKeyboardDismiss,
             sessionKey: sessionKey,
             forceReReadGeneration: forceReReadGeneration,
             onScrollEvent: onScrollEvent,
@@ -88,12 +96,14 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
             isActiveSession: isActiveSession,
             isRenderPolicyFrozen: isRenderPolicyFrozen,
             isInputActive: isInputActive,
+            isDictationActive: isDictationActive,
             isKeyboardVisible: isKeyboardVisible,
             topInset: topInset,
             truncationBottomInset: truncationBottomInset,
             firstUnreadMessageId: firstUnreadMessageId,
             unreadCount: unreadCount,
             onExpand: onExpand,
+            onRequestKeyboardDismiss: onRequestKeyboardDismiss,
             sessionKey: sessionKey,
             forceReReadGeneration: forceReReadGeneration,
             onScrollEvent: onScrollEvent,
@@ -105,19 +115,21 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
     }
 }
 
-final class MessageFlowCollectionViewController: UIViewController, UICollectionViewDelegateFlowLayout {
+final class MessageFlowCollectionViewController: UIViewController, UICollectionViewDelegateFlowLayout, UIGestureRecognizerDelegate {
     private struct UpdateRequest {
         let viewModel: ChatViewModel
         let isCompact: Bool
         let isActiveSession: Bool
         let isRenderPolicyFrozen: Bool
         let isInputActive: Bool
+        let isDictationActive: Bool
         let isKeyboardVisible: Bool
         let topInset: CGFloat
         let truncationBottomInset: CGFloat
         let firstUnreadMessageId: String?
         let unreadCount: Int
         let onExpand: ((Message) -> Void)?
+        let onRequestKeyboardDismiss: (@MainActor () -> Void)?
         let sessionKey: String?
         let forceReReadGeneration: Int
         let onScrollEvent: (@MainActor (MessageFlowScrollEvent) -> Void)?
@@ -222,12 +234,15 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     private var isActiveSession: Bool = true
     private var isRenderPolicyFrozen: Bool = false
     private var isInputActive: Bool = false
+    private var isDictationActive: Bool = false
     private var isKeyboardVisible: Bool = false
+    private var didRequestKeyboardDismissForCurrentPan = false
     private var topInset: CGFloat = 0
     private var truncationBottomInset: CGFloat = 0
     private var lastBoundsSize: CGSize = .zero
     private var forceReconfigureAll = false
     private var onExpand: ((Message) -> Void)?
+    private var onRequestKeyboardDismiss: (@MainActor () -> Void)?
     private var onScrollEvent: (@MainActor (MessageFlowScrollEvent) -> Void)?
     // Staged stream materialization (approved spec: tail window -> full history).
     // WHY N=50: device measurements showed 500-item first apply taking 1.4-2.7s.
@@ -941,6 +956,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 isActiveSession: isActiveSession,
                 isRenderPolicyFrozen: isRenderPolicyFrozen,
                 isInputActive: isInputActive,
+                isDictationActive: isDictationActive,
                 isKeyboardVisible: isKeyboardVisible,
                 topInset: topInset,
                 truncationBottomInset: truncationBottomInset,
@@ -1051,6 +1067,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     }
 
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+        dismissKeyboardIfNeeded()
         // Spec: interaction = scroll view dragging/tracking. Enter a pinned-but-defer state.
         setSalientHighlightIsScrolling(true)
         guard let sessionKey = callbackSessionKey() else { return }
@@ -1635,12 +1652,14 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             isActiveSession: isActiveSession,
             isRenderPolicyFrozen: isRenderPolicyFrozen,
             isInputActive: isInputActive,
+            isDictationActive: isDictationActive,
             isKeyboardVisible: isKeyboardVisible,
             topInset: topInset,
             truncationBottomInset: truncationBottomInset,
             firstUnreadMessageId: firstUnreadMessageId,
             unreadCount: unreadCount,
             onExpand: onExpand,
+            onRequestKeyboardDismiss: onRequestKeyboardDismiss,
             sessionKey: channelOverride,
             forceReReadGeneration: 0,
             onScrollEvent: onScrollEvent,
@@ -1660,12 +1679,14 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 isActiveSession: request.isActiveSession,
                 isRenderPolicyFrozen: request.isRenderPolicyFrozen,
                 isInputActive: request.isInputActive,
+                isDictationActive: request.isDictationActive,
                 isKeyboardVisible: request.isKeyboardVisible,
                 topInset: request.topInset,
                 truncationBottomInset: request.truncationBottomInset,
                 firstUnreadMessageId: request.firstUnreadMessageId,
                 unreadCount: request.unreadCount,
                 onExpand: request.onExpand,
+                onRequestKeyboardDismiss: request.onRequestKeyboardDismiss,
                 sessionKey: request.sessionKey,
                 forceReReadGeneration: request.forceReReadGeneration,
                 onScrollEvent: request.onScrollEvent,
@@ -1680,12 +1701,14 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         isActiveSession: Bool,
         isRenderPolicyFrozen: Bool,
         isInputActive: Bool,
+        isDictationActive: Bool,
         isKeyboardVisible: Bool,
         topInset: CGFloat,
         truncationBottomInset: CGFloat,
         firstUnreadMessageId: String?,
         unreadCount: Int,
         onExpand: ((Message) -> Void)? = nil,
+        onRequestKeyboardDismiss: (@MainActor () -> Void)? = nil,
         sessionKey: String? = nil,
         forceReReadGeneration: Int = 0,
         onScrollEvent: (@MainActor (MessageFlowScrollEvent) -> Void)? = nil,
@@ -1697,12 +1720,14 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             isActiveSession: isActiveSession,
             isRenderPolicyFrozen: isRenderPolicyFrozen,
             isInputActive: isInputActive,
+            isDictationActive: isDictationActive,
             isKeyboardVisible: isKeyboardVisible,
             topInset: topInset,
             truncationBottomInset: truncationBottomInset,
             firstUnreadMessageId: firstUnreadMessageId,
             unreadCount: unreadCount,
             onExpand: onExpand,
+            onRequestKeyboardDismiss: onRequestKeyboardDismiss,
             sessionKey: sessionKey,
             forceReReadGeneration: forceReReadGeneration,
             onScrollEvent: onScrollEvent,
@@ -1730,14 +1755,19 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         self.isActiveSession = isActiveSession
         self.isRenderPolicyFrozen = isRenderPolicyFrozen
         self.isInputActive = isInputActive
+        self.isDictationActive = isDictationActive
         self.isKeyboardVisible = isKeyboardVisible
 #if !os(visionOS)
-        let desiredDismissMode = MessageFlowCollectionView.keyboardDismissModeForInputFocus(isInputActive)
+        let desiredDismissMode = MessageFlowCollectionView.keyboardDismissModeForInputFocus(
+            isInputActive,
+            isDictationActive: isDictationActive
+        )
         if collectionView.keyboardDismissMode != desiredDismissMode {
             collectionView.keyboardDismissMode = desiredDismissMode
         }
 #endif
         self.onExpand = onExpand
+        self.onRequestKeyboardDismiss = onRequestKeyboardDismiss
         self.truncationBottomInset = truncationBottomInset
         self.onScrollEvent = onScrollEvent
 
@@ -2746,8 +2776,17 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         collectionView.backgroundColor = .clear
         collectionView.contentInsetAdjustmentBehavior = .never
         collectionView.alwaysBounceVertical = true
+        collectionView.panGestureRecognizer.addTarget(self, action: #selector(handleCollectionViewPanForKeyboardDismiss(_:)))
+        let swipeDownGesture = UISwipeGestureRecognizer(target: self, action: #selector(handleCollectionViewSwipeDownForKeyboardDismiss(_:)))
+        swipeDownGesture.direction = .down
+        swipeDownGesture.cancelsTouchesInView = false
+        swipeDownGesture.delegate = self
+        collectionView.addGestureRecognizer(swipeDownGesture)
 #if !os(visionOS)
-        collectionView.keyboardDismissMode = MessageFlowCollectionView.keyboardDismissModeForInputFocus(isInputActive)
+        collectionView.keyboardDismissMode = MessageFlowCollectionView.keyboardDismissModeForInputFocus(
+            isInputActive,
+            isDictationActive: isDictationActive
+        )
 #endif
         collectionView.allowsSelection = false
         collectionView.allowsMultipleSelection = false
@@ -2759,6 +2798,52 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
 
         view.addSubview(collectionView)
         // Frame will be set in viewDidLayoutSubviews to extend to window bounds
+    }
+
+    @objc
+    private func handleCollectionViewPanForKeyboardDismiss(_ gesture: UIPanGestureRecognizer) {
+        switch gesture.state {
+        case .began:
+            didRequestKeyboardDismissForCurrentPan = false
+        case .changed:
+            guard !didRequestKeyboardDismissForCurrentPan else { return }
+            guard isKeyboardVisible else { return }
+            guard !isDictationActive else { return }
+
+            let translation = gesture.translation(in: collectionView)
+            guard translation.y > 18 else { return }
+            guard abs(translation.y) > abs(translation.x) else { return }
+
+            didRequestKeyboardDismissForCurrentPan = true
+            dismissKeyboardIfNeeded()
+        case .ended, .cancelled, .failed:
+            didRequestKeyboardDismissForCurrentPan = false
+        default:
+            break
+        }
+    }
+
+    @objc
+    private func handleCollectionViewSwipeDownForKeyboardDismiss(_ gesture: UISwipeGestureRecognizer) {
+        guard gesture.state == .ended else { return }
+        dismissKeyboardIfNeeded()
+    }
+
+    func gestureRecognizer(
+        _ gestureRecognizer: UIGestureRecognizer,
+        shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer
+    ) -> Bool {
+        true
+    }
+
+    private func dismissKeyboardIfNeeded() {
+        guard isKeyboardVisible else { return }
+        guard !isDictationActive else { return }
+        if let onRequestKeyboardDismiss {
+            onRequestKeyboardDismiss()
+        } else {
+            view.window?.endEditing(true)
+        }
     }
 
     private func configureDataSource() {

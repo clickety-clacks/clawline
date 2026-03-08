@@ -14,6 +14,39 @@ import os.log
 
 private let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "ChatView")
 
+#if DEBUG
+private let keyboardDictationUITestLaunchArg = "--ui-test-keyboard-dictation"
+
+private final class UITestDictationAudioCapture: DictationAudioCapturing {
+    let frameStream: AsyncStream<Data> = AsyncStream { _ in }
+    let levelStream: AsyncStream<Float> = AsyncStream { _ in }
+    let eventStream: AsyncStream<DictationAudioCaptureEvent> = AsyncStream { _ in }
+
+    func start() throws {}
+    func stop() {}
+}
+
+private final class UITestSonioxStreamingClient: SonioxStreamingClienting {
+    let events: AsyncStream<SonioxStreamingEvent> = AsyncStream { _ in }
+
+    func connect(config: SonioxStreamingConfig) async throws {
+        let _ = config
+    }
+
+    func sendAudioFrame(_ frame: Data) async throws {
+        let _ = frame
+    }
+
+    func sendFinalize() async throws {}
+
+    func close(code: URLSessionWebSocketTask.CloseCode, reason: String?, caller: String) {
+        let _ = code
+        let _ = reason
+        let _ = caller
+    }
+}
+#endif
+
 func runtimeInsetFallbackBarHeight(
     measuredInputBarHeight: CGFloat,
     settledInputBarHeight: CGFloat,
@@ -113,6 +146,7 @@ struct ChatView: View {
     @State private var isFileImporterPresented = false
     @State private var photoPickerItems: [PhotosPickerItem] = []
     @State private var focusRequestID = 0
+    @State private var dismissRequestID = 0
     @State private var shouldRestoreFocusAfterPicker = false
     @State private var scrollButtonStateBySessionKey: [String: ScrollButtonState] = [:]
     @State private var scrollButtonDragTranslation: CGFloat = 0
@@ -128,9 +162,23 @@ struct ChatView: View {
     init(viewModel: ChatViewModel, toastManager: ToastManager) {
         self._viewModel = Bindable(wrappedValue: viewModel)
         self.toastManager = toastManager
+#if DEBUG
+        let isKeyboardDictationUITestMode = ProcessInfo.processInfo.arguments.contains(keyboardDictationUITestLaunchArg)
+        let audioCaptureFactory: () -> any DictationAudioCapturing = isKeyboardDictationUITestMode
+            ? { UITestDictationAudioCapture() }
+            : { DictationAudioCapture() }
+        let streamingClientFactory: () -> any SonioxStreamingClienting = isKeyboardDictationUITestMode
+            ? { UITestSonioxStreamingClient() }
+            : { SonioxStreamingClient() }
+#else
+        let audioCaptureFactory: () -> any DictationAudioCapturing = { DictationAudioCapture() }
+        let streamingClientFactory: () -> any SonioxStreamingClienting = { SonioxStreamingClient() }
+#endif
         let session = DictationCoordinator(
             bridge: ComposeInputDictationBridge(host: viewModel),
-            keyStore: SonioxKeyStore()
+            keyStore: SonioxKeyStore(),
+            audioCaptureFactory: audioCaptureFactory,
+            streamingClientFactory: streamingClientFactory
         )
         _dictationCoordinator = State(
             initialValue: session
@@ -216,6 +264,23 @@ struct ChatView: View {
 #else
         false
 #endif
+    }
+
+    private var isKeyboardDictationUITestMode: Bool {
+#if DEBUG
+        ProcessInfo.processInfo.arguments.contains(keyboardDictationUITestLaunchArg)
+#else
+        false
+#endif
+    }
+
+    private var keyboardDictationStateSummary: String {
+        "focused=\(isInputFocused ? 1 : 0);keyboard=\(isKeyboardVisible ? 1 : 0);dictating=\(dictationCoordinator.isDictationActive ? 1 : 0)"
+    }
+
+    private var listKeyboardDismissRequest: (@MainActor () -> Void)? {
+        guard isKeyboardDictationUITestMode else { return nil }
+        return { dismissComposeKeyboardFromUserGesture() }
     }
 
     private func scrollButtonState(for sessionKey: String) -> ScrollButtonState {
@@ -478,6 +543,66 @@ struct ChatView: View {
         GeometryReader { geometry in
             chatContent(geometry: geometry, viewModel: viewModel, toastManager: toastManager)
         }
+        .overlay(alignment: .topLeading) {
+            if isKeyboardDictationUITestMode {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(keyboardDictationStateSummary)
+                        .font(.caption2)
+                        .foregroundStyle(.clear)
+                        .accessibilityIdentifier("keyboard-dictation-state")
+                        .accessibilityLabel(keyboardDictationStateSummary)
+
+                    Button("focus") {
+                        requestInputFocus()
+                        dictationCoordinator.focusComposeTextViewForTesting()
+                    }
+                    .buttonStyle(.plain)
+                    .font(.caption2)
+                    .foregroundStyle(.primary)
+                    .frame(width: 44, height: 22)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    .accessibilityIdentifier("ui-test-focus-composer")
+
+                    Button("start") {
+                        dictationCoordinator.startStickyDictation()
+                    }
+                    .buttonStyle(.plain)
+                    .font(.caption2)
+                    .foregroundStyle(.primary)
+                    .frame(width: 44, height: 22)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    .accessibilityIdentifier("ui-test-start-dictation")
+
+                    Button("stop") {
+                        if dictationCoordinator.isDictationActive {
+                            dictationCoordinator.stopDictationForKeyboardDismissUITest()
+                        } else {
+                            dismissComposeKeyboardFromUserGesture()
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .font(.caption2)
+                    .foregroundStyle(.primary)
+                    .frame(width: 44, height: 22)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    .accessibilityIdentifier("ui-test-stop-dictation")
+
+                    Button("hide") {
+                        isInputFocused = false
+                        dictationCoordinator.dismissComposeTextViewKeyboard()
+                        keyboardRefreshToken &+= 1
+                    }
+                    .buttonStyle(.plain)
+                    .font(.caption2)
+                    .foregroundStyle(.primary)
+                    .frame(width: 44, height: 22)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    .accessibilityIdentifier("ui-test-force-keyboard-dismiss")
+                }
+                .padding(1)
+                .allowsHitTesting(true)
+            }
+        }
         .background {
             // Background extends edge-to-edge. Admin users with paged TabView have
             // per-page backgrounds for the gradient; regular users get background here.
@@ -684,6 +809,25 @@ struct ChatView: View {
             )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .ignoresSafeArea(.container, edges: [.top, .bottom])
+#if DEBUG
+                .overlay {
+                    if isKeyboardDictationUITestMode {
+                        Button {
+                            guard !dictationCoordinator.isDictationActive else {
+                                return
+                            }
+                            dismissComposeKeyboardFromUserGesture()
+                        } label: {
+                            Color.black.opacity(0.001)
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("ui-test-dismiss-hitbox")
+                        .accessibilityLabel("Dismiss keyboard")
+                    }
+                }
+#endif
         )
 
         ZStack(alignment: .top) {
@@ -698,6 +842,19 @@ struct ChatView: View {
             toastBannerView(geometry: geometry, toastManager: toastManager)
         }
         .ignoresSafeArea(.keyboard)
+#if !os(visionOS)
+        .contentShape(Rectangle())
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 12)
+                .onChanged { value in
+                    guard !dictationCoordinator.isDictationActive else { return }
+                    guard isKeyboardVisible else { return }
+                    guard value.translation.height > 18 else { return }
+                    guard abs(value.translation.height) > abs(value.translation.width) else { return }
+                    dismissComposeKeyboardFromUserGesture()
+                }
+        )
+#endif
         .onChange(of: layoutInputs) { _, _ in
             layoutCoordinator.updateInputs(layoutInputs, metrics: layoutMetrics)
             layoutCoordinator.markInputsChanged()
@@ -755,8 +912,18 @@ struct ChatView: View {
                 layoutRevision &+= 1
             }
         }
-        .onChange(of: isInputFocused) { _, _ in
+        .onChange(of: isInputFocused) { _, focused in
             layoutRevision &+= 1
+            keyboardRefreshToken &+= 1
+            if !focused {
+                DispatchQueue.main.async {
+                    keyboardRefreshToken &+= 1
+                }
+                let refreshDelay = max(0.05, keyboardAnimationDuration)
+                DispatchQueue.main.asyncAfter(deadline: .now() + refreshDelay) {
+                    keyboardRefreshToken &+= 1
+                }
+            }
             updateDictationContext(viewModel: viewModel)
         }
         .onChange(of: dictationMotion.shouldFreezeLayout) { _, isFrozen in
@@ -956,6 +1123,7 @@ struct ChatView: View {
                 isPreparing: viewModel.sendButtonIsPreparing,
                 connectionState: viewModel.sendButtonConnectionState,
                 focusTrigger: focusRequestID,
+                dismissTrigger: dismissRequestID,
                 isTextFieldFocused: isInputFocused,
                 bottomSafeAreaInset: geometry.safeAreaInsets.bottom,
                 isKeyboardVisible: isKeyboardVisible,
@@ -971,6 +1139,17 @@ struct ChatView: View {
                 // DO NOT replace with @Binding or try to use @FocusState directly.
                 onFocusChange: { focused in isInputFocused = focused },
                 onRequestFocus: { requestInputFocus() },
+                onRequestDirectFocus: {
+                    let restoreComposeFocus = {
+                        requestInputFocus()
+                        dictationCoordinator.focusComposeTextViewForTesting()
+                        keyboardRefreshToken &+= 1
+                    }
+                    restoreComposeFocus()
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) {
+                        restoreComposeFocus()
+                    }
+                },
                 onPasteImages: handlePastedImages,
                 motion: dictationMotion,
                 isCompact: horizontalSizeClass == .compact
@@ -1035,6 +1214,7 @@ struct ChatView: View {
             isActiveSession: sessionKey == renderPolicySessionKey,
             isRenderPolicyFrozen: viewModel.isRenderPolicyFrozen,
             isInputActive: isInputFocused,
+            isDictationActive: dictationCoordinator.isDictationActive,
             isKeyboardVisible: isKeyboardVisible,
             truncationBottomInset: truncationBottomInset,
             firstUnreadMessageId: state.firstUnreadMessageId,
@@ -1042,6 +1222,7 @@ struct ChatView: View {
             onExpand: { message in
                 activeSheet = .expandedMessage(message)
             },
+            onRequestKeyboardDismiss: listKeyboardDismissRequest,
             layoutCoordinator: layoutCoordinator,
             sessionKey: sessionKey,
             onScrollEvent: handleMessageFlowScrollEvent
@@ -1049,11 +1230,7 @@ struct ChatView: View {
         // We manage keyboard avoidance manually inside the collection view.
         // Prevent SwiftUI from shrinking the view and double-applying the keyboard height.
         .ignoresSafeArea(.keyboard, edges: .bottom)
-#if os(visionOS)
         return list
-#else
-        return list
-#endif
     }
 
     @ViewBuilder
@@ -1179,11 +1356,13 @@ struct ChatView: View {
                 isActiveSession: false,
                 isRenderPolicyFrozen: false,
                 isInputActive: isInputFocused,
+                isDictationActive: dictationCoordinator.isDictationActive,
                 isKeyboardVisible: isKeyboardVisible,
                 truncationBottomInset: truncationBottomInset,
                 firstUnreadMessageId: nil,
                 unreadCount: 0,
                 onExpand: nil,
+                onRequestKeyboardDismiss: listKeyboardDismissRequest,
                 layoutCoordinator: layoutCoordinator,
                 // Do not register prewarm shells as live session list views.
                 shouldRegisterWithLayoutCoordinator: false,
@@ -1322,6 +1501,21 @@ struct ChatView: View {
     @MainActor
     private func requestInputFocus() {
         focusRequestID &+= 1
+    }
+
+    @MainActor
+    private func dismissComposeKeyboardFromUserGesture() {
+        isInputFocused = false
+        dismissRequestID &+= 1
+        dictationCoordinator.dismissComposeTextViewKeyboard()
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        for scene in UIApplication.shared.connectedScenes {
+            guard let windowScene = scene as? UIWindowScene else { continue }
+            for window in windowScene.windows {
+                window.endEditing(true)
+            }
+        }
+        keyboardRefreshToken &+= 1
     }
 
     @MainActor

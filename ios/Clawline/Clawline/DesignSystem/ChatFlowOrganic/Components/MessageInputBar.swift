@@ -365,13 +365,9 @@ struct DictationPanGestureInstaller: UIViewControllerRepresentable {
 
         private func lockTextScrollForDictationIfNeeded() {
             guard let activeTextView else { return }
-            activeTextViewWasSelectable = activeTextView.isSelectable
             if activeTextView.isScrollEnabled {
                 activeTextView.isScrollEnabled = false
             }
-            // While dictation pan owns this touch, disable text selection movement so
-            // cursor/selection gestures cannot race the dictation drag path.
-            activeTextView.isSelectable = false
         }
 
         private func nearestTextView(at location: CGPoint, in window: UIWindow) -> UITextView? {
@@ -467,6 +463,7 @@ struct MessageInputBar: View {
     let isPreparing: Bool
     let connectionState: SendButtonConnectionState
     let focusTrigger: Int
+    let dismissTrigger: Int
     let isTextFieldFocused: Bool
     /// Pass geometry.safeAreaInsets.bottom directly - DO NOT pass a computed Bool.
     let bottomSafeAreaInset: CGFloat
@@ -478,6 +475,7 @@ struct MessageInputBar: View {
     let onAdd: () -> Void
     let onFocusChange: (Bool) -> Void
     let onRequestFocus: () -> Void
+    var onRequestDirectFocus: (() -> Void)?
     var onPasteImages: (([UIImage]) -> Void)?
 
     @State private var editorHeight: CGFloat = 44
@@ -490,6 +488,7 @@ struct MessageInputBar: View {
     @State private var micTapActivationTask: Task<Void, Never>?
     @State private var gestureSettleTask: Task<Void, Never>?
     @State private var textEditorGlobalFrame: CGRect = .zero
+    @State private var shouldRestoreFocusAfterGestureDictationStart = false
     let isCompact: Bool
     private let verticalDominanceRatio: CGFloat = 1.4
 
@@ -538,9 +537,13 @@ struct MessageInputBar: View {
         accessibilityReduceMotion || dictation.reduceMotionEnabled
     }
 
+    private var isKeyboardDictationUITestMode: Bool {
+        ProcessInfo.processInfo.arguments.contains("--ui-test-keyboard-dictation")
+    }
+
     private var shouldRenderMic: Bool {
-        !dictation.isSurfaceOpen
-            && !isTextFieldFocused
+        (!dictation.isSurfaceOpen || isKeyboardDictationUITestMode)
+            && (!isTextFieldFocused || isKeyboardDictationUITestMode)
             && content.length == 0
             && (dictation.micVisible || micTransientVisible)
     }
@@ -947,6 +950,7 @@ struct MessageInputBar: View {
                     pendingInsertions: $pendingInsertions,
                     resetToken: resetToken,
                     focusTrigger: focusTrigger,
+                    dismissTrigger: dismissTrigger,
                     isEditable: true,
                     isKeyboardVisible: isKeyboardVisible,
                     tintColor: editorTintUIColor,
@@ -999,9 +1003,9 @@ struct MessageInputBar: View {
                     micButton
                         .padding(.trailing, 8)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
-                        .opacity(dictation.micVisible ? 1 : micTransientOpacity)
-                        .offset(x: dictation.micVisible ? 0 : micTransientOffset)
-                        .allowsHitTesting(dictation.micVisible)
+                        .opacity((dictation.micVisible || isKeyboardDictationUITestMode) ? 1 : micTransientOpacity)
+                        .offset(x: (dictation.micVisible || isKeyboardDictationUITestMode) ? 0 : micTransientOffset)
+                        .allowsHitTesting(dictation.micVisible || isKeyboardDictationUITestMode)
                         .transition(.move(edge: .trailing).combined(with: .opacity))
                         .animation(.easeOut(duration: isTextFieldFocused ? 0.7 : 0.35), value: dictation.micVisible)
                 }
@@ -1027,6 +1031,25 @@ struct MessageInputBar: View {
                     )
                 }
             )
+            .overlay {
+                if isKeyboardDictationUITestMode {
+                    Button {
+                        if let onRequestDirectFocus {
+                            onRequestDirectFocus()
+                        } else {
+                            onFocusChange(true)
+                            onRequestFocus()
+                        }
+                    } label: {
+                        Color.clear
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("compose-focus-target")
+                    .accessibilityLabel("Compose message")
+                }
+            }
             .accessibilityAction(named: Text("Start Sticky Dictation")) {
                 guard dictation.micVisible || dictation.swipeActivationEnabled else { return }
                 dictation.setComposeSelectionRange(selectionRange)
@@ -1214,25 +1237,30 @@ struct MessageInputBar: View {
     }
 
     private var micButton: some View {
-        Image(systemName: "mic.fill")
-            .font(.system(size: 16, weight: .semibold))
-            .foregroundStyle(inputTintColor.opacity(0.9))
-            .frame(width: metrics.inputBarHeight, height: metrics.inputBarHeight)
-            .contentShape(Rectangle())
-            .onTapGesture {
-                guard !isSending else { return }
-                if dictation.isStickyDictationActive {
-                    dictation.dismissSurfaceFromUserGesture()
-                } else {
-                    startStickyFromMicTap()
-                }
+        Button {
+            guard !isSending else { return }
+            if dictation.isStickyDictationActive {
+                dictation.dismissSurfaceFromUserGesture()
+            } else {
+                startStickyFromMicTap()
             }
-            .accessibilityLabel(dictation.isStickyDictationActive ? "Stop dictation" : "Start dictation")
+        } label: {
+            Image(systemName: "mic.fill")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(inputTintColor.opacity(0.9))
+                .frame(width: metrics.inputBarHeight, height: metrics.inputBarHeight)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(dictation.isStickyDictationActive ? "Stop dictation" : "Start dictation")
+        .accessibilityIdentifier("dictation-mic-button")
+        .disabled(isSending)
     }
 
     private func startStickyFromMicTap() {
         micTapActivationTask?.cancel()
         dictation.setComposeSelectionRange(selectionRange)
+        let shouldPreserveKeyboardFocus = isTextFieldFocused || isKeyboardVisible
         dictation.beginGesturePrewarm()
         withAnimation(settleSpring) {
             motion.beginProgrammaticReveal()
@@ -1248,6 +1276,17 @@ struct MessageInputBar: View {
             }
             dictation.startStickyDictation()
             motion.commitSettledState(.openListening)
+            if shouldPreserveKeyboardFocus {
+                requestComposeFocus()
+            }
+        }
+    }
+
+    private func requestComposeFocus() {
+        if let onRequestDirectFocus {
+            onRequestDirectFocus()
+        } else {
+            onFocusChange(true)
             onRequestFocus()
         }
     }
@@ -1270,6 +1309,7 @@ struct MessageInputBar: View {
                 originWasOpen: motion.isSurfaceVisible,
                 swipeActivationEnabled: dictation.swipeActivationEnabled
             )
+            shouldRestoreFocusAfterGestureDictationStart = isTextFieldFocused || isKeyboardVisible
             dictation.setComposeSelectionRange(selectionRange)
             dictation.beginGesturePrewarm()
         }
@@ -1325,6 +1365,7 @@ struct MessageInputBar: View {
             return
         }
         if wasCancelled {
+            shouldRestoreFocusAfterGestureDictationStart = false
             withAnimation(settleSpring) {
                 motion.gestureCancelled()
             }
@@ -1352,27 +1393,37 @@ struct MessageInputBar: View {
 
         switch intent {
         case .send:
+            shouldRestoreFocusAfterGestureDictationStart = false
             logDictation("DICTATION_UI gesture_end action=pull_to_send up=\(up) down=\(down) verticalDominant=\(verticalDominant) startedSurfaceOpen=\(motion.pushGestureStartedWithSurfaceOpen) walkieActive=\(dictation.isWalkieTalkieActive)")
             onSend()
         case .dismissSurface:
+            shouldRestoreFocusAfterGestureDictationStart = false
             dictation.dismissSurfaceFromUserGesture()
         case .startSticky:
             logDictation("DICTATION_UI gesture_end classification=sticky_start up=\(up) down=\(down)")
             dictation.setComposeSelectionRange(selectionRange)
             dictation.startStickyDictation()
             beginMicFadeOut(fromSwipe: false)
-            onRequestFocus()
+            if shouldRestoreFocusAfterGestureDictationStart {
+                requestComposeFocus()
+            }
+            shouldRestoreFocusAfterGestureDictationStart = false
         case .endWalkieKeepOpen:
+            shouldRestoreFocusAfterGestureDictationStart = false
             logDictation("DICTATION_UI gesture_end classification=walkie_release_keep_open up=\(up) down=\(down)")
             dictation.endWalkieTalkieIfNeeded()
         case .endWalkieAndDismiss:
+            shouldRestoreFocusAfterGestureDictationStart = false
             logDictation("DICTATION_UI gesture_end classification=walkie_release_dismiss up=\(up) down=\(down)")
             dictation.dismissSurfaceFromUserGesture()
         case .settleClosed:
+            shouldRestoreFocusAfterGestureDictationStart = false
             break
         case .settleOpen:
+            shouldRestoreFocusAfterGestureDictationStart = false
             break
         case .none:
+            shouldRestoreFocusAfterGestureDictationStart = false
             break
         }
         scheduleInsetUnfreezeAfterSettle()
@@ -1380,13 +1431,17 @@ struct MessageInputBar: View {
 
     private func shouldBeginDictationPan(startLocation: CGPoint, velocity: CGPoint) -> Bool {
         _ = velocity
-        return shouldBeginDictationPanGesture(
+        let shouldBegin = shouldBeginDictationPanGesture(
             startedInEditableRegion: startsInEditableRegion(startLocation: startLocation),
             isSurfaceVisible: motion.isSurfaceVisible,
             swipeActivationEnabled: dictation.swipeActivationEnabled,
             hasSelection: selectionRange.length > 0,
             startedInSelectionGestureRegion: startsInSelectionGestureRegion(startLocation: startLocation)
         )
+        if shouldBegin {
+            shouldRestoreFocusAfterGestureDictationStart = isTextFieldFocused || isKeyboardVisible
+        }
+        return shouldBegin
     }
 
     private func startsInEditableRegion(startLocation: CGPoint) -> Bool {
@@ -1740,6 +1795,7 @@ struct DictationMicAffordanceAnimationPlan {
                 isPreparing: false,
                 connectionState: .connected,
                 focusTrigger: 0,
+                dismissTrigger: 0,
                 isTextFieldFocused: false,
                 bottomSafeAreaInset: 34,
                 isKeyboardVisible: false,

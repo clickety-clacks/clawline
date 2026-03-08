@@ -47,6 +47,7 @@ final class DictationAudioCapture: DictationAudioCapturing {
     private let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "DictationAudioCapture")
     private var engine = AVAudioEngine()
     private let queue = DispatchQueue(label: "co.clicketyclacks.Clawline.dictation.audio")
+    private let lifecycleQueue = DispatchQueue(label: "co.clicketyclacks.Clawline.dictation.audio.lifecycle")
 
     private var continuationFrames: AsyncStream<Data>.Continuation?
     private var continuationLevels: AsyncStream<Float>.Continuation?
@@ -61,6 +62,7 @@ final class DictationAudioCapture: DictationAudioCapturing {
     private var lastLevelEmitTime = CFAbsoluteTimeGetCurrent()
     private var isRunning = false
     private var isInterrupted = false
+    private var isTapInstalled = false
 #if os(iOS)
     private var audioSessionObservers: [NSObjectProtocol] = []
 #endif
@@ -85,39 +87,52 @@ final class DictationAudioCapture: DictationAudioCapturing {
     var levelStream: AsyncStream<Float> { _levelStream }
     var eventStream: AsyncStream<DictationAudioCaptureEvent> { _eventStream }
 
-    func start() throws {
-        guard !isRunning else { return }
-        frameAccumulator.removeAll(keepingCapacity: true)
-        isInterrupted = false
-
-        guard let outputFormat else {
-            throw DictationAudioCaptureError.outputFormatUnavailable
+    @discardableResult
+    private func withLifecycleLock<T>(_ block: () throws -> T) throws -> T {
+        var result: Result<T, Error>!
+        lifecycleQueue.sync {
+            result = Result { try block() }
         }
+        return try result.get()
+    }
 
-        try configureAudioSession()
-        try configureEngineGraph(outputFormat: outputFormat)
-        observeAudioSessionNotifications()
+    func start() throws {
+        try withLifecycleLock {
+            guard !isRunning else { return }
+            frameAccumulator.removeAll(keepingCapacity: true)
+            isInterrupted = false
 
-        engine.prepare()
-        isRunning = true
-        do {
-            try engine.start()
-        } catch {
-            isRunning = false
-            teardownEngineGraph()
-            stopObservingAudioSessionNotifications()
-            deactivateAudioSession()
-            throw error
+            guard let outputFormat else {
+                throw DictationAudioCaptureError.outputFormatUnavailable
+            }
+
+            try configureAudioSession()
+            try configureEngineGraph(outputFormat: outputFormat)
+            observeAudioSessionNotifications()
+
+            engine.prepare()
+            isRunning = true
+            do {
+                try engine.start()
+            } catch {
+                isRunning = false
+                teardownEngineGraph()
+                stopObservingAudioSessionNotifications()
+                deactivateAudioSession()
+                throw error
+            }
         }
     }
 
     func stop() {
-        guard isRunning else { return }
-        isRunning = false
-        isInterrupted = false
-        teardownEngineGraph()
-        stopObservingAudioSessionNotifications()
-        deactivateAudioSession()
+        lifecycleQueue.sync {
+            guard isRunning else { return }
+            isRunning = false
+            isInterrupted = false
+            teardownEngineGraph()
+            stopObservingAudioSessionNotifications()
+            deactivateAudioSession()
+        }
     }
 
     private func configureAudioSession() throws {
@@ -138,14 +153,21 @@ final class DictationAudioCapture: DictationAudioCapturing {
             throw DictationAudioCaptureError.converterCreationFailed
         }
 
-        inputNode.removeTap(onBus: 0)
+        if isTapInstalled {
+            inputNode.removeTap(onBus: 0)
+            isTapInstalled = false
+        }
         inputNode.installTap(onBus: 0, bufferSize: 1_024, format: inputFormat) { [weak self] buffer, _ in
             self?.handleInputBuffer(buffer)
         }
+        isTapInstalled = true
     }
 
     private func teardownEngineGraph() {
-        engine.inputNode.removeTap(onBus: 0)
+        if isTapInstalled {
+            engine.inputNode.removeTap(onBus: 0)
+            isTapInstalled = false
+        }
         engine.stop()
 
         queue.sync {
@@ -192,36 +214,39 @@ final class DictationAudioCapture: DictationAudioCapturing {
     }
 
     private func handleInterruptionNotification(_ notification: Notification) {
-        guard isRunning else { return }
-        guard
-            let typeValue = notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
-            let type = AVAudioSession.InterruptionType(rawValue: typeValue)
-        else {
-            return
-        }
-
-        switch type {
-        case .began:
-            isInterrupted = true
-            engine.pause()
-            continuationEvents?.yield(.interruptionBegan)
-        case .ended:
-            let optionsValue = notification.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
-            let options = AVAudioSession.InterruptionOptions(rawValue: optionsValue)
-            let shouldResume = options.contains(.shouldResume)
-            continuationEvents?.yield(.interruptionEnded(shouldResume: shouldResume))
-            guard shouldResume else { return }
-            do {
-                try configureAudioSession()
-                if !engine.isRunning {
-                    try engine.start()
-                }
-                isInterrupted = false
-            } catch {
-                continuationEvents?.yield(.failed(message: "Audio interruption recovery failed: \(error.localizedDescription)"))
+        lifecycleQueue.async { [weak self] in
+            guard let self else { return }
+            guard self.isRunning else { return }
+            guard
+                let typeValue = notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
+                let type = AVAudioSession.InterruptionType(rawValue: typeValue)
+            else {
+                return
             }
-        @unknown default:
-            break
+
+            switch type {
+            case .began:
+                self.isInterrupted = true
+                self.engine.pause()
+                self.continuationEvents?.yield(.interruptionBegan)
+            case .ended:
+                let optionsValue = notification.userInfo?[AVAudioSessionInterruptionOptionKey] as? UInt ?? 0
+                let options = AVAudioSession.InterruptionOptions(rawValue: optionsValue)
+                let shouldResume = options.contains(.shouldResume)
+                self.continuationEvents?.yield(.interruptionEnded(shouldResume: shouldResume))
+                guard shouldResume else { return }
+                do {
+                    try self.configureAudioSession()
+                    if !self.engine.isRunning {
+                        try self.engine.start()
+                    }
+                    self.isInterrupted = false
+                } catch {
+                    self.continuationEvents?.yield(.failed(message: "Audio interruption recovery failed: \(error.localizedDescription)"))
+                }
+            @unknown default:
+                break
+            }
         }
     }
 

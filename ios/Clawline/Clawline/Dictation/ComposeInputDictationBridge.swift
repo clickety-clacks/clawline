@@ -7,6 +7,7 @@
 
 import Foundation
 import UIKit
+import UIKit
 
 struct ComposeDraftSnapshot {
     var content: NSAttributedString
@@ -70,11 +71,30 @@ final class ComposeInputDictationBridge {
         composeTextView = textView
     }
 
+    func focusComposeTextView() {
+        guard let composeTextView else { return }
+        if composeTextView.isFirstResponder {
+            composeTextView.resignFirstResponder()
+            DispatchQueue.main.async { [weak composeTextView] in
+                composeTextView?.becomeFirstResponder()
+            }
+        } else {
+            composeTextView.becomeFirstResponder()
+        }
+    }
+
+    func dismissComposeTextViewKeyboard() {
+        composeTextView?.resignFirstResponder()
+        composeTextView?.window?.endEditing(true)
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+    }
+
     // Prefer the coordinator-captured selection for dictation start to avoid transient
     // UIKit selection collapse when gesture/tap focus changes right before activation.
     func setPreferredSelectionRange(_ selectionRange: NSRange, for sessionKey: String?) {
         guard let sessionKey, !sessionKey.isEmpty else { return }
-        preferredSelectionRangeBySession[sessionKey] = selectionRange
+        let liveSelectionRange = composeTextView?.selectedRange ?? selectionRange
+        preferredSelectionRangeBySession[sessionKey] = liveSelectionRange
     }
 
     func noteUserEdit(

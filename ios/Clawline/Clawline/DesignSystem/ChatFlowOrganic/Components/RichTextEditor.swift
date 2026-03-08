@@ -19,6 +19,7 @@ struct RichTextEditor: UIViewRepresentable {
     @Binding var pendingInsertions: [PendingAttachment]
     var resetToken: Int
     var focusTrigger: Int
+    var dismissTrigger: Int
     var isEditable: Bool
     var isKeyboardVisible: Bool
     var tintColor: UIColor
@@ -59,6 +60,8 @@ struct RichTextEditor: UIViewRepresentable {
         textView.keyboardDismissMode = .none
 #endif
         textView.returnKeyType = .send
+        textView.accessibilityIdentifier = "compose-text-view"
+        textView.accessibilityLabel = "Compose message"
         textView.tintColor = tintColor
         textView.textColor = textColor
         textView.autocorrectionType = .yes
@@ -151,6 +154,10 @@ struct RichTextEditor: UIViewRepresentable {
             trigger: focusTrigger,
             isKeyboardVisible: isKeyboardVisible
         )
+        context.coordinator.applyDismissIfNeeded(
+            on: textView,
+            trigger: dismissTrigger
+        )
         context.coordinator.updateHeight(for: textView, allowAutoScroll: false)
         context.coordinator.enforceBaseAttributesIfNeeded(on: textView)
         context.coordinator.ensureTypingAttributes(on: textView)
@@ -173,6 +180,7 @@ struct RichTextEditor: UIViewRepresentable {
     final class Coordinator: NSObject, UITextViewDelegate, UIGestureRecognizerDelegate {
         var parent: RichTextEditor
         private var lastFocusTrigger: Int = 0
+        private var lastDismissTrigger: Int = 0
         var isApplyingLocalEdit = false
         var isInsertingAttachments = false
         var isUpdatingFromSwiftUI = false
@@ -191,11 +199,20 @@ struct RichTextEditor: UIViewRepresentable {
                 isKeyboardVisible: parent.isKeyboardVisible
             ) {
                 textView.resignFirstResponder()
-                DispatchQueue.main.async {
-                    textView.becomeFirstResponder()
+                DispatchQueue.main.async { [weak self, weak textView] in
+                    guard let self, let textView else { return }
+                    let becameFirstResponder = textView.becomeFirstResponder()
+                    if becameFirstResponder || textView.isFirstResponder {
+                        self.parent.onFocusChange(true)
+                    }
                 }
             } else if !textView.isFirstResponder {
-                textView.becomeFirstResponder()
+                let becameFirstResponder = textView.becomeFirstResponder()
+                if becameFirstResponder || textView.isFirstResponder {
+                    parent.onFocusChange(true)
+                }
+            } else {
+                parent.onFocusChange(true)
             }
         }
 
@@ -315,12 +332,29 @@ struct RichTextEditor: UIViewRepresentable {
                 isKeyboardVisible: isKeyboardVisible
             ) {
                 textView.resignFirstResponder()
-                DispatchQueue.main.async {
-                    textView.becomeFirstResponder()
+                DispatchQueue.main.async { [weak self, weak textView] in
+                    guard let self, let textView else { return }
+                    let becameFirstResponder = textView.becomeFirstResponder()
+                    if becameFirstResponder || textView.isFirstResponder {
+                        self.parent.onFocusChange(true)
+                    }
                 }
             } else {
-                textView.becomeFirstResponder()
+                let becameFirstResponder = textView.becomeFirstResponder()
+                if becameFirstResponder || textView.isFirstResponder {
+                    parent.onFocusChange(true)
+                }
             }
+        }
+
+        func applyDismissIfNeeded(on textView: UITextView, trigger: Int) {
+            guard trigger != lastDismissTrigger else { return }
+            lastDismissTrigger = trigger
+            guard trigger > 0 else { return }
+            guard textView.isFirstResponder || parent.isKeyboardVisible else { return }
+            textView.resignFirstResponder()
+            textView.window?.endEditing(true)
+            parent.onFocusChange(false)
         }
 
         private func ensureCaretVisible(in textView: UITextView) {

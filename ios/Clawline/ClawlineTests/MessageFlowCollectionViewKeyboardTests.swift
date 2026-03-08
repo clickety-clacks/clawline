@@ -4,9 +4,15 @@ import UIKit
 
 @MainActor
 struct MessageFlowCollectionViewKeyboardTests {
-    @Test("Focused editor disables interactive keyboard dismissal")
-    func focusedEditorDisablesInteractiveKeyboardDismissal() {
-        #expect(MessageFlowCollectionView.keyboardDismissModeForInputFocus(true) == .none)
-        #expect(MessageFlowCollectionView.keyboardDismissModeForInputFocus(false) == .interactive)
+    @Test("Active dictation blocks list-driven keyboard dismissal")
+    func activeDictationBlocksListDrivenKeyboardDismissal() {
+        #expect(MessageFlowCollectionView.keyboardDismissModeForInputFocus(true, isDictationActive: true) == .none)
+        #expect(MessageFlowCollectionView.keyboardDismissModeForInputFocus(false, isDictationActive: true) == .none)
+    }
+
+    @Test("Inactive dictation preserves normal interactive dismissal")
+    func inactiveDictationPreservesInteractiveDismissal() {
+        #expect(MessageFlowCollectionView.keyboardDismissModeForInputFocus(true, isDictationActive: false) == .interactive)
+        #expect(MessageFlowCollectionView.keyboardDismissModeForInputFocus(false, isDictationActive: false) == .interactive)
     }
 }

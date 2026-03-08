@@ -282,6 +282,11 @@ final class DictationSession {
     private var dictationAttemptID: UInt64 = 0
     private var activeAttemptID: UInt64?
     private var audioDecodeTimeoutRecoveryCount: Int = 0
+    private let uiTestSessionKey = "agent:main:ui-test:main"
+
+    private var isKeyboardDictationUITestMode: Bool {
+        ProcessInfo.processInfo.arguments.contains("--ui-test-keyboard-dictation")
+    }
 
     private func durationSeconds(_ duration: Duration) -> Double {
         let components = duration.components
@@ -359,7 +364,14 @@ final class DictationSession {
         reduceMotionEnabled: Bool,
         contextTerms: [String] = []
     ) {
-        self.currentSessionKey = sessionKey
+        let effectiveSessionKey: String
+        if sessionKey.isEmpty && isKeyboardDictationUITestMode {
+            effectiveSessionKey = uiTestSessionKey
+        } else {
+            effectiveSessionKey = sessionKey
+        }
+
+        self.currentSessionKey = effectiveSessionKey
         self.composeIsEmpty = composeIsEmpty
         self.isTextFieldFocused = textFieldFocused
         self.selectionLength = selectionLength
@@ -368,7 +380,7 @@ final class DictationSession {
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
 
-        if sessionKey.isEmpty {
+        if effectiveSessionKey.isEmpty {
             teardownPhase1(reason: PrewarmTeardownReason.viewInactive.rawValue)
         } else {
             preparePhase1IfNeeded()
@@ -377,8 +389,8 @@ final class DictationSession {
         if isDictationActive,
            let originSessionKey,
            !originSessionKey.isEmpty,
-           !sessionKey.isEmpty,
-           sessionKey != originSessionKey {
+           !effectiveSessionKey.isEmpty,
+           effectiveSessionKey != originSessionKey {
             requestStreamSwitchStopIfNeeded(trigger: "stream_switch_context_update")
         }
 
@@ -415,6 +427,29 @@ final class DictationSession {
 
     func setComposeTextView(_ textView: PastableTextView?) {
         bridge.setComposeTextView(textView)
+    }
+
+    func focusComposeTextViewForTesting() {
+        bridge.focusComposeTextView()
+    }
+
+    func dismissComposeTextViewKeyboard() {
+        bridge.dismissComposeTextViewKeyboard()
+    }
+
+    func stopDictationForKeyboardDismissUITest() {
+        guard isDictationActive else { return }
+        Task { [weak self] in
+            await self?.stopKeep(
+                reason: "ui_test_keyboard_dismiss",
+                timeout: .zero,
+                announceStop: false,
+                gracefulFinalize: false,
+                collapseSurface: true,
+                collapseSurfaceImmediately: true,
+                trigger: "ui_test_keyboard_dismiss"
+            )
+        }
     }
 
     func setComposeSelectionRange(_ selectionRange: NSRange) {

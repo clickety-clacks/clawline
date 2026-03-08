@@ -3971,7 +3971,9 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     }
 
     var isUserInteracting: Bool {
-        collectionView.isDragging || collectionView.isTracking
+        // Shared SBB interaction gate across iOS + visionOS.
+        // Keep show/hide transitions in one state-machine path regardless of render layer.
+        collectionView.isDragging || collectionView.isTracking || collectionView.isDecelerating
     }
 
     var isPinnedToBottomIntent: Bool {

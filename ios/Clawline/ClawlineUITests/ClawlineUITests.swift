@@ -133,7 +133,7 @@ final class ClawlineUITests: XCTestCase {
     }
 
     @MainActor
-    func testWhileDictatingListDragInteractivelyDismissesKeyboard() throws {
+    func testWhileDictatingListDragDoesNotDismissKeyboard() throws {
         let app = makeKeyboardDictationApp()
         app.launch()
 
@@ -142,7 +142,7 @@ final class ClawlineUITests: XCTestCase {
         waitForKeyboardState(in: app, focused: true, keyboardVisible: true, dictating: true)
 
         swipeDownOnMessageList(in: app)
-        waitForKeyboardState(in: app, focused: false, keyboardVisible: false, dictating: true)
+        waitForKeyboardState(in: app, focused: true, keyboardVisible: true, dictating: true)
     }
 
     @MainActor
@@ -207,8 +207,12 @@ final class ClawlineUITests: XCTestCase {
     @MainActor
     private func tapComposeInput(in app: XCUIApplication) {
         let textView = app.textViews["compose-text-view"]
-        if textView.waitForExistence(timeout: 2), textView.isHittable {
-            textView.tap()
+        if textView.waitForExistence(timeout: 2) {
+            if textView.isHittable {
+                textView.tap()
+            } else {
+                textView.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+            }
             return
         }
 

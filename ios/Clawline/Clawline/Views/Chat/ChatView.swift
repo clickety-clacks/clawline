@@ -844,15 +844,6 @@ struct ChatView: View {
         .ignoresSafeArea(.keyboard)
 #if !os(visionOS)
         .contentShape(Rectangle())
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 12)
-                .onEnded { value in
-                    guard isKeyboardVisible else { return }
-                    guard value.translation.height > 18 else { return }
-                    guard abs(value.translation.height) > abs(value.translation.width) else { return }
-                    dismissComposeKeyboardFromUserGesture()
-                }
-        )
 #endif
         .onChange(of: layoutInputs) { _, _ in
             layoutCoordinator.updateInputs(layoutInputs, metrics: layoutMetrics)
@@ -2479,6 +2470,9 @@ private final class StreamPagerProbeView: UIView {
             oldPan.removeTarget(self, action: #selector(handlePagerPan(_:)))
         }
         observedPagerScrollView = pagerScrollView
+        if pagerScrollView.keyboardDismissMode != .interactive {
+            pagerScrollView.keyboardDismissMode = .interactive
+        }
         pagerScrollView.panGestureRecognizer.addTarget(self, action: #selector(handlePagerPan(_:)))
     }
 

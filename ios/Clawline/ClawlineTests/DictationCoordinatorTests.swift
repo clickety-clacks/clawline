@@ -727,6 +727,56 @@ struct DictationCoordinatorTests {
         #expect(harness.client.connectCallCount >= 2)
     }
 
+    @Test("Walkie activation reaches listening-ready on a healthy connection")
+    @MainActor
+    func walkieActivationBecomesListeningReady() async {
+        let harness = DictationTestHarness()
+        let coordinator = harness.makeCoordinator()
+
+        coordinator.updateContext(
+            sessionKey: harness.host.activeSessionKey,
+            composeIsEmpty: true,
+            textFieldFocused: false,
+            selectionLength: 0,
+            reduceMotionEnabled: false
+        )
+
+        coordinator.startWalkieTalkieDictation()
+
+        await waitUntil { coordinator.isListeningReady }
+
+        #expect(coordinator.isWalkieTalkieActive)
+        #expect(coordinator.isListening)
+        #expect(coordinator.isListeningReady)
+        #expect(harness.audio.started)
+        #expect(harness.client.connected)
+        #expect(coordinator.errorMessage == nil)
+    }
+
+    @Test("Sticky dictation can start while text is selected")
+    @MainActor
+    func stickyDictationCanStartWithSelectedText() async {
+        let harness = DictationTestHarness()
+        let coordinator = harness.makeCoordinator()
+
+        coordinator.updateContext(
+            sessionKey: harness.host.activeSessionKey,
+            composeIsEmpty: false,
+            textFieldFocused: true,
+            selectionLength: 5,
+            reduceMotionEnabled: false
+        )
+
+        coordinator.startStickyDictation()
+
+        await waitUntil { coordinator.isListeningReady }
+
+        #expect(coordinator.isStickyDictationActive)
+        #expect(coordinator.isListening)
+        #expect(coordinator.isListeningReady)
+        #expect(coordinator.swipeActivationEnabled == false)
+    }
+
     @Test("Audio interruption does not force dictation stop")
     @MainActor
     func interruptionBeganKeepsSessionAlive() async {

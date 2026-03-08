@@ -67,6 +67,75 @@ struct ComposeInputDictationBridgeTests {
 
         #expect(textView.attributedText.string == "hello beautiful world")
     }
+
+    @Test("Dictation keeps replacing the tracked transcript span after the initial insertion shifts text")
+    func dictationTracksShiftedTranscriptSpanAcrossUpdates() {
+        let host = BridgeHost()
+        let bridge = ComposeInputDictationBridge(host: host)
+        let textView = PastableTextView()
+        textView.attributedText = NSAttributedString(string: "hello world")
+        textView.selectedRange = NSRange(location: 11, length: 0)
+        bridge.setComposeTextView(textView)
+
+        let sessionKey = "agent:main:test:main"
+        let snapshot = ComposeDraftSnapshot(
+            content: NSAttributedString(string: "hello world"),
+            attachments: [:]
+        )
+
+        bridge.setPreferredSelectionRange(NSRange(location: 6, length: 0), for: sessionKey)
+        bridge.resetTranscriptState(for: sessionKey)
+
+        bridge.applySegmentUpdate(
+            DictationSegmentUpdate(
+                provisionalText: "bea",
+                committedSegments: [],
+                finished: false,
+                sawEndpoint: false,
+                hadAnyTokens: true
+            ),
+            baseSnapshot: snapshot,
+            originSessionKey: sessionKey
+        )
+
+        bridge.applySegmentUpdate(
+            DictationSegmentUpdate(
+                provisionalText: "beautiful ",
+                committedSegments: [],
+                finished: false,
+                sawEndpoint: false,
+                hadAnyTokens: true
+            ),
+            baseSnapshot: snapshot,
+            originSessionKey: sessionKey
+        )
+
+        bridge.applySegmentUpdate(
+            DictationSegmentUpdate(
+                provisionalText: "",
+                committedSegments: ["beautiful "],
+                finished: false,
+                sawEndpoint: true,
+                hadAnyTokens: true
+            ),
+            baseSnapshot: snapshot,
+            originSessionKey: sessionKey
+        )
+
+        bridge.applySegmentUpdate(
+            DictationSegmentUpdate(
+                provisionalText: "again ",
+                committedSegments: [],
+                finished: false,
+                sawEndpoint: false,
+                hadAnyTokens: true
+            ),
+            baseSnapshot: snapshot,
+            originSessionKey: sessionKey
+        )
+
+        #expect(textView.attributedText.string == "hello beautiful again world")
+    }
 }
 
 @MainActor

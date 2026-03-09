@@ -1055,12 +1055,12 @@ struct MessageInputBar: View {
             }
             .accessibilityAction(named: Text("Start Sticky Dictation")) {
                 guard dictation.micVisible || dictation.swipeActivationEnabled else { return }
-                dictation.setComposeSelectionRange(selectionRange)
+                dictation.captureComposeSelectionRangeForActivation(selectionRange)
                 dictation.startStickyDictation()
             }
             .accessibilityAction(named: Text("Start Walkie-Talkie Dictation")) {
                 guard dictation.micVisible || dictation.swipeActivationEnabled else { return }
-                dictation.setComposeSelectionRange(selectionRange)
+                dictation.captureComposeSelectionRangeForActivation(selectionRange)
                 dictation.startWalkieTalkieDictation()
                 beginMicFadeOut(fromSwipe: !dictation.micVisible)
             }
@@ -1262,7 +1262,7 @@ struct MessageInputBar: View {
 
     private func startStickyFromMicTap() {
         micTapActivationTask?.cancel()
-        dictation.setComposeSelectionRange(selectionRange)
+        dictation.captureComposeSelectionRangeForActivation(selectionRange)
         let shouldPreserveKeyboardFocus = isTextFieldFocused || isKeyboardVisible
         dictation.beginGesturePrewarm()
         withAnimation(settleSpring) {
@@ -1313,7 +1313,7 @@ struct MessageInputBar: View {
                 swipeActivationEnabled: dictation.swipeActivationEnabled
             )
             shouldRestoreFocusAfterGestureDictationStart = isTextFieldFocused || isKeyboardVisible
-            dictation.setComposeSelectionRange(selectionRange)
+            dictation.captureComposeSelectionRangeForActivation(selectionRange)
             dictation.beginGesturePrewarm()
         }
 

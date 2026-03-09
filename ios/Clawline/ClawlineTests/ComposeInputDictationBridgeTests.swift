@@ -136,6 +136,72 @@ struct ComposeInputDictationBridgeTests {
 
         #expect(textView.attributedText.string == "hello beautiful again world")
     }
+
+    @Test("Activation capture wins over later ambient selection changes before dictation starts")
+    func activationCapturePreservesCaretBeforeReset() {
+        let host = BridgeHost()
+        let bridge = ComposeInputDictationBridge(host: host)
+        let textView = PastableTextView()
+        textView.attributedText = NSAttributedString(string: "hello world")
+        textView.selectedRange = NSRange(location: 11, length: 0)
+        bridge.setComposeTextView(textView)
+
+        let sessionKey = "agent:main:test:main"
+        let snapshot = ComposeDraftSnapshot(
+            content: NSAttributedString(string: "hello world"),
+            attachments: [:]
+        )
+
+        bridge.captureSelectionRangeForActivation(NSRange(location: 6, length: 0), for: sessionKey)
+        bridge.setPreferredSelectionRange(NSRange(location: 11, length: 0), for: sessionKey)
+        bridge.resetTranscriptState(for: sessionKey)
+        bridge.applySegmentUpdate(
+            DictationSegmentUpdate(
+                provisionalText: "beautiful ",
+                committedSegments: [],
+                finished: false,
+                sawEndpoint: false,
+                hadAnyTokens: true
+            ),
+            baseSnapshot: snapshot,
+            originSessionKey: sessionKey
+        )
+
+        #expect(textView.attributedText.string == "hello beautiful world")
+    }
+
+    @Test("Activation capture preserves selected replacement span before reset")
+    func activationCapturePreservesSelectedReplacementBeforeReset() {
+        let host = BridgeHost()
+        let bridge = ComposeInputDictationBridge(host: host)
+        let textView = PastableTextView()
+        textView.attributedText = NSAttributedString(string: "alpha BETA omega")
+        textView.selectedRange = NSRange(location: 16, length: 0)
+        bridge.setComposeTextView(textView)
+
+        let sessionKey = "agent:main:test:main"
+        let snapshot = ComposeDraftSnapshot(
+            content: NSAttributedString(string: "alpha BETA omega"),
+            attachments: [:]
+        )
+
+        bridge.captureSelectionRangeForActivation(NSRange(location: 6, length: 4), for: sessionKey)
+        bridge.setPreferredSelectionRange(NSRange(location: 16, length: 0), for: sessionKey)
+        bridge.resetTranscriptState(for: sessionKey)
+        bridge.applySegmentUpdate(
+            DictationSegmentUpdate(
+                provisionalText: "spoken",
+                committedSegments: [],
+                finished: false,
+                sawEndpoint: false,
+                hadAnyTokens: true
+            ),
+            baseSnapshot: snapshot,
+            originSessionKey: sessionKey
+        )
+
+        #expect(textView.attributedText.string == "alpha spoken omega")
+    }
 }
 
 @MainActor

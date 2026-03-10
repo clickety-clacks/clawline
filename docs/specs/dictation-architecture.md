@@ -882,3 +882,17 @@ Motion stored state: `settleDurationMultiplier: Double = 1.0`. Set to 2.0 to slo
 4. **UITextView mutation coverage.** `noteUserEdit()` must observe all user mutation paths (typing, paste, autocorrect, undo/redo). Missing a path can desync bridge UTF-16 boundary state.
 
 5. **Suppression tradeoff.** Skipping the first endpoint commit after suppression intentionally drops Soniox late-turn corrections for that segment. This is expected by design ("user wins"), but should be treated as an explicit product tradeoff.
+
+---
+
+## Appendix: Preserved Notes
+
+### From: scratch/dictation-bugs-2026-03-08.md (verified against commit 5c718fad2)
+
+**Known dictation bugs (as of 2026-03-08):**
+1. **Keyboard dismiss non-interactive** — pull-down gesture drops keyboard instantly; must use interactive keyboard dismiss mode.
+2. **Opening dictation flickers keyboard** — starting dictation briefly dismisses then re-shows keyboard; should stay visible continuously.
+3. **Walkie-talkie mode stuck on "connecting"** — never transitions to listening; swipe-up dictation does work, so audio capture is functional; only walkie-talkie activation path is broken.
+4. **Dictated text appends instead of inserting at cursor** — must insert at current cursor position.
+5. **Selection replacement broken** — selecting text and dictating appends to end; must replace selected text.
+6. **Cursor drag conflicts with dictation UI gesture** — dragging cursor also drags dictation interface; gestures must be independent.

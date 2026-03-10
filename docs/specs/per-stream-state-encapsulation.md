@@ -464,3 +464,51 @@ Related behavioral constraints to preserve:
 - `/Users/mike/shared-workspace/clawline/specs/message-stream-seam.md` (canonical write seam for message mutations)
 
 No unspecced defensive additions. If an implementation gap appears, update this spec first.
+
+---
+
+## Appendix: Preserved Notes
+
+### From: retros/per-stream-cv-analysis.md
+
+**TabView vs show/hide for per-stream MessageFlowCollectionView:**
+
+The `per-stream-state` branch used a paged `TabView` (one MFCV per tab). Because `TabView` can recycle off-screen pages, each stream switch behaves like a context hand-off — triggering the full switch-seam pipeline even though each tab has its own MFCV instance.
+
+**Switch-seam complexity introduced by TabView approach (approximate line counts deletable with show/hide):**
+The branch added these exclusively to manage the TabView recycling/timing problem:
+- `PerStreamRuntimeState` struct (per-stream mutable state centralized)
+- `runStreamContextSwitchSeam` (switch ownership handoff function)
+- Two-key ChatViewModel split: `uiSelectedSessionKey` vs `engineActiveSessionKey`
+- Epoch-based debounced engine activation with pager interaction/settle signals
+- `isRenderPolicyFrozen` flag to block heavy render work during pager animation
+- Two-phase scroll restore (`pendingTail → pendingFullConfirmation → confirmed`)
+- Zero-sections guard in `MessageFlowLayout.prepare()`
+
+**Show/hide proposal advantages:**
+- Stream switching becomes a `view.isHidden` toggle — no timing race.
+- Large portions of the switch-seam code (several hundred lines in MFCV + ChatViewModel) become deletable.
+- `runStreamContextSwitchSeam`, epoch debounce, render-freeze, two-phase scroll restore all become unnecessary.
+
+**Key constraint:** Show/hide requires allocating all stream views up front (memory tradeoff vs TabView's lazy recycling). For typical 2–5 Clawline streams, this is acceptable.
+
+---
+
+### From: retros/t113-spec-gap-analysis.md + retros/t113-transition-surface-audit.md
+
+**Transition Surface Contract (three rules that prevent integration bugs by construction):**
+
+**Rule 1: No silent defaults on session-critical parameters.**
+Any method parameter that controls session binding must be required (no default value) or must have a provably safe default for ALL existing callers. If a safe default is impossible, the parameter must be required. (Prevents boundary bugs like TS-1 where `viewDidLayoutSubviews` calls `update()` with missing session-critical parameters.)
+
+**Rule 2: Universal async continuation rule.**
+Any closure executing after yielding the main actor that touches per-stream state must capture and validate `(sessionKey, generation)`. This applies to EVERY `DispatchQueue.main.async`, every `UIView.animate` completion, every `scrollViewDidEnd*` delegate — not just timers. Property shims (computed properties routing through `activeStateKey()`) are only safe in synchronous call paths where `activeStateKey()` is stable within a single main-actor turn.
+
+**Rule 3: Async lifecycle cleanup invariant.**
+Any per-stream state set synchronously as a pre-condition for an async operation (e.g., setting `morphTargetMessageId`) must be cleaned up in ALL exit paths of the async continuation, including guard-failure early returns.
+
+**Meta principle:** Specs for per-stream state must model the boundary between new and existing code, not just the new subsystem in isolation. Every integration bug found in T113 audit lived at the old↔new boundary, not in the new code itself.
+
+**SBB emission idempotency rule:**
+- Forced emission (`force: true`) is permitted only on session switch (new session's state must be reported) and on transitions that invalidate the emission cache.
+- Steady-state path must use change detection (`lastReportedHideIndicator != shouldHide`), not forced emission. Prevents per-frame dictionary mutations in SwiftUI state.

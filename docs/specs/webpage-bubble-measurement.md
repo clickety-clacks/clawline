@@ -387,3 +387,15 @@ Non-goal guardrails:
 - 2026-03-04: Adversarial self-review pass applied; clarified scope boundaries, private-module constraint, and concrete acceptance/regression checks.
 - 2026-03-04: Re-audited source paths for T140; documented that `BubbleHeightPolicy` is nested in `BubbleSizingV2.swift` and reran adversarial self-review.
 - 2026-03-04: Incorporated Opus adversarial findings: added headless-layout validation gate, explicit measurement-key semantics, bounded concurrency model, rollback criteria, and phase-2 network-duplication question.
+
+---
+
+## Appendix: Preserved Notes
+
+### From: retros/webpage-bubble-measurement-adversarial-20260304.md
+
+**Blocking issues identified in adversarial review:**
+
+1. **Headless `WebPage` layout not verified:** The spec assumes `WebPage` renders content and completes layout before the `.finished` navigation event. This is unverified against SDK interfaces. `WKWebView` requires view attachment for accurate intrinsic sizing — if `WebPage` has the same requirement, the headless measurement premise fails. Must be verified empirically before implementation.
+
+2. **Cache key design underspecified:** The replacement key (after removing inset coupling) is described vaguely. Must explicitly define `WebPageMeasurementKey` components: what constitutes "content identity" (HTML hash? URL? Message ID?), what is "typography/metrics fingerprint" (Dynamic Type category? Font size? Scale factor?), and invalidation semantics for streaming/edited HTML messages.

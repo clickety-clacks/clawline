@@ -811,3 +811,32 @@ All three Round 1 blockers have been resolved:
 8. Relay message dispatch (`relay.activated`, `chat.send`, `streams.*`, `auth.refresh`)
 9. Relay push subscription (`chat.incoming`, `event` forwarding) + background task
 10. `ClawlineApp.swift` integration + `EnvironmentKeys.swift` additions
+
+---
+
+## Appendix: Preserved Notes
+
+### From: retros/watch-ios-support-handoff.md
+
+**Watch app transport architecture (direct-first):**
+
+`WatchProviderTransport` manages four states:
+```
+.probing → .direct   (direct WebSocket succeeded)
+.probing → .relay    (direct failed, iPhone relay activated)
+.relay   → .probing  (relay send fails, retry direct)
+.direct  → .probing  (direct connection dropped)
+any      → .disconnected  (phone unreachable, direct failed, no relay)
+```
+
+The `.relay → .probing` on send failure was a specific bug fix. Originally, relay send failure went straight to `.disconnected` — too aggressive, since the phone might still be reachable for other traffic.
+
+**Why direct-first:** Relay ties voice latency to iPhone proximity and network state. Direct is possible because the Watch shares credentials with the iOS app (provider token, base URL).
+
+**Credential sync flow:**
+```
+iOS AuthManager / SonioxKeyStore / CartesiaKeyStore
+  → WatchConnectivityService.syncCredentials()
+    updateApplicationContext(...)  ← Watch reads on activation (recovery path)
+    transferUserInfo(...)          ← async queue, delivered even when Watch sleeps
+```

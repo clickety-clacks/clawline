@@ -163,6 +163,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     private static let bubbleSizingV2RemeasureDebounceSeconds: TimeInterval = 0.45
     private static let bubbleSizingV2RemeasureMaxWaitSeconds: TimeInterval = 2.5
     private static let bubbleSizingV2RestSettleDelaySeconds: TimeInterval = 0.12
+    private static let previewRemeasureRestPollSeconds: TimeInterval = 0.06
     private static let bottomInsetHeightCapInvalidationDebounceSeconds: TimeInterval = 0.20
     private static let restoreMaxConfirmationRetries: Int = 3
 
@@ -217,6 +218,8 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         var bubbleSizingV2PendingRemeasureIds: Set<String> = []
         var bubbleSizingV2RemeasureDebounceTimer: Timer?
         var bubbleSizingV2DeferredFlushTimer: Timer?
+        var deferredPreviewRemeasureIds: Set<String> = []
+        var deferredPreviewRemeasureTimer: Timer?
 
         var deferredBottomInsetRemeasureIds: Set<String> = []
         var bottomInsetRemeasureTimer: Timer?
@@ -690,6 +693,22 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         }
     }
 
+    private var deferredPreviewRemeasureIds: Set<String> {
+        get { activeStateKey().map { readState(for: $0).deferredPreviewRemeasureIds } ?? [] }
+        set {
+            guard let key = activeStateKey() else { return }
+            mutateState(for: key) { $0.deferredPreviewRemeasureIds = newValue }
+        }
+    }
+
+    private var deferredPreviewRemeasureTimer: Timer? {
+        get { activeStateKey().flatMap { readState(for: $0).deferredPreviewRemeasureTimer } }
+        set {
+            guard let key = activeStateKey() else { return }
+            mutateState(for: key) { $0.deferredPreviewRemeasureTimer = newValue }
+        }
+    }
+
     private var deferredBottomInsetRemeasureIds: Set<String> {
         get { activeStateKey().map { readState(for: $0).deferredBottomInsetRemeasureIds } ?? [] }
         set {
@@ -743,6 +762,14 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     }
 
     deinit {
+        let sessionKeys = Array(perStreamStateBySessionKey.keys)
+        for sessionKey in sessionKeys {
+            let state = readState(for: sessionKey)
+            state.deferredPreviewRemeasureTimer?.invalidate()
+            mutateState(for: sessionKey) { runtimeState in
+                runtimeState.deferredPreviewRemeasureTimer = nil
+            }
+        }
         NotificationCenter.default.removeObserver(self, name: UIApplication.willResignActiveNotification, object: nil)
         pendingBottomInsetHeightCapInvalidation?.cancel()
     }
@@ -1030,6 +1057,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             setSalientHighlightIsScrolling(false)
         }
         if !decelerate {
+            flushDeferredPreviewRemeasuresIfPossible()
             guard let sessionKey = callbackSessionKey() else { return }
             handleUserScrollSettled(sessionKey: sessionKey)
             checkFirstUnreadCrossingIfNeeded(sessionKey: sessionKey)
@@ -1045,6 +1073,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
 #if os(visionOS)
         updateVisibleCellOpacity()
 #endif
+        flushDeferredPreviewRemeasuresIfPossible()
         setSalientHighlightIsScrolling(false)
         guard let sessionKey = callbackSessionKey() else { return }
         handleUserScrollSettled(sessionKey: sessionKey)
@@ -1057,6 +1086,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     }
 
     func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
+        flushDeferredPreviewRemeasuresIfPossible()
         guard let sessionKey = callbackSessionKey() else { return }
         handleProgrammaticScrollEnded(sessionKey: sessionKey)
         checkFirstUnreadCrossingIfNeeded(sessionKey: sessionKey)
@@ -1133,7 +1163,9 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                         animationOptions: UIView.AnimationOptions = []) {
         let previousBottomInset = collectionView.contentInset.bottom
         let delta = totalBottomInset - previousBottomInset
-        let shouldPinToBottom = sbbState.isPinnedToBottomIntent && !isUserInteracting
+        // Keep keyboard/inset anchoring tied to active finger interaction only.
+        // Deceleration must not disable this pinning path.
+        let shouldPinToBottom = sbbState.isPinnedToBottomIntent && !isActivelyDraggingOrTracking
         currentBottomInset = totalBottomInset
         // Avoid re-applying the same inset; on visionOS we can get frequent relayout ticks and
         // touching `contentInset` even with the same value can kick the scroll view.
@@ -4080,6 +4112,13 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     }
 
     var isUserInteracting: Bool {
+        // Shared SBB interaction gate across iOS + visionOS.
+        // Include deceleration so SBB state transitions do not settle mid-fling.
+        collectionView.isDragging || collectionView.isTracking || collectionView.isDecelerating
+    }
+
+    var isActivelyDraggingOrTracking: Bool {
+        // Keyboard dismiss + inset pinning should only follow active touch interaction.
         collectionView.isDragging || collectionView.isTracking
     }
 
@@ -4131,6 +4170,15 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             }
             return
         }
+        guard isScrollFullyStoppedForPreviewRemeasure() else {
+            deferredPreviewRemeasureIds.insert(messageId)
+            scheduleDeferredPreviewRemeasureFlushAfterRest()
+            return
+        }
+        applyRequestedLayoutNow(messageId: messageId)
+    }
+
+    private func applyRequestedLayoutNow(messageId: String) {
         guard let viewModel, let message = messagesById[messageId] else {
             invalidateLayout(for: messageId)
             return
@@ -4170,6 +4218,37 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             verticalFittingPriority: .fittingSizeLevel
         )
         applyMeasuredSize(measured, for: messageId)
+    }
+
+    private func isScrollFullyStoppedForPreviewRemeasure() -> Bool {
+        !collectionView.isDragging && !collectionView.isTracking && !collectionView.isDecelerating
+    }
+
+    private func scheduleDeferredPreviewRemeasureFlushAfterRest() {
+        guard !deferredPreviewRemeasureIds.isEmpty else { return }
+        guard deferredPreviewRemeasureTimer == nil else { return }
+        let timer = Timer(timeInterval: Self.previewRemeasureRestPollSeconds, repeats: false) { [weak self] _ in
+            guard let self else { return }
+            self.deferredPreviewRemeasureTimer = nil
+            self.flushDeferredPreviewRemeasuresIfPossible()
+            if !self.deferredPreviewRemeasureIds.isEmpty {
+                self.scheduleDeferredPreviewRemeasureFlushAfterRest()
+            }
+        }
+        deferredPreviewRemeasureTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    private func flushDeferredPreviewRemeasuresIfPossible() {
+        guard !deferredPreviewRemeasureIds.isEmpty else { return }
+        guard isScrollFullyStoppedForPreviewRemeasure() else { return }
+        deferredPreviewRemeasureTimer?.invalidate()
+        deferredPreviewRemeasureTimer = nil
+        let ids = Array(deferredPreviewRemeasureIds)
+        deferredPreviewRemeasureIds.removeAll()
+        for id in ids {
+            applyRequestedLayoutNow(messageId: id)
+        }
     }
 
     private func handleBubbleSizingV2LinkPreviewLayout(messageId: String) {
@@ -4463,7 +4542,9 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         if let delta = writeMeasuredSize(messageId: messageId, measurement: snapped) {
             executeInvalidationPlan(.remeasureAndShift([(id: messageId, delta: delta)]))
         } else {
+            let viewportAnchor = captureBubbleSizingV2ViewportAnchor()
             scheduleLayoutInvalidation()
+            scheduleBubbleSizingV2ViewportAnchorCompensation(viewportAnchor)
         }
         if messageId == lastMessageId, let sessionKey = callbackSessionKey() {
             scheduleScrollToBottom(sessionKey: sessionKey, animated: false, attempts: 1)

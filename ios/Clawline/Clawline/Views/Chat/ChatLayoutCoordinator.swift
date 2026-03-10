@@ -234,7 +234,7 @@ final class ChatLayoutCoordinator {
             targetInset: targetInset,
             barHeight: currentBarHeight,
             previousBarHeight: lastAppliedBarHeight,
-            isUserInteracting: list?.isUserInteracting ?? false,
+            isUserInteracting: list?.isActivelyDraggingOrTracking ?? false,
             isPinnedToBottomIntent: list?.isPinnedToBottomIntent ?? false,
             didJustStabilize: didJustStabilize,
             wasNearBottom: wasNearBottom,

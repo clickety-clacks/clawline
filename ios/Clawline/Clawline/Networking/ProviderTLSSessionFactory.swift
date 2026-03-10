@@ -27,6 +27,11 @@ protocol ProviderTLSSessionFactoring: AnyObject {
     var currentGeneration: Int { get }
 
     func makeSession(for role: ProviderTLSSessionRole) -> ProviderTLSSessionHandle
+    func withTaskStartBoundary<T>(
+        for role: ProviderTLSSessionRole,
+        current: ProviderTLSSessionHandle?,
+        _ body: (_ handle: ProviderTLSSessionHandle, _ staleSession: URLSession?) throws -> T
+    ) rethrows -> T
     func addPolicyChangeObserver(_ observer: @escaping (Int) -> Void) -> ProviderTLSPolicyChangeObservation
     func removePolicyChangeObserver(_ observation: ProviderTLSPolicyChangeObservation)
 }
@@ -73,24 +78,31 @@ final class ProviderTLSSessionFactory: ProviderTLSSessionFactoring {
     }
 
     func makeSession(for role: ProviderTLSSessionRole) -> ProviderTLSSessionHandle {
-        let configuration = URLSessionConfiguration.default
-        let delegate: URLSessionDelegate
+        lock.lock()
+        defer { lock.unlock() }
+        return makeSessionLocked(for: role, generation: generation)
+    }
 
-        switch role {
-        case .webSocket(let connectTimeout, let resourceTimeout):
-            configuration.timeoutIntervalForRequest = connectTimeout
-            configuration.timeoutIntervalForResource = resourceTimeout
-            delegate = ProviderWebSocketTLSSessionDelegate(policyProvider: policyProvider)
-        case .upload, .assetDownload:
-            configuration.timeoutIntervalForRequest = 20
-            configuration.timeoutIntervalForResource = 360
-            delegate = ProviderHTTPTLSSessionDelegate(policyProvider: policyProvider)
+    func withTaskStartBoundary<T>(
+        for role: ProviderTLSSessionRole,
+        current: ProviderTLSSessionHandle?,
+        _ body: (_ handle: ProviderTLSSessionHandle, _ staleSession: URLSession?) throws -> T
+    ) rethrows -> T {
+        lock.lock()
+        defer { lock.unlock() }
+
+        let handle: ProviderTLSSessionHandle
+        let staleSession: URLSession?
+
+        if let current, current.generation == generation {
+            handle = current
+            staleSession = nil
+        } else {
+            handle = makeSessionLocked(for: role, generation: generation)
+            staleSession = current?.session
         }
 
-        return ProviderTLSSessionHandle(
-            session: sessionBuilder(configuration, delegate),
-            generation: currentGeneration
-        )
+        return try body(handle, staleSession)
     }
 
     func addPolicyChangeObserver(_ observer: @escaping (Int) -> Void) -> ProviderTLSPolicyChangeObservation {
@@ -118,6 +130,27 @@ final class ProviderTLSSessionFactory: ProviderTLSSessionFactoring {
         lock.unlock()
 
         callbacks.forEach { $0(newGeneration) }
+    }
+
+    private func makeSessionLocked(for role: ProviderTLSSessionRole, generation: Int) -> ProviderTLSSessionHandle {
+        let configuration = URLSessionConfiguration.default
+        let delegate: URLSessionDelegate
+
+        switch role {
+        case .webSocket(let connectTimeout, let resourceTimeout):
+            configuration.timeoutIntervalForRequest = connectTimeout
+            configuration.timeoutIntervalForResource = resourceTimeout
+            delegate = ProviderWebSocketTLSSessionDelegate(policyProvider: policyProvider)
+        case .upload, .assetDownload:
+            configuration.timeoutIntervalForRequest = 20
+            configuration.timeoutIntervalForResource = 360
+            delegate = ProviderHTTPTLSSessionDelegate(policyProvider: policyProvider)
+        }
+
+        return ProviderTLSSessionHandle(
+            session: sessionBuilder(configuration, delegate),
+            generation: generation
+        )
     }
 }
 

@@ -131,6 +131,67 @@ struct ProviderTLSSessionIsolationTests {
         #expect(ObjectIdentifier(firstSession) != ObjectIdentifier(taskSpy.sessions[1]))
         firstClient.close(with: .normalClosure)
     }
+
+    @Test("Websocket connector refreshes a cached session at task start when TLS generation has advanced")
+    func webSocketConnectorRefreshesCachedSessionAtTaskStartWhenGenerationAdvances() async throws {
+        let factory = TestTLSSessionFactory()
+        let taskSpy = WebSocketTaskFactorySpy()
+        let connector = URLSessionWebSocketConnector(
+            connectTimeout: 20,
+            resourceTimeout: 360,
+            tlsSessionFactory: factory,
+            webSocketTaskFactory: taskSpy.makeTask(session:request:)
+        )
+        let url = URL(string: "wss://example.com/ws")!
+
+        let firstClient = try await connector.connect(to: url)
+        factory.advanceGenerationBeforeNextTaskStart(for: .webSocket(connectTimeout: 20, resourceTimeout: 360))
+
+        _ = try await connector.connect(to: url)
+
+        #expect(factory.taskStartCalls.filter {
+            if case .webSocket = $0 { return true }
+            return false
+        }.count == 2)
+        #expect(factory.makeCalls.filter {
+            if case .webSocket = $0 { return true }
+            return false
+        }.count == 2)
+        #expect(taskSpy.sessions.count == 2)
+        #expect(ObjectIdentifier(taskSpy.sessions[0]) != ObjectIdentifier(taskSpy.sessions[1]))
+        firstClient.close(with: .normalClosure)
+    }
+
+    @Test("Upload and asset download refresh cached sessions at task start when TLS generation advances")
+    @MainActor
+    func uploadAndAssetDownloadRefreshCachedSessionsAtTaskStartWhenGenerationAdvances() async throws {
+        let factory = TestTLSSessionFactory()
+        let taskSpy = HTTPTaskFactorySpy()
+        let auth = TestAuthManager(token: "jwt")
+        let service = UploadService(
+            auth: auth,
+            baseURLProvider: { URL(string: "https://example.com")! },
+            tlsSessionFactory: factory,
+            dataTaskFactory: taskSpy.makeTask(session:request:completion:)
+        )
+
+        _ = try await service.upload(data: Data("hello".utf8), mimeType: "image/png", filename: "image.png")
+        _ = try await service.download(assetId: "asset_1")
+
+        factory.advanceGenerationBeforeNextTaskStart(for: .upload)
+        factory.advanceGenerationBeforeNextTaskStart(for: .assetDownload)
+
+        _ = try await service.upload(data: Data("hello".utf8), mimeType: "image/png", filename: "image.png")
+        _ = try await service.download(assetId: "asset_1")
+
+        #expect(factory.taskStartCalls.filter { $0 == .upload }.count == 2)
+        #expect(factory.taskStartCalls.filter { $0 == .assetDownload }.count == 2)
+        #expect(factory.makeCalls.filter { $0 == .upload }.count == 2)
+        #expect(factory.makeCalls.filter { $0 == .assetDownload }.count == 2)
+        #expect(taskSpy.sessions.count == 4)
+        #expect(ObjectIdentifier(taskSpy.sessions[0]) != ObjectIdentifier(taskSpy.sessions[2]))
+        #expect(ObjectIdentifier(taskSpy.sessions[1]) != ObjectIdentifier(taskSpy.sessions[3]))
+    }
 }
 
 private final class SessionBuilderSpy {
@@ -145,8 +206,10 @@ private final class SessionBuilderSpy {
 private final class TestTLSSessionFactory: ProviderTLSSessionFactoring {
     private(set) var currentGeneration = 0
     private(set) var makeCalls: [ProviderTLSSessionRole] = []
+    private(set) var taskStartCalls: [ProviderTLSSessionRole] = []
 
     private var observers: [UUID: (Int) -> Void] = [:]
+    private var rolesAdvancingAtTaskStart: [ProviderTLSSessionRole] = []
 
     func makeSession(for role: ProviderTLSSessionRole) -> ProviderTLSSessionHandle {
         makeCalls.append(role)
@@ -154,6 +217,25 @@ private final class TestTLSSessionFactory: ProviderTLSSessionFactoring {
         configuration.protocolClasses = [TestURLProtocol.self]
         let session = URLSession(configuration: configuration)
         return ProviderTLSSessionHandle(session: session, generation: currentGeneration)
+    }
+
+    func withTaskStartBoundary<T>(
+        for role: ProviderTLSSessionRole,
+        current: ProviderTLSSessionHandle?,
+        _ body: (_ handle: ProviderTLSSessionHandle, _ staleSession: URLSession?) throws -> T
+    ) rethrows -> T {
+        taskStartCalls.append(role)
+        if let index = rolesAdvancingAtTaskStart.firstIndex(of: role) {
+            rolesAdvancingAtTaskStart.remove(at: index)
+            currentGeneration += 1
+        }
+
+        if let current, current.generation == currentGeneration {
+            return try body(current, nil)
+        }
+
+        let handle = makeSession(for: role)
+        return try body(handle, current?.session)
     }
 
     func addPolicyChangeObserver(_ observer: @escaping (Int) -> Void) -> ProviderTLSPolicyChangeObservation {
@@ -170,6 +252,10 @@ private final class TestTLSSessionFactory: ProviderTLSSessionFactoring {
         currentGeneration += 1
         let generation = currentGeneration
         observers.values.forEach { $0(generation) }
+    }
+
+    func advanceGenerationBeforeNextTaskStart(for role: ProviderTLSSessionRole) {
+        rolesAdvancingAtTaskStart.append(role)
     }
 }
 
@@ -221,6 +307,51 @@ private final class TestWebSocketTask: ProviderWebSocketTasking {
         self.closeCode = closeCode
         self.closeReason = reason
         continuation.finish()
+    }
+}
+
+private final class HTTPTaskFactorySpy {
+    private(set) var sessions: [URLSession] = []
+
+    func makeTask(
+        session: URLSession,
+        request: URLRequest,
+        completion: @escaping @Sendable (Data?, URLResponse?, (any Error)?) -> Void
+    ) -> any ProviderHTTPTasking {
+        sessions.append(session)
+        let response: URLResponse
+        let data: Data
+
+        if request.url?.path == "/upload" {
+            response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            data = Data(#"{"assetId":"asset_1","mimeType":"image/png"}"#.utf8)
+        } else {
+            response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+            data = Data("image-data".utf8)
+        }
+
+        return TestHTTPTask {
+            completion(data, response, nil)
+        }
+    }
+}
+
+private final class TestHTTPTask: ProviderHTTPTasking {
+    private let onResume: () -> Void
+    private(set) var resumeCount = 0
+    private(set) var cancelCount = 0
+
+    init(onResume: @escaping () -> Void) {
+        self.onResume = onResume
+    }
+
+    func resume() {
+        resumeCount += 1
+        onResume()
+    }
+
+    func cancel() {
+        cancelCount += 1
     }
 }
 

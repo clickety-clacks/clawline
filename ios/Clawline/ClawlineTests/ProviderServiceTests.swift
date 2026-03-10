@@ -212,6 +212,96 @@ struct ProviderServiceTests {
         })
     }
 
+    @Test("Lifecycle auth_result forwards provider replay metadata")
+    func lifecycleAuthResultForwardsReplayMetadata() async throws {
+        let mockSocket = MockWebSocketClient()
+        let connector = MockWebSocketConnector(client: mockSocket)
+        let baseURL = URL(string: "https://example.com")!
+        let service = ProviderChatService(
+            connector: connector,
+            deviceId: "device_123",
+            baseURLProvider: { baseURL }
+        )
+
+        var iterator = service.lifecycleTransportEvents.makeAsyncIterator()
+        service.startConnectionAttempt(epoch: 7, lastMessageId: "s_0", token: "jwt")
+
+        let opened = await iterator.next()
+        #expect(opened == .init(epoch: 7, payload: .transportOpened))
+
+        mockSocket.enqueue(text: #"{ "type": "auth_result", "success": true, "replayCount": 3, "replayTruncated": true, "historyReset": true }"#)
+
+        let authResult = await iterator.next()
+        #expect(
+            authResult == .init(
+                epoch: 7,
+                payload: .authResult(
+                    success: true,
+                    replayCount: 3,
+                    replayTruncated: true,
+                    historyReset: true,
+                    failureReason: nil
+                )
+            )
+        )
+
+        service.stopConnectionAttempt()
+    }
+
+    @Test("Stale socket message and close events keep their original lifecycle epoch")
+    func staleSocketEventsKeepOriginalLifecycleEpoch() async {
+        let firstSocket = ManualWebSocketClient()
+        let secondSocket = ManualWebSocketClient()
+        let connector = SequentialMockWebSocketConnector(clients: [firstSocket, secondSocket])
+        let baseURL = URL(string: "https://example.com")!
+        let service = ProviderChatService(
+            connector: connector,
+            deviceId: "device_123",
+            baseURLProvider: { baseURL }
+        )
+
+        var iterator = service.lifecycleTransportEvents.makeAsyncIterator()
+
+        service.startConnectionAttempt(epoch: 1, lastMessageId: nil, token: "jwt")
+        let firstOpened = await iterator.next()
+        #expect(firstOpened == .init(epoch: 1, payload: .transportOpened))
+
+        service.startConnectionAttempt(epoch: 2, lastMessageId: nil, token: "jwt")
+        firstSocket.enqueue(text: #"{ "type": "message", "id": "s_1", "role": "assistant", "content": "stale", "timestamp": 1700000000000, "streaming": false, "sessionKey": "agent:main:main", "attachments": [] }"#)
+        firstSocket.finish(closeInfo: WebSocketCloseInfo(code: 1006, reason: "stale"))
+        secondSocket.enqueue(text: #"{ "type": "auth_result", "success": true, "replayCount": 0 }"#)
+
+        var sawStaleMessage = false
+        var sawStaleClose = false
+
+        for _ in 0..<4 {
+            guard let event = await iterator.next() else { break }
+            switch event.payload {
+            case .transportOpened:
+                continue
+            case .serverMessage(let data):
+                guard let payload = try? JSONDecoder().decode(ServerMessagePayload.self, from: data) else { continue }
+                if payload.id == "s_1" {
+                    sawStaleMessage = event.epoch == 1
+                }
+            case .transportClosed(reason: _):
+                if event.epoch == 1 {
+                    sawStaleClose = true
+                }
+            case .authResult(success: _, replayCount: _, replayTruncated: _, historyReset: _, failureReason: _):
+                continue
+            case .transportTimeout:
+                continue
+            }
+        }
+
+        #expect(connector.connectCount == 2)
+        #expect(sawStaleMessage)
+        #expect(sawStaleClose)
+
+        service.stopConnectionAttempt()
+    }
+
     @Test("Chat send does not automatically retry an unacked message")
     func chatSendDoesNotRetryUnackedMessage() async throws {
         let mockSocket = MockWebSocketClient()
@@ -506,6 +596,27 @@ private final class FallbackMockWebSocketConnector: WebSocketConnecting {
     }
 }
 
+private final class SequentialMockWebSocketConnector: WebSocketConnecting {
+    private var clients: [ManualWebSocketClient]
+    private var nextIndex = 0
+    private(set) var connectCount = 0
+
+    init(clients: [ManualWebSocketClient]) {
+        self.clients = clients
+    }
+
+    func connect(to url: URL) async throws -> any WebSocketClient {
+        guard nextIndex < clients.count else {
+            throw URLError(.cannotConnectToHost)
+        }
+
+        connectCount += 1
+        let client = clients[nextIndex]
+        nextIndex += 1
+        return client
+    }
+}
+
 private final class MockWebSocketClient: WebSocketClient {
     private let stream: AsyncStream<String>
     private let continuation: AsyncStream<String>.Continuation
@@ -530,6 +641,40 @@ private final class MockWebSocketClient: WebSocketClient {
 
     func enqueue(text: String) {
         continuation.yield(text)
+    }
+}
+
+private final class ManualWebSocketClient: WebSocketClient {
+    private let stream: AsyncStream<String>
+    private let continuation: AsyncStream<String>.Continuation
+
+    private(set) var sentTexts: [String] = []
+    private(set) var closeRequested = false
+    private(set) var lastCloseInfo: WebSocketCloseInfo?
+
+    init() {
+        var continuation: AsyncStream<String>.Continuation!
+        self.stream = AsyncStream { continuation = $0 }
+        self.continuation = continuation
+    }
+
+    var incomingTextMessages: AsyncStream<String> { stream }
+
+    func send(text: String) async throws {
+        sentTexts.append(text)
+    }
+
+    func close(with code: URLSessionWebSocketTask.CloseCode?) {
+        closeRequested = true
+    }
+
+    func enqueue(text: String) {
+        continuation.yield(text)
+    }
+
+    func finish(closeInfo: WebSocketCloseInfo?) {
+        lastCloseInfo = closeInfo
+        continuation.finish()
     }
 }
 

@@ -73,45 +73,37 @@ final class URLSessionWebSocketConnector: WebSocketConnecting {
         if request.value(forHTTPHeaderField: "Origin") == nil {
             request.setValue("https://clawline.app", forHTTPHeaderField: "Origin")
         }
-        let session = sessionForConnect()
         let taskID = UUID()
-        let task = webSocketTaskFactory(session, request)
-        register(task: task, id: taskID)
-        task.resume()
-        return URLSessionWebSocketClient(task: task) { [weak self] in
-            self?.unregisterTask(id: taskID)
-        }
-    }
-
-    private func sessionForConnect() -> URLSession {
-        let staleSession: URLSession?
-        let session: URLSession
-
-        lock.lock()
-        if let currentSession,
-           currentSession.generation == tlsSessionFactory.currentGeneration {
-            session = currentSession.session
-            lock.unlock()
-            return session
-        }
-
-        staleSession = currentSession?.session
-        let freshSession = tlsSessionFactory.makeSession(
+        var staleSession: URLSession?
+        let client: URLSessionWebSocketClient = try tlsSessionFactory.withTaskStartBoundary(
             for: .webSocket(
                 connectTimeout: connectTimeout,
                 resourceTimeout: resourceTimeout
-            )
-        )
-        currentSession = freshSession
-        session = freshSession.session
-        lock.unlock()
-
+            ),
+            current: currentSessionSnapshot()
+        ) { [self] handle, replacedSession in
+            staleSession = replacedSession
+            let task = webSocketTaskFactory(handle.session, request)
+            registerStarted(task: task, id: taskID, sessionHandle: handle)
+            task.resume()
+            return URLSessionWebSocketClient(task: task) { [weak self] in
+                self?.unregisterTask(id: taskID)
+            }
+        }
         staleSession?.invalidateAndCancel()
+        return client
+    }
+
+    private func currentSessionSnapshot() -> ProviderTLSSessionHandle? {
+        lock.lock()
+        let session = currentSession
+        lock.unlock()
         return session
     }
 
-    private func register(task: any ProviderWebSocketTasking, id: UUID) {
+    private func registerStarted(task: any ProviderWebSocketTasking, id: UUID, sessionHandle: ProviderTLSSessionHandle) {
         lock.lock()
+        currentSession = sessionHandle
         activeTasks[id] = task
         lock.unlock()
     }

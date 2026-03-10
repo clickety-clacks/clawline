@@ -45,6 +45,17 @@ private final class UITestSonioxStreamingClient: SonioxStreamingClienting {
         let _ = caller
     }
 }
+
+@MainActor
+private final class T099OnDisappearProbeStore {
+    struct PendingActiveDisappear {
+        let vmObject: String
+        let chatViewId: String
+    }
+
+    static let shared = T099OnDisappearProbeStore()
+    var pendingActiveDisappear: PendingActiveDisappear?
+}
 #endif
 
 func runtimeInsetFallbackBarHeight(
@@ -157,6 +168,27 @@ struct ChatView: View {
     @State private var scrollButtonSettleTask: Task<Void, Never>?
     @State private var scrollButtonTapSuppressionTask: Task<Void, Never>?
     @AppStorage("chat.scrollButton.horizontalDetent") private var scrollButtonDetentRawValue = ScrollButtonHorizontalDetent.center.rawValue
+    @State private var chatViewTraceId = UUID().uuidString
+
+#if DEBUG
+    @State private var lifecycleDebugOverlayVisible = true
+    @State private var lifecycleDebugOverlayDismissTask: Task<Void, Never>?
+    @State private var probeTaskEnterCount = 0
+    @State private var probeOnAppearCount = 0
+    @State private var probeOnDisappearCount = 0
+    @State private var probeLatestOnAppearConnState = "unknown"
+    @State private var probeLatestInstanceId = ""
+    @State private var probeLatestVmObject = ""
+    @State private var probeLastOnDisappearCause = "unknown"
+    @State private var probeLastOnDisappearPreviousVMObject = "-"
+    @State private var probeLastOnDisappearPreviousChatViewId = "-"
+    @State private var probeLastOnDisappearCurrentVMObject = "-"
+    @State private var probeLastOnDisappearCurrentChatViewId = "-"
+
+    private var isLifecycleDebugOverlayEnabled: Bool {
+        settings.isLifecycleDebugOverlayEnabled
+    }
+#endif
 
     @MainActor
     init(viewModel: ChatViewModel, toastManager: ToastManager) {

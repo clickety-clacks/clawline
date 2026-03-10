@@ -58,6 +58,7 @@ final class ComposeInputDictationBridge {
     private weak var composeTextView: PastableTextView?
     private var transcriptStateBySession: [String: TranscriptState] = [:]
     private var preferredSelectionRangeBySession: [String: NSRange] = [:]
+    private var activationSelectionRangeBySession: [String: NSRange] = [:]
 
     init(host: any DictationComposeDraftHosting) {
         self.host = host
@@ -94,6 +95,19 @@ final class ComposeInputDictationBridge {
         }
         if let liveSelectionRange = composeTextView?.selectedRange {
             preferredSelectionRangeBySession[sessionKey] = liveSelectionRange
+        }
+    }
+
+    // Freeze the activation-time selection so later UIKit cursor churn cannot move the
+    // initial dictation insertion anchor before transcript state resets.
+    func captureSelectionRangeForActivation(_ selectionRange: NSRange, for sessionKey: String?) {
+        guard let sessionKey, !sessionKey.isEmpty else { return }
+        if selectionRange.location != NSNotFound {
+            activationSelectionRangeBySession[sessionKey] = selectionRange
+            return
+        }
+        if let liveSelectionRange = composeTextView?.selectedRange {
+            activationSelectionRangeBySession[sessionKey] = liveSelectionRange
         }
     }
 
@@ -140,7 +154,8 @@ final class ComposeInputDictationBridge {
     }
 
     func resetTranscriptState(for sessionKey: String) {
-        let selectedRange = preferredSelectionRangeBySession[sessionKey]
+        let selectedRange = activationSelectionRangeBySession[sessionKey]
+            ?? preferredSelectionRangeBySession[sessionKey]
             ?? composeTextView?.selectedRange
             ?? NSRange(location: NSNotFound, length: 0)
         let textLength = composeTextView?.attributedText.length ?? 0
@@ -166,6 +181,7 @@ final class ComposeInputDictationBridge {
             suppressedUntilNextEndpoint: false,
             committedText: ""
         )
+        activationSelectionRangeBySession.removeValue(forKey: sessionKey)
         preferredSelectionRangeBySession.removeValue(forKey: sessionKey)
     }
 

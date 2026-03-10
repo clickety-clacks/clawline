@@ -456,6 +456,10 @@ final class DictationSession {
         bridge.setPreferredSelectionRange(selectionRange, for: currentSessionKey)
     }
 
+    func captureComposeSelectionRangeForActivation(_ selectionRange: NSRange) {
+        bridge.captureSelectionRangeForActivation(selectionRange, for: currentSessionKey)
+    }
+
     func noteComposeUserEditDuringDictation(editedRangeUTF16: NSRange, replacementUTF16Length: Int) {
         guard isDictationActive else { return }
         bridge.noteUserEdit(

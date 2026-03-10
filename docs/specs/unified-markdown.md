@@ -267,3 +267,58 @@ Post-change invariant:
 1. Emoji-only is decided exactly once in unified markdown planning.
 2. Exactly one render path executes for message text: emoji-only path or standard markdown path.
 3. Emoji-only path and markdown block pass are mutually exclusive, so attributed text cannot be clobbered.
+
+---
+
+## Appendix: Preserved Notes
+
+### From: retros/unified-md-block-spacing.md
+
+**Block spacing root cause (T057 bounce):** Block spacing regressed because the unified parser collapsed multiple top-level markdown block nodes into a single `.richText(markdownSource:)` payload. The renderer then fed that through `AttributedString(markdown:, interpretedSyntax: .full)` which flattens block separators.
+
+**Fix principle:** Parser emits one `.richText` block per top-level non-code/non-table AST child (no contiguous merge buffer). Renderer styles each block. Bubble/expanded lay out ordered blocks with separation between distinct blocks.
+
+**Invariant:** Structural segmentation is decided once in `UnifiedMarkdownParser` from AST boundaries. Renderer only transforms style for each block. UI layers only lay out blocks.
+
+**Second bounce — bubble-layer re-merge:** After parser boundary fixes, the bubble view had a second merge layer: `combinedMarkdownText(from: renderedMarkdownBlocks)` in `configure(...)` concatenated all `.attributedText` blocks into one attributed run. `salientBaseAttributedText` was captured from this merged run, then salient highlighting reapplied the merged run to `bodyLabel`, bypassing per-block layout.
+
+**Second bounce fix:** Remove `combinedMarkdownText` primary usage. `addRenderedMarkdownBlocks()` is the only non-emoji path that sets visible text content. `salientBaseAttributedText` must be set from the primary attributed block inside `addRenderedMarkdownBlocks()`, not from a synthetic merged string.
+
+**Resulting invariant:** For non-emoji markdown text, bubble visible content is sourced exclusively from ordered rendered blocks, one text container per block (primary + supplemental), with no hidden re-merge stage.
+
+---
+
+### From: retros/unified-md-darkmode-analysis.md
+
+**Dark mode is not unified because the pipeline unifies markdown structure but not theming ownership:**
+- Bubble code blocks: explicit `isDark` override + async UIKit re-highlighting path.
+- Bubble tables: SwiftUI hosted widget, inherits `colorScheme` from hosting controller style.
+- Expanded pane: pure SwiftUI, `@Environment(\.colorScheme)` directly.
+
+**Three appearance channels exist:** SwiftUI `colorScheme` environment, UIKit `traitCollection.userInterfaceStyle`, and explicit `isDark` override plumbing from `MessageFlowCollectionView → bubble → subviews`.
+
+**Architectural risk:** Appearance source is duplicated and can drift. Theme behavior is currently a property of host path, not markdown block semantics.
+
+---
+
+### From: retros/unified-md-dry-audit.md
+
+**Critical DRY violations in unified pipeline:**
+1. Legacy parser code still co-located with unified builder in `MessagePresentationBuilder.build` — `processTextSegment` entry exists but is never called. Future edits could accidentally patch the wrong parser.
+2. Emoji-only classification split across three implementations with non-identical criteria (parser: 1–3 chars + `isUnifiedMarkdownEmoji`; builder: `allSatisfy { $0.isEmoji }` no limit; chromeless gate: scalar count 1–3).
+3. `MarkdownRenderOptions` construction duplicated between bubble and expanded surfaces — changing default render style requires synchronizing two files.
+4. `CodeBlockUIKitView` and `TableUIKitWrapperView` duplicate UIKit-hosting-SwiftUI infrastructure (lifecycle, constraints, style propagation, measurement).
+5. Text-content presence checks (`hasTextContent` + second scan for code/table) are repeated rather than centralized.
+
+---
+
+### From: specs/superswiftmarkup-assessment.md
+
+**SuperSwiftMarkup library — NOT suitable for adoption (as of 2026-02-12):**
+- `SuperSwiftMarkup` rewrite repo contains only workspace metadata (no source) — not usable.
+- Prototype repo fails iOS build (`UIColor.blended` API missing).
+- Prototype has `fatalError("TODO")` in parser for unsupported/unknown markdown nodes — unsafe in production chat renderer.
+- Test coverage effectively absent (placeholder tests only).
+- `DocumentView+actions.swift` is 1331 lines with TODO handlers — prototype maturity, not production-ready.
+
+Decision: build custom unified parser pipeline rather than adopt SuperSwiftMarkup.

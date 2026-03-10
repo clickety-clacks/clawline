@@ -497,3 +497,28 @@ Primary files expected:
 
 Spec compliance guardrail:
 - Implement only what is specified above. If implementation needs behavior not listed here, stop and request spec clarification.
+
+---
+
+## Appendix: Preserved Notes
+
+### From: reviews/t100-stale-listener-race-fix.md
+
+**Stale-listener close race fix:**
+In lifecycle connect fallback, attempt 1 could leave a stale listener alive while attempt 2 became active. The stale listener later emitted socket-close handling producing `transportClosed(.error)`, which could knock the coordinator from `authenticating` to recovery/failure before active auth success landed.
+
+**Fix pattern:**
+- Assign lifecycle connection token before emitting lifecycle events/callbacks on successful connect.
+- Gate all socket-close handling behind a per-attempt connection token: drop stale closes from prior attempts.
+- In fallback `continue` path: explicitly disconnect/cleanup before moving to next transport.
+- Prevent stale attempt close from moving epoch from `authenticating → recovering`.
+
+---
+
+### From: retros/t100-connection-failure-diagnosis.md
+
+**Cold launch persisted stream key reset:** On cold launch, if `restoreActiveSessionKeyIfNeeded()` runs before `orderedSessions` is populated, it falls back to the default main session and overwrites the persisted key. Fix: delay restore until ordered sessions are available post-provisioning.
+
+**Duplicate VM instances receiving provisioning events:** During login, duplicate `ChatViewModel` instances can receive the same provisioning events, causing repeated state transitions. This happens when VM lifecycle is not properly scoped to auth state.
+
+**Provisioning state should not reset on intermediate reconnecting phases:** Resetting `provisionedCount` during reconnect→reconnecting transitions wipes valid session lists, causing unnecessary session list rebuilds and UI flicker.

@@ -192,3 +192,22 @@ Validation tests:
 - [ ] Migration dry-run checks (SQLite): count rows by old/new prefix before and after rewrite.
 - [ ] Replay and stream-delete regression checks on migrated data.
 - [ ] iOS local cache sanity: old keys remain harmless; new keys populate fresh state.
+
+---
+
+## Appendix: Preserved Notes
+
+### From: specs/multi-agent-investigation.md
+
+**Session key hardcoding in iOS client (as of investigation date):**
+- `SessionKey.admin = "agent:main:main"` — hardcoded
+- `SessionKey.clawlineDMPrefix = "agent:main:clawline:"` — hardcoded
+- `SessionKey.clawlineMain(userId:)` constructs `"agent:main:clawline:\(userId):main"` — hardcoded
+- `isClawlinePersonalDM` requires `parts[1] == "main"` — hardcoded
+
+**Mostly opaque routing:** Incoming message routing uses `payload.sessionKey` directly (no pattern parse). `SessionRegistry` documents session keys as opaque canonical IDs. `StreamAPIClient` uses session key as opaque path component.
+
+**To support a different agent ID (e.g., `agent:streams`):**
+1. Generalize session-key helper constants/parsing in `SessionKey.swift` — replace hardcoded `main` agent segment.
+2. `ChatViewModel` depends on `SessionKey.clawlineMain` and `SessionKey.isClawlinePersonalDM` for fallback and protected-stream decisions — these drive through once `SessionKey` is generalized.
+3. Provider must also construct/validate/route session keys using configurable agent ID (not confirmed from this repo — provider TS not present).

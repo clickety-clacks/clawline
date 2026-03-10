@@ -1369,3 +1369,15 @@ Unsubscribe from events.
 - Electron kiosk mode.
 - Screen name collision handling.
 - Provider screen disambiguation in CLU prompts.
+
+---
+
+## Appendix: Preserved Notes
+
+### From: specs/loupe-canvas-foundation-analysis.md
+
+**Decision: Do NOT use OpenClaw Canvas as kernel for Loupe.**
+
+Canvas is command-oriented (`present/hide/navigate/eval/snapshot`), foreground-gated on mobile nodes, and optimized for single-node visual control — not multi-surface state orchestration.
+
+For any Loupe multi-surface state needs, Canvas can serve as a rendering adapter/prototyping surface, but a dedicated surface control plane is required for production use.

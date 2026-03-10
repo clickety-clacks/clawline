@@ -212,6 +212,74 @@ struct ProviderServiceTests {
         })
     }
 
+    @Test("Chat send does not automatically retry an unacked message")
+    func chatSendDoesNotRetryUnackedMessage() async throws {
+        let mockSocket = MockWebSocketClient()
+        let connector = MockWebSocketConnector(client: mockSocket)
+        let baseURL = URL(string: "https://example.com")!
+        let service = ProviderChatService(
+            connector: connector,
+            deviceId: "device_123",
+            baseURLProvider: { baseURL }
+        )
+
+        Task {
+            try await Task.sleep(forDuration: .milliseconds(10))
+            mockSocket.enqueue(text: #"{ "type": "auth_result", "success": true }"#)
+        }
+
+        try await service.connect(token: "jwt", lastMessageId: nil)
+        try await service.send(
+            id: "c_single_send",
+            content: "Hello once",
+            attachments: [],
+            sessionKey: nil
+        )
+
+        try await Task.sleep(forDuration: .milliseconds(5200))
+
+        let sendCount = mockSocket.sentTexts.filter {
+            $0.contains("\"type\":\"message\"") && $0.contains("\"id\":\"c_single_send\"")
+        }.count
+        #expect(sendCount == 1)
+    }
+
+    @Test("Chat send suppresses duplicate client message ids")
+    func chatSendSuppressesDuplicateMessageIds() async throws {
+        let mockSocket = MockWebSocketClient()
+        let connector = MockWebSocketConnector(client: mockSocket)
+        let baseURL = URL(string: "https://example.com")!
+        let service = ProviderChatService(
+            connector: connector,
+            deviceId: "device_123",
+            baseURLProvider: { baseURL }
+        )
+
+        Task {
+            try await Task.sleep(forDuration: .milliseconds(10))
+            mockSocket.enqueue(text: #"{ "type": "auth_result", "success": true }"#)
+        }
+
+        try await service.connect(token: "jwt", lastMessageId: nil)
+        try await service.send(
+            id: "c_dedup",
+            content: "Hello",
+            attachments: [],
+            sessionKey: nil
+        )
+        try await service.send(
+            id: "c_dedup",
+            content: "Hello",
+            attachments: [],
+            sessionKey: nil
+        )
+
+        let sendCount = mockSocket.sentTexts.filter {
+            $0.contains("\"type\":\"message\"") && $0.contains("\"id\":\"c_dedup\"")
+        }.count
+        #expect(sendCount == 1)
+    }
+
     @Test("Retry cancellation does not send message frame after disconnect")
     func retryCancellationDoesNotSendAfterDisconnect() async throws {
         let mockSocket = MockWebSocketClient()

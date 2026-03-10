@@ -37,5 +37,26 @@ struct ScrollToBottomUnreadTests {
         )
         #expect(result.isEmpty)
     }
-}
 
+    @Test("Bottom fallback: incremental append must not schedule autojump")
+    func bottomFallbackSkipsIncrementalAppend() {
+        let shouldSchedule = MessageFlowCollectionViewController.shouldScheduleBottomFallbackAfterApply(
+            hasPendingRestoreState: false,
+            restorePhaseIsNone: true,
+            isIncrementalAppend: true,
+            previousLastMessageId: "m1"
+        )
+        #expect(shouldSchedule == false)
+    }
+
+    @Test("Bottom fallback: first population may schedule one-time placement")
+    func bottomFallbackAllowsFirstPopulation() {
+        let shouldSchedule = MessageFlowCollectionViewController.shouldScheduleBottomFallbackAfterApply(
+            hasPendingRestoreState: false,
+            restorePhaseIsNone: true,
+            isIncrementalAppend: false,
+            previousLastMessageId: nil
+        )
+        #expect(shouldSchedule == true)
+    }
+}

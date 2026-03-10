@@ -36,6 +36,10 @@ final class SettingsManager {
         didSet { saveFontScale() }
     }
 
+    var isLifecycleDebugOverlayEnabled: Bool {
+        didSet { saveLifecycleDebugOverlayEnabled() }
+    }
+
     private(set) var fontScaleChangeSequence: Int = 0
     private(set) var fontScaleToastSequence: Int = 0
     private var pendingFontScaleToastMessage: String?
@@ -44,6 +48,7 @@ final class SettingsManager {
 
     private static let effectConfigKey = "backgroundEffectConfiguration"
     private static let appearanceModeKey = "appearanceMode"
+    private static let lifecycleDebugOverlayEnabledKey = "debug.lifecycleOverlayEnabled"
 
     init() {
         if let data = UserDefaults.standard.data(forKey: Self.effectConfigKey),
@@ -63,6 +68,7 @@ final class SettingsManager {
         self.trustSelfSignedCertificates = ProviderTLSSettingsStore.trustSelfSignedCertificates
         self.pinnedLeafCertificateSHA256 = ProviderTLSSettingsStore.pinnedLeafCertificateSHA256 ?? ""
         self.fontScale = AppFontScale.persistedValue()
+        self.isLifecycleDebugOverlayEnabled = UserDefaults.standard.bool(forKey: Self.lifecycleDebugOverlayEnabledKey)
     }
 
     private func save() {
@@ -87,12 +93,20 @@ final class SettingsManager {
         AppFontScale.persist(fontScale)
     }
 
+    private func saveLifecycleDebugOverlayEnabled() {
+        UserDefaults.standard.set(
+            isLifecycleDebugOverlayEnabled,
+            forKey: Self.lifecycleDebugOverlayEnabledKey
+        )
+    }
+
     func resetToDefaults() {
         effectConfig = .default
         appearanceMode = .dark
         trustSelfSignedCertificates = true
         pinnedLeafCertificateSHA256 = ""
         fontScale = AppFontScale.defaultValue
+        isLifecycleDebugOverlayEnabled = false
     }
 
     func toggleSettings() {

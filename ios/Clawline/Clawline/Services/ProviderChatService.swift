@@ -187,11 +187,6 @@ final class ProviderChatService: ChatServicing {
         }
     }
 
-    private struct PendingMessage {
-        let payload: ClientMessagePayload
-        var retryTask: Task<Void, Never>?
-    }
-
     private let connector: any WebSocketConnecting
     private let deviceId: String
     private let baseURLProvider: () -> URL?
@@ -200,7 +195,6 @@ final class ProviderChatService: ChatServicing {
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
     private let supportedClientFeatures = ["terminal_bubbles_v1"]
-    private let ackInterval: Duration = .seconds(5)
     private let authTimeout: Duration = .seconds(12)
 
     private let messageBroadcaster = AsyncStreamBroadcaster<Message>()
@@ -211,7 +205,8 @@ final class ProviderChatService: ChatServicing {
     private var socket: (any WebSocketClient)?
     private var receiveTask: Task<Void, Never>?
     private var authContinuation: CheckedContinuation<Void, Swift.Error>?
-    private var pendingMessages: [String: PendingMessage] = [:]
+    private var pendingMessages: Set<String> = []
+    private var sentMessageIDs: Set<String> = []
     private var shouldNotifyDisconnect = true
     private var pendingDisconnectReason: String?
     private var isConnecting = false
@@ -346,8 +341,7 @@ final class ProviderChatService: ChatServicing {
         socket = nil
         authToken = nil
         if !pendingMessages.isEmpty {
-            for (messageId, pending) in pendingMessages {
-                pending.retryTask?.cancel()
+            for messageId in pendingMessages {
                 emitServiceEvent(.messageError(
                     messageId: messageId,
                     code: "connection_lost",
@@ -372,6 +366,10 @@ final class ProviderChatService: ChatServicing {
         guard id.hasPrefix("c_") else {
             throw Error.invalidMessageId
         }
+        if sentMessageIDs.contains(id) {
+            logger.warning("duplicate outbound message suppressed id=\(id, privacy: .public)")
+            return
+        }
 
         let payload = ClientMessagePayload(
             id: id,
@@ -388,11 +386,14 @@ final class ProviderChatService: ChatServicing {
             )
         }
 
-        pendingMessages[id]?.retryTask?.cancel()
-        let retryTask = scheduleRetry(for: payload)
-        pendingMessages[id] = PendingMessage(payload: payload, retryTask: retryTask)
-
-        try await socket.send(text: text)
+        sentMessageIDs.insert(id)
+        pendingMessages.insert(id)
+        do {
+            try await socket.send(text: text)
+        } catch {
+            pendingMessages.remove(id)
+            throw error
+        }
     }
 
     func sendInteractiveCallback(
@@ -576,9 +577,7 @@ final class ProviderChatService: ChatServicing {
             logger.warning("Dropping ack payload: decode failed error=\(error.localizedDescription, privacy: .public)")
             return
         }
-        if let pending = pendingMessages.removeValue(forKey: payload.id) {
-            pending.retryTask?.cancel()
-        }
+        pendingMessages.remove(payload.id)
         emitServiceEvent(.messageAcked(id: payload.id))
     }
 
@@ -592,9 +591,7 @@ final class ProviderChatService: ChatServicing {
         }
 
         if let messageId = payload.messageId {
-            if let pending = pendingMessages.removeValue(forKey: messageId) {
-                pending.retryTask?.cancel()
-            }
+            pendingMessages.remove(messageId)
             emitServiceEvent(.messageError(messageId: messageId, code: payload.code, message: payload.message))
             return
         }
@@ -621,8 +618,7 @@ final class ProviderChatService: ChatServicing {
         case "invalid_message", "payload_too_large", "invalid_channel":
             logger.info("message-level error without messageId code=\(payload.code, privacy: .public)")
             if !pendingMessages.isEmpty {
-                for (messageId, pending) in pendingMessages {
-                    pending.retryTask?.cancel()
+                for messageId in pendingMessages {
                     emitServiceEvent(.messageError(
                         messageId: messageId,
                         code: payload.code,
@@ -816,8 +812,7 @@ final class ProviderChatService: ChatServicing {
 
         // Notify the UI about each pending message that failed to send
         // This removes the optimistic placeholders so users know messages weren't delivered
-        for (messageId, pending) in pendingMessages {
-            pending.retryTask?.cancel()
+        for messageId in pendingMessages {
             emitServiceEvent(.messageError(
                 messageId: messageId,
                 code: "connection_lost",
@@ -849,53 +844,6 @@ final class ProviderChatService: ChatServicing {
 
     private func teardownConnection() async throws {
         performDisconnect(shouldNotify: false)
-    }
-
-    private func scheduleRetry(for payload: ClientMessagePayload) -> Task<Void, Never> {
-        Task { [weak self] in
-            guard let self else { return }
-            while !Task.isCancelled {
-                do {
-                    try await Task.sleep(forDuration: ackInterval)
-                } catch is CancellationError {
-                    return
-                } catch {
-                    logger.error("retry sleep failed for messageId=\(payload.id, privacy: .public) error=\(error.localizedDescription, privacy: .public)")
-                    return
-                }
-                guard !Task.isCancelled else { return }
-                guard let socket = self.socket else { return }
-                guard self.pendingMessages[payload.id] != nil else { return }
-
-                let text: String
-                do {
-                    let data = try self.encoder.encode(payload)
-                    guard let encodedText = String(data: data, encoding: .utf8) else {
-                        self.pendingMessages.removeValue(forKey: payload.id)
-                        self.emitServiceEvent(.messageError(
-                            messageId: payload.id,
-                            code: "client_encode_failed",
-                            message: "Failed to encode outbound retry payload."
-                        ))
-                        logger.error("retry encode produced non-UTF8 payload for messageId=\(payload.id, privacy: .public)")
-                        return
-                    }
-                    text = encodedText
-                } catch {
-                    self.pendingMessages.removeValue(forKey: payload.id)
-                    self.emitServiceEvent(.messageError(
-                        messageId: payload.id,
-                        code: "client_encode_failed",
-                        message: "Failed to encode outbound retry payload."
-                    ))
-                    logger.error("retry encode failed for messageId=\(payload.id, privacy: .public) error=\(error.localizedDescription, privacy: .public)")
-                    return
-                }
-
-                guard !Task.isCancelled else { return }
-                try? await socket.send(text: text)
-            }
-        }
     }
 
     private func resolveAuthContinuation(with result: Result<Void, Swift.Error>) {

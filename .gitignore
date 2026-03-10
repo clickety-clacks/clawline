@@ -43,3 +43,11 @@ scratch/
 .xcode-spm/
 ._*
 ios/Clawline/Clawline.xcodeproj/xcuserdata/
+
+# Engram local artifacts (keep only .engram/config.yml in git)
+.engram/tapes/
+.engram/cursors/
+.engram/index.sqlite
+
+# Engram cache local artifacts
+.engram-cache/

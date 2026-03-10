@@ -61,6 +61,7 @@ enum BubbleSizingV2 {
     }
 
     struct CacheKey: Hashable {
+        let sessionKey: String
         let messageId: String
         let presentationFingerprint: Int
         let layoutFingerprint: Int
@@ -138,6 +139,7 @@ enum BubbleSizingV2 {
         }
 
         func measurementCacheKey(
+            sessionKey: String,
             messageId: String,
             presentationFingerprint: Int,
             layoutFingerprintSeed: Int,
@@ -148,6 +150,7 @@ enum BubbleSizingV2 {
             hasher.combine(layoutFingerprintSeed)
             hasher.combine(cacheFingerprint)
             return CacheKey(
+                sessionKey: sessionKey,
                 messageId: messageId,
                 presentationFingerprint: presentationFingerprint,
                 layoutFingerprint: hasher.finalize(),

@@ -63,6 +63,8 @@ struct RichTextEditor: UIViewRepresentable {
 
     func updateUIView(_ textView: PastableTextView, context: Context) {
         context.coordinator.parent = self
+        context.coordinator.isUpdatingFromSwiftUI = true
+        defer { context.coordinator.isUpdatingFromSwiftUI = false }
 
         // Update paste callback
         let coordinator = context.coordinator
@@ -78,8 +80,10 @@ struct RichTextEditor: UIViewRepresentable {
             context.coordinator.lastResetToken = resetToken
             textView.attributedText = attributedText
             context.coordinator.enforceBaseAttributes(on: textView)
-            if selectionRange.location != NSNotFound {
+            if selectionRange.location != NSNotFound, textView.selectedRange != selectionRange {
+                context.coordinator.isApplyingParentSelection = true
                 textView.selectedRange = selectionRange
+                context.coordinator.isApplyingParentSelection = false
             }
             logger.info("[trace] updateUIView applied reset len=\(attributedText.length)")
         }
@@ -129,6 +133,8 @@ struct RichTextEditor: UIViewRepresentable {
         private var lastFocusTrigger: Int = 0
         var isApplyingLocalEdit = false
         var isInsertingAttachments = false
+        var isUpdatingFromSwiftUI = false
+        var isApplyingParentSelection = false
         var lastResetToken: Int = 0
         private var lastBaseTextColor: UIColor?
 
@@ -145,9 +151,10 @@ struct RichTextEditor: UIViewRepresentable {
         }
 
         func textViewDidChange(_ textView: UITextView) {
+            guard !isUpdatingFromSwiftUI else { return }
             isApplyingLocalEdit = true
             parent.attributedText = textView.attributedText
-            parent.selectionRange = textView.selectedRange
+            setSelectionRange(textView.selectedRange)
             updateHeight(for: textView, allowAutoScroll: true)
             ensureCaretVisible(in: textView)
             ensureTypingAttributes(on: textView)
@@ -156,8 +163,10 @@ struct RichTextEditor: UIViewRepresentable {
         }
 
         func textViewDidChangeSelection(_ textView: UITextView) {
-            guard textView.selectedRange.location != NSNotFound else { return }
-            parent.selectionRange = textView.selectedRange
+            let selectedRange = textView.selectedRange
+            guard selectedRange.location != NSNotFound else { return }
+            guard !isApplyingParentSelection else { return }
+            setSelectionRange(selectedRange)
             if isApplyingLocalEdit {
                 ensureCaretVisible(in: textView)
             }
@@ -198,7 +207,15 @@ struct RichTextEditor: UIViewRepresentable {
                 clamped = min(max(size.height, minHeight), maxHeight)
             }
             if abs(parent.calculatedHeight - clamped) > 0.5 {
-                parent.calculatedHeight = clamped
+                if isUpdatingFromSwiftUI {
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self else { return }
+                        guard abs(self.parent.calculatedHeight - clamped) > 0.5 else { return }
+                        self.parent.calculatedHeight = clamped
+                    }
+                } else {
+                    parent.calculatedHeight = clamped
+                }
             }
             textView.isScrollEnabled = size.height > maxHeight
             if textView.isScrollEnabled {
@@ -221,6 +238,19 @@ struct RichTextEditor: UIViewRepresentable {
             let range = textView.selectedRange
             DispatchQueue.main.async {
                 textView.scrollRangeToVisible(range)
+            }
+        }
+
+        private func setSelectionRange(_ selectedRange: NSRange) {
+            guard parent.selectionRange != selectedRange else { return }
+            if isUpdatingFromSwiftUI {
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    guard self.parent.selectionRange != selectedRange else { return }
+                    self.parent.selectionRange = selectedRange
+                }
+            } else {
+                parent.selectionRange = selectedRange
             }
         }
 

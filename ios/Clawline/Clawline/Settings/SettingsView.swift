@@ -56,6 +56,16 @@ struct SettingsView: View {
                     Text("When enabled, Clawline accepts self-signed TLS certificates for provider WebSocket connections. Add a SHA-256 leaf certificate fingerprint to pin a specific cert.")
                 }
 
+#if DEBUG
+                Section {
+                    Toggle("Show lifecycle debug overlay", isOn: $settings.isLifecycleDebugOverlayEnabled)
+                } header: {
+                    Text("Debug")
+                } footer: {
+                    Text("Controls on-screen lifecycle/image-send diagnostics overlay visibility.")
+                }
+#endif
+
                 if settings.effectConfig.isEnabled {
                     Section {
                         ColorPicker("Color 1", selection: color1Binding)

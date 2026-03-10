@@ -48,6 +48,7 @@ struct MessageInputBar: View {
     var resetToken: Int
     let canSend: Bool
     let isSending: Bool
+    let isStagingAttachments: Bool
     let connectionState: SendButtonConnectionState
     let focusTrigger: Int
     /// Pass geometry.safeAreaInsets.bottom directly - DO NOT pass a computed Bool.
@@ -255,6 +256,7 @@ struct MessageInputBar: View {
             MessageSendControl(
                 isSending: isSending,
                 canSend: canSend,
+                isStagingAttachments: isStagingAttachments,
                 connectionState: connectionState,
                 sendButtonSize: metrics.inputBarHeight,
                 inputBarColorScheme: inputBarColorScheme,
@@ -378,6 +380,7 @@ private struct MessageSendControl: View {
 
     let isSending: Bool
     let canSend: Bool
+    let isStagingAttachments: Bool
     let connectionState: SendButtonConnectionState
     let sendButtonSize: CGFloat
     let inputBarColorScheme: ColorScheme
@@ -389,6 +392,9 @@ private struct MessageSendControl: View {
 
     private var isReconnecting: Bool { connectionState == .reconnecting }
     private var isDisconnected: Bool { connectionState == .disconnected }
+    private var isStagingSendGate: Bool {
+        connectionState == .connected && isStagingAttachments && !isSending && !canSend
+    }
     private var sendActionEnabled: Bool { isSending || canSend || isDisconnected }
     private var sendIconColor: Color { .white }
     private let reconnectPulseDuration: TimeInterval = 0.8
@@ -396,7 +402,7 @@ private struct MessageSendControl: View {
     private var bubbleVisualState: BubbleVisualState {
         switch connectionState {
         case .connected:
-            return sendActionEnabled ? .active : .ghost
+            return (sendActionEnabled || isStagingSendGate) ? .active : .ghost
         case .reconnecting:
             return .reconnecting
         case .disconnected:
@@ -457,11 +463,20 @@ private struct MessageSendControl: View {
                 break
             }
         }) {
-            Image(systemName: isDisconnected ? "arrow.clockwise" : "paperplane.fill")
-                .font(.clawline(.uiLabel).weight(.semibold))
-                .foregroundStyle(sendIconColor)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .contentShape(Rectangle())
+            Group {
+                if isStagingSendGate {
+                    ProgressView()
+                        .progressViewStyle(.circular)
+                        .tint(sendIconColor)
+                        .scaleEffect(0.9)
+                } else {
+                    Image(systemName: isDisconnected ? "arrow.clockwise" : "paperplane.fill")
+                        .font(.clawline(.uiLabel).weight(.semibold))
+                        .foregroundStyle(sendIconColor)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .contentShape(Rectangle())
         }
         .frame(width: sendButtonSize, height: sendButtonSize)
         .background {
@@ -482,7 +497,8 @@ private struct MessageSendControl: View {
         .allowsHitTesting(sendActionEnabled && !isReconnecting)
         .accessibilityLabel(
             isReconnecting ? "Reconnecting" :
-                (isDisconnected ? "Disconnected. Tap to reconnect." : "Send message")
+                (isStagingSendGate ? "Staging attachments" :
+                    (isDisconnected ? "Disconnected. Tap to reconnect." : "Send message"))
         )
         .id("send-button")
         .animation(.spring(response: 0.30, dampingFraction: 0.82), value: isSending)
@@ -504,6 +520,7 @@ private struct MessageSendControl: View {
                 resetToken: 0,
                 canSend: true,
                 isSending: false,
+                isStagingAttachments: false,
                 connectionState: .connected,
                 focusTrigger: 0,
                 bottomSafeAreaInset: 34,

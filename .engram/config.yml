@@ -1,0 +1,3 @@
+db: .engram/index.sqlite
+additional_stores:
+  - ~/.engram/index.sqlite

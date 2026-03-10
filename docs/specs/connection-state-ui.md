@@ -164,3 +164,24 @@ A message is marked failed when either condition is true:
 - `ios/Clawline/Clawline/Views/Chat/MessageBubbleUIKitView.swift`
 - Keep `ChatServicing.ConnectionState` shape unchanged unless implementation discovers hard blocker.
 - Preserve session-key routing invariants and existing reconnect backoff behavior.
+
+---
+
+## Appendix: Preserved Notes
+
+### From: specs/t069-connection-state-full-audit-retro.md
+
+**Connection state mutation seam violation (pre-fix):**
+`connectionState` had 3 independent direct mutation paths:
+1. `observeConnectionState()` stream handler
+2. `reconnect()`  
+3. `handle(serviceEvent: .connectionInterrupted)`
+
+This violates architecture-principles mutation seam discipline (single mutation point). Fix: centralize all `connectionState` writes through a single `transitionConnectionState(to:)` function.
+
+**Input bar appearance:** Border color, placeholder text, and background are NOT driven by connection state — only `MessageSendControl` (send button) maps connection state to visual tokens. Connection state's only intended visual surface is the send button area.
+
+**Send control state mapping:**
+- Connected: paperplane icon (or stop when sending)
+- Reconnecting: yellow dot
+- Disconnected: red reconnect icon

@@ -322,3 +322,35 @@ Round 2 errors (corrected in this final):
   8. Phase 2 completion gate lacked compiler-error-first migration
      proof requirement. Fixed: zero direct writes is a compiler-
      verifiable gate.
+
+---
+
+## Appendix: Preserved Notes
+
+### From: retros/t113-t104-retro.md
+
+**T104/SBB regression root causes:**
+
+A) Stale snapshot reuse caused "opens near top":
+- Non-animated programmatic scroll (`setContentOffset(..., animated: false)`) does NOT trigger `scrollViewDidEndScrollingAnimation`.
+- `lastKnownScrollSnapshot` was only refreshed on user scroll/deceleration paths.
+- On stream switch, if flush hits geometry-unavailable path, stale near-top snapshot gets used.
+- Fix: refresh `lastKnownScrollSnapshot` after ALL non-animated programmatic offset changes (restore apply, restore fallback-to-bottom, `scrollToBottom`, `scrollToMessageCentered`, `adjustContentOffsetForBottomInsetChange`).
+
+B) SBB visibility not emitted on stream switch entry:
+- `prepareIncomingStateOnSwitch` correctly sets per-stream `sbbState`.
+- But `ChatView` SBB visibility is driven by `.isAtBottomChanged` scroll events.
+- Without guaranteed event emission immediately after stream switch, UI retained stale hidden state.
+- Fix: add `emitHideIndicatorIfChanged(force: true)` on stream-context seam key selection paths in `runStreamContextSwitchSeam`.
+
+**Architecture was correct; implementation had two conformance gaps.**
+
+### From: specs/t113-architecture-plan-review.md
+
+**T113 architecture review verdict: APPROVED** for ticket-closure scope.
+
+Key constraints from review:
+- T099 cursor rule: canonical auth cursor = nil when ANY known stream lacks cursor; max only when ALL have cursors; active-session/global fallback explicitly forbidden.
+- T100 is explicitly out of scope for T113 closure.
+- T105 closure requires compiler-verifiable zero direct writes outside the seam (private backing store + `unavailable` legacy APIs), not just interface design.
+- Callback-registry + `forceReRead` wiring are required gates (not optional polish) for T095/T103.

@@ -1375,63 +1375,6 @@
                     <tr><td>Fade behavior</td><td>Overlay pinned to bubble bottom; <code>pointer-events: none</code></td></tr>
                 </tbody>
             </table>
-
-            <h3 id="bubble-timestamp">Bubble Timestamp</h3>
-            <p>Each message bubble displays a relative or absolute timestamp. Timestamps are peripheral information — they should be visible when needed but never compete with message content.</p>
-
-            <table class="spec-table">
-                <thead>
-                    <tr><th>Property</th><th>Value</th></tr>
-                </thead>
-                <tbody>
-                    <tr><td>Font</td><td><code>.caption2</code> (Dynamic Type) — reference 11px</td></tr>
-                    <tr><td>Color</td><td><code>var(--text-muted)</code></td></tr>
-                    <tr><td>Position</td><td>Header line, trailing-aligned (opposite side from avatar/sender name)</td></tr>
-                    <tr><td>Vertical alignment</td><td>Baseline-aligned with sender name text</td></tr>
-                    <tr><td>Opacity</td><td><code>0.7</code></td></tr>
-                </tbody>
-            </table>
-
-            <h4>Time Display Rules</h4>
-            <table class="spec-table">
-                <thead>
-                    <tr><th>Age</th><th>Format</th><th>Example</th></tr>
-                </thead>
-                <tbody>
-                    <tr><td>Under 1 minute</td><td>Relative</td><td>"just now"</td></tr>
-                    <tr><td>1-59 minutes</td><td>Relative</td><td>"3m ago"</td></tr>
-                    <tr><td>1-23 hours (same day)</td><td>Time only</td><td>"2:45 PM"</td></tr>
-                    <tr><td>Yesterday</td><td>Day + time</td><td>"Yesterday, 9:12 AM"</td></tr>
-                    <tr><td>Same week</td><td>Weekday + time</td><td>"Tuesday, 3:30 PM"</td></tr>
-                    <tr><td>Same year</td><td>Short date + time</td><td>"Feb 21, 4:15 PM"</td></tr>
-                    <tr><td>Different year</td><td>Full date</td><td>"Dec 3, 2025"</td></tr>
-                </tbody>
-            </table>
-
-            <h4>Date Separators</h4>
-            <p>When messages span different days, a date separator divides them. This is a standalone element between bubbles, not attached to any bubble.</p>
-
-            <table class="spec-table">
-                <thead>
-                    <tr><th>Property</th><th>Value</th></tr>
-                </thead>
-                <tbody>
-                    <tr><td>Font</td><td><code>.caption</code> (Dynamic Type) — reference 12px</td></tr>
-                    <tr><td>Font weight</td><td><code>.semibold</code></td></tr>
-                    <tr><td>Color</td><td><code>var(--text-muted)</code></td></tr>
-                    <tr><td>Alignment</td><td>Center</td></tr>
-                    <tr><td>Vertical padding</td><td><code>16px</code> above and below</td></tr>
-                    <tr><td>Format (today)</td><td>"Today"</td></tr>
-                    <tr><td>Format (yesterday)</td><td>"Yesterday"</td></tr>
-                    <tr><td>Format (same week)</td><td>"Tuesday"</td></tr>
-                    <tr><td>Format (same year)</td><td>"February 21"</td></tr>
-                    <tr><td>Format (different year)</td><td>"December 3, 2025"</td></tr>
-                </tbody>
-            </table>
-
-            <div class="callout">
-                <p>Timestamps and date separators use the system locale for formatting. Never hardcode date formats — use <code>DateFormatter</code> / <code>.formatted()</code> with relative and named styles.</p>
-            </div>
         </section>
 
         <!-- CHROMELESS BUBBLES SECTION -->
@@ -1792,30 +1735,6 @@
                     <tr><td>Backdrop blur</td><td><code>.blur()</code> on background + <code>.saturation()</code></td></tr>
                 </tbody>
             </table>
-
-            <h3 id="dynamic-type">Dynamic Type Mapping</h3>
-            <p>All font sizes must use iOS Dynamic Type text styles, not hardcoded point sizes. This ensures Clawline respects the user's system text size preference and supports accessibility. The design system's fixed pixel values are <strong>reference sizes at the default (Large) text size</strong> — the actual rendered size scales with Dynamic Type.</p>
-
-            <table class="spec-table">
-                <thead>
-                    <tr><th>Design System Usage</th><th>Reference Size</th><th>iOS Text Style</th><th>SwiftUI</th></tr>
-                </thead>
-                <tbody>
-                    <tr><td>Short messages (1-3 words)</td><td>22px</td><td><code>.title3</code></td><td><code>.font(.title3.weight(.semibold))</code></td></tr>
-                    <tr><td>Medium messages</td><td>17px</td><td><code>.body</code></td><td><code>.font(.body.weight(.medium))</code></td></tr>
-                    <tr><td>Body text (long messages)</td><td>17px</td><td><code>.body</code></td><td><code>.font(.body)</code></td></tr>
-                    <tr><td>UI labels, input text</td><td>15px</td><td><code>.subheadline</code></td><td><code>.font(.subheadline)</code></td></tr>
-                    <tr><td>Secondary labels, code blocks</td><td>13px</td><td><code>.footnote</code></td><td><code>.font(.footnote)</code></td></tr>
-                    <tr><td>Sender names</td><td>12px</td><td><code>.caption</code></td><td><code>.font(.caption.weight(.semibold))</code></td></tr>
-                    <tr><td>Timestamps, metadata</td><td>11px</td><td><code>.caption2</code></td><td><code>.font(.caption2)</code></td></tr>
-                    <tr><td>Section headers</td><td>28px</td><td><code>.title</code></td><td><code>.font(.title.weight(.bold))</code></td></tr>
-                    <tr><td>Subsection headers</td><td>20px</td><td><code>.title2</code></td><td><code>.font(.title2.weight(.semibold))</code></td></tr>
-                </tbody>
-            </table>
-
-            <div class="callout">
-                <p><strong>Never use fixed font sizes in code.</strong> Always use <code>Font.TextStyle</code> in SwiftUI or <code>UIFont.TextStyle</code> in UIKit. The reference sizes above are for design documentation only — the system handles scaling. OTW (Optimized Text Width) also scales with Dynamic Type since it's derived from the body font size.</p>
-            </div>
 
             <h3>Flow Layout in SwiftUI</h3>
             <p>For the wrapping flow behavior, consider:</p>

@@ -1367,6 +1367,13 @@ final class ChatViewModel: ChatViewModelHosting {
             "incoming id=\(message.id, privacy: .public) sessionKey=\(message.sessionKey, privacy: .public) stream=\(message.stream.rawValue, privacy: .public) role=\(String(describing: message.role), privacy: .public) streaming=\(message.streaming, privacy: .public) deviceId=\(message.deviceId ?? "nil", privacy: .public) snippet=\"\(snippet, privacy: .public)\""
         )
 
+        if shouldSuppressInteractiveCallbackEcho(message) {
+            logger.info(
+                "incoming suppressed interactive_callback_echo id=\(message.id, privacy: .public) sessionKey=\(message.sessionKey, privacy: .public)"
+            )
+            return
+        }
+
         var resolvedMessage = message
         if message.role == .assistant,
            message.attachments.isEmpty,
@@ -1420,6 +1427,14 @@ final class ChatViewModel: ChatViewModelHosting {
 
         markUnreadIfNeeded(for: resolvedMessage)
         resolveAssetAttachmentsIfNeeded(for: resolvedMessage)
+    }
+
+    private func shouldSuppressInteractiveCallbackEcho(_ message: Message) -> Bool {
+        guard message.role == .user, !message.streaming else { return false }
+        let trimmed = message.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("[Interactive:") else { return false }
+        guard trimmed.contains("] action=") || trimmed.contains(" action=") else { return false }
+        return true
     }
 
     private func handleLifecycleServerMessage(epoch: Int, payload: Data) {

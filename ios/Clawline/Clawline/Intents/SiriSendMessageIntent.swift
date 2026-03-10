@@ -73,9 +73,11 @@ struct SendMessageIntent: AppIntent {
         NSLog("[SiriIntent][6] sending – stream=%@ bot=%@", stream.rawValue, resolvedBotName.value)
 
         let device = DeviceIdentifier()
+        let tlsSessionFactory = ProviderTLSSessionFactory()
         let connector = URLSessionWebSocketConnector(
             connectTimeout: SiriSendTimeouts.connectSeconds,
-            resourceTimeout: SiriSendTimeouts.resourceSeconds
+            resourceTimeout: SiriSendTimeouts.resourceSeconds,
+            tlsSessionFactory: tlsSessionFactory
         )
         let chatService = ProviderChatService(
             connector: connector,

@@ -7,29 +7,63 @@
 
 import Foundation
 import OSLog
-import CryptoKit
 
 private let webSocketLogger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "WebSocketConnector")
 
+protocol ProviderWebSocketTasking: AnyObject {
+    var closeCode: URLSessionWebSocketTask.CloseCode { get }
+    var closeReason: Data? { get }
+
+    func resume()
+    func send(_ message: URLSessionWebSocketTask.Message) async throws
+    func receive() async throws -> URLSessionWebSocketTask.Message
+    func cancel(with closeCode: URLSessionWebSocketTask.CloseCode, reason: Data?)
+}
+
+extension URLSessionWebSocketTask: ProviderWebSocketTasking {}
+
 final class URLSessionWebSocketConnector: WebSocketConnecting {
-    private let session: URLSession
-    private let sessionDelegate: URLSessionDelegate
+    typealias WebSocketTaskFactory = (_ session: URLSession, _ request: URLRequest) -> any ProviderWebSocketTasking
+
+    private let tlsSessionFactory: any ProviderTLSSessionFactoring
     private let connectTimeout: TimeInterval
     private let resourceTimeout: TimeInterval
+    private let webSocketTaskFactory: WebSocketTaskFactory
+    private let lock = NSLock()
 
-    var tlsAwareURLSession: URLSession { session }
+    private var currentSession: ProviderTLSSessionHandle?
+    private var activeTasks: [UUID: any ProviderWebSocketTasking] = [:]
+    private var policyObservation: ProviderTLSPolicyChangeObservation?
 
     init(connectTimeout: TimeInterval = 20,
          resourceTimeout: TimeInterval = 360,
-         tlsPolicyProvider: @escaping () -> ProviderTLSPolicy = { ProviderTLSSettingsStore.policy }) {
+         tlsSessionFactory: any ProviderTLSSessionFactoring = ProviderTLSSessionFactory(),
+         webSocketTaskFactory: @escaping WebSocketTaskFactory = { session, request in
+             session.webSocketTask(with: request)
+         }) {
+        self.tlsSessionFactory = tlsSessionFactory
         self.connectTimeout = connectTimeout
         self.resourceTimeout = resourceTimeout
-        let configuration = URLSessionConfiguration.default
-        configuration.timeoutIntervalForRequest = connectTimeout
-        configuration.timeoutIntervalForResource = resourceTimeout
-        let delegate = ProviderWebSocketTLSSessionDelegate(policyProvider: tlsPolicyProvider)
-        self.sessionDelegate = delegate
-        self.session = URLSession(configuration: configuration, delegate: delegate, delegateQueue: nil)
+        self.webSocketTaskFactory = webSocketTaskFactory
+        self.policyObservation = tlsSessionFactory.addPolicyChangeObserver { [weak self] _ in
+            self?.handlePolicyChange()
+        }
+    }
+
+    deinit {
+        if let policyObservation {
+            tlsSessionFactory.removePolicyChangeObserver(policyObservation)
+        }
+
+        let sessionsAndTasks: (URLSession?, [any ProviderWebSocketTasking])
+        lock.lock()
+        sessionsAndTasks = (currentSession?.session, Array(activeTasks.values))
+        currentSession = nil
+        activeTasks.removeAll()
+        lock.unlock()
+
+        sessionsAndTasks.1.forEach { $0.cancel(with: .normalClosure, reason: nil) }
+        sessionsAndTasks.0?.invalidateAndCancel()
     }
 
     func connect(to url: URL) async throws -> any WebSocketClient {
@@ -39,75 +73,87 @@ final class URLSessionWebSocketConnector: WebSocketConnecting {
         if request.value(forHTTPHeaderField: "Origin") == nil {
             request.setValue("https://clawline.app", forHTTPHeaderField: "Origin")
         }
-        let task = session.webSocketTask(with: request)
+        let session = sessionForConnect()
+        let taskID = UUID()
+        let task = webSocketTaskFactory(session, request)
+        register(task: task, id: taskID)
         task.resume()
-        return URLSessionWebSocketClient(task: task)
-    }
-}
-
-final class ProviderWebSocketTLSSessionDelegate: NSObject, URLSessionDelegate {
-    private let policyProvider: () -> ProviderTLSPolicy
-
-    init(policyProvider: @escaping () -> ProviderTLSPolicy) {
-        self.policyProvider = policyProvider
+        return URLSessionWebSocketClient(task: task) { [weak self] in
+            self?.unregisterTask(id: taskID)
+        }
     }
 
-    func urlSession(_ session: URLSession,
-                    didReceive challenge: URLAuthenticationChallenge,
-                    completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
-        guard challenge.protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust else {
-            completionHandler(.performDefaultHandling, nil)
-            return
+    private func sessionForConnect() -> URLSession {
+        let staleSession: URLSession?
+        let session: URLSession
+
+        lock.lock()
+        if let currentSession,
+           currentSession.generation == tlsSessionFactory.currentGeneration {
+            session = currentSession.session
+            lock.unlock()
+            return session
         }
 
-        guard let serverTrust = challenge.protectionSpace.serverTrust else {
-            completionHandler(.performDefaultHandling, nil)
-            return
-        }
+        staleSession = currentSession?.session
+        let freshSession = tlsSessionFactory.makeSession(
+            for: .webSocket(
+                connectTimeout: connectTimeout,
+                resourceTimeout: resourceTimeout
+            )
+        )
+        currentSession = freshSession
+        session = freshSession.session
+        lock.unlock()
 
-        let policy = policyProvider()
-        if let pinned = policy.pinnedLeafCertificateSHA256 {
-            if Self.matchesPinnedLeafSHA256(serverTrust: serverTrust, pinned: pinned) {
-                completionHandler(.useCredential, URLCredential(trust: serverTrust))
-            } else {
-                completionHandler(.cancelAuthenticationChallenge, nil)
-            }
-            return
-        }
-
-        if policy.trustSelfSignedCertificates {
-            completionHandler(.useCredential, URLCredential(trust: serverTrust))
-            return
-        }
-
-        completionHandler(.performDefaultHandling, nil)
+        staleSession?.invalidateAndCancel()
+        return session
     }
 
-    private static func matchesPinnedLeafSHA256(serverTrust: SecTrust, pinned: String) -> Bool {
-        guard let chain = SecTrustCopyCertificateChain(serverTrust) as? [SecCertificate],
-              let leaf = chain.first else {
-            return false
-        }
-        let data = SecCertificateCopyData(leaf) as Data
-        let digest = SHA256.hash(data: data)
-        let fingerprint = digest.map { String(format: "%02x", $0) }.joined()
-        return fingerprint == pinned
+    private func register(task: any ProviderWebSocketTasking, id: UUID) {
+        lock.lock()
+        activeTasks[id] = task
+        lock.unlock()
+    }
+
+    private func unregisterTask(id: UUID) {
+        lock.lock()
+        activeTasks.removeValue(forKey: id)
+        lock.unlock()
+    }
+
+    private func handlePolicyChange() {
+        let sessionAndTasks: (URLSession?, [any ProviderWebSocketTasking])
+        lock.lock()
+        sessionAndTasks = (currentSession?.session, Array(activeTasks.values))
+        currentSession = nil
+        activeTasks.removeAll()
+        lock.unlock()
+
+        sessionAndTasks.1.forEach { $0.cancel(with: .goingAway, reason: nil) }
+        sessionAndTasks.0?.invalidateAndCancel()
     }
 }
 
 private final class URLSessionWebSocketClient: WebSocketClient {
-    private let task: URLSessionWebSocketTask
+    private let task: any ProviderWebSocketTasking
     private let stream: AsyncStream<String>
     private let continuation: AsyncStream<String>.Continuation
+    private let onTermination: (() -> Void)?
     private var receiveTask: Task<Void, Never>?
     private(set) var lastCloseInfo: WebSocketCloseInfo?
 
-    init(task: URLSessionWebSocketTask) {
+    init(task: any ProviderWebSocketTasking, onTermination: (() -> Void)? = nil) {
         self.task = task
+        self.onTermination = onTermination
         var continuation: AsyncStream<String>.Continuation!
         self.stream = AsyncStream { continuation = $0 }
         self.continuation = continuation
         startReceiving()
+    }
+
+    deinit {
+        onTermination?()
     }
 
     var incomingTextMessages: AsyncStream<String> { stream }
@@ -121,6 +167,7 @@ private final class URLSessionWebSocketClient: WebSocketClient {
         task.cancel(with: code ?? .normalClosure, reason: nil)
         receiveTask?.cancel()
         continuation.finish()
+        onTermination?()
     }
 
     private func startReceiving() {

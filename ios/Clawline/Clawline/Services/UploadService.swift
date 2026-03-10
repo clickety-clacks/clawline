@@ -14,17 +14,32 @@ final class UploadService: UploadServicing {
         let mimeType: String?
     }
 
-    private let session: URLSession
+    private let tlsSessionFactory: any ProviderTLSSessionFactoring
     private let auth: any AuthManaging
     private let baseURLProvider: () -> URL?
     private let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "UploadService")
+    private let lock = NSLock()
+
+    private var uploadSession: ProviderTLSSessionHandle?
+    private var assetDownloadSession: ProviderTLSSessionHandle?
+    private var policyObservation: ProviderTLSPolicyChangeObservation?
 
     init(auth: any AuthManaging,
          baseURLProvider: @escaping () -> URL? = { ProviderBaseURLStore.baseURL },
-         session: URLSession = .shared) {
+         tlsSessionFactory: any ProviderTLSSessionFactoring = ProviderTLSSessionFactory()) {
         self.auth = auth
         self.baseURLProvider = baseURLProvider
-        self.session = session
+        self.tlsSessionFactory = tlsSessionFactory
+        self.policyObservation = tlsSessionFactory.addPolicyChangeObserver { [weak self] _ in
+            self?.handlePolicyChange()
+        }
+    }
+
+    deinit {
+        if let policyObservation {
+            tlsSessionFactory.removePolicyChangeObserver(policyObservation)
+        }
+        invalidateOwnedSessions(cancelTasks: true)
     }
 
     func upload(data: Data, mimeType: String, filename: String?) async throws -> String {
@@ -54,7 +69,7 @@ final class UploadService: UploadServicing {
         let responseData: Data
         let response: URLResponse
         do {
-            (responseData, response) = try await session.data(for: request)
+            (responseData, response) = try await uploadURLSession().data(for: request)
         } catch {
             logger.error("asset upload request failed error=\(error.localizedDescription, privacy: .public)")
             throw error
@@ -113,7 +128,7 @@ final class UploadService: UploadServicing {
         request.httpMethod = "GET"
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
 
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await assetDownloadURLSession().data(for: request)
         guard let httpResponse = response as? HTTPURLResponse else {
             throw AttachmentError.networkFailure
         }
@@ -213,5 +228,75 @@ final class UploadService: UploadServicing {
             return string.replacingOccurrences(of: "\n", with: "\\n")
         }
         return data.prefix(maxLength).base64EncodedString()
+    }
+
+    private func uploadURLSession() -> URLSession {
+        session(for: .upload)
+    }
+
+    private func assetDownloadURLSession() -> URLSession {
+        session(for: .assetDownload)
+    }
+
+    private func session(for role: ProviderTLSSessionRole) -> URLSession {
+        let staleSession: URLSession?
+        let resolvedSession: URLSession
+
+        lock.lock()
+        let currentGeneration = tlsSessionFactory.currentGeneration
+        let currentHandle: ProviderTLSSessionHandle? = {
+            switch role {
+            case .upload:
+                return uploadSession
+            case .assetDownload:
+                return assetDownloadSession
+            case .webSocket:
+                return nil
+            }
+        }()
+
+        if let currentHandle, currentHandle.generation == currentGeneration {
+            resolvedSession = currentHandle.session
+            lock.unlock()
+            return resolvedSession
+        }
+
+        staleSession = currentHandle?.session
+        let freshHandle = tlsSessionFactory.makeSession(for: role)
+        switch role {
+        case .upload:
+            uploadSession = freshHandle
+        case .assetDownload:
+            assetDownloadSession = freshHandle
+        case .webSocket:
+            break
+        }
+        resolvedSession = freshHandle.session
+        lock.unlock()
+
+        staleSession?.finishTasksAndInvalidate()
+        return resolvedSession
+    }
+
+    private func handlePolicyChange() {
+        invalidateOwnedSessions(cancelTasks: false)
+    }
+
+    private func invalidateOwnedSessions(cancelTasks: Bool) {
+        let sessions: [URLSession]
+
+        lock.lock()
+        sessions = [uploadSession?.session, assetDownloadSession?.session].compactMap { $0 }
+        uploadSession = nil
+        assetDownloadSession = nil
+        lock.unlock()
+
+        sessions.forEach { session in
+            if cancelTasks {
+                session.invalidateAndCancel()
+            } else {
+                session.finishTasksAndInvalidate()
+            }
+        }
     }
 }

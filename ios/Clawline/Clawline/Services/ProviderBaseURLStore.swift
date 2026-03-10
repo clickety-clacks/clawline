@@ -40,7 +40,9 @@ enum ProviderTLSSettingsStore {
             return UserDefaults.standard.bool(forKey: trustSelfSignedKey)
         }
         set {
+            let previousPolicy = policy
             UserDefaults.standard.set(newValue, forKey: trustSelfSignedKey)
+            postPolicyChangeIfNeeded(from: previousPolicy)
         }
     }
 
@@ -50,12 +52,14 @@ enum ProviderTLSSettingsStore {
             return normalizeFingerprint(raw)
         }
         set {
+            let previousPolicy = policy
             let normalized = normalizeFingerprint(newValue)
             if let normalized {
                 UserDefaults.standard.set(normalized, forKey: pinnedFingerprintKey)
             } else {
                 UserDefaults.standard.removeObject(forKey: pinnedFingerprintKey)
             }
+            postPolicyChangeIfNeeded(from: previousPolicy)
         }
     }
 
@@ -74,6 +78,11 @@ enum ProviderTLSSettingsStore {
             .filter { $0.isHexDigit }
         guard normalized.count == 64 else { return nil }
         return normalized
+    }
+
+    private static func postPolicyChangeIfNeeded(from previousPolicy: ProviderTLSPolicy) {
+        guard previousPolicy != policy else { return }
+        NotificationCenter.default.post(name: .providerTLSPolicyDidChange, object: nil)
     }
 }
 

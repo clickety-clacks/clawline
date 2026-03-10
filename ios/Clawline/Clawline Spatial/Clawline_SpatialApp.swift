@@ -28,7 +28,12 @@ struct Clawline_SpatialApp: App {
         let settingsManager = SettingsManager()
         _settingsManager = State(initialValue: settingsManager)
         let device = DeviceIdentifier()
-        let connector = URLSessionWebSocketConnector(connectTimeout: 20, resourceTimeout: 360)
+        let tlsSessionFactory = ProviderTLSSessionFactory()
+        let connector = URLSessionWebSocketConnector(
+            connectTimeout: 20,
+            resourceTimeout: 360,
+            tlsSessionFactory: tlsSessionFactory
+        )
         self.deviceIdentifier = device
         self.connectionService = ProviderConnectionService(connector: connector)
         self.chatService = ProviderChatService(
@@ -38,7 +43,7 @@ struct Clawline_SpatialApp: App {
         )
         self.uploadService = UploadService(
             auth: authManager,
-            session: connector.tlsAwareURLSession
+            tlsSessionFactory: tlsSessionFactory
         )
     }
 

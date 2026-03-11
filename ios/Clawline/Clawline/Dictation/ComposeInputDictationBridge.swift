@@ -89,13 +89,51 @@ final class ComposeInputDictationBridge {
     // UIKit selection collapse when gesture/tap focus changes right before activation.
     func setPreferredSelectionRange(_ selectionRange: NSRange, for sessionKey: String?) {
         guard let sessionKey, !sessionKey.isEmpty else { return }
+        let resolvedSelectionRange: NSRange
         if selectionRange.location != NSNotFound {
-            preferredSelectionRangeBySession[sessionKey] = selectionRange
+            resolvedSelectionRange = selectionRange
+        } else if let liveSelectionRange = composeTextView?.selectedRange {
+            resolvedSelectionRange = liveSelectionRange
+        } else {
             return
         }
-        if let liveSelectionRange = composeTextView?.selectedRange {
-            preferredSelectionRangeBySession[sessionKey] = liveSelectionRange
-        }
+        preferredSelectionRangeBySession[sessionKey] = resolvedSelectionRange
+
+        guard var state = transcriptStateBySession[sessionKey],
+              host?.activeSessionKey == sessionKey,
+              let composeTextView
+        else { return }
+        guard !composeTextView.dictationProgrammaticUpdateInFlight else { return }
+
+        reanchorTranscriptState(
+            &state,
+            to: resolvedSelectionRange,
+            in: composeTextView
+        )
+        transcriptStateBySession[sessionKey] = state
+    }
+
+    private func reanchorTranscriptState(
+        _ state: inout TranscriptState,
+        to selectionRange: NSRange,
+        in textView: UITextView
+    ) {
+        let textLength = textView.attributedText.length
+        let clampedSelectionRange = safeReplacementRange(
+            selectedRange: selectionRange,
+            textLength: textLength,
+            fallbackLocation: textLength
+        )
+        let selectedText = substring(
+            text: textView.attributedText.string,
+            utf16Range: clampedSelectionRange
+        ) ?? ""
+
+        state.dictationStartUTF16 = clampedSelectionRange.location
+        state.committedLenUTF16 = 0
+        state.provisionalText = selectedText
+        state.suppressedUntilNextEndpoint = false
+        state.committedText = ""
     }
 
     // Freeze the activation-time selection so later UIKit cursor churn cannot move the

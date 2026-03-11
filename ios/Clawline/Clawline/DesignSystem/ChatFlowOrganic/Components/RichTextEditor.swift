@@ -247,12 +247,14 @@ struct RichTextEditor: UIViewRepresentable {
             let selectedRange = textView.selectedRange
             guard selectedRange.location != NSNotFound else { return }
             guard !isApplyingParentSelection else { return }
-            setSelectionRange(selectedRange)
             if let textView = textView as? PastableTextView {
                 if textView.dictationIgnoreNextSelectionInteraction {
                     textView.dictationIgnoreNextSelectionInteraction = false
+                    ensureTypingAttributes(on: textView)
+                    return
                 }
             }
+            setSelectionRange(selectedRange)
             if isApplyingLocalEdit {
                 ensureCaretVisible(in: textView)
             }

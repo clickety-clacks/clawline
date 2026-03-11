@@ -137,6 +137,98 @@ struct ComposeInputDictationBridgeTests {
         #expect(textView.attributedText.string == "hello beautiful again world")
     }
 
+    @Test("Moving the cursor during dictation re-anchors the next dictated text to the new caret")
+    func movingCursorDuringDictationReanchorsInsertion() {
+        let host = BridgeHost()
+        let bridge = ComposeInputDictationBridge(host: host)
+        let textView = PastableTextView()
+        textView.attributedText = NSAttributedString(string: "hello world")
+        textView.selectedRange = NSRange(location: 11, length: 0)
+        bridge.setComposeTextView(textView)
+
+        let sessionKey = "agent:main:test:main"
+        let snapshot = ComposeDraftSnapshot(
+            content: NSAttributedString(string: "hello world"),
+            attachments: [:]
+        )
+
+        bridge.setPreferredSelectionRange(textView.selectedRange, for: sessionKey)
+        bridge.resetTranscriptState(for: sessionKey)
+        bridge.applySegmentUpdate(
+            DictationSegmentUpdate(
+                provisionalText: "",
+                committedSegments: [" tail"],
+                finished: false,
+                sawEndpoint: true,
+                hadAnyTokens: true
+            ),
+            baseSnapshot: snapshot,
+            originSessionKey: sessionKey
+        )
+
+        textView.selectedRange = NSRange(location: 6, length: 0)
+        bridge.setPreferredSelectionRange(textView.selectedRange, for: sessionKey)
+        bridge.applySegmentUpdate(
+            DictationSegmentUpdate(
+                provisionalText: "new ",
+                committedSegments: [],
+                finished: false,
+                sawEndpoint: false,
+                hadAnyTokens: true
+            ),
+            baseSnapshot: snapshot,
+            originSessionKey: sessionKey
+        )
+
+        #expect(textView.attributedText.string == "hello new world tail")
+    }
+
+    @Test("Selecting text during dictation makes the next dictated text replace that selection")
+    func selectingTextDuringDictationReplacesSelection() {
+        let host = BridgeHost()
+        let bridge = ComposeInputDictationBridge(host: host)
+        let textView = PastableTextView()
+        textView.attributedText = NSAttributedString(string: "alpha beta omega")
+        textView.selectedRange = NSRange(location: 16, length: 0)
+        bridge.setComposeTextView(textView)
+
+        let sessionKey = "agent:main:test:main"
+        let snapshot = ComposeDraftSnapshot(
+            content: NSAttributedString(string: "alpha beta omega"),
+            attachments: [:]
+        )
+
+        bridge.setPreferredSelectionRange(textView.selectedRange, for: sessionKey)
+        bridge.resetTranscriptState(for: sessionKey)
+        bridge.applySegmentUpdate(
+            DictationSegmentUpdate(
+                provisionalText: "",
+                committedSegments: [" tail"],
+                finished: false,
+                sawEndpoint: true,
+                hadAnyTokens: true
+            ),
+            baseSnapshot: snapshot,
+            originSessionKey: sessionKey
+        )
+
+        textView.selectedRange = NSRange(location: 6, length: 4)
+        bridge.setPreferredSelectionRange(textView.selectedRange, for: sessionKey)
+        bridge.applySegmentUpdate(
+            DictationSegmentUpdate(
+                provisionalText: "spoken",
+                committedSegments: [],
+                finished: false,
+                sawEndpoint: false,
+                hadAnyTokens: true
+            ),
+            baseSnapshot: snapshot,
+            originSessionKey: sessionKey
+        )
+
+        #expect(textView.attributedText.string == "alpha spoken omega tail")
+    }
+
     @Test("Activation capture wins over later ambient selection changes before dictation starts")
     func activationCapturePreservesCaretBeforeReset() {
         let host = BridgeHost()

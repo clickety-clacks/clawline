@@ -2180,8 +2180,8 @@ private final class TestChatService: ChatServicing {
         }
     }()
 
-    func connect(token: String, activeSessionKey: String?) async throws {
-        _ = activeSessionKey
+    func connect(token: String, lastMessageId: String?) async throws {
+        _ = lastMessageId
         connectCallCount += 1
         isTransportReadyForSend = true
         stateContinuation?.yield(.connected)

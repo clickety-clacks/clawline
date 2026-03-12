@@ -457,10 +457,10 @@ Primary implementation surface:
 - `ios/Clawline/Clawline/ViewModels/ChatViewModel.swift`
 
 Related behavioral constraints to preserve:
-- `docs/specs/scroll-to-bottom-invariants.md`
-- `docs/specs/scroll-to-bottom-button.md`
-- `docs/specs/staged-stream-materialization.md`
-- `docs/specs/stream-switch-coordinator.md`
+- `specs/scroll-to-bottom-invariants.md`
+- `specs/scroll-to-bottom-button.md`
+- `specs/staged-stream-materialization.md`
+- `specs/stream-switch-coordinator.md`
 - `/Users/mike/shared-workspace/clawline/specs/message-stream-seam.md` (canonical write seam for message mutations)
 
 No unspecced defensive additions. If an implementation gap appears, update this spec first.
@@ -469,7 +469,7 @@ No unspecced defensive additions. If an implementation gap appears, update this 
 
 ## Appendix: Preserved Notes
 
-### From: retros/per-stream-cv-analysis.md
+### Preserved from deleted non-core doc: per-stream-cv-analysis.md
 
 **TabView vs show/hide for per-stream MessageFlowCollectionView:**
 
@@ -494,7 +494,7 @@ The branch added these exclusively to manage the TabView recycling/timing proble
 
 ---
 
-### From: retros/t113-spec-gap-analysis.md + retros/t113-transition-surface-audit.md
+### Preserved from deleted non-core docs: t113-spec-gap-analysis.md + t113-transition-surface-audit.md
 
 **Transition Surface Contract (three rules that prevent integration bugs by construction):**
 

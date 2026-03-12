@@ -816,7 +816,7 @@ All three Round 1 blockers have been resolved:
 
 ## Appendix: Preserved Notes
 
-### From: retros/watch-ios-support-handoff.md
+### Preserved from deleted non-core doc: watch-ios-support-handoff.md
 
 **Watch app transport architecture (direct-first):**
 

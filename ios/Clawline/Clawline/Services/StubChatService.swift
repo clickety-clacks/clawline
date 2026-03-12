@@ -53,8 +53,8 @@ final class StubChatService: ChatServicing {
         latestConnectionState == .connected
     }
 
-    func connect(token: String, activeSessionKey: String?) async throws {
-        _ = activeSessionKey
+    func connect(token: String, lastMessageId: String?) async throws {
+        _ = lastMessageId
         stateContinuation?.yield(.connecting)
         latestConnectionState = .connecting
         try await Task.sleep(forDuration: .milliseconds(500))
@@ -81,7 +81,7 @@ final class StubChatService: ChatServicing {
         _ = lastMessageId
         Task {
             do {
-                try await connect(token: token, activeSessionKey: nil)
+                try await connect(token: token, lastMessageId: nil)
                 lifecycleContinuation?.yield(.init(
                     epoch: epoch,
                     payload: .authResult(success: true, replayCount: 0, replayTruncated: false, historyReset: false, failureReason: nil)

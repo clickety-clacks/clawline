@@ -9,7 +9,7 @@
 
 ## Appendix: Preserved Notes
 
-### From: specs/rebase-2026-03-03/ (rebase migration specs, 2026-03-03)
+### Preserved from deleted non-core doc:  (rebase migration specs, 2026-03-03)
 
 **Key invariants preserved through v2026.3.2 rebase:**
 

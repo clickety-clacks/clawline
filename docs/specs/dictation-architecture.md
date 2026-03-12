@@ -887,7 +887,7 @@ Motion stored state: `settleDurationMultiplier: Double = 1.0`. Set to 2.0 to slo
 
 ## Appendix: Preserved Notes
 
-### From: scratch/dictation-bugs-2026-03-08.md (verified against commit 5c718fad2)
+### Preserved from deleted non-core doc: dictation-bugs-2026-03-08.md (verified against commit 5c718fad2)
 
 **Known dictation bugs (as of 2026-03-08):**
 1. **Keyboard dismiss non-interactive** — pull-down gesture drops keyboard instantly; must use interactive keyboard dismiss mode.

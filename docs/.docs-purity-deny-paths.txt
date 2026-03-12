@@ -1,0 +1,8 @@
+history/
+retros/
+reviews/
+scratch/
+bugs/
+investigations/
+implementation-notes/
+specs/archive/

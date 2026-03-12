@@ -1352,9 +1352,8 @@ final class ChatViewModel: ChatViewModelHosting {
         guard let token = auth.token else {
             throw ProviderChatService.Error.notConnected
         }
-        let activeKey = engineActiveSessionKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        let activeSessionKey = activeKey.isEmpty ? nil : activeKey
-        try await chatService.connect(token: token, activeSessionKey: activeSessionKey)
+        let lastMessageId = chatService.replayCursorSnapshot().values.max()
+        try await chatService.connect(token: token, lastMessageId: lastMessageId)
     }
 
     private static func makeIdempotencyKey() -> String {

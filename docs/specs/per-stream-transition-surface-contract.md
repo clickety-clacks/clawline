@@ -1,7 +1,7 @@
 # Per-Stream Transition Surface Contract
 
 **Parent spec:** `per-stream-state-encapsulation.md`
-**Derived from:** T113 transition surface audit, re-audit, and spec gap analysis (`retros/t113-spec-gap-analysis.md`)
+**Derived from:** T113 transition surface audit, re-audit, and spec gap analysis (consolidated into core docs, 2026-03-09)
 
 This contract governs the boundary between per-stream state infrastructure and the code that uses it. The parent spec defines how per-stream state works internally. This spec defines the obligations that per-stream state imposes on every caller, old or new.
 

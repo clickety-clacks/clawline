@@ -131,7 +131,7 @@ Gap B: Clawline-specific plugin-sdk carveouts remain.
 
 ---
 
-### From: investigations/clawline-extension-consolidation.md
+### Preserved from deleted non-core doc: clawline-extension-consolidation.md
 
 **Skills that belong in `extensions/clawline/` (not upstream `skills/`):**
 `clawline-alert-overlay`, `clawline-allowlist`, `clawline-gateway-ops`, `clawline-media`, `clawline-pairing` — all are fork-only contributions.
@@ -140,4 +140,4 @@ Gap B: Clawline-specific plugin-sdk carveouts remain.
 
 **Device management consolidation needed:** `allowlist` and `pairing` skills should be merged into one `device-management` skill.
 
-**Agent guidance files** (`AGENTS.md`, `CLAUDE.md` in `src/clawline/`) should move into `extensions/clawline/` alongside code.
+**Agent guidance files** (`~/.openclaw/workspace/AGENTS.md`, `(local agent guidance file, not part of core docs)` in `src/clawline/`) should move into `extensions/clawline/` alongside code.

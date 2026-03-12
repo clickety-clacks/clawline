@@ -20,7 +20,7 @@ This document defines how chats are organized and presented in the Clawline iOS/
 - Visual design / layout polish
 - Notifications UX
 - Search implementation
-- OpenClaw core implementation details (see `history/` for point-in-time implementation references)
+- OpenClaw core implementation details are summarized in provider/core architecture docs
 
 ---
 
@@ -198,15 +198,15 @@ The client uses these session keys for all subsequent message routing.
 
 ## Implementation References
 
-Detailed OpenClaw core implementation notes (routing logic, code paths, function signatures, historical bugs) are preserved in `/Users/mike/shared-workspace/clawline/history/`:
+Detailed implementation rationale was consolidated from historical/review docs into core docs on 2026-03-09:
 
-- **chat-information-architecture-verbose-2026-02-06.md** — Original verbose spec with all internal details
-- **chat-ia-implementation-questions.md** — 20 questions from provider implementation
-- **chat-ia-implementation-answers.md** — Answers with code references
-- **chat-ia-reality-check.md** — Spec-vs-code audit findings
-- **2026-02-04-message-routing-investigation.md** — Routing bug deep dive
 
-These documents capture our understanding at the time of implementation (Feb 2026). OpenClaw core may change; the IA described in this document remains stable.
+
+
+
+
+
+
 
 ---
 

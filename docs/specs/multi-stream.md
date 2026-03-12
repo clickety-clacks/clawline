@@ -2,7 +2,7 @@
 
 Status: Draft (implementation-grade)
 Last updated: 2026-02-12
-Sources: clickety-clacks/clawline#71, `multi-stream-review.md`, Flynn decisions
+Sources: clickety-clacks/clawline#71, `(deleted after consolidation, 2026-03-09)`, Flynn decisions
 
 ## 1. Purpose
 

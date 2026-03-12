@@ -27,15 +27,15 @@ Bugs this spec must eliminate:
 ## Prior Art Used
 
 - `/Users/mike/shared-workspace/clawline/specs/connection-state-ui.md`
-- `/Users/mike/shared-workspace/clawline/specs/t069-connection-state-full-audit-retro.md`
+- `(deleted after consolidation, 2026-03-09)`
 - `/Users/mike/shared-workspace/clawline/ios-provider-connection.md`
 - `/Users/mike/shared-workspace/clawline/specs/clawline-invariants.md`
 - `/Users/mike/shared-workspace/clawline/specs/staged-stream-materialization.md`
-- `/Users/mike/shared-workspace/clawline/specs/staged-stream-materialization-arch-review.md`
-- `/Users/mike/shared-workspace/clawline/specs/staged-stream-materialization-arch-review-2.md`
+- `(deleted after consolidation, 2026-03-09)`
+- `(deleted after consolidation, 2026-03-09)`
 - `/Users/mike/shared-workspace/clawline/specs/stream-switch-coordinator.md`
-- `/Users/mike/shared-workspace/clawline/specs/stream-switch-coordinator-arch-review.md`
-- `/Users/mike/shared-workspace/clawline/specs/stream-switch-separation-code-review.md`
+- `(deleted after consolidation, 2026-03-09)`
+- `(deleted after consolidation, 2026-03-09)`
 
 State-machine prior-art lookup note:
 - Requested file `clawline-ws-state-machine.mmd` was searched under `/Users/mike/.openclaw/workspace`, `/Users/mike/shared-workspace`, and `/Users/mike/src/clawline`; no file found.
@@ -502,7 +502,7 @@ Spec compliance guardrail:
 
 ## Appendix: Preserved Notes
 
-### From: reviews/t100-stale-listener-race-fix.md
+### Preserved from deleted non-core doc: t100-stale-listener-race-fix.md
 
 **Stale-listener close race fix:**
 In lifecycle connect fallback, attempt 1 could leave a stale listener alive while attempt 2 became active. The stale listener later emitted socket-close handling producing `transportClosed(.error)`, which could knock the coordinator from `authenticating` to recovery/failure before active auth success landed.
@@ -515,7 +515,7 @@ In lifecycle connect fallback, attempt 1 could leave a stale listener alive whil
 
 ---
 
-### From: retros/t100-connection-failure-diagnosis.md
+### Preserved from deleted non-core doc: t100-connection-failure-diagnosis.md
 
 **Cold launch persisted stream key reset:** On cold launch, if `restoreActiveSessionKeyIfNeeded()` runs before `orderedSessions` is populated, it falls back to the default main session and overwrites the persisted key. Fix: delay restore until ordered sessions are available post-provisioning.
 

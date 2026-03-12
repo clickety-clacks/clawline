@@ -49,7 +49,7 @@ SECTION 2: TICKET CLOSURE MAP
 
 T077 — Stream switch latency
   Status: RESOLVED. Work is on main.
-  Evidence: ~/shared-workspace/clawline/retros/t077-latency-review-2026-02-23.md
+  Evidence: latency review evidence consolidated into core docs (2026-03-09)
   Action: None.
 
 T095 — Scroll position not preserved on re-read/initial populate
@@ -327,7 +327,7 @@ Round 2 errors (corrected in this final):
 
 ## Appendix: Preserved Notes
 
-### From: retros/t113-t104-retro.md
+### Preserved from deleted non-core doc: t113-t104-retro.md
 
 **T104/SBB regression root causes:**
 

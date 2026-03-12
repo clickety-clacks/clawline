@@ -4,7 +4,7 @@ Owner: bubble sizing refactor
 
 This spec describes the new architecture for bubble sizing in UIKit chat bubbles (MessageFlowCollectionView + MessageBubbleUIKitView) and how we collapse the current branchy behavior into a single coherent pipeline.
 
-It is written against the current audit: `scratch/bubble-sizing-audit.md`.
+It is written against the audited behavior baseline consolidated into this spec.
 
 ## Goals
 

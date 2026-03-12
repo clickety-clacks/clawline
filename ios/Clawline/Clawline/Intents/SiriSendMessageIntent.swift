@@ -88,7 +88,7 @@ struct SendMessageIntent: AppIntent {
         do {
             NSLog("[SiriIntent][7] connecting...")
             try await withTimeout(SiriSendTimeouts.connect) {
-                try await chatService.connect(token: token, activeSessionKey: nil)
+                try await chatService.connect(token: token, lastMessageId: nil)
             }
             NSLog("[SiriIntent][8] connected")
 

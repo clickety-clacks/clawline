@@ -299,3 +299,25 @@ Before cleaning up:
 ---
 
 *This SOP supersedes any prior guidance about shared checkouts or `cp -r` clones for coding agents.*
+
+---
+
+## Appendix: Preserved Notes
+
+### From: retros/rebase-2026-03-03-debrief.md
+
+**v2026.3.2 rebase learnings (2026-03-03):**
+
+Key conflicts that required active refactoring (not just upstream accept):
+
+**A) `plugin-auto-enable.ts`:** Under raw upstream behavior, configured `channels.clawline` would be auto-enabled too aggressively. Fix: explicit Clawline handling registers configured Clawline in plugin entries as disabled by default (`plugins.entries.clawline.enabled = false`). Preserve this in future rebases.
+
+**B) `message-action-params.ts`:** Added buffer-object compatibility normalization for `sendAttachment` (`Buffer`, `Uint8Array`, `{type:"Buffer",data:[...]}` forms) + explicit loopback SSRF allowance for localhost media fetches. Both are Clawline-specific additions inside the upstream media-policy structure.
+
+**C) `server-methods/agent.ts`:** Preserved Clawline request-channel fallback (`channel: entry?.channel ?? requestChannel`) in the new ingress flow. Has regression test in `agent.test.ts`. Must preserve in future rebases.
+
+**D) `plugin-sdk/index.ts`:** Must manually restore after rebase: `ClawlineDeliveryTarget`, `sendClawlineOutboundMessage`, `startClawlineService`/`ClawlineServiceHandle` (B13 invariant). These exports get dropped by upstream merges.
+
+**E) `ws-connection/*`:** Upstream split the monolithic `message-handler.ts` into `auth-context.ts`, `connect-policy.ts`, `unauthorized-flood-guard.ts`. Device signature skew tightened from 10m → 2m. Client challenge nonce now mandatory.
+
+**Rebase process:** Use spec agent for collision zone recon before writing merge code. Pre-analyze conflict areas with `git diff aba15763b v2026.3.2`. Write migration specs per collision zone. Verify each with tests before moving to next.

@@ -35,3 +35,28 @@
 - Ensure message sizing uses only content + width (no post-layout state changes).
 - Confirm that link preview / image loading does not change measured height after initial size (if it does, consider fixed-height placeholders or precomputed sizing).
 - Recheck width computation when device rotates; this is the sole allowed cause of size changes.
+
+---
+
+## Appendix: Preserved Notes
+
+### From: above-bar-gap-analysis.md
+
+**Above-bar gap root cause:**
+The visible gap between the last bubble's bottom edge and the input bar's top edge is determined by **two independent layout systems** that must agree:
+1. **Collection view content inset** (`collectionView.contentInset.bottom = listBottomInset`)
+2. **Auto Layout constraints** (`KeyboardPinnedContainer` against `keyboardLayoutGuide`)
+
+The gap formula (`ChatView.swift`):
+```swift
+let listBottomInset = keyboardInset + belowBarGap + resolvedInputHeight
+    + metrics.flowGap - metrics.containerPadding
+```
+
+**Race condition:** All four inputs (`keyboardHeight`, `inputBarHeight`, `geometry.safeAreaInsets.bottom`, `horizontalSizeClass`) start at zero/default and update asynchronously:
+- `keyboardHeight`: updated via `KeyboardLayoutGuideObserverView` notification callback
+- `inputBarHeight`: updated via `DispatchQueue.main.async` from `KeyboardPinnedContainer.Coordinator`
+- `safeAreaInsets.bottom`: from SwiftUI `GeometryProxy`, may be 0 on first frame
+- `horizontalSizeClass`: from trait collection
+
+The gap is wrong on first load because the two layout systems compute from different snapshots of these shared inputs. It self-corrects after any interaction that triggers a layout pass from both systems.

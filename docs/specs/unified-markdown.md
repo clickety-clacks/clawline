@@ -272,7 +272,7 @@ Post-change invariant:
 
 ## Appendix: Preserved Notes
 
-### From: retros/unified-md-block-spacing.md
+### Preserved from deleted non-core doc: unified-md-block-spacing.md
 
 **Block spacing root cause (T057 bounce):** Block spacing regressed because the unified parser collapsed multiple top-level markdown block nodes into a single `.richText(markdownSource:)` payload. The renderer then fed that through `AttributedString(markdown:, interpretedSyntax: .full)` which flattens block separators.
 
@@ -288,7 +288,7 @@ Post-change invariant:
 
 ---
 
-### From: retros/unified-md-darkmode-analysis.md
+### Preserved from deleted non-core doc: unified-md-darkmode-analysis.md
 
 **Dark mode is not unified because the pipeline unifies markdown structure but not theming ownership:**
 - Bubble code blocks: explicit `isDark` override + async UIKit re-highlighting path.
@@ -301,7 +301,7 @@ Post-change invariant:
 
 ---
 
-### From: retros/unified-md-dry-audit.md
+### Preserved from deleted non-core doc: unified-md-dry-audit.md
 
 **Critical DRY violations in unified pipeline:**
 1. Legacy parser code still co-located with unified builder in `MessagePresentationBuilder.build` — `processTextSegment` entry exists but is never called. Future edits could accidentally patch the wrong parser.

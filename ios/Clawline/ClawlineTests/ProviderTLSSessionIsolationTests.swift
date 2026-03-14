@@ -99,6 +99,45 @@ struct ProviderTLSSessionIsolationTests {
         }
     }
 
+    @Test("Policy-change disconnects trigger websocket lifecycle reconnects on a fresh session")
+    func policyChangeReconnectsWebSocketLifecycle() async throws {
+        try await withProviderTLSPolicyScope {
+            let factory = CountingTLSSessionFactory()
+            let connector = URLSessionWebSocketConnector(
+                tlsSessionFactory: factory,
+                connectTimeout: 20,
+                resourceTimeout: 360
+            )
+            let driver = WebSocketReconnectDriver(
+                connector: connector,
+                url: URL(string: "wss://192.0.2.1/ws")!
+            )
+            defer { Task { await driver.stop() } }
+
+            await driver.start()
+            for _ in 0..<100 {
+                if factory.makeSessionCallCount(for: .webSocket) == 1 { break }
+                try await Task.sleep(forDuration: .milliseconds(20))
+            }
+            #expect(factory.makeSessionCallCount(for: .webSocket) == 1)
+
+            ProviderTLSSettingsStore.trustSelfSignedCertificates = false
+
+            var reconnectCount = 0
+            for _ in 0..<150 {
+                reconnectCount = await driver.reconnectCount
+                if reconnectCount == 1,
+                   factory.makeSessionCallCount(for: .webSocket) == 2 {
+                    break
+                }
+                try await Task.sleep(forDuration: .milliseconds(20))
+            }
+
+            #expect(reconnectCount == 1)
+            #expect(factory.makeSessionCallCount(for: .webSocket) == 2)
+        }
+    }
+
     private func withProviderTLSPolicyScope(_ operation: () async throws -> Void) async throws {
         let originalTrust = ProviderTLSSettingsStore.trustSelfSignedCertificates
         let originalPinned = ProviderTLSSettingsStore.pinnedLeafCertificateSHA256
@@ -176,5 +215,53 @@ private final class TLSIsolationAuthManager: AuthManaging {
         token = nil
         currentUserId = nil
         isAdmin = false
+    }
+}
+
+private actor WebSocketReconnectDriver {
+    private let connector: URLSessionWebSocketConnector
+    private let url: URL
+    private var monitorTask: Task<Void, Never>?
+    private var currentClient: (any WebSocketClient)?
+
+    private(set) var reconnectCount = 0
+
+    init(connector: URLSessionWebSocketConnector, url: URL) {
+        self.connector = connector
+        self.url = url
+    }
+
+    func start() {
+        guard monitorTask == nil else { return }
+        monitorTask = Task { [weak self] in
+            await self?.run()
+        }
+    }
+
+    func stop() {
+        monitorTask?.cancel()
+        monitorTask = nil
+        currentClient?.close(with: .goingAway)
+        currentClient = nil
+    }
+
+    private func run() async {
+        do {
+            let firstClient = try await connector.connect(to: url)
+            currentClient = firstClient
+
+            var iterator = firstClient.incomingTextMessages.makeAsyncIterator()
+            while !Task.isCancelled, await iterator.next() != nil {}
+
+            guard !Task.isCancelled else { return }
+
+            let secondClient = try await connector.connect(to: url)
+            currentClient = secondClient
+            reconnectCount = 1
+        } catch is CancellationError {
+            return
+        } catch {
+            return
+        }
     }
 }

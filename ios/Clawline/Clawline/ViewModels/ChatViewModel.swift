@@ -38,6 +38,52 @@ final class ChatViewModel: ChatViewModelHosting {
         InteractiveHTMLDescriptor.mimeType,
         TerminalSessionDescriptor.mimeType
     ]
+
+    var debugInstanceId: String { instanceId }
+#if DEBUG
+    enum ImageSendDebugEventKind: String, Equatable {
+        case attachmentAdded = "attachment_added"
+        case attachmentStagingStarted = "attachment_staging_started"
+        case attachmentStagingCompleted = "attachment_staging_completed"
+        case sendTapped = "send_tapped"
+        case sendDispatched = "send_dispatched"
+        case sendResult = "send_result"
+    }
+
+    struct ImageSendDebugRecord: Equatable, Identifiable {
+        let id = UUID()
+        let kind: ImageSendDebugEventKind
+        let timestamp: Date
+        let detail: String
+    }
+
+    enum LifecycleDebugSignal: String, Equatable {
+        case authChangedToken = "authChanged(token)"
+        case authChangedNil = "authChanged(nil)"
+        case viewAppeared = "viewAppeared"
+        case sceneActivated = "sceneActivated"
+    }
+
+    struct LifecycleDebugSignalRecord: Equatable, Identifiable {
+        let id = UUID()
+        let signal: LifecycleDebugSignal
+        let timestamp: Date
+    }
+
+    enum LifecycleObserverDebugEvent: String, Equatable {
+        case onDisappear = "onDisappear"
+        case startObservingIfNeeded = "startObservingIfNeeded"
+    }
+
+    struct LifecycleObserverDebugRecord: Equatable, Identifiable {
+        let id = UUID()
+        let event: LifecycleObserverDebugEvent
+        let timestamp: Date
+        let hasObservationTask: Bool
+        let hasTransportSubscription: Bool
+        let hasOutputsSubscription: Bool
+    }
+#endif
     private(set) var messages: [Message] = []
     private(set) var streamsBySessionKey: [String: StreamSession] = [:]
     private(set) var orderedSessionKeys: [String] = []
@@ -273,6 +319,7 @@ final class ChatViewModel: ChatViewModelHosting {
         }
     }
     var attachmentData: [UUID: PendingAttachment] = [:]
+    private(set) var pendingAttachmentStageCount: Int = 0
     private(set) var isSending: Bool = false
     private(set) var isAssistantTyping: Bool = false
     private(set) var typingSessionKey: String?
@@ -298,7 +345,8 @@ final class ChatViewModel: ChatViewModelHosting {
     }
 
     var canSend: Bool {
-        transportSendButtonConnectionState == .connected && !inputContent.isEffectivelyEmpty
+        transportSendButtonConnectionState == .connected
+            && (!inputContent.isEffectivelyEmpty || !attachmentData.isEmpty)
     }
 
     var sendButtonConnectionState: SendButtonConnectionState {
@@ -352,6 +400,16 @@ final class ChatViewModel: ChatViewModelHosting {
     private var hasReceivedSessionProvisioning = false
     private var provisionedSessionKeys: Set<String> = []
     private var pendingProvisionedSend: PendingProvisionedSend?
+#if DEBUG
+    private(set) var lifecycleDebugPhase: ConnectionLifecyclePhase = .idle
+    private(set) var lifecycleDebugSignals: [LifecycleDebugSignalRecord] = []
+    private(set) var lifecycleDebugObserverEvents: [LifecycleObserverDebugRecord] = []
+    private(set) var lifecycleDebugStartupGateEvents: [StartupGateDebugEvent] = []
+    private(set) var lifecycleDebugLastGateDecision: String = "none"
+    private(set) var imageSendDebugRecords: [ImageSendDebugRecord] = []
+    private(set) var imageSendLastTransportSnapshot: String = "-"
+    private(set) var lifecycleDebugSequence: Int = 0
+#endif
 
     private struct PendingLocalMessage: Equatable {
         let id: String
@@ -455,6 +513,25 @@ final class ChatViewModel: ChatViewModelHosting {
         logger.info("ChatViewModel deinit id=\(self.instanceId, privacy: .public)")
         NotificationCenter.default.removeObserver(self, name: UIApplication.didReceiveMemoryWarningNotification, object: nil)
         NotificationCenter.default.removeObserver(self, name: Notification.Name("AuthStateDidChange"), object: nil)
+    }
+
+    func activate(origin: String = "RootView.ensureChatViewModel") async {
+        _ = origin
+        await onAppear()
+    }
+
+    func prepareForReplacement() {
+        onDisappear()
+    }
+
+    func onAppear(origin: String) async {
+        _ = origin
+        await onAppear()
+    }
+
+    func onDisappear(origin: String) {
+        _ = origin
+        onDisappear()
     }
 
     func onAppear() async {
@@ -737,6 +814,24 @@ final class ChatViewModel: ChatViewModelHosting {
 
     func stageAttachments(_ attachments: [PendingAttachment]) {
         attachments.forEach { attachmentData[$0.id] = $0 }
+    }
+
+    func stageAttachments(_ attachments: [PendingAttachment], source: String) {
+        _ = source
+        stageAttachments(attachments)
+    }
+
+    func beginAttachmentStaging() {
+        pendingAttachmentStageCount += 1
+    }
+
+    func endAttachmentStaging() {
+        pendingAttachmentStageCount = max(0, pendingAttachmentStageCount - 1)
+    }
+
+    func forceReReadGeneration(for sessionKey: String) -> Int {
+        _ = sessionKey
+        return 0
     }
 
     func logout() {

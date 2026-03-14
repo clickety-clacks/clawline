@@ -578,6 +578,10 @@ struct MessageInputBar: View {
         connectionState == .disconnected
     }
 
+    private var hasSubmittableDraft: Bool {
+        !content.isEffectivelyEmpty
+    }
+
     private var sendButtonWidth: CGFloat {
         metrics.inputBarHeight
     }
@@ -597,6 +601,11 @@ struct MessageInputBar: View {
 
     static func shouldRequestFocusOnEditorTap(isKeyboardVisible: Bool) -> Bool {
         !isKeyboardVisible
+    }
+
+    static func reconnectBubbleScale(phase: CGFloat) -> CGFloat {
+        let clampedPhase = min(1, max(0, phase))
+        return 0.75 + (0.25 * clampedPhase)
     }
 
     static func sendButtonBubbleVisualState(
@@ -657,8 +666,7 @@ struct MessageInputBar: View {
         case .active, .error:
             return 1
         case .reconnecting:
-            let clampedPhase = min(1, max(0, reconnectPhase))
-            return 0.75 + (0.25 * clampedPhase)
+            return Double(reconnectBubbleScale(phase: CGFloat(reconnectPhase)))
         }
     }
 
@@ -772,6 +780,14 @@ struct MessageInputBar: View {
 #else
         return UIColor(ChatFlowTheme.sage(colorScheme))
 #endif
+    }
+
+    private func handleEditorSubmitIntent() {
+        guard Self.shouldDispatchEditorSubmitIntent(
+            isSending: isSending,
+            hasSubmittableDraft: hasSubmittableDraft
+        ) else { return }
+        onSend()
     }
 
 #if DEBUG
@@ -966,10 +982,7 @@ struct MessageInputBar: View {
 #endif
                     }(),
                     onFocusChange: onFocusChange,
-                    onSubmit: {
-                        guard canSendNow else { return }
-                        onSend()
-                    },
+                    onSubmit: handleEditorSubmitIntent,
                     onEscape: {
                         dictation.stopFromEscapeKey()
                     },

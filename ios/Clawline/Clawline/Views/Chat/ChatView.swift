@@ -2846,7 +2846,7 @@ private final class PreviewChatService: ChatServicing {
     var serviceEvents: AsyncStream<ChatServiceEvent> {
         AsyncStream { _ in }
     }
-    func connect(token: String, activeSessionKey: String?) async throws {}
+    func connect(token: String, lastMessageId: String?) async throws {}
     func startConnectionAttempt(epoch: Int, lastMessageId: String?, token: String) {}
     func stopConnectionAttempt() {}
     func disconnect() {}

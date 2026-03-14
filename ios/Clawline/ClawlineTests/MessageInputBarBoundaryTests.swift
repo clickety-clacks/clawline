@@ -6,6 +6,8 @@
 //
 
 import Testing
+import CoreGraphics
+import Foundation
 @testable import Clawline
 
 struct MessageInputBarBoundaryTests {
@@ -50,6 +52,8 @@ struct MessageInputBarBoundaryTests {
     @Test("Reconnect bubble keeps the 0.75 small-end scale")
     @MainActor
     func reconnectBubbleRetainsRequestedSmallEndScale() {
+        #expect(MessageInputBar.reconnectBubbleScale(phase: CGFloat(0)) == CGFloat(0.75))
+        #expect(MessageInputBar.reconnectBubbleScale(phase: CGFloat(1)) == CGFloat(1.0))
         #expect(
             abs(
                 MessageInputBar.sendButtonBubbleScale(

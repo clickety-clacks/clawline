@@ -59,7 +59,7 @@ protocol ChatServicing: AnyObject {
     var lifecycleTransportEvents: AsyncStream<LifecycleTransportEvent> { get }
     var isTransportReadyForSend: Bool { get }
 
-    func connect(token: String, activeSessionKey: String?) async throws
+    func connect(token: String, lastMessageId: String?) async throws
     func startConnectionAttempt(epoch: Int, lastMessageId: String?, token: String)
     func stopConnectionAttempt()
     func disconnect()

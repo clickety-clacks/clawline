@@ -229,7 +229,6 @@ final class ProviderChatService: ChatServicing {
     private let decoder: JSONDecoder
     private let replayCursorDefaults = UserDefaults.standard
     private let supportedClientFeatures = ["terminal_bubbles_v1"]
-    private let ackInterval: Duration = .seconds(5)
     private let authTimeout: Duration = .seconds(12)
 
     private let messageBroadcaster = AsyncStreamBroadcaster<Message>()
@@ -242,6 +241,7 @@ final class ProviderChatService: ChatServicing {
     private var receiveTask: Task<Void, Never>?
     private var authContinuation: CheckedContinuation<Void, Swift.Error>?
     private var pendingMessages: [String: PendingMessage] = [:]
+    private var sentMessageIDs: Set<String> = []
     private var shouldNotifyDisconnect = true
     private var pendingDisconnectReason: String?
     private let connectJoinGate = ConnectJoinGate()
@@ -350,11 +350,6 @@ final class ProviderChatService: ChatServicing {
         }
         let trimmed = fallback.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
-    }
-
-    func connect(token: String, activeSessionKey: String?) async throws {
-        _ = activeSessionKey
-        try await connectInternal(token: token, forcedLastMessageId: nil)
     }
 
     func connect(token: String, lastMessageId: String?) async throws {
@@ -514,6 +509,10 @@ final class ProviderChatService: ChatServicing {
         guard id.hasPrefix("c_") else {
             throw Error.invalidMessageId
         }
+        if sentMessageIDs.contains(id) {
+            logger.warning("duplicate outbound message suppressed id=\(id, privacy: .public)")
+            return
+        }
 
         let payload = ClientMessagePayload(
             id: id,
@@ -531,8 +530,8 @@ final class ProviderChatService: ChatServicing {
         }
 
         pendingMessages[id]?.retryTask?.cancel()
-        let retryTask = scheduleRetry(for: payload)
-        pendingMessages[id] = PendingMessage(payload: payload, retryTask: retryTask)
+        sentMessageIDs.insert(id)
+        pendingMessages[id] = PendingMessage(payload: payload, retryTask: nil)
         do {
             try await socket.send(text: text)
         } catch {
@@ -630,7 +629,7 @@ final class ProviderChatService: ChatServicing {
         for (index, wsURL) in wsURLs.enumerated() {
             if Task.isCancelled { return }
             do {
-                logger.info("lifecycle attempt epoch=\(epoch) connect \(index + 1)/\(wsURLs.count) ws=\(wsURL.absoluteString, privacy: .public)")
+                logger.info("lifecycle attempt epoch=\(epoch, privacy: .public) connect \(index + 1, privacy: .public)/\(wsURLs.count, privacy: .public) ws=\(wsURL.absoluteString, privacy: .public)")
                 let client = try await connector.connect(to: wsURL)
                 if Task.isCancelled { return }
                 let connectionToken = UUID()
@@ -712,50 +711,69 @@ final class ProviderChatService: ChatServicing {
         if let lifecycleConnectionToken, !isCurrentLifecycleConnectionToken(lifecycleConnectionToken) {
             return
         }
-        guard let data = text.data(using: .utf8) else { return }
-        if let envelope = try? decoder.decode(Envelope.self, from: data) {
-            switch envelope.type {
-            case "auth_result":
-                handleAuthResult(
-                    data: data,
-                    lifecycleEpoch: lifecycleEpoch,
-                    lifecycleConnectionToken: lifecycleConnectionToken
-                )
-            case "message":
-                handleMessage(data: data, lifecycleEpoch: lifecycleEpoch, lifecycleConnectionToken: lifecycleConnectionToken)
-            case "ack":
-                handleAck(data: data)
-            case "error":
-                handleServerError(
-                    data: data,
-                    lifecycleEpoch: lifecycleEpoch,
-                    lifecycleConnectionToken: lifecycleConnectionToken
-                )
-            case "user_info":
-                handleUserInfo(data: data)
-            case "typing":
-                handleTyping(data: data)
-            case "session_info":
-                handleSessionInfo(data: data)
-            case "stream_snapshot":
-                handleStreamSnapshot(data: data)
-            case "stream_created":
-                handleStreamCreated(data: data)
-            case "stream_updated":
-                handleStreamUpdated(data: data)
-            case "stream_deleted":
-                handleStreamDeleted(data: data)
-            case "event":
-                handleEvent(data: data)
-            default:
-                logger.debug("Unknown message type: \(envelope.type, privacy: .public)")
-                break
-            }
+        guard let data = text.data(using: .utf8) else {
+            logger.warning("Dropping inbound frame: failed UTF-8 conversion")
+            return
+        }
+
+        let envelope: Envelope
+        do {
+            envelope = try decoder.decode(Envelope.self, from: data)
+        } catch {
+            logger.warning("Dropping inbound frame: failed to decode envelope error=\(error.localizedDescription, privacy: .public)")
+            return
+        }
+
+        switch envelope.type {
+        case "auth_result":
+            handleAuthResult(
+                data: data,
+                lifecycleEpoch: lifecycleEpoch,
+                lifecycleConnectionToken: lifecycleConnectionToken
+            )
+        case "message":
+            handleMessage(
+                data: data,
+                lifecycleEpoch: lifecycleEpoch,
+                lifecycleConnectionToken: lifecycleConnectionToken
+            )
+        case "ack":
+            handleAck(data: data)
+        case "error":
+            handleServerError(
+                data: data,
+                lifecycleEpoch: lifecycleEpoch,
+                lifecycleConnectionToken: lifecycleConnectionToken
+            )
+        case "user_info":
+            handleUserInfo(data: data)
+        case "typing":
+            handleTyping(data: data)
+        case "session_info":
+            handleSessionInfo(data: data)
+        case "stream_snapshot":
+            handleStreamSnapshot(data: data)
+        case "stream_created":
+            handleStreamCreated(data: data)
+        case "stream_updated":
+            handleStreamUpdated(data: data)
+        case "stream_deleted":
+            handleStreamDeleted(data: data)
+        case "event":
+            handleEvent(data: data)
+        default:
+            logger.debug("Unknown message type: \(envelope.type, privacy: .public)")
         }
     }
 
     private func handleAuthResult(data: Data, lifecycleEpoch: Int?, lifecycleConnectionToken: UUID?) {
-        guard let result = try? decoder.decode(AuthResultPayload.self, from: data) else { return }
+        let result: AuthResultPayload
+        do {
+            result = try decoder.decode(AuthResultPayload.self, from: data)
+        } catch {
+            logger.warning("Dropping auth_result: decode failed error=\(error.localizedDescription, privacy: .public)")
+            return
+        }
         if let lifecycleEpoch {
             emitLifecycleEvent(
                 epoch: lifecycleEpoch,
@@ -811,7 +829,13 @@ final class ProviderChatService: ChatServicing {
             )
             return
         }
-        guard let payload = try? decoder.decode(ServerMessagePayload.self, from: data) else { return }
+        let payload: ServerMessagePayload
+        do {
+            payload = try decoder.decode(ServerMessagePayload.self, from: data)
+        } catch {
+            logger.warning("Dropping message payload: decode failed error=\(error.localizedDescription, privacy: .public)")
+            return
+        }
         guard let sessionKey = resolveSessionKey(from: payload) else {
             logger.warning("Dropping message: missing sessionKey id=\(payload.id, privacy: .public)")
             return
@@ -852,7 +876,13 @@ final class ProviderChatService: ChatServicing {
     }
 
     private func handleServerError(data: Data, lifecycleEpoch: Int?, lifecycleConnectionToken: UUID?) {
-        guard let payload = try? decoder.decode(ErrorPayload.self, from: data) else { return }
+        let payload: ErrorPayload
+        do {
+            payload = try decoder.decode(ErrorPayload.self, from: data)
+        } catch {
+            logger.warning("Dropping error payload: decode failed error=\(error.localizedDescription, privacy: .public)")
+            return
+        }
 
         if let messageId = payload.messageId {
             if let pending = pendingMessages.removeValue(forKey: messageId) {
@@ -1283,68 +1313,6 @@ final class ProviderChatService: ChatServicing {
         }
     }
 
-    private func scheduleRetry(for payload: ClientMessagePayload) -> Task<Void, Never> {
-        Task { [weak self] in
-            guard let self else { return }
-            while !Task.isCancelled {
-                do {
-                    try await Task.sleep(forDuration: ackInterval)
-                } catch is CancellationError {
-                    return
-                } catch {
-                    logger.error("retry sleep failed for messageId=\(payload.id, privacy: .public) error=\(error.localizedDescription, privacy: .public)")
-                    return
-                }
-                guard !Task.isCancelled else { return }
-                guard let socket = self.socket else { return }
-                guard self.pendingMessages[payload.id] != nil else { return }
-
-                let text: String
-                do {
-                    let data = try self.encoder.encode(payload)
-                    guard let encodedText = String(data: data, encoding: .utf8) else {
-                        self.pendingMessages.removeValue(forKey: payload.id)
-                        self.emitServiceEvent(.messageError(
-                            messageId: payload.id,
-                            code: "client_encode_failed",
-                            message: "Failed to encode outbound retry payload."
-                        ))
-                        logger.error("retry encode produced non-UTF8 payload for messageId=\(payload.id, privacy: .public)")
-                        return
-                    }
-                    text = encodedText
-                } catch {
-                    self.pendingMessages.removeValue(forKey: payload.id)
-                    self.emitServiceEvent(.messageError(
-                        messageId: payload.id,
-                        code: "client_encode_failed",
-                        message: "Failed to encode outbound retry payload."
-                    ))
-                    logger.error("retry encode failed for messageId=\(payload.id, privacy: .public) error=\(error.localizedDescription, privacy: .public)")
-                    return
-                }
-
-                guard !Task.isCancelled else { return }
-                do {
-                    try await socket.send(text: text)
-                } catch is CancellationError {
-                    return
-                } catch {
-                    self.pendingMessages.removeValue(forKey: payload.id)
-                    self.emitServiceEvent(.messageError(
-                        messageId: payload.id,
-                        code: "queue_failed",
-                        message: error.localizedDescription
-                    ))
-                    logger.error(
-                        "retry send failed for messageId=\(payload.id, privacy: .public) error=\(error.localizedDescription, privacy: .public)"
-                    )
-                    return
-                }
-            }
-        }
-    }
-
     private func resolveAuthContinuation(with result: Result<Void, Swift.Error>) {
         guard let continuation = authContinuation else { return }
         authContinuation = nil
@@ -1403,7 +1371,6 @@ final class ProviderChatService: ChatServicing {
                     }
                 }
             }
-
             group.addTask { [authTimeout] in
                 try await Task.sleep(forDuration: authTimeout)
                 throw Error.authTimeout
@@ -1457,13 +1424,10 @@ final class ProviderChatService: ChatServicing {
         }
         return replayCursorSnapshot.values.compactMap(normalizeServerEventID).max()
     }
-
     private func normalizeServerEventID(_ raw: String?) -> String? {
         guard let raw else { return nil }
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.hasPrefix(Self.serverEventIDPrefix) else { return nil }
-        let uuidPortion = String(trimmed.dropFirst(Self.serverEventIDPrefix.count))
-        guard UUID(uuidString: uuidPortion) != nil else { return nil }
         return trimmed
     }
 }

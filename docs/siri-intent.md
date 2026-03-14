@@ -95,7 +95,7 @@ If the app has no pairing/auth data or `userId` is unavailable, treat as **not p
 - Use the existing chat send path (no new wire schema).
 - Payload is the same as an in-app user message:
   - `content`: the message string (see bot name formatting below)
-  - `sessionKey`: derived from routing rules above (see `docs/architecture.md`)
+  - `sessionKey`: derived from routing rules above (see `architecture.md`)
 - No attachments or rich content are supported by this intent.
 - Treat the send as successful only after the underlying chat service receives the server `ack` (handled by `ChatServicing`).
 - Bot name formatting:
@@ -106,7 +106,7 @@ If the app has no pairing/auth data or `userId` is unavailable, treat as **not p
 
 The intent is self-contained and must not depend on any shared UI state:
 
-1. **Connect** using a fresh `ChatServicing` instance (per `docs/ios-architecture.md`).
+1. **Connect** using a fresh `ChatServicing` instance (per `ios-architecture.md`).
 2. **Authenticate** using existing stored credentials (token) via `ChatServicing.connect(...)`.
    - Use `lastMessageId = nil` to avoid replay and minimize latency for a one-shot send.
 3. **Send** the message payload with the chosen `sessionKey` and `content` (content may include the bot name prefix per the contract above).

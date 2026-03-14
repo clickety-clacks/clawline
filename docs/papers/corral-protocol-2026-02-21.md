@@ -117,7 +117,7 @@ CLU asked each coding agent for a context dump before killing them. The scroll-i
 
 **Shared memory substrate.** All CLU sessions draw from the same distilled memory files. Flynn's architectural decision about SBB state keying had been captured there, which is why Engram could describe it as "Flynn's decision, not just a spec choice" months later in a different session.
 
-**Behavioral calibration.** CLU's `tuning.md` captures patterns from repeated interactions: which prompts mean investigate first, how Flynn signals hard architectural constraints vs. soft preferences. These are shared across sessions. When Ideas searched transcripts without being asked, it was applying the same instinct all CLU instances share.
+**Behavioral calibration.** CLU's `(workspace tuning memory)` captures patterns from repeated interactions: which prompts mean investigate first, how Flynn signals hard architectural constraints vs. soft preferences. These are shared across sessions. When Ideas searched transcripts without being asked, it was applying the same instinct all CLU instances share.
 
 **The distillation loop.** Before each context compaction, CLU extracts durable facts to a daily memory file. Those facts — specific decisions, failure modes, constraints — become the foundation for future sessions. New instances aren't starting cold; they're starting from a curated base.
 

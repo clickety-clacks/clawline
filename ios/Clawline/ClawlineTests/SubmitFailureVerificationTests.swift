@@ -55,7 +55,7 @@ struct SubmitFailureVerificationTests {
 
         service.startConnectionAttempt(epoch: 1, lastMessageId: nil, token: "jwt")
         try await Task.sleep(forDuration: .milliseconds(10))
-        try await service.connect(token: "jwt", activeSessionKey: nil)
+        try await service.connect(token: "jwt", lastMessageId: nil)
 
         #expect(connector.connectCallCount == 1)
         #expect(connector.clients.count == 1)
@@ -148,9 +148,9 @@ private final class VerificationChatService: ChatServicing {
         }
     }()
 
-    func connect(token: String, activeSessionKey: String?) async throws {
+    func connect(token: String, lastMessageId: String?) async throws {
         let _ = token
-        let _ = activeSessionKey
+        let _ = lastMessageId
         isTransportReadyForSend = true
         stateContinuation?.yield(.connected)
     }

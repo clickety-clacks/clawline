@@ -2,15 +2,15 @@
 
 ## Purpose
 
-Describe how the iOS client (Clawline) connects to the clawd.me provider plugin, including pairing, authenticated chat, streaming messages, large media/file transfers, and keeping multiple devices for the same user in sync. This is aligned with `docs/architecture.md` and `docs/ios-architecture.md`.
+Describe how the iOS client (Clawline) connects to the OpenClaw Clawline provider runtime, including pairing, authenticated chat, streaming messages, large media/file transfers, and keeping multiple devices for the same user in sync. This is aligned with `architecture.md` and `ios-architecture.md`.
 
 ## Interpretation
 
-This guide is the client-side contract. Statements using MUST/SHOULD are binding; other explanatory text is guidance. Architectural choices live in `docs/architecture.md`.
+This guide is the client-side contract. Statements using MUST/SHOULD are binding; other explanatory text is guidance. Architectural choices live in `architecture.md`.
 
 ## Client roles (per iOS architecture)
 
-From `docs/ios-architecture.md` and `COMMON.md`:
+From `ios-architecture.md` and `(external/common reference removed)`:
 - `ConnectionServicing`: pairing + admin approvals
 - `ChatServicing`: authenticated WebSocket connection + message streaming via `AsyncStream`
 - `AuthManaging`: token storage and auth state
@@ -36,7 +36,7 @@ UI states should follow `PairingState` in the iOS spec (optional approval code i
 Admin approvals (v1):
 - The first device to pair becomes an admin automatically.
 - Once authenticated, admin devices receive `pair_approval_request` events on the main chat WebSocket (no second socket). `ConnectionServicing` handles bootstrap pairing, then subscribes to the stream surfaced by `ChatServicing` so only one socket stays open per device. `ChatServicing` MUST expose a raw `AsyncStream<ServerMessage>` (or equivalent) of all server events; `ConnectionServicing` filters `pair_approval_request` from that stream and publishes them to the UI. The provider MUST re-emit any still-pending approvals when an admin successfully authenticates, so no approval requests are lost during the pairing→auth handoff.
-- `pair_approval_request` schema (from `docs/architecture.md`):
+- `pair_approval_request` schema (from `architecture.md`):
   ```json
   {
     "type": "pair_approval_request",
@@ -58,7 +58,7 @@ Admin approvals (v1):
   `pair_decision` has no `id` field and does not receive `ack`; retries are done by resending the same payload (idempotency is keyed on `deviceId` + pending state on the server). If multiple admins decide concurrently, the first decision wins; later decisions receive `error` `invalid_message`.
   Admin UIs should treat `invalid_message` responses as “request already resolved” and remove the pending item.
 
-`pair_result` responses follow `docs/architecture.md`: success payload `{ success:true, token, userId }`; failure payload `{ success:false, reason: "pair_rejected" | "pair_denied" | "pair_timeout" }`.
+`pair_result` responses follow `architecture.md`: success payload `{ success:true, token, userId }`; failure payload `{ success:false, reason: "pair_rejected" | "pair_denied" | "pair_timeout" }`.
 
 ### 2) Authenticated session
 
@@ -187,7 +187,7 @@ Typing events are rate-limited to 2 per second per device; excess events receive
 
 ## Session routing
 
-Messages carry a `sessionKey` field that identifies which conversation stream they belong to. See `docs/architecture.md` for the full session key architecture.
+Messages carry a `sessionKey` field that identifies which conversation stream they belong to. See `architecture.md` for the full session key architecture.
 
 ### Session key format
 
@@ -220,7 +220,7 @@ Admin users receive messages from both streams. Non-admin users receive only the
 
 ## Errors & status codes
 
-- WebSocket `error.code` values come from `docs/architecture.md` (`auth_failed`, `token_revoked`, `invalid_message`, `payload_too_large`, `not_found`, `rate_limited`, `session_replaced`, `upload_failed_retryable`, `server_error`). Display them or map to user-friendly text.
+- WebSocket `error.code` values come from `architecture.md` (`auth_failed`, `token_revoked`, `invalid_message`, `payload_too_large`, `not_found`, `rate_limited`, `session_replaced`, `upload_failed_retryable`, `server_error`). Display them or map to user-friendly text.
 - `auth_result.reason` values include `auth_failed`, `token_revoked`, `device_not_approved`, and `token_expired`. Treat `token_expired`/`auth_failed` as “clear token and restart pairing.”
 - For `device_not_approved`, keep the device on the “Awaiting approval” screen, retry pairing automatically every ~30s, and notify the user that an admin must approve.
 - HTTP uploads return JSON errors with HTTP statuses: 400 (`invalid_message`), 401 (`auth_failed`), 403 (`token_revoked`), 404 (`not_found`), 413 (`payload_too_large`), 429 (`rate_limited`), 503 (`upload_failed_retryable`), 500 (`server_error`). Treat 401/403 as token failures (clear token).
@@ -321,7 +321,7 @@ Assistant messages (and user echoes) may include:
 
 ## Error handling
 
-Error schema (from `docs/architecture.md`):
+Error schema (from `architecture.md`):
 ```json
 { "type": "error", "code": "invalid_message", "message": "Details", "messageId": "c_123" }
 ```
@@ -331,7 +331,7 @@ Error schema (from `docs/architecture.md`):
 - `error` messages: display inline banner and keep connection alive.
 - Upload errors: show retry action.
 - `upload_failed_retryable` means the client should retry the upload.
-- HTTP status codes for upload follow `docs/architecture.md`.
+- HTTP status codes for upload follow `architecture.md`.
 - `pair_result` failure reasons include `pair_rejected`, `pair_denied`, or `pair_timeout`.
 - `pair_result` failure closes the WebSocket; client should retry by opening a new connection.
 - `session_replaced` means another connection took over the same deviceId. The server closes the old socket immediately after sending `session_replaced` and does not replay unacked messages from the old connection; the client must resend any pending messages after reconnect. Other devices that share the same `userId` stay active.

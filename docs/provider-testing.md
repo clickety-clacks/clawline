@@ -4,7 +4,7 @@
 
 Define the minimum functional and behavioral coverage required for the Clawline provider implementation. This is a contract for contributors, not optional guidance.
 
-All requirements in this document are normative. Treat each bullet as MUST for the provider implementation. Storage retention is an explicit product decision: v1 keeps all messages and media files indefinitely (no automatic pruning). Features explicitly marked “Not MVP” in `docs/architecture.md` are intentionally excluded from required tests.
+All requirements in this document are normative. Treat each bullet as MUST for the provider implementation. Storage retention is an explicit product decision: v1 keeps all messages and media files indefinitely (no automatic pruning). Features explicitly marked “Not MVP” in `architecture.md` are intentionally excluded from required tests.
 
 ## Test layers
 
@@ -33,7 +33,7 @@ Use these defaults when building fixtures; override per-test only when needed.
 
 ### State file shapes referenced in tests
 
-Tests refer to the allowlist/denylist JSON files defined in `docs/provider-architecture.md`. The allowlist entry structure is:
+Tests refer to the allowlist/denylist JSON files defined in `provider-architecture.md`. The allowlist entry structure is:
 ```json
 {
   "deviceId": "uuid",

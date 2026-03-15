@@ -44,6 +44,7 @@ private final class AsyncStreamBroadcaster<Element> {
 }
 
 final class ProviderChatService: ChatServicing {
+    // ⚠️ ARCHITECTURE CHANGE: See MERGE_NOTES.md — PCS Connect Ownership Refactor
     private actor ConnectJoinGate {
         private var inFlight: (id: UInt64, task: Task<Void, Swift.Error>)?
         private var nextID: UInt64 = 0
@@ -244,6 +245,7 @@ final class ProviderChatService: ChatServicing {
     private var sentMessageIDs: Set<String> = []
     private var shouldNotifyDisconnect = true
     private var pendingDisconnectReason: String?
+    // ⚠️ ARCHITECTURE CHANGE: See MERGE_NOTES.md — PCS Connect Ownership Refactor
     private let connectJoinGate = ConnectJoinGate()
     private var connectAttemptTask: Task<Void, Never>?
     private var activeLifecycleConnectionToken: UUID?
@@ -352,6 +354,7 @@ final class ProviderChatService: ChatServicing {
         return trimmed.isEmpty ? nil : trimmed
     }
 
+    // ⚠️ ARCHITECTURE CHANGE: See MERGE_NOTES.md — PCS Connect Ownership Refactor
     func connect(token: String, lastMessageId: String?) async throws {
         try await connectInternal(token: token, forcedLastMessageId: lastMessageId)
     }

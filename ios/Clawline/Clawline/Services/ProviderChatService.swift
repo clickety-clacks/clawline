@@ -43,6 +43,11 @@ private final class AsyncStreamBroadcaster<Element> {
     }
 }
 
+enum TransportOwnerMode {
+    case managed
+    case standalone
+}
+
 final class ProviderChatService: ChatServicing {
     // ⚠️ ARCHITECTURE CHANGE: See MERGE_NOTES.md — PCS Connect Ownership Refactor
     private actor ConnectJoinGate {
@@ -231,6 +236,7 @@ final class ProviderChatService: ChatServicing {
     private let replayCursorDefaults = UserDefaults.standard
     private let supportedClientFeatures = ["terminal_bubbles_v1"]
     private let authTimeout: Duration = .seconds(12)
+    private let transportOwnerMode: TransportOwnerMode
 
     private let messageBroadcaster = AsyncStreamBroadcaster<Message>()
     private let stateBroadcaster = AsyncStreamBroadcaster<ConnectionState>()
@@ -271,6 +277,28 @@ final class ProviderChatService: ChatServicing {
          streamAPIClient: StreamAPIClient? = nil,
          encoder: JSONEncoder = JSONEncoder(),
          decoder: JSONDecoder = JSONDecoder()) {
+        self.transportOwnerMode = .managed
+        self.connector = connector
+        self.deviceId = deviceId
+        self.baseURLProvider = baseURLProvider
+        self.userIdProvider = userIdProvider
+        self.authTokenProvider = authTokenProvider
+        self.encoder = encoder
+        self.decoder = decoder
+        self.streamAPIClient = streamAPIClient ?? StreamAPIClient(baseURLProvider: baseURLProvider)
+        self.replayCursorBySessionKey = restoreReplayCursorSnapshot()
+    }
+
+    fileprivate init(connector: any WebSocketConnecting,
+                     deviceId: String,
+                     transportOwnerMode: TransportOwnerMode,
+                     baseURLProvider: @escaping () -> URL? = { ProviderBaseURLStore.baseURL },
+                     userIdProvider: @escaping () -> String? = { nil },
+                     authTokenProvider: @escaping @Sendable () async -> String? = { nil },
+                     streamAPIClient: StreamAPIClient? = nil,
+                     encoder: JSONEncoder = JSONEncoder(),
+                     decoder: JSONDecoder = JSONDecoder()) {
+        self.transportOwnerMode = transportOwnerMode
         self.connector = connector
         self.deviceId = deviceId
         self.baseURLProvider = baseURLProvider
@@ -1432,5 +1460,56 @@ final class ProviderChatService: ChatServicing {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.hasPrefix(Self.serverEventIDPrefix) else { return nil }
         return trimmed
+    }
+}
+
+final class ProviderDirectChatClient: DirectChatConnecting {
+    private let service: ProviderChatService
+
+    init(connector: any WebSocketConnecting,
+         deviceId: String,
+         baseURLProvider: @escaping () -> URL? = { ProviderBaseURLStore.baseURL },
+         userIdProvider: @escaping () -> String? = { nil },
+         authTokenProvider: @escaping @Sendable () async -> String? = { nil },
+         streamAPIClient: StreamAPIClient? = nil,
+         encoder: JSONEncoder = JSONEncoder(),
+         decoder: JSONDecoder = JSONDecoder()) {
+        self.service = ProviderChatService(
+            connector: connector,
+            deviceId: deviceId,
+            transportOwnerMode: .standalone,
+            baseURLProvider: baseURLProvider,
+            userIdProvider: userIdProvider,
+            authTokenProvider: authTokenProvider,
+            streamAPIClient: streamAPIClient,
+            encoder: encoder,
+            decoder: decoder
+        )
+    }
+
+    var incomingMessages: AsyncStream<Message> { service.incomingMessages }
+    var connectionState: AsyncStream<ConnectionState> { service.connectionState }
+    var serviceEvents: AsyncStream<ChatServiceEvent> { service.serviceEvents }
+
+    func connect(token: String, lastMessageId: String?) async throws {
+        try await service.connect(token: token, lastMessageId: lastMessageId)
+    }
+
+    func disconnect() {
+        service.disconnect()
+    }
+
+    func send(
+        id: String,
+        content: String,
+        attachments: [WireAttachment],
+        sessionKey: String?
+    ) async throws {
+        try await service.send(
+            id: id,
+            content: content,
+            attachments: attachments,
+            sessionKey: sessionKey
+        )
     }
 }

@@ -113,7 +113,7 @@ private final class VerificationUploadService: UploadServicing {
 }
 
 @MainActor
-private final class VerificationChatService: ChatServicing {
+private final class VerificationChatService: ChatServicing, DirectChatConnecting {
     private var messageContinuation: AsyncStream<Message>.Continuation?
     private var stateContinuation: AsyncStream<ConnectionState>.Continuation?
     private var eventContinuation: AsyncStream<ChatServiceEvent>.Continuation?

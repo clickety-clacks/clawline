@@ -7,7 +7,7 @@
 
 import Foundation
 
-final class StubChatService: ChatServicing {
+final class StubChatService: ChatServicing, DirectChatConnecting {
     var responseDelay: TimeInterval = 1.5
     private var streams: [StreamSession] = []
     private var replayCursorBySessionKey: [String: String] = [:]

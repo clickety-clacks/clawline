@@ -77,7 +77,7 @@ struct SendMessageIntent: AppIntent {
             connectTimeout: SiriSendTimeouts.connectSeconds,
             resourceTimeout: SiriSendTimeouts.resourceSeconds
         )
-        let chatService = ProviderChatService(
+        let chatService = ProviderDirectChatClient(
             connector: connector,
             deviceId: device.deviceId,
             userIdProvider: { authSnapshot.userId }

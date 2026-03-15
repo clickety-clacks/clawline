@@ -2830,7 +2830,7 @@ private struct PreviewDevice: DeviceIdentifying {
     let deviceId = "preview-device"
 }
 
-private final class PreviewChatService: ChatServicing {
+private final class PreviewChatService: ChatServicing, DirectChatConnecting {
     var lifecycleTransportEvents: AsyncStream<LifecycleTransportEvent> {
         AsyncStream { _ in }
     }

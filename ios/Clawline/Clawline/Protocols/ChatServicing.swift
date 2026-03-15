@@ -59,7 +59,6 @@ protocol ChatServicing: AnyObject {
     var lifecycleTransportEvents: AsyncStream<LifecycleTransportEvent> { get }
     var isTransportReadyForSend: Bool { get }
 
-    func connect(token: String, lastMessageId: String?) async throws
     func startConnectionAttempt(epoch: Int, lastMessageId: String?, token: String)
     func stopConnectionAttempt()
     func disconnect()
@@ -83,4 +82,19 @@ protocol ChatServicing: AnyObject {
     func createStream(displayName: String, idempotencyKey: String) async throws -> StreamSession
     func renameStream(sessionKey: String, displayName: String) async throws -> StreamSession
     func deleteStream(sessionKey: String, idempotencyKey: String?) async throws -> String
+}
+
+protocol DirectChatConnecting: AnyObject {
+    var incomingMessages: AsyncStream<Message> { get }
+    var connectionState: AsyncStream<ConnectionState> { get }
+    var serviceEvents: AsyncStream<ChatServiceEvent> { get }
+
+    func connect(token: String, lastMessageId: String?) async throws
+    func disconnect()
+    func send(
+        id: String,
+        content: String,
+        attachments: [WireAttachment],
+        sessionKey: String?
+    ) async throws
 }

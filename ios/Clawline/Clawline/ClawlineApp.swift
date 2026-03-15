@@ -22,6 +22,7 @@ struct ClawlineApp: App {
     private let deviceIdentifier: any DeviceIdentifying
     private let connectionService: any ConnectionServicing
     private let chatService: any ChatServicing
+    private let directChatClient: any DirectChatConnecting
     private let uploadService: any UploadServicing
 
     init() {
@@ -59,7 +60,16 @@ struct ClawlineApp: App {
                 await MainActor.run { authManager.token }
             }
         )
+        let directChatClient = ProviderDirectChatClient(
+            connector: connector,
+            deviceId: device.deviceId,
+            userIdProvider: { authManager.currentUserId },
+            authTokenProvider: {
+                await MainActor.run { authManager.token }
+            }
+        )
         self.chatService = chatService
+        self.directChatClient = directChatClient
         self.uploadService = UploadService(
             auth: authManager,
             session: connector.tlsAwareURLSession
@@ -78,7 +88,7 @@ struct ClawlineApp: App {
     var body: some Scene {
         WindowGroup {
             @Bindable var settingsManager = settingsManager
-            RootView(uploadService: uploadService)
+            RootView(uploadService: uploadService, directChatClient: directChatClient)
                 .environment(authManager)
                 .environment(\.connectionService, connectionService)
                 .environment(\.deviceIdentifier, deviceIdentifier)

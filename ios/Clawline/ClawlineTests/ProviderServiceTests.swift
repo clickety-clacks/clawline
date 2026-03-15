@@ -132,7 +132,7 @@ struct ProviderServiceTests {
         let mockSocket = MockWebSocketClient()
         let connector = MockWebSocketConnector(client: mockSocket)
         let baseURL = URL(string: "https://example.com")!
-        let service = ProviderChatService(
+        let service = ProviderDirectChatClient(
             connector: connector,
             deviceId: "device_123",
             baseURLProvider: { baseURL }
@@ -148,7 +148,7 @@ struct ProviderServiceTests {
             mockSocket.enqueue(text: #"{ "type": "message", "id": "s_1", "role": "assistant", "content": "Hi", "timestamp": 1700000000000, "streaming": false, "sessionKey": "agent:main:main", "attachments": [] }"#)
         }
 
-        async let connectResult = service.connect(token: "jwt", lastMessageId: "s_0")
+        async let connectResult: Void = service.connect(token: "jwt", lastMessageId: "s_0")
         try await connectResult
 
         let message = await iterator.next()
@@ -164,7 +164,7 @@ struct ProviderServiceTests {
         let mockSocket = MockWebSocketClient()
         let connector = FallbackMockWebSocketConnector(client: mockSocket)
         let baseURL = URL(string: "http://example.com")!
-        let service = ProviderChatService(
+        let service = ProviderDirectChatClient(
             connector: connector,
             deviceId: "device_123",
             baseURLProvider: { baseURL }
@@ -187,7 +187,7 @@ struct ProviderServiceTests {
         let mockSocket = MockWebSocketClient()
         let connector = MockWebSocketConnector(client: mockSocket)
         let baseURL = URL(string: "https://example.com")!
-        let service = ProviderChatService(
+        let service = ProviderDirectChatClient(
             connector: connector,
             deviceId: "device_123",
             baseURLProvider: { baseURL }
@@ -217,7 +217,7 @@ struct ProviderServiceTests {
         let mockSocket = MockWebSocketClient()
         let connector = MockWebSocketConnector(client: mockSocket)
         let baseURL = URL(string: "https://example.com")!
-        let service = ProviderChatService(
+        let service = ProviderDirectChatClient(
             connector: connector,
             deviceId: "device_123",
             baseURLProvider: { baseURL }
@@ -249,7 +249,7 @@ struct ProviderServiceTests {
         let mockSocket = MockWebSocketClient()
         let connector = MockWebSocketConnector(client: mockSocket)
         let baseURL = URL(string: "https://example.com")!
-        let service = ProviderChatService(
+        let service = ProviderDirectChatClient(
             connector: connector,
             deviceId: "device_123",
             baseURLProvider: { baseURL }
@@ -285,7 +285,7 @@ struct ProviderServiceTests {
         let mockSocket = MockWebSocketClient()
         let connector = MockWebSocketConnector(client: mockSocket)
         let baseURL = URL(string: "https://example.com")!
-        let service = ProviderChatService(
+        let service = ProviderDirectChatClient(
             connector: connector,
             deviceId: "device_123",
             baseURLProvider: { baseURL }
@@ -323,7 +323,7 @@ struct ProviderServiceTests {
         let mockSocket = MockWebSocketClient()
         let connector = MockWebSocketConnector(client: mockSocket)
         let baseURL = URL(string: "https://example.com")!
-        let service = ProviderChatService(
+        let service = ProviderDirectChatClient(
             connector: connector,
             deviceId: "device_123",
             baseURLProvider: { baseURL }
@@ -352,7 +352,7 @@ struct ProviderServiceTests {
         let mockSocket = MockWebSocketClient()
         let connector = MockWebSocketConnector(client: mockSocket)
         let baseURL = URL(string: "https://example.com")!
-        let service = ProviderChatService(
+        let service = ProviderDirectChatClient(
             connector: connector,
             deviceId: "device_123",
             baseURLProvider: { baseURL }
@@ -395,7 +395,7 @@ struct ProviderServiceTests {
         let mockSocket = MockWebSocketClient()
         let connector = MockWebSocketConnector(client: mockSocket)
         let baseURL = URL(string: "https://example.com")!
-        let service = ProviderChatService(
+        let service = ProviderDirectChatClient(
             connector: connector,
             deviceId: "device_123",
             baseURLProvider: { baseURL }
@@ -429,7 +429,7 @@ struct ProviderServiceTests {
         let mockSocket = MockWebSocketClient()
         let connector = MockWebSocketConnector(client: mockSocket)
         let baseURL = URL(string: "https://example.com")!
-        let service = ProviderChatService(
+        let service = ProviderDirectChatClient(
             connector: connector,
             deviceId: "device_123",
             baseURLProvider: { baseURL }

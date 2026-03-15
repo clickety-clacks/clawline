@@ -40,29 +40,30 @@ struct SubmitFailureVerificationTests {
         #expect(viewModel.canSend == false)
     }
 
-    @Test("Direct connect joins in-flight lifecycle connect")
-    func directConnectJoinsInFlightLifecycleConnect() async throws {
+    @Test("Concurrent standalone callers join one direct connect attempt")
+    func concurrentStandaloneCallersJoinOneDirectConnectAttempt() async throws {
         let connector = VerificationOverlapConnector(
             connectDelay: .milliseconds(80),
             authResultDelay: .milliseconds(20)
         )
         let baseURL = URL(string: "https://example.com")!
-        let service = ProviderChatService(
+        let service = ProviderDirectChatClient(
             connector: connector,
             deviceId: "device_123",
             baseURLProvider: { baseURL }
         )
 
-        service.startConnectionAttempt(epoch: 1, lastMessageId: nil, token: "jwt")
+        async let firstConnect: Void = service.connect(token: "jwt", lastMessageId: nil)
         try await Task.sleep(forDuration: .milliseconds(10))
-        try await service.connect(token: "jwt", lastMessageId: nil)
+        async let secondConnect: Void = service.connect(token: "jwt", lastMessageId: nil)
+        try await firstConnect
+        try await secondConnect
 
         #expect(connector.connectCallCount == 1)
         #expect(connector.clients.count == 1)
         #expect(
             connector.clients.first?.sentTexts.filter { $0.contains(#""type":"auth""#) }.count == 1
         )
-        #expect(service.isTransportReadyForSend)
     }
 }
 
@@ -113,7 +114,7 @@ private final class VerificationUploadService: UploadServicing {
 }
 
 @MainActor
-private final class VerificationChatService: ChatServicing, DirectChatConnecting {
+private final class VerificationChatService: ChatServicing {
     private var messageContinuation: AsyncStream<Message>.Continuation?
     private var stateContinuation: AsyncStream<ConnectionState>.Continuation?
     private var eventContinuation: AsyncStream<ChatServiceEvent>.Continuation?
@@ -147,13 +148,6 @@ private final class VerificationChatService: ChatServicing, DirectChatConnecting
             self.lifecycleContinuation = continuation
         }
     }()
-
-    func connect(token: String, lastMessageId: String?) async throws {
-        let _ = token
-        let _ = lastMessageId
-        isTransportReadyForSend = true
-        stateContinuation?.yield(.connected)
-    }
 
     func startConnectionAttempt(epoch: Int, lastMessageId: String?, token: String) {
         let _ = lastMessageId

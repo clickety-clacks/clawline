@@ -438,7 +438,6 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
 
     private let auth: any AuthManaging
     private let chatService: any ChatServicing
-    private let directChatClient: (any DirectChatConnecting)?
     private let uploadService: any UploadServicing
     private let settings: SettingsManager
     private let deviceId: String
@@ -639,7 +638,6 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
 
     init(auth: any AuthManaging,
          chatService: any ChatServicing,
-         directChatClient: (any DirectChatConnecting)? = nil,
          settings: SettingsManager,
          device: any DeviceIdentifying,
          uploadService: any UploadServicing,
@@ -652,11 +650,10 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
              let generator = UIImpactFeedbackGenerator(style: .light)
              generator.impactOccurred()
              #endif
-         }) {
+        }) {
         logger.info("ChatViewModel init id=\(self.instanceId, privacy: .public)")
         self.auth = auth
         self.chatService = chatService
-        self.directChatClient = directChatClient ?? (chatService as? any DirectChatConnecting)
         self.settings = settings
         self.deviceId = device.deviceId
         self.uploadService = uploadService
@@ -1411,14 +1408,14 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
     }
 
     private func reconnectActiveTransportForControlPlane() async throws {
-        guard let token = auth.token else {
+        guard auth.token != nil else {
             throw ProviderChatService.Error.notConnected
         }
-        guard let directChatClient else {
+        await startObservingIfNeeded(origin: "reconnectActiveTransportForControlPlane")
+        let ready = await lifecycleCoordinator.ensureManagedTransportReady()
+        guard ready else {
             throw ProviderChatService.Error.notConnected
         }
-        let lastMessageId = chatService.replayCursorSnapshot().values.max()
-        try await directChatClient.connect(token: token, lastMessageId: lastMessageId)
     }
 
     private static func makeIdempotencyKey() -> String {

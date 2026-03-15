@@ -2502,7 +2502,7 @@ private final class TestAuthManager: AuthManaging {
 
     func refreshAdminStatusFromToken() {}
 }
-private final class TestChatService: ChatServicing, DirectChatConnecting {
+private final class TestChatService: ChatServicing {
     private var messageContinuation: AsyncStream<Message>.Continuation?
     private var stateContinuation: AsyncStream<ConnectionState>.Continuation?
     private var eventContinuation: AsyncStream<ChatServiceEvent>.Continuation?
@@ -2557,19 +2557,11 @@ private final class TestChatService: ChatServicing, DirectChatConnecting {
         }
     }()
 
-    func connect(token: String, lastMessageId: String?) async throws {
-        _ = lastMessageId
-        connectCallCount += 1
-        isTransportReadyForSend = true
-        if emitConnectedOnConnect {
-            stateContinuation?.yield(.connected)
-        }
-    }
-
     func startConnectionAttempt(epoch: Int, lastMessageId: String?, token: String) {
         _ = lastMessageId
         _ = token
         connectCallCount += 1
+        guard emitConnectedOnConnect else { return }
         lifecycleContinuation?.yield(.init(epoch: epoch, payload: .transportOpened))
         lifecycleContinuation?.yield(
             .init(

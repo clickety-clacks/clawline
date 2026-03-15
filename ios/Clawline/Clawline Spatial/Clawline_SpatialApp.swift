@@ -17,7 +17,6 @@ struct Clawline_SpatialApp: App {
     private let deviceIdentifier: any DeviceIdentifying
     private let connectionService: any ConnectionServicing
     private let chatService: any ChatServicing
-    private let directChatClient: any DirectChatConnecting
     private let uploadService: any UploadServicing
 
     init() {
@@ -38,11 +37,6 @@ struct Clawline_SpatialApp: App {
             userIdProvider: { authManager.currentUserId }
         )
         self.chatService = chatService
-        self.directChatClient = ProviderDirectChatClient(
-            connector: connector,
-            deviceId: device.deviceId,
-            userIdProvider: { authManager.currentUserId }
-        )
         self.uploadService = UploadService(
             auth: authManager,
             session: connector.tlsAwareURLSession
@@ -52,7 +46,7 @@ struct Clawline_SpatialApp: App {
     var body: some Scene {
         WindowGroup {
             @Bindable var settingsManager = settingsManager
-            RootView(uploadService: uploadService, directChatClient: directChatClient)
+            RootView(uploadService: uploadService)
                 .environment(authManager)
                 .environment(\.connectionService, connectionService)
                 .environment(\.deviceIdentifier, deviceIdentifier)

@@ -11,7 +11,6 @@ import OSLog
 struct RootView: View {
     private let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "RootView")
     let uploadService: any UploadServicing
-    let directChatClient: (any DirectChatConnecting)?
     @State private var toastManager = ToastManager()
     @State private var salientHighlightService = SalientHighlightService()
     @State private var chatViewModel: ChatViewModel?
@@ -158,7 +157,6 @@ struct RootView: View {
         chatViewModel = ChatViewModel(
             auth: auth,
             chatService: chatService,
-            directChatClient: directChatClient,
             settings: settings,
             device: device,
             uploadService: uploadService,
@@ -191,7 +189,7 @@ private struct KeyboardSafeAreaMode: ViewModifier {
 // MARK: - Previews
 
 #Preview("Unauthenticated") {
-    RootView(uploadService: PreviewUploadService(), directChatClient: nil)
+    RootView(uploadService: PreviewUploadService())
         .environment(AuthManager())
         .environment(\.connectionService, StubConnectionService())
         .environment(\.deviceIdentifier, DeviceIdentifier())
@@ -201,7 +199,7 @@ private struct KeyboardSafeAreaMode: ViewModifier {
 #Preview("Authenticated") {
     let auth = AuthManager()
     auth.storeCredentials(token: "preview-token", userId: "preview-user")
-    return RootView(uploadService: PreviewUploadService(), directChatClient: nil)
+    return RootView(uploadService: PreviewUploadService())
         .environment(auth)
         .environment(\.connectionService, StubConnectionService())
         .environment(\.deviceIdentifier, DeviceIdentifier())

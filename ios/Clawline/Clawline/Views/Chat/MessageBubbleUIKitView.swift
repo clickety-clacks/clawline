@@ -168,6 +168,7 @@ final class MessageBubbleUIKitContainerView: UIView {
 final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
     private static let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "BubbleTheme")
     override var safeAreaInsets: UIEdgeInsets { .zero }
+    private let enableDataDetectors: Bool
     private let shadowContainerView = UIView()  // Separate view for shadow (masks clip shadows)
     private let bubbleBackgroundView = UIView()
     private let contentStack = UIStackView()
@@ -249,7 +250,18 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
     }
 
     override init(frame: CGRect) {
+        self.enableDataDetectors = true
         super.init(frame: frame)
+        configureViewHierarchy()
+    }
+
+    init(frame: CGRect = .zero, enableDataDetectors: Bool) {
+        self.enableDataDetectors = enableDataDetectors
+        super.init(frame: frame)
+        configureViewHierarchy()
+    }
+
+    private func configureViewHierarchy() {
         backgroundColor = .clear
         insetsLayoutMarginsFromSafeArea = false
         preservesSuperviewLayoutMargins = false
@@ -366,7 +378,11 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
         senderLabel.firstBaselineAnchor.constraint(equalTo: timestampLabel.firstBaselineAnchor).isActive = true
 
         bodyLabel.translatesAutoresizingMaskIntoConstraints = false
-        UnifiedMarkdownRenderer.configureTextView(bodyLabel, delegate: self)
+        UnifiedMarkdownRenderer.configureTextView(
+            bodyLabel,
+            delegate: self,
+            enableDataDetectors: enableDataDetectors
+        )
         let bodyTap = UITapGestureRecognizer(target: self, action: #selector(handleBubbleTap))
         bodyTap.cancelsTouchesInView = false
         bodyTap.delaysTouchesBegan = false
@@ -957,7 +973,6 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
                 return max(120, effectiveTruncationHeight - (headerHeight + headerSpacing + padding))
             }
         }()
-        var didRenderImages = false
         var didRenderAttachments = !fileParts.isEmpty
         for part in presentation.parts {
             switch part {
@@ -970,7 +985,6 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
                 ) {
                     dynamicContentStack.addArrangedSubview(imageView)
                     dynamicContentViews.append(imageView)
-                    didRenderImages = true
                     didRenderAttachments = true
                 }
             case .gallery(let attachments):
@@ -983,11 +997,10 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
                     ) {
                         dynamicContentStack.addArrangedSubview(imageView)
                         dynamicContentViews.append(imageView)
-                        didRenderImages = true
                         didRenderAttachments = true
                     }
                 }
-            case .file(let attachment):
+            case .file:
                 continue
             default:
                 continue
@@ -1211,7 +1224,9 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
         dynamicContentScrollView.alwaysBounceVertical = isOverflowing
         dynamicContentScrollView.contentInset.bottom = isOverflowing ? Self.bubbleScrollFadeHeight : 0
 #if !os(visionOS)
-        dynamicContentScrollView.scrollIndicatorInsets.bottom = isOverflowing ? Self.bubbleScrollFadeHeight : 0
+        var indicatorInsets = dynamicContentScrollView.verticalScrollIndicatorInsets
+        indicatorInsets.bottom = isOverflowing ? Self.bubbleScrollFadeHeight : 0
+        dynamicContentScrollView.verticalScrollIndicatorInsets = indicatorInsets
 #endif
         fadeView.isHidden = !isOverflowing
 
@@ -1758,7 +1773,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
         return container
     }
 
-    private static func formatFileSize(_ bytes: Int) -> String {
+    nonisolated private static func formatFileSize(_ bytes: Int) -> String {
         let formatter = ByteCountFormatter()
         formatter.allowedUnits = [.useKB, .useMB, .useGB]
         formatter.countStyle = .file

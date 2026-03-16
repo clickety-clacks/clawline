@@ -544,24 +544,6 @@ struct ChatView: View {
         )
     }
 
-    private func sharedScrollButtonView(
-        sessionKey: String,
-        containerWidth: CGFloat,
-        viewModel: ChatViewModel
-    ) -> AnyView? {
-        let state = scrollButtonState(for: sessionKey)
-        guard state.isVisible else { return nil }
-        return AnyView(
-            scrollButtonControl(
-                state: state,
-                containerWidth: containerWidth,
-                onTap: {
-                    handleScrollButtonTap(sessionKey: sessionKey, viewModel: viewModel)
-                }
-            )
-        )
-    }
-
     @ViewBuilder
     private func floatingPageDotsView(
         viewModel: ChatViewModel,
@@ -1001,16 +983,15 @@ struct ChatView: View {
             // visionOS: keep the scroll-to-bottom button in the main SwiftUI overlay.
             // iOS/iPadOS: we pin it to the UIKit keyboardLayoutGuide via KeyboardPinnedContainerView.
             let sessionKey = viewModel.uiSelectedSessionKey
-            if let scrollButtonView = sharedScrollButtonView(
-                sessionKey: sessionKey,
+            let state = scrollButtonState(for: sessionKey)
+            scrollButtonControl(
+                state: state,
                 containerWidth: geometry.size.width,
-                viewModel: viewModel
-            ) {
-                scrollButtonView
-                    .offset(x: activeScrollButtonHorizontalOffset(containerWidth: geometry.size.width))
-                    .padding(.bottom, inputBarTopFromScreenBottom + floatingScrollButtonBottomGap)
-                    .frame(maxWidth: .infinity, alignment: .center)
-            }
+                onTap: { handleScrollButtonTap(sessionKey: sessionKey, viewModel: viewModel) }
+            )
+            .offset(x: activeScrollButtonHorizontalOffset(containerWidth: geometry.size.width))
+            .padding(.bottom, inputBarTopFromScreenBottom + floatingScrollButtonBottomGap)
+            .frame(maxWidth: .infinity, alignment: .center)
 #else
             EmptyView()
 #endif
@@ -1324,10 +1305,15 @@ struct ChatView: View {
         let sendCommandPort: any SendCommandPort = viewModel
         let sessionKey = viewModel.uiSelectedSessionKey
         let effectiveSessionKeys = effectiveStreams.map(\.sessionKey)
-        let scrollButtonView = sharedScrollButtonView(
-            sessionKey: sessionKey,
-            containerWidth: geometry.size.width,
-            viewModel: viewModel
+        let state = scrollButtonState(for: sessionKey)
+        let scrollButtonView: AnyView = AnyView(
+            scrollButtonControl(
+                state: state,
+                containerWidth: geometry.size.width,
+                onTap: {
+                    handleScrollButtonTap(sessionKey: sessionKey, viewModel: viewModel)
+                }
+            )
         )
         let pageDotsView: AnyView? = effectiveSessionKeys.isEmpty
             ? nil
@@ -1719,6 +1705,7 @@ struct ChatView: View {
                 }
             )
             .presentationCompactAdaptation(.popover)
+            .presentationBackground(.clear)
         }
     }
 
@@ -2212,8 +2199,9 @@ private final class KeyboardLayoutGuideObserverView: UIView {
                 result.isFloating ? 1 : 0
             )
         } else {
-            let screenHeight = window?.windowScene?.screen.bounds.height
-                ?? UIScreen.main.bounds.height
+            let screenHeight = UIApplication.shared.connectedScenes
+                .compactMap { ($0 as? UIWindowScene)?.screen.bounds.height }
+                .first ?? endFrame.maxY
             height = max(0, screenHeight - endFrame.origin.y)
         }
 #endif
@@ -2304,6 +2292,10 @@ private struct KeyboardPinnedContainer<Content: View>: UIViewRepresentable {
             horizontalAnimationToken: scrollButtonHorizontalAnimationToken
         )
         uiView.updatePageDots(pageDotsView, gap: pageDotsGap)
+        // Seed the pinned gap immediately on every SwiftUI update so launch layout matches the
+        // steady-state hidden-keyboard position even before coordinator-driven transitions fire.
+        uiView.setDesiredBottomGap(desiredBottomGap, isKeyboardVisible: isKeyboardVisible)
+        uiView.layoutIfNeeded()
         uiView.setOnBarHeightChange { [weak layoutCoordinator] height in
             // Break potential SwiftUI layout cycles by only propagating meaningful bar height changes.
             // (On some iOS 26.2 devices we observed AttributeGraph "cycle detected" during launch.)
@@ -2355,9 +2347,9 @@ private final class KeyboardPinnedContainerView<Content: View>: UIView, Keyboard
     private var pageDotsBottomToBarTop: NSLayoutConstraint?
     private var minHeightConstraint: NSLayoutConstraint?
     private var hostingBottomToKeyboard: NSLayoutConstraint?
+    private var hostingBottomToContainer: NSLayoutConstraint?
     private var versionLabelBottomToKeyboard: NSLayoutConstraint?
     private var versionLabelBottomToContainer: NSLayoutConstraint?
-    private var bottomToContainerConstraint: NSLayoutConstraint?
     private var onBarHeightChange: ((CGFloat) -> Void)?
     private var lastMeasuredHeight: CGFloat = 0
     private var composerMotionOffsetY: CGFloat = 0
@@ -2497,6 +2489,12 @@ private final class KeyboardPinnedContainerView<Content: View>: UIView, Keyboard
             host.view.backgroundColor = .clear
             host.view.isOpaque = false
             host.view.translatesAutoresizingMaskIntoConstraints = false
+            if #available(iOS 16.0, visionOS 1.0, *) {
+                // Give the raw UIKit host its real capsule size on first layout so
+                // the pinned-container hit test matches the visible pager control.
+                host.sizingOptions = [.intrinsicContentSize]
+                host.safeAreaRegions = []
+            }
             addSubview(host.view)
             pageDotsHost = host
 
@@ -2518,10 +2516,17 @@ private final class KeyboardPinnedContainerView<Content: View>: UIView, Keyboard
     func setDesiredBottomGap(_ gap: CGFloat, isKeyboardVisible: Bool) {
         ensureConstraints(desiredBottomGap: gap)
 #if os(visionOS)
-        bottomToContainerConstraint?.constant = -gap
+        hostingBottomToContainer?.constant = -gap
 #else
         hostingBottomToKeyboard?.constant = -gap
+        hostingBottomToContainer?.constant = -gap
+        // `keyboardLayoutGuide` can report a stale non-zero frame on cold launch.
+        // Stay pinned to the container bottom until we know the keyboard is truly visible.
+        hostingBottomToKeyboard?.isActive = isKeyboardVisible
+        hostingBottomToContainer?.isActive = !isKeyboardVisible
         let hasVersionText = versionLabel.attributedText != nil && !versionLabel.attributedText!.string.isEmpty
+        versionLabelBottomToKeyboard?.isActive = isKeyboardVisible
+        versionLabelBottomToContainer?.isActive = !isKeyboardVisible
         versionLabel.isHidden = isKeyboardVisible || !hasVersionText
 #endif
     }
@@ -2596,7 +2601,7 @@ private final class KeyboardPinnedContainerView<Content: View>: UIView, Keyboard
     private func ensureConstraints(desiredBottomGap: CGFloat) {
         guard let hostingView = hostingController.view else { return }
 #if os(visionOS)
-        if bottomToContainerConstraint == nil {
+        if hostingBottomToContainer == nil {
             hostingView.translatesAutoresizingMaskIntoConstraints = false
             hostingView.setContentHuggingPriority(.required, for: .vertical)
             hostingView.setContentCompressionResistancePriority(.required, for: .vertical)
@@ -2623,7 +2628,7 @@ private final class KeyboardPinnedContainerView<Content: View>: UIView, Keyboard
                 versionLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -24),
                 versionLabel.bottomAnchor.constraint(equalTo: hostingView.topAnchor, constant: -4),
             ])
-            self.bottomToContainerConstraint = bottomToContainerConstraint
+            hostingBottomToContainer = bottomToContainerConstraint
         }
 #else
         if minHeightConstraint == nil {
@@ -2643,6 +2648,11 @@ private final class KeyboardPinnedContainerView<Content: View>: UIView, Keyboard
                 equalTo: keyboardLayoutGuide.topAnchor,
                 constant: -desiredBottomGap
             )
+            let hostingToContainer = hostingView.bottomAnchor.constraint(
+                equalTo: bottomAnchor,
+                constant: -desiredBottomGap
+            )
+            hostingToContainer.isActive = false
 
             let versionToKeyboard = versionLabel.bottomAnchor.constraint(
                 equalTo: keyboardLayoutGuide.topAnchor,
@@ -2653,6 +2663,7 @@ private final class KeyboardPinnedContainerView<Content: View>: UIView, Keyboard
                 constant: -4
             )
             versionToContainer.priority = .defaultLow
+            versionToContainer.isActive = false
 
             NSLayoutConstraint.activate([
                 hostingView.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -2660,6 +2671,7 @@ private final class KeyboardPinnedContainerView<Content: View>: UIView, Keyboard
                 minHeight,
                 topConstraint,
                 hostingToKeyboard,
+                hostingToContainer,
                 versionLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 24),
                 versionLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -24),
                 versionToKeyboard,
@@ -2668,6 +2680,7 @@ private final class KeyboardPinnedContainerView<Content: View>: UIView, Keyboard
 
             minHeightConstraint = minHeight
             hostingBottomToKeyboard = hostingToKeyboard
+            hostingBottomToContainer = hostingToContainer
             versionLabelBottomToKeyboard = versionToKeyboard
             versionLabelBottomToContainer = versionToContainer
         }

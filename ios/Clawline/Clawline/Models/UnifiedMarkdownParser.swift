@@ -3,12 +3,12 @@ import Markdown
 import UIKit
 
 enum UnifiedMarkdownParser {
-    private static let maxColumns = 40
-    private static let maxCellsPerMessage = 400
-    private static let fenceInvisibleScalars: Set<Character> = ["\u{200B}", "\u{200C}", "\u{200D}", "\u{2060}", "\u{FEFF}"]
-    private static let tablePipeSentinel = "\u{E000}"
+    nonisolated private static let maxColumns = 40
+    nonisolated private static let maxCellsPerMessage = 400
+    nonisolated private static let fenceInvisibleScalars: Set<Character> = ["\u{200B}", "\u{200C}", "\u{200D}", "\u{2060}", "\u{FEFF}"]
+    nonisolated private static let tablePipeSentinel = "\u{E000}"
 
-    static func parse(markdown: String, messageID: String, metrics: ChatFlowTheme.Metrics) -> MarkdownRenderPlan {
+    nonisolated static func parse(markdown: String, messageID: String, metrics: ChatFlowTheme.Metrics) -> MarkdownRenderPlan {
         guard !markdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return .empty
         }
@@ -77,7 +77,7 @@ enum UnifiedMarkdownParser {
         )
     }
 
-    private static func planFromRichTextOnly(_ markdown: String) -> MarkdownRenderPlan {
+    nonisolated private static func planFromRichTextOnly(_ markdown: String) -> MarkdownRenderPlan {
         let restored = restoreProtectedPipes(in: markdown)
         let trimmed = restored.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return .empty }
@@ -94,13 +94,13 @@ enum UnifiedMarkdownParser {
         )
     }
 
-    private static func normalizedLanguage(_ language: String?) -> String? {
+    nonisolated private static func normalizedLanguage(_ language: String?) -> String? {
         guard let language else { return nil }
         let trimmed = language.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? nil : trimmed
     }
 
-    private static func plainText(from block: MarkdownRenderBlock) -> String {
+    nonisolated private static func plainText(from block: MarkdownRenderBlock) -> String {
         switch block {
         case .richText(let source):
             return markdownPlainText(from: source)
@@ -118,7 +118,7 @@ enum UnifiedMarkdownParser {
         }
     }
 
-    private static func markdownPlainText(from source: String) -> String {
+    nonisolated private static func markdownPlainText(from source: String) -> String {
         if let attributed = try? AttributedString(
             markdown: source,
             options: .init(interpretedSyntax: .full)
@@ -128,7 +128,7 @@ enum UnifiedMarkdownParser {
         return source.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private static func buildTableModel(
+    nonisolated private static func buildTableModel(
         from table: Table,
         messageID: String,
         metrics: ChatFlowTheme.Metrics
@@ -214,7 +214,7 @@ enum UnifiedMarkdownParser {
         )
     }
 
-    private static func mapAlignment(_ alignment: Table.ColumnAlignment?) -> ColumnAlignment {
+    nonisolated private static func mapAlignment(_ alignment: Table.ColumnAlignment?) -> ColumnAlignment {
         switch alignment {
         case .center:
             return .center
@@ -225,7 +225,7 @@ enum UnifiedMarkdownParser {
         }
     }
 
-    private static func makeCell(from markdown: String, metrics: ChatFlowTheme.Metrics) -> TableModel.Cell {
+    nonisolated private static func makeCell(from markdown: String, metrics: ChatFlowTheme.Metrics) -> TableModel.Cell {
         let attributed: AttributedString
         if let parsed = try? AttributedString(
             markdown: markdown,
@@ -245,7 +245,7 @@ enum UnifiedMarkdownParser {
         )
     }
 
-    private static func tableCellMarkdown(from cell: Table.Cell) -> String {
+    nonisolated private static func tableCellMarkdown(from cell: Table.Cell) -> String {
         // Calling Table.Cell.format() can assert inside swift-markdown's formatter.
         // Format each child node instead so malformed/edge cell content is still preserved.
         let source = cell.children
@@ -261,7 +261,7 @@ enum UnifiedMarkdownParser {
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private static func normalizeTableCellMarkdowns(_ cells: [String], expectedCount: Int) -> [String] {
+    nonisolated private static func normalizeTableCellMarkdowns(_ cells: [String], expectedCount: Int) -> [String] {
         guard !cells.isEmpty else { return cells }
 
         var merged: [String] = []
@@ -284,7 +284,7 @@ enum UnifiedMarkdownParser {
         return merged
     }
 
-    private static func hasUnbalancedInlineCodeDelimiter(_ source: String) -> Bool {
+    nonisolated private static func hasUnbalancedInlineCodeDelimiter(_ source: String) -> Bool {
         var openDelimiterLength: Int?
         var index = source.startIndex
         while index < source.endIndex {
@@ -309,7 +309,7 @@ enum UnifiedMarkdownParser {
         return openDelimiterLength != nil
     }
 
-    private static func normalizeFenceLines(in markdown: String) -> String {
+    nonisolated private static func normalizeFenceLines(in markdown: String) -> String {
         let lines = markdown.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
         let hasTrailingNewline = markdown.last?.isNewline == true
         let normalized = lines.map { normalizeFenceLine(String($0)) }
@@ -319,7 +319,7 @@ enum UnifiedMarkdownParser {
         return normalized.joined(separator: "\n")
     }
 
-    private static func normalizeFenceLine(_ line: String) -> String {
+    nonisolated private static func normalizeFenceLine(_ line: String) -> String {
         let leadingSpaces = line.prefix(while: { $0 == " " || $0 == "\t" })
         let remainder = line.dropFirst(leadingSpaces.count)
         guard let marker = remainder.first, marker == "`" || marker == "~" else {
@@ -346,7 +346,7 @@ enum UnifiedMarkdownParser {
         return String(leadingSpaces) + String(repeating: String(marker), count: markerCount) + suffix
     }
 
-    private static func protectInlineCodePipesInTableRows(in markdown: String) -> String {
+    nonisolated private static func protectInlineCodePipesInTableRows(in markdown: String) -> String {
         let lines = markdown.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
         let hasTrailingNewline = markdown.last?.isNewline == true
         var openFence: (marker: Character, count: Int)?
@@ -383,7 +383,7 @@ enum UnifiedMarkdownParser {
         return transformed.joined(separator: "\n")
     }
 
-    private static func protectInlineCodePipesInTableLine(_ line: String) -> String {
+    nonisolated private static func protectInlineCodePipesInTableLine(_ line: String) -> String {
         let trimmed = line.trimmingCharacters(in: .whitespaces)
         guard trimmed.hasPrefix("|"), line.contains("|"), line.contains("`") else {
             return line
@@ -423,11 +423,11 @@ enum UnifiedMarkdownParser {
         return result
     }
 
-    private static func restoreProtectedPipes(in source: String) -> String {
+    nonisolated private static func restoreProtectedPipes(in source: String) -> String {
         source.replacingOccurrences(of: tablePipeSentinel, with: "|")
     }
 
-    private static func containsUnclosedCodeFence(in markdown: String) -> Bool {
+    nonisolated private static func containsUnclosedCodeFence(in markdown: String) -> Bool {
         struct FenceState {
             let marker: Character
             let count: Int
@@ -453,7 +453,7 @@ enum UnifiedMarkdownParser {
         return openFence != nil
     }
 
-    private static func fenceToken(in line: String) -> (marker: Character, count: Int, isClosing: Bool)? {
+    nonisolated private static func fenceToken(in line: String) -> (marker: Character, count: Int, isClosing: Bool)? {
         let leadingSpaceCount = line.prefix(while: { $0 == " " }).count
         guard leadingSpaceCount <= 3 else { return nil }
 
@@ -476,7 +476,7 @@ enum UnifiedMarkdownParser {
         return (marker: marker, count: runCount, isClosing: isClosing)
     }
 
-    private static func intrinsicWidth(for text: String, metrics: ChatFlowTheme.Metrics) -> CGFloat {
+    nonisolated private static func intrinsicWidth(for text: String, metrics: ChatFlowTheme.Metrics) -> CGFloat {
         _ = metrics
         let scaledFont = UIFont.clawline(.bodyText)
         let width = (text as NSString).size(withAttributes: [.font: scaledFont]).width

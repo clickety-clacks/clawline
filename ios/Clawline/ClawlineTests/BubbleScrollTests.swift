@@ -57,6 +57,52 @@ struct BubbleScrollTests {
         #expect(scrollEnabledWithPreview == true)
     }
 
+    @Test("Measurement bubble disables data detectors while visible bubbles keep link detectors")
+    @MainActor
+    func measurementBubbleDisablesDataDetectors() {
+        let visibleBubble = MessageBubbleUIKitView()
+        let measurementBubble = MessageBubbleUIKitView(enableDataDetectors: false)
+        let metrics = ChatFlowTheme.Metrics(isCompact: false)
+        let message = Message(
+            id: "measurement-detectors",
+            role: .assistant,
+            content: "Visit https://example.com",
+            timestamp: Date(),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: "server:personal"
+        )
+        let presentation = buildPresentation(message, metrics: metrics, enableLinkPreviews: false)
+        let sizeClass = MessageFlowRules.sizeClass(for: presentation)
+
+        for bubble in [visibleBubble, measurementBubble] {
+            bubble.configure(
+                message: message,
+                presentation: presentation,
+                sizeClass: sizeClass,
+                metrics: metrics,
+                maxWidth: 320,
+                bubbleSizingV2: nil,
+                showsHeader: true,
+                paddingScale: 1,
+                minWidthOverride: nil,
+                maxWidthOverride: nil,
+                useContinuousCorners: true,
+                isDark: false,
+                onRequestExpand: nil,
+                onRequestLayout: nil,
+                onInteractiveCallback: nil
+            )
+        }
+
+        let visibleDetectors = textViews(in: visibleBubble).map(\.dataDetectorTypes)
+        let measurementDetectors = textViews(in: measurementBubble).map(\.dataDetectorTypes)
+
+        #expect(visibleDetectors.contains([.link]))
+        #expect(measurementDetectors.allSatisfy { $0.isEmpty })
+    }
+
     @Test("T047/T046: Overflow-to-fit transition clears stale inner offset and fade state")
     @MainActor
     func overflowTransitionResetsOffsetAndFade() {

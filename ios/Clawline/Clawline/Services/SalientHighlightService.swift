@@ -277,7 +277,7 @@ private actor Worker {
         Task {
             // Ensure we don't grant permits inline on the first enqueued request.
             await Task.yield()
-            await self.runPermitGrant()
+            self.runPermitGrant()
         }
     }
 

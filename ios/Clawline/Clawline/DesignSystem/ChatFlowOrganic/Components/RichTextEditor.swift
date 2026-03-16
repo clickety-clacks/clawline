@@ -676,7 +676,7 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
 
     func textPasteConfigurationSupporting(
         _ textPasteConfigurationSupporting: UITextPasteConfigurationSupporting,
-        transforming item: UITextPasteItem
+        transform item: UITextPasteItem
     ) {
         let isImage = Self.providerHasImage(item.itemProvider)
         logger.info("[paste] transforming item isImage=\(isImage) types=\(item.itemProvider.registeredTypeIdentifiers)")
@@ -711,9 +711,9 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
                     texts.append(text)
                 }
             }
-            await MainActor.run {
+            let combined = texts.joined()
+            await MainActor.run { [weak self, combined] in
                 guard let self else { return }
-                let combined = texts.joined()
                 if !combined.isEmpty {
                     self.insertPlainText(combined)
                 }
@@ -741,7 +741,7 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
         delegate?.textViewDidChange?(self)
     }
 
-    private static func loadSanitizedText(from provider: NSItemProvider) async -> String? {
+    nonisolated private static func loadSanitizedText(from provider: NSItemProvider) async -> String? {
         if provider.hasItemConformingToTypeIdentifier(UTType.plainText.identifier) {
             return await loadText(for: UTType.plainText.identifier, from: provider)
         }
@@ -774,7 +774,7 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
         return nil
     }
 
-    private static func loadText(for typeIdentifier: String, from provider: NSItemProvider) async -> String? {
+    nonisolated private static func loadText(for typeIdentifier: String, from provider: NSItemProvider) async -> String? {
         await withCheckedContinuation { continuation in
             provider.loadItem(forTypeIdentifier: typeIdentifier, options: nil) { obj, _ in
                 let text = (obj as? String) ?? (obj as? Data).flatMap { String(data: $0, encoding: .utf8) }
@@ -783,7 +783,7 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
         }
     }
 
-    private static func loadData(for typeIdentifier: String, from provider: NSItemProvider) async -> Data? {
+    nonisolated private static func loadData(for typeIdentifier: String, from provider: NSItemProvider) async -> Data? {
         await withCheckedContinuation { continuation in
             provider.loadItem(forTypeIdentifier: typeIdentifier, options: nil) { obj, _ in
                 let data = (obj as? Data) ?? (obj as? String).flatMap { $0.data(using: .utf8) }
@@ -792,7 +792,7 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
         }
     }
 
-    private static func providerHasText(_ provider: NSItemProvider) -> Bool {
+    nonisolated private static func providerHasText(_ provider: NSItemProvider) -> Bool {
         provider.hasItemConformingToTypeIdentifier(UTType.plainText.identifier)
             || provider.hasItemConformingToTypeIdentifier(UTType.utf8PlainText.identifier)
             || provider.hasItemConformingToTypeIdentifier(UTType.text.identifier)
@@ -802,7 +802,7 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
 
     // MARK: - Image detection
 
-    private static func providerHasImage(_ provider: NSItemProvider) -> Bool {
+    nonisolated private static func providerHasImage(_ provider: NSItemProvider) -> Bool {
         provider.canLoadObject(ofClass: UIImage.self)
             || provider.hasItemConformingToTypeIdentifier(UTType.image.identifier)
     }
@@ -815,9 +815,9 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
                     texts.append(text)
                 }
             }
-            await MainActor.run {
+            let combined = texts.joined()
+            await MainActor.run { [weak self, combined] in
                 guard let self else { return }
-                let combined = texts.joined()
                 if !combined.isEmpty {
                     self.insertPlainText(combined)
                 }
@@ -830,7 +830,7 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
     private func handleImageProviders(_ imageProviders: [NSItemProvider]) {
         Task.detached { [weak self] in
             let images = await Self.loadImages(from: imageProviders)
-            await MainActor.run {
+            await MainActor.run { [weak self, images] in
                 guard let self else { return }
                 logger.info("[paste] loaded \(images.count) image(s)")
                 self.onPasteImages?(images)
@@ -838,7 +838,7 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
         }
     }
 
-    private static func loadImages(from providers: [NSItemProvider]) async -> [UIImage] {
+    nonisolated private static func loadImages(from providers: [NSItemProvider]) async -> [UIImage] {
         await withTaskGroup(of: UIImage?.self) { group in
             for provider in providers {
                 group.addTask {

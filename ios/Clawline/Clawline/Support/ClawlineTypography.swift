@@ -17,7 +17,7 @@ enum ClawlineTextRole {
     case sectionHeader
     case subsectionHeader
 
-    fileprivate var swiftUITextStyle: Font.TextStyle {
+    nonisolated fileprivate var swiftUITextStyle: Font.TextStyle {
         switch self {
         case .shortMessage:
             return .title3
@@ -38,7 +38,7 @@ enum ClawlineTextRole {
         }
     }
 
-    fileprivate var uiTextStyle: UIFont.TextStyle {
+    nonisolated fileprivate var uiTextStyle: UIFont.TextStyle {
         switch self {
         case .shortMessage:
             return .title3
@@ -59,7 +59,7 @@ enum ClawlineTextRole {
         }
     }
 
-    fileprivate var fontWeight: Font.Weight? {
+    nonisolated fileprivate var fontWeight: Font.Weight? {
         switch self {
         case .shortMessage:
             return .semibold
@@ -76,7 +76,7 @@ enum ClawlineTextRole {
         }
     }
 
-    fileprivate var uiWeight: UIFont.Weight? {
+    nonisolated fileprivate var uiWeight: UIFont.Weight? {
         switch self {
         case .shortMessage:
             return .semibold
@@ -116,7 +116,7 @@ extension Font {
 }
 
 extension UIFont {
-    static func clawline(
+    nonisolated static func clawline(
         _ role: ClawlineTextRole,
         compatibleWith traitCollection: UITraitCollection? = nil
     ) -> UIFont {
@@ -128,7 +128,7 @@ extension UIFont {
         )
     }
 
-    static func clawline(
+    nonisolated static func clawline(
         _ role: ClawlineTextRole,
         weight: UIFont.Weight,
         compatibleWith traitCollection: UITraitCollection? = nil
@@ -141,7 +141,7 @@ extension UIFont {
         )
     }
 
-    static func clawlineMonospaced(
+    nonisolated static func clawlineMonospaced(
         _ role: ClawlineTextRole,
         weight: UIFont.Weight? = nil,
         compatibleWith traitCollection: UITraitCollection? = nil
@@ -154,7 +154,7 @@ extension UIFont {
         )
     }
 
-    private static func makePreferred(
+    nonisolated private static func makePreferred(
         textStyle: UIFont.TextStyle,
         weight: UIFont.Weight?,
         design: UIFontDescriptor.SystemDesign?,

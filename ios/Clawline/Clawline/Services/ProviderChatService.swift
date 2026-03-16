@@ -561,6 +561,7 @@ class ProviderChatService: ChatServicing {
     private let lifecycleTransportEventBroadcaster = AsyncStreamBroadcaster<LifecycleTransportEvent>()
     private var lastConnectionState: ConnectionState = .disconnected
 
+    private var authTimeoutTask: Task<Void, Never>?
     private var pendingMessages: [String: PendingMessage] = [:]
     private var replayCursorBySessionKey: [String: String] = [:]
     private var knownSessionKeys: Set<String> = []
@@ -769,6 +770,7 @@ class ProviderChatService: ChatServicing {
 
     func disconnect() {
         logger.info("disconnect requested")
+        cancelAuthTimeout()
         Task { [weak self] in
             guard let self else { return }
             await self.transportSessionCoordinator.cancelAttempt()
@@ -805,6 +807,7 @@ class ProviderChatService: ChatServicing {
 
     private func performDisconnect(shouldNotify: Bool, reason: String? = nil) {
         logger.info("performDisconnect notify=\(shouldNotify, privacy: .public) reason=\(reason ?? "nil", privacy: .public)")
+        cancelAuthTimeout()
         if !pendingMessages.isEmpty {
             for (messageId, pending) in pendingMessages {
                 pending.retryTask?.cancel()
@@ -1110,7 +1113,7 @@ class ProviderChatService: ChatServicing {
             )
         }
         if result.success {
-            let resolution = await transportSessionCoordinator.applyAuthSuccess(generation: generation)
+            let resolution = await applyAuthSuccess(generation: generation)
             guard resolution.shouldProcess else { return }
             logger.info("state -> connected (auth success)")
             updateState(.connected)
@@ -1127,7 +1130,7 @@ class ProviderChatService: ChatServicing {
         } else {
             let reason = result.reason ?? "Unknown error"
             let error = Error.authFailed(reason)
-            let resolution = await transportSessionCoordinator.applyAuthFailure(generation: generation, error: error)
+            let resolution = await applyAuthFailure(generation: generation, error: error)
             guard resolution.shouldProcess else { return }
             logger.info("state -> failed (auth result) error=\(error.localizedDescription, privacy: .public)")
             updateState(.failed(error))
@@ -1239,7 +1242,7 @@ class ProviderChatService: ChatServicing {
                     generation: generation
                 )
             }
-            let resolution = await transportSessionCoordinator.applyAuthFailure(generation: generation, error: error)
+            let resolution = await applyAuthFailure(generation: generation, error: error)
             guard resolution.shouldProcess else { return }
             logger.info("state -> failed (server error auth_failed) error=\(error.localizedDescription, privacy: .public)")
             updateState(.failed(error))
@@ -1262,7 +1265,7 @@ class ProviderChatService: ChatServicing {
                     generation: generation
                 )
             }
-            let resolution = await transportSessionCoordinator.applyAuthFailure(generation: generation, error: error)
+            let resolution = await applyAuthFailure(generation: generation, error: error)
             guard resolution.shouldProcess else { return }
             logger.info("state -> failed (server error token_revoked) error=\(error.localizedDescription, privacy: .public)")
             updateState(.failed(error))
@@ -1286,7 +1289,7 @@ class ProviderChatService: ChatServicing {
                 )
             }
             logger.info("state -> failed (server error session_replaced)")
-            _ = await transportSessionCoordinator.applyAuthFailure(generation: generation, error: error)
+            _ = await applyAuthFailure(generation: generation, error: error)
             updateState(.failed(error))
             await transportSessionCoordinator.applyDisconnect(
                 shouldNotify: false,
@@ -1310,7 +1313,7 @@ class ProviderChatService: ChatServicing {
                         generation: generation
                     )
                 } else {
-                    _ = await transportSessionCoordinator.applyAuthFailure(
+                    _ = await applyAuthFailure(
                         generation: generation,
                         error: Error.authFailed("Invalid lastMessageId")
                     )
@@ -1537,6 +1540,7 @@ class ProviderChatService: ChatServicing {
     }
 
     private func handleSocketClose(closeInfo: WebSocketCloseInfo?, generation: UUID, lifecycleEpoch: Int?) async {
+        cancelAuthTimeout()
         let resolution = await transportSessionCoordinator.applySocketClose(
             generation: generation,
             closeInfo: closeInfo
@@ -1601,7 +1605,31 @@ class ProviderChatService: ChatServicing {
     }
 
     private func teardownConnection() async throws {
+        cancelAuthTimeout()
         await transportSessionCoordinator.applyDisconnect(shouldNotify: false)
+    }
+
+    private func cancelAuthTimeout() {
+        authTimeoutTask?.cancel()
+        authTimeoutTask = nil
+    }
+
+    private func resolveAuthContinuation(with result: Result<Void, Swift.Error>) async {
+        cancelAuthTimeout()
+        await transportSessionCoordinator.resolveAuthContinuation(with: result)
+    }
+
+    private func applyAuthSuccess(generation: UUID) async -> TransportSessionCoordinator.AuthResultResolution {
+        cancelAuthTimeout()
+        return await transportSessionCoordinator.applyAuthSuccess(generation: generation)
+    }
+
+    private func applyAuthFailure(
+        generation: UUID,
+        error: Swift.Error
+    ) async -> TransportSessionCoordinator.FailureResolution {
+        cancelAuthTimeout()
+        return await transportSessionCoordinator.applyAuthFailure(generation: generation, error: error)
     }
 
     private func mapStreamAPIError(_ error: Swift.Error) -> Swift.Error {
@@ -1620,57 +1648,39 @@ class ProviderChatService: ChatServicing {
         token: String,
         forcedLastMessageId: String?
     ) async throws {
-        try await withThrowingTaskGroup(of: Void.self) { group in
-            group.addTask { [weak self] in
-                guard let self else { return }
-                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Swift.Error>) in
-                    Task {
-                        let installed = await self.transportSessionCoordinator.installAuthContinuation(
-                            continuation,
-                            generation: generation
-                        )
-                        guard installed else { return }
-                        do {
-                            let replayCursorSnapshot = self.replayCursorSnapshot()
-                            let candidateLastMessageId = forcedLastMessageId ?? self.resolveAuthLastMessageId(
-                                replayCursorSnapshot: replayCursorSnapshot,
-                                knownSessionKeys: self.knownSessionKeys
-                            )
-                            let lastMessageId = self.normalizeServerEventID(candidateLastMessageId)
-                            let authPayload = AuthPayload(
-                                token: token,
-                                deviceId: self.deviceId,
-                                lastMessageId: lastMessageId,
-                                replayCursorsBySessionKey: nil,
-                                clientFeatures: self.supportedClientFeatures,
-                                client: ClientDescriptor(
-                                    id: Self.clientID,
-                                    features: self.supportedClientFeatures
-                                )
-                            )
-                            let data = try self.encoder.encode(authPayload)
-                            guard let text = String(data: data, encoding: .utf8) else {
-                                await self.transportSessionCoordinator.resolveAuthContinuation(
-                                    with: .failure(Error.notConnected)
-                                )
-                                return
-                            }
-                            try await client.send(text: text)
-                        } catch {
-                            await self.transportSessionCoordinator.resolveAuthContinuation(with: .failure(error))
-                        }
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Swift.Error>) in
+            Task { [weak self] in
+                guard let self else {
+                    continuation.resume(throwing: Error.notConnected)
+                    return
+                }
+                let installed = await self.transportSessionCoordinator.installAuthContinuation(
+                    continuation,
+                    generation: generation
+                )
+                guard installed else { return }
+                self.cancelAuthTimeout()
+                let authTimeout = self.authTimeout
+                self.authTimeoutTask = Task { [weak self] in
+                    do {
+                        try await Task.sleep(forDuration: authTimeout)
+                    } catch {
+                        return
                     }
+                    await self?.resolveAuthContinuation(with: .failure(Error.authTimeout))
+                }
+                do {
+                    let replayCursorSnapshot = self.replayCursorSnapshot()
+                    let candidateLastMessageId = forcedLastMessageId ?? self.resolveAuthLastMessageId(
+                        replayCursorSnapshot: replayCursorSnapshot,
+                        knownSessionKeys: self.knownSessionKeys
+                    )
+                    let lastMessageId = self.normalizeServerEventID(candidateLastMessageId)
+                    try await self.sendAuth(client: client, token: token, lastMessageId: lastMessageId)
+                } catch {
+                    await self.resolveAuthContinuation(with: .failure(error))
                 }
             }
-            group.addTask { [authTimeout] in
-                try await Task.sleep(forDuration: authTimeout)
-                throw Error.authTimeout
-            }
-
-            guard let _ = try await group.next() else {
-                throw Error.authTimeout
-            }
-            group.cancelAll()
         }
     }
 

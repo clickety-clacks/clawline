@@ -1,13 +1,13 @@
 import Foundation
 
 enum EmojiOnlyClassifier {
-    static let maxAmplifiedEmojiCount = 3
+    nonisolated static let maxAmplifiedEmojiCount = 3
 
-    static func isEmojiOnly(_ text: String) -> Bool {
+    nonisolated static func isEmojiOnly(_ text: String) -> Bool {
         emojiCharacters(in: text) != nil
     }
 
-    static func emojiCharacters(in text: String) -> [Character]? {
+    nonisolated static func emojiCharacters(in text: String) -> [Character]? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
         let characters = Array(trimmed)
@@ -18,7 +18,7 @@ enum EmojiOnlyClassifier {
 }
 
 private extension Character {
-    var isUnifiedEmojiOnlyCharacter: Bool {
+    nonisolated var isUnifiedEmojiOnlyCharacter: Bool {
         unicodeScalars.contains { scalar in
             scalar.properties.isEmoji && (
                 scalar.properties.generalCategory == .otherSymbol

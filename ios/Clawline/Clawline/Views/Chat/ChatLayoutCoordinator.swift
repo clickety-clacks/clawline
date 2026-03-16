@@ -187,12 +187,8 @@ final class ChatLayoutCoordinator {
         didApplyThisTick = false
         guard !pendingFallback else { return }
         pendingFallback = true
-        RunLoop.main.perform { [weak self] in
-            guard let self else { return }
-            self.pendingFallback = false
-            if !self.didApplyThisTick {
-                self.applyTransitionIfPossible(reason: "fallback")
-            }
+        Task { @MainActor [weak self] in
+            self?.runPendingFallbackIfNeeded()
         }
     }
 
@@ -461,6 +457,13 @@ final class ChatLayoutCoordinator {
 
     private func activeListView() -> MessageFlowCollectionViewController? {
         listViews[activeSessionKey]?.value
+    }
+
+    private func runPendingFallbackIfNeeded() {
+        pendingFallback = false
+        if !didApplyThisTick {
+            applyTransitionIfPossible(reason: "fallback")
+        }
     }
 
     private func applyLatestInset(to view: MessageFlowCollectionViewController, isActive: Bool) {

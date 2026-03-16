@@ -36,7 +36,7 @@ struct ScrollToBottomButton: View {
     }
 
     private var badgeBackground: Color {
-        ChatFlowTheme.terracotta(resolvedScheme)
+        ChatFlowTheme.unreadIndicator(resolvedScheme)
     }
 
     var body: some View {

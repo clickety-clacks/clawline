@@ -87,10 +87,6 @@ struct StreamManagerSheet: View {
         max(0, effectiveContainerHeight - functionBarHeight - searchBarHeight)
     }
 
-    private var allowsListScrolling: Bool {
-        listContentHeight > listViewportHeight + 0.5
-    }
-
     private var cappedContainerHeight: CGFloat {
         StreamSelectorLayout.containerHeight(
             itemCount: listItemCount,
@@ -116,9 +112,9 @@ struct StreamManagerSheet: View {
             }
             .padding(.horizontal, 12)
             .frame(height: 38)
-            .background(
+            .overlay(
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(Color.primary.opacity(colorScheme == .dark ? 0.10 : 0.08))
+                    .stroke(Color.white.opacity(colorScheme == .dark ? 0.18 : 0.14), lineWidth: 0.8)
             )
             .padding(.horizontal, listRowHorizontalInset)
             .padding(.top, 12)
@@ -206,7 +202,6 @@ struct StreamManagerSheet: View {
             .listStyle(.plain)
             .environment(\.defaultMinListRowHeight, listRowHeight)
             .listRowSpacing(listRowSpacing)
-            .scrollDisabled(!allowsListScrolling)
             .scrollBounceBehavior(.always)
             .contentMargins(.vertical, 0, for: .scrollContent)
             .scrollContentBackground(.hidden)
@@ -242,9 +237,7 @@ struct StreamManagerSheet: View {
         }
         .frame(minWidth: 280, idealWidth: 320, maxWidth: 360)
         .frame(height: cappedContainerHeight)
-#if !os(visionOS)
-        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: popupCornerRadius, style: .continuous))
-#endif
+        .background(Color.clear)
         .overlay(
             RoundedRectangle(cornerRadius: popupCornerRadius, style: .continuous)
                 .stroke(Color.white.opacity(0.10), lineWidth: 0.5)
@@ -321,6 +314,14 @@ struct StreamManagerSheet: View {
                             )
                         )
                         .frame(width: 8, height: 8)
+                        .shadow(
+                            color: isActive ? StreamDotColor.activeGlow(colorScheme: colorScheme) : .clear,
+                            radius: isActive ? StreamDotColor.activeOuterGlowRadius(colorScheme: colorScheme) : 0
+                        )
+                        .shadow(
+                            color: isActive ? StreamDotColor.activeGlow(colorScheme: colorScheme) : .clear,
+                            radius: isActive ? StreamDotColor.activeInnerGlowRadius(colorScheme: colorScheme) : 0
+                        )
                     Text(stream.displayName)
                         .font(.clawline(.subsectionHeader).weight(isActive ? .semibold : .regular))
                         .frame(maxWidth: .infinity, alignment: .leading)

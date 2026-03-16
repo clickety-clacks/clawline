@@ -686,10 +686,14 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         self.salientHighlightService = salientHighlightService
         self.lifecycleCoordinator = ConnectionLifecycleCoordinator(
             startAttempt: { [weak chatService] epoch, lastMessageId, token in
-                chatService?.startConnectionAttempt(epoch: epoch, lastMessageId: lastMessageId, token: token)
+                Task { @MainActor [weak chatService] in
+                    chatService?.startConnectionAttempt(epoch: epoch, lastMessageId: lastMessageId, token: token)
+                }
             },
             stopAttempt: { [weak chatService] in
-                chatService?.stopConnectionAttempt()
+                Task { @MainActor [weak chatService] in
+                    chatService?.stopConnectionAttempt()
+                }
             }
         )
         self.nowProvider = nowProvider
@@ -1383,15 +1387,31 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
     func createStream(displayName: String) async -> Bool {
         let trimmed = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return false }
+        let idempotencyKey = Self.makeIdempotencyKey()
         do {
             let stream = try await chatService.createStream(
                 displayName: trimmed,
-                idempotencyKey: Self.makeIdempotencyKey()
+                idempotencyKey: idempotencyKey
             )
             applyStreamUpsert(stream)
             setEngineActiveSessionKey(stream.sessionKey)
             return true
         } catch {
+            if shouldRetryCreateOnActiveConnection(after: error) {
+                do {
+                    try await reconnectActiveTransportForControlPlane()
+                    let stream = try await chatService.createStream(
+                        displayName: trimmed,
+                        idempotencyKey: idempotencyKey
+                    )
+                    applyStreamUpsert(stream)
+                    setEngineActiveSessionKey(stream.sessionKey)
+                    return true
+                } catch {
+                    toastManager.show(error.localizedDescription)
+                    return false
+                }
+            }
             toastManager.show(error.localizedDescription)
             return false
         }
@@ -1442,6 +1462,19 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
     }
 
     private func shouldRetryDeleteOnActiveConnection(after error: Swift.Error) -> Bool {
+        guard auth.token != nil else { return false }
+        if let providerError = error as? ProviderChatService.Error,
+           case .notConnected = providerError {
+            return true
+        }
+        if let streamError = error as? StreamAPIError,
+           streamError.code == "not_connected" {
+            return true
+        }
+        return false
+    }
+
+    private func shouldRetryCreateOnActiveConnection(after error: Swift.Error) -> Bool {
         guard auth.token != nil else { return false }
         if let providerError = error as? ProviderChatService.Error,
            case .notConnected = providerError {

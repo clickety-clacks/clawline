@@ -4,10 +4,10 @@ import UIKit
 
 @MainActor
 struct MessageFlowCollectionViewKeyboardTests {
-    @Test("Active dictation preserves interactive keyboard dismissal")
-    func activeDictationPreservesInteractiveKeyboardDismissal() {
-        #expect(MessageFlowCollectionView.keyboardDismissModeForInputFocus(true, isDictationActive: true) == .interactive)
-        #expect(MessageFlowCollectionView.keyboardDismissModeForInputFocus(false, isDictationActive: true) == .interactive)
+    @Test("Active dictation disables scroll-driven keyboard dismissal")
+    func activeDictationDisablesScrollDrivenKeyboardDismissal() {
+        #expect(MessageFlowCollectionView.keyboardDismissModeForInputFocus(true, isDictationActive: true) == .none)
+        #expect(MessageFlowCollectionView.keyboardDismissModeForInputFocus(false, isDictationActive: true) == .none)
     }
 
     @Test("Inactive dictation preserves normal interactive dismissal")

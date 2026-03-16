@@ -3,6 +3,7 @@ import Testing
 @testable import Clawline
 
 @MainActor
+@Suite(.serialized)
 struct SubmitFailureVerificationTests {
     @Test("Send stays blocked until transport is actually ready")
     func sendRequiresActualTransportReadiness() async throws {
@@ -284,7 +285,9 @@ private final class VerificationAutoAuthClient: WebSocketClient {
     }
 }
 
+@MainActor
 private func resetSubmitFailureVerificationPersistence() {
+    ChatViewModel.setConnectionOwnershipDisabledForTesting(true)
     let defaults = UserDefaults.standard
     for key in defaults.dictionaryRepresentation().keys {
         if key.hasPrefix("clawline.lastServerMessageId.")

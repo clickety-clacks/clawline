@@ -46,6 +46,10 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
     private let instanceId = UUID().uuidString
     @MainActor
     private static var currentConnectionOwnerId: String?
+#if DEBUG
+    @MainActor
+    private static var connectionOwnershipDisabledForTesting = false
+#endif
     private static let richDocumentMimeTypesNeedingPayload: Set<String> = [
         InteractiveHTMLDescriptor.mimeType,
         TerminalSessionDescriptor.mimeType
@@ -84,10 +88,18 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
     }
 
     private var isConnectionOwner: Bool {
-        Self.currentConnectionOwnerId == instanceId
+#if DEBUG
+        if Self.connectionOwnershipDisabledForTesting {
+            return true
+        }
+#endif
+        return Self.currentConnectionOwnerId == instanceId
     }
 
     private func claimConnectionOwnership(reason: String) {
+#if DEBUG
+        guard !Self.connectionOwnershipDisabledForTesting else { return }
+#endif
         let previousOwner = Self.currentConnectionOwnerId ?? "none"
         Self.currentConnectionOwnerId = instanceId
         logger.info(
@@ -97,6 +109,9 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
     }
 
     private func releaseConnectionOwnershipIfNeeded(reason: String) {
+#if DEBUG
+        guard !Self.connectionOwnershipDisabledForTesting else { return }
+#endif
         guard Self.currentConnectionOwnerId == instanceId else { return }
         Self.currentConnectionOwnerId = nil
         logger.info(
@@ -104,6 +119,15 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         )
         emitPinpointLog(event: "connectionOwner_release", origin: reason)
     }
+
+#if DEBUG
+    static func setConnectionOwnershipDisabledForTesting(_ disabled: Bool) {
+        connectionOwnershipDisabledForTesting = disabled
+        if disabled {
+            currentConnectionOwnerId = nil
+        }
+    }
+#endif
     private(set) var messages: [Message] = []
     private(set) var streamsBySessionKey: [String: StreamSession] = [:]
     private(set) var orderedSessionKeys: [String] = []
@@ -446,6 +470,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
     private var observationStartupTask: Task<Void, Never>?
     private var activationTask: Task<Void, Never>?
     private var hasActivatedLifecycleOwnership = false
+    private var incomingMessagesSubscription: AsyncStream<Message>?
     private var lifecycleTransportEventsSubscription: AsyncStream<LifecycleTransportEvent>?
     private var lifecycleOutputsSubscription: AsyncStream<ConnectionLifecycleOutput>?
     private var lifecycleStartupGateDebugSubscription: AsyncStream<StartupGateDebugEvent>?
@@ -769,7 +794,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         guard !isRetired else { return }
         guard isConnectionOwner else { return }
         guard auth.token != nil else { return }
-        guard sendButtonConnectionState == .disconnected else { return }
+        guard sendButtonConnectionState != .connected else { return }
         Task {
             await startObservingIfNeeded(origin: "reconnect")
             await lifecycleCoordinator.manualRetry()
@@ -896,6 +921,9 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
             await self.ensureLifecycleOutputsSubscription()
             self.coordinatorDiag("startObservingIfNeeded after ensureLifecycleOutputsSubscription")
             if Task.isCancelled { return }
+            self.ensureIncomingMessagesSubscription()
+            self.coordinatorDiag("startObservingIfNeeded after ensureIncomingMessagesSubscription")
+            if Task.isCancelled { return }
             await self.ensureLifecycleStartupGateDebugSubscription()
             self.coordinatorDiag("startObservingIfNeeded after ensureLifecycleStartupGateDebugSubscription")
             if Task.isCancelled { return }
@@ -909,6 +937,10 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
             self.coordinatorDiag("startObservingIfNeeded creating observationTask")
             self.observationTask = Task {
                 await withTaskGroup(of: Void.self) { group in
+                    group.addTask { [weak self] in
+                        await self?.observeIncomingMessages()
+                    }
+
                     group.addTask { [weak self] in
                         await self?.observeLifecycleTransportEvents()
                     }
@@ -943,6 +975,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         activationTask = nil
         observationTask?.cancel()
         observationTask = nil
+        incomingMessagesSubscription = nil
         lifecycleTransportEventsSubscription = nil
         lifecycleOutputsSubscription = nil
         lifecycleStartupGateDebugSubscription = nil
@@ -965,6 +998,12 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         Task { await lifecycleCoordinator.disconnectRequested() }
         chatService.disconnect()
         releaseConnectionOwnershipIfNeeded(reason: "prepareForReplacement")
+    }
+
+    private func ensureIncomingMessagesSubscription() {
+        guard incomingMessagesSubscription == nil else { return }
+        incomingMessagesSubscription = chatService.incomingMessages
+        coordinatorDiag("ensureIncomingMessagesSubscription created")
     }
 
     private func ensureLifecycleTransportSubscription() {
@@ -995,6 +1034,14 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         }
         lifecycleStartupGateDebugSubscription = await lifecycleCoordinator.startupGateDebugEvents
         coordinatorDiag("ensureLifecycleStartupGateDebugSubscription created")
+    }
+
+    @MainActor
+    private func observeIncomingMessages() async {
+        guard let incomingMessagesSubscription else { return }
+        for await message in incomingMessagesSubscription {
+            handleIncoming(message)
+        }
     }
 
     @MainActor
@@ -1428,6 +1475,11 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
             "incoming id=\(message.id, privacy: .public) sessionKey=\(message.sessionKey, privacy: .public) stream=\(message.stream.rawValue, privacy: .public) role=\(String(describing: message.role), privacy: .public) streaming=\(message.streaming, privacy: .public) deviceId=\(message.deviceId ?? "nil", privacy: .public) snippet=\"\(snippet, privacy: .public)\""
         )
 
+        if message.id.hasPrefix("s_") {
+            chatService.setReplayCursor(message.id, for: message.sessionKey)
+            Task { await lifecycleCoordinator.updateCanonicalCursor(message.id) }
+        }
+
         if shouldSuppressInteractiveCallbackEcho(message) {
             logger.info(
                 "incoming suppressed interactive_callback_echo id=\(message.id, privacy: .public) sessionKey=\(message.sessionKey, privacy: .public)"
@@ -1449,6 +1501,19 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
                 deviceId: message.deviceId,
                 sessionKey: message.sessionKey
             )
+        }
+
+        let canSynthesizeUnknownStream =
+            message.sessionKey == streamMainSessionKey()
+            || message.sessionKey == engineActiveSessionKey
+            || message.sessionKey == uiSelectedSessionKey
+            || syntheticSessionKeys.contains(message.sessionKey)
+            || !hasReceivedSessionProvisioning
+        guard streamsBySessionKey[message.sessionKey] != nil || canSynthesizeUnknownStream else {
+            logger.info(
+                "incoming ignored unknown sessionKey=\(message.sessionKey, privacy: .public) id=\(message.id, privacy: .public)"
+            )
+            return
         }
 
         // Check if this is an assistant message arriving while typing indicator is visible.
@@ -2477,6 +2542,9 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
                         guard self.writerCurrentEpoch == epoch else { return }
                         guard self.firstReplayAppliedEpoch != epoch else { return }
                     }
+                    if let currentMessages = self.sessionMessages[sessionKey], !currentMessages.isEmpty {
+                        return
+                    }
                     self.setMessages(filtered, for: sessionKey)
                     let cachedLast = self.lastServerMessageId(from: filtered)
                     self.chatService.setReplayCursor(cachedLast, for: sessionKey)
@@ -2496,6 +2564,12 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
     }
 
     private func clearCursor(for sessionKey: String) {
+        if let currentMessages = sessionMessages[sessionKey], !currentMessages.isEmpty {
+            return
+        }
+        if let currentCursor = chatService.replayCursorSnapshot()[sessionKey], !currentCursor.isEmpty {
+            return
+        }
         self.chatService.setReplayCursor(nil, for: sessionKey)
         Task { await lifecycleCoordinator.updateCanonicalCursor(nil) }
         self.armForceReRead(for: sessionKey)
@@ -2614,9 +2688,6 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
 
     private func ensureDefaultActiveSessionIfNeeded() {
         if engineActiveSessionKey.isEmpty {
-            guard !orderedSessionKeys.isEmpty else {
-                return
-            }
             if let main = streamMainSessionKey() {
                 ensureStreamEntry(for: main)
                 setEngineActiveSessionKey(main)

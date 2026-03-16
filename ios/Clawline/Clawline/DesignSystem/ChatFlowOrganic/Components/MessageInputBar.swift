@@ -19,6 +19,13 @@ private struct MessageInputBarTextEditorFramePreferenceKey: PreferenceKey {
     }
 }
 
+private struct MessageInputBarFramePreferenceKey: PreferenceKey {
+    static var defaultValue: CGRect = .zero
+    static func reduce(value: inout CGRect, nextValue: () -> CGRect) {
+        value = nextValue()
+    }
+}
+
 struct DictationPanEvent {
     let startLocation: CGPoint
     let translation: CGPoint
@@ -96,6 +103,7 @@ func classifyDictationPanIntent(_ context: DictationPanIntentContext) -> Dictati
 struct DictationPanGestureInstaller: UIViewControllerRepresentable {
     var shouldBegin: (CGPoint, CGPoint) -> Bool
     var startsInEditableRegion: (CGPoint) -> Bool
+    var activeRegion: () -> CGRect
     var isSurfaceOpen: () -> Bool
     var scenePhase: ScenePhase
     var onChanged: (DictationPanEvent) -> Void
@@ -105,6 +113,7 @@ struct DictationPanGestureInstaller: UIViewControllerRepresentable {
         Coordinator(
             shouldBegin: shouldBegin,
             startsInEditableRegion: startsInEditableRegion,
+            activeRegion: activeRegion,
             isSurfaceOpen: isSurfaceOpen,
             onChanged: onChanged,
             onEnded: onEnded
@@ -121,6 +130,7 @@ struct DictationPanGestureInstaller: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: InstallerViewController, context: Context) {
         context.coordinator.shouldBegin = shouldBegin
         context.coordinator.startsInEditableRegion = startsInEditableRegion
+        context.coordinator.activeRegion = activeRegion
         context.coordinator.isSurfaceOpen = isSurfaceOpen
         context.coordinator.onChanged = onChanged
         context.coordinator.onEnded = onEnded
@@ -135,6 +145,7 @@ struct DictationPanGestureInstaller: UIViewControllerRepresentable {
         Coordinator(
             shouldBegin: { _, _ in false },
             startsInEditableRegion: { _ in false },
+            activeRegion: { .zero },
             isSurfaceOpen: { false },
             onChanged: { _ in },
             onEnded: onEnded
@@ -178,6 +189,7 @@ struct DictationPanGestureInstaller: UIViewControllerRepresentable {
 
         var shouldBegin: (CGPoint, CGPoint) -> Bool
         var startsInEditableRegion: (CGPoint) -> Bool
+        var activeRegion: () -> CGRect
         var isSurfaceOpen: () -> Bool
         var onChanged: (DictationPanEvent) -> Void
         var onEnded: (DictationPanEvent, Bool) -> Void
@@ -197,12 +209,14 @@ struct DictationPanGestureInstaller: UIViewControllerRepresentable {
         init(
             shouldBegin: @escaping (CGPoint, CGPoint) -> Bool,
             startsInEditableRegion: @escaping (CGPoint) -> Bool,
+            activeRegion: @escaping () -> CGRect,
             isSurfaceOpen: @escaping () -> Bool,
             onChanged: @escaping (DictationPanEvent) -> Void,
             onEnded: @escaping (DictationPanEvent, Bool) -> Void
         ) {
             self.shouldBegin = shouldBegin
             self.startsInEditableRegion = startsInEditableRegion
+            self.activeRegion = activeRegion
             self.isSurfaceOpen = isSurfaceOpen
             self.onChanged = onChanged
             self.onEnded = onEnded
@@ -249,6 +263,11 @@ struct DictationPanGestureInstaller: UIViewControllerRepresentable {
         }
 
         func updateActiveRegion(from installerViewController: InstallerViewController) {
+            let explicitActiveRegion = activeRegion()
+            if explicitActiveRegion != .zero {
+                activeRegionInWindow = explicitActiveRegion
+                return
+            }
             guard let window = installerViewController.view.window else {
                 activeRegionInWindow = .zero
                 return
@@ -371,6 +390,12 @@ struct DictationPanGestureInstaller: UIViewControllerRepresentable {
             if activeTextView.isScrollEnabled {
                 activeTextView.isScrollEnabled = false
             }
+            // Toggling selectability on the active first responder drops the software
+            // keyboard mid-dictation. Keep the keyboard up and only take the stronger
+            // selection lock when the editor is not currently owning first responder.
+            if activeTextView.isSelectable, !activeTextView.isFirstResponder {
+                activeTextView.isSelectable = false
+            }
         }
 
         private func nearestTextView(at location: CGPoint, in window: UIWindow) -> UITextView? {
@@ -384,6 +409,17 @@ struct DictationPanGestureInstaller: UIViewControllerRepresentable {
             return nil
         }
 
+        private func nearestCollectionView(from view: UIView) -> UICollectionView? {
+            var current: UIView? = view
+            while let candidate = current {
+                if let collectionView = candidate as? UICollectionView {
+                    return collectionView
+                }
+                current = candidate.superview
+            }
+            return nil
+        }
+
         func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
             guard gestureRecognizer === pan,
                   let host = attachedView,
@@ -392,6 +428,10 @@ struct DictationPanGestureInstaller: UIViewControllerRepresentable {
                 return false
             }
             let location = pan.location(in: window)
+            if let touchedView = window.hitTest(location, with: nil),
+               nearestCollectionView(from: touchedView) != nil {
+                return false
+            }
             guard activeRegionInWindow.contains(location) else { return false }
             let velocity = pan.velocity(in: window)
             let allowed = shouldBegin(location, velocity)
@@ -491,6 +531,7 @@ struct MessageInputBar: View {
     @State private var micTapActivationTask: Task<Void, Never>?
     @State private var gestureSettleTask: Task<Void, Never>?
     @State private var textEditorGlobalFrame: CGRect = .zero
+    @State private var inputBarGlobalFrame: CGRect = .zero
     @State private var shouldRestoreFocusAfterGestureDictationStart = false
     let isCompact: Bool
     private let verticalDominanceRatio: CGFloat = 1.4
@@ -818,6 +859,14 @@ struct MessageInputBar: View {
         .padding(.bottom, metrics.bottomPadding)
         .frame(maxWidth: maxBarWidth)
         .frame(maxWidth: .infinity, alignment: .center)
+        .background(
+            GeometryReader { geometry in
+                Color.clear.preference(
+                    key: MessageInputBarFramePreferenceKey.self,
+                    value: geometry.frame(in: .global)
+                )
+            }
+        )
         .overlay(alignment: .bottom) {
             if motion.pullToSendProgress > 0.001 {
                 pullToSendIndicator
@@ -833,6 +882,7 @@ struct MessageInputBar: View {
             DictationPanGestureInstaller(
                 shouldBegin: shouldBeginDictationPan(startLocation:velocity:),
                 startsInEditableRegion: startsInEditableRegion(startLocation:),
+                activeRegion: { inputBarGlobalFrame },
                 isSurfaceOpen: { motion.isSurfaceVisible },
                 scenePhase: scenePhase,
                 onChanged: { event in
@@ -856,6 +906,9 @@ struct MessageInputBar: View {
         )
         .onPreferenceChange(MessageInputBarTextEditorFramePreferenceKey.self) { frame in
             textEditorGlobalFrame = frame
+        }
+        .onPreferenceChange(MessageInputBarFramePreferenceKey.self) { frame in
+            inputBarGlobalFrame = frame
         }
         .simultaneousGesture(TapGesture().onEnded {
             logger.info("Input bar tap gesture")

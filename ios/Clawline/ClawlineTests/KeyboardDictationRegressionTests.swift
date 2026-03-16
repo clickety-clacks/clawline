@@ -149,17 +149,17 @@ struct KeyboardDictationRegressionTests {
     }
 
     // ------------------------------------------------------------------
-    // Combined: keyboard dismiss mode stays interactive
+    // Combined: active dictation disables scroll dismissal, normal input stays interactive
     // ------------------------------------------------------------------
 
-    /// MessageFlowCollectionView keyboard dismiss mode remains .interactive
-    /// in all states, ensuring scroll-based dismissal works correctly.
-    @Test("Keyboard dismiss mode is interactive in all states")
+    /// MessageFlowCollectionView keeps the keyboard pinned during dictation,
+    /// but preserves normal scroll dismissal once dictation is inactive.
+    @Test("Keyboard dismiss mode gates on dictation state")
     @MainActor
     func keyboardDismissModeGuard() {
         #expect(
             MessageFlowCollectionView.keyboardDismissModeForInputFocus(true, isDictationActive: true)
-                == .interactive
+                == .none
         )
         #expect(
             MessageFlowCollectionView.keyboardDismissModeForInputFocus(false, isDictationActive: false)
@@ -171,7 +171,7 @@ struct KeyboardDictationRegressionTests {
         )
         #expect(
             MessageFlowCollectionView.keyboardDismissModeForInputFocus(false, isDictationActive: true)
-                == .interactive
+                == .none
         )
     }
 }

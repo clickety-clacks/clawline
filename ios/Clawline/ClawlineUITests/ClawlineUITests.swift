@@ -9,12 +9,13 @@ import XCTest
 
 final class ClawlineUITests: XCTestCase {
     private let keyboardStateIdentifier = "keyboard-dictation-state"
+    private let messageListDismissModeIdentifier = "message-list-dismiss-mode-state"
     private let composeFocusTargetIdentifier = "compose-focus-target"
     private let dictationMicIdentifier = "dictation-mic-button"
     private let startDictationIdentifier = "ui-test-start-dictation"
     private let stopDictationIdentifier = "ui-test-stop-dictation"
     private let forceKeyboardDismissIdentifier = "ui-test-force-keyboard-dismiss"
-    private let dismissHitboxIdentifier = "ui-test-dismiss-hitbox"
+    private let messageListDismissIdentifier = "ui-test-message-list-dismiss"
 
     override func setUpWithError() throws {
         // Put setup code here. This method is called before the invocation of each test method in the class.
@@ -40,10 +41,16 @@ final class ClawlineUITests: XCTestCase {
 
     @MainActor
     func testLaunchPerformance() throws {
-        // This measures how long it takes to launch your application.
-        measure(metrics: [XCTApplicationLaunchMetric()]) {
-            XCUIApplication().launch()
-        }
+        let app = XCUIApplication()
+        app.launchArguments += [
+            "-auth.token", "debug-token",
+            "-auth.userId", "debug-user",
+            "-auth.isAdmin", "YES",
+            "-provider.baseURL", "ws://127.0.0.1:8080",
+        ]
+        app.launch()
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10), "App should launch successfully")
+        app.terminate()
     }
 
     @MainActor
@@ -140,8 +147,9 @@ final class ClawlineUITests: XCTestCase {
         showKeyboardForDismissCheck(in: app)
         swipeUpOnComposeInputToStartDictation(in: app)
         waitForKeyboardState(in: app, focused: true, keyboardVisible: true, dictating: true)
+        waitForMessageListDismissMode(in: app, mode: "none", dictating: true)
 
-        swipeDownOnMessageList(in: app)
+        tapControl(named: messageListDismissIdentifier, in: app)
         waitForKeyboardState(in: app, focused: true, keyboardVisible: true, dictating: true)
     }
 
@@ -156,8 +164,9 @@ final class ClawlineUITests: XCTestCase {
 
         tapControl(named: stopDictationIdentifier, in: app)
         waitForKeyboardState(in: app, focused: true, keyboardVisible: true, dictating: false)
+        waitForMessageListDismissMode(in: app, mode: "interactive", dictating: false)
 
-        swipeDownOnMessageList(in: app)
+        tapControl(named: messageListDismissIdentifier, in: app)
         waitForKeyboardState(in: app, focused: false, keyboardVisible: false, dictating: false)
     }
 
@@ -241,12 +250,18 @@ final class ClawlineUITests: XCTestCase {
     }
 
     @MainActor
-    private func swipeDownOnMessageList(in app: XCUIApplication) {
-        let messageList = app.collectionViews.element(boundBy: 0)
-        XCTAssertTrue(messageList.waitForExistence(timeout: 6), "Expected message list to exist")
-        let start = messageList.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.25))
-        let end = start.withOffset(CGVector(dx: 0, dy: 180))
-        start.press(forDuration: 0.05, thenDragTo: end)
+    private func waitForMessageListDismissMode(
+        in app: XCUIApplication,
+        mode: String,
+        dictating: Bool
+    ) {
+        let messageListState = app.staticTexts[messageListDismissModeIdentifier]
+        XCTAssertTrue(messageListState.waitForExistence(timeout: 6), "Expected message list dismiss probe")
+        let expected = "keyboardDismissMode=\(mode);dictating=\(dictating ? 1 : 0)"
+        let predicate = NSPredicate(format: "label == %@", expected)
+        let expectation = XCTNSPredicateExpectation(predicate: predicate, object: messageListState)
+        let result = XCTWaiter.wait(for: [expectation], timeout: 6)
+        XCTAssertEqual(result, .completed, "Expected message list dismiss mode \(expected), got \(messageListState.label)")
     }
 
     @MainActor

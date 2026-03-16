@@ -38,6 +38,7 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
     var sessionKey: String?
     var forceReReadGeneration: Int = 0
     var onScrollEvent: (@MainActor (MessageFlowScrollEvent) -> Void)?
+    var onKeyboardDismissModeChanged: (@MainActor (String) -> Void)?
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.settingsManager) private var settings
 
@@ -47,8 +48,7 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
         isDictationActive: Bool
     ) -> UIScrollView.KeyboardDismissMode {
         let _ = isInputActive
-        let _ = isDictationActive
-        return .interactive
+        return isDictationActive ? .none : .interactive
     }
 #endif
 
@@ -77,6 +77,7 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
             sessionKey: sessionKey,
             forceReReadGeneration: forceReReadGeneration,
             onScrollEvent: onScrollEvent,
+            onKeyboardDismissModeChanged: onKeyboardDismissModeChanged,
             isDark: isDark
         )
         if shouldRegisterWithLayoutCoordinator, let sessionKey {
@@ -108,6 +109,7 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
             sessionKey: sessionKey,
             forceReReadGeneration: forceReReadGeneration,
             onScrollEvent: onScrollEvent,
+            onKeyboardDismissModeChanged: onKeyboardDismissModeChanged,
             isDark: isDark
         )
         if shouldRegisterWithLayoutCoordinator, let sessionKey {
@@ -117,6 +119,8 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
 }
 
 final class MessageFlowCollectionViewController: UIViewController, UICollectionViewDelegateFlowLayout, UIGestureRecognizerDelegate {
+    private static let accessibilityIdentifier = "message-flow-collection-view"
+    private static let keyboardDictationUITestLaunchArg = "--ui-test-keyboard-dictation"
     private struct UpdateRequest {
         let viewModel: ChatViewModel
         let isCompact: Bool
@@ -134,6 +138,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         let sessionKey: String?
         let forceReReadGeneration: Int
         let onScrollEvent: (@MainActor (MessageFlowScrollEvent) -> Void)?
+        let onKeyboardDismissModeChanged: (@MainActor (String) -> Void)?
         let isDark: Bool?
     }
 
@@ -248,6 +253,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     private var onExpand: ((Message) -> Void)?
     private var onRequestKeyboardDismiss: (@MainActor () -> Void)?
     private var onScrollEvent: (@MainActor (MessageFlowScrollEvent) -> Void)?
+    private var onKeyboardDismissModeChanged: (@MainActor (String) -> Void)?
     // Staged stream materialization (approved spec: tail window -> full history).
     // WHY N=50: device measurements showed 500-item first apply taking 1.4-2.7s.
     // A 50-item first paint targets ~10% of that cost while still showing meaningful recent context.
@@ -1723,6 +1729,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 sessionKey: request.sessionKey,
                 forceReReadGeneration: request.forceReReadGeneration,
                 onScrollEvent: request.onScrollEvent,
+                onKeyboardDismissModeChanged: request.onKeyboardDismissModeChanged,
                 isDark: request.isDark
             )
         }
@@ -1745,6 +1752,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         sessionKey: String? = nil,
         forceReReadGeneration: Int = 0,
         onScrollEvent: (@MainActor (MessageFlowScrollEvent) -> Void)? = nil,
+        onKeyboardDismissModeChanged: (@MainActor (String) -> Void)? = nil,
         isDark: Bool? = nil
     ) {
         let request = UpdateRequest(
@@ -1764,6 +1772,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             sessionKey: sessionKey,
             forceReReadGeneration: forceReReadGeneration,
             onScrollEvent: onScrollEvent,
+            onKeyboardDismissModeChanged: onKeyboardDismissModeChanged,
             isDark: isDark
         )
         if isUpdatePassInFlight || isSnapshotApplyInFlight {
@@ -1798,11 +1807,13 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         if collectionView.keyboardDismissMode != desiredDismissMode {
             collectionView.keyboardDismissMode = desiredDismissMode
         }
+        updateKeyboardDismissAccessibilityState()
 #endif
         self.onExpand = onExpand
         self.onRequestKeyboardDismiss = onRequestKeyboardDismiss
         self.truncationBottomInset = truncationBottomInset
         self.onScrollEvent = onScrollEvent
+        self.onKeyboardDismissModeChanged = onKeyboardDismissModeChanged
 
         // Handle appearance change from SwiftUI colorScheme
         if let isDark = isDark, currentIsDark != isDark {
@@ -2804,6 +2815,10 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
 
         // Use frame-based layout - we extend to window bounds in viewDidLayoutSubviews
         collectionView = UICollectionView(frame: view.bounds, collectionViewLayout: flowLayout)
+        collectionView.accessibilityIdentifier = Self.accessibilityIdentifier
+        if ProcessInfo.processInfo.arguments.contains(Self.keyboardDictationUITestLaunchArg) {
+            collectionView.isAccessibilityElement = true
+        }
         collectionView.translatesAutoresizingMaskIntoConstraints = true
         collectionView.autoresizingMask = []
         collectionView.backgroundColor = .clear
@@ -2820,6 +2835,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             isInputActive,
             isDictationActive: isDictationActive
         )
+        updateKeyboardDismissAccessibilityState()
 #endif
         collectionView.allowsSelection = false
         collectionView.allowsMultipleSelection = false
@@ -2839,13 +2855,20 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         case .began:
             didRequestKeyboardDismissForCurrentPan = false
         case .changed:
-            guard isKeyboardVisible else { return }
+            guard isKeyboardVisible, !isDictationActive else { return }
 
             let translation = gesture.translation(in: collectionView)
             didRequestKeyboardDismissForCurrentPan =
                 translation.y > 18 && abs(translation.y) > abs(translation.x)
         case .ended:
-            if didRequestKeyboardDismissForCurrentPan {
+            let translation = gesture.translation(in: collectionView)
+            let shouldDismiss =
+                didRequestKeyboardDismissForCurrentPan ||
+                (isKeyboardVisible &&
+                 !isDictationActive &&
+                 translation.y > 18 &&
+                 abs(translation.y) > abs(translation.x))
+            if shouldDismiss {
                 dismissKeyboardIfNeeded()
             }
             didRequestKeyboardDismissForCurrentPan = false
@@ -2859,6 +2882,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     @objc
     private func handleCollectionViewSwipeDownForKeyboardDismiss(_ gesture: UISwipeGestureRecognizer) {
         guard gesture.state == .ended else { return }
+        guard !isDictationActive else { return }
         dismissKeyboardIfNeeded()
     }
 
@@ -2877,6 +2901,26 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         } else {
             view.window?.endEditing(true)
         }
+    }
+
+    private func updateKeyboardDismissAccessibilityState() {
+#if !os(visionOS)
+        let mode: String
+        switch collectionView.keyboardDismissMode {
+        case .none:
+            mode = "none"
+        case .interactive:
+            mode = "interactive"
+        case .onDrag:
+            mode = "onDrag"
+        @unknown default:
+            mode = "unknown"
+        }
+        let summary = "keyboardDismissMode=\(mode);dictating=\(isDictationActive ? 1 : 0)"
+        collectionView.accessibilityLabel = summary
+        collectionView.accessibilityValue = summary
+        onKeyboardDismissModeChanged?(summary)
+#endif
     }
 
     private func configureDataSource() {
@@ -3346,7 +3390,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         let env = bubbleSizingV2Environment(metrics: metrics)
 
         if DateSeparatorCell.isDateSeparatorItemID(id) {
-            let rowWidth = effectiveContentWidth(metrics: metrics)
+            let rowWidth = availableContentWidth()
             let lineHeight = UIFont.clawline(.uiLabel, weight: .semibold).lineHeight
             return CGSize(
                 width: rowWidth,

@@ -12,6 +12,7 @@ import WebKit
 @testable import Clawline
 
 @MainActor
+@Suite(.serialized)
 struct InteractiveHTMLBubbleUIKitViewTests {
     @Test("Interactive bubble waits for non-zero width before loading and renders visible content")
     func interactiveBubbleWaitsForWidthAndRenders() async throws {

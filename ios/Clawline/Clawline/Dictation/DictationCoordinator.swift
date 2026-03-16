@@ -556,6 +556,7 @@ final class DictationSession {
             dismissComposeKeyPrompt()
             return
         }
+        beginStopKeepTransitionIfNeeded()
         Task { [weak self] in
             await self?.stopKeep(
                 reason: "surface_dismiss",
@@ -602,6 +603,7 @@ final class DictationSession {
 
     func stopDictationFromSwipeRight() {
         guard state == .dictatingSticky || state == .dictatingWalkieTalkie else { return }
+        beginStopKeepTransitionIfNeeded()
         Task { [weak self] in
             logDictation("DICTATION_STOP trace_id=DICTATION_STOP_SWIPE_RIGHT caller=swipe_right_stop ts=\(Date().timeIntervalSince1970)")
             await self?.stopKeep(
@@ -614,6 +616,7 @@ final class DictationSession {
 
     func stopStickyFromMicTap() {
         guard state == .dictatingSticky else { return }
+        beginStopKeepTransitionIfNeeded()
         Task { [weak self] in
             logDictation("DICTATION_STOP trace_id=DICTATION_STOP_MIC_TAP caller=mic_tap_stop ts=\(Date().timeIntervalSince1970)")
             await self?.stopKeep(
@@ -646,6 +649,7 @@ final class DictationSession {
 
     func stopFromEscapeKey() {
         guard state == .dictatingSticky || state == .dictatingPaused else { return }
+        beginStopKeepTransitionIfNeeded()
         Task { [weak self] in
             logDictation("DICTATION_STOP trace_id=DICTATION_STOP_ESCAPE caller=stopFromEscapeKey ts=\(Date().timeIntervalSince1970)")
             await self?.stopKeep(
@@ -666,6 +670,7 @@ final class DictationSession {
 
     func stopFromVoiceOverAction() {
         guard state == .dictatingSticky || state == .dictatingPaused else { return }
+        beginStopKeepTransitionIfNeeded()
         Task { [weak self] in
             logDictation("DICTATION_STOP trace_id=DICTATION_STOP_VOICEOVER caller=stopFromVoiceOverAction ts=\(Date().timeIntervalSince1970)")
             await self?.stopKeep(
@@ -784,6 +789,19 @@ final class DictationSession {
         armSessionDurationTimer()
         resetTokenInactivityTimer()
         schedulePhase1IdleTeardown()
+    }
+
+    @discardableResult
+    private func beginStopKeepTransitionIfNeeded() -> Bool {
+        switch state {
+        case .dictatingSticky, .dictatingPaused, .dictatingWalkieTalkie:
+            state = .stoppingKeep
+            return true
+        case .stoppingKeep, .finalizing:
+            return true
+        default:
+            return false
+        }
     }
 
     private func nextActivationGeneration() -> UInt64 {
@@ -914,6 +932,10 @@ final class DictationSession {
     }
 
     private func armSessionDurationTimer() {
+        if isKeyboardDictationUITestMode {
+            cancelMaxDurationTimer(reason: "ui_test_mode_skip", caller: "armSessionDurationTimer")
+            return
+        }
         if mode == .walkieTalkie {
             cancelMaxDurationTimer(reason: "walkie_mode_skip", caller: "armSessionDurationTimer")
             logDictation(
@@ -966,6 +988,10 @@ final class DictationSession {
     }
 
     private func resetTokenInactivityTimer() {
+        if isKeyboardDictationUITestMode {
+            cancelTokenInactivityTimer(reason: "ui_test_mode_skip")
+            return
+        }
         if mode == .walkieTalkie {
             cancelTokenInactivityTimer(reason: "walkie_mode_skip")
             logDictation(
@@ -1142,6 +1168,12 @@ final class DictationSession {
     }
 
     private func handleProtocolError(code: String?, message: String) {
+        if isKeyboardDictationUITestMode {
+            logDictation(
+                "DICTATION_COORD ui_test_suppressed_protocol_error code=\(code ?? "nil") message=\(message)"
+            )
+            return
+        }
         if message.localizedCaseInsensitiveContains("audio decode timeout") {
             Task { [weak self] in
                 await self?.recoverFromAudioDecodeTimeout(message: message)
@@ -1203,6 +1235,12 @@ final class DictationSession {
 
     private func handleTransportFailure(stage: SonioxStreamingClientStage, message: String) async {
         guard isDictationActive || prewarmConnectTask != nil else { return }
+        if isKeyboardDictationUITestMode {
+            logDictation(
+                "DICTATION_COORD ui_test_suppressed_transport_failure stage=\(stage.rawValue) message=\(message)"
+            )
+            return
+        }
         if stage == .connect, prewarmConnectTask != nil, suppressedPrewarmFailureBudget > 0 {
             suppressedPrewarmFailureBudget -= 1
             logDictation("DICTATION_COORD suppressed_prewarm_failure stage=\(stage.rawValue) message=\(message) \(attemptContext())")

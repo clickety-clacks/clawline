@@ -147,6 +147,7 @@ struct ChatView: View {
     @State private var keyboardAnimationDuration: TimeInterval = 0.3
     @State private var keyboardAnimationCurve: UIView.AnimationCurve = .easeInOut
     @State private var keyboardRefreshToken: Int = 0
+    @State private var messageListDismissModeSummary = "keyboardDismissMode=interactive;dictating=0"
     @State private var layoutCoordinator = ChatLayoutCoordinator()
     @State private var layoutRevision: Int = 0
     @State private var selectionRange = NSRange(location: 0, length: 0)
@@ -602,6 +603,12 @@ struct ChatView: View {
                         .accessibilityIdentifier("keyboard-dictation-state")
                         .accessibilityLabel(keyboardDictationStateSummary)
 
+                    Text(messageListDismissModeSummary)
+                        .font(.caption2)
+                        .foregroundStyle(.clear)
+                        .accessibilityIdentifier("message-list-dismiss-mode-state")
+                        .accessibilityLabel(messageListDismissModeSummary)
+
                     Button("focus") {
                         requestInputFocus()
                         dictationCoordinator.focusComposeTextViewForTesting()
@@ -648,6 +655,17 @@ struct ChatView: View {
                     .frame(width: 44, height: 22)
                     .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
                     .accessibilityIdentifier("ui-test-force-keyboard-dismiss")
+
+                    Button("list") {
+                        guard !dictationCoordinator.isDictationActive else { return }
+                        listKeyboardDismissRequest?()
+                    }
+                    .buttonStyle(.plain)
+                    .font(.caption2)
+                    .foregroundStyle(.primary)
+                    .frame(width: 44, height: 22)
+                    .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    .accessibilityIdentifier("ui-test-message-list-dismiss")
                 }
                 .padding(1)
                 .allowsHitTesting(true)
@@ -859,25 +877,6 @@ struct ChatView: View {
             )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .ignoresSafeArea(.container, edges: [.top, .bottom])
-#if DEBUG
-                .overlay {
-                    if isKeyboardDictationUITestMode {
-                        Button {
-                            guard !dictationCoordinator.isDictationActive else {
-                                return
-                            }
-                            dismissComposeKeyboardFromUserGesture()
-                        } label: {
-                            Color.black.opacity(0.001)
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityIdentifier("ui-test-dismiss-hitbox")
-                        .accessibilityLabel("Dismiss keyboard")
-                    }
-                }
-#endif
         )
 
         ZStack(alignment: .top) {
@@ -1490,7 +1489,10 @@ struct ChatView: View {
             onRequestKeyboardDismiss: listKeyboardDismissRequest,
             layoutCoordinator: layoutCoordinator,
             sessionKey: sessionKey,
-            onScrollEvent: handleMessageFlowScrollEvent
+            onScrollEvent: handleMessageFlowScrollEvent,
+            onKeyboardDismissModeChanged: { summary in
+                messageListDismissModeSummary = summary
+            }
         )
         // We manage keyboard avoidance manually inside the collection view.
         // Prevent SwiftUI from shrinking the view and double-applying the keyboard height.
@@ -1632,7 +1634,8 @@ struct ChatView: View {
                 // Do not register prewarm shells as live session list views.
                 shouldRegisterWithLayoutCoordinator: false,
                 sessionKey: sessionKey,
-                onScrollEvent: nil
+                onScrollEvent: nil,
+                onKeyboardDismissModeChanged: nil
             )
             .hidden()
         }

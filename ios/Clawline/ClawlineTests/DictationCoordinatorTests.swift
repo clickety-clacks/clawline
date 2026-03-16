@@ -2,6 +2,7 @@ import Foundation
 import Testing
 @testable import Clawline
 
+@Suite(.serialized)
 struct DictationCoordinatorTests {
     @Test("Transcript buffer emits endpoint commit updates")
     func transcriptBufferReconciliation() {

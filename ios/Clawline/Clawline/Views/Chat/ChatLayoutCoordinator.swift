@@ -133,6 +133,10 @@ final class ChatLayoutCoordinator {
 
     func registerListView(_ view: MessageFlowCollectionViewController, sessionKey: String) {
         dispatchPrecondition(condition: .onQueue(.main))
+        if let existing = listViews[sessionKey]?.value, existing === view {
+            applyLatestInset(to: view, isActive: sessionKey == activeSessionKey)
+            return
+        }
         listViews[sessionKey] = WeakBox(view)
         applyLatestInset(to: view, isActive: sessionKey == activeSessionKey)
     }

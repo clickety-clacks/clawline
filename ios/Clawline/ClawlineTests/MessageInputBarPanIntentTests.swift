@@ -103,6 +103,7 @@ private final class PanGestureCoordinatorHarness {
     }
 }
 
+@Suite(.serialized)
 struct MessageInputBarPanIntentTests {
     @Test("Editor-origin gestures never arm dictation")
     func editorOriginGesturesNeverArmDictation() {

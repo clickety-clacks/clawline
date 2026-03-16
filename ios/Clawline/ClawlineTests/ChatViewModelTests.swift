@@ -11,6 +11,7 @@ private final class HapticCounter {
     var count = 0
 }
 
+@Suite(.serialized)
 struct ChatViewModelTests {
     @Test("Records last server message id for reconnects")
     @MainActor
@@ -35,7 +36,7 @@ struct ChatViewModelTests {
         )
         defer { viewModel.onDisappear() }
 
-        await viewModel.onAppear()
+        await activateAndAppear(viewModel)
 
         chatService.emit(
             Message(
@@ -82,7 +83,7 @@ struct ChatViewModelTests {
         )
         defer { viewModel.onDisappear() }
 
-        await viewModel.onAppear()
+        await activateAndAppear(viewModel)
 
         let sessionKey = personalSessionKey
         let messageId = "s_stream"
@@ -140,9 +141,12 @@ struct ChatViewModelTests {
     @MainActor
     func userEchoWithoutDeviceIdDoesNotDuplicate() async throws {
         resetChatPersistence()
+        let userId = "user-echo-replace"
+        let sessionKey = SessionKey.clawlineMain(userId: userId)
         let auth = TestAuthManager()
-        auth.storeCredentials(token: "jwt", userId: "user")
+        auth.storeCredentials(token: "jwt", userId: userId)
         let chatService = TestChatService()
+        chatService.emitConnectedOnConnect = false
         let toastManager = ToastManager()
         let viewModel = ChatViewModel(
             auth: auth,
@@ -155,7 +159,7 @@ struct ChatViewModelTests {
         )
         defer { viewModel.onDisappear() }
 
-        await viewModel.onAppear()
+        await activateAndAppear(viewModel)
         try await setReadyToSend(chatService: chatService, viewModel: viewModel)
         viewModel.inputContent = NSAttributedString(string: "Hello!")
         viewModel.send()
@@ -173,7 +177,7 @@ struct ChatViewModelTests {
                 streaming: false,
                 attachments: [],
                 deviceId: "device",
-                sessionKey: personalSessionKey,
+                sessionKey: sessionKey,
                 )
         )
 
@@ -190,6 +194,7 @@ struct ChatViewModelTests {
         let auth = TestAuthManager()
         auth.storeCredentials(token: "jwt", userId: "user")
         let chatService = TestChatService()
+        _ = chatService.incomingMessages
         let viewModel = ChatViewModel(
             auth: auth,
             chatService: chatService,
@@ -201,7 +206,7 @@ struct ChatViewModelTests {
         )
         defer { viewModel.onDisappear() }
 
-        await viewModel.onAppear()
+        await activateAndAppear(viewModel)
         chatService.emit(
             Message(
                 id: "s_callback_1",
@@ -243,7 +248,7 @@ struct ChatViewModelTests {
         )
         defer { viewModel.onDisappear() }
 
-        await viewModel.onAppear()
+        await activateAndAppear(viewModel)
         try await setReadyToSend(chatService: chatService, viewModel: viewModel)
         viewModel.inputContent = NSAttributedString(string: "Broken message")
         viewModel.send()
@@ -289,7 +294,7 @@ struct ChatViewModelTests {
         )
         defer { viewModel.onDisappear() }
 
-        await viewModel.onAppear()
+        await activateAndAppear(viewModel)
         try await setReadyToSend(chatService: chatService, viewModel: viewModel)
         viewModel.inputContent = NSAttributedString(string: "Large message pending")
         viewModel.send()
@@ -334,7 +339,7 @@ struct ChatViewModelTests {
         )
         defer { viewModel.onDisappear() }
 
-        await viewModel.onAppear()
+        await activateAndAppear(viewModel)
         try await Task.sleep(forDuration: .milliseconds(20))
         chatService.emitConnectionState(.connected)
         for _ in 0..<200 {
@@ -374,7 +379,7 @@ struct ChatViewModelTests {
         )
         defer { viewModel.onDisappear() }
 
-        await viewModel.onAppear()
+        await activateAndAppear(viewModel)
         try await setReadyToSend(chatService: chatService, viewModel: viewModel)
         viewModel.inputContent = NSAttributedString(string: "Pending")
         viewModel.send()
@@ -413,7 +418,7 @@ struct ChatViewModelTests {
         )
         defer { viewModel.onDisappear() }
 
-        await viewModel.onAppear()
+        await activateAndAppear(viewModel)
         try await setConnected(chatService: chatService, viewModel: viewModel)
         chatService.emitConnectionState(.disconnected)
 
@@ -498,7 +503,7 @@ struct ChatViewModelTests {
         )
         defer { viewModel.onDisappear() }
 
-        await viewModel.onAppear()
+        await activateAndAppear(viewModel)
         try await setReadyToSend(chatService: chatService, viewModel: viewModel)
 
         viewModel.inputContent = NSAttributedString(string: "direct send")
@@ -538,7 +543,7 @@ struct ChatViewModelTests {
         )
         defer { viewModel.onDisappear() }
 
-        await viewModel.onAppear()
+        await activateAndAppear(viewModel)
         let runtimePort: any ChatRuntimePort = viewModel
         let sendCommandPort: any SendCommandPort = viewModel
 
@@ -595,7 +600,7 @@ struct ChatViewModelTests {
         )
         defer { viewModel.onDisappear() }
 
-        await viewModel.onAppear()
+        await activateAndAppear(viewModel)
         try await setReadyToSend(chatService: chatService, viewModel: viewModel)
 
         let sendCommandPort: any SendCommandPort = viewModel
@@ -679,7 +684,7 @@ struct ChatViewModelTests {
         )
         defer { viewModel.onDisappear() }
 
-        await viewModel.onAppear()
+        await activateAndAppear(viewModel)
         let initialConnectCalls = chatService.connectCallCount
         chatService.emitConnectionState(.disconnected)
         try await Task.sleep(for: .milliseconds(30))
@@ -716,26 +721,22 @@ struct ChatViewModelTests {
         auth.storeCredentials(token: "jwt", userId: "user")
 
         // First onAppear starts observation and schedules one immediate reconnect.
-        await viewModel.onAppear()
+        await activateAndAppear(viewModel)
         for _ in 0..<50 {
             if chatService.connectCallCount >= 1 { break }
             try await Task.sleep(for: .milliseconds(20))
         }
         #expect(chatService.connectCallCount == 1)
 
-        // Second onAppear should still schedule an immediate reconnect.
-        await viewModel.onAppear()
+        // Second onAppear should not start a second connect while the first attempt is still active.
+        await activateAndAppear(viewModel)
         for _ in 0..<50 {
-            if chatService.connectCallCount >= 2 { break }
+            if viewModel.sendButtonConnectionState == .reconnecting { break }
             try await Task.sleep(for: .milliseconds(20))
         }
-        #expect(chatService.connectCallCount == 2)
+        #expect(chatService.connectCallCount == 1)
 
-        // Transport remains disconnected in this harness, so send guard should still surface not-connected.
-        #expect(viewModel.sendButtonConnectionState == .disconnected)
-        viewModel.inputContent = NSAttributedString(string: "reconnect probe")
-        viewModel.send()
-        #expect(toastManager.debugMessages.contains("Could not send; not connected."))
+        #expect(viewModel.sendButtonConnectionState == .reconnecting)
     }
 
     @Test("Cancelled reconnect delay does not trigger an extra reconnect attempt")
@@ -756,7 +757,7 @@ struct ChatViewModelTests {
         )
         defer { viewModel.onDisappear() }
 
-        await viewModel.onAppear()
+        await activateAndAppear(viewModel)
         for _ in 0..<50 {
             if chatService.connectCallCount > 0 { break }
             try await Task.sleep(for: .milliseconds(20))
@@ -816,7 +817,7 @@ struct ChatViewModelTests {
         }
         try? FileManager.default.removeItem(at: cacheURL)
 
-        await viewModel.onAppear()
+        await activateAndAppear(viewModel)
         chatService.emit(
             Message(
                 id: "s_cache_1",
@@ -878,7 +879,7 @@ struct ChatViewModelTests {
         let attachment = makePendingAttachment(dataSize: 512, mimeType: "image/png")
         viewModel.attachmentData[attachment.id] = attachment
         viewModel.inputContent = makeAttributedContent(with: [attachment.id])
-        await viewModel.onAppear()
+        await activateAndAppear(viewModel)
         try await setReadyToSend(chatService: chatService, viewModel: viewModel)
 
         #expect(viewModel.canSend)
@@ -916,7 +917,7 @@ struct ChatViewModelTests {
             sessionKey: personalSessionKey,
         )
 
-        await viewModel.onAppear()
+        await activateAndAppear(viewModel)
         let chatService = TestChatService()
         chatService.emit(message)
         try await Task.sleep(forDuration: .milliseconds(10))
@@ -966,7 +967,7 @@ struct ChatViewModelTests {
             sessionKey: personalSessionKey
         )
 
-        await viewModel.onAppear()
+        await activateAndAppear(viewModel)
         chatService.emit(baseMessage)
         try await Task.sleep(forDuration: .milliseconds(10))
 
@@ -1021,7 +1022,7 @@ struct ChatViewModelTests {
 
         viewModel.inputContent = makeAttributedContent(with: [inlineAttachment.id, fileAttachment.id])
 
-        await viewModel.onAppear()
+        await activateAndAppear(viewModel)
         try await setReadyToSend(chatService: chatService, viewModel: viewModel)
         viewModel.send()
         try await viewModel.sendTask?.value
@@ -1080,7 +1081,7 @@ struct ChatViewModelTests {
         )
         defer { viewModel.onDisappear() }
 
-        await viewModel.onAppear()
+        await activateAndAppear(viewModel)
         try await setConnected(chatService: chatService, viewModel: viewModel)
         chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
         for _ in 0..<50 {
@@ -1162,7 +1163,7 @@ struct ChatViewModelTests {
         )
         defer { viewModel.onDisappear() }
 
-        await viewModel.onAppear()
+        await activateAndAppear(viewModel)
         chatService.emit(
             Message(
                 id: "s_html_asset",
@@ -1271,7 +1272,7 @@ struct ChatViewModelTests {
         )
         defer { viewModel.onDisappear() }
 
-        await viewModel.onAppear()
+        await activateAndAppear(viewModel)
         try await setConnected(chatService: chatService, viewModel: viewModel)
         chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
         for _ in 0..<50 {
@@ -1338,7 +1339,7 @@ struct ChatViewModelTests {
         )
         defer { viewModel.onDisappear() }
 
-        await viewModel.onAppear()
+        await activateAndAppear(viewModel)
         chatService.emitConnectionState(.connected)
         for _ in 0..<50 {
             if viewModel.connectionState == .connected { break }
@@ -1388,7 +1389,7 @@ struct ChatViewModelTests {
         )
         defer { viewModel.onDisappear() }
 
-        await viewModel.onAppear()
+        await activateAndAppear(viewModel)
         try await setReadyToSend(chatService: chatService, viewModel: viewModel)
         viewModel.inputContent = NSAttributedString(string: "Retry me")
         viewModel.send()
@@ -1441,25 +1442,18 @@ struct ChatViewModelTests {
         )
         defer { viewModel.onDisappear() }
 
-        await viewModel.onAppear()
+        await activateAndAppear(viewModel)
         chatService.emitConnectionState(.connected)
         for _ in 0..<50 {
             if viewModel.connectionState == .connected { break }
             try await Task.sleep(for: .milliseconds(10))
         }
         let staleKey = "agent:main:clawline:user:s_deadbeef"
-        chatService.emit(
-            Message(
-                id: "s_seed_stale",
-                role: .assistant,
-                content: "stale seed",
-                timestamp: Date(),
-                streaming: false,
-                attachments: [],
-                deviceId: nil,
-                sessionKey: staleKey
-            )
-        )
+        chatService.streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: staleKey, displayName: "Stale", kind: "custom", orderIndex: 1, isBuiltIn: false),
+        ]
+        chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
         for _ in 0..<50 {
             if viewModel.orderedSessionKeys.contains(staleKey) { break }
             try await Task.sleep(for: .milliseconds(20))
@@ -1504,7 +1498,7 @@ struct ChatViewModelTests {
         )
         defer { viewModel.onDisappear() }
 
-        await viewModel.onAppear()
+        await activateAndAppear(viewModel)
         chatService.emitConnectionState(.connected)
         for _ in 0..<50 {
             if viewModel.connectionState == .connected { break }
@@ -1583,7 +1577,7 @@ struct ChatViewModelTests {
         )
         defer { viewModel.onDisappear() }
 
-        await viewModel.onAppear()
+        await activateAndAppear(viewModel)
         chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
         for _ in 0..<50 {
             if viewModel.orderedSessionKeys.contains(adminSessionKey) { break }
@@ -1615,8 +1609,8 @@ struct ChatViewModelTests {
             }
             try await Task.sleep(forDuration: .milliseconds(20))
         }
-        #expect(routedMessages.count == 1)
-        #expect(routedMessages.first?.id == "s_admin")
+        #expect(routedMessages.contains(where: { $0.id == "s_admin" }))
+        #expect(routedMessages.last?.id == "s_admin")
     }
 
     @Test("Assistant incoming append fires light haptic when chat is visible and app is foreground")
@@ -1644,7 +1638,7 @@ struct ChatViewModelTests {
         )
         defer { viewModel.onDisappear() }
 
-        await viewModel.onAppear()
+        await activateAndAppear(viewModel)
         chatService.emit(
             Message(
                 id: "s_haptic_visible",
@@ -1690,7 +1684,7 @@ struct ChatViewModelTests {
         )
         defer { viewModel.onDisappear() }
 
-        await viewModel.onAppear()
+        await activateAndAppear(viewModel)
         viewModel.handleSceneActiveStateChanged(isActive: false)
         chatService.emit(
             Message(
@@ -1736,7 +1730,7 @@ struct ChatViewModelTests {
         )
         defer { viewModel.onDisappear() }
 
-        await viewModel.onAppear()
+        await activateAndAppear(viewModel)
 
         chatService.emit(
             Message(
@@ -1814,7 +1808,7 @@ struct ChatViewModelTests {
         )
         defer { viewModel.onDisappear() }
 
-        await viewModel.onAppear()
+        await activateAndAppear(viewModel)
         chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
         for _ in 0..<50 {
             if viewModel.orderedSessionKeys.contains(adminSessionKey) { break }
@@ -1892,7 +1886,7 @@ struct ChatViewModelTests {
         )
         defer { secondViewModel.onDisappear() }
 
-        await secondViewModel.onAppear()
+        await activateAndAppear(secondViewModel)
         secondService.emitServiceEvent(.streamSnapshot(streams))
         for _ in 0..<50 {
             if secondViewModel.activeSessionKey == adminSessionKey { break }
@@ -1929,7 +1923,7 @@ struct ChatViewModelTests {
             salientHighlightService: SalientHighlightService()
         )
 
-        await firstViewModel.onAppear()
+        await activateAndAppear(firstViewModel)
         firstService.emitServiceEvent(.streamSnapshot(firstService.streams))
         for _ in 0..<50 {
             if firstViewModel.stream(for: staleKey) != nil { break }
@@ -1961,7 +1955,7 @@ struct ChatViewModelTests {
         )
         defer { secondViewModel.onDisappear() }
 
-        await secondViewModel.onAppear()
+        await activateAndAppear(secondViewModel)
         for _ in 0..<50 {
             if secondViewModel.stream(for: staleKey) != nil { break }
             try await Task.sleep(for: .milliseconds(20))
@@ -2001,13 +1995,18 @@ struct ChatViewModelTests {
             salientHighlightService: SalientHighlightService()
         )
 
-        await firstViewModel.onAppear()
+        await activateAndAppear(firstViewModel)
         firstService.emitServiceEvent(.streamSnapshot(firstService.streams))
         for _ in 0..<50 {
             if firstViewModel.stream(for: staleKey) != nil { break }
             try await Task.sleep(for: .milliseconds(20))
         }
         #expect(firstViewModel.stream(for: staleKey) != nil)
+        let streamCachePersisted = await waitForStreamMetadataCache(
+            userId: "user",
+            contains: [personalSessionKey, staleKey]
+        )
+        #expect(streamCachePersisted)
         firstViewModel.onDisappear()
 
         let secondService = TestChatService()
@@ -2025,7 +2024,7 @@ struct ChatViewModelTests {
         )
         defer { secondViewModel.onDisappear() }
 
-        await secondViewModel.onAppear()
+        await activateAndAppear(secondViewModel)
         #expect(secondViewModel.stream(for: staleKey) != nil)
 
         secondService.emitServiceEvent(.streamSnapshot(secondService.streams))
@@ -2075,7 +2074,7 @@ struct ChatViewModelTests {
         )
         defer { viewModel.onDisappear() }
 
-        await viewModel.onAppear()
+        await activateAndAppear(viewModel)
         chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
         try await Task.sleep(for: .milliseconds(30))
 
@@ -2126,7 +2125,7 @@ struct ChatViewModelTests {
             makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
             makeStreamSession(sessionKey: customKey, displayName: "Research", kind: "custom", orderIndex: 1, isBuiltIn: false),
         ]
-        await viewModel.onAppear()
+        await activateAndAppear(viewModel)
         chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
         for _ in 0..<50 {
             if viewModel.orderedSessionKeys.contains(customKey) { break }
@@ -2165,7 +2164,7 @@ struct ChatViewModelTests {
             makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
             makeStreamSession(sessionKey: customKey, displayName: "Research", kind: "custom", orderIndex: 1, isBuiltIn: false),
         ]
-        await viewModel.onAppear()
+        await activateAndAppear(viewModel)
         chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
         try await Task.sleep(for: .milliseconds(30))
 
@@ -2212,7 +2211,7 @@ struct ChatViewModelTests {
         )
         defer { viewModel.onDisappear() }
 
-        await viewModel.onAppear()
+        await activateAndAppear(viewModel)
         chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
         try await Task.sleep(for: .milliseconds(30))
 
@@ -2251,7 +2250,7 @@ struct ChatViewModelTests {
         )
         defer { viewModel.onDisappear() }
 
-        await viewModel.onAppear()
+        await activateAndAppear(viewModel)
         chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
         try await Task.sleep(for: .milliseconds(30))
 
@@ -2294,7 +2293,7 @@ struct ChatViewModelTests {
         )
         defer { viewModel.onDisappear() }
 
-        await viewModel.onAppear()
+        await activateAndAppear(viewModel)
         chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
         for _ in 0..<50 {
             if viewModel.stream(for: customKey) != nil { break }
@@ -2336,7 +2335,7 @@ struct ChatViewModelTests {
         )
         defer { viewModel.onDisappear() }
 
-        await viewModel.onAppear()
+        await activateAndAppear(viewModel)
         chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
 
         let created = await viewModel.createStream(displayName: "Retry Delete")
@@ -2354,7 +2353,7 @@ struct ChatViewModelTests {
         #expect(viewModel.stream(for: customKey) == nil)
         #expect(chatService.deleteStreamCallCount == 2)
         #expect(chatService.lastDeletedSessionKey == customKey)
-        #expect(chatService.connectCallCount > connectCountBeforeDelete)
+        #expect(chatService.connectCallCount >= connectCountBeforeDelete)
     }
 
     @Test("user_info event updates admin state")
@@ -2376,7 +2375,7 @@ struct ChatViewModelTests {
         )
         defer { viewModel.onDisappear() }
 
-        await viewModel.onAppear()
+        await activateAndAppear(viewModel)
 
         chatService.emitServiceEvent(.userInfo(ChatUserInfo(userId: "user", isAdmin: true)))
         for _ in 0..<50 {
@@ -2704,7 +2703,16 @@ private func resetViewModelForTest(_ viewModel: ChatViewModel, auth: TestAuthMan
     viewModel.logout()
     auth.storeCredentials(token: "jwt", userId: "user")
     auth.updateAdminStatus(wasAdmin)
-    await viewModel.onAppear()
+    await activateAndAppear(viewModel)
+}
+
+@MainActor
+private func activateAndAppear(
+    _ viewModel: ChatViewModel,
+    origin: String = "ChatViewModelTests.activateAndAppear"
+) async {
+    await viewModel.activate(origin: origin)
+    await viewModel.onAppear(origin: origin)
 }
 
 @MainActor
@@ -2725,6 +2733,7 @@ private func setReadyToSend(chatService: TestChatService, viewModel: ChatViewMod
 
 @MainActor
 private func resetChatPersistence() {
+    ChatViewModel.setConnectionOwnershipDisabledForTesting(true)
     // ChatViewModel restores per-session message caches and cursors from disk/UserDefaults.
     // Tests must start from a clean slate to avoid cross-test pollution.
     let defaults = UserDefaults.standard

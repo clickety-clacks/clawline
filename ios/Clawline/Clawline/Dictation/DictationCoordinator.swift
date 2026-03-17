@@ -110,12 +110,14 @@ final class DictationSession {
     }
 
     private let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "DictationCoordinator")
+    private var uiProjectionState: DictationState = .idleSurfaceClosed
     private var state: DictationState = .idleSurfaceClosed {
         didSet {
             guard oldValue != state else { return }
             let trace = "DICTATION_COORD state \(String(describing: oldValue)) -> \(String(describing: state))"
             logDictation(trace)
-            surfaceTarget = surfaceTarget(for: state)
+            uiProjectionState = projectedUIState(for: state, fallback: uiProjectionState)
+            surfaceTarget = surfaceTarget(for: uiProjectionState)
             setSystemIdleSleepDisabled(shouldDisableIdleSleep(for: state))
         }
     }
@@ -140,6 +142,21 @@ final class DictationSession {
             return true
         case .idleSurfaceClosed, .keyPromptModal, .keyVerifyingModal, .dictatingPaused, .error:
             return false
+        }
+    }
+
+    private func projectedUIState(for state: DictationState, fallback previous: DictationState) -> DictationState {
+        switch state {
+        case .finalizing, .stoppingKeep, .stoppingDiscard:
+            return previous
+        case .idleSurfaceClosed,
+                .keyPromptModal,
+                .keyVerifyingModal,
+                .dictatingSticky,
+                .dictatingPaused,
+                .dictatingWalkieTalkie,
+                .error:
+            return state
         }
     }
 
@@ -178,20 +195,22 @@ final class DictationSession {
     }
 
     var showsComposeKeyPromptModal: Bool {
-        state == .keyPromptModal || state == .keyVerifyingModal
+        uiProjectionState == .keyPromptModal || uiProjectionState == .keyVerifyingModal
     }
 
     var isDictationActive: Bool {
-        switch state {
-        case .dictatingSticky, .dictatingPaused, .dictatingWalkieTalkie, .finalizing, .stoppingKeep, .stoppingDiscard:
+        switch uiProjectionState {
+        case .dictatingSticky, .dictatingPaused, .dictatingWalkieTalkie:
             return true
         case .idleSurfaceClosed, .keyPromptModal, .keyVerifyingModal, .error:
+            return false
+        case .finalizing, .stoppingKeep, .stoppingDiscard:
             return false
         }
     }
 
     var isListening: Bool {
-        state == .dictatingSticky || state == .dictatingWalkieTalkie
+        uiProjectionState == .dictatingSticky || uiProjectionState == .dictatingWalkieTalkie
     }
 
     var isListeningReady: Bool {
@@ -199,18 +218,20 @@ final class DictationSession {
     }
 
     var isStickyDictationActive: Bool {
-        state == .dictatingSticky
+        uiProjectionState == .dictatingSticky
     }
 
     var isWalkieTalkieActive: Bool {
-        state == .dictatingWalkieTalkie
+        uiProjectionState == .dictatingWalkieTalkie
     }
 
     var isWaveformVisible: Bool {
-        switch state {
-        case .dictatingSticky, .dictatingPaused, .dictatingWalkieTalkie, .finalizing, .stoppingKeep, .stoppingDiscard:
+        switch uiProjectionState {
+        case .dictatingSticky, .dictatingPaused, .dictatingWalkieTalkie, .error:
             return true
-        case .idleSurfaceClosed, .keyPromptModal, .keyVerifyingModal, .error:
+        case .idleSurfaceClosed, .keyPromptModal, .keyVerifyingModal:
+            return false
+        case .finalizing, .stoppingKeep, .stoppingDiscard:
             return false
         }
     }
@@ -220,7 +241,7 @@ final class DictationSession {
     }
 
     var micVisible: Bool {
-        if state == .keyPromptModal || state == .keyVerifyingModal {
+        if uiProjectionState == .keyPromptModal || uiProjectionState == .keyVerifyingModal {
             return true
         }
         return !isSurfaceOpen
@@ -808,14 +829,7 @@ final class DictationSession {
         teardownPhase1(reason: PrewarmTeardownReason.viewInactive.rawValue)
         guard state == .dictatingSticky || state == .dictatingWalkieTalkie else { return }
         Task { [weak self] in
-            await self?.stopKeep(
-                reason: "app_background",
-                timeout: self?.timing.stopKeepFinalizeTimeout ?? .milliseconds(1_200),
-                announceStop: false,
-                collapseSurface: true,
-                collapseSurfaceImmediately: true,
-                trigger: "app_background"
-            )
+            let _ = await self?.pauseListening(reason: "app_background")
         }
     }
 

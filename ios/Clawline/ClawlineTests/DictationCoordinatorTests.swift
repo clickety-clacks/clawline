@@ -854,9 +854,9 @@ struct DictationCoordinatorTests {
         #expect(!harness.client.closeCalls.isEmpty)
     }
 
-    @Test("App background closes dictation transport and collapses the surface")
+    @Test("App background pauses dictation and keeps the surface open")
     @MainActor
-    func appBackgroundStopsAndCollapsesSurface() async {
+    func appBackgroundPausesAndPreservesSurface() async {
         let harness = DictationTestHarness()
         let coordinator = harness.makeCoordinator()
 
@@ -875,16 +875,57 @@ struct DictationCoordinatorTests {
 
         await waitUntil(timeoutMs: 1_500) {
             !coordinator.isListening
-                && !coordinator.isSurfaceOpen
-                && !coordinator.isDictationActive
+                && coordinator.isSurfaceOpen
+                && coordinator.isDictationActive
                 && harness.client.finalized
                 && !harness.client.closeCalls.isEmpty
         }
 
-        #expect(!coordinator.isSurfaceOpen)
-        #expect(!coordinator.isDictationActive)
+        #expect(coordinator.isSurfaceOpen)
+        #expect(coordinator.isDictationActive)
+        #expect(!coordinator.isStickyDictationActive)
+        #expect(!coordinator.isWalkieTalkieActive)
         #expect(harness.client.finalized)
         #expect(!harness.client.closeCalls.isEmpty)
+    }
+
+    @Test("Finalizing is shielded from the UI projection")
+    @MainActor
+    func finalizingStateIsHiddenFromProjection() async {
+        let harness = DictationTestHarness(
+            timing: DictationTiming(
+                maxSessionDuration: .seconds(30),
+                tokenInactivityTimeout: .seconds(30),
+                stopKeepFinalizeTimeout: .milliseconds(120),
+                sendFinalizeTimeout: .milliseconds(250)
+            )
+        )
+        let coordinator = harness.makeCoordinator()
+
+        coordinator.updateContext(
+            sessionKey: harness.host.activeSessionKey,
+            composeIsEmpty: true,
+            textFieldFocused: false,
+            selectionLength: 0,
+            reduceMotionEnabled: false
+        )
+
+        coordinator.startStickyDictation()
+        await waitUntil { harness.client.connected }
+
+        coordinator.handleAppBackgrounded()
+        try? await Task.sleep(for: .milliseconds(40))
+
+        let projection = DictationInteractionProjection(session: coordinator)
+        #expect(projection.surfaceTarget == .open)
+        #expect(projection.isSurfaceOpen)
+        #expect(projection.isDictationActive)
+        #expect(projection.isStickyDictationActive)
+        #expect(projection.isListening)
+
+        await waitUntil(timeoutMs: 1_500) { !coordinator.isListening }
+        #expect(coordinator.isSurfaceOpen)
+        #expect(coordinator.isDictationActive)
     }
 
     @Test("Idle sleep is disabled only while dictation is actively running")

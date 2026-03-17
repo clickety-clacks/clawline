@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import UIKit
 @testable import Clawline
 
 @Suite(.serialized)
@@ -162,6 +163,7 @@ struct DictationCoordinatorTests {
         )
         coordinator.startStickyDictation()
         #expect(coordinator.isListening)
+        await waitUntil { harness.client.connected }
 
         let newSessionKey = "agent:main:test:switched"
         harness.host.activeSessionKey = newSessionKey
@@ -185,9 +187,17 @@ struct DictationCoordinatorTests {
             )
         )
 
-        await waitUntil(timeoutMs: 1_500) { !coordinator.isListening }
+        await waitUntil(timeoutMs: 1_500) {
+            !coordinator.isListening
+                && harness.client.finalized
+                && !harness.client.closeCalls.isEmpty
+                && harness.analytics.stopEvents.contains(where: { $0.reason == "stream_switch" })
+        }
         #expect(!coordinator.isListening)
+        #expect(coordinator.isSurfaceOpen)
+        #expect(coordinator.isDictationActive)
         #expect(harness.analytics.stopEvents.contains(where: { $0.reason == "stream_switch" }))
+        #expect(harness.client.finalized)
         #expect(harness.client.closeCalls.count >= 1)
     }
 
@@ -523,8 +533,8 @@ struct DictationCoordinatorTests {
             harness.host.currentText(for: harness.host.activeSessionKey) == "seed text"
         }
 
-        #expect(harness.client.finalized == false)
-        #expect(harness.client.sentFrames.isEmpty)
+        #expect(harness.client.finalized)
+        #expect(harness.client.sentFrames == [Data()])
         #expect(!coordinator.isSurfaceOpen)
     }
 
@@ -812,9 +822,9 @@ struct DictationCoordinatorTests {
         #expect(coordinator.swipeActivationEnabled == false)
     }
 
-    @Test("Audio interruption does not force dictation stop")
+    @Test("Audio interruption pauses dictation and keeps surface open")
     @MainActor
-    func interruptionBeganKeepsSessionAlive() async {
+    func interruptionBeganPausesSession() async {
         let harness = DictationTestHarness()
         let coordinator = harness.makeCoordinator()
 
@@ -828,12 +838,82 @@ struct DictationCoordinatorTests {
 
         coordinator.startStickyDictation()
         #expect(coordinator.isStickyDictationActive)
+        await waitUntil { harness.client.connected }
 
         harness.audio.emit(event: .interruptionBegan)
-        try? await Task.sleep(for: .milliseconds(50))
+        await waitUntil(timeoutMs: 1_500) {
+            !coordinator.isListening
+                && harness.client.finalized
+                && !harness.client.closeCalls.isEmpty
+        }
 
-        #expect(coordinator.isStickyDictationActive)
-        #expect(harness.client.closeCalls.isEmpty)
+        #expect(!coordinator.isListening)
+        #expect(coordinator.isDictationActive)
+        #expect(coordinator.isSurfaceOpen)
+        #expect(harness.client.finalized)
+        #expect(!harness.client.closeCalls.isEmpty)
+    }
+
+    @Test("App background closes dictation transport and collapses the surface")
+    @MainActor
+    func appBackgroundStopsAndCollapsesSurface() async {
+        let harness = DictationTestHarness()
+        let coordinator = harness.makeCoordinator()
+
+        coordinator.updateContext(
+            sessionKey: harness.host.activeSessionKey,
+            composeIsEmpty: true,
+            textFieldFocused: false,
+            selectionLength: 0,
+            reduceMotionEnabled: false
+        )
+
+        coordinator.startStickyDictation()
+        await waitUntil { coordinator.isListeningReady }
+
+        coordinator.handleAppBackgrounded()
+
+        await waitUntil(timeoutMs: 1_500) {
+            !coordinator.isListening
+                && !coordinator.isSurfaceOpen
+                && !coordinator.isDictationActive
+                && harness.client.finalized
+                && !harness.client.closeCalls.isEmpty
+        }
+
+        #expect(!coordinator.isSurfaceOpen)
+        #expect(!coordinator.isDictationActive)
+        #expect(harness.client.finalized)
+        #expect(!harness.client.closeCalls.isEmpty)
+    }
+
+    @Test("Idle sleep is disabled only while dictation is actively running")
+    @MainActor
+    func idleSleepTracksActiveDictationState() async {
+        let previous = UIApplication.shared.isIdleTimerDisabled
+        defer { UIApplication.shared.isIdleTimerDisabled = previous }
+
+        let harness = DictationTestHarness()
+        let coordinator = harness.makeCoordinator()
+
+        coordinator.updateContext(
+            sessionKey: harness.host.activeSessionKey,
+            composeIsEmpty: true,
+            textFieldFocused: false,
+            selectionLength: 0,
+            reduceMotionEnabled: false
+        )
+
+        UIApplication.shared.isIdleTimerDisabled = false
+        coordinator.startStickyDictation()
+        await waitUntil { coordinator.isListeningReady }
+        #expect(UIApplication.shared.isIdleTimerDisabled)
+
+        harness.audio.emit(event: .interruptionBegan)
+        await waitUntil(timeoutMs: 1_500) {
+            !coordinator.isListening && !UIApplication.shared.isIdleTimerDisabled
+        }
+        #expect(!UIApplication.shared.isIdleTimerDisabled)
     }
 
     @Test("Audio capture failure event stops dictation and enters error")
@@ -900,7 +980,7 @@ struct DictationCoordinatorTests {
 // MARK: - Test Harness
 
 @MainActor
-private final class DictationTestHarness {
+final class DictationTestHarness {
     let host = MockComposeDraftHost()
     let client = SonioxMockFixtureClient()
     let audio = MockDictationAudioCapture()
@@ -935,7 +1015,7 @@ private final class DictationTestHarness {
 
     func makeCoordinator() -> DictationCoordinator {
         DictationCoordinator(
-            bridge: ComposeInputDictationBridge(host: host),
+            bridge: DictationTranscriptApplicator(host: host),
             keyStore: keyStore,
             languageHintProvider: { "en" },
             audioCaptureFactory: {
@@ -954,7 +1034,7 @@ private final class DictationTestHarness {
 }
 
 @MainActor
-private final class MockComposeDraftHost: DictationComposeDraftHosting {
+final class MockComposeDraftHost: DictationComposeDraftHosting {
     var activeSessionKey: String = "agent:main:test:main"
     private var drafts: [String: ComposeDraftSnapshot] = ["agent:main:test:main": .empty]
 
@@ -992,7 +1072,7 @@ private final class MockComposeDraftHost: DictationComposeDraftHosting {
     }
 }
 
-private final class MockDictationAudioCapture: DictationAudioCapturing {
+final class MockDictationAudioCapture: DictationAudioCapturing {
     private var frameContinuation: AsyncStream<Data>.Continuation?
     private var levelContinuation: AsyncStream<Float>.Continuation?
     private var eventContinuation: AsyncStream<DictationAudioCaptureEvent>.Continuation?
@@ -1042,7 +1122,7 @@ private final class MockDictationAudioCapture: DictationAudioCapturing {
     }
 }
 
-private final class MockSonioxKeyVerifier: SonioxKeyVerifying {
+final class MockSonioxKeyVerifier: SonioxKeyVerifying {
     var results: [Bool] = [true]
     private(set) var verifiedKeys: [String] = []
 
@@ -1055,7 +1135,7 @@ private final class MockSonioxKeyVerifier: SonioxKeyVerifying {
     }
 }
 
-private final class SonioxMockFixtureClient: SonioxStreamingClienting {
+final class SonioxMockFixtureClient: SonioxStreamingClienting {
     enum ConnectBehavior {
         case succeed
         case fail(any Error)
@@ -1119,7 +1199,7 @@ private final class SonioxMockFixtureClient: SonioxStreamingClienting {
 }
 
 @MainActor
-private final class MockDictationAnalytics: DictationAnalyticsTracking {
+final class MockDictationAnalytics: DictationAnalyticsTracking {
     struct StopEvent {
         let reason: String
         let durationMs: Int
@@ -1156,12 +1236,12 @@ private final class MockDictationAnalytics: DictationAnalyticsTracking {
     func trackSocketDrop(mode: DictationMode, elapsedMs: Int) {}
 }
 
-private enum DictationTestError: Error {
+enum DictationTestError: Error {
     case connectFailed
 }
 
 @MainActor
-private final class MockDictationFeedback: DictationFeedbackProviding {
+final class MockDictationFeedback: DictationFeedbackProviding {
     var isVoiceOverRunning: Bool = false
     var isReduceMotionEnabled: Bool = false
 
@@ -1172,7 +1252,7 @@ private final class MockDictationFeedback: DictationFeedbackProviding {
 }
 
 @MainActor
-private func waitUntil(timeoutMs: UInt64 = 1_000, predicate: @escaping @MainActor () -> Bool) async {
+func waitUntil(timeoutMs: UInt64 = 1_000, predicate: @escaping @MainActor () -> Bool) async {
     let start = Date()
     while Date().timeIntervalSince(start) * 1000 < Double(timeoutMs) {
         if predicate() {

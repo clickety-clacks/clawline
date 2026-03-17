@@ -47,6 +47,81 @@ struct DictationPanIntentContext {
     let velocity: CGPoint
 }
 
+struct DictationInteractionProjection {
+    let surfaceTarget: SurfaceTarget
+    let isSurfaceOpen: Bool
+    let isDictationActive: Bool
+    let isStickyDictationActive: Bool
+    let isWalkieTalkieActive: Bool
+    let isListening: Bool
+    let micVisible: Bool
+    let swipeActivationEnabled: Bool
+    let reduceMotionEnabled: Bool
+    let showsComposeKeyPromptModal: Bool
+    let errorMessage: String?
+    let audioLevel: Float
+    let inlineKeyText: String
+    let inlineKeyStatus: SonioxKeyVerificationStatus
+    let inlineKeyActionTitle: String
+
+    init(session: DictationSession) {
+        surfaceTarget = session.surfaceTarget
+        isSurfaceOpen = session.isSurfaceOpen
+        isDictationActive = session.isDictationActive
+        isStickyDictationActive = session.isStickyDictationActive
+        isWalkieTalkieActive = session.isWalkieTalkieActive
+        isListening = session.isListening
+        micVisible = session.micVisible
+        swipeActivationEnabled = session.swipeActivationEnabled
+        reduceMotionEnabled = session.reduceMotionEnabled
+        showsComposeKeyPromptModal = session.showsComposeKeyPromptModal
+        errorMessage = session.errorMessage
+        audioLevel = session.audioLevel
+        inlineKeyText = session.inlineKeyText
+        inlineKeyStatus = session.inlineKeyStatus
+        inlineKeyActionTitle = session.inlineKeyActionTitle
+    }
+}
+
+@MainActor
+enum DictationGestureCommitIntent {
+    case startSticky
+    case startWalkieTalkie
+    case dismissSurface
+    case endWalkieTalkie
+    case resumeWalkieTalkieFromPaused
+}
+
+enum DictationStopIntentSource {
+    case escapeKey
+    case voiceOverAction
+}
+
+enum DictationDiscardIntentSource {
+    case escapeLongPress
+    case voiceOverAction
+}
+
+enum DictationInteractionIntent {
+    case composeSelectionChanged(NSRange)
+    case activationSelectionCaptured(NSRange)
+    case composeUserEdited(range: NSRange, replacementUTF16Length: Int)
+    case composeTextViewChanged(PastableTextView?)
+    case gesturePrewarmRequested
+    case gestureCancelled(trigger: String)
+    case gestureCommitRequested(DictationGestureCommitIntent)
+    case stopRequested(DictationStopIntentSource)
+    case discardRequested(DictationDiscardIntentSource)
+    case waveformToggleRequested
+    case inlineKeyTextChanged(String)
+}
+
+@MainActor
+struct DictationInteractionEmitter {
+    let emit: (DictationInteractionIntent) -> Void
+    let performComposeKeyPrimaryAction: (@escaping (URL) -> Void) async -> Void
+}
+
 func shouldBeginDictationPanGesture(
     startedInEditableRegion: Bool,
     isSurfaceVisible: Bool,
@@ -508,7 +583,8 @@ struct MessageInputBar: View {
     @Binding var content: NSAttributedString
     @Binding var selectionRange: NSRange
     @Binding var pendingInsertions: [PendingAttachment]
-    let dictation: DictationSession
+    let dictation: DictationInteractionProjection
+    let dictationEmitter: DictationInteractionEmitter
     var placeholderText: String = "Message"
     var resetToken: Int
     let canSend: Bool
@@ -944,7 +1020,7 @@ struct MessageInputBar: View {
             editorHeight = metrics.inputBarHeight
         }
         .onChange(of: selectionRange) { _, newValue in
-            dictation.setComposeSelectionRange(newValue)
+            dictationEmitter.emit(.composeSelectionChanged(newValue))
         }
         .onDisappear {
             micFadeTask?.cancel()
@@ -952,7 +1028,7 @@ struct MessageInputBar: View {
             motion.clearGestureState()
         }
         .onAppear {
-            dictation.setComposeSelectionRange(selectionRange)
+            dictationEmitter.emit(.composeSelectionChanged(selectionRange))
             motion.settle(to: dictation.surfaceTarget)
         }
         .onChange(of: dictation.surfaceTarget) { _, target in
@@ -1047,20 +1123,22 @@ struct MessageInputBar: View {
                     onFocusChange: onFocusChange,
                     onSubmit: handleEditorSubmitIntent,
                     onEscape: {
-                        dictation.stopFromEscapeKey()
+                        dictationEmitter.emit(.stopRequested(.escapeKey))
                     },
                     onEscapeLongPress: {
-                        dictation.discardFromEscapeLongPress()
+                        dictationEmitter.emit(.discardRequested(.escapeLongPress))
                     },
                     onPasteImages: onPasteImages,
                     onUserEdit: { range, replacementUTF16Length in
-                        dictation.noteComposeUserEditDuringDictation(
-                            editedRangeUTF16: range,
-                            replacementUTF16Length: replacementUTF16Length
+                        dictationEmitter.emit(
+                            .composeUserEdited(
+                                range: range,
+                                replacementUTF16Length: replacementUTF16Length
+                            )
                         )
                     },
                     onTextViewReady: { textView in
-                        dictation.setComposeTextView(textView)
+                        dictationEmitter.emit(.composeTextViewChanged(textView))
                     },
                     trailingPadding: micTrailingPadding
                 )
@@ -1131,20 +1209,20 @@ struct MessageInputBar: View {
             }
             .accessibilityAction(named: Text("Start Sticky Dictation")) {
                 guard dictation.micVisible || dictation.swipeActivationEnabled else { return }
-                dictation.captureComposeSelectionRangeForActivation(selectionRange)
-                dictation.startStickyDictation()
+                dictationEmitter.emit(.activationSelectionCaptured(selectionRange))
+                dictationEmitter.emit(.gestureCommitRequested(.startSticky))
             }
             .accessibilityAction(named: Text("Start Walkie-Talkie Dictation")) {
                 guard dictation.micVisible || dictation.swipeActivationEnabled else { return }
-                dictation.captureComposeSelectionRangeForActivation(selectionRange)
-                dictation.startWalkieTalkieDictation()
+                dictationEmitter.emit(.activationSelectionCaptured(selectionRange))
+                dictationEmitter.emit(.gestureCommitRequested(.startWalkieTalkie))
                 beginMicFadeOut(fromSwipe: !dictation.micVisible)
             }
             .accessibilityAction(named: Text("Stop Dictation")) {
-                dictation.stopFromVoiceOverAction()
+                dictationEmitter.emit(.stopRequested(.voiceOverAction))
             }
             .accessibilityAction(named: Text("Cancel and Discard Dictation")) {
-                dictation.discardFromVoiceOverAction()
+                dictationEmitter.emit(.discardRequested(.voiceOverAction))
             }
 
             MessageSendControl(
@@ -1319,7 +1397,7 @@ struct MessageInputBar: View {
         Button {
             guard !isSending else { return }
             if dictation.isStickyDictationActive {
-                dictation.dismissSurfaceFromUserGesture()
+                dictationEmitter.emit(.gestureCommitRequested(.dismissSurface))
             } else {
                 startStickyFromMicTap()
             }
@@ -1338,9 +1416,9 @@ struct MessageInputBar: View {
 
     private func startStickyFromMicTap() {
         micTapActivationTask?.cancel()
-        dictation.captureComposeSelectionRangeForActivation(selectionRange)
+        dictationEmitter.emit(.activationSelectionCaptured(selectionRange))
         let shouldPreserveKeyboardFocus = isTextFieldFocused || isKeyboardVisible
-        dictation.beginGesturePrewarm()
+        dictationEmitter.emit(.gesturePrewarmRequested)
         withAnimation(settleSpring) {
             motion.beginProgrammaticReveal()
         }
@@ -1353,7 +1431,7 @@ struct MessageInputBar: View {
             } catch {
                 return
             }
-            dictation.startStickyDictation()
+            dictationEmitter.emit(.gestureCommitRequested(.startSticky))
             motion.commitSettledState(.openListening)
             if shouldPreserveKeyboardFocus {
                 requestComposeFocus()
@@ -1389,12 +1467,12 @@ struct MessageInputBar: View {
                 swipeActivationEnabled: dictation.swipeActivationEnabled
             )
             shouldRestoreFocusAfterGestureDictationStart = isTextFieldFocused || isKeyboardVisible
-            dictation.captureComposeSelectionRangeForActivation(selectionRange)
-            dictation.beginGesturePrewarm()
+            dictationEmitter.emit(.activationSelectionCaptured(selectionRange))
+            dictationEmitter.emit(.gesturePrewarmRequested)
         }
 
         if !motion.isSurfaceVisible && !motion.swipeActivationEnabledAtGestureStart {
-            dictation.cancelGesturePrewarmIfNeeded(trigger: "push_changed_activation_disabled")
+            dictationEmitter.emit(.gestureCancelled(trigger: "push_changed_activation_disabled"))
             withAnimation(settleSpring) {
                 motion.gestureCancelled()
             }
@@ -1404,7 +1482,7 @@ struct MessageInputBar: View {
 
         if !motion.isSurfaceVisible && up < verticalDominanceRatio * abs(dx) {
             if abs(dx) > up {
-                dictation.cancelGesturePrewarmIfNeeded(trigger: "push_changed_horizontal_dominant")
+                dictationEmitter.emit(.gestureCancelled(trigger: "push_changed_horizontal_dominant"))
             }
             withAnimation(settleSpring) {
                 motion.gestureCancelled()
@@ -1426,8 +1504,8 @@ struct MessageInputBar: View {
             holdDuration: walkieHoldDurationSeconds
            ) {
             logDictation("DICTATION_UI gesture_classification=walkie_hold_activated up=\(up) dx=\(dx) dy=\(dy)")
-            dictation.setComposeSelectionRange(selectionRange)
-            dictation.startWalkieTalkieDictation()
+            dictationEmitter.emit(.composeSelectionChanged(selectionRange))
+            dictationEmitter.emit(.gestureCommitRequested(.startWalkieTalkie))
             beginMicFadeOut(fromSwipe: false)
         }
     }
@@ -1477,11 +1555,11 @@ struct MessageInputBar: View {
             onSend()
         case .dismissSurface:
             shouldRestoreFocusAfterGestureDictationStart = false
-            dictation.dismissSurfaceFromUserGesture()
+            dictationEmitter.emit(.gestureCommitRequested(.dismissSurface))
         case .startSticky:
             logDictation("DICTATION_UI gesture_end classification=sticky_start up=\(up) down=\(down)")
-            dictation.setComposeSelectionRange(selectionRange)
-            dictation.startStickyDictation()
+            dictationEmitter.emit(.composeSelectionChanged(selectionRange))
+            dictationEmitter.emit(.gestureCommitRequested(.startSticky))
             beginMicFadeOut(fromSwipe: false)
             if shouldRestoreFocusAfterGestureDictationStart {
                 requestComposeFocus()
@@ -1490,11 +1568,11 @@ struct MessageInputBar: View {
         case .endWalkieKeepOpen:
             shouldRestoreFocusAfterGestureDictationStart = false
             logDictation("DICTATION_UI gesture_end classification=walkie_release_keep_open up=\(up) down=\(down)")
-            dictation.endWalkieTalkieIfNeeded()
+            dictationEmitter.emit(.gestureCommitRequested(.endWalkieTalkie))
         case .endWalkieAndDismiss:
             shouldRestoreFocusAfterGestureDictationStart = false
             logDictation("DICTATION_UI gesture_end classification=walkie_release_dismiss up=\(up) down=\(down)")
-            dictation.dismissSurfaceFromUserGesture()
+            dictationEmitter.emit(.gestureCommitRequested(.dismissSurface))
         case .settleClosed:
             shouldRestoreFocusAfterGestureDictationStart = false
             break
@@ -1561,7 +1639,7 @@ struct MessageInputBar: View {
                 .frame(height: 44)
                 .contentShape(Rectangle())
                 .onTapGesture {
-                    dictation.toggleWaveformTapAction()
+                    dictationEmitter.emit(.waveformToggleRequested)
                 }
                 .onLongPressGesture(
                     minimumDuration: 0.35,
@@ -1569,12 +1647,12 @@ struct MessageInputBar: View {
                     pressing: { isPressing in
                         guard !isPressing, waveformDidStartWalkie else { return }
                         waveformDidStartWalkie = false
-                        dictation.endWalkieTalkieIfNeeded()
+                        dictationEmitter.emit(.gestureCommitRequested(.endWalkieTalkie))
                     },
                     perform: {
                         guard isPausedSurfaceState else { return }
                         waveformDidStartWalkie = true
-                        dictation.startWalkieTalkieFromPausedSurface()
+                        dictationEmitter.emit(.gestureCommitRequested(.resumeWalkieTalkieFromPaused))
                     }
                 )
 
@@ -1607,7 +1685,7 @@ struct MessageInputBar: View {
     private var dictationKeyTextBinding: Binding<String> {
         Binding(
             get: { dictation.inlineKeyText },
-            set: { dictation.updateInlineKeyText($0) }
+            set: { dictationEmitter.emit(.inlineKeyTextChanged($0)) }
         )
     }
 
@@ -1619,7 +1697,7 @@ struct MessageInputBar: View {
                 actionTitle: dictation.inlineKeyActionTitle,
                 onAction: {
                     Task { @MainActor in
-                        await dictation.handleComposeKeyPrimaryAction { url in
+                        await dictationEmitter.performComposeKeyPrimaryAction { url in
                             openURL(url)
                         }
                     }
@@ -1856,7 +1934,7 @@ struct DictationMicAffordanceAnimationPlan {
     @Previewable @State var selection = NSRange(location: 5, length: 0)
     let draftHost = PreviewDictationDraftHost()
     let dictation = DictationCoordinator(
-        bridge: ComposeInputDictationBridge(host: draftHost),
+        bridge: DictationTranscriptApplicator(host: draftHost),
         keyStore: SonioxKeyStore()
     )
     let motion = DictationMotion(session: dictation)
@@ -1866,7 +1944,62 @@ struct DictationMicAffordanceAnimationPlan {
                 content: $content,
                 selectionRange: $selection,
                 pendingInsertions: .constant([]),
-                dictation: dictation,
+                dictation: DictationInteractionProjection(session: dictation),
+                dictationEmitter: DictationInteractionEmitter(
+                    emit: { intent in
+                        switch intent {
+                        case .composeSelectionChanged(let selectionRange):
+                            dictation.setComposeSelectionRange(selectionRange)
+                        case .activationSelectionCaptured(let selectionRange):
+                            dictation.captureComposeSelectionRangeForActivation(selectionRange)
+                        case .composeUserEdited(let range, let replacementUTF16Length):
+                            dictation.noteComposeUserEditDuringDictation(
+                                editedRangeUTF16: range,
+                                replacementUTF16Length: replacementUTF16Length
+                            )
+                        case .composeTextViewChanged(let textView):
+                            dictation.setComposeTextView(textView)
+                        case .gesturePrewarmRequested:
+                            dictation.beginGesturePrewarm()
+                        case .gestureCancelled(let trigger):
+                            dictation.cancelGesturePrewarmIfNeeded(trigger: trigger)
+                        case .gestureCommitRequested(let commitIntent):
+                            switch commitIntent {
+                            case .startSticky:
+                                dictation.startStickyDictation()
+                            case .startWalkieTalkie:
+                                dictation.startWalkieTalkieDictation()
+                            case .dismissSurface:
+                                dictation.dismissSurfaceFromUserGesture()
+                            case .endWalkieTalkie:
+                                dictation.endWalkieTalkieIfNeeded()
+                            case .resumeWalkieTalkieFromPaused:
+                                dictation.startWalkieTalkieFromPausedSurface()
+                            }
+                        case .stopRequested(let source):
+                            switch source {
+                            case .escapeKey:
+                                dictation.stopFromEscapeKey()
+                            case .voiceOverAction:
+                                dictation.stopFromVoiceOverAction()
+                            }
+                        case .discardRequested(let source):
+                            switch source {
+                            case .escapeLongPress:
+                                dictation.discardFromEscapeLongPress()
+                            case .voiceOverAction:
+                                dictation.discardFromVoiceOverAction()
+                            }
+                        case .waveformToggleRequested:
+                            dictation.toggleWaveformTapAction()
+                        case .inlineKeyTextChanged(let value):
+                            dictation.updateInlineKeyText(value)
+                        }
+                    },
+                    performComposeKeyPrimaryAction: { openURL in
+                        await dictation.handleComposeKeyPrimaryAction(openKeyURL: openURL)
+                    }
+                ),
                 placeholderText: "Message",
                 resetToken: 0,
                 canSend: true,

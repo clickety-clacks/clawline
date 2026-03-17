@@ -616,7 +616,7 @@ struct ChatViewModelTests {
             }
 
             let coordinator = DictationCoordinator(
-                bridge: ComposeInputDictationBridge(host: viewModel),
+                bridge: DictationTranscriptApplicator(host: viewModel),
                 keyStore: SonioxKeyStore(verifier: AlwaysValidSonioxKeyVerifier()),
                 languageHintProvider: { "en" },
                 audioCaptureFactory: { NoopDictationAudioCapture() },

@@ -63,7 +63,10 @@ func runtimeInsetFallbackBarHeight(
     settledInputBarHeight: CGFloat,
     layoutFrozen: Bool
 ) -> CGFloat {
-    max(measuredInputBarHeight, MessageInputBarMetrics.minInputBarHeight)
+    if layoutFrozen, settledInputBarHeight > 0.5 {
+        return settledInputBarHeight
+    }
+    return max(measuredInputBarHeight, MessageInputBarMetrics.minInputBarHeight)
 }
 
 // MARK: - ⚠️⚠️⚠️ CRITICAL: DO NOT MODIFY WITHOUT READING ⚠️⚠️⚠️
@@ -208,7 +211,7 @@ struct ChatView: View {
         let streamingClientFactory: () -> any SonioxStreamingClienting = { SonioxStreamingClient() }
 #endif
         let session = DictationCoordinator(
-            bridge: ComposeInputDictationBridge(host: viewModel),
+            bridge: DictationTranscriptApplicator(host: viewModel),
             keyStore: SonioxKeyStore(),
             audioCaptureFactory: audioCaptureFactory,
             streamingClientFactory: streamingClientFactory
@@ -701,16 +704,16 @@ struct ChatView: View {
         )
         .sheet(item: $activeSheet, content: sheetView)
         .onChange(of: viewModel.uiSelectedSessionKey) { _, _ in
-            updateDictationContext(viewModel: viewModel)
+            reportDictationObservations(viewModel: viewModel)
         }
         .onChange(of: viewModel.inputContent.length) { _, _ in
-            updateDictationContext(viewModel: viewModel)
+            reportDictationObservations(viewModel: viewModel)
         }
         .onChange(of: selectionRange) { _, _ in
-            updateDictationContext(viewModel: viewModel)
+            reportDictationObservations(viewModel: viewModel)
         }
         .onReceive(NotificationCenter.default.publisher(for: UIAccessibility.reduceMotionStatusDidChangeNotification)) { _ in
-            updateDictationContext(viewModel: viewModel)
+            reportDictationObservations(viewModel: viewModel)
         }
         .photosPicker(
             isPresented: $isPhotosPickerPresented,
@@ -892,7 +895,7 @@ struct ChatView: View {
             layoutCoordinator.setActiveSessionKey(viewModel.engineActiveSessionKey)
             layoutCoordinator.updateInputs(layoutInputs, metrics: layoutMetrics)
             layoutCoordinator.markInputsChanged()
-            updateDictationContext(viewModel: viewModel)
+            reportDictationObservations(viewModel: viewModel)
         }
         .onChange(of: viewModel.uiSelectionSequence) { _, _ in
             guard let selectedSessionKey = viewModel.lastUISelectedSessionKey else { return }
@@ -945,7 +948,7 @@ struct ChatView: View {
                     keyboardRefreshToken &+= 1
                 }
             }
-            updateDictationContext(viewModel: viewModel)
+            reportDictationObservations(viewModel: viewModel)
         }
         .onChange(of: dictationMotion.shouldFreezeLayout) { _, isFrozen in
             if !isFrozen {
@@ -1244,7 +1247,20 @@ struct ChatView: View {
         return AttributedString("v\(version)")
     }
 
-    private func updateDictationContext(viewModel: ChatViewModel) {
+    private var dictationInteractionProjection: DictationInteractionProjection {
+        DictationInteractionProjection(session: dictationCoordinator)
+    }
+
+    private var dictationInteractionEmitter: DictationInteractionEmitter {
+        DictationInteractionEmitter(
+            emit: handleDictationIntent(_:),
+            performComposeKeyPrimaryAction: { openURL in
+                await dictationCoordinator.handleComposeKeyPrimaryAction(openKeyURL: openURL)
+            }
+        )
+    }
+
+    private func reportDictationObservations(viewModel: ChatViewModel) {
         dictationCoordinator.updateContext(
             sessionKey: viewModel.activeSessionKey,
             composeIsEmpty: viewModel.inputContent.isEffectivelyEmpty,
@@ -1265,6 +1281,58 @@ struct ChatView: View {
                     .filter { !$0.isEmpty }
             )
         )
+    }
+
+    @MainActor
+    private func handleDictationIntent(_ intent: DictationInteractionIntent) {
+        switch intent {
+        case .composeSelectionChanged(let selectionRange):
+            dictationCoordinator.setComposeSelectionRange(selectionRange)
+        case .activationSelectionCaptured(let selectionRange):
+            dictationCoordinator.captureComposeSelectionRangeForActivation(selectionRange)
+        case .composeUserEdited(let range, let replacementUTF16Length):
+            dictationCoordinator.noteComposeUserEditDuringDictation(
+                editedRangeUTF16: range,
+                replacementUTF16Length: replacementUTF16Length
+            )
+        case .composeTextViewChanged(let textView):
+            dictationCoordinator.setComposeTextView(textView)
+        case .gesturePrewarmRequested:
+            dictationCoordinator.beginGesturePrewarm()
+        case .gestureCancelled(let trigger):
+            dictationCoordinator.cancelGesturePrewarmIfNeeded(trigger: trigger)
+        case .gestureCommitRequested(let commitIntent):
+            switch commitIntent {
+            case .startSticky:
+                dictationCoordinator.startStickyDictation()
+            case .startWalkieTalkie:
+                dictationCoordinator.startWalkieTalkieDictation()
+            case .dismissSurface:
+                dictationCoordinator.dismissSurfaceFromUserGesture()
+            case .endWalkieTalkie:
+                dictationCoordinator.endWalkieTalkieIfNeeded()
+            case .resumeWalkieTalkieFromPaused:
+                dictationCoordinator.startWalkieTalkieFromPausedSurface()
+            }
+        case .stopRequested(let source):
+            switch source {
+            case .escapeKey:
+                dictationCoordinator.stopFromEscapeKey()
+            case .voiceOverAction:
+                dictationCoordinator.stopFromVoiceOverAction()
+            }
+        case .discardRequested(let source):
+            switch source {
+            case .escapeLongPress:
+                dictationCoordinator.discardFromEscapeLongPress()
+            case .voiceOverAction:
+                dictationCoordinator.discardFromVoiceOverAction()
+            }
+        case .waveformToggleRequested:
+            dictationCoordinator.toggleWaveformTapAction()
+        case .inlineKeyTextChanged(let value):
+            dictationCoordinator.updateInlineKeyText(value)
+        }
     }
 
     @ViewBuilder
@@ -1365,7 +1433,8 @@ struct ChatView: View {
                 content: $viewModel.inputContent,
                 selectionRange: $selectionRange,
                 pendingInsertions: $pendingInputInsertions,
-                dictation: dictationCoordinator,
+                dictation: dictationInteractionProjection,
+                dictationEmitter: dictationInteractionEmitter,
                 placeholderText: viewModel.activeSessionDisplayName,
                 resetToken: viewModel.inputResetToken,
                 canSend: viewModel.canSend,

@@ -248,8 +248,7 @@ struct RichTextEditor: UIViewRepresentable {
             guard selectedRange.location != NSNotFound else { return }
             guard !isApplyingParentSelection else { return }
             if let textView = textView as? PastableTextView {
-                if textView.dictationIgnoreNextSelectionInteraction {
-                    textView.dictationIgnoreNextSelectionInteraction = false
+                if textView.consumeDictationSelectionInteractionSuppression() {
                     ensureTypingAttributes(on: textView)
                     return
                 }
@@ -265,7 +264,7 @@ struct RichTextEditor: UIViewRepresentable {
                       shouldChangeTextIn range: NSRange,
                       replacementText text: String) -> Bool {
             if let textView = textView as? PastableTextView,
-               !textView.dictationProgrammaticUpdateInFlight {
+               !textView.dictationProgrammaticEditInFlight {
                 parent.onUserEdit?(range, text.utf16.count)
             }
             if text == "\n" {
@@ -457,7 +456,8 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
     var onEscape: (() -> Void)?
     var onEscapeLongPress: (() -> Void)?
     var onLayout: ((CGFloat) -> Void)?
-    var dictationProgrammaticUpdateInFlight: Bool = false
+    private(set) var dictationProgrammaticUpdateInFlight: Bool = false
+    private(set) var dictationProgrammaticEditInFlight: Bool = false
     var dictationIgnoreNextSelectionInteraction: Bool = false
     var isInputEnabled: Bool = true {
         didSet {
@@ -478,6 +478,7 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
     private var isEscapePressed = false
     private var didFireEscapeLongPress = false
     private let escapeLongPressDuration: Duration = .milliseconds(700)
+    private let dictationProgrammaticUpdateGracePeriod: Duration = .milliseconds(120)
 
     override init(frame: CGRect, textContainer: NSTextContainer?) {
         super.init(frame: frame, textContainer: textContainer)
@@ -489,9 +490,41 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
         pasteDelegate = self
     }
 
+    private var dictationProgrammaticUpdateGeneration: UInt64 = 0
     override func layoutSubviews() {
         super.layoutSubviews()
         onLayout?(bounds.width)
+    }
+
+    var shouldSuppressDictationSelectionCallbacks: Bool {
+        dictationProgrammaticUpdateInFlight && dictationIgnoreNextSelectionInteraction
+    }
+
+    func beginDictationProgrammaticUpdate() {
+        dictationProgrammaticUpdateGeneration &+= 1
+        dictationProgrammaticUpdateInFlight = true
+        dictationProgrammaticEditInFlight = true
+        dictationIgnoreNextSelectionInteraction = true
+    }
+
+    func endDictationProgrammaticUpdate() {
+        let generation = dictationProgrammaticUpdateGeneration
+        dictationProgrammaticEditInFlight = false
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + TimeInterval(dictationProgrammaticUpdateGracePeriod.components.seconds)
+            + Double(dictationProgrammaticUpdateGracePeriod.components.attoseconds) / 1_000_000_000_000_000_000
+        ) { [weak self] in
+            guard let self else { return }
+            guard self.dictationProgrammaticUpdateGeneration == generation else { return }
+            self.dictationProgrammaticUpdateInFlight = false
+            self.dictationIgnoreNextSelectionInteraction = false
+        }
+    }
+
+    func consumeDictationSelectionInteractionSuppression() -> Bool {
+        guard dictationIgnoreNextSelectionInteraction else { return false }
+        dictationIgnoreNextSelectionInteraction = false
+        return true
     }
 
     override var keyCommands: [UIKeyCommand]? {

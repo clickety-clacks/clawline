@@ -255,16 +255,19 @@ final class ChatLayoutCoordinator {
                 barView.setDesiredBottomGap(metrics.belowBarGap, isKeyboardVisible: inputs.keyboardVisible)
                 barView.containerView.layoutIfNeeded()
             }
-            if insetChanged {
-                for list in self.listViews.values.compactMap({ $0.value }) {
-                    if abs(list.currentBottomInset - targetInset) > 0.5 {
-                        list.setBottomInset(targetInset)
-                    }
+        }
+
+        let applyInsetsImmediately = { [weak self] in
+            guard let self, insetChanged else { return }
+            for list in self.listViews.values.compactMap({ $0.value }) {
+                if abs(list.currentBottomInset - targetInset) > 0.5 {
+                    list.setBottomInset(targetInset)
                 }
             }
         }
 
         if transition.animateInsets || transition.animateBarPosition {
+            applyInsetsImmediately()
             UIView.animate(
                 withDuration: transition.animationDuration,
                 delay: 0,
@@ -285,6 +288,7 @@ final class ChatLayoutCoordinator {
                 }
             }
         } else {
+            applyInsetsImmediately()
             applyChanges()
             performScrollAction(transition.scrollAction)
             isApplyingTransition = false

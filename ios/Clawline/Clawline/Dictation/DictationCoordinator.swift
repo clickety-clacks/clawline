@@ -116,6 +116,7 @@ final class DictationSession {
             let trace = "DICTATION_COORD state \(String(describing: oldValue)) -> \(String(describing: state))"
             logDictation(trace)
             surfaceTarget = surfaceTarget(for: state)
+            setSystemIdleSleepDisabled(shouldDisableIdleSleep(for: state))
         }
     }
     private(set) var errorMessage: String?
@@ -124,7 +125,6 @@ final class DictationSession {
     private(set) var surfaceTarget: SurfaceTarget = .closed {
         didSet {
             guard oldValue != surfaceTarget else { return }
-            setSystemIdleSleepDisabled(surfaceTarget == .open)
         }
     }
 
@@ -132,6 +132,15 @@ final class DictationSession {
 #if os(iOS)
         UIApplication.shared.isIdleTimerDisabled = disabled
 #endif
+    }
+
+    private func shouldDisableIdleSleep(for state: DictationState) -> Bool {
+        switch state {
+        case .dictatingSticky, .dictatingWalkieTalkie, .finalizing, .stoppingKeep, .stoppingDiscard:
+            return true
+        case .idleSurfaceClosed, .keyPromptModal, .keyVerifyingModal, .dictatingPaused, .error:
+            return false
+        }
     }
 
     private func surfaceTarget(for state: DictationState) -> SurfaceTarget {
@@ -221,7 +230,34 @@ final class DictationSession {
         !isSurfaceOpen && selectionLength == 0
     }
 
-    private let bridge: ComposeInputDictationBridge
+    private struct TranscriptSession {
+        var originSessionKey: String
+        var baseSnapshot: ComposeDraftSnapshot
+        var dictationStartUTF16: Int
+        var committedLenUTF16: Int
+        var provisionalText: String
+        var suppressedUntilNextEndpoint: Bool
+        var committedText: String
+        var pendingUpdate: DictationSegmentUpdate?
+        var activationSelectionRange: NSRange?
+        var preferredSelectionRange: NSRange?
+        var walkieOrigin: WalkieOrigin?
+
+        var provisionalLenUTF16: Int {
+            provisionalText.utf16.count
+        }
+
+        var previousTranscriptUTF16Length: Int {
+            committedLenUTF16 + provisionalLenUTF16
+        }
+    }
+
+    private enum TranscriptOwnership {
+        case inactive
+        case active(TranscriptSession)
+    }
+
+    private let bridge: DictationTranscriptApplicator
     private let keyStore: SonioxKeyStore
     private let languageHintProvider: () -> String
     private let audioCaptureFactory: () -> any DictationAudioCapturing
@@ -236,11 +272,12 @@ final class DictationSession {
     private var selectionLength = 0
     private var contextTerms: [String] = []
 
-    private var originSessionKey: String?
-    private var preDictationSnapshot: ComposeDraftSnapshot = .empty
+    private var transcriptOwnership: TranscriptOwnership = .inactive
     private var transcriptBuffer = DictationTranscriptBuffer()
-    private var pendingTranscriptUpdate: DictationSegmentUpdate?
     private var pendingActivationMode: DictationMode?
+    private var pendingActivationWalkieOrigin: WalkieOrigin?
+    private var pendingActivationSelectionRange: NSRange?
+    private var pendingPreferredSelectionRange: NSRange?
     private var gesturePrewarmGeneration: UInt64?
     private var gestureActivationFailed = false
     private(set) var mode: DictationMode?
@@ -248,7 +285,6 @@ final class DictationSession {
     private var lastTokenAt: Date?
     private var finishedReceived = false
     private var pendingStopContext: String?
-    private var walkieOrigin: WalkieOrigin?
 
     private var audioCapture: (any DictationAudioCapturing)?
     private var streamingClient: (any SonioxStreamingClienting)?
@@ -336,7 +372,7 @@ final class DictationSession {
     }
 
     init(
-        bridge: ComposeInputDictationBridge,
+        bridge: DictationTranscriptApplicator,
         keyStore: SonioxKeyStore,
         languageHintProvider: @escaping () -> String = { DictationLanguageHintResolver.resolve() },
         audioCaptureFactory: @escaping () -> any DictationAudioCapturing = { DictationAudioCapture() },
@@ -354,6 +390,35 @@ final class DictationSession {
         self.feedback = feedback ?? UIKitDictationFeedbackProvider()
         self.timing = timing
         reduceMotionEnabled = self.feedback.isReduceMotionEnabled
+        bridge.setReplayPlanProvider { [weak self] in
+            self?.currentTranscriptReplayPlan()
+        }
+    }
+
+    private var originSessionKey: String? {
+        guard case .active(let session) = transcriptOwnership else { return nil }
+        return session.originSessionKey
+    }
+
+    private var preDictationSnapshot: ComposeDraftSnapshot {
+        guard case .active(let session) = transcriptOwnership else { return .empty }
+        return session.baseSnapshot
+    }
+
+    private var activeWalkieOrigin: WalkieOrigin? {
+        guard case .active(let session) = transcriptOwnership else { return nil }
+        return session.walkieOrigin
+    }
+
+    private func activeTranscriptSession() -> TranscriptSession? {
+        guard case .active(let session) = transcriptOwnership else { return nil }
+        return session
+    }
+
+    private func updateActiveTranscriptSession(_ mutate: (inout TranscriptSession) -> Void) {
+        guard case .active(var session) = transcriptOwnership else { return }
+        mutate(&session)
+        transcriptOwnership = .active(session)
     }
 
     func updateContext(
@@ -416,9 +481,9 @@ final class DictationSession {
             logDictation("DICTATION_STOP trace_id=DICTATION_STOP_STREAM_SWITCH caller=stream_switch_handler trigger=\(trigger) ts=\(Date().timeIntervalSince1970)")
             await self.stopKeep(
                 reason: "stream_switch",
-                timeout: .zero,
+                timeout: self.timing.sendFinalizeTimeout,
                 announceStop: false,
-                gracefulFinalize: false,
+                gracefulFinalize: true,
                 collapseSurface: false,
                 trigger: trigger
             )
@@ -453,20 +518,60 @@ final class DictationSession {
     }
 
     func setComposeSelectionRange(_ selectionRange: NSRange) {
-        bridge.setPreferredSelectionRange(selectionRange, for: currentSessionKey)
+        let resolvedSelectionRange: NSRange?
+        if selectionRange.location != NSNotFound {
+            resolvedSelectionRange = selectionRange
+        } else if let liveSelectionRange = bridge.boundComposeTextView?.selectedRange,
+                  liveSelectionRange.location != NSNotFound {
+            resolvedSelectionRange = liveSelectionRange
+        } else {
+            resolvedSelectionRange = nil
+        }
+
+        pendingPreferredSelectionRange = resolvedSelectionRange
+
+        guard let resolvedSelectionRange else { return }
+        updateActiveTranscriptSession { session in
+            session.preferredSelectionRange = resolvedSelectionRange
+            guard session.originSessionKey == currentSessionKey,
+                  let textView = bridge.boundComposeTextView else { return }
+            reanchorTranscriptSession(
+                &session,
+                to: resolvedSelectionRange,
+                text: textView.attributedText.string,
+                textLength: textView.attributedText.length
+            )
+        }
     }
 
     func captureComposeSelectionRangeForActivation(_ selectionRange: NSRange) {
-        bridge.captureSelectionRangeForActivation(selectionRange, for: currentSessionKey)
+        let resolvedSelectionRange: NSRange?
+        if selectionRange.location != NSNotFound {
+            resolvedSelectionRange = selectionRange
+        } else if let liveSelectionRange = bridge.boundComposeTextView?.selectedRange,
+                  liveSelectionRange.location != NSNotFound {
+            resolvedSelectionRange = liveSelectionRange
+        } else {
+            resolvedSelectionRange = nil
+        }
+
+        pendingActivationSelectionRange = resolvedSelectionRange
+        updateActiveTranscriptSession { session in
+            session.activationSelectionRange = resolvedSelectionRange
+        }
     }
 
     func noteComposeUserEditDuringDictation(editedRangeUTF16: NSRange, replacementUTF16Length: Int) {
         guard isDictationActive else { return }
-        bridge.noteUserEdit(
-            editedRangeUTF16: editedRangeUTF16,
-            replacementUTF16Length: replacementUTF16Length,
-            originSessionKey: originSessionKey
-        )
+        guard let originSessionKey, !originSessionKey.isEmpty, originSessionKey == currentSessionKey else { return }
+        guard bridge.boundComposeTextView?.dictationProgrammaticEditInFlight != true else { return }
+        updateActiveTranscriptSession { session in
+            noteUserEdit(
+                session: &session,
+                editedRangeUTF16: editedRangeUTF16,
+                replacementUTF16Length: replacementUTF16Length
+            )
+        }
     }
 
     func preparePhase1IfNeeded() {
@@ -519,20 +624,17 @@ final class DictationSession {
             resumeFromPaused()
             return
         }
-        walkieOrigin = nil
-        start(mode: .sticky)
+        start(mode: .sticky, walkieOrigin: nil)
     }
 
     func startWalkieTalkieDictation() {
         logDictation("DICTATION_UI startWalkieTalkieDictation state=\(String(describing: state)) \(attemptContext())")
-        walkieOrigin = .pushHold
-        start(mode: .walkieTalkie)
+        start(mode: .walkieTalkie, walkieOrigin: .pushHold)
     }
 
     func startWalkieTalkieFromPausedSurface() {
         guard state == .dictatingPaused else { return }
-        walkieOrigin = .pausedHold
-        start(mode: .walkieTalkie)
+        start(mode: .walkieTalkie, walkieOrigin: .pausedHold)
     }
 
     func pauseFromWaveformTap() {
@@ -584,9 +686,11 @@ final class DictationSession {
         let isValid = await keyStore.verify()
         if isValid {
             let requestedMode = pendingActivationMode
+            let requestedWalkieOrigin = pendingActivationWalkieOrigin
             pendingActivationMode = nil
+            pendingActivationWalkieOrigin = nil
             if let requestedMode {
-                start(mode: requestedMode)
+                start(mode: requestedMode, walkieOrigin: requestedWalkieOrigin)
             } else {
                 state = idleStateForCurrentContext()
             }
@@ -598,6 +702,7 @@ final class DictationSession {
     func dismissComposeKeyPrompt() {
         guard state == .keyPromptModal || state == .keyVerifyingModal else { return }
         pendingActivationMode = nil
+        pendingActivationWalkieOrigin = nil
         state = idleStateForCurrentContext()
     }
 
@@ -631,7 +736,7 @@ final class DictationSession {
         guard state == .dictatingWalkieTalkie else { return }
         Task { [weak self] in
             guard let self else { return }
-            switch self.walkieOrigin {
+            switch self.activeWalkieOrigin {
             case .pushHold:
                 logDictation("DICTATION_STOP trace_id=DICTATION_STOP_WALKIE_RELEASE caller=walkie_release_collapse ts=\(Date().timeIntervalSince1970)")
                 await self.stopKeep(
@@ -707,15 +812,17 @@ final class DictationSession {
                 reason: "app_background",
                 timeout: self?.timing.stopKeepFinalizeTimeout ?? .milliseconds(1_200),
                 announceStop: false,
-                collapseSurface: false,
+                collapseSurface: true,
+                collapseSurfaceImmediately: true,
                 trigger: "app_background"
             )
         }
     }
 
-    private func start(mode: DictationMode) {
+    private func start(mode: DictationMode, walkieOrigin: WalkieOrigin?) {
         if state == .finalizing || state == .stoppingKeep || state == .stoppingDiscard {
             pendingActivationMode = mode
+            pendingActivationWalkieOrigin = walkieOrigin
             logDictation("DICTATION_ATTEMPT queued_during_teardown mode=\(mode.rawValue) \(attemptContext())")
             return
         }
@@ -729,6 +836,7 @@ final class DictationSession {
         }
         guard let apiKey = configuredAPIKeyOrNil() else {
             pendingActivationMode = mode
+            pendingActivationWalkieOrigin = walkieOrigin
             state = .keyPromptModal
             return
         }
@@ -737,6 +845,7 @@ final class DictationSession {
         activeAttemptID = dictationAttemptID
         let generation = gesturePrewarmGeneration ?? prewarmGeneration ?? nextActivationGeneration()
         pendingActivationMode = nil
+        pendingActivationWalkieOrigin = nil
         gesturePrewarmGeneration = nil
         self.mode = mode
         logDictation("DICTATION_ATTEMPT start_requested start_mode=\(mode.rawValue) \(attemptContext())")
@@ -746,7 +855,7 @@ final class DictationSession {
             originSessionKey != currentSessionKey
 
         if needsSessionContextInitialization {
-            initializeOriginSessionContext(for: currentSessionKey)
+            initializeOriginSessionContext(for: currentSessionKey, walkieOrigin: walkieOrigin)
         }
         self.finishedReceived = false
         self.audioDecodeTimeoutRecoveryCount = 0
@@ -754,7 +863,9 @@ final class DictationSession {
         self.lastTokenAt = Date()
         self.audioLevel = 0
         self.errorMessage = nil
-        self.walkieOrigin = mode == .walkieTalkie ? .pushHold : nil
+        updateActiveTranscriptSession { session in
+            session.walkieOrigin = walkieOrigin
+        }
 
         feedback.impactLight()
         if state != .dictatingPaused {
@@ -1152,6 +1263,7 @@ final class DictationSession {
         case .interruptionBegan:
             logger.notice("Dictation capture interruption began")
             analytics.trackError(errorCode: nil, stage: "audio_interruption")
+            let _ = await pauseListening(reason: "audio_interruption")
         case .interruptionEnded(let shouldResume):
             logger.notice("Dictation capture interruption ended shouldResume=\(shouldResume, privacy: .public)")
         case .routeChanged:
@@ -1384,6 +1496,11 @@ final class DictationSession {
         prewarmConnectStartedAt = nil
         suppressedPrewarmFailureBudget = 0
         audioCapture?.stop()
+        state = .finalizing
+        let _ = await finalizeForPendingStopAction(
+            reason: reason,
+            timeout: timing.sendFinalizeTimeout
+        )
         logDictation(
             "DICTATION_STOP trace_id=DICTATION_DISCARD_CLOSE_CLIENT_CANCELLED reason=\(reason) trigger=\(trigger) callSite=\(callSite)"
         )
@@ -1430,6 +1547,7 @@ final class DictationSession {
         keepAudioForPausedWaveform: Bool = false
     ) {
         let queuedActivationMode = pendingActivationMode
+        let queuedActivationWalkieOrigin = pendingActivationWalkieOrigin
         let duration = elapsedSessionMilliseconds()
         let stopContext = pendingStopContext ?? "trigger=unknown callSite=unknown"
         logger.notice(
@@ -1495,7 +1613,8 @@ final class DictationSession {
 
         if let queuedActivationMode {
             pendingActivationMode = nil
-            start(mode: queuedActivationMode)
+            pendingActivationWalkieOrigin = nil
+            start(mode: queuedActivationMode, walkieOrigin: queuedActivationWalkieOrigin)
         }
     }
 
@@ -1611,7 +1730,7 @@ final class DictationSession {
 
     private func resumeFromPaused() {
         guard state == .dictatingPaused else { return }
-        start(mode: .sticky)
+        start(mode: .sticky, walkieOrigin: nil)
     }
 
     private func schedulePhase1IdleTeardown() {
@@ -1719,10 +1838,12 @@ final class DictationSession {
             "DICTATION_PERF ts=\(Date().timeIntervalSince1970) event=queue_transcript_apply immediate=\(immediate) " +
             "committed_segments=\(update.committedSegments.count) provisional_chars=\(update.provisionalText.count) finished=\(update.finished)"
         )
-        if let pending = pendingTranscriptUpdate {
-            pendingTranscriptUpdate = mergeTranscriptUpdates(pending, update)
-        } else {
-            pendingTranscriptUpdate = update
+        updateActiveTranscriptSession { session in
+            if let pending = session.pendingUpdate {
+                session.pendingUpdate = mergeTranscriptUpdates(pending, update)
+            } else {
+                session.pendingUpdate = update
+            }
         }
         // Endpoint commits (committedSegments) must never wait behind provisional coalescing.
         let shouldFlushImmediately = immediate || !update.committedSegments.isEmpty
@@ -1743,8 +1864,9 @@ final class DictationSession {
         logDictation("DICTATION_PERF ts=\(Date().timeIntervalSince1970) event=flush_transcript_apply_begin")
         transcriptApplyTask?.cancel()
         transcriptApplyTask = nil
-        guard let update = pendingTranscriptUpdate else { return }
-        pendingTranscriptUpdate = nil
+        guard var session = activeTranscriptSession(), let update = session.pendingUpdate else { return }
+        session.pendingUpdate = nil
+        transcriptOwnership = .active(session)
         applyTranscriptIfNeeded(update)
         logDictation("DICTATION_PERF ts=\(Date().timeIntervalSince1970) event=flush_transcript_apply_end")
     }
@@ -1752,7 +1874,9 @@ final class DictationSession {
     private func cancelPendingTranscriptApply() {
         transcriptApplyTask?.cancel()
         transcriptApplyTask = nil
-        pendingTranscriptUpdate = nil
+        updateActiveTranscriptSession { session in
+            session.pendingUpdate = nil
+        }
     }
 
     private func logDictation(_ message: String) {
@@ -1760,20 +1884,38 @@ final class DictationSession {
         print(message)
     }
 
-    private func initializeOriginSessionContext(for sessionKey: String) {
-        originSessionKey = sessionKey
-        bridge.resetTranscriptState(for: sessionKey)
+    private func initializeOriginSessionContext(for sessionKey: String, walkieOrigin: WalkieOrigin?) {
         logDictation("DICTATION_PERF ts=\(Date().timeIntervalSince1970) event=capture_snapshot_begin session=\(sessionKey)")
-        preDictationSnapshot = bridge.captureSnapshot(for: sessionKey)
+        let snapshot = bridge.captureSnapshot(for: sessionKey)
         logDictation("DICTATION_PERF ts=\(Date().timeIntervalSince1970) event=capture_snapshot_end session=\(sessionKey)")
+        let selectedRange = resolvedTranscriptAnchorRange(
+            activationSelectionRange: pendingActivationSelectionRange,
+            preferredSelectionRange: pendingPreferredSelectionRange,
+            snapshot: snapshot
+        )
+        let initialProvisionalText = substring(text: snapshot.content.string, utf16Range: selectedRange) ?? ""
+        transcriptOwnership = .active(
+            TranscriptSession(
+                originSessionKey: sessionKey,
+                baseSnapshot: snapshot,
+                dictationStartUTF16: selectedRange.location,
+                committedLenUTF16: 0,
+                provisionalText: initialProvisionalText,
+                suppressedUntilNextEndpoint: false,
+                committedText: "",
+                pendingUpdate: nil,
+                activationSelectionRange: pendingActivationSelectionRange,
+                preferredSelectionRange: pendingPreferredSelectionRange,
+                walkieOrigin: walkieOrigin
+            )
+        )
         transcriptBuffer.reset()
-        pendingTranscriptUpdate = nil
+        pendingActivationSelectionRange = nil
     }
 
     private func clearOriginSessionContext() {
-        originSessionKey = nil
-        preDictationSnapshot = .empty
-        pendingTranscriptUpdate = nil
+        transcriptOwnership = .inactive
+        pendingActivationSelectionRange = nil
     }
 
     private func applyTranscriptIfNeeded(_ update: DictationSegmentUpdate) {
@@ -1795,14 +1937,244 @@ final class DictationSession {
             "committed_segments=\(update.committedSegments.count) provisional_chars=\(update.provisionalText.count) finished=\(update.finished)"
         )
         let startedAt = CFAbsoluteTimeGetCurrent()
-        bridge.applySegmentUpdate(
-            update,
-            baseSnapshot: preDictationSnapshot,
-            originSessionKey: originSessionKey
+        guard var session = activeTranscriptSession() else { return }
+        if let textView = bridge.boundComposeTextView {
+            syncCommittedText(from: textView.attributedText.string, session: &session)
+        } else {
+            syncCommittedText(
+                from: bridge.captureSnapshot(for: session.originSessionKey).content.string,
+                session: &session
+            )
+        }
+        let previousTranscriptUTF16Length = session.previousTranscriptUTF16Length
+        applySegmentUpdate(update, to: &session)
+        let replacementText = NSAttributedString(
+            string: session.committedText + session.provisionalText,
+            attributes: defaultTextAttributes()
         )
+        let replacementRange = NSRange(
+            location: session.dictationStartUTF16,
+            length: previousTranscriptUTF16Length
+        )
+        let plan = DictationTextApplicationPlan(
+            sessionKey: session.originSessionKey,
+            baseSnapshot: session.baseSnapshot,
+            replacementRange: replacementRange,
+            fallbackLocation: session.dictationStartUTF16,
+            replacementText: replacementText,
+            moveCursorToEnd: true
+        )
+        transcriptOwnership = .active(session)
+        bridge.apply(plan)
         let elapsedMs = Int((CFAbsoluteTimeGetCurrent() - startedAt) * 1_000)
         logDictation("DICTATION_PERF ts=\(Date().timeIntervalSince1970) event=apply_transcript_end elapsedMs=\(elapsedMs)")
         logger.notice("[DICTATION-PERF] applyTranscriptIfNeeded: \(elapsedMs, privacy: .public)ms")
+    }
+
+    private func currentTranscriptReplayPlan() -> DictationTextApplicationPlan? {
+        guard let session = activeTranscriptSession() else { return nil }
+        guard !session.originSessionKey.isEmpty else { return nil }
+        guard session.originSessionKey == currentSessionKey else { return nil }
+        switch state {
+        case .dictatingSticky, .dictatingPaused, .dictatingWalkieTalkie, .finalizing, .stoppingKeep:
+            break
+        case .idleSurfaceClosed, .keyPromptModal, .keyVerifyingModal, .stoppingDiscard, .error:
+            return nil
+        }
+        return DictationTextApplicationPlan(
+            sessionKey: session.originSessionKey,
+            baseSnapshot: session.baseSnapshot,
+            replacementRange: NSRange(
+                location: session.dictationStartUTF16,
+                length: session.previousTranscriptUTF16Length
+            ),
+            fallbackLocation: session.dictationStartUTF16,
+            replacementText: NSAttributedString(
+                string: session.committedText + session.provisionalText,
+                attributes: defaultTextAttributes()
+            ),
+            moveCursorToEnd: true
+        )
+    }
+
+    private func resolvedTranscriptAnchorRange(
+        activationSelectionRange: NSRange?,
+        preferredSelectionRange: NSRange?,
+        snapshot: ComposeDraftSnapshot
+    ) -> NSRange {
+        let selectedRange = activationSelectionRange ?? preferredSelectionRange
+        return safeReplacementRange(
+            selectedRange: selectedRange ?? NSRange(location: NSNotFound, length: 0),
+            textLength: snapshot.content.length,
+            fallbackLocation: snapshot.content.length
+        )
+    }
+
+    private func defaultTextAttributes() -> [NSAttributedString.Key: Any] {
+        [
+            .font: UIFont.preferredFont(forTextStyle: .body),
+            .foregroundColor: UIColor.label
+        ]
+    }
+
+    private func reanchorTranscriptSession(
+        _ session: inout TranscriptSession,
+        to selectionRange: NSRange,
+        text: String,
+        textLength: Int
+    ) {
+        let clampedSelectionRange = safeReplacementRange(
+            selectedRange: selectionRange,
+            textLength: textLength,
+            fallbackLocation: textLength
+        )
+        let selectedText = substring(text: text, utf16Range: clampedSelectionRange) ?? ""
+
+        session.dictationStartUTF16 = clampedSelectionRange.location
+        session.committedLenUTF16 = 0
+        session.provisionalText = selectedText
+        session.suppressedUntilNextEndpoint = false
+        session.committedText = ""
+    }
+
+    private func noteUserEdit(
+        session: inout TranscriptSession,
+        editedRangeUTF16: NSRange,
+        replacementUTF16Length: Int
+    ) {
+        let provisionalRange = NSRange(
+            location: session.dictationStartUTF16 + session.committedLenUTF16,
+            length: session.provisionalLenUTF16
+        )
+        if rangesIntersect(editedRangeUTF16, provisionalRange) {
+            session.committedText += session.provisionalText
+            session.committedLenUTF16 += session.provisionalLenUTF16
+            session.provisionalText = ""
+            session.suppressedUntilNextEndpoint = true
+        }
+
+        let committedStart = session.dictationStartUTF16
+        let committedEnd = committedStart + session.committedLenUTF16
+        let newCommittedStart = transformBoundary(
+            committedStart,
+            editedRange: editedRangeUTF16,
+            replacementUTF16Length: replacementUTF16Length,
+            affinity: .start
+        )
+        let newCommittedEnd = transformBoundary(
+            committedEnd,
+            editedRange: editedRangeUTF16,
+            replacementUTF16Length: replacementUTF16Length,
+            affinity: .end
+        )
+
+        session.dictationStartUTF16 = max(0, newCommittedStart)
+        session.committedLenUTF16 = max(0, newCommittedEnd - newCommittedStart)
+    }
+
+    private func applySegmentUpdate(_ update: DictationSegmentUpdate, to session: inout TranscriptSession) {
+        var shouldSkipFirstEndpointCommit = session.suppressedUntilNextEndpoint
+        var processedAnyEndpoint = false
+
+        for segment in update.committedSegments {
+            processedAnyEndpoint = true
+            if shouldSkipFirstEndpointCommit {
+                shouldSkipFirstEndpointCommit = false
+                session.suppressedUntilNextEndpoint = false
+                session.provisionalText = ""
+                continue
+            }
+
+            session.committedText += segment
+            session.committedLenUTF16 += segment.utf16.count
+            session.provisionalText = ""
+        }
+
+        if session.suppressedUntilNextEndpoint && update.sawEndpoint && !processedAnyEndpoint {
+            session.suppressedUntilNextEndpoint = false
+            shouldSkipFirstEndpointCommit = false
+            session.provisionalText = ""
+        } else {
+            session.suppressedUntilNextEndpoint = shouldSkipFirstEndpointCommit
+        }
+
+        if !session.suppressedUntilNextEndpoint {
+            session.provisionalText = update.provisionalText
+        }
+
+        if update.finished {
+            if session.suppressedUntilNextEndpoint {
+                session.suppressedUntilNextEndpoint = false
+                session.provisionalText = ""
+            } else if !session.provisionalText.isEmpty {
+                session.committedText += session.provisionalText
+                session.committedLenUTF16 += session.provisionalLenUTF16
+                session.provisionalText = ""
+            }
+        }
+    }
+
+    private func syncCommittedText(from text: String, session: inout TranscriptSession) {
+        let committedRange = NSRange(location: session.dictationStartUTF16, length: session.committedLenUTF16)
+        guard let committedSubstring = substring(text: text, utf16Range: committedRange) else { return }
+        session.committedText = committedSubstring
+    }
+
+    private func safeReplacementRange(selectedRange: NSRange, textLength: Int, fallbackLocation: Int) -> NSRange {
+        let replacementLength = selectedRange.location == NSNotFound ? 0 : selectedRange.length
+        let location = selectedRange.location == NSNotFound
+            ? min(max(fallbackLocation, 0), textLength)
+            : min(max(selectedRange.location, 0), textLength)
+        let length = min(max(replacementLength, 0), max(0, textLength - location))
+        return NSRange(location: location, length: length)
+    }
+
+    private func substring(text: String, utf16Range: NSRange) -> String? {
+        let nsString = text as NSString
+        guard utf16Range.location >= 0,
+              utf16Range.length >= 0,
+              utf16Range.location + utf16Range.length <= nsString.length else {
+            return nil
+        }
+        return nsString.substring(with: utf16Range)
+    }
+
+    private enum BoundaryAffinity {
+        case start
+        case end
+    }
+
+    private func transformBoundary(
+        _ boundary: Int,
+        editedRange: NSRange,
+        replacementUTF16Length: Int,
+        affinity: BoundaryAffinity
+    ) -> Int {
+        let editStart = editedRange.location
+        let editEnd = editedRange.location + editedRange.length
+        let delta = replacementUTF16Length - editedRange.length
+
+        if boundary < editStart {
+            return boundary
+        }
+        if boundary > editEnd {
+            return boundary + delta
+        }
+
+        switch affinity {
+        case .start:
+            return editStart
+        case .end:
+            return editStart + replacementUTF16Length
+        }
+    }
+
+    private func rangesIntersect(_ a: NSRange, _ b: NSRange) -> Bool {
+        if a.length == 0 {
+            let point = a.location
+            return point >= b.location && point <= b.location + b.length
+        }
+        return NSIntersectionRange(a, b).length > 0
     }
 
     private func mergeTranscriptUpdates(

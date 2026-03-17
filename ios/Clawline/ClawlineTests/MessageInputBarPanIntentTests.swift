@@ -35,9 +35,28 @@ private final class TestPanGestureRecognizer: UIPanGestureRecognizer {
 }
 
 @MainActor
+private final class TestTextView: UITextView {
+    private var simulatedFirstResponder = false
+
+    override var isFirstResponder: Bool {
+        simulatedFirstResponder
+    }
+
+    override func becomeFirstResponder() -> Bool {
+        simulatedFirstResponder = true
+        return true
+    }
+
+    override func resignFirstResponder() -> Bool {
+        simulatedFirstResponder = false
+        return true
+    }
+}
+
+@MainActor
 private final class PanGestureCoordinatorHarness {
     let coordinator: DictationPanGestureInstaller.Coordinator
-    let textView: UITextView
+    let textView: TestTextView
     let textGestureRecognizer = UIPanGestureRecognizer()
 
     private let window: UIWindow
@@ -56,7 +75,7 @@ private final class PanGestureCoordinatorHarness {
         }
 
         coordinator = DictationPanGestureInstaller.debugCoordinatorForTests(onEnded: onEnded)
-        textView = UITextView(frame: CGRect(x: 24, y: 30, width: 220, height: 56))
+        textView = TestTextView(frame: CGRect(x: 24, y: 30, width: 220, height: 56))
         textView.isSelectable = true
         textView.isScrollEnabled = true
         textView.addGestureRecognizer(textGestureRecognizer)
@@ -97,7 +116,9 @@ private final class PanGestureCoordinatorHarness {
         _ = textView.becomeFirstResponder()
         sendPan(state: .began)
         sendPan(state: .changed, translation: CGPoint(x: 0, y: -48), velocity: CGPoint(x: 0, y: -320))
-        coordinator.debugPrimeTextViewLock(textView)
+        if textGestureRecognizer.isEnabled || textView.isScrollEnabled {
+            coordinator.debugPrimeTextViewLock(textView)
+        }
     }
 
     func sendPan(state: UIGestureRecognizer.State, translation: CGPoint = .zero, velocity: CGPoint = .zero) {

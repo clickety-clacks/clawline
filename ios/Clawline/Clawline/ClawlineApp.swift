@@ -25,6 +25,9 @@ struct ClawlineApp: App {
     private let uploadService: any UploadServicing
 
     init() {
+#if DEBUG
+        Self.resetPersistentAppStateForUnitTestsIfNeeded()
+#endif
         if #available(iOS 13.0, *) {
             UIView.appearance(whenContainedInInstancesOf: [UIHostingController<AnyView>.self]).backgroundColor = .clear
             UIScrollView.appearance(whenContainedInInstancesOf: [UIHostingController<AnyView>.self]).backgroundColor = .clear
@@ -134,6 +137,12 @@ struct ClawlineApp: App {
 
 #if DEBUG
 private extension ClawlineApp {
+    static func resetPersistentAppStateForUnitTestsIfNeeded() {
+        guard NSClassFromString("XCTestCase") != nil else { return }
+        ProviderBaseURLStore.clearBaseURL()
+        AuthManager.resetPersistentCredentialsForTesting()
+    }
+
     static func configureDebugAdminIfNeeded(authManager: AuthManager) {
         let processInfo = ProcessInfo.processInfo
         let envValue = processInfo.environment["CLAWLINE_DEBUG_FORCE_ADMIN"]

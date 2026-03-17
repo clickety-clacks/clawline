@@ -18,14 +18,14 @@ struct StreamPageDotsViewTests {
         #expect(hitRect.width == originalFrame.width)
     }
 
-    @Test("Cold-start pager fallback ignores frozen settled composer height")
-    func startupPagerFallbackMatchesMainGeometry() {
+    @Test("Frozen layout fallback reuses settled composer height")
+    func frozenPagerFallbackUsesSettledHeight() {
         let fallbackHeight = runtimeInsetFallbackBarHeight(
             measuredInputBarHeight: 0,
             settledInputBarHeight: 88,
             layoutFrozen: true
         )
 
-        #expect(fallbackHeight == MessageInputBarMetrics.minInputBarHeight)
+        #expect(fallbackHeight == 88)
     }
 }

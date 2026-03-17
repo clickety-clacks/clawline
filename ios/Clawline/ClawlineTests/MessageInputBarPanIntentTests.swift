@@ -260,6 +260,23 @@ struct MessageInputBarPanIntentTests {
     }
 
     @MainActor
+    @Test("Reported behavior 4: input stays responsive after dictation drag teardown")
+    func reportedBehaviorInputRemainsResponsiveAfterDictation() {
+        let harness = PanGestureCoordinatorHarness()
+
+        harness.beginActiveDragOnFocusedEditor()
+        harness.sendPan(state: .ended)
+
+        harness.textView.selectedRange = NSRange(location: 0, length: 0)
+        harness.textView.insertText("h")
+
+        #expect(harness.textGestureRecognizer.isEnabled == true)
+        #expect(harness.textView.isSelectable == true)
+        #expect(harness.textView.isScrollEnabled == true)
+        #expect(harness.textView.text == "h")
+    }
+
+    @MainActor
     @Test("Dismiss callback sees editor interaction restored before surface teardown")
     func dismissCallbackRunsAfterEditorInteractionIsRestored() {
         var selectableDuringEndedCallback: Bool?

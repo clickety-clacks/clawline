@@ -451,6 +451,40 @@ struct DictationCoordinatorTests {
         #expect(harness.client.connectCallCount >= 2)
     }
 
+    @Test("Reported behavior 3: swipe-down dismiss collapses dictation surface")
+    @MainActor
+    func reportedBehaviorSwipeDownDismisses() async {
+        let harness = DictationTestHarness(
+            timing: DictationTiming(
+                maxSessionDuration: .seconds(30),
+                tokenInactivityTimeout: .seconds(30),
+                stopKeepFinalizeTimeout: .milliseconds(80),
+                sendFinalizeTimeout: .milliseconds(60)
+            )
+        )
+        let coordinator = harness.makeCoordinator()
+
+        coordinator.updateContext(
+            sessionKey: harness.host.activeSessionKey,
+            composeIsEmpty: true,
+            textFieldFocused: true,
+            selectionLength: 0,
+            reduceMotionEnabled: false
+        )
+
+        coordinator.startStickyDictation()
+        await waitUntil { coordinator.isStickyDictationActive }
+
+        coordinator.dismissSurfaceFromUserGesture()
+
+        await waitUntil(timeoutMs: 1_500) {
+            !coordinator.isSurfaceOpen && !coordinator.isDictationActive
+        }
+
+        #expect(!coordinator.isSurfaceOpen)
+        #expect(!coordinator.isDictationActive)
+    }
+
     @Test("Discard restores pre-dictation snapshot")
     @MainActor
     func discardRestoresSnapshot() async {

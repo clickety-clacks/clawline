@@ -255,6 +255,42 @@ struct ComposeInputDictationBridgeEndpointCommitTests {
         #expect(textView.attributedText.string == "alpha spoken omega")
     }
 
+    @Test("Reported behavior 1: dictation inserts text into compose field")
+    func reportedBehaviorTextInsertedAfterDictation() {
+        let host = BridgeEndpointTestHost()
+        let bridge = ComposeInputDictationBridge(host: host)
+        let textView = PastableTextView()
+
+        seed(textView: textView, with: "", selectedRange: NSRange(location: 0, length: 0))
+        bridge.setComposeTextView(textView)
+        bridge.resetTranscriptState(for: host.activeSessionKey)
+
+        apply(bridge: bridge, update: update(provisional: "hello"), host: host)
+
+        #expect(textView.attributedText.string == "hello")
+    }
+
+    @Test("Reported behavior 2: swipe-up dictation does not duplicate inserted text")
+    func reportedBehaviorNoDuplicateInsertionOnSwipeUp() {
+        let host = BridgeEndpointTestHost()
+        let bridge = ComposeInputDictationBridge(host: host)
+        let textView = PastableTextView()
+
+        seed(textView: textView, with: "", selectedRange: NSRange(location: 0, length: 0))
+        bridge.setComposeTextView(textView)
+        bridge.resetTranscriptState(for: host.activeSessionKey)
+
+        apply(bridge: bridge, update: update(provisional: "hello"), host: host)
+        apply(bridge: bridge, update: update(provisional: "hello"), host: host)
+        apply(
+            bridge: bridge,
+            update: update(committed: ["hello"], sawEndpoint: true),
+            host: host
+        )
+
+        #expect(textView.attributedText.string == "hello")
+    }
+
     @Test("Session key mismatch skips bridge updates")
     func sessionKeyMismatchSkipsBridgeUpdates() {
         let host = BridgeEndpointTestHost()

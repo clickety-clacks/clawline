@@ -335,7 +335,15 @@ class ProviderChatService: ChatServicing {
 
             let shouldNotifyDisconnect = self.shouldNotifyDisconnect
             let pendingDisconnectReason = self.pendingDisconnectReason
-            resetTransportState(closeSocket: false)
+            if attemptState != nil, sessionState == nil {
+                receiveTask?.cancel()
+                receiveTask = nil
+                socket = nil
+                authToken = nil
+                sessionState = nil
+            } else {
+                resetTransportState(closeSocket: false)
+            }
             self.shouldNotifyDisconnect = true
             self.pendingDisconnectReason = nil
 
@@ -972,7 +980,12 @@ class ProviderChatService: ChatServicing {
                     payload: .transportOpened,
                     generation: generation
                 )
-                try await sendAuth(client: client, token: token, lastMessageId: lastMessageId)
+                try await awaitAuthResult(
+                    client: client,
+                    generation: generation,
+                    token: token,
+                    forcedLastMessageId: lastMessageId
+                )
                 return
             } catch {
                 if index < wsURLs.count - 1, shouldFallbackToNextTransport(after: error) {

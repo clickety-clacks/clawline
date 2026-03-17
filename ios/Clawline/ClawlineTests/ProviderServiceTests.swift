@@ -182,6 +182,52 @@ struct ProviderServiceTests {
         #expect(connector.connectedURLs.last?.absoluteString == "ws://example.com/ws")
     }
 
+    @Test("Managed lifecycle connect falls back to ws when secure transport closes before auth completes")
+    @MainActor
+    func managedLifecycleConnectFallsBackAfterPreAuthSocketClose() async throws {
+        let secureSocket = MockWebSocketClient()
+        let fallbackSocket = MockWebSocketClient()
+        let connector = AsyncFallbackMockWebSocketConnector(
+            secureClient: secureSocket,
+            fallbackClient: fallbackSocket
+        )
+        let baseURL = URL(string: "http://example.com")!
+        let service = ProviderChatService(
+            connector: connector,
+            deviceId: "device_123",
+            baseURLProvider: { baseURL }
+        )
+
+        let stateMonitor = Task {
+            var iterator = service.connectionState.makeAsyncIterator()
+            while let state = await iterator.next() {
+                if state == .connected {
+                    return true
+                }
+            }
+            return false
+        }
+        defer { stateMonitor.cancel() }
+
+        service.startConnectionAttempt(epoch: 1, lastMessageId: nil, token: "jwt")
+
+        Task {
+            try await Task.sleep(forDuration: .milliseconds(20))
+            secureSocket.close(with: .normalClosure)
+            try await Task.sleep(forDuration: .milliseconds(20))
+            fallbackSocket.enqueue(text: #"{ "type": "auth_result", "success": true }"#)
+        }
+
+        try await waitUntil(timeout: .seconds(1)) {
+            connector.connectedURLs.count == 2
+        }
+        let sawConnected = try await waitForTaskValue(timeout: .seconds(1), task: stateMonitor)
+
+        #expect(connector.connectedURLs.first?.absoluteString == "wss://example.com/ws")
+        #expect(connector.connectedURLs.last?.absoluteString == "ws://example.com/ws")
+        #expect(sawConnected)
+    }
+
     @Test("Chat send serializes message payload")
     func chatSendSerializesPayload() async throws {
         let mockSocket = MockWebSocketClient()
@@ -506,6 +552,25 @@ private final class FallbackMockWebSocketConnector: WebSocketConnecting {
     }
 }
 
+private final class AsyncFallbackMockWebSocketConnector: WebSocketConnecting {
+    let secureClient: MockWebSocketClient
+    let fallbackClient: MockWebSocketClient
+    private(set) var connectedURLs: [URL] = []
+
+    init(secureClient: MockWebSocketClient, fallbackClient: MockWebSocketClient) {
+        self.secureClient = secureClient
+        self.fallbackClient = fallbackClient
+    }
+
+    func connect(to url: URL) async throws -> any WebSocketClient {
+        connectedURLs.append(url)
+        if url.scheme == "wss" {
+            return secureClient
+        }
+        return fallbackClient
+    }
+}
+
 private final class MockWebSocketClient: WebSocketClient {
     private let stream: AsyncStream<String>
     private let continuation: AsyncStream<String>.Continuation
@@ -573,4 +638,39 @@ private final class HangingWebSocketClient: WebSocketClient {
     }
 
     func close(with code: URLSessionWebSocketTask.CloseCode?) {}
+}
+
+private func waitUntil(
+    timeout: Duration,
+    poll: Duration = .milliseconds(10),
+    condition: @escaping @Sendable () -> Bool
+) async throws {
+    let clock = ContinuousClock()
+    let deadline = clock.now + timeout
+
+    while !condition() {
+        if clock.now >= deadline {
+            throw CancellationError()
+        }
+        try await Task.sleep(forDuration: poll)
+    }
+}
+
+private func waitForTaskValue<T: Sendable>(
+    timeout: Duration,
+    task: Task<T, Never>
+) async throws -> T {
+    try await withThrowingTaskGroup(of: T.self) { group in
+        group.addTask {
+            await task.value
+        }
+        group.addTask {
+            try await Task.sleep(forDuration: timeout)
+            throw CancellationError()
+        }
+
+        let value = try await group.next()!
+        group.cancelAll()
+        return value
+    }
 }

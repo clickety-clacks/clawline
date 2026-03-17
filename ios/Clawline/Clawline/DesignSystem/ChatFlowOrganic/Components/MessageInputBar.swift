@@ -204,6 +204,7 @@ struct DictationPanGestureInstaller: UIViewControllerRepresentable {
         private var activeTextView: UITextView?
         private var activeTextViewWasScrollEnabled = false
         private var activeTextViewWasSelectable = false
+        private var activeTextViewGestureRecognizerStates: [(UIGestureRecognizer, Bool)] = []
         private var lastScenePhase: ScenePhase?
 
         init(
@@ -340,9 +341,13 @@ struct DictationPanGestureInstaller: UIViewControllerRepresentable {
 
         private func resetGestureState() {
             if let activeTextView {
+                for (gestureRecognizer, wasEnabled) in activeTextViewGestureRecognizerStates {
+                    gestureRecognizer.isEnabled = wasEnabled
+                }
                 activeTextView.isScrollEnabled = activeTextViewWasScrollEnabled
                 activeTextView.isSelectable = activeTextViewWasSelectable
             }
+            activeTextViewGestureRecognizerStates.removeAll(keepingCapacity: false)
             activeTextView = nil
             activeTextViewWasScrollEnabled = false
             activeTextViewWasSelectable = false
@@ -390,10 +395,15 @@ struct DictationPanGestureInstaller: UIViewControllerRepresentable {
             if activeTextView.isScrollEnabled {
                 activeTextView.isScrollEnabled = false
             }
-            // Toggling selectability on the active first responder drops the software
-            // keyboard mid-dictation. Keep the keyboard up and only take the stronger
-            // selection lock when the editor is not currently owning first responder.
-            if activeTextView.isSelectable, !activeTextView.isFirstResponder {
+            if activeTextView.isFirstResponder {
+                if activeTextViewGestureRecognizerStates.isEmpty {
+                    let gestureRecognizers = activeTextView.gestureRecognizers ?? []
+                    activeTextViewGestureRecognizerStates = gestureRecognizers.map { ($0, $0.isEnabled) }
+                    for gestureRecognizer in gestureRecognizers where gestureRecognizer.isEnabled {
+                        gestureRecognizer.isEnabled = false
+                    }
+                }
+            } else if activeTextView.isSelectable {
                 activeTextView.isSelectable = false
             }
         }

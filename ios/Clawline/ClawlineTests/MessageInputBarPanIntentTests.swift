@@ -38,6 +38,7 @@ private final class TestPanGestureRecognizer: UIPanGestureRecognizer {
 private final class PanGestureCoordinatorHarness {
     let coordinator: DictationPanGestureInstaller.Coordinator
     let textView: UITextView
+    let textGestureRecognizer = UIPanGestureRecognizer()
 
     private let window: UIWindow
     private let rootViewController: UIViewController
@@ -58,6 +59,7 @@ private final class PanGestureCoordinatorHarness {
         textView = UITextView(frame: CGRect(x: 24, y: 30, width: 220, height: 56))
         textView.isSelectable = true
         textView.isScrollEnabled = true
+        textView.addGestureRecognizer(textGestureRecognizer)
 
         window = resolvedWindow
         if let existingRoot = window.rootViewController {
@@ -89,6 +91,13 @@ private final class PanGestureCoordinatorHarness {
             coordinator.debugPrimeTextViewLock(textView)
         }
         #expect(textView.isSelectable == false)
+    }
+
+    func beginActiveDragOnFocusedEditor() {
+        _ = textView.becomeFirstResponder()
+        sendPan(state: .began)
+        sendPan(state: .changed, translation: CGPoint(x: 0, y: -48), velocity: CGPoint(x: 0, y: -320))
+        coordinator.debugPrimeTextViewLock(textView)
     }
 
     func sendPan(state: UIGestureRecognizer.State, translation: CGPoint = .zero, velocity: CGPoint = .zero) {
@@ -230,6 +239,22 @@ struct MessageInputBarPanIntentTests {
 
         harness.beginActiveDragThatLocksSelection()
         harness.sendPan(state: .cancelled)
+        #expect(harness.textView.isSelectable == true)
+        #expect(harness.textView.isScrollEnabled == true)
+    }
+
+    @MainActor
+    @Test("Focused editor drag disables text gestures without dropping selectability")
+    func focusedEditorDragDisablesTextGesturesWithoutDroppingSelectability() {
+        let harness = PanGestureCoordinatorHarness()
+
+        harness.beginActiveDragOnFocusedEditor()
+        #expect(harness.textView.isFirstResponder)
+        #expect(harness.textView.isSelectable == true)
+        #expect(harness.textGestureRecognizer.isEnabled == false)
+
+        harness.sendPan(state: .ended)
+        #expect(harness.textGestureRecognizer.isEnabled == true)
         #expect(harness.textView.isSelectable == true)
         #expect(harness.textView.isScrollEnabled == true)
     }

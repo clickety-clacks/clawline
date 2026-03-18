@@ -607,6 +607,91 @@ struct ProviderServiceTests {
         #expect(!streams[1].adopted)
     }
 
+    @Test("Reorder streams request patches ordered session keys to provider")
+    func reorderStreamsPatchesOrderedSessionKeysToProvider() async throws {
+        let mockSocket = MockWebSocketClient()
+        let connector = MockWebSocketConnector(client: mockSocket)
+        let baseURL = URL(string: "https://example.com")!
+        defer { HTTPStubURLProtocol.requestHandler = nil }
+        HTTPStubURLProtocol.requestHandler = { request in
+            #expect(request.url?.path == "/api/streams")
+            #expect(request.httpMethod == "PATCH")
+            #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer jwt")
+            let body = try JSONSerialization.jsonObject(with: request.httpBody ?? Data()) as? [String: Any]
+            #expect(body?["sessionKeys"] as? [String] == [
+                "agent:main:clawline:user:s_bravo",
+                "agent:main:clawline:user:main",
+                "agent:main:clawline:user:s_alpha",
+            ])
+            let data = #"""
+            {
+              "streams": [
+                {
+                  "sessionKey": "agent:main:clawline:user:s_bravo",
+                  "displayName": "Bravo",
+                  "kind": "custom",
+                  "orderIndex": 0,
+                  "isBuiltIn": false,
+                  "createdAt": 1700000000000,
+                  "updatedAt": 1700000000000
+                },
+                {
+                  "sessionKey": "agent:main:clawline:user:main",
+                  "displayName": "Personal",
+                  "kind": "main",
+                  "orderIndex": 1,
+                  "isBuiltIn": true,
+                  "createdAt": 1700000000000,
+                  "updatedAt": 1700000000000
+                },
+                {
+                  "sessionKey": "agent:main:clawline:user:s_alpha",
+                  "displayName": "Alpha",
+                  "kind": "custom",
+                  "orderIndex": 2,
+                  "isBuiltIn": false,
+                  "createdAt": 1700000000000,
+                  "updatedAt": 1700000000000
+                }
+              ]
+            }
+            """#.data(using: .utf8) ?? Data()
+            return (
+                HTTPURLResponse(
+                    url: request.url ?? baseURL,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                data
+            )
+        }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [HTTPStubURLProtocol.self]
+        let urlSession = URLSession(configuration: configuration)
+        let streamAPIClient = StreamAPIClient(baseURLProvider: { baseURL }, session: urlSession)
+        let service = ProviderChatService(
+            connector: connector,
+            deviceId: "device_123",
+            baseURLProvider: { baseURL },
+            authTokenProvider: { "jwt" },
+            streamAPIClient: streamAPIClient
+        )
+
+        let streams = try await service.reorderStreams(sessionKeys: [
+            "agent:main:clawline:user:s_bravo",
+            "agent:main:clawline:user:main",
+            "agent:main:clawline:user:s_alpha",
+        ])
+
+        #expect(streams.map(\.sessionKey) == [
+            "agent:main:clawline:user:s_bravo",
+            "agent:main:clawline:user:main",
+            "agent:main:clawline:user:s_alpha",
+        ])
+        #expect(streams.map(\.orderIndex) == [0, 1, 2])
+    }
+
     @Test("Adopt stream request posts session key to provider")
     func adoptStreamPostsSessionKeyToProvider() async throws {
         let mockSocket = MockWebSocketClient()

@@ -169,6 +169,29 @@ final class StubChatService: ChatServicing {
         return stream
     }
 
+    func reorderStreams(sessionKeys: [String]) async throws -> [StreamSession] {
+        let bySessionKey = Dictionary(uniqueKeysWithValues: streams.map { ($0.sessionKey, $0) })
+        let now = Date()
+        let reordered = try sessionKeys.enumerated().map { index, sessionKey in
+            guard let stream = bySessionKey[sessionKey] else {
+                throw StreamAPIError(code: "stream_not_found", message: "Stream not found", statusCode: 404)
+            }
+            return StreamSession(
+                sessionKey: stream.sessionKey,
+                displayName: stream.displayName,
+                kind: stream.kind,
+                orderIndex: index,
+                isBuiltIn: stream.isBuiltIn,
+                createdAt: stream.createdAt,
+                updatedAt: now,
+                trackingMode: stream.trackingMode
+            )
+        }
+        streams = reordered
+        serviceEventContinuation?.yield(.streamSnapshot(reordered))
+        return reordered
+    }
+
     func adoptStream(sessionKey: String) async throws -> StreamSession {
         let now = Date()
         let stream = StreamSession(

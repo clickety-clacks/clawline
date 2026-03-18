@@ -296,6 +296,20 @@ final class ProviderChatService: ChatServicing {
         }
     }
 
+    func reorderStreams(sessionKeys: [String]) async throws -> [StreamSession] {
+        guard let token = await resolveControlPlaneToken() else {
+            throw Error.notConnected
+        }
+        do {
+            return try await streamAPIClient.reorderStreams(
+                sessionKeys: sessionKeys,
+                token: token
+            )
+        } catch {
+            throw mapStreamAPIError(error)
+        }
+    }
+
     func adoptStream(sessionKey: String) async throws -> StreamSession {
         guard let token = await resolveControlPlaneToken() else {
             throw Error.notConnected

@@ -7,6 +7,7 @@
 
 import SwiftUI
 import UIKit
+import UniformTypeIdentifiers
 
 struct StreamManagerSheet: View {
     @Environment(\.colorScheme) private var colorScheme
@@ -24,9 +25,12 @@ struct StreamManagerSheet: View {
     @State private var searchQuery = ""
     @State private var activeEditor: EditorMode?
     @State private var isWorking = false
+    @State private var isReordering = false
     @State private var removingSessionKeys: Set<String> = []
     @State private var pendingCreateRows: [PendingCreateRow] = []
     @State private var pendingRemovalStream: StreamSession?
+    @State private var displayedSessionKeys: [String] = []
+    @State private var draggedSessionKey: String?
     @FocusState private var focusedEditor: EditorMode?
 
     private enum EditorMode: Hashable {
@@ -36,6 +40,43 @@ struct StreamManagerSheet: View {
     private struct PendingCreateRow: Identifiable, Hashable {
         let id: UUID
         let displayName: String
+    }
+
+    private struct StreamReorderDropDelegate: DropDelegate {
+        let targetSessionKey: String
+        let isEnabled: Bool
+        @Binding var displayedSessionKeys: [String]
+        @Binding var draggedSessionKey: String?
+        let onCommit: @MainActor () -> Void
+
+        func dropEntered(info: DropInfo) {
+            guard isEnabled, let draggedSessionKey, draggedSessionKey != targetSessionKey else { return }
+            guard let fromIndex = displayedSessionKeys.firstIndex(of: draggedSessionKey),
+                  let toIndex = displayedSessionKeys.firstIndex(of: targetSessionKey) else { return }
+            guard displayedSessionKeys[toIndex] != draggedSessionKey else { return }
+            withAnimation(.snappy(duration: 0.18)) {
+                displayedSessionKeys.move(
+                    fromOffsets: IndexSet(integer: fromIndex),
+                    toOffset: toIndex > fromIndex ? toIndex + 1 : toIndex
+                )
+            }
+        }
+
+        func dropUpdated(info: DropInfo) -> DropProposal? {
+            isEnabled ? DropProposal(operation: .move) : nil
+        }
+
+        func performDrop(info: DropInfo) -> Bool {
+            guard isEnabled else {
+                draggedSessionKey = nil
+                return false
+            }
+            draggedSessionKey = nil
+            Task { @MainActor in
+                onCommit()
+            }
+            return true
+        }
     }
 
     private let listRowHeight: CGFloat = 52
@@ -64,12 +105,36 @@ struct StreamManagerSheet: View {
         colorScheme == .dark ? Color.white.opacity(0.62) : Color.black.opacity(0.34)
     }
 
+    private var isMutatingStreams: Bool {
+        isWorking || isReordering || !removingSessionKeys.isEmpty
+    }
+
+    private var streamLookup: [String: StreamSession] {
+        Dictionary(uniqueKeysWithValues: streams.map { ($0.sessionKey, $0) })
+    }
+
+    private var orderedStreams: [StreamSession] {
+        let currentSessionKeys = streams.map(\.sessionKey)
+        let baselineSessionKeys = displayedSessionKeys.isEmpty ? currentSessionKeys : displayedSessionKeys
+        var resolvedSessionKeys: [String] = []
+        var seenSessionKeys: Set<String> = []
+        for sessionKey in baselineSessionKeys where streamLookup[sessionKey] != nil {
+            if seenSessionKeys.insert(sessionKey).inserted {
+                resolvedSessionKeys.append(sessionKey)
+            }
+        }
+        for sessionKey in currentSessionKeys where seenSessionKeys.insert(sessionKey).inserted {
+            resolvedSessionKeys.append(sessionKey)
+        }
+        return resolvedSessionKeys.compactMap { streamLookup[$0] }
+    }
+
     private var listItemCount: Int {
         filteredStreams.count + filteredPendingCreateRows.count
     }
 
     private var filteredStreams: [StreamSession] {
-        StreamSelectorLayout.filter(streams: streams, query: searchQuery)
+        StreamSelectorLayout.filter(streams: orderedStreams, query: searchQuery)
     }
 
     private var filteredPendingCreateRows: [PendingCreateRow] {
@@ -115,6 +180,16 @@ struct StreamManagerSheet: View {
                 ForEach(filteredStreams) { stream in
                     rowContent(for: stream)
                         .frame(height: listRowHeight, alignment: .center)
+                        .onDrop(
+                            of: [UTType.text],
+                            delegate: StreamReorderDropDelegate(
+                                targetSessionKey: stream.sessionKey,
+                                isEnabled: canReorderStreams,
+                                displayedSessionKeys: $displayedSessionKeys,
+                                draggedSessionKey: $draggedSessionKey,
+                                onCommit: { persistReorderedStreams() }
+                            )
+                        )
                         .listRowInsets(
                             EdgeInsets(
                                 top: 0,
@@ -221,6 +296,12 @@ struct StreamManagerSheet: View {
                 searchQuery = ""
             }
         }
+        .onAppear {
+            synchronizeDisplayedSessionKeys()
+        }
+        .onChange(of: streams.map(\.sessionKey)) { _, _ in
+            synchronizeDisplayedSessionKeys()
+        }
         .alert(
             pendingRemovalTitle,
             isPresented: Binding(
@@ -271,7 +352,7 @@ struct StreamManagerSheet: View {
                         .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
                 }
                 .buttonStyle(.plain)
-                .disabled(activeEditor != nil || isWorking)
+                .disabled(activeEditor != nil || isMutatingStreams)
                 .accessibilityLabel("Track")
                 .accessibilityHint("Tracks an existing untracked session")
             }
@@ -291,7 +372,7 @@ struct StreamManagerSheet: View {
                     .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             }
             .buttonStyle(.plain)
-            .disabled(activeEditor != nil)
+            .disabled(activeEditor != nil || isMutatingStreams)
             .accessibilityLabel("Add stream")
             .accessibilityHint("Creates a new stream")
         }
@@ -316,51 +397,71 @@ struct StreamManagerSheet: View {
                     Task { await renameStream(stream) }
                 }
         } else {
-            Button {
-                let selectedSessionKey = stream.sessionKey
-                isPresented = false
-                // Avoid mutating presentation + selected stream in the same synchronous tap turn.
-                // Deferring selection to the next main-actor cycle prevents picker-triggered UI lockups.
-                Task { @MainActor in
-                    await Task.yield()
-                    onSelectStream(selectedSessionKey)
-                }
-            } label: {
-                HStack(spacing: 10) {
-                    let isActive = stream.sessionKey == viewModel.uiSelectedSessionKey
-                    let hasUnread = unreadSessionKeys.contains(stream.sessionKey)
-                    Circle()
-                        .fill(
-                            StreamDotColor.resolve(
-                                isActive: isActive,
-                                hasUnread: hasUnread,
-                                colorScheme: colorScheme
-                            )
-                        )
-                        .frame(width: 8, height: 8)
-                        .shadow(
-                            color: isActive ? StreamDotColor.activeGlow(colorScheme: colorScheme) : .clear,
-                            radius: isActive ? StreamDotColor.activeOuterGlowRadius(colorScheme: colorScheme) : 0
-                        )
-                        .shadow(
-                            color: isActive ? StreamDotColor.activeGlow(colorScheme: colorScheme) : .clear,
-                            radius: isActive ? StreamDotColor.activeInnerGlowRadius(colorScheme: colorScheme) : 0
-                        )
-                    Text(stream.displayName)
-                        .font(.clawline(.subsectionHeader).weight(isActive ? .semibold : .regular))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    if isRemovingStream(stream.sessionKey) {
-                        ProgressView()
-                            .controlSize(.small)
-                            .tint(.secondary)
+            HStack(spacing: 10) {
+                Button {
+                    let selectedSessionKey = stream.sessionKey
+                    isPresented = false
+                    // Avoid mutating presentation + selected stream in the same synchronous tap turn.
+                    // Deferring selection to the next main-actor cycle prevents picker-triggered UI lockups.
+                    Task { @MainActor in
+                        await Task.yield()
+                        onSelectStream(selectedSessionKey)
                     }
+                } label: {
+                    HStack(spacing: 10) {
+                        let isActive = stream.sessionKey == viewModel.uiSelectedSessionKey
+                        let hasUnread = unreadSessionKeys.contains(stream.sessionKey)
+                        Circle()
+                            .fill(
+                                StreamDotColor.resolve(
+                                    isActive: isActive,
+                                    hasUnread: hasUnread,
+                                    colorScheme: colorScheme
+                                )
+                            )
+                            .frame(width: 8, height: 8)
+                            .shadow(
+                                color: isActive ? StreamDotColor.activeGlow(colorScheme: colorScheme) : .clear,
+                                radius: isActive ? StreamDotColor.activeOuterGlowRadius(colorScheme: colorScheme) : 0
+                            )
+                            .shadow(
+                                color: isActive ? StreamDotColor.activeGlow(colorScheme: colorScheme) : .clear,
+                                radius: isActive ? StreamDotColor.activeInnerGlowRadius(colorScheme: colorScheme) : 0
+                            )
+                        Text(stream.displayName)
+                            .font(.clawline(.subsectionHeader).weight(isActive ? .semibold : .regular))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        if isRemovingStream(stream.sessionKey) {
+                            ProgressView()
+                                .controlSize(.small)
+                                .tint(.secondary)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
+                .buttonStyle(.plain)
+                .disabled(isMutatingStreams || isRemovingStream(stream.sessionKey))
+
+                if canShowDragHandle(for: stream) {
+                    dragHandle(for: stream)
+                }
             }
-            .buttonStyle(.plain)
-            .disabled(isWorking || isRemovingStream(stream.sessionKey))
         }
+    }
+
+    private func dragHandle(for stream: StreamSession) -> some View {
+        Image(systemName: "line.3.horizontal")
+            .font(.title3.weight(.semibold))
+            .foregroundStyle(canReorderStreams ? .secondary : .tertiary)
+            .frame(width: 28, height: 28, alignment: .center)
+            .contentShape(Rectangle())
+            .accessibilityLabel("Reorder \(stream.displayName)")
+            .accessibilityHint("Drag to reorder streams")
+            .onDrag {
+                draggedSessionKey = stream.sessionKey
+                return NSItemProvider(object: stream.sessionKey as NSString)
+            }
     }
 
     private func beginRenaming(_ stream: StreamSession) {
@@ -371,6 +472,23 @@ struct StreamManagerSheet: View {
         }
     }
 
+    private var canReorderStreams: Bool {
+        guard searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+        guard activeEditor == nil else { return false }
+        guard pendingRemovalStream == nil else { return false }
+        guard pendingCreateRows.isEmpty else { return false }
+        return !isMutatingStreams && orderedStreams.count > 1
+    }
+
+    private func canShowDragHandle(for stream: StreamSession) -> Bool {
+        canReorderStreams && !isRemovingStream(stream.sessionKey)
+    }
+
+    private func synchronizeDisplayedSessionKeys() {
+        guard !isReordering, draggedSessionKey == nil else { return }
+        displayedSessionKeys = streams.map(\.sessionKey)
+    }
+
     private func resetInlineEditing() {
         activeEditor = nil
         draftName = ""
@@ -378,17 +496,20 @@ struct StreamManagerSheet: View {
         removingSessionKeys.removeAll()
         pendingCreateRows.removeAll()
         pendingRemovalStream = nil
+        displayedSessionKeys = streams.map(\.sessionKey)
+        draggedSessionKey = nil
+        isReordering = false
     }
 
     private func canPerformRenameAction(for stream: StreamSession) -> Bool {
-        guard !isWorking else { return false }
+        guard !isMutatingStreams else { return false }
         guard !isRemovingStream(stream.sessionKey) else { return false }
         guard activeEditor != .renaming(stream.sessionKey) else { return false }
         return viewModel.canRenameStream(sessionKey: stream.sessionKey)
     }
 
     private func canPerformRemovalAction(for stream: StreamSession) -> Bool {
-        guard !isWorking else { return false }
+        guard !isMutatingStreams else { return false }
         guard !isRemovingStream(stream.sessionKey) else { return false }
         guard activeEditor != .renaming(stream.sessionKey) else { return false }
         return viewModel.isAdoptedStream(sessionKey: stream.sessionKey)
@@ -410,6 +531,23 @@ struct StreamManagerSheet: View {
             _ = await viewModel.createStream(displayName: name)
             await MainActor.run {
                 pendingCreateRows.removeAll { $0.id == pendingID }
+            }
+        }
+    }
+
+    private func persistReorderedStreams() {
+        guard canReorderStreams else { return }
+        let sessionKeys = orderedStreams.map(\.sessionKey)
+        guard sessionKeys != streams.map(\.sessionKey) else { return }
+        isReordering = true
+        Task {
+            let succeeded = await viewModel.reorderStreams(sessionKeys: sessionKeys)
+            await MainActor.run {
+                isReordering = false
+                draggedSessionKey = nil
+                if !succeeded {
+                    displayedSessionKeys = streams.map(\.sessionKey)
+                }
             }
         }
     }

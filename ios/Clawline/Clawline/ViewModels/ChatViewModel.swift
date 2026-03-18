@@ -1389,6 +1389,29 @@ final class ChatViewModel: ChatViewModelHosting {
         }
     }
 
+    func reorderStreams(sessionKeys: [String]) async -> Bool {
+        guard canReorderStreams(sessionKeys: sessionKeys) else { return false }
+        do {
+            let streams = try await chatService.reorderStreams(sessionKeys: sessionKeys)
+            applyStreamSnapshot(streams)
+            return true
+        } catch {
+            if shouldRetryReorderOnActiveConnection(after: error) {
+                do {
+                    try await reconnectActiveTransportForControlPlane()
+                    let streams = try await chatService.reorderStreams(sessionKeys: sessionKeys)
+                    applyStreamSnapshot(streams)
+                    return true
+                } catch {
+                    toastManager.show(error.localizedDescription)
+                    return false
+                }
+            }
+            toastManager.show(error.localizedDescription)
+            return false
+        }
+    }
+
     func renameStream(sessionKey: String, displayName: String) async -> Bool {
         guard canRenameStream(sessionKey: sessionKey) else { return false }
         let trimmed = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1447,6 +1470,19 @@ final class ChatViewModel: ChatViewModelHosting {
         return false
     }
 
+    private func shouldRetryReorderOnActiveConnection(after error: Swift.Error) -> Bool {
+        guard auth.token != nil else { return false }
+        if let providerError = error as? ProviderChatService.Error,
+           case .notConnected = providerError {
+            return true
+        }
+        if let streamError = error as? StreamAPIError,
+           streamError.code == "not_connected" {
+            return true
+        }
+        return false
+    }
+
     private func shouldRetryCreateOnActiveConnection(after error: Swift.Error) -> Bool {
         guard auth.token != nil else { return false }
         if let providerError = error as? ProviderChatService.Error,
@@ -1466,6 +1502,17 @@ final class ChatViewModel: ChatViewModelHosting {
         }
         let lastMessageId = chatService.replayCursorSnapshot().values.max()
         try await chatService.connect(token: token, lastMessageId: lastMessageId)
+    }
+
+    private func canReorderStreams(sessionKeys: [String]) -> Bool {
+        let normalizedSessionKeys = sessionKeys.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        guard normalizedSessionKeys.count > 1 else { return false }
+        let currentSessionKeys = orderedStreams.map(\.sessionKey)
+        guard normalizedSessionKeys.count == currentSessionKeys.count else { return false }
+        let normalizedSet = Set(normalizedSessionKeys)
+        let currentSet = Set(currentSessionKeys)
+        guard normalizedSet.count == normalizedSessionKeys.count else { return false }
+        return normalizedSet == currentSet
     }
 
     private static func makeIdempotencyKey() -> String {
@@ -2911,11 +2958,6 @@ final class ChatViewModel: ChatViewModelHosting {
     private func recalculateOrderedSessionKeys() {
         orderedSessionKeys = streamsBySessionKey.values
             .sorted { lhs, rhs in
-                let lhsPriority = streamOrderingPriority(lhs)
-                let rhsPriority = streamOrderingPriority(rhs)
-                if lhsPriority != rhsPriority {
-                    return lhsPriority < rhsPriority
-                }
                 if lhs.orderIndex == rhs.orderIndex {
                     return lhs.sessionKey < rhs.sessionKey
                 }
@@ -2934,17 +2976,6 @@ final class ChatViewModel: ChatViewModelHosting {
         if stream.sessionKey == SessionKey.admin { return true }
         if SessionKey.isClawlinePersonalDM(stream.sessionKey) { return true }
         return false
-    }
-
-    private func streamOrderingPriority(_ stream: StreamSession) -> Int {
-        switch stream.kind {
-        case "dm", "global_dm":
-            return 0
-        case "main":
-            return 1
-        default:
-            return 2
-        }
     }
 
     private func nextSyntheticOrderIndex(from streams: Dictionary<String, StreamSession>.Values? = nil) -> Int {

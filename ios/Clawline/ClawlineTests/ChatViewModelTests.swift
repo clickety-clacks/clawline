@@ -2178,6 +2178,42 @@ struct ChatViewModelTests {
         #expect(!viewModel.canDeleteStream(sessionKey: adoptedKey))
     }
 
+    @Test("Reorder streams applies provider order to ordered streams")
+    @MainActor
+    func reorderStreamsAppliesProviderOrder() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let customA = "agent:main:clawline:user:s_alpha"
+        let customB = "agent:main:clawline:user:s_bravo"
+        chatService.streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: customA, displayName: "Alpha", kind: "custom", orderIndex: 1, isBuiltIn: false),
+            makeStreamSession(sessionKey: customB, displayName: "Bravo", kind: "custom", orderIndex: 2, isBuiltIn: false),
+        ]
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
+
+        let reordered = await viewModel.reorderStreams(sessionKeys: [customB, personalSessionKey, customA])
+
+        #expect(reordered)
+        #expect(chatService.reorderStreamCallCount == 1)
+        #expect(chatService.lastReorderedSessionKeys == [customB, personalSessionKey, customA])
+        #expect(viewModel.orderedStreams.map(\.sessionKey) == [customB, personalSessionKey, customA])
+    }
+
     @Test("Server-adopted streams from provider override websocket snapshot without adopted flag")
     @MainActor
     func adoptedSessionsUseServerAdoptedFlagFromSnapshot() async throws {
@@ -2716,15 +2752,19 @@ private final class TestChatService: ChatServicing {
     var isTransportReadyForSend: Bool = false
     var sendError: Swift.Error?
     var createStreamError: Error?
+    var reorderStreamError: Error?
     var deleteStreamError: Error?
+    var reorderStreamErrorSequence: [Error] = []
     var deleteStreamErrorSequence: [Error] = []
     var fetchTrackableSessionsError: Error?
     var streams: [StreamSession] = []
     var trackableSessions: [TrackableSession] = []
     private(set) var fetchStreamsCallCount: Int = 0
     private(set) var fetchTrackableSessionsCallCount: Int = 0
+    private(set) var reorderStreamCallCount: Int = 0
     private(set) var deleteStreamCallCount: Int = 0
     private(set) var lastDeletedSessionKey: String?
+    private(set) var lastReorderedSessionKeys: [String] = []
     private(set) var renameStreamCallCount: Int = 0
     private(set) var adoptStreamCallCount: Int = 0
     private(set) var lastAdoptedSessionKey: String?
@@ -2887,6 +2927,33 @@ private final class TestChatService: ChatServicing {
         )
         streams.append(stream)
         return stream
+    }
+
+    func reorderStreams(sessionKeys: [String]) async throws -> [StreamSession] {
+        reorderStreamCallCount += 1
+        lastReorderedSessionKeys = sessionKeys
+        if !reorderStreamErrorSequence.isEmpty {
+            let error = reorderStreamErrorSequence.removeFirst()
+            throw error
+        }
+        if let reorderStreamError { throw reorderStreamError }
+        let bySessionKey = Dictionary(uniqueKeysWithValues: streams.map { ($0.sessionKey, $0) })
+        streams = try sessionKeys.enumerated().map { index, sessionKey in
+            guard let stream = bySessionKey[sessionKey] else {
+                throw StreamAPIError(code: "stream_not_found", message: "not found", statusCode: 404)
+            }
+            return StreamSession(
+                sessionKey: stream.sessionKey,
+                displayName: stream.displayName,
+                kind: stream.kind,
+                orderIndex: index,
+                isBuiltIn: stream.isBuiltIn,
+                createdAt: stream.createdAt,
+                updatedAt: Date(),
+                trackingMode: stream.trackingMode
+            )
+        }
+        return streams
     }
 
     func adoptStream(sessionKey: String) async throws -> StreamSession {

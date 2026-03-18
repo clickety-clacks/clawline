@@ -2685,6 +2685,19 @@ private final class PreviewChatService: ChatServicing {
             updatedAt: Date()
         )
     }
+    func reorderStreams(sessionKeys: [String]) async throws -> [StreamSession] {
+        sessionKeys.enumerated().map { index, sessionKey in
+            StreamSession(
+                sessionKey: sessionKey,
+                displayName: sessionKey,
+                kind: "custom",
+                orderIndex: index,
+                isBuiltIn: false,
+                createdAt: Date(),
+                updatedAt: Date()
+            )
+        }
+    }
     func renameStream(sessionKey: String, displayName: String) async throws -> StreamSession {
         StreamSession(
             sessionKey: sessionKey,

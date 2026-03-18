@@ -46,6 +46,10 @@ final class StreamAPIClient {
         let deletedSessionKey: String
     }
 
+    private struct ReorderStreamsRequest: Encodable {
+        let sessionKeys: [String]
+    }
+
     private struct CreateStreamRequest: Encodable {
         let idempotencyKey: String
         let displayName: String
@@ -111,6 +115,16 @@ final class StreamAPIClient {
             body: CreateStreamRequest(idempotencyKey: idempotencyKey, displayName: displayName)
         )
         return response.stream
+    }
+
+    func reorderStreams(sessionKeys: [String], token: String?) async throws -> [StreamSession] {
+        let response: FetchStreamsResponse = try await sendRequest(
+            method: "PATCH",
+            path: "/api/streams",
+            token: token,
+            body: ReorderStreamsRequest(sessionKeys: sessionKeys)
+        )
+        return response.streams
     }
 
     func adoptStream(sessionKey: String, token: String?) async throws -> StreamSession {

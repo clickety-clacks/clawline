@@ -111,3 +111,74 @@ Non-Clawline track candidates do not have the full native Clawline stream shape.
 - Provider: add a separate authenticated endpoint for non-Clawline track candidates backed by the session store.
 - iOS: fetch those candidates specifically for the Track picker and render them in a separate section with distinct labeling.
 - Preserve the existing `/api/streams` and WebSocket stream/session-info contracts as Clawline-stream-only.
+
+## Message Delivery to Adopted Sessions
+
+Adopted sessions must support sending messages from the Clawline client through to the gateway agent.
+
+### Current blockers (provider-side)
+
+1. **Session allowlist rejection**: `provisionedSessionKeys` (set during auth from SQLite stream manifest) does not include adopted session keys. Message handler rejects with `stream_not_found`.
+2. **Session key parser**: `parseClawlineUserSessionKey` expects `agent:main:clawline:<userId>:<streamSuffix>` format. Non-Clawline keys (e.g. `agent:main:discord:channel:123`) are rejected.
+3. **Stream suffix routing**: The inbound message handler derives `streamSuffix` from parsed Clawline key structure. Non-Clawline keys have no suffix to extract.
+4. **Message persistence**: `persistUserMessage` writes to Clawline SQLite events table. Adopted sessions have no corresponding stream row.
+5. **Message history**: No provider path to fetch prior messages for non-Clawline sessions through the Clawline HTTP/WS APIs.
+6. **Agent delivery routing**: The `route` object hardcodes `channel: "clawline"` — adopted sessions may have originated on other channels.
+
+### Required behavior
+
+- The provider must accept sends to adopted session keys that are present in the gateway session store, even if they are not native Clawline streams.
+- The provider must route these messages to the gateway using the adopted session's original channel context (not hardcoded `clawline`).
+- The provider should persist user messages for adopted sessions so the Clawline client can display conversation history locally.
+- The `provisionedSessionKeys` allowlist sent during auth must include adopted session keys (client reports which sessions it has adopted).
+- Non-Clawline session keys must not be forced through `parseClawlineUserSessionKey`.
+
+### Implementation approach
+
+- Client sends adopted session keys during WebSocket auth (e.g. `adoptedSessionKeys` field alongside existing auth payload).
+- Provider merges adopted keys into `provisionedSessionKeys` for the session.
+- Message handler adds a code path for non-Clawline session keys: skip Clawline-specific parsing, route directly to gateway with original channel context from session store metadata.
+- Persistence: store messages in the existing events table keyed by adopted session key, or in a separate lightweight store.
+- History: optionally expose adopted-session message history through `/api/streams/<sessionKey>/events` or a new endpoint.
+
+### Not required (for initial implementation)
+
+- Real-time typing indicators for adopted sessions
+- Read receipts across adopted sessions
+- Full parity with native Clawline stream features (ordering, pinning, etc.)
+
+## Adoption Security Policy
+
+### Design principle
+
+Stream ownership is a UX convenience (each user sees their own streams), not a security boundary. The Clawline extension's `provisionedSessionKeys` allowlist is extension-level UX scoping, not core security — core OpenClaw has no concept of per-user session ownership.
+
+### Policy
+
+- Only admin users (`isAdmin`) can adopt session keys from the gateway session store.
+- Adopting another user's stream effectively creates a group chat — both users can see and send to that session.
+- No ownership validation beyond the admin check — admin can adopt anything.
+- Non-admin users cannot use the Track/adopt flow.
+
+### Auth-time behavior
+
+- When the client reports adopted session keys during auth, the provider merges them into `provisionedSessionKeys` without ownership checks.
+- On successful adoption via the adopt endpoint, the provider adds the key to the client's live session immediately.
+- On reconnect/re-auth, the provider rebuilds the adopted set from server-side adoption records.
+
+## Adopted Session Message Delivery
+
+### Approach
+
+- Add a separate inbound code path for non-Clawline session keys — do NOT broaden `parseClawlineUserSessionKey()`.
+- For adopted keys, skip Clawline-specific parsing and `streamSuffix` derivation.
+- Build inbound context from the session store's real origin metadata (`channel`, `lastChannel`, `lastTo`) so core can route replies to the correct provider/channel.
+- Persist messages in the existing `events` table keyed by the adopted session key — bypass Clawline-only key normalization that coerces unknown keys to the personal stream.
+
+### What changes where
+
+- **Clawline extension only** — no core changes needed. Core already routes arbitrary `agent:*` keys and supports cross-channel reply delivery.
+- Provider auth: merge adopted keys into `provisionedSessionKeys` and subscriptions.
+- Provider inbound: add adopted-session branch in `processClientMessage` before the Clawline parser.
+- Provider persistence: skip `normalizeStoredSessionKey` coercion for adopted keys.
+- Provider context: build route from session-store metadata, not hardcoded `clawline`.

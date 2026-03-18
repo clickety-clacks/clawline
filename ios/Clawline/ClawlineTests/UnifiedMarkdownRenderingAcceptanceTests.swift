@@ -142,6 +142,32 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
         #expect(sequence(for: plan.blocks) == [.richText, .code, .richText, .code, .richText])
     }
 
+    @Test("T169: heavily-indented fenced code trims shared left gutter")
+    func t169_heavilyIndentedCodeBlockRemainsVisible() {
+        let markdown = """
+        ```swift
+                            struct Example {
+                                let value = 1
+                            }
+        ```
+        """
+
+        let plan = UnifiedMarkdownParser.parse(markdown: markdown, messageID: "t169", metrics: metrics)
+
+        guard case .code(let language, let code)? = plan.blocks.first else {
+            Issue.record("Expected first block to be code")
+            return
+        }
+
+        #expect(language == "swift")
+        #expect(code.trimmingCharacters(in: .newlines) == """
+        struct Example {
+            let value = 1
+        }
+        """)
+        #expect(!code.hasPrefix("                    "))
+    }
+
     @Test("HL-01: mark highlight applies to rich text only")
     func hl_01_markHighlightScoping() {
         let markdown = """

@@ -5,6 +5,7 @@ import UIKit
 enum UnifiedMarkdownParser {
     nonisolated private static let maxColumns = 40
     nonisolated private static let maxCellsPerMessage = 400
+    nonisolated private static let minimumCommonCodeIndentToTrim = 20
     nonisolated private static let fenceInvisibleScalars: Set<Character> = ["\u{200B}", "\u{200C}", "\u{200D}", "\u{2060}", "\u{FEFF}"]
     nonisolated private static let tablePipeSentinel = "\u{E000}"
 
@@ -35,7 +36,7 @@ enum UnifiedMarkdownParser {
                 blocks.append(
                     .code(
                         language: normalizedLanguage(code.language),
-                        code: restoreProtectedPipes(in: code.code)
+                        code: normalizeCodeBlockIndent(in: restoreProtectedPipes(in: code.code))
                     )
                 )
                 continue
@@ -421,6 +422,35 @@ enum UnifiedMarkdownParser {
             index = line.index(after: index)
         }
         return result
+    }
+
+    nonisolated private static func normalizeCodeBlockIndent(in code: String) -> String {
+        let lines = code.split(omittingEmptySubsequences: false, whereSeparator: \.isNewline)
+        let commonIndent = lines
+            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            .map { leadingCodeIndentWidth(for: $0) }
+            .min() ?? 0
+
+        guard commonIndent >= minimumCommonCodeIndentToTrim else {
+            return code
+        }
+
+        let hasTrailingNewline = code.last?.isNewline == true
+        let normalized = lines.map { line -> String in
+            guard !line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                return String(line)
+            }
+            return String(line.dropFirst(min(commonIndent, leadingCodeIndentWidth(for: line))))
+        }
+
+        if hasTrailingNewline {
+            return normalized.joined(separator: "\n") + "\n"
+        }
+        return normalized.joined(separator: "\n")
+    }
+
+    nonisolated private static func leadingCodeIndentWidth<S: StringProtocol>(for line: S) -> Int {
+        line.prefix { $0 == " " || $0 == "\t" }.count
     }
 
     nonisolated private static func restoreProtectedPipes(in source: String) -> String {

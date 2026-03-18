@@ -17,6 +17,7 @@ struct RichTextEditor: UIViewRepresentable {
     @Binding var calculatedHeight: CGFloat
     @Binding var selectionRange: NSRange
     @Binding var pendingInsertions: [PendingAttachment]
+    var fontScaleChangeSequence: Int
     var resetToken: Int
     var focusTrigger: Int
     var dismissTrigger: Int
@@ -25,6 +26,7 @@ struct RichTextEditor: UIViewRepresentable {
     var tintColor: UIColor
     var textColor: UIColor = .label
     var onFocusChange: (Bool) -> Void
+    var onTextEditActivity: (() -> Void)?
     var onSubmit: (() -> Void)?
     var onEscape: (() -> Void)?
     var onEscapeLongPress: (() -> Void)?
@@ -54,7 +56,7 @@ struct RichTextEditor: UIViewRepresentable {
         textView.textContainerInset = UIEdgeInsets(top: 12, left: 20, bottom: 12, right: trailingPadding)
         textView.textContainer.lineFragmentPadding = 0
         textView.adjustsFontForContentSizeCategory = true
-        textView.font = UIFont.preferredFont(forTextStyle: .body)
+        textView.font = UIFont.clawline(.bodyText)
         textView.allowsEditingTextAttributes = true
 #if !os(visionOS)
         textView.keyboardDismissMode = .none
@@ -112,7 +114,6 @@ struct RichTextEditor: UIViewRepresentable {
                 textView.selectedRange = selectionRange
                 context.coordinator.isApplyingParentSelection = false
             }
-            logger.info("[trace] updateUIView applied reset len=\(attributedText.length)")
         }
         context.coordinator.isApplyingLocalEdit = false
 
@@ -140,6 +141,10 @@ struct RichTextEditor: UIViewRepresentable {
         if textView.textColor != textColor {
             textView.textColor = textColor
         }
+        let baseFont = UIFont.clawline(.bodyText)
+        if textView.font?.pointSize != baseFont.pointSize {
+            textView.font = baseFont
+        }
 
         let currentInset = textView.textContainerInset
         if abs(currentInset.right - trailingPadding) > 0.5 {
@@ -159,7 +164,10 @@ struct RichTextEditor: UIViewRepresentable {
             trigger: dismissTrigger
         )
         context.coordinator.updateHeight(for: textView, allowAutoScroll: false)
-        context.coordinator.enforceBaseAttributesIfNeeded(on: textView)
+        context.coordinator.enforceBaseAttributesIfNeeded(
+            on: textView,
+            fontScaleChangeSequence: fontScaleChangeSequence
+        )
         context.coordinator.ensureTypingAttributes(on: textView)
 
         if !pendingInsertions.isEmpty, !isComposing, !context.coordinator.isInsertingAttachments {
@@ -187,6 +195,8 @@ struct RichTextEditor: UIViewRepresentable {
         var isApplyingParentSelection = false
         var lastResetToken: Int = 0
         private var lastBaseTextColor: UIColor?
+        private var lastBaseFontPointSize: CGFloat?
+        private var lastFontScaleChangeSequence: Int?
 
         init(parent: RichTextEditor) {
             self.parent = parent
@@ -234,13 +244,12 @@ struct RichTextEditor: UIViewRepresentable {
         func textViewDidChange(_ textView: UITextView) {
             guard !isUpdatingFromSwiftUI else { return }
             isApplyingLocalEdit = true
+            parent.onTextEditActivity?()
             parent.attributedText = textView.attributedText
             setSelectionRange(textView.selectedRange)
             updateHeight(for: textView, allowAutoScroll: true)
             ensureCaretVisible(in: textView)
             ensureTypingAttributes(on: textView)
-            let length = textView.attributedText?.length ?? 0
-            logger.info("[trace] textViewDidChange len=\(length) sel=\(textView.selectedRange.location),\(textView.selectedRange.length)")
         }
 
         func textViewDidChangeSelection(_ textView: UITextView) {
@@ -381,21 +390,26 @@ struct RichTextEditor: UIViewRepresentable {
 
         func ensureTypingAttributes(on textView: UITextView) {
             var attributes = textView.typingAttributes
-            attributes[.font] = UIFont.preferredFont(forTextStyle: .body)
+            attributes[.font] = UIFont.clawline(.bodyText)
             attributes[.foregroundColor] = parent.textColor
             textView.typingAttributes = attributes
         }
 
-        func enforceBaseAttributesIfNeeded(on textView: UITextView) {
-            if let lastBaseTextColor, lastBaseTextColor.isEqual(parent.textColor) {
+        func enforceBaseAttributesIfNeeded(on textView: UITextView, fontScaleChangeSequence: Int) {
+            let baseFont = UIFont.clawline(.bodyText)
+            let colorUnchanged = lastBaseTextColor?.isEqual(parent.textColor) == true
+            let fontUnchanged = lastBaseFontPointSize == baseFont.pointSize
+            let sequenceUnchanged = lastFontScaleChangeSequence == fontScaleChangeSequence
+            if colorUnchanged && fontUnchanged && sequenceUnchanged {
                 return
             }
             lastBaseTextColor = parent.textColor
-            enforceBaseAttributes(on: textView)
+            lastBaseFontPointSize = baseFont.pointSize
+            lastFontScaleChangeSequence = fontScaleChangeSequence
+            enforceBaseAttributes(on: textView, baseFont: baseFont)
         }
 
-        func enforceBaseAttributes(on textView: UITextView) {
-            let baseFont = UIFont.preferredFont(forTextStyle: .body)
+        func enforceBaseAttributes(on textView: UITextView, baseFont: UIFont = UIFont.clawline(.bodyText)) {
             let baseColor = parent.textColor
             let fullRange = NSRange(location: 0, length: textView.textStorage.length)
             guard fullRange.length > 0 else { return }

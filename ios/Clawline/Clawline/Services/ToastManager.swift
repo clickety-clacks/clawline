@@ -14,6 +14,14 @@ final class ToastManager {
     struct Toast: Identifiable, Equatable {
         let id = UUID()
         let message: String
+        let actionTitle: String?
+        let action: (@MainActor () -> Void)?
+
+        static func == (lhs: Toast, rhs: Toast) -> Bool {
+            lhs.id == rhs.id
+                && lhs.message == rhs.message
+                && lhs.actionTitle == rhs.actionTitle
+        }
     }
 
     private(set) var toast: Toast?
@@ -22,9 +30,12 @@ final class ToastManager {
     private(set) var debugMessages: [String] = []
 #endif
 
-    func show(_ message: String, duration: Duration = .seconds(3)) {
+    func show(_ message: String,
+              duration: Duration = .seconds(3),
+              actionTitle: String? = nil,
+              action: (@MainActor () -> Void)? = nil) {
         guard !message.isEmpty else { return }
-        toast = Toast(message: message)
+        toast = Toast(message: message, actionTitle: actionTitle, action: action)
 #if DEBUG
         debugMessages.append(message)
 #endif
@@ -53,6 +64,12 @@ final class ToastManager {
         dismissTask?.cancel()
         dismissTask = nil
         toast = nil
+    }
+
+    func performAction() {
+        guard let action = toast?.action else { return }
+        dismiss()
+        action()
     }
 
 #if DEBUG

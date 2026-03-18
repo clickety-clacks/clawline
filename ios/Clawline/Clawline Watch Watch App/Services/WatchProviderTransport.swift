@@ -188,6 +188,10 @@ final class WatchProviderTransport: ChatServicing {
         transportState = .disconnected
     }
 
+    func fetchTrackableSessions() async throws -> [TrackableSession] {
+        []
+    }
+
     func send(id: String, content: String, attachments: [WireAttachment], sessionKey: String?) async throws {
         let message = BufferedMessage(
             id: id,

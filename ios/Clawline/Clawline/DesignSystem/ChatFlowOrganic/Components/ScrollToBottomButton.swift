@@ -64,6 +64,7 @@ struct ScrollToBottomButton: View {
                     .padding(.vertical, 3)
                     .background(badgeBackground, in: Capsule())
                     .overlay(Capsule().stroke(ChatFlowTheme.ink(resolvedScheme).opacity(0.15), lineWidth: 1))
+                    .shadow(color: badgeBackground.opacity(resolvedScheme == .dark ? 0.35 : 0.22), radius: 6, y: 1)
                     .offset(x: 6, y: -6)
                     .zIndex(2)
                     .allowsHitTesting(false)

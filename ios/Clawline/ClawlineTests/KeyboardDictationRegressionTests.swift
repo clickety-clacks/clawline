@@ -185,6 +185,7 @@ private func makeTestEditor() -> RichTextEditor {
         calculatedHeight: .constant(44),
         selectionRange: .constant(NSRange(location: 0, length: 0)),
         pendingInsertions: .constant([]),
+        fontScaleChangeSequence: 0,
         resetToken: 0,
         focusTrigger: 0,
         dismissTrigger: 0,

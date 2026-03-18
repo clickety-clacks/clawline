@@ -197,6 +197,29 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         SessionRegistry.shared.stream(for: engineActiveSessionKey)
     }
 
+    var canUseTrackFeature: Bool {
+        auth.isAdmin
+    }
+
+    struct UntrackedSessionCandidate: Identifiable, Equatable {
+        var id: String { sessionKey }
+        let sessionKey: String
+        let displayName: String
+    }
+
+    var untrackedSessionCandidates: [UntrackedSessionCandidate] {
+        guard canUseTrackFeature else { return [] }
+        return trackableSessionKeyOrder
+            .filter { canTrackSession(sessionKey: $0) }
+            .map { sessionKey in
+                let displayName =
+                    trackableSessionsBySessionKey[sessionKey]?.displayName
+                    ?? streamsBySessionKey[sessionKey]?.displayName
+                    ?? fallbackDisplayName(for: sessionKey)
+                return UntrackedSessionCandidate(sessionKey: sessionKey, displayName: displayName)
+            }
+    }
+
     // MARK: Stream Switch API
     // All switch mutations are MainActor-only by class annotation.
     // Steps 1-5 are intentionally synchronous (no suspension points) to keep epoch capture atomic.
@@ -380,7 +403,6 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
     var inputContent: NSAttributedString = NSAttributedString() {
         didSet {
             pruneAttachmentData()
-            logger.info("[trace] inputContent len=\(self.inputContent.length) empty=\(self.inputContent.isEffectivelyEmpty) canSend=\(self.canSend) state=\(String(describing: self.connectionState))")
         }
     }
     var attachmentData: [UUID: PendingAttachment] = [:]
@@ -520,7 +542,16 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
     private var supportsSessionProvisioning = false
     private var hasResolvedProvisioningCapability = true
     private var hasReceivedSessionProvisioning = false
-    private var provisionedSessionKeys: Set<String> = []
+    private var hasReceivedExplicitSessionInfo = false
+    private var accessibleSessionKeys: Set<String> = []
+    private var accessibleSessionKeyOrder: [String] = []
+    private var trackableSessionsBySessionKey: [String: TrackableSession] = [:]
+    private var trackableSessionKeyOrder: [String] = []
+    private var refreshStreamsTask: Task<Void, Never>?
+    private var refreshTrackableSessionsTask: Task<Void, Never>?
+    private var pendingUntrackRecovery: StreamSession?
+    private var hasLoadedTrackableSessionsOnce = false
+    private var hasSurfacedInitialTrackableSessionsFailure = false
     private var pendingProvisionedSend: PendingProvisionedSend?
 
     func forceReReadGeneration(for sessionKey: String) -> Int {
@@ -844,6 +875,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
             restoreStreamMetadataIfNeeded()
             restoreActiveSessionKeyIfNeeded()
             ensureDefaultActiveSessionIfNeeded()
+            refreshStreamsFromProvider(reason: "authChanged")
         } else {
             coordinatorDiag("handleAuthStateChange logout-path")
             didRestoreActiveSessionKey = false
@@ -1377,11 +1409,54 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
 
     func canDeleteStream(sessionKey: String) -> Bool {
         guard let stream = streamsBySessionKey[sessionKey] else { return false }
+        guard !stream.adopted else { return false }
         if stream.sessionKey == SessionKey.admin { return false }
         if stream.kind == "main" { return true }
         if SessionKey.isClawlinePersonalDM(stream.sessionKey) { return true }
         guard !stream.isBuiltIn else { return false }
         return !isProtectedNonDeletableStream(stream)
+    }
+
+    func canUntrackStream(sessionKey: String) -> Bool {
+        guard let stream = streamsBySessionKey[sessionKey] else { return false }
+        return stream.adopted
+    }
+
+    func isAdoptedStream(sessionKey: String) -> Bool {
+        guard let stream = streamsBySessionKey[sessionKey] else {
+            logger.info("adopted_check sessionKey=\(sessionKey, privacy: .public) result=false source=missing_stream")
+            return false
+        }
+        logger.info(
+            "adopted_check sessionKey=\(sessionKey, privacy: .public) adopted=\(stream.adopted, privacy: .public) result=\(stream.adopted, privacy: .public)"
+        )
+        return stream.adopted
+    }
+
+    func canTrackSession(sessionKey: String) -> Bool {
+        guard canUseTrackFeature else { return false }
+        guard !sessionKey.isEmpty else { return false }
+        let trackedSessionKeys = Set(
+            orderedStreams
+                .filter { !syntheticSessionKeys.contains($0.sessionKey) }
+                .map(\.sessionKey)
+        )
+        guard !trackedSessionKeys.contains(sessionKey) else { return false }
+        return trackableSessionsBySessionKey[sessionKey] != nil
+    }
+
+    func trackSession(sessionKey: String) async -> Bool {
+        guard canTrackSession(sessionKey: sessionKey) else { return false }
+        do {
+            let stream = try await chatService.adoptStream(sessionKey: sessionKey)
+            pendingUntrackRecovery = nil
+            applyStreamUpsert(stream)
+            refreshTrackableSessions(reason: "trackSuccess")
+            return true
+        } catch {
+            toastManager.show(error.localizedDescription)
+            return false
+        }
     }
 
     func createStream(displayName: String) async -> Bool {
@@ -1432,14 +1507,15 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
     }
 
     func deleteStream(sessionKey: String) async -> Bool {
-        guard canDeleteStream(sessionKey: sessionKey) else { return false }
-        let idempotencyKey = Self.makeIdempotencyKey()
+        guard let stream = streamsBySessionKey[sessionKey] else { return false }
+        guard stream.adopted || canDeleteStream(sessionKey: sessionKey) else { return false }
+        let idempotencyKey = stream.adopted ? nil : Self.makeIdempotencyKey()
         do {
             _ = try await chatService.deleteStream(
                 sessionKey: sessionKey,
                 idempotencyKey: idempotencyKey
             )
-            applyStreamDeletion(sessionKey: sessionKey)
+            applyDeleteSuccess(for: stream)
             return true
         } catch {
             if shouldRetryDeleteOnActiveConnection(after: error) {
@@ -1449,7 +1525,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
                         sessionKey: sessionKey,
                         idempotencyKey: idempotencyKey
                     )
-                    applyStreamDeletion(sessionKey: sessionKey)
+                    applyDeleteSuccess(for: stream)
                     return true
                 } catch {
                     toastManager.show(error.localizedDescription)
@@ -2187,6 +2263,9 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
     }
 
     private func pruneAttachmentData() {
+        guard !attachmentData.isEmpty || !stagedAttachmentProtection.isEmpty || !uploadedAssetIds.isEmpty else {
+            return
+        }
         let referencedIds = Set(inputContent.pendingAttachmentIds())
         stagedAttachmentProtection.formIntersection(Set(attachmentData.keys))
         stagedAttachmentProtection.subtract(referencedIds)
@@ -2376,21 +2455,39 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
             hasResolvedProvisioningCapability = true
             supportsSessionProvisioning = true
             hasReceivedSessionProvisioning = true
-            provisionedSessionKeys = Set(streams.map(\.sessionKey))
+            for stream in streams {
+                logger.info(
+                    "stream_snapshot_debug sessionKey=\(stream.sessionKey, privacy: .public) adopted=\(stream.adopted, privacy: .public)"
+                )
+            }
+            if accessibleSessionKeyOrder.isEmpty {
+                replaceAccessibleSessionKeys(with: streams.map(\.sessionKey))
+            } else {
+                mergeAccessibleSessionKeys(streams.map(\.sessionKey))
+            }
             applyStreamSnapshot(streams)
+            refreshStreamsFromProvider(reason: "streamSnapshot")
+            refreshTrackableSessions(reason: "streamSnapshot")
             attemptPendingProvisionedSendIfPossible()
         case .streamCreated(let stream):
             hasResolvedProvisioningCapability = true
             supportsSessionProvisioning = true
             hasReceivedSessionProvisioning = true
-            provisionedSessionKeys.insert(stream.sessionKey)
+            mergeAccessibleSessionKeys([stream.sessionKey])
             applyStreamUpsert(stream)
+            refreshStreamsFromProvider(reason: "streamCreated")
+            refreshTrackableSessions(reason: "streamCreated")
             attemptPendingProvisionedSendIfPossible()
         case .streamUpdated(let stream):
             applyStreamUpsert(stream)
+            refreshStreamsFromProvider(reason: "streamUpdated")
         case .streamDeleted(let sessionKey):
-            provisionedSessionKeys.remove(sessionKey)
-            applyStreamDeletion(sessionKey: sessionKey)
+            if !hasReceivedExplicitSessionInfo {
+                removeAccessibleSessionKey(sessionKey)
+            }
+            applyDeletedStreamMutation(sessionKey: sessionKey)
+            refreshStreamsFromProvider(reason: "streamDeleted")
+            refreshTrackableSessions(reason: "streamDeleted")
             attemptPendingProvisionedSendIfPossible()
         case .sessionProvisioningAvailable(let supported):
             hasResolvedProvisioningCapability = true
@@ -2400,14 +2497,16 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
             hasResolvedProvisioningCapability = true
             supportsSessionProvisioning = true
             hasReceivedSessionProvisioning = true
-            provisionedSessionKeys = Set(info.sessionKeys)
+            hasReceivedExplicitSessionInfo = true
+            replaceAccessibleSessionKeys(with: info.sessionKeys)
+            refreshTrackableSessions(reason: "sessionInfo")
             attemptPendingProvisionedSendIfPossible()
         }
     }
 
     private func sendProvisioningState(for sessionKey: String) -> SendProvisioningState {
         if hasReceivedSessionProvisioning {
-            return provisionedSessionKeys.contains(sessionKey) ? .ready : .unavailable
+            return isLocallySendableSessionKey(sessionKey) ? .ready : .unavailable
         }
         if supportsSessionProvisioning {
             return .waiting
@@ -2436,6 +2535,13 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
             pendingProvisionedSend = nil
             toastManager.show("This stream is unavailable. Switch streams and try again.")
         }
+    }
+
+    private func isLocallySendableSessionKey(_ sessionKey: String) -> Bool {
+        if accessibleSessionKeys.contains(sessionKey) {
+            return true
+        }
+        return isAdoptedStream(sessionKey: sessionKey)
     }
 
     private func transitionConnectionState(_ state: ConnectionState,
@@ -2467,10 +2573,106 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         supportsSessionProvisioning = false
         hasResolvedProvisioningCapability = false
         hasReceivedSessionProvisioning = false
-        provisionedSessionKeys.removeAll()
+        hasReceivedExplicitSessionInfo = false
+        accessibleSessionKeys.removeAll()
+        accessibleSessionKeyOrder.removeAll()
+        trackableSessionsBySessionKey.removeAll()
+        trackableSessionKeyOrder.removeAll()
+        refreshStreamsTask?.cancel()
+        refreshStreamsTask = nil
+        refreshTrackableSessionsTask?.cancel()
+        refreshTrackableSessionsTask = nil
+        pendingUntrackRecovery = nil
+        hasLoadedTrackableSessionsOnce = false
+        hasSurfacedInitialTrackableSessionsFailure = false
         if clearPendingSend {
             pendingProvisionedSend = nil
         }
+    }
+
+    private func replaceAccessibleSessionKeys(with sessionKeys: [String]) {
+        let normalized = normalizeSessionKeyList(sessionKeys)
+        accessibleSessionKeyOrder = normalized
+        accessibleSessionKeys = Set(normalized)
+    }
+
+    private func mergeAccessibleSessionKeys(_ sessionKeys: [String]) {
+        for sessionKey in normalizeSessionKeyList(sessionKeys) where accessibleSessionKeys.insert(sessionKey).inserted {
+            accessibleSessionKeyOrder.append(sessionKey)
+        }
+    }
+
+    private func removeAccessibleSessionKey(_ sessionKey: String) {
+        accessibleSessionKeys.remove(sessionKey)
+        accessibleSessionKeyOrder.removeAll { $0 == sessionKey }
+    }
+
+    private func replaceTrackableSessions(with sessions: [TrackableSession]) {
+        trackableSessionKeyOrder = normalizeSessionKeyList(sessions.map(\.sessionKey))
+        trackableSessionsBySessionKey = Dictionary(
+            uniqueKeysWithValues: sessions.map { ($0.sessionKey, $0) }
+        )
+        hasLoadedTrackableSessionsOnce = true
+        hasSurfacedInitialTrackableSessionsFailure = false
+    }
+
+    private func refreshStreamsFromProvider(reason: String) {
+        refreshStreamsTask?.cancel()
+        guard auth.token != nil else { return }
+        refreshStreamsTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let streams = try await self.chatService.fetchStreams()
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    self.applyStreamSnapshot(streams)
+                }
+            } catch {
+                guard !Task.isCancelled else { return }
+                self.logger.warning(
+                    "stream refresh failed reason=\(reason, privacy: .public) error=\(error.localizedDescription, privacy: .public)"
+                )
+            }
+        }
+    }
+
+    private func refreshTrackableSessions(reason: String) {
+        refreshTrackableSessionsTask?.cancel()
+        guard canUseTrackFeature else {
+            replaceTrackableSessions(with: [])
+            return
+        }
+        refreshTrackableSessionsTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let sessions = try await self.chatService.fetchTrackableSessions()
+                guard !Task.isCancelled else { return }
+                self.replaceTrackableSessions(with: sessions)
+            } catch {
+                guard !Task.isCancelled else { return }
+                let errorDescription = error.localizedDescription
+                self.logger.error("trackable sessions refresh failed reason=\(reason, privacy: .public) error=\(errorDescription, privacy: .public)")
+                print("[TRACKABLE_SESSIONS] reason=\(reason) error=\(errorDescription)")
+                if !self.hasLoadedTrackableSessionsOnce && !self.hasSurfacedInitialTrackableSessionsFailure {
+                    self.hasSurfacedInitialTrackableSessionsFailure = true
+                    self.toastManager.show("Could not load Track candidates. \(errorDescription)")
+                }
+            }
+        }
+    }
+
+    private func normalizeSessionKeyList(_ sessionKeys: [String]) -> [String] {
+        var seen: Set<String> = []
+        var normalized: [String] = []
+        normalized.reserveCapacity(sessionKeys.count)
+        for sessionKey in sessionKeys {
+            let trimmed = sessionKey.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            if seen.insert(trimmed).inserted {
+                normalized.append(trimmed)
+            }
+        }
+        return normalized
     }
 
     private func activeSessionDefaultsKey() -> String {
@@ -2751,9 +2953,18 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
 
     private func applyStreamSnapshot(_ streams: [StreamSession]) {
         let previousSessionKeys = Set(streamsBySessionKey.keys)
-        let byKey: [String: StreamSession] = Dictionary(uniqueKeysWithValues: streams.map { ($0.sessionKey, $0) })
-        let serverKeys = Set(streams.map(\.sessionKey))
-        syntheticSessionKeys = Set(byKey.keys).subtracting(serverKeys)
+        let normalizedStreams = streams
+        let serverKeys = Set(normalizedStreams.map(\.sessionKey))
+        let adoptedStreams = streamsBySessionKey.values.filter {
+            $0.adopted && !serverKeys.contains($0.sessionKey)
+        }
+        let mergedStreams = normalizedStreams + adoptedStreams
+        let byKey: [String: StreamSession] = Dictionary(uniqueKeysWithValues: mergedStreams.map { ($0.sessionKey, $0) })
+        syntheticSessionKeys = Set(
+            byKey.values
+                .filter { !$0.adopted && !serverKeys.contains($0.sessionKey) }
+                .map(\.sessionKey)
+        )
         streamsBySessionKey = byKey
         let validSessionKeys = Set(byKey.keys)
         let removedSessionKeys = previousSessionKeys.subtracting(validSessionKeys)
@@ -2832,6 +3043,67 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         }
         SessionRegistry.shared.remove(sessionKey: sessionKey)
         persistStreamMetadata()
+    }
+
+    private func applyDeleteSuccess(for stream: StreamSession) {
+        if stream.adopted {
+            pendingUntrackRecovery = stream
+            applyDeletedStreamMutation(sessionKey: stream.sessionKey)
+            refreshTrackableSessions(reason: "deleteSuccess")
+            toastManager.show(
+                "Session untracked.",
+                actionTitle: "Undo",
+                action: { [weak self] in
+                    Task { @MainActor [weak self] in
+                        await self?.undoPendingUntrack()
+                    }
+                }
+            )
+            return
+        }
+        applyDeletedStreamMutation(sessionKey: stream.sessionKey)
+    }
+
+    private func applyDeletedStreamMutation(sessionKey: String) {
+        if pendingUntrackRecovery?.sessionKey == sessionKey || streamsBySessionKey[sessionKey]?.adopted == true {
+            unlinkTrackedSession(sessionKey: sessionKey)
+            return
+        }
+        applyStreamDeletion(sessionKey: sessionKey)
+    }
+
+    private func unlinkTrackedSession(sessionKey: String) {
+        streamsBySessionKey.removeValue(forKey: sessionKey)
+        syntheticSessionKeys.remove(sessionKey)
+        recalculateOrderedSessionKeys()
+
+        if typingSessionKey == sessionKey {
+            typingSessionKey = nil
+            isAssistantTyping = false
+        }
+
+        if engineActiveSessionKey == sessionKey {
+            let fallback = streamMainSessionKey().flatMap { orderedSessionKeys.contains($0) ? $0 : nil }
+                ?? orderedSessionKeys.first
+                ?? streamMainSessionKey()
+            if let fallback {
+                ensureStreamEntry(for: fallback)
+                setEngineActiveSessionKey(fallback)
+            } else {
+                clearActiveSession()
+            }
+        } else if !engineActiveSessionKey.isEmpty {
+            messages = sessionMessages[engineActiveSessionKey] ?? []
+        }
+
+        SessionRegistry.shared.remove(sessionKey: sessionKey)
+        persistStreamMetadata()
+    }
+
+    private func undoPendingUntrack() async {
+        guard let stream = pendingUntrackRecovery else { return }
+        pendingUntrackRecovery = nil
+        _ = await trackSession(sessionKey: stream.sessionKey)
     }
 
     private func recalculateOrderedSessionKeys() {
@@ -2921,6 +3193,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         let decoder = JSONDecoder()
         if let streams = try? decoder.decode([StreamSession].self, from: data) {
             streamsBySessionKey = Dictionary(uniqueKeysWithValues: streams.map { ($0.sessionKey, $0) })
+            syntheticSessionKeys.removeAll()
             recalculateOrderedSessionKeys()
             SessionRegistry.shared.replace(with: orderedStreams)
         }

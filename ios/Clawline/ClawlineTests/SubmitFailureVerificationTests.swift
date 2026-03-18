@@ -226,6 +226,13 @@ private final class VerificationChatService: ChatServicing {
         let _ = idempotencyKey
         throw ProviderChatService.Error.notConnected
     }
+
+    func fetchTrackableSessions() async throws -> [TrackableSession] { [] }
+
+    func adoptStream(sessionKey: String) async throws -> StreamSession {
+        let _ = sessionKey
+        throw ProviderChatService.Error.notConnected
+    }
 }
 
 @MainActor

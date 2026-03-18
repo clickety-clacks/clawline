@@ -10,6 +10,35 @@ import Testing
 @testable import Clawline
 
 struct ClawlineTests {
+    @Test("T167: font scale applies platform delta before user multiplier")
+    func scaledPointSizeUsesPlatformDeltaAndPersistedScale() {
+        let suiteName = "ClawlineTests.T167.scaledPointSizeUsesPlatformDeltaAndPersistedScale"
+        guard let defaults = UserDefaults(suiteName: suiteName) else {
+            Issue.record("Failed to create isolated defaults suite")
+            return
+        }
+        defaults.removePersistentDomain(forName: suiteName)
+        defer {
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        let basePointSize: CGFloat = 20
+        let expectedDefault: CGFloat
+#if targetEnvironment(macCatalyst)
+        expectedDefault = 24
+#else
+        expectedDefault = 20
+#endif
+
+        #expect(AppFontScale.scaledPointSize(for: basePointSize, defaults: defaults) == expectedDefault)
+
+        AppFontScale.persist(1.5, defaults: defaults)
+        #expect(
+            AppFontScale.scaledPointSize(for: basePointSize, defaults: defaults)
+                == expectedDefault * 1.5
+        )
+    }
+
     @Test("T134: font scale shortcuts adjust value and emit toast message")
     @MainActor
     func fontScaleAdjustmentsEmitToast() {

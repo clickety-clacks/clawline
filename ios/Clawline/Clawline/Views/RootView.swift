@@ -55,6 +55,7 @@ struct RootView: View {
     }
 
     var body: some View {
+        let _ = settings.fontScaleChangeSequence
         Group {
             // If the provider base URL is missing (fresh install / wiped defaults), route to
             // onboarding so the user can recover without having to send a message.

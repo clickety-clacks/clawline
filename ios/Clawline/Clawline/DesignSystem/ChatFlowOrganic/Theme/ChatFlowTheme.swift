@@ -124,11 +124,15 @@ enum ChatFlowTheme {
     }
 
     // MARK: - Typography helpers
+    static func maxLineWidth(bodyFont: UIFont) -> CGFloat {
+        let sample = String(repeating: "n", count: 65)
+        let size = (sample as NSString).size(withAttributes: [.font: bodyFont])
+        return ceil(size.width)
+    }
+
     static func maxLineWidth(bodyFontSize _: CGFloat = 0) -> CGFloat {
         let scaledFont = UIFont.clawline(.bodyText)
-        let sample = String(repeating: "n", count: 65)
-        let size = (sample as NSString).size(withAttributes: [.font: scaledFont])
-        return ceil(size.width)
+        return maxLineWidth(bodyFont: scaledFont)
     }
 }
 

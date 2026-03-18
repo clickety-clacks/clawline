@@ -586,6 +586,7 @@ struct MessageInputBar: View {
     let dictation: DictationInteractionProjection
     let dictationEmitter: DictationInteractionEmitter
     var placeholderText: String = "Message"
+    var fontScaleChangeSequence: Int = 0
     var resetToken: Int
     let canSend: Bool
     let isSending: Bool
@@ -1106,6 +1107,7 @@ struct MessageInputBar: View {
                     calculatedHeight: $editorHeight,
                     selectionRange: $selectionRange,
                     pendingInsertions: $pendingInsertions,
+                    fontScaleChangeSequence: fontScaleChangeSequence,
                     resetToken: resetToken,
                     focusTrigger: focusTrigger,
                     dismissTrigger: dismissTrigger,

@@ -176,7 +176,8 @@ extension UIFont {
         let baseFont = UIFont(descriptor: descriptor, size: preferredDescriptor.pointSize)
         let dynamicTypeFont = UIFontMetrics(forTextStyle: textStyle)
             .scaledFont(for: baseFont, compatibleWith: traitCollection)
-        let appScale = AppFontScale.persistedValue()
-        return dynamicTypeFont.withSize(dynamicTypeFont.pointSize * appScale)
+        return dynamicTypeFont.withSize(
+            AppFontScale.scaledPointSize(for: dynamicTypeFont.pointSize)
+        )
     }
 }

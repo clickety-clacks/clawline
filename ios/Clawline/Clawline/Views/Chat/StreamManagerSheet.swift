@@ -6,9 +6,11 @@
 //
 
 import SwiftUI
+import UIKit
 
 struct StreamManagerSheet: View {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.settingsManager) private var settings
 
     @Bindable var viewModel: ChatViewModel
     let streams: [StreamSession]
@@ -16,15 +18,15 @@ struct StreamManagerSheet: View {
     @Binding var isPresented: Bool
     let maxAvailableHeight: CGFloat
     let onSelectStream: (String) -> Void
+    let onPresentTrackPicker: () -> Void
 
     @State private var draftName = ""
     @State private var searchQuery = ""
     @State private var activeEditor: EditorMode?
     @State private var isWorking = false
-    @State private var deletingSessionKeys: Set<String> = []
+    @State private var removingSessionKeys: Set<String> = []
     @State private var pendingCreateRows: [PendingCreateRow] = []
-    @State private var pendingDeleteStream: StreamSession?
-    @State private var renderedContainerHeight: CGFloat = 0
+    @State private var pendingRemovalStream: StreamSession?
     @FocusState private var focusedEditor: EditorMode?
 
     private enum EditorMode: Hashable {
@@ -39,15 +41,28 @@ struct StreamManagerSheet: View {
     private let listRowHeight: CGFloat = 52
     private let listRowSpacing: CGFloat = 2
     private let listRowHorizontalInset: CGFloat = 12
-    private let searchBarHeight: CGFloat = 56
     private let functionBarHeight: CGFloat = 40
+    private let actionBarTopPadding: CGFloat = 12
+    private let actionBarBottomPadding: CGFloat = 20
     private let listOuterVerticalPadding: CGFloat = 20
     private let minimumPopoverHeight: CGFloat = 140
     private let popupCornerRadius: CGFloat = 20
-    private let toolbarBorderOpacity: CGFloat = 0.22
-    private let toolbarBorderWidth: CGFloat = 0.8
-    private let plusBorderOpacity: CGFloat = 0.34
-    private let plusBorderWidth: CGFloat = 1
+    private let actionBarSeparatorInset: CGFloat = 12
+    private var actionBarContentHeight: CGFloat {
+        functionBarHeight + actionBarTopPadding + actionBarBottomPadding
+    }
+
+    private var actionBarReservedHeight: CGFloat {
+        actionBarContentHeight
+    }
+
+    private var actionBarSeparatorHeight: CGFloat {
+        1 / max(UITraitCollection.current.displayScale, 1)
+    }
+
+    private var actionBarSeparatorColor: Color {
+        colorScheme == .dark ? Color.white.opacity(0.62) : Color.black.opacity(0.34)
+    }
 
     private var listItemCount: Int {
         filteredStreams.count + filteredPendingCreateRows.count
@@ -76,15 +91,8 @@ struct StreamManagerSheet: View {
         )
     }
 
-    private var effectiveContainerHeight: CGFloat {
-        if renderedContainerHeight > 0 {
-            return renderedContainerHeight
-        }
-        return cappedContainerHeight
-    }
-
     private var listViewportHeight: CGFloat {
-        max(0, effectiveContainerHeight - functionBarHeight - searchBarHeight)
+        max(0, cappedContainerHeight - actionBarReservedHeight)
     }
 
     private var cappedContainerHeight: CGFloat {
@@ -93,7 +101,7 @@ struct StreamManagerSheet: View {
             showsCreateInlineRow: false,
             rowHeight: listRowHeight,
             rowSpacing: listRowSpacing,
-            functionBarHeight: functionBarHeight + searchBarHeight,
+            functionBarHeight: actionBarReservedHeight,
             outerVerticalPadding: listOuterVerticalPadding,
             maxAvailableHeight: maxAvailableHeight,
             minimumPopoverHeight: minimumPopoverHeight
@@ -101,26 +109,8 @@ struct StreamManagerSheet: View {
     }
 
     var body: some View {
+        let _ = settings.fontScaleChangeSequence
         VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass")
-                    .foregroundStyle(.secondary)
-                TextField("Search streams", text: $searchQuery)
-                    .font(.clawline(.uiLabel))
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-            }
-            .padding(.horizontal, 12)
-            .frame(height: 38)
-            .overlay(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(Color.white.opacity(colorScheme == .dark ? 0.18 : 0.14), lineWidth: 0.8)
-            )
-            .padding(.horizontal, listRowHorizontalInset)
-            .padding(.top, 12)
-            .padding(.bottom, 6)
-            .frame(height: searchBarHeight)
-
             List {
                 ForEach(filteredStreams) { stream in
                     rowContent(for: stream)
@@ -139,18 +129,22 @@ struct StreamManagerSheet: View {
                             Button {
                                 beginRenaming(stream)
                             } label: {
-                                Label("Rename", systemImage: "pencil")
+                                Image(systemName: "pencil")
+                                    .font(.title3.weight(.semibold))
                             }
+                            .accessibilityLabel("Rename")
                             .disabled(!canPerformRenameAction(for: stream))
                             .tint(canPerformRenameAction(for: stream) ? .blue : Color.gray.opacity(0.35))
 
                             Button {
-                                pendingDeleteStream = stream
+                                pendingRemovalStream = stream
                             } label: {
-                                Label("Delete", systemImage: "trash")
+                                Image(systemName: removalActionImage(for: stream))
+                                    .font(.title3.weight(.semibold))
                             }
-                            .disabled(!canPerformDeleteAction(for: stream))
-                            .tint(canPerformDeleteAction(for: stream) ? .red : Color.gray.opacity(0.35))
+                            .accessibilityLabel(removalActionTitle(for: stream))
+                            .disabled(!canPerformRemovalAction(for: stream))
+                            .tint(canPerformRemovalAction(for: stream) ? .red : Color.gray.opacity(0.35))
                         }
                 }
 
@@ -203,55 +197,23 @@ struct StreamManagerSheet: View {
             .environment(\.defaultMinListRowHeight, listRowHeight)
             .listRowSpacing(listRowSpacing)
             .scrollBounceBehavior(.always)
-            .contentMargins(.vertical, 0, for: .scrollContent)
+            .contentMargins(.top, listOuterVerticalPadding, for: .scrollContent)
+            .contentMargins(.bottom, listOuterVerticalPadding, for: .scrollContent)
             .scrollContentBackground(.hidden)
             .background(Color.clear)
-            .padding(.vertical, listOuterVerticalPadding)
+            .frame(height: listViewportHeight)
+            .clipShape(Rectangle())
             .disabled(isWorking)
 
-            // Keep add affordance optically centered in a fixed-height toolbar regardless of keyboard changes.
-            Button {
-                addStreamDirectly()
-            } label: {
-                Image(systemName: "plus")
-                    .font(.clawline(.subsectionHeader).weight(.regular))
-                    .foregroundStyle(.primary)
-                    .frame(width: functionBarHeight, height: functionBarHeight, alignment: .center)
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 10, style: .continuous)
-                            .stroke(Color.white.opacity(plusBorderOpacity), lineWidth: plusBorderWidth)
-                    }
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .disabled(activeEditor != nil)
-            .accessibilityLabel("Add stream")
-            .accessibilityHint("Creates a new stream")
-            .frame(maxHeight: .infinity, alignment: .center)
-            .frame(maxWidth: .infinity, alignment: .center)
-            .frame(height: functionBarHeight, alignment: .center)
-            .overlay {
-                Rectangle()
-                    .stroke(Color.white.opacity(toolbarBorderOpacity), lineWidth: toolbarBorderWidth)
-            }
+            bottomActionBar
         }
-        .frame(minWidth: 280, idealWidth: 320, maxWidth: 360)
         .frame(height: cappedContainerHeight)
+        .frame(minWidth: 280, idealWidth: 320, maxWidth: 360)
         .background(Color.clear)
         .overlay(
             RoundedRectangle(cornerRadius: popupCornerRadius, style: .continuous)
                 .stroke(Color.white.opacity(0.10), lineWidth: 0.5)
-        )
-        .background(
-            GeometryReader { proxy in
-                Color.clear
-                    .onAppear {
-                        renderedContainerHeight = proxy.size.height
-                    }
-                    .onChange(of: proxy.size.height) { _, newValue in
-                        renderedContainerHeight = newValue
-                    }
-            }
+                .allowsHitTesting(false)
         )
         .onChange(of: isPresented) { _, presented in
             if !presented {
@@ -260,22 +222,84 @@ struct StreamManagerSheet: View {
             }
         }
         .alert(
-            "Are you sure?",
+            pendingRemovalTitle,
             isPresented: Binding(
-                get: { pendingDeleteStream != nil },
+                get: { pendingRemovalStream != nil },
                 set: { isPresented in
                     if !isPresented {
-                        pendingDeleteStream = nil
+                        pendingRemovalStream = nil
                     }
                 }
             ),
-            presenting: pendingDeleteStream
+            presenting: pendingRemovalStream
         ) { stream in
             Button("Cancel", role: .cancel) {}
-            Button("Confirm", role: .destructive) {
-                pendingDeleteStream = nil
-                Task { await deleteStream(stream) }
+            Button(removalActionTitle(for: stream), role: .destructive) {
+                pendingRemovalStream = nil
+                Task { await removeStream(stream) }
             }
+        }
+    }
+
+    private var bottomActionBar: some View {
+        HStack(spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(.secondary)
+                TextField("Filter…", text: $searchQuery)
+                    .font(.clawline(.uiLabel))
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+            }
+            .padding(.horizontal, 12)
+            .frame(maxWidth: .infinity)
+            .frame(height: functionBarHeight)
+            .contentShape(Rectangle())
+
+            if viewModel.canUseTrackFeature {
+                Button {
+                    onPresentTrackPicker()
+                } label: {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(Color.clear)
+                        .frame(width: functionBarHeight, height: functionBarHeight, alignment: .center)
+                        .overlay {
+                            Image(systemName: "eye")
+                                .font(.clawline(.subsectionHeader).weight(.regular))
+                                .foregroundStyle(.primary)
+                        }
+                        .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .disabled(activeEditor != nil || isWorking)
+                .accessibilityLabel("Track")
+                .accessibilityHint("Tracks an existing untracked session")
+            }
+
+            // Keep add affordance optically centered in a fixed-height toolbar regardless of keyboard changes.
+            Button {
+                addStreamDirectly()
+            } label: {
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .fill(Color.clear)
+                    .frame(width: functionBarHeight, height: functionBarHeight, alignment: .center)
+                    .overlay {
+                        Image(systemName: "plus")
+                            .font(.clawline(.subsectionHeader).weight(.regular))
+                            .foregroundStyle(.primary)
+                    }
+                    .contentShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .disabled(activeEditor != nil)
+            .accessibilityLabel("Add stream")
+            .accessibilityHint("Creates a new stream")
+        }
+        .padding(.horizontal, listRowHorizontalInset)
+        .padding(.top, actionBarTopPadding)
+        .padding(.bottom, actionBarBottomPadding)
+        .overlay(alignment: .top) {
+            sectionSeparator
         }
     }
 
@@ -325,7 +349,7 @@ struct StreamManagerSheet: View {
                     Text(stream.displayName)
                         .font(.clawline(.subsectionHeader).weight(isActive ? .semibold : .regular))
                         .frame(maxWidth: .infinity, alignment: .leading)
-                    if isDeletingStream(stream.sessionKey) {
+                    if isRemovingStream(stream.sessionKey) {
                         ProgressView()
                             .controlSize(.small)
                             .tint(.secondary)
@@ -335,7 +359,7 @@ struct StreamManagerSheet: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .disabled(isWorking || isDeletingStream(stream.sessionKey))
+            .disabled(isWorking || isRemovingStream(stream.sessionKey))
         }
     }
 
@@ -351,27 +375,29 @@ struct StreamManagerSheet: View {
         activeEditor = nil
         draftName = ""
         focusedEditor = nil
-        deletingSessionKeys.removeAll()
+        removingSessionKeys.removeAll()
         pendingCreateRows.removeAll()
-        pendingDeleteStream = nil
+        pendingRemovalStream = nil
     }
 
     private func canPerformRenameAction(for stream: StreamSession) -> Bool {
         guard !isWorking else { return false }
-        guard !isDeletingStream(stream.sessionKey) else { return false }
+        guard !isRemovingStream(stream.sessionKey) else { return false }
         guard activeEditor != .renaming(stream.sessionKey) else { return false }
         return viewModel.canRenameStream(sessionKey: stream.sessionKey)
     }
 
-    private func canPerformDeleteAction(for stream: StreamSession) -> Bool {
+    private func canPerformRemovalAction(for stream: StreamSession) -> Bool {
         guard !isWorking else { return false }
-        guard !isDeletingStream(stream.sessionKey) else { return false }
+        guard !isRemovingStream(stream.sessionKey) else { return false }
         guard activeEditor != .renaming(stream.sessionKey) else { return false }
-        return viewModel.canDeleteStream(sessionKey: stream.sessionKey)
+        return viewModel.isAdoptedStream(sessionKey: stream.sessionKey)
+            ? viewModel.canUntrackStream(sessionKey: stream.sessionKey)
+            : viewModel.canDeleteStream(sessionKey: stream.sessionKey)
     }
 
-    private func isDeletingStream(_ sessionKey: String) -> Bool {
-        deletingSessionKeys.contains(sessionKey)
+    private func isRemovingStream(_ sessionKey: String) -> Bool {
+        removingSessionKeys.contains(sessionKey)
     }
 
     private func addStreamDirectly() {
@@ -398,16 +424,479 @@ struct StreamManagerSheet: View {
         resetInlineEditing()
     }
 
-    private func deleteStream(_ stream: StreamSession) async {
-        guard !isDeletingStream(stream.sessionKey) else { return }
-        deletingSessionKeys.insert(stream.sessionKey)
+    private func removeStream(_ stream: StreamSession) async {
+        guard !isRemovingStream(stream.sessionKey) else { return }
+        removingSessionKeys.insert(stream.sessionKey)
         let succeeded = await viewModel.deleteStream(sessionKey: stream.sessionKey)
-        if !succeeded {
-            deletingSessionKeys.remove(stream.sessionKey)
-        }
+        removingSessionKeys.remove(stream.sessionKey)
         if activeEditor == .renaming(stream.sessionKey) {
             resetInlineEditing()
         }
+        guard succeeded else { return }
+    }
+
+    private var pendingRemovalTitle: String {
+        guard let stream = pendingRemovalStream else { return "Are you sure?" }
+        return viewModel.isAdoptedStream(sessionKey: stream.sessionKey) ? "Untrack this session?" : "Delete this stream?"
+    }
+
+    private func removalActionTitle(for stream: StreamSession) -> String {
+        viewModel.isAdoptedStream(sessionKey: stream.sessionKey) ? "Untrack" : "Delete"
+    }
+
+    private func removalActionImage(for stream: StreamSession) -> String {
+        viewModel.isAdoptedStream(sessionKey: stream.sessionKey) ? "eye.slash" : "trash"
+    }
+
+    private var sectionSeparator: some View {
+        Rectangle()
+            .fill(actionBarSeparatorColor)
+            .frame(height: actionBarSeparatorHeight)
+            .padding(.horizontal, actionBarSeparatorInset)
+            .allowsHitTesting(false)
+    }
+
+}
+
+struct TrackPickerSheet: View {
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.settingsManager) private var settings
+
+    @Bindable var viewModel: ChatViewModel
+
+    @State private var selectedTrackCandidateSessionKey: String?
+    @State private var trackSearchQuery = ""
+    @State private var isWorking = false
+    @FocusState private var isTrackSearchFieldFocused: Bool
+
+    private let trackPickerRowCornerRadius: CGFloat = 12
+    private let trackPickerContentHorizontalPadding: CGFloat = 20
+    private let trackPickerSectionSpacing: CGFloat = 20
+    private let trackPickerBottomBarHeight: CGFloat = 88
+    private let trackPickerSearchFieldHeight: CGFloat = 40
+    private let trackPickerActionButtonHeight: CGFloat = 44
+
+    private var trackCandidates: [ChatViewModel.UntrackedSessionCandidate] {
+        viewModel.untrackedSessionCandidates
+    }
+
+    private var selectedTrackCandidate: ChatViewModel.UntrackedSessionCandidate? {
+        guard let selectedTrackCandidateSessionKey else { return nil }
+        return filteredTrackCandidates.first { $0.sessionKey == selectedTrackCandidateSessionKey }
+            ?? trackCandidates.first { $0.sessionKey == selectedTrackCandidateSessionKey }
+    }
+
+    private var filteredTrackCandidates: [ChatViewModel.UntrackedSessionCandidate] {
+        let normalized = trackSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return trackCandidates }
+        return trackCandidates.filter {
+            StreamSelectorLayout.matchesTrackCandidate(
+                displayName: $0.displayName,
+                sessionKey: $0.sessionKey,
+                query: normalized
+            )
+        }
+    }
+
+    private var trackPickerEmptyStateTitle: String {
+        trackSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? "No sessions available"
+            : "No matching sessions"
+    }
+
+    private var hasSelectedTrackCandidate: Bool {
+        selectedTrackCandidate != nil
+    }
+
+    private var trackPickerActionBackgroundColor: Color {
+        hasSelectedTrackCandidate && !isWorking
+            ? Color.primary
+            : Color.primary.opacity(colorScheme == .dark ? 0.16 : 0.08)
+    }
+
+    private var trackPickerActionForegroundColor: Color {
+        hasSelectedTrackCandidate && !isWorking
+            ? (colorScheme == .dark ? .black : .white)
+            : .secondary
+    }
+
+    private var trackPickerMatchHighlightColor: Color {
+        StreamDotColor.resolve(
+            isActive: true,
+            hasUnread: false,
+            colorScheme: colorScheme
+        )
+    }
+
+    var body: some View {
+        let _ = settings.fontScaleChangeSequence
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: trackPickerSectionSpacing) {
+                    trackPickerIntroCard
+                    trackPickerCandidateSection
+                }
+                .padding(.horizontal, trackPickerContentHorizontalPadding)
+                .padding(.top, 8)
+                .padding(.bottom, 24)
+            }
+            .background(Color.clear)
+            .navigationTitle("Track Session")
+            .navigationBarTitleDisplayMode(.inline)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                trackPickerBottomBar
+            }
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        dismissTrackPicker()
+                    }
+                }
+            }
+        }
+        .onChange(of: trackCandidates.map(\.sessionKey)) { _, sessionKeys in
+            guard let selectedTrackCandidateSessionKey else { return }
+            if !sessionKeys.contains(selectedTrackCandidateSessionKey) {
+                self.selectedTrackCandidateSessionKey = nil
+            }
+        }
+        .onDisappear {
+            clearTrackPickerFirstResponder()
+        }
+    }
+
+    private func dismissTrackPicker() {
+        clearTrackPickerFirstResponder()
+        selectedTrackCandidateSessionKey = nil
+        trackSearchQuery = ""
+        dismiss()
+    }
+
+    private func clearTrackPickerFirstResponder() {
+        isTrackSearchFieldFocused = false
+        UIApplication.shared.sendAction(
+            #selector(UIResponder.resignFirstResponder),
+            to: nil,
+            from: nil,
+            for: nil
+        )
+    }
+
+    private func adoptSelectedTrackSession() {
+        guard let selectedTrackCandidate else { return }
+        guard !isWorking else { return }
+        isWorking = true
+        Task {
+            let succeeded = await viewModel.trackSession(sessionKey: selectedTrackCandidate.sessionKey)
+            await MainActor.run {
+                isWorking = false
+                guard succeeded else { return }
+                dismissTrackPicker()
+            }
+        }
+    }
+
+    private var trackPickerIntroCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Image(systemName: "eye")
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundStyle(.primary.opacity(0.7))
+                .frame(width: 40, height: 40)
+                .background(
+                    Circle()
+                        .fill(Color.primary.opacity(colorScheme == .dark ? 0.12 : 0.06))
+                )
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Adopt an agent session")
+                    .font(.clawline(.uiLabel, weight: .semibold))
+                    .foregroundStyle(.primary)
+                Text("Select a session below, then tap Adopt. Nothing is tracked until you confirm.")
+                    .font(.clawline(.secondaryLabel))
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .fill(Color.primary.opacity(colorScheme == .dark ? 0.08 : 0.04))
+        }
+        .overlay {
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .stroke(Color.primary.opacity(colorScheme == .dark ? 0.08 : 0.06), lineWidth: 0.5)
+        }
+    }
+
+    private var trackPickerSearchField: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(.tertiary)
+            TextField("Filter sessions", text: $trackSearchQuery)
+                .font(.clawline(.uiLabel))
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .focused($isTrackSearchFieldFocused)
+        }
+        .padding(.horizontal, 12)
+        .frame(maxWidth: .infinity, minHeight: trackPickerSearchFieldHeight, alignment: .leading)
+        .background {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color.primary.opacity(colorScheme == .dark ? 0.10 : 0.05))
+        }
+    }
+
+    private var trackPickerCandidateSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                Text("Sessions")
+                    .font(.clawline(.timestamp, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .textCase(.uppercase)
+                    .tracking(0.6)
+                if !trackCandidates.isEmpty {
+                    Text("\(filteredTrackCandidates.count)")
+                        .font(.clawline(.timestamp, weight: .medium))
+                        .foregroundStyle(.secondary.opacity(0.7))
+                        .monospacedDigit()
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 4)
+
+            VStack(spacing: 6) {
+                if filteredTrackCandidates.isEmpty {
+                    trackPickerEmptyState
+                } else {
+                    ForEach(filteredTrackCandidates) { candidate in
+                        trackPickerRow(for: candidate)
+                    }
+                }
+            }
+        }
+    }
+
+    private var trackPickerEmptyState: some View {
+        VStack(spacing: 8) {
+            Image(systemName: trackSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "eye.slash" : "magnifyingglass")
+                .font(.system(size: 24, weight: .light))
+                .foregroundStyle(.tertiary)
+                .padding(.bottom, 4)
+            Text(trackPickerEmptyStateTitle)
+                .font(.clawline(.uiLabel, weight: .medium))
+                .foregroundStyle(.secondary)
+            Text(
+                trackSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    ? "No adoptable agent sessions are available right now."
+                    : "Try a different filter to find the session you want to adopt."
+            )
+                .font(.clawline(.secondaryLabel))
+                .foregroundStyle(.tertiary)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 32)
+    }
+
+    private var trackPickerBottomBar: some View {
+        VStack(spacing: 0) {
+            trackPickerBottomSeparator
+
+            HStack(alignment: .center, spacing: 10) {
+                trackPickerSearchField
+
+                Button {
+                    adoptSelectedTrackSession()
+                } label: {
+                    Text("Adopt")
+                        .font(.clawline(.uiLabel, weight: .semibold))
+                        .frame(minWidth: 80)
+                        .frame(height: trackPickerActionButtonHeight)
+                        .padding(.horizontal, 4)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(trackPickerActionForegroundColor)
+                .background {
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .fill(trackPickerActionBackgroundColor)
+                }
+                .disabled(!hasSelectedTrackCandidate || isWorking)
+            }
+            .padding(.horizontal, trackPickerContentHorizontalPadding)
+            .padding(.top, 12)
+            .padding(.bottom, 20)
+            .frame(minHeight: trackPickerBottomBarHeight)
+            .background(.regularMaterial)
+        }
+    }
+
+    private var trackPickerBottomSeparator: some View {
+        Rectangle()
+            .fill(Color.primary.opacity(0.10))
+            .frame(maxWidth: .infinity)
+            .frame(height: 0.5)
+            .allowsHitTesting(false)
+    }
+
+    @ViewBuilder
+    private func trackPickerRow(for candidate: ChatViewModel.UntrackedSessionCandidate) -> some View {
+        let isSelected = selectedTrackCandidateSessionKey == candidate.sessionKey
+
+        Button {
+            selectedTrackCandidateSessionKey = candidate.sessionKey
+        } label: {
+            HStack(spacing: 12) {
+                ZStack {
+                    Circle()
+                        .strokeBorder(
+                            isSelected
+                                ? Color.primary.opacity(0.8)
+                                : Color.primary.opacity(colorScheme == .dark ? 0.25 : 0.18),
+                            lineWidth: isSelected ? 0 : 1.5
+                        )
+                        .background(
+                            Circle()
+                                .fill(isSelected ? Color.primary : Color.clear)
+                        )
+                    if isSelected {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(colorScheme == .dark ? .black : .white)
+                    }
+                }
+                .frame(width: 22, height: 22)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    highlightedTrackPickerDisplayName(for: candidate)
+                        .font(.clawline(.uiLabel, weight: isSelected ? .semibold : .regular))
+                        .lineLimit(1)
+
+                    highlightedTrackPickerSessionKey(for: candidate)
+                        .font(.clawline(.timestamp, design: .monospaced))
+                        .lineLimit(1)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background {
+                RoundedRectangle(cornerRadius: trackPickerRowCornerRadius, style: .continuous)
+                    .fill(
+                        isSelected
+                            ? Color.primary.opacity(colorScheme == .dark ? 0.12 : 0.06)
+                            : Color.primary.opacity(colorScheme == .dark ? 0.04 : 0.02)
+                    )
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: trackPickerRowCornerRadius, style: .continuous)
+                    .stroke(
+                        isSelected
+                            ? Color.primary.opacity(colorScheme == .dark ? 0.20 : 0.14)
+                            : Color.primary.opacity(colorScheme == .dark ? 0.06 : 0.04),
+                        lineWidth: 0.5
+                    )
+            }
+            .contentShape(RoundedRectangle(cornerRadius: trackPickerRowCornerRadius, style: .continuous))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func highlightedTrackPickerDisplayName(for candidate: ChatViewModel.UntrackedSessionCandidate) -> Text {
+        highlightedText(
+            candidate.displayName,
+            query: trackSearchQuery,
+            defaultColor: .primary,
+            highlightColor: trackPickerMatchHighlightColor
+        )
+    }
+
+    private func highlightedTrackPickerSessionKey(for candidate: ChatViewModel.UntrackedSessionCandidate) -> Text {
+        let snippet = sessionKeySnippet(candidate.sessionKey, query: trackSearchQuery)
+        return highlightedText(
+            snippet.text,
+            highlightedRange: snippet.highlightedRange,
+            defaultColor: .secondary,
+            highlightColor: trackPickerMatchHighlightColor
+        )
+    }
+
+    private func highlightedText(
+        _ text: String,
+        query: String,
+        defaultColor: Color,
+        highlightColor: Color
+    ) -> Text {
+        let normalized = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty,
+            let range = text.range(of: normalized, options: .caseInsensitive)
+        else {
+            return Text(text).foregroundColor(defaultColor)
+        }
+        return highlightedText(
+            text,
+            highlightedRange: range,
+            defaultColor: defaultColor,
+            highlightColor: highlightColor
+        )
+    }
+
+    private func highlightedText(
+        _ text: String,
+        highlightedRange: Range<String.Index>?,
+        defaultColor: Color,
+        highlightColor: Color
+    ) -> Text {
+        var attributed = AttributedString(text)
+        attributed.foregroundColor = defaultColor
+
+        guard let highlightedRange,
+            let attributedRange = Range(highlightedRange, in: attributed)
+        else {
+            return Text(attributed)
+        }
+
+        attributed[attributedRange].foregroundColor = highlightColor
+        attributed[attributedRange].inlinePresentationIntent = .stronglyEmphasized
+        return Text(attributed)
+    }
+
+    private func sessionKeySnippet(_ sessionKey: String, query: String) -> (text: String, highlightedRange: Range<String.Index>?) {
+        let normalized = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty,
+            let matchRange = sessionKey.range(of: normalized, options: .caseInsensitive)
+        else {
+            let shortened = shortenedTrackSessionKey(sessionKey)
+            return (shortened, nil)
+        }
+
+        let lowerOffset = sessionKey.distance(from: sessionKey.startIndex, to: matchRange.lowerBound)
+        let upperOffset = sessionKey.distance(from: sessionKey.startIndex, to: matchRange.upperBound)
+        let snippetStartOffset = max(0, lowerOffset - 8)
+        let snippetEndOffset = min(sessionKey.count, upperOffset + 8)
+        let snippetStart = sessionKey.index(sessionKey.startIndex, offsetBy: snippetStartOffset)
+        let snippetEnd = sessionKey.index(sessionKey.startIndex, offsetBy: snippetEndOffset)
+        let needsLeadingEllipsis = snippetStartOffset > 0
+        let needsTrailingEllipsis = snippetEndOffset < sessionKey.count
+        let coreSnippet = String(sessionKey[snippetStart..<snippetEnd])
+        let snippetText = "\(needsLeadingEllipsis ? "…" : "")\(coreSnippet)\(needsTrailingEllipsis ? "…" : "")"
+        let highlightStartOffset = (needsLeadingEllipsis ? 1 : 0) + sessionKey.distance(from: snippetStart, to: matchRange.lowerBound)
+        let highlightEndOffset = highlightStartOffset + sessionKey.distance(from: matchRange.lowerBound, to: matchRange.upperBound)
+        let snippetHighlightStart = snippetText.index(snippetText.startIndex, offsetBy: highlightStartOffset)
+        let snippetHighlightEnd = snippetText.index(snippetText.startIndex, offsetBy: highlightEndOffset)
+        return (snippetText, snippetHighlightStart..<snippetHighlightEnd)
+    }
+
+    private func shortenedTrackSessionKey(_ sessionKey: String) -> String {
+        guard sessionKey.count > 34 else { return sessionKey }
+        let start = sessionKey.prefix(18)
+        let end = sessionKey.suffix(12)
+        return "\(start)…\(end)"
     }
 }
 
@@ -424,6 +913,13 @@ enum StreamSelectorLayout {
         let normalized = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalized.isEmpty else { return true }
         return displayName.localizedCaseInsensitiveContains(normalized)
+    }
+
+    static func matchesTrackCandidate(displayName: String, sessionKey: String, query: String) -> Bool {
+        let normalized = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return true }
+        return displayName.localizedCaseInsensitiveContains(normalized)
+            || sessionKey.localizedCaseInsensitiveContains(normalized)
     }
 
     static func listContentHeight(

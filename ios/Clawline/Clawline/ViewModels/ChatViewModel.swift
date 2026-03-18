@@ -366,6 +366,8 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         messages = sessionMessages[sessionKey] ?? []
         StreamSwitchTiming.log("messages_assigned", sessionKey: sessionKey)
         persistActiveSessionKey(sessionKey)
+        restoreLastServerMessageIdIfNeeded(for: sessionKey)
+        lastServerMessageId = lastServerMessageIdBySession[sessionKey]
     }
 
     private func clearActiveSession(clearPersistedActiveSessionKey: Bool = true) {
@@ -377,6 +379,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         pendingEngineActivationTask = nil
         engineActivationInFlightSessionKey = nil
         messages = []
+        lastServerMessageId = nil
         if clearPersistedActiveSessionKey {
             streamDefaults.removeObject(forKey: activeSessionDefaultsKey())
         }
@@ -498,6 +501,8 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
     private var lifecycleStartupGateDebugSubscription: AsyncStream<StartupGateDebugEvent>?
     private var sessionMessages: [String: [Message]] = [:]
     private var forceReReadGenerationBySession: [String: Int] = [:]
+    private var lastServerMessageIdBySession: [String: String] = [:]
+    private(set) var lastServerMessageId: String?
     private var pendingLocalMessages: [PendingLocalMessage] = []
     private var ackedPendingLocalMessageIDs: Set<String> = []
     private let lifecycleCoordinator: ConnectionLifecycleCoordinator
@@ -1372,8 +1377,10 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         sessionKeysToClear.formUnion(streamsBySessionKey.keys)
         for key in sessionKeysToClear {
             persistLastReadMessageId(nil, for: key)
+            persistLastServerMessageId(nil, for: key)
         }
         lastReadMessageIdBySession.removeAll()
+        lastServerMessageIdBySession.removeAll()
         hasUnreadBySession.removeAll()
         auth.clearCredentials()
         messageFailures.removeAll()
@@ -1587,6 +1594,11 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         if message.id.hasPrefix("s_") {
             chatService.setReplayCursor(message.id, for: message.sessionKey)
             Task { await lifecycleCoordinator.updateCanonicalCursor(message.id) }
+            lastServerMessageIdBySession[message.sessionKey] = message.id
+            persistLastServerMessageId(message.id, for: message.sessionKey)
+            if message.sessionKey == engineActiveSessionKey {
+                lastServerMessageId = message.id
+            }
         }
 
         if shouldSuppressInteractiveCallbackEcho(message) {
@@ -2707,6 +2719,30 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         }
     }
 
+    private func lastServerMessageIdDefaultsKey(for sessionKey: String) -> String {
+        "clawline.lastServerMessageId.\(sessionKey)"
+    }
+
+    private func persistLastServerMessageId(_ value: String?, for sessionKey: String) {
+        let key = lastServerMessageIdDefaultsKey(for: sessionKey)
+        if let value, !value.isEmpty {
+            streamDefaults.set(value, forKey: key)
+        } else {
+            streamDefaults.removeObject(forKey: key)
+        }
+    }
+
+    private func restoreLastServerMessageIdIfNeeded(for sessionKey: String) {
+        guard lastServerMessageIdBySession[sessionKey] == nil else { return }
+        if let stored = streamDefaults.string(forKey: lastServerMessageIdDefaultsKey(for: sessionKey)) {
+            lastServerMessageIdBySession[sessionKey] = stored
+        }
+    }
+
+    private func restoreLastServerMessageIdIfNeeded() {
+        restoreLastServerMessageIdIfNeeded(for: engineActiveSessionKey)
+    }
+
     private func messageCacheDirectoryURL() -> URL? {
         let fileManager = FileManager.default
         guard let baseURL = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
@@ -2971,18 +3007,21 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         for sessionKey in removedSessionKeys {
             sessionMessages.removeValue(forKey: sessionKey)
             lastReadMessageIdBySession.removeValue(forKey: sessionKey)
+            lastServerMessageIdBySession.removeValue(forKey: sessionKey)
             hasUnreadBySession.removeValue(forKey: sessionKey)
             let removedIDs = Set(pendingLocalMessages.filter { $0.sessionKey == sessionKey }.map(\.id))
             pendingLocalMessages.removeAll { $0.sessionKey == sessionKey }
             ackedPendingLocalMessageIDs.subtract(removedIDs)
             chatService.setReplayCursor(nil, for: sessionKey)
             persistLastReadMessageId(nil, for: sessionKey)
+            persistLastServerMessageId(nil, for: sessionKey)
             persistMessages([], for: sessionKey)
         }
         recalculateOrderedSessionKeys()
         for sessionKey in orderedSessionKeys {
             ensureSessionStorage(for: sessionKey)
             restoreLastReadMessageIdIfNeeded(for: sessionKey)
+            restoreLastServerMessageIdIfNeeded(for: sessionKey)
             restoreCachedMessagesIfNeeded(for: sessionKey)
             refreshUnreadState(for: sessionKey)
         }
@@ -3003,6 +3042,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         recalculateOrderedSessionKeys()
         ensureSessionStorage(for: stream.sessionKey)
         restoreLastReadMessageIdIfNeeded(for: stream.sessionKey)
+        restoreLastServerMessageIdIfNeeded(for: stream.sessionKey)
         restoreCachedMessagesIfNeeded(for: stream.sessionKey)
         refreshUnreadState(for: stream.sessionKey)
         ensureDefaultActiveSessionIfNeeded()
@@ -3016,9 +3056,11 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         recalculateOrderedSessionKeys()
         sessionMessages.removeValue(forKey: sessionKey)
         lastReadMessageIdBySession.removeValue(forKey: sessionKey)
+        lastServerMessageIdBySession.removeValue(forKey: sessionKey)
         hasUnreadBySession.removeValue(forKey: sessionKey)
         chatService.setReplayCursor(nil, for: sessionKey)
         persistLastReadMessageId(nil, for: sessionKey)
+        persistLastServerMessageId(nil, for: sessionKey)
         persistMessages([], for: sessionKey)
         let removedIDs = Set(pendingLocalMessages.filter { $0.sessionKey == sessionKey }.map(\.id))
         pendingLocalMessages.removeAll { $0.sessionKey == sessionKey }

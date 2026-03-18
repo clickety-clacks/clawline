@@ -555,6 +555,7 @@ final class DictationSession {
         updateActiveTranscriptSession { session in
             session.preferredSelectionRange = resolvedSelectionRange
             guard session.originSessionKey == currentSessionKey,
+                  shouldReanchorTranscriptSession(session),
                   let textView = bridge.boundComposeTextView else { return }
             reanchorTranscriptSession(
                 &session,
@@ -2049,6 +2050,10 @@ final class DictationSession {
         session.provisionalText = selectedText
         session.suppressedUntilNextEndpoint = false
         session.committedText = ""
+    }
+
+    private func shouldReanchorTranscriptSession(_ session: TranscriptSession) -> Bool {
+        session.pendingUpdate == nil && session.previousTranscriptUTF16Length == 0
     }
 
     private func noteUserEdit(

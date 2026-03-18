@@ -34,21 +34,21 @@ struct DictationCoordinatorTranscriptOwnershipTests {
         #expect(rig.textView.attributedText.string == "alpha spoken omega")
     }
 
-    @Test("Moving the cursor during dictation re-anchors the next dictated text to the new caret")
-    func movingCursorDuringDictationReanchorsInsertion() async {
-        let rig = makeRig(initialText: "hello world", selectedRange: NSRange(location: 11, length: 0))
+    @Test("Caret changes during active dictation do not re-anchor transcript-owned updates")
+    func movingCursorDuringDictationDoesNotAppendFullTranscript() async {
+        let rig = makeRig(initialText: "", selectedRange: NSRange(location: 0, length: 0))
 
         startDictation(rig)
-        emitCommitted([" tail"], into: rig)
-        await waitUntil { rig.textView.attributedText.string == "hello world tail" }
+        emitProvisional("There", into: rig)
+        await waitUntil { rig.textView.attributedText.string == "There" }
 
-        rig.textView.selectedRange = NSRange(location: 6, length: 0)
+        rig.textView.selectedRange = NSRange(location: rig.textView.attributedText.length, length: 0)
         rig.coordinator.setComposeSelectionRange(rig.textView.selectedRange)
         syncContext(rig)
 
-        emitProvisional("new ", into: rig)
-        await waitUntil { rig.textView.attributedText.string == "hello new world tail" }
-        #expect(rig.textView.attributedText.string == "hello new world tail")
+        emitProvisional("There's also", into: rig)
+        await waitUntil { rig.textView.attributedText.string == "There's also" }
+        #expect(rig.textView.attributedText.string == "There's also")
     }
 
     @Test("User edit in provisional range suppresses Soniox provisional updates until endpoint")

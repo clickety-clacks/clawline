@@ -132,4 +132,53 @@ struct StreamSelectorLayoutTests {
 
         #expect(filtered.count == streams.count)
     }
+
+    @Test("Popup reorder state moves the full visible session-key list immediately")
+    func popupReorderStateMovesVisibleSessionKeysImmediately() {
+        var state = StreamManagerSheetReorderState()
+        state.applyCanonical(["main", "alpha", "bravo"])
+
+        let reordered = state.move(fromOffsets: IndexSet(integer: 2), toOffset: 0)
+
+        #expect(reordered == ["bravo", "main", "alpha"])
+        #expect(state.displayedSessionKeys == ["bravo", "main", "alpha"])
+        #expect(state.canonicalSessionKeys == ["main", "alpha", "bravo"])
+    }
+
+    @Test("Popup reorder state snaps to canonical order when snapshot order changes")
+    func popupReorderStateSnapsToCanonicalSnapshotOrder() {
+        var state = StreamManagerSheetReorderState()
+        state.applyCanonical(["main", "alpha", "bravo"])
+        _ = state.move(fromOffsets: IndexSet(integer: 2), toOffset: 0)
+
+        state.applyCanonical(["alpha", "main", "bravo"])
+
+        #expect(state.displayedSessionKeys == ["alpha", "main", "bravo"])
+        #expect(state.canonicalSessionKeys == ["alpha", "main", "bravo"])
+    }
+
+    @Test("Popup reorder state rolls back to canonical order on server failure")
+    func popupReorderStateRollsBackToCanonicalOrder() {
+        var state = StreamManagerSheetReorderState()
+        state.applyCanonical(["main", "alpha", "bravo"])
+        _ = state.move(fromOffsets: IndexSet(integer: 2), toOffset: 0)
+
+        state.rollback()
+
+        #expect(state.displayedSessionKeys == ["main", "alpha", "bravo"])
+    }
+
+    @Test("Popup reorder stays disabled during search")
+    func popupReorderDisablesDuringSearch() {
+        let enabled = StreamManagerSheetReorderState.canReorder(
+            searchQuery: "alpha",
+            isEditing: false,
+            hasPendingRemoval: false,
+            hasPendingCreateRows: false,
+            isMutatingStreams: false,
+            streamCount: 3
+        )
+
+        #expect(enabled == false)
+    }
 }

@@ -7,7 +7,41 @@
 
 import SwiftUI
 import UIKit
-import UniformTypeIdentifiers
+
+struct StreamManagerSheetReorderState {
+    private(set) var canonicalSessionKeys: [String] = []
+    private(set) var displayedSessionKeys: [String] = []
+
+    mutating func applyCanonical(_ sessionKeys: [String]) {
+        canonicalSessionKeys = sessionKeys
+        displayedSessionKeys = sessionKeys
+    }
+
+    mutating func move(fromOffsets: IndexSet, toOffset: Int) -> [String] {
+        displayedSessionKeys.move(fromOffsets: fromOffsets, toOffset: toOffset)
+        return displayedSessionKeys
+    }
+
+    mutating func rollback() {
+        displayedSessionKeys = canonicalSessionKeys
+    }
+
+    static func canReorder(
+        searchQuery: String,
+        isEditing: Bool,
+        hasPendingRemoval: Bool,
+        hasPendingCreateRows: Bool,
+        isMutatingStreams: Bool,
+        streamCount: Int
+    ) -> Bool {
+        guard searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+        guard !isEditing else { return false }
+        guard !hasPendingRemoval else { return false }
+        guard !hasPendingCreateRows else { return false }
+        guard !isMutatingStreams else { return false }
+        return streamCount > 1
+    }
+}
 
 struct StreamManagerSheet: View {
     @Environment(\.colorScheme) private var colorScheme
@@ -29,8 +63,7 @@ struct StreamManagerSheet: View {
     @State private var removingSessionKeys: Set<String> = []
     @State private var pendingCreateRows: [PendingCreateRow] = []
     @State private var pendingRemovalStream: StreamSession?
-    @State private var displayedSessionKeys: [String] = []
-    @State private var draggedSessionKey: String?
+    @State private var reorderState = StreamManagerSheetReorderState()
     @FocusState private var focusedEditor: EditorMode?
 
     private enum EditorMode: Hashable {
@@ -42,41 +75,9 @@ struct StreamManagerSheet: View {
         let displayName: String
     }
 
-    private struct StreamReorderDropDelegate: DropDelegate {
-        let targetSessionKey: String
-        let isEnabled: Bool
-        @Binding var displayedSessionKeys: [String]
-        @Binding var draggedSessionKey: String?
-        let onCommit: @MainActor () -> Void
-
-        func dropEntered(info: DropInfo) {
-            guard isEnabled, let draggedSessionKey, draggedSessionKey != targetSessionKey else { return }
-            guard let fromIndex = displayedSessionKeys.firstIndex(of: draggedSessionKey),
-                  let toIndex = displayedSessionKeys.firstIndex(of: targetSessionKey) else { return }
-            guard displayedSessionKeys[toIndex] != draggedSessionKey else { return }
-            withAnimation(.snappy(duration: 0.18)) {
-                displayedSessionKeys.move(
-                    fromOffsets: IndexSet(integer: fromIndex),
-                    toOffset: toIndex > fromIndex ? toIndex + 1 : toIndex
-                )
-            }
-        }
-
-        func dropUpdated(info: DropInfo) -> DropProposal? {
-            isEnabled ? DropProposal(operation: .move) : nil
-        }
-
-        func performDrop(info: DropInfo) -> Bool {
-            guard isEnabled else {
-                draggedSessionKey = nil
-                return false
-            }
-            draggedSessionKey = nil
-            Task { @MainActor in
-                onCommit()
-            }
-            return true
-        }
+    private struct StreamOrderSignature: Equatable {
+        let sessionKey: String
+        let orderIndex: Int
     }
 
     private let listRowHeight: CGFloat = 52
@@ -115,7 +116,7 @@ struct StreamManagerSheet: View {
 
     private var orderedStreams: [StreamSession] {
         let currentSessionKeys = streams.map(\.sessionKey)
-        let baselineSessionKeys = displayedSessionKeys.isEmpty ? currentSessionKeys : displayedSessionKeys
+        let baselineSessionKeys = reorderState.displayedSessionKeys.isEmpty ? currentSessionKeys : reorderState.displayedSessionKeys
         var resolvedSessionKeys: [String] = []
         var seenSessionKeys: Set<String> = []
         for sessionKey in baselineSessionKeys where streamLookup[sessionKey] != nil {
@@ -176,109 +177,7 @@ struct StreamManagerSheet: View {
     var body: some View {
         let _ = settings.fontScaleChangeSequence
         VStack(spacing: 0) {
-            List {
-                ForEach(filteredStreams) { stream in
-                    rowContent(for: stream)
-                        .frame(height: listRowHeight, alignment: .center)
-                        .onDrop(
-                            of: [UTType.text],
-                            delegate: StreamReorderDropDelegate(
-                                targetSessionKey: stream.sessionKey,
-                                isEnabled: canReorderStreams,
-                                displayedSessionKeys: $displayedSessionKeys,
-                                draggedSessionKey: $draggedSessionKey,
-                                onCommit: { persistReorderedStreams() }
-                            )
-                        )
-                        .listRowInsets(
-                            EdgeInsets(
-                                top: 0,
-                                leading: listRowHorizontalInset,
-                                bottom: 0,
-                                trailing: listRowHorizontalInset
-                            )
-                        )
-                        .listRowSeparator(.hidden)
-                        .listRowBackground(Color.clear)
-                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                            Button {
-                                beginRenaming(stream)
-                            } label: {
-                                Image(systemName: "pencil")
-                                    .font(.title3.weight(.semibold))
-                            }
-                            .accessibilityLabel("Rename")
-                            .disabled(!canPerformRenameAction(for: stream))
-                            .tint(canPerformRenameAction(for: stream) ? .blue : Color.gray.opacity(0.35))
-
-                            Button {
-                                pendingRemovalStream = stream
-                            } label: {
-                                Image(systemName: removalActionImage(for: stream))
-                                    .font(.title3.weight(.semibold))
-                            }
-                            .accessibilityLabel(removalActionTitle(for: stream))
-                            .disabled(!canPerformRemovalAction(for: stream))
-                            .tint(canPerformRemovalAction(for: stream) ? .red : Color.gray.opacity(0.35))
-                        }
-                }
-
-                ForEach(filteredPendingCreateRows) { pendingRow in
-                    HStack(spacing: 10) {
-                        Circle()
-                            .fill(Color.primary.opacity(0.18))
-                            .frame(width: 8, height: 8)
-                        Text(pendingRow.displayName)
-                            .font(.clawline(.subsectionHeader).weight(.regular))
-                            .foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        ProgressView()
-                            .controlSize(.small)
-                            .tint(.secondary)
-                    }
-                    .listRowSeparator(.hidden)
-                    .listRowBackground(Color.clear)
-                    .frame(height: listRowHeight, alignment: .center)
-                    .listRowInsets(
-                        EdgeInsets(
-                            top: 0,
-                            leading: listRowHorizontalInset,
-                            bottom: 0,
-                            trailing: listRowHorizontalInset
-                        )
-                    )
-                    .contentShape(Rectangle())
-                }
-
-                if filteredStreams.isEmpty && filteredPendingCreateRows.isEmpty {
-                    Text("No streams found")
-                        .font(.clawline(.secondaryLabel))
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .center)
-                        .frame(height: listRowHeight, alignment: .center)
-                        .listRowSeparator(.hidden)
-                        .listRowBackground(Color.clear)
-                        .listRowInsets(
-                            EdgeInsets(
-                                top: 0,
-                                leading: listRowHorizontalInset,
-                                bottom: 0,
-                                trailing: listRowHorizontalInset
-                            )
-                        )
-                }
-            }
-            .listStyle(.plain)
-            .environment(\.defaultMinListRowHeight, listRowHeight)
-            .listRowSpacing(listRowSpacing)
-            .scrollBounceBehavior(.always)
-            .contentMargins(.top, listOuterVerticalPadding, for: .scrollContent)
-            .contentMargins(.bottom, listOuterVerticalPadding, for: .scrollContent)
-            .scrollContentBackground(.hidden)
-            .background(Color.clear)
-            .frame(height: listViewportHeight)
-            .clipShape(Rectangle())
-            .disabled(isWorking)
+            streamList
 
             bottomActionBar
         }
@@ -299,7 +198,7 @@ struct StreamManagerSheet: View {
         .onAppear {
             synchronizeDisplayedSessionKeys()
         }
-        .onChange(of: streams.map(\.sessionKey)) { _, _ in
+        .onChange(of: streamOrderSignature) { _, _ in
             synchronizeDisplayedSessionKeys()
         }
         .alert(
@@ -319,6 +218,85 @@ struct StreamManagerSheet: View {
                 pendingRemovalStream = nil
                 Task { await removeStream(stream) }
             }
+        }
+    }
+
+    private var streamList: some View {
+        List {
+            reorderableStreamRows
+            pendingCreateRowsView
+            emptyStateRow
+        }
+        .listStyle(.plain)
+        .environment(\.defaultMinListRowHeight, listRowHeight)
+        .listRowSpacing(listRowSpacing)
+        .scrollBounceBehavior(.always)
+        .contentMargins(.top, listOuterVerticalPadding, for: .scrollContent)
+        .contentMargins(.bottom, listOuterVerticalPadding, for: .scrollContent)
+        .scrollContentBackground(.hidden)
+        .background(Color.clear)
+        .frame(height: listViewportHeight)
+        .clipShape(Rectangle())
+        .disabled(isWorking)
+        .environment(\.editMode, .constant(canReorderStreams ? .active : .inactive))
+    }
+
+    @ViewBuilder
+    private var reorderableStreamRows: some View {
+        ForEach(filteredStreams) { stream in
+            streamRow(for: stream)
+        }
+        .onMove(perform: moveStreams)
+    }
+
+    @ViewBuilder
+    private var pendingCreateRowsView: some View {
+        ForEach(filteredPendingCreateRows) { pendingRow in
+            HStack(spacing: 10) {
+                Circle()
+                    .fill(Color.primary.opacity(0.18))
+                    .frame(width: 8, height: 8)
+                Text(pendingRow.displayName)
+                    .font(.clawline(.subsectionHeader).weight(.regular))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(.secondary)
+            }
+            .listRowSeparator(.hidden)
+            .listRowBackground(Color.clear)
+            .frame(height: listRowHeight, alignment: .center)
+            .listRowInsets(
+                EdgeInsets(
+                    top: 0,
+                    leading: listRowHorizontalInset,
+                    bottom: 0,
+                    trailing: listRowHorizontalInset
+                )
+            )
+            .contentShape(Rectangle())
+        }
+    }
+
+    @ViewBuilder
+    private var emptyStateRow: some View {
+        if filteredStreams.isEmpty && filteredPendingCreateRows.isEmpty {
+            Text("No streams found")
+                .font(.clawline(.secondaryLabel))
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .frame(height: listRowHeight, alignment: .center)
+                .listRowSeparator(.hidden)
+                .listRowBackground(Color.clear)
+                .listRowInsets(
+                    EdgeInsets(
+                        top: 0,
+                        leading: listRowHorizontalInset,
+                        bottom: 0,
+                        trailing: listRowHorizontalInset
+                    )
+                )
         }
     }
 
@@ -442,25 +420,45 @@ struct StreamManagerSheet: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(isMutatingStreams || isRemovingStream(stream.sessionKey))
-
-                if canShowDragHandle(for: stream) {
-                    dragHandle(for: stream)
-                }
             }
         }
     }
 
-    private func dragHandle(for stream: StreamSession) -> some View {
-        Image(systemName: "line.3.horizontal")
-            .font(.title3.weight(.semibold))
-            .foregroundStyle(canReorderStreams ? .secondary : .tertiary)
-            .frame(width: 28, height: 28, alignment: .center)
-            .contentShape(Rectangle())
-            .accessibilityLabel("Reorder \(stream.displayName)")
-            .accessibilityHint("Drag to reorder streams")
-            .onDrag {
-                draggedSessionKey = stream.sessionKey
-                return NSItemProvider(object: stream.sessionKey as NSString)
+    private func streamRow(for stream: StreamSession) -> some View {
+        let canRename = canPerformRenameAction(for: stream)
+        let canRemove = canPerformRemovalAction(for: stream)
+        return rowContent(for: stream)
+            .frame(height: listRowHeight, alignment: .center)
+            .listRowInsets(
+                EdgeInsets(
+                    top: 0,
+                    leading: listRowHorizontalInset,
+                    bottom: 0,
+                    trailing: listRowHorizontalInset
+                )
+            )
+            .listRowSeparator(.hidden)
+            .listRowBackground(Color.clear)
+            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                Button {
+                    beginRenaming(stream)
+                } label: {
+                    Image(systemName: "pencil")
+                        .font(.title3.weight(.semibold))
+                }
+                .accessibilityLabel("Rename")
+                .disabled(!canRename)
+                .tint(canRename ? .blue : Color.gray.opacity(0.35))
+
+                Button {
+                    pendingRemovalStream = stream
+                } label: {
+                    Image(systemName: removalActionImage(for: stream))
+                        .font(.title3.weight(.semibold))
+                }
+                .accessibilityLabel(removalActionTitle(for: stream))
+                .disabled(!canRemove)
+                .tint(canRemove ? .red : Color.gray.opacity(0.35))
             }
     }
 
@@ -473,20 +471,18 @@ struct StreamManagerSheet: View {
     }
 
     private var canReorderStreams: Bool {
-        guard searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
-        guard activeEditor == nil else { return false }
-        guard pendingRemovalStream == nil else { return false }
-        guard pendingCreateRows.isEmpty else { return false }
-        return !isMutatingStreams && orderedStreams.count > 1
-    }
-
-    private func canShowDragHandle(for stream: StreamSession) -> Bool {
-        canReorderStreams && !isRemovingStream(stream.sessionKey)
+        StreamManagerSheetReorderState.canReorder(
+            searchQuery: searchQuery,
+            isEditing: activeEditor != nil,
+            hasPendingRemoval: pendingRemovalStream != nil,
+            hasPendingCreateRows: !pendingCreateRows.isEmpty,
+            isMutatingStreams: isMutatingStreams,
+            streamCount: orderedStreams.count
+        )
     }
 
     private func synchronizeDisplayedSessionKeys() {
-        guard !isReordering, draggedSessionKey == nil else { return }
-        displayedSessionKeys = streams.map(\.sessionKey)
+        reorderState.applyCanonical(streams.map(\.sessionKey))
     }
 
     private func resetInlineEditing() {
@@ -496,8 +492,7 @@ struct StreamManagerSheet: View {
         removingSessionKeys.removeAll()
         pendingCreateRows.removeAll()
         pendingRemovalStream = nil
-        displayedSessionKeys = streams.map(\.sessionKey)
-        draggedSessionKey = nil
+        reorderState.applyCanonical(streams.map(\.sessionKey))
         isReordering = false
     }
 
@@ -535,18 +530,26 @@ struct StreamManagerSheet: View {
         }
     }
 
-    private func persistReorderedStreams() {
+    private var streamOrderSignature: [StreamOrderSignature] {
+        streams.map { StreamOrderSignature(sessionKey: $0.sessionKey, orderIndex: $0.orderIndex) }
+    }
+
+    private func moveStreams(fromOffsets: IndexSet, toOffset: Int) {
         guard canReorderStreams else { return }
-        let sessionKeys = orderedStreams.map(\.sessionKey)
-        guard sessionKeys != streams.map(\.sessionKey) else { return }
+        let sessionKeys = reorderState.move(fromOffsets: fromOffsets, toOffset: toOffset)
+        persistReorderedStreams(sessionKeys: sessionKeys)
+    }
+
+    private func persistReorderedStreams(sessionKeys: [String]) {
+        guard canReorderStreams else { return }
+        guard sessionKeys != reorderState.canonicalSessionKeys else { return }
         isReordering = true
         Task {
             let succeeded = await viewModel.reorderStreams(sessionKeys: sessionKeys)
             await MainActor.run {
                 isReordering = false
-                draggedSessionKey = nil
                 if !succeeded {
-                    displayedSessionKeys = streams.map(\.sessionKey)
+                    reorderState.rollback()
                 }
             }
         }

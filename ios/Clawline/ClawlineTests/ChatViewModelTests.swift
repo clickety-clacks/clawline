@@ -2214,6 +2214,50 @@ struct ChatViewModelTests {
         #expect(viewModel.orderedStreams.map(\.sessionKey) == [customB, personalSessionKey, customA])
     }
 
+    @Test("Stream snapshot reorder replaces ordered streams with canonical order")
+    @MainActor
+    func streamSnapshotReorderReplacesOrderedStreams() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let customA = "agent:main:clawline:user:s_alpha"
+        let customB = "agent:main:clawline:user:s_bravo"
+        chatService.streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: customA, displayName: "Alpha", kind: "custom", orderIndex: 1, isBuiltIn: false),
+            makeStreamSession(sessionKey: customB, displayName: "Bravo", kind: "custom", orderIndex: 2, isBuiltIn: false),
+        ]
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
+
+        chatService.emitServiceEvent(.streamSnapshot([
+            makeStreamSession(sessionKey: customB, displayName: "Bravo", kind: "custom", orderIndex: 0, isBuiltIn: false),
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 1, isBuiltIn: true),
+            makeStreamSession(sessionKey: customA, displayName: "Alpha", kind: "custom", orderIndex: 2, isBuiltIn: false),
+        ]))
+
+        for _ in 0..<50 {
+            if viewModel.orderedStreams.map(\.sessionKey) == [customB, personalSessionKey, customA] {
+                break
+            }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(viewModel.orderedStreams.map(\.sessionKey) == [customB, personalSessionKey, customA])
+    }
+
     @Test("Server-adopted streams from provider override websocket snapshot without adopted flag")
     @MainActor
     func adoptedSessionsUseServerAdoptedFlagFromSnapshot() async throws {

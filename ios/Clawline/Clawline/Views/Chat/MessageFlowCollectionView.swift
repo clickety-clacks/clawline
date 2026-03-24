@@ -227,6 +227,9 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     private var topInset: CGFloat = 0
     private var truncationBottomInset: CGFloat = 0
     private var lastBoundsSize: CGSize = .zero
+    private var lastMeasurementContentWidth: CGFloat?
+    private var lastMeasurementMetricsFingerprint: Int?
+    private var pendingBoundsChange = false
     private var forceReconfigureAll = false
     private var currentFontScaleChangeSequence: Int = 0
     private var onExpand: ((Message) -> Void)?
@@ -955,7 +958,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             return
         }
         lastBoundsSize = size
-        forceReconfigureAll = true
+        pendingBoundsChange = true
         updateLayout()
         if let viewModel {
             update(
@@ -3089,8 +3092,32 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         collectionView.contentInset.top = topInset
         collectionView.verticalScrollIndicatorInsets.top = topInset
         setBottomInset(currentBottomInset)
-        let envInvalidationPlan = invalidateFor(reason: .envChanged)
-        executeInvalidationPlan(envInvalidationPlan)
+
+        let contentWidth = effectiveContentWidth(metrics: metrics)
+        let metricsFp = BubbleSizingV2.metricsFingerprint(
+            metrics: metrics, traitCollection: view.traitCollection
+        )
+        let measurementInputsChanged =
+            contentWidth != lastMeasurementContentWidth
+            || metricsFp != lastMeasurementMetricsFingerprint
+
+        if pendingBoundsChange {
+            pendingBoundsChange = false
+            if measurementInputsChanged {
+                forceReconfigureAll = true
+            }
+        }
+
+        if measurementInputsChanged {
+            lastMeasurementContentWidth = contentWidth
+            lastMeasurementMetricsFingerprint = metricsFp
+            let envInvalidationPlan = invalidateFor(reason: .envChanged)
+            executeInvalidationPlan(envInvalidationPlan)
+        } else {
+            // Measurement inputs unchanged — bubble sizes are still valid.
+            // Rebuild layout positions only (bounds/insets may have shifted).
+            scheduleLayoutInvalidation()
+        }
     }
 
     private func availableContentWidth() -> CGFloat {

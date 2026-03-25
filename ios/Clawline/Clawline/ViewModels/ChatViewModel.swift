@@ -36,6 +36,7 @@ final class ChatViewModel: ChatViewModelHosting {
     private let instanceId = UUID().uuidString
     @MainActor
     private static var currentConnectionOwnerId: String?
+    private static let providerMaxTextMessageBytes = 65_536
     private static let richDocumentMimeTypesNeedingPayload: Set<String> = [
         InteractiveHTMLDescriptor.mimeType,
         TerminalSessionDescriptor.mimeType
@@ -161,6 +162,29 @@ final class ChatViewModel: ChatViewModelHosting {
 
     var activeStream: ChatStream {
         SessionRegistry.shared.stream(for: engineActiveSessionKey)
+    }
+
+    var canUseTrackFeature: Bool {
+        auth.isAdmin
+    }
+
+    struct UntrackedSessionCandidate: Identifiable, Equatable {
+        var id: String { sessionKey }
+        let sessionKey: String
+        let displayName: String
+    }
+
+    var untrackedSessionCandidates: [UntrackedSessionCandidate] {
+        guard canUseTrackFeature else { return [] }
+        return trackableSessionKeyOrder
+            .filter { canTrackSession(sessionKey: $0) }
+            .map { sessionKey in
+                let displayName =
+                    trackableSessionsBySessionKey[sessionKey]?.displayName
+                    ?? streamsBySessionKey[sessionKey]?.displayName
+                    ?? fallbackDisplayName(for: sessionKey)
+                return UntrackedSessionCandidate(sessionKey: sessionKey, displayName: displayName)
+            }
     }
 
     // MARK: Stream Switch API
@@ -343,10 +367,21 @@ final class ChatViewModel: ChatViewModelHosting {
     var activeSessionDisplayName: String {
         streamsBySessionKey[uiSelectedSessionKey]?.displayName ?? fallbackDisplayName(for: uiSelectedSessionKey)
     }
+
+    var activeSessionPlaceholderText: String {
+        Self.placeholderText(
+            displayName: activeSessionDisplayName,
+            sessionKey: uiSelectedSessionKey
+        )
+    }
+
+    nonisolated static func placeholderText(displayName: String, sessionKey: String) -> String {
+        guard !sessionKey.isEmpty else { return displayName }
+        return "\(displayName) — \(sessionKey)"
+    }
     var inputContent: NSAttributedString = NSAttributedString() {
         didSet {
             pruneAttachmentData()
-            logger.info("[trace] inputContent len=\(self.inputContent.length) empty=\(self.inputContent.isEffectivelyEmpty) canSend=\(self.canSend) state=\(String(describing: self.connectionState))")
         }
     }
     var attachmentData: [UUID: PendingAttachment] = [:]
@@ -405,6 +440,7 @@ final class ChatViewModel: ChatViewModelHosting {
     private var sessionMessages: [String: [Message]] = [:]
     private var forceReReadGenerationBySession: [String: Int] = [:]
     private var pendingLocalMessages: [PendingLocalMessage] = []
+    private var ackedPendingLocalMessageIDs: Set<String> = []
     private let lifecycleCoordinator: ConnectionLifecycleCoordinator
     private var lifecycleTransportTask: Task<Void, Never>?
     private var lifecycleOutputTask: Task<Void, Never>?
@@ -446,7 +482,16 @@ final class ChatViewModel: ChatViewModelHosting {
     private var supportsSessionProvisioning = false
     private var hasResolvedProvisioningCapability = true
     private var hasReceivedSessionProvisioning = false
-    private var provisionedSessionKeys: Set<String> = []
+    private var hasReceivedExplicitSessionInfo = false
+    private var accessibleSessionKeys: Set<String> = []
+    private var accessibleSessionKeyOrder: [String] = []
+    private var trackableSessionsBySessionKey: [String: TrackableSession] = [:]
+    private var trackableSessionKeyOrder: [String] = []
+    private var refreshStreamsTask: Task<Void, Never>?
+    private var refreshTrackableSessionsTask: Task<Void, Never>?
+    private var pendingUntrackRecovery: StreamSession?
+    private var hasLoadedTrackableSessionsOnce = false
+    private var hasSurfacedInitialTrackableSessionsFailure = false
     private var pendingProvisionedSend: PendingProvisionedSend?
 
     func forceReReadGeneration(for sessionKey: String) -> Int {
@@ -612,10 +657,14 @@ final class ChatViewModel: ChatViewModelHosting {
         self.salientHighlightService = salientHighlightService
         self.lifecycleCoordinator = ConnectionLifecycleCoordinator(
             startAttempt: { [weak chatService] epoch, lastMessageId, token in
-                chatService?.startConnectionAttempt(epoch: epoch, lastMessageId: lastMessageId, token: token)
+                Task { @MainActor [weak chatService] in
+                    chatService?.startConnectionAttempt(epoch: epoch, lastMessageId: lastMessageId, token: token)
+                }
             },
             stopAttempt: { [weak chatService] in
-                chatService?.stopConnectionAttempt()
+                Task { @MainActor [weak chatService] in
+                    chatService?.stopConnectionAttempt()
+                }
             }
         )
         self.nowProvider = nowProvider
@@ -762,6 +811,7 @@ final class ChatViewModel: ChatViewModelHosting {
             restoreStreamMetadataIfNeeded()
             restoreActiveSessionKeyIfNeeded()
             ensureDefaultActiveSessionIfNeeded()
+            refreshStreamsFromProvider(reason: "authChanged")
         } else {
             coordinatorDiag("handleAuthStateChange logout-path")
             didRestoreActiveSessionKey = false
@@ -985,6 +1035,21 @@ final class ChatViewModel: ChatViewModelHosting {
         return "connectionState=\(String(describing: connectionState)) providerReady=\(providerReady ? "1" : "0") transportReady=\(transportReady ? "1" : "0")"
     }
 
+    private func validateTextByteLimitForSend(_ text: String) -> Bool {
+        let textBytes = text.lengthOfBytes(using: .utf8)
+        guard textBytes <= Self.providerMaxTextMessageBytes else {
+#if DEBUG
+            recordImageSendDebugEvent(
+                .sendResult,
+                detail: "failure reason=text_too_large bytes=\(textBytes) limit=\(Self.providerMaxTextMessageBytes)"
+            )
+#endif
+            toastManager.show("That message is too large to send.")
+            return false
+        }
+        return true
+    }
+
     func send() {
         guard !isSending else { return }
         let referencedIds = Set(inputContent.pendingAttachmentIds())
@@ -1015,6 +1080,10 @@ final class ChatViewModel: ChatViewModelHosting {
 #if DEBUG
             recordImageSendDebugEvent(.sendResult, detail: "failure reason=empty_input")
 #endif
+            return
+        }
+
+        if !validateTextByteLimitForSend(text) {
             return
         }
 
@@ -1125,6 +1194,7 @@ final class ChatViewModel: ChatViewModelHosting {
     func resendFailedMessage(messageId: String) {
         guard !isSending else { return }
         guard let (message, sessionKey, index) = findMessage(id: messageId) else { return }
+        guard validateTextByteLimitForSend(message.content) else { return }
 
         let clientId = "c_\(UUID().uuidString)"
         let resentMessage = Message(
@@ -1144,6 +1214,7 @@ final class ChatViewModel: ChatViewModelHosting {
         setMessages(messageList, for: sessionKey)
 
         pendingLocalMessages.removeAll { $0.id == messageId }
+        ackedPendingLocalMessageIDs.remove(messageId)
         pendingLocalMessages.append(PendingLocalMessage(id: clientId, sessionKey: sessionKey))
         messageFailures.removeValue(forKey: messageId)
 
@@ -1244,6 +1315,7 @@ final class ChatViewModel: ChatViewModelHosting {
         orderedSessionKeys = []
         syntheticSessionKeys = []
         pendingLocalMessages.removeAll()
+        ackedPendingLocalMessageIDs.removeAll()
         isAssistantTyping = false
         typingSessionKey = nil
         shouldMorphTypingIndicator = false
@@ -1267,6 +1339,7 @@ final class ChatViewModel: ChatViewModelHosting {
 
     func canDeleteStream(sessionKey: String) -> Bool {
         guard let stream = streamsBySessionKey[sessionKey] else { return false }
+        guard !stream.adopted else { return false }
         if stream.sessionKey == SessionKey.admin { return false }
         if stream.kind == "main" { return true }
         if SessionKey.isClawlinePersonalDM(stream.sessionKey) { return true }
@@ -1274,18 +1347,80 @@ final class ChatViewModel: ChatViewModelHosting {
         return !isProtectedNonDeletableStream(stream)
     }
 
+    func canUntrackStream(sessionKey: String) -> Bool {
+        guard let stream = streamsBySessionKey[sessionKey] else { return false }
+        return stream.adopted
+    }
+
+    func isAdoptedStream(sessionKey: String) -> Bool {
+        guard let stream = streamsBySessionKey[sessionKey] else {
+            logger.info("adopted_check sessionKey=\(sessionKey, privacy: .public) result=false source=missing_stream")
+            return false
+        }
+        logger.info(
+            "adopted_check sessionKey=\(sessionKey, privacy: .public) adopted=\(stream.adopted, privacy: .public) result=\(stream.adopted, privacy: .public)"
+        )
+        return stream.adopted
+    }
+
+    func canTrackSession(sessionKey: String) -> Bool {
+        guard canUseTrackFeature else { return false }
+        guard !sessionKey.isEmpty else { return false }
+        let trackedSessionKeys = Set(
+            orderedStreams
+                .filter { !syntheticSessionKeys.contains($0.sessionKey) }
+                .map(\.sessionKey)
+        )
+        guard !trackedSessionKeys.contains(sessionKey) else { return false }
+        return trackableSessionsBySessionKey[sessionKey] != nil
+    }
+
+    func trackSession(sessionKey: String) async -> Bool {
+        guard canTrackSession(sessionKey: sessionKey) else { return false }
+        do {
+            let stream = try await chatService.adoptStream(sessionKey: sessionKey)
+            pendingUntrackRecovery = nil
+            applyStreamUpsert(stream)
+            refreshTrackableSessions(reason: "trackSuccess")
+            return true
+        } catch {
+            toastManager.show(error.localizedDescription)
+            return false
+        }
+    }
+
+    func refreshTrackableSessionsOnDemand() {
+        refreshTrackableSessions(reason: "manualRefresh")
+    }
+
     func createStream(displayName: String) async -> Bool {
         let trimmed = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return false }
+        let idempotencyKey = Self.makeIdempotencyKey()
         do {
             let stream = try await chatService.createStream(
                 displayName: trimmed,
-                idempotencyKey: Self.makeIdempotencyKey()
+                idempotencyKey: idempotencyKey
             )
             applyStreamUpsert(stream)
             setEngineActiveSessionKey(stream.sessionKey)
             return true
         } catch {
+            if shouldRetryCreateOnActiveConnection(after: error) {
+                do {
+                    try await reconnectActiveTransportForControlPlane()
+                    let stream = try await chatService.createStream(
+                        displayName: trimmed,
+                        idempotencyKey: idempotencyKey
+                    )
+                    applyStreamUpsert(stream)
+                    setEngineActiveSessionKey(stream.sessionKey)
+                    return true
+                } catch {
+                    toastManager.show(error.localizedDescription)
+                    return false
+                }
+            }
             toastManager.show(error.localizedDescription)
             return false
         }
@@ -1306,14 +1441,15 @@ final class ChatViewModel: ChatViewModelHosting {
     }
 
     func deleteStream(sessionKey: String) async -> Bool {
-        guard canDeleteStream(sessionKey: sessionKey) else { return false }
-        let idempotencyKey = Self.makeIdempotencyKey()
+        guard let stream = streamsBySessionKey[sessionKey] else { return false }
+        guard stream.adopted || canDeleteStream(sessionKey: sessionKey) else { return false }
+        let idempotencyKey = stream.adopted ? nil : Self.makeIdempotencyKey()
         do {
             _ = try await chatService.deleteStream(
                 sessionKey: sessionKey,
                 idempotencyKey: idempotencyKey
             )
-            applyStreamDeletion(sessionKey: sessionKey)
+            applyDeleteSuccess(for: stream)
             return true
         } catch {
             if shouldRetryDeleteOnActiveConnection(after: error) {
@@ -1323,7 +1459,7 @@ final class ChatViewModel: ChatViewModelHosting {
                         sessionKey: sessionKey,
                         idempotencyKey: idempotencyKey
                     )
-                    applyStreamDeletion(sessionKey: sessionKey)
+                    applyDeleteSuccess(for: stream)
                     return true
                 } catch {
                     toastManager.show(error.localizedDescription)
@@ -1336,6 +1472,19 @@ final class ChatViewModel: ChatViewModelHosting {
     }
 
     private func shouldRetryDeleteOnActiveConnection(after error: Swift.Error) -> Bool {
+        guard auth.token != nil else { return false }
+        if let providerError = error as? ProviderChatService.Error,
+           case .notConnected = providerError {
+            return true
+        }
+        if let streamError = error as? StreamAPIError,
+           streamError.code == "not_connected" {
+            return true
+        }
+        return false
+    }
+
+    private func shouldRetryCreateOnActiveConnection(after error: Swift.Error) -> Bool {
         guard auth.token != nil else { return false }
         if let providerError = error as? ProviderChatService.Error,
            case .notConnected = providerError {
@@ -1463,6 +1612,7 @@ final class ChatViewModel: ChatViewModelHosting {
         sessionMessages.removeAll()
         messages.removeAll()
         pendingLocalMessages.removeAll()
+        ackedPendingLocalMessageIDs.removeAll()
         messageFailures.removeAll()
         chatService.clearReplayCursors()
         clearMessageCache()
@@ -1603,6 +1753,7 @@ final class ChatViewModel: ChatViewModelHosting {
         }
 
         let pending = pendingLocalMessages.remove(at: pendingIndex)
+        ackedPendingLocalMessageIDs.remove(pending.id)
         var placeholderSessionKey = pending.sessionKey
         ensureSessionStorage(for: placeholderSessionKey)
         var pendingList = sessionMessages[placeholderSessionKey] ?? []
@@ -1690,6 +1841,7 @@ final class ChatViewModel: ChatViewModelHosting {
         if let pendingIndex = pendingLocalMessages.firstIndex(where: { $0.id == id }) {
             pendingLocalMessages.remove(at: pendingIndex)
         }
+        ackedPendingLocalMessageIDs.remove(id)
         messageFailures.removeValue(forKey: id)
     }
 
@@ -1742,10 +1894,12 @@ final class ChatViewModel: ChatViewModelHosting {
     private func markPendingMessagesAsFailedForConnectionLoss() {
         guard !pendingLocalMessages.isEmpty else { return }
         let pendingIds = Set(pendingLocalMessages.map(\.id))
-        for id in pendingIds {
+        let failedIds = pendingIds.subtracting(ackedPendingLocalMessageIDs)
+        for id in failedIds {
             messageFailures[id] = MessageFailure(code: "connection_lost", message: nil)
         }
         pendingLocalMessages.removeAll()
+        ackedPendingLocalMessageIDs.removeAll()
         if let activeClientMessageId, pendingIds.contains(activeClientMessageId) {
             self.activeClientMessageId = nil
             self.isSending = false
@@ -1759,6 +1913,7 @@ final class ChatViewModel: ChatViewModelHosting {
             messageFailures[id] = MessageFailure(code: code, message: message)
         }
         pendingLocalMessages.removeAll()
+        ackedPendingLocalMessageIDs.removeAll()
         if let activeClientMessageId, pendingIds.contains(activeClientMessageId) {
             self.activeClientMessageId = nil
         }
@@ -1900,6 +2055,71 @@ final class ChatViewModel: ChatViewModelHosting {
         }
     }
 
+    // MARK: - Image downscale for model limits
+
+    private static let modelAwareMaxImageDimension: CGFloat = 1568
+    private static let minImageDimension: CGFloat = 512
+    private static let initialJPEGQuality: CGFloat = 0.9
+    private static let minJPEGQuality: CGFloat = 0.58
+    private static let qualityStep: CGFloat = 0.08
+    private static let resizeStep: CGFloat = 0.85
+    private static let downscalePassLimit: Int = 12
+
+    private func prepareImageDataForModel(data: Data, mimeType: String) throws -> (Data, String) {
+        guard PendingAttachment.inlineMimeTypes.contains(mimeType.lowercased()) else {
+            return (data, mimeType)
+        }
+        guard data.count > PendingAttachment.modelAwareMaxImageRawByteLimit else {
+            return (data, mimeType)
+        }
+        guard let image = UIImage(data: data) else {
+            return (data, mimeType)
+        }
+
+        var maxDim = Self.modelAwareMaxImageDimension
+        var quality = Self.initialJPEGQuality
+        var pass = 0
+
+        while pass < Self.downscalePassLimit {
+            pass += 1
+            if let compressed = downscaleImage(image, maxDimension: maxDim, quality: quality) {
+                if compressed.count <= PendingAttachment.modelAwareMaxImageRawByteLimit {
+                    logger.info("image downscaled pass=\(pass, privacy: .public) from=\(data.count, privacy: .public) to=\(compressed.count, privacy: .public)")
+                    return (compressed, "image/jpeg")
+                }
+            }
+            if quality > Self.minJPEGQuality {
+                quality -= Self.qualityStep
+            } else {
+                maxDim *= Self.resizeStep
+                quality = Self.initialJPEGQuality
+            }
+            if maxDim < Self.minImageDimension {
+                break
+            }
+        }
+
+        throw AttachmentError.imageTooLargeForModel
+    }
+
+    private func downscaleImage(_ image: UIImage, maxDimension: CGFloat, quality: CGFloat) -> Data? {
+        let size = image.size
+        let scale: CGFloat
+        if size.width > size.height {
+            scale = size.width > maxDimension ? maxDimension / size.width : 1
+        } else {
+            scale = size.height > maxDimension ? maxDimension / size.height : 1
+        }
+        let newSize = CGSize(width: (size.width * scale).rounded(), height: (size.height * scale).rounded())
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let renderer = UIGraphicsImageRenderer(size: newSize, format: format)
+        let resized = renderer.image { _ in
+            image.draw(in: CGRect(origin: .zero, size: newSize))
+        }
+        return resized.jpegData(compressionQuality: quality)
+    }
+
     private func buildWireAttachments(from attachments: [PendingAttachment],
                                       content: String) async throws -> [WireAttachment] {
         var results: [WireAttachment] = []
@@ -1911,19 +2131,22 @@ final class ChatViewModel: ChatViewModelHosting {
         var inlineBytes = 0
         for attachment in attachments {
             try Task.checkCancellation()
-            let canInline = attachment.isInlineCapableImage
-                && attachment.size <= PendingAttachment.inlineByteLimit
-                && inlineBytes + attachment.size <= PendingAttachment.inlineTotalByteLimit
-                && contentBytes + inlineBytes + attachment.size <= PendingAttachment.totalPayloadByteLimit
+            let (preparedData, preparedMime) = try prepareImageDataForModel(
+                data: attachment.data, mimeType: attachment.mimeType
+            )
+            let canInline = PendingAttachment.inlineMimeTypes.contains(preparedMime.lowercased())
+                && preparedData.count <= PendingAttachment.inlineByteLimit
+                && inlineBytes + preparedData.count <= PendingAttachment.inlineTotalByteLimit
+                && contentBytes + inlineBytes + preparedData.count <= PendingAttachment.totalPayloadByteLimit
 
             if canInline {
-                logger.info("attachment inline id=\(attachment.id.uuidString, privacy: .public) bytes=\(attachment.size, privacy: .public)")
-                results.append(.image(mimeType: attachment.mimeType, data: attachment.data))
-                inlineBytes += attachment.size
+                logger.info("attachment inline id=\(attachment.id.uuidString, privacy: .public) bytes=\(preparedData.count, privacy: .public)")
+                results.append(.image(mimeType: preparedMime, data: preparedData))
+                inlineBytes += preparedData.count
                 continue
             }
 
-            if attachment.size > PendingAttachment.maxUploadByteLimit {
+            if preparedData.count > PendingAttachment.maxUploadByteLimit {
                 throw AttachmentError.uploadTooLarge
             }
 
@@ -1933,12 +2156,12 @@ final class ChatViewModel: ChatViewModelHosting {
             }
 
             let assetId = try await uploadService.upload(
-                data: attachment.data,
-                mimeType: attachment.mimeType,
+                data: preparedData,
+                mimeType: preparedMime,
                 filename: attachment.filename
             )
             uploadedAssetIds[attachment.id] = assetId
-            logger.info("attachment uploaded id=\(attachment.id.uuidString, privacy: .public) assetId=\(assetId, privacy: .public) bytes=\(attachment.size, privacy: .public)")
+            logger.info("attachment uploaded id=\(attachment.id.uuidString, privacy: .public) assetId=\(assetId, privacy: .public) bytes=\(preparedData.count, privacy: .public)")
             results.append(.asset(assetId: assetId))
         }
         return results
@@ -1961,10 +2184,11 @@ final class ChatViewModel: ChatViewModelHosting {
                 continue
             }
 
-            guard let data = attachment.data else {
+            guard let rawData = attachment.data else {
                 throw AttachmentError.invalidData
             }
-            let mimeType = attachment.mimeType ?? "application/octet-stream"
+            let rawMime = attachment.mimeType ?? "application/octet-stream"
+            let (data, mimeType) = try prepareImageDataForModel(data: rawData, mimeType: rawMime)
             let canInline = PendingAttachment.inlineMimeTypes.contains(mimeType.lowercased())
                 && data.count <= PendingAttachment.inlineByteLimit
                 && inlineBytes + data.count <= PendingAttachment.inlineTotalByteLimit
@@ -2021,6 +2245,9 @@ final class ChatViewModel: ChatViewModelHosting {
     }
 
     private func pruneAttachmentData() {
+        guard !attachmentData.isEmpty || !stagedAttachmentProtection.isEmpty || !uploadedAssetIds.isEmpty else {
+            return
+        }
         let referencedIds = Set(inputContent.pendingAttachmentIds())
         stagedAttachmentProtection.formIntersection(Set(attachmentData.keys))
         stagedAttachmentProtection.subtract(referencedIds)
@@ -2113,12 +2340,18 @@ final class ChatViewModel: ChatViewModelHosting {
             if let pendingIndex = pendingLocalMessages.firstIndex(where: { $0.id == messageId }) {
                 pendingLocalMessages.remove(at: pendingIndex)
             }
+            ackedPendingLocalMessageIDs.remove(messageId)
             if activeClientMessageId == messageId {
                 activeClientMessageId = nil
             }
             isSending = false
-        case .messageAcked:
-            break
+        case .messageAcked(let messageId):
+            ackedPendingLocalMessageIDs.insert(messageId)
+            messageFailures.removeValue(forKey: messageId)
+            if activeClientMessageId == messageId {
+                activeClientMessageId = nil
+                isSending = false
+            }
         case .connectionInterrupted(let reason):
             logger.info("connection interrupted reason=\(reason ?? "unknown", privacy: .public)")
             markPendingMessagesAsFailedForConnectionLoss()
@@ -2142,21 +2375,39 @@ final class ChatViewModel: ChatViewModelHosting {
             hasResolvedProvisioningCapability = true
             supportsSessionProvisioning = true
             hasReceivedSessionProvisioning = true
-            provisionedSessionKeys = Set(streams.map(\.sessionKey))
+            for stream in streams {
+                logger.info(
+                    "stream_snapshot_debug sessionKey=\(stream.sessionKey, privacy: .public) adopted=\(stream.adopted, privacy: .public)"
+                )
+            }
+            if accessibleSessionKeyOrder.isEmpty {
+                replaceAccessibleSessionKeys(with: streams.map(\.sessionKey))
+            } else {
+                mergeAccessibleSessionKeys(streams.map(\.sessionKey))
+            }
             applyStreamSnapshot(streams)
+            refreshStreamsFromProvider(reason: "streamSnapshot")
+            refreshTrackableSessions(reason: "streamSnapshot")
             attemptPendingProvisionedSendIfPossible()
         case .streamCreated(let stream):
             hasResolvedProvisioningCapability = true
             supportsSessionProvisioning = true
             hasReceivedSessionProvisioning = true
-            provisionedSessionKeys.insert(stream.sessionKey)
+            mergeAccessibleSessionKeys([stream.sessionKey])
             applyStreamUpsert(stream)
+            refreshStreamsFromProvider(reason: "streamCreated")
+            refreshTrackableSessions(reason: "streamCreated")
             attemptPendingProvisionedSendIfPossible()
         case .streamUpdated(let stream):
             applyStreamUpsert(stream)
+            refreshStreamsFromProvider(reason: "streamUpdated")
         case .streamDeleted(let sessionKey):
-            provisionedSessionKeys.remove(sessionKey)
-            applyStreamDeletion(sessionKey: sessionKey)
+            if !hasReceivedExplicitSessionInfo {
+                removeAccessibleSessionKey(sessionKey)
+            }
+            applyDeletedStreamMutation(sessionKey: sessionKey)
+            refreshStreamsFromProvider(reason: "streamDeleted")
+            refreshTrackableSessions(reason: "streamDeleted")
             attemptPendingProvisionedSendIfPossible()
         case .sessionProvisioningAvailable(let supported):
             hasResolvedProvisioningCapability = true
@@ -2166,14 +2417,16 @@ final class ChatViewModel: ChatViewModelHosting {
             hasResolvedProvisioningCapability = true
             supportsSessionProvisioning = true
             hasReceivedSessionProvisioning = true
-            provisionedSessionKeys = Set(info.sessionKeys)
+            hasReceivedExplicitSessionInfo = true
+            replaceAccessibleSessionKeys(with: info.sessionKeys)
+            refreshTrackableSessions(reason: "sessionInfo")
             attemptPendingProvisionedSendIfPossible()
         }
     }
 
     private func sendProvisioningState(for sessionKey: String) -> SendProvisioningState {
         if hasReceivedSessionProvisioning {
-            return provisionedSessionKeys.contains(sessionKey) ? .ready : .unavailable
+            return isLocallySendableSessionKey(sessionKey) ? .ready : .unavailable
         }
         if supportsSessionProvisioning {
             return .waiting
@@ -2202,6 +2455,13 @@ final class ChatViewModel: ChatViewModelHosting {
             pendingProvisionedSend = nil
             toastManager.show("This stream is unavailable. Switch streams and try again.")
         }
+    }
+
+    private func isLocallySendableSessionKey(_ sessionKey: String) -> Bool {
+        if accessibleSessionKeys.contains(sessionKey) {
+            return true
+        }
+        return isAdoptedStream(sessionKey: sessionKey)
     }
 
     private func transitionConnectionState(_ state: ConnectionState,
@@ -2233,10 +2493,106 @@ final class ChatViewModel: ChatViewModelHosting {
         supportsSessionProvisioning = false
         hasResolvedProvisioningCapability = false
         hasReceivedSessionProvisioning = false
-        provisionedSessionKeys.removeAll()
+        hasReceivedExplicitSessionInfo = false
+        accessibleSessionKeys.removeAll()
+        accessibleSessionKeyOrder.removeAll()
+        trackableSessionsBySessionKey.removeAll()
+        trackableSessionKeyOrder.removeAll()
+        refreshStreamsTask?.cancel()
+        refreshStreamsTask = nil
+        refreshTrackableSessionsTask?.cancel()
+        refreshTrackableSessionsTask = nil
+        pendingUntrackRecovery = nil
+        hasLoadedTrackableSessionsOnce = false
+        hasSurfacedInitialTrackableSessionsFailure = false
         if clearPendingSend {
             pendingProvisionedSend = nil
         }
+    }
+
+    private func replaceAccessibleSessionKeys(with sessionKeys: [String]) {
+        let normalized = normalizeSessionKeyList(sessionKeys)
+        accessibleSessionKeyOrder = normalized
+        accessibleSessionKeys = Set(normalized)
+    }
+
+    private func mergeAccessibleSessionKeys(_ sessionKeys: [String]) {
+        for sessionKey in normalizeSessionKeyList(sessionKeys) where accessibleSessionKeys.insert(sessionKey).inserted {
+            accessibleSessionKeyOrder.append(sessionKey)
+        }
+    }
+
+    private func removeAccessibleSessionKey(_ sessionKey: String) {
+        accessibleSessionKeys.remove(sessionKey)
+        accessibleSessionKeyOrder.removeAll { $0 == sessionKey }
+    }
+
+    private func replaceTrackableSessions(with sessions: [TrackableSession]) {
+        trackableSessionKeyOrder = normalizeSessionKeyList(sessions.map(\.sessionKey))
+        trackableSessionsBySessionKey = Dictionary(
+            uniqueKeysWithValues: sessions.map { ($0.sessionKey, $0) }
+        )
+        hasLoadedTrackableSessionsOnce = true
+        hasSurfacedInitialTrackableSessionsFailure = false
+    }
+
+    private func refreshStreamsFromProvider(reason: String) {
+        refreshStreamsTask?.cancel()
+        guard auth.token != nil else { return }
+        refreshStreamsTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let streams = try await self.chatService.fetchStreams()
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    self.applyStreamSnapshot(streams)
+                }
+            } catch {
+                guard !Task.isCancelled else { return }
+                self.logger.warning(
+                    "stream refresh failed reason=\(reason, privacy: .public) error=\(error.localizedDescription, privacy: .public)"
+                )
+            }
+        }
+    }
+
+    private func refreshTrackableSessions(reason: String) {
+        refreshTrackableSessionsTask?.cancel()
+        guard canUseTrackFeature else {
+            replaceTrackableSessions(with: [])
+            return
+        }
+        refreshTrackableSessionsTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                let sessions = try await self.chatService.fetchTrackableSessions()
+                guard !Task.isCancelled else { return }
+                self.replaceTrackableSessions(with: sessions)
+            } catch {
+                guard !Task.isCancelled else { return }
+                let errorDescription = error.localizedDescription
+                self.logger.error("trackable sessions refresh failed reason=\(reason, privacy: .public) error=\(errorDescription, privacy: .public)")
+                print("[TRACKABLE_SESSIONS] reason=\(reason) error=\(errorDescription)")
+                if !self.hasLoadedTrackableSessionsOnce && !self.hasSurfacedInitialTrackableSessionsFailure {
+                    self.hasSurfacedInitialTrackableSessionsFailure = true
+                    self.toastManager.show("Could not load Track candidates. \(errorDescription)")
+                }
+            }
+        }
+    }
+
+    private func normalizeSessionKeyList(_ sessionKeys: [String]) -> [String] {
+        var seen: Set<String> = []
+        var normalized: [String] = []
+        normalized.reserveCapacity(sessionKeys.count)
+        for sessionKey in sessionKeys {
+            let trimmed = sessionKey.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            if seen.insert(trimmed).inserted {
+                normalized.append(trimmed)
+            }
+        }
+        return normalized
     }
 
     private func activeSessionDefaultsKey() -> String {
@@ -2505,9 +2861,18 @@ final class ChatViewModel: ChatViewModelHosting {
 
     private func applyStreamSnapshot(_ streams: [StreamSession]) {
         let previousSessionKeys = Set(streamsBySessionKey.keys)
-        let byKey: [String: StreamSession] = Dictionary(uniqueKeysWithValues: streams.map { ($0.sessionKey, $0) })
-        let serverKeys = Set(streams.map(\.sessionKey))
-        syntheticSessionKeys = Set(byKey.keys).subtracting(serverKeys)
+        let normalizedStreams = streams
+        let serverKeys = Set(normalizedStreams.map(\.sessionKey))
+        let adoptedStreams = streamsBySessionKey.values.filter {
+            $0.adopted && !serverKeys.contains($0.sessionKey)
+        }
+        let mergedStreams = normalizedStreams + adoptedStreams
+        let byKey: [String: StreamSession] = Dictionary(uniqueKeysWithValues: mergedStreams.map { ($0.sessionKey, $0) })
+        syntheticSessionKeys = Set(
+            byKey.values
+                .filter { !$0.adopted && !serverKeys.contains($0.sessionKey) }
+                .map(\.sessionKey)
+        )
         streamsBySessionKey = byKey
         let validSessionKeys = Set(byKey.keys)
         let removedSessionKeys = previousSessionKeys.subtracting(validSessionKeys)
@@ -2515,7 +2880,9 @@ final class ChatViewModel: ChatViewModelHosting {
             sessionMessages.removeValue(forKey: sessionKey)
             lastReadMessageIdBySession.removeValue(forKey: sessionKey)
             hasUnreadBySession.removeValue(forKey: sessionKey)
+            let removedIDs = Set(pendingLocalMessages.filter { $0.sessionKey == sessionKey }.map(\.id))
             pendingLocalMessages.removeAll { $0.sessionKey == sessionKey }
+            ackedPendingLocalMessageIDs.subtract(removedIDs)
             chatService.setReplayCursor(nil, for: sessionKey)
             persistLastReadMessageId(nil, for: sessionKey)
             persistMessages([], for: sessionKey)
@@ -2561,7 +2928,9 @@ final class ChatViewModel: ChatViewModelHosting {
         chatService.setReplayCursor(nil, for: sessionKey)
         persistLastReadMessageId(nil, for: sessionKey)
         persistMessages([], for: sessionKey)
+        let removedIDs = Set(pendingLocalMessages.filter { $0.sessionKey == sessionKey }.map(\.id))
         pendingLocalMessages.removeAll { $0.sessionKey == sessionKey }
+        ackedPendingLocalMessageIDs.subtract(removedIDs)
         if typingSessionKey == sessionKey {
             typingSessionKey = nil
             isAssistantTyping = false
@@ -2582,6 +2951,67 @@ final class ChatViewModel: ChatViewModelHosting {
         }
         SessionRegistry.shared.remove(sessionKey: sessionKey)
         persistStreamMetadata()
+    }
+
+    private func applyDeleteSuccess(for stream: StreamSession) {
+        if stream.adopted {
+            pendingUntrackRecovery = stream
+            applyDeletedStreamMutation(sessionKey: stream.sessionKey)
+            refreshTrackableSessions(reason: "deleteSuccess")
+            toastManager.show(
+                "Session untracked.",
+                actionTitle: "Undo",
+                action: { [weak self] in
+                    Task { @MainActor [weak self] in
+                        await self?.undoPendingUntrack()
+                    }
+                }
+            )
+            return
+        }
+        applyDeletedStreamMutation(sessionKey: stream.sessionKey)
+    }
+
+    private func applyDeletedStreamMutation(sessionKey: String) {
+        if pendingUntrackRecovery?.sessionKey == sessionKey || streamsBySessionKey[sessionKey]?.adopted == true {
+            unlinkTrackedSession(sessionKey: sessionKey)
+            return
+        }
+        applyStreamDeletion(sessionKey: sessionKey)
+    }
+
+    private func unlinkTrackedSession(sessionKey: String) {
+        streamsBySessionKey.removeValue(forKey: sessionKey)
+        syntheticSessionKeys.remove(sessionKey)
+        recalculateOrderedSessionKeys()
+
+        if typingSessionKey == sessionKey {
+            typingSessionKey = nil
+            isAssistantTyping = false
+        }
+
+        if engineActiveSessionKey == sessionKey {
+            let fallback = streamMainSessionKey().flatMap { orderedSessionKeys.contains($0) ? $0 : nil }
+                ?? orderedSessionKeys.first
+                ?? streamMainSessionKey()
+            if let fallback {
+                ensureStreamEntry(for: fallback)
+                setEngineActiveSessionKey(fallback)
+            } else {
+                clearActiveSession()
+            }
+        } else if !engineActiveSessionKey.isEmpty {
+            messages = sessionMessages[engineActiveSessionKey] ?? []
+        }
+
+        SessionRegistry.shared.remove(sessionKey: sessionKey)
+        persistStreamMetadata()
+    }
+
+    private func undoPendingUntrack() async {
+        guard let stream = pendingUntrackRecovery else { return }
+        pendingUntrackRecovery = nil
+        _ = await trackSession(sessionKey: stream.sessionKey)
     }
 
     private func recalculateOrderedSessionKeys() {
@@ -2671,6 +3101,7 @@ final class ChatViewModel: ChatViewModelHosting {
         let decoder = JSONDecoder()
         if let streams = try? decoder.decode([StreamSession].self, from: data) {
             streamsBySessionKey = Dictionary(uniqueKeysWithValues: streams.map { ($0.sessionKey, $0) })
+            syntheticSessionKeys.removeAll()
             recalculateOrderedSessionKeys()
             SessionRegistry.shared.replace(with: orderedStreams)
         }
@@ -2704,8 +3135,17 @@ final class ChatViewModel: ChatViewModelHosting {
         }
     }
 
+    private func isImageRelatedError(_ text: String) -> Bool {
+        let lower = text.lowercased()
+        let keywords = ["image", "size", "bytes", "mb", "payload_too_large"]
+        return keywords.contains(where: { lower.contains($0) })
+    }
+
     private func userFacingMessage(for code: String, fallback: String?) -> String {
         if let fallback, !fallback.isEmpty {
+            if isImageRelatedError(fallback) {
+                return "That image is too large for this model. Reduce image size and try again."
+            }
             return fallback
         }
         switch code {
@@ -2743,6 +3183,7 @@ final class ChatViewModel: ChatViewModelHosting {
         if let pendingIndex = pendingLocalMessages.firstIndex(where: { $0.id == id }) {
             pendingLocalMessages.remove(at: pendingIndex)
         }
+        ackedPendingLocalMessageIDs.remove(id)
     }
 
     private func isNoReply(code: String, message: String?) -> Bool {
@@ -2776,6 +3217,7 @@ final class ChatViewModel: ChatViewModelHosting {
            let pendingIndex = pendingLocalMessages.firstIndex(where: { $0.id == messageId }) {
             resolvedSessionKey = pendingLocalMessages[pendingIndex].sessionKey
             pendingLocalMessages.remove(at: pendingIndex)
+            ackedPendingLocalMessageIDs.remove(messageId)
         }
         if let messageId, activeClientMessageId == messageId {
             activeClientMessageId = nil

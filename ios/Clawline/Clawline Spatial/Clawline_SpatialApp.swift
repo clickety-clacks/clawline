@@ -27,19 +27,11 @@ struct Clawline_SpatialApp: App {
         _authManager = State(initialValue: authManager)
         let settingsManager = SettingsManager()
         _settingsManager = State(initialValue: settingsManager)
-        let device = DeviceIdentifier()
-        let connector = URLSessionWebSocketConnector(connectTimeout: 20, resourceTimeout: 360)
-        self.deviceIdentifier = device
-        self.connectionService = ProviderConnectionService(connector: connector)
-        self.chatService = ProviderChatService(
-            connector: connector,
-            deviceId: device.deviceId,
-            userIdProvider: { authManager.currentUserId }
-        )
-        self.uploadService = UploadService(
-            auth: authManager,
-            session: connector.tlsAwareURLSession
-        )
+        let coreServices = ClawlineCoreRuntimeServicesFactory.make(authManager: authManager)
+        self.deviceIdentifier = coreServices.deviceIdentifier
+        self.connectionService = coreServices.connectionService
+        self.chatService = coreServices.chatService
+        self.uploadService = coreServices.uploadService
     }
 
     var body: some Scene {

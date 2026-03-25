@@ -12,6 +12,7 @@ import UIKit
 struct ExpandedMessageSheet: View {
     let message: Message
     let presentation: MessagePresentation
+    let fontScaleChangeSequence: Int
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.settingsManager) private var settings
@@ -31,6 +32,7 @@ struct ExpandedMessageSheet: View {
     }
 
     var body: some View {
+        let _ = fontScaleChangeSequence
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
@@ -137,7 +139,10 @@ struct ExpandedMessageSheet: View {
             }
 
             ForEach(Array(terminalSessions.enumerated()), id: \.offset) { item in
-                TerminalBubbleExpandedRepresentable(descriptor: item.element)
+                TerminalBubbleExpandedRepresentable(
+                    descriptor: item.element,
+                    fontScaleChangeSequence: fontScaleChangeSequence
+                )
                     .frame(maxWidth: .infinity)
             }
 
@@ -240,9 +245,11 @@ struct ExpandedMessageSheet: View {
 
 private struct TerminalBubbleExpandedRepresentable: UIViewRepresentable {
     let descriptor: TerminalSessionDescriptor
+    let fontScaleChangeSequence: Int
 
     final class Coordinator {
         var lastTerminalSessionId: String?
+        var lastFontScaleChangeSequence: Int?
     }
 
     func makeCoordinator() -> Coordinator {
@@ -253,14 +260,17 @@ private struct TerminalBubbleExpandedRepresentable: UIViewRepresentable {
         let view = TerminalBubbleUIKitView()
         view.configure(descriptor: descriptor, style: .expanded(height: 520))
         context.coordinator.lastTerminalSessionId = descriptor.terminalSessionId
+        context.coordinator.lastFontScaleChangeSequence = fontScaleChangeSequence
         return view
     }
 
     func updateUIView(_ uiView: TerminalBubbleUIKitView, context: Context) {
         // Avoid reconfiguring during unrelated SwiftUI updates (can cause flicker/reconnect churn).
-        if context.coordinator.lastTerminalSessionId != descriptor.terminalSessionId {
+        if context.coordinator.lastTerminalSessionId != descriptor.terminalSessionId
+            || context.coordinator.lastFontScaleChangeSequence != fontScaleChangeSequence {
             uiView.configure(descriptor: descriptor, style: .expanded(height: 520))
             context.coordinator.lastTerminalSessionId = descriptor.terminalSessionId
+            context.coordinator.lastFontScaleChangeSequence = fontScaleChangeSequence
         }
     }
 }

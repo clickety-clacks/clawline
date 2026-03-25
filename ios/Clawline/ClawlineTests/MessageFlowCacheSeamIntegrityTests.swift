@@ -79,4 +79,26 @@ struct MessageFlowCacheSeamIntegrityTests {
             "Date separator width must not use bubble-capped effectiveContentWidth()."
         )
     }
+
+    @Test("T138: full-row items force their own layout row")
+    func fullRowItemsForceDedicatedLayoutRow() throws {
+        let sourceURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent() // ClawlineTests
+            .deletingLastPathComponent() // Clawline
+            .appendingPathComponent("Clawline/Views/Chat/MessageFlowCollectionView.swift")
+        let contents = try String(contentsOf: sourceURL, encoding: .utf8)
+
+        #expect(
+            contents.contains("if fullRowItem, x > sectionInset.left {"),
+            "Full-row items should flush the current row before layout so date separators cannot render inline."
+        )
+        #expect(
+            contents.contains("if fullRowItem {\n                x = sectionInset.left\n                y = frame.maxY"),
+            "Full-row items should advance layout to the next row after placement."
+        )
+        #expect(
+            contents.contains("if isFullRowItem(size.width, contentWidth: signature.contentWidth) ||\n            isFullRowItem(previousAttributes.frame.width, contentWidth: signature.contentWidth) {"),
+            "Incremental append should fall back to a rebuild when a full-row item is involved."
+        )
+    }
 }

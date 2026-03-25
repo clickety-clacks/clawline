@@ -37,6 +37,7 @@ struct RootView: View {
     }
 
     var body: some View {
+        let _ = settings.fontScaleChangeSequence
         Group {
             // If the provider base URL is missing (fresh install / wiped defaults), route to
             // onboarding so the user can recover without having to send a message.
@@ -83,6 +84,9 @@ struct RootView: View {
                 chatViewModel?.prepareForReplacement()
                 chatViewModel = nil
             }
+        }
+        .onChange(of: settings.fontScaleToastSequence) { _, _ in
+            showPendingFontScaleToastIfNeeded()
         }
         .environment(\.uploadService, uploadService)
         .background {
@@ -136,6 +140,12 @@ struct RootView: View {
                 await created.activate(origin: "RootView.ensureChatViewModel[\(origin)]")
             }
         }
+    }
+
+    @MainActor
+    private func showPendingFontScaleToastIfNeeded() {
+        guard let message = settings.consumePendingFontScaleToastMessage() else { return }
+        toastManager.show(message, duration: .seconds(3))
     }
 }
 

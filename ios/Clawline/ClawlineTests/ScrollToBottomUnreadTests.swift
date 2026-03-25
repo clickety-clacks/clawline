@@ -59,4 +59,22 @@ struct ScrollToBottomUnreadTests {
         )
         #expect(shouldSchedule == true)
     }
+
+    @Test("Scroll-to-bottom falls back to absolute bottom when no anchor exists")
+    func scrollToBottomFallsBackWithoutAnchor() {
+        let shouldFallback = MessageFlowCollectionViewController.shouldFallbackToAbsoluteBottom(
+            lastMessageId: "m1",
+            hasMessageAnchor: false
+        )
+        #expect(shouldFallback == true)
+    }
+
+    @Test("Scroll-to-bottom uses anchor path when last message anchor exists")
+    func scrollToBottomUsesAnchorWhenAvailable() {
+        let shouldFallback = MessageFlowCollectionViewController.shouldFallbackToAbsoluteBottom(
+            lastMessageId: "m1",
+            hasMessageAnchor: true
+        )
+        #expect(shouldFallback == false)
+    }
 }

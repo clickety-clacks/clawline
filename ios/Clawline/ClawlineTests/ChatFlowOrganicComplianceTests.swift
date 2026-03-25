@@ -169,7 +169,7 @@ struct ChatFlowOrganicComplianceTests {
 
         let renderedText = renderedMarkdownText(
             from: presentation,
-            stripDetectedURLs: true
+            stripDetectedURLs: false
         )
         #expect(renderedText.contains("Intro paragraph."))
         #expect(renderedText.contains("Middle paragraph with markdown."))
@@ -178,17 +178,18 @@ struct ChatFlowOrganicComplianceTests {
         #expect(!renderedText.contains("print(\"second\")"))
     }
 
-    @Test("Bug #50: Expanded text extraction preserves URLs")
-    func expandedTextExtractionPreservesURLs() {
+    @Test("Bubble and expanded text extraction both preserve URLs")
+    func textExtractionPreservesURLsAcrossSurfaces() {
         let message = sampleMessage(content: "See https://a.example and https://b.example")
         let presentation = buildPresentation(message)
-        let bubbleText = renderedMarkdownText(from: presentation, stripDetectedURLs: true)
+        let bubbleText = renderedMarkdownText(from: presentation, stripDetectedURLs: false)
         let expandedText = renderedMarkdownText(from: presentation, stripDetectedURLs: false)
 
-        #expect(!bubbleText.contains("https://a.example"))
-        #expect(!bubbleText.contains("https://b.example"))
+        #expect(bubbleText.contains("https://a.example"))
+        #expect(bubbleText.contains("https://b.example"))
         #expect(expandedText.contains("https://a.example"))
         #expect(expandedText.contains("https://b.example"))
+        #expect(bubbleText == expandedText)
     }
 
     @Test("Doc §5: Markdown tables promote to table part")

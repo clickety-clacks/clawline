@@ -113,6 +113,7 @@ struct ChatView: View {
     @State private var pendingInputInsertions: [PendingAttachment] = []
     @State private var activeSheet: ChatSheet?
     @State private var isStreamManagerPopoverPresented = false
+    @State private var isTrackPickerPresented = false
     @State private var isPhotosPickerPresented = false
     @State private var isFileImporterPresented = false
     @State private var photoPickerItems: [PhotosPickerItem] = []
@@ -138,6 +139,8 @@ struct ChatView: View {
     @Environment(\.settingsManager) private var settings
 
     @State private var inputBarHeight: CGFloat = 0
+    @State private var isTypingActive = false
+    @State private var typingActivityResetTask: Task<Void, Never>?
     @State private var streamToastManager = StreamToastManager()
     @State private var streamToastBusySince: Date?
     @State private var streamToastBusyClearTask: Task<Void, Never>?
@@ -163,9 +166,14 @@ struct ChatView: View {
 #endif
 
     private let streamToastMinimumBusySeconds: TimeInterval = 0.45
+    private let typingActivitySettleDelay: Duration = .milliseconds(180)
 
     private var isKeyboardVisible: Bool {
         keyboardHeight > 0.5
+    }
+
+    private var fontScaleChangeSequence: Int {
+        settings.fontScaleChangeSequence
     }
 
     private enum ChatSheet: Identifiable {
@@ -419,7 +427,7 @@ struct ChatView: View {
             }
             return
         }
-        layoutCoordinator.scrollToBottom(sessionKey: sessionKey, animated: true)
+        layoutCoordinator.scrollToBottom(sessionKey: sessionKey, animated: true, attempts: 1)
     }
 
     private func scrollButtonControl(
@@ -442,24 +450,6 @@ struct ChatView: View {
                 .onEnded { value in
                     handleScrollButtonDragEnded(value, containerWidth: containerWidth)
                 }
-        )
-    }
-
-    private func sharedScrollButtonView(
-        sessionKey: String,
-        containerWidth: CGFloat,
-        viewModel: ChatViewModel
-    ) -> AnyView? {
-        let state = scrollButtonState(for: sessionKey)
-        guard state.isVisible else { return nil }
-        return AnyView(
-            scrollButtonControl(
-                state: state,
-                containerWidth: containerWidth,
-                onTap: {
-                    handleScrollButtonTap(sessionKey: sessionKey, viewModel: viewModel)
-                }
-            )
         )
     }
 
@@ -491,6 +481,7 @@ struct ChatView: View {
     private var chatBody: some View {
         @Bindable var viewModel = viewModel
         @Bindable var toastManager = toastManager
+        let _ = fontScaleChangeSequence
 
         GeometryReader { geometry in
             chatContent(geometry: geometry, viewModel: viewModel, toastManager: toastManager)
@@ -575,7 +566,6 @@ struct ChatView: View {
         .background(
             KeyboardLayoutGuideReader(refreshToken: keyboardRefreshToken) { height, duration, curve in
                 if abs(height - keyboardHeight) > 0.5 {
-                    NSLog("[KBTIMING] keyboardHeight state set %.1f -> %.1f", keyboardHeight, height)
                     withAnimation(nil) {
                         keyboardHeight = height
                     }
@@ -835,16 +825,15 @@ struct ChatView: View {
             // visionOS: keep the scroll-to-bottom button in the main SwiftUI overlay.
             // iOS/iPadOS: we pin it to the UIKit keyboardLayoutGuide via KeyboardPinnedContainerView.
             let sessionKey = viewModel.uiSelectedSessionKey
-            if let scrollButtonView = sharedScrollButtonView(
-                sessionKey: sessionKey,
+            let state = scrollButtonState(for: sessionKey)
+            scrollButtonControl(
+                state: state,
                 containerWidth: geometry.size.width,
-                viewModel: viewModel
-            ) {
-                scrollButtonView
-                    .offset(x: activeScrollButtonHorizontalOffset(containerWidth: geometry.size.width))
-                    .padding(.bottom, inputBarTopFromScreenBottom + floatingScrollButtonBottomGap)
-                    .frame(maxWidth: .infinity, alignment: .center)
-            }
+                onTap: { handleScrollButtonTap(sessionKey: sessionKey, viewModel: viewModel) }
+            )
+            .offset(x: activeScrollButtonHorizontalOffset(containerWidth: geometry.size.width))
+            .padding(.bottom, inputBarTopFromScreenBottom + floatingScrollButtonBottomGap)
+            .frame(maxWidth: .infinity, alignment: .center)
 #else
             EmptyView()
 #endif
@@ -1116,7 +1105,13 @@ struct ChatView: View {
     private func toastBannerView(geometry: GeometryProxy,
                                  toastManager: ToastManager) -> some View {
         if let toast = toastManager.toast {
-            ToastBanner(message: toast.message) {
+            ToastBanner(
+                message: toast.message,
+                actionTitle: toast.actionTitle,
+                action: toast.actionTitle == nil ? nil : {
+                    toastManager.performAction()
+                }
+            ) {
                 toastManager.dismiss()
             }
             .padding(.top, geometry.safeAreaInsets.top + 12)
@@ -1134,10 +1129,15 @@ struct ChatView: View {
                                  streamSelectorMaxHeight: CGFloat) -> some View {
         let sessionKey = viewModel.uiSelectedSessionKey
         let effectiveSessionKeys = effectiveStreams.map(\.sessionKey)
-        let scrollButtonView = sharedScrollButtonView(
-            sessionKey: sessionKey,
-            containerWidth: geometry.size.width,
-            viewModel: viewModel
+        let state = scrollButtonState(for: sessionKey)
+        let scrollButtonView: AnyView = AnyView(
+            scrollButtonControl(
+                state: state,
+                containerWidth: geometry.size.width,
+                onTap: {
+                    handleScrollButtonTap(sessionKey: sessionKey, viewModel: viewModel)
+                }
+            )
         )
         let pageDotsView: AnyView? = effectiveSessionKeys.isEmpty
             ? nil
@@ -1187,7 +1187,8 @@ struct ChatView: View {
                 content: $viewModel.inputContent,
                 selectionRange: $selectionRange,
                 pendingInsertions: $pendingInputInsertions,
-                placeholderText: viewModel.activeSessionDisplayName,
+                placeholderText: viewModel.activeSessionPlaceholderText,
+                fontScaleChangeSequence: fontScaleChangeSequence,
                 resetToken: viewModel.inputResetToken,
                 canSend: viewModel.canSend,
                 isSending: viewModel.isSending,
@@ -1197,6 +1198,7 @@ struct ChatView: View {
                 bottomSafeAreaInset: geometry.safeAreaInsets.bottom,
                 isKeyboardVisible: isKeyboardVisible,
                 onSend: {
+                    clearTypingActivity()
                     viewModel.send()
                 },
                 onCancel: { viewModel.cancelSend() },
@@ -1206,7 +1208,15 @@ struct ChatView: View {
                 },
                 // ⚠️ This callback is how focus state survives view recreation.
                 // DO NOT replace with @Binding or try to use @FocusState directly.
-                onFocusChange: { focused in isInputFocused = focused },
+                onFocusChange: { focused in
+                    isInputFocused = focused
+                    if !focused {
+                        clearTypingActivity()
+                    }
+                },
+                onTextEditActivity: {
+                    recordTypingActivity()
+                },
                 onPasteImages: handlePastedImages,
                 isCompact: horizontalSizeClass == .compact
             )
@@ -1270,6 +1280,7 @@ struct ChatView: View {
             isActiveSession: sessionKey == renderPolicySessionKey,
             isRenderPolicyFrozen: viewModel.isRenderPolicyFrozen,
             isInputActive: isInputFocused,
+            isTypingActive: isTypingActive,
             truncationBottomInset: truncationBottomInset,
             firstUnreadMessageId: state.firstUnreadMessageId,
             unreadCount: state.unreadCount,
@@ -1279,6 +1290,7 @@ struct ChatView: View {
             layoutCoordinator: layoutCoordinator,
             sessionKey: sessionKey,
             forceReReadGeneration: viewModel.forceReReadGeneration(for: sessionKey),
+            fontScaleChangeSequence: fontScaleChangeSequence,
             onScrollEvent: handleMessageFlowScrollEvent
         )
         // We manage keyboard avoidance manually inside the collection view.
@@ -1310,7 +1322,11 @@ struct ChatView: View {
         case .expandedMessage(let message):
             let metrics = ChatFlowTheme.Metrics(isCompact: horizontalSizeClass == .compact)
             let presentation = viewModel.presentation(for: message, metrics: metrics)
-            ExpandedMessageSheet(message: message, presentation: presentation)
+            ExpandedMessageSheet(
+                message: message,
+                presentation: presentation,
+                fontScaleChangeSequence: fontScaleChangeSequence
+            )
         case .camera:
             #if os(visionOS)
             Color.clear
@@ -1414,6 +1430,7 @@ struct ChatView: View {
                 isActiveSession: false,
                 isRenderPolicyFrozen: false,
                 isInputActive: isInputFocused,
+                isTypingActive: isTypingActive,
                 truncationBottomInset: truncationBottomInset,
                 firstUnreadMessageId: nil,
                 unreadCount: 0,
@@ -1423,6 +1440,7 @@ struct ChatView: View {
                 shouldRegisterWithLayoutCoordinator: false,
                 sessionKey: sessionKey,
                 forceReReadGeneration: viewModel.forceReReadGeneration(for: sessionKey),
+                fontScaleChangeSequence: fontScaleChangeSequence,
                 onScrollEvent: nil
             )
             .hidden()
@@ -1504,9 +1522,26 @@ struct ChatView: View {
                 maxAvailableHeight: streamSelectorMaxHeight,
                 onSelectStream: { sessionKey in
                     selectStream(sessionKey, source: .programmatic)
+                },
+                onPresentTrackPicker: {
+                    prepareForAttachmentPicker()
+                    isStreamManagerPopoverPresented = false
+                    Task { @MainActor in
+                        await Task.yield()
+                        isTrackPickerPresented = true
+                    }
                 }
             )
             .presentationCompactAdaptation(.popover)
+            .presentationBackground(.clear)
+        }
+        .sheet(
+            isPresented: $isTrackPickerPresented,
+            onDismiss: {
+                restoreFocusIfNeeded()
+            }
+        ) {
+            TrackPickerSheet(viewModel: viewModel)
         }
     }
 
@@ -1531,6 +1566,27 @@ struct ChatView: View {
                 }
             }
         }
+    }
+
+    private func recordTypingActivity() {
+        if !isTypingActive {
+            isTypingActive = true
+        }
+        typingActivityResetTask?.cancel()
+        typingActivityResetTask = Task { @MainActor in
+            do {
+                try await Task.sleep(for: typingActivitySettleDelay)
+            } catch {
+                return
+            }
+            clearTypingActivity()
+        }
+    }
+
+    private func clearTypingActivity() {
+        typingActivityResetTask?.cancel()
+        typingActivityResetTask = nil
+        isTypingActive = false
     }
 
     private func deviceCornerRadius() -> CGFloat {
@@ -1788,39 +1844,51 @@ struct ChatView: View {
 
     private struct ToastBanner: View {
         let message: String
+        let actionTitle: String?
+        let action: (() -> Void)?
         let dismiss: () -> Void
 
         var body: some View {
-            Text(message)
-                .font(.clawline(.uiLabel).weight(.medium))
-                .foregroundColor(.primary)
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .padding(.horizontal, 20)
-                .padding(.vertical, 12)
-#if os(visionOS)
-                .background(
-                    Capsule()
-                        .fill(Color.white.opacity(0.3))
-                )
-#else
-                .glassEffect(.regular, in: Capsule())
-#endif
-                .onTapGesture(perform: dismiss)
-                .gesture(
-                    DragGesture(minimumDistance: 8)
-                        .onEnded { value in
-                            if value.translation.height < -10 {
-                                dismiss()
-                            }
-                        }
-                )
-                .accessibilityLabel(message)
-                .accessibilityHint("Dismiss with tap or swipe up.")
-                .accessibilityAddTraits(.isStaticText)
-                .onAppear {
-                    UIAccessibility.post(notification: .announcement, argument: message)
+            HStack(spacing: 12) {
+                Text(message)
+                    .font(.clawline(.uiLabel).weight(.medium))
+                    .foregroundColor(.primary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                if let actionTitle, let action {
+                    Button(actionTitle, action: action)
+                        .font(.clawline(.uiLabel).weight(.semibold))
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.primary)
                 }
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 12)
+#if os(visionOS)
+            .background(
+                Capsule()
+                    .fill(Color.white.opacity(0.3))
+            )
+#else
+            .glassEffect(.regular, in: Capsule())
+#endif
+            .onTapGesture(perform: dismiss)
+            .gesture(
+                DragGesture(minimumDistance: 8)
+                    .onEnded { value in
+                        if value.translation.height < -10 {
+                            dismiss()
+                        }
+                    }
+            )
+            .accessibilityLabel(message)
+            .accessibilityHint(actionTitle == nil ? "Dismiss with tap or swipe up." : "Tap Undo to restore or tap elsewhere to dismiss.")
+            .accessibilityAddTraits(.isStaticText)
+            .onAppear {
+                UIAccessibility.post(notification: .announcement, argument: message)
+            }
         }
     }
 
@@ -1867,6 +1935,7 @@ private final class KeyboardLayoutGuideObserverView: UIView {
     private var lastDuration: TimeInterval = 0
     private var lastCurve: UIView.AnimationCurve = .easeInOut
     private var lastRefreshToken: Int = 0
+    private var needsForegroundRefresh: Bool = false
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -1926,12 +1995,6 @@ private final class KeyboardLayoutGuideObserverView: UIView {
         if abs(height - lastHeight) > 0.5 {
             lastHeight = height
         }
-        NSLog(
-            "[KBTIMING] keyboardFrameChanged foreground frame=%@ win=%@ floating=%d",
-            NSCoder.string(for: frameInWindow),
-            NSCoder.string(for: windowBounds),
-            result.isFloating ? 1 : 0
-        )
         onChange?(height, lastDuration, lastCurve)
     }
 
@@ -1954,24 +2017,27 @@ private final class KeyboardLayoutGuideObserverView: UIView {
 
     @objc private func willEnterForeground(_ notification: Notification) {
         // #24: Keyboard notifications aren't guaranteed when returning to foreground with the keyboard already up.
-        // Refresh from the layout guide immediately and again on the next tick after layout settles.
-        refreshFromLayoutGuide()
-        DispatchQueue.main.async { [weak self] in
-            self?.refreshFromLayoutGuide()
-        }
+        // Schedule one foreground refresh after layout settles.
+        scheduleForegroundRefresh()
     }
 
     @objc private func didBecomeActive(_ notification: Notification) {
         // #12200: Keyboard can be dismissed while we're backgrounded (e.g. web form in Safari/WebView).
         // Ensure we re-sample from `keyboardLayoutGuide` after activation, not just on keyboard notifications.
-        refreshFromLayoutGuide()
+        scheduleForegroundRefresh()
+    }
+
+    private func scheduleForegroundRefresh() {
+        guard !needsForegroundRefresh else { return }
+        needsForegroundRefresh = true
         DispatchQueue.main.async { [weak self] in
-            self?.refreshFromLayoutGuide()
+            guard let self else { return }
+            self.needsForegroundRefresh = false
+            self.refreshFromLayoutGuide()
         }
     }
 
     @objc private func keyboardFrameChanged(_ notification: Notification) {
-        let t0 = CFAbsoluteTimeGetCurrent()
         guard let endFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect else { return }
         let duration = (notification.userInfo?[UIResponder.keyboardAnimationDurationUserInfoKey] as? NSNumber)?.doubleValue ?? 0.3
         let curveRaw = (notification.userInfo?[UIResponder.keyboardAnimationCurveUserInfoKey] as? NSNumber)?.intValue ?? UIView.AnimationCurve.easeInOut.rawValue
@@ -1986,15 +2052,10 @@ private final class KeyboardLayoutGuideObserverView: UIView {
             let windowBounds = window.bounds
             let result = heightFromFrame(frameInWindow, windowBounds: windowBounds)
             height = result.height
-            NSLog(
-                "[KBTIMING] keyboardFrameChanged frame=%@ win=%@ floating=%d",
-                NSCoder.string(for: frameInWindow),
-                NSCoder.string(for: windowBounds),
-                result.isFloating ? 1 : 0
-            )
         } else {
-            let screenHeight = window?.windowScene?.screen.bounds.height
-                ?? UIScreen.main.bounds.height
+            let screenHeight = UIApplication.shared.connectedScenes
+                .compactMap { ($0 as? UIWindowScene)?.screen.bounds.height }
+                .first ?? endFrame.maxY
             height = max(0, screenHeight - endFrame.origin.y)
         }
 #endif
@@ -2008,7 +2069,6 @@ private final class KeyboardLayoutGuideObserverView: UIView {
             lastCurve = curve
         }
         onChange?(height, duration, curve)
-        NSLog("[KBTIMING] keyboardFrameChanged h=%.1f dur=%.2f curve=%d dt=%.4f", height, duration, curve.rawValue, CFAbsoluteTimeGetCurrent() - t0)
     }
 }
 
@@ -2068,7 +2128,6 @@ private struct KeyboardPinnedContainer<Content: View>: UIViewRepresentable {
     }
 
     func updateUIView(_ uiView: KeyboardPinnedContainerView<Content>, context: Context) {
-        let t0 = CFAbsoluteTimeGetCurrent()
         uiView.hostingController.rootView = content
         uiView.updateVersionText(versionText)
         uiView.updateScrollButton(
@@ -2079,6 +2138,10 @@ private struct KeyboardPinnedContainer<Content: View>: UIViewRepresentable {
             horizontalAnimationToken: scrollButtonHorizontalAnimationToken
         )
         uiView.updatePageDots(pageDotsView, gap: pageDotsGap)
+        // Seed the pinned gap immediately on every SwiftUI update so launch layout matches the
+        // steady-state hidden-keyboard position even before coordinator-driven transitions fire.
+        uiView.setDesiredBottomGap(desiredBottomGap, isKeyboardVisible: isKeyboardVisible)
+        uiView.layoutIfNeeded()
         uiView.setOnBarHeightChange { [weak layoutCoordinator] height in
             // Break potential SwiftUI layout cycles by only propagating meaningful bar height changes.
             // (On some iOS 26.2 devices we observed AttributeGraph "cycle detected" during launch.)
@@ -2096,7 +2159,6 @@ private struct KeyboardPinnedContainer<Content: View>: UIViewRepresentable {
         layoutCoordinator.registerBarView(uiView)
         layoutCoordinator.applyTransitionIfPossible(reason: "KeyboardPinnedContainer.updateUIView")
         _ = layoutKey
-        NSLog("[KBTIMING] KBPinnedContainer.updateUIView gap=%.1f kbVis=%d dt=%.4f", desiredBottomGap, isKeyboardVisible ? 1 : 0, CFAbsoluteTimeGetCurrent() - t0)
     }
 }
 
@@ -2111,9 +2173,9 @@ private final class KeyboardPinnedContainerView<Content: View>: UIView, Keyboard
     private var pageDotsBottomToBarTop: NSLayoutConstraint?
     private var minHeightConstraint: NSLayoutConstraint?
     private var hostingBottomToKeyboard: NSLayoutConstraint?
+    private var hostingBottomToContainer: NSLayoutConstraint?
     private var versionLabelBottomToKeyboard: NSLayoutConstraint?
     private var versionLabelBottomToContainer: NSLayoutConstraint?
-    private var bottomToContainerConstraint: NSLayoutConstraint?
     private var onBarHeightChange: ((CGFloat) -> Void)?
     private var lastMeasuredHeight: CGFloat = 0
 
@@ -2252,6 +2314,12 @@ private final class KeyboardPinnedContainerView<Content: View>: UIView, Keyboard
             host.view.backgroundColor = .clear
             host.view.isOpaque = false
             host.view.translatesAutoresizingMaskIntoConstraints = false
+            if #available(iOS 16.0, visionOS 1.0, *) {
+                // Give the raw UIKit host its real capsule size on first layout so
+                // the pinned-container hit test matches the visible pager control.
+                host.sizingOptions = [.intrinsicContentSize]
+                host.safeAreaRegions = []
+            }
             addSubview(host.view)
             pageDotsHost = host
 
@@ -2273,10 +2341,17 @@ private final class KeyboardPinnedContainerView<Content: View>: UIView, Keyboard
     func setDesiredBottomGap(_ gap: CGFloat, isKeyboardVisible: Bool) {
         ensureConstraints(desiredBottomGap: gap)
 #if os(visionOS)
-        bottomToContainerConstraint?.constant = -gap
+        hostingBottomToContainer?.constant = -gap
 #else
         hostingBottomToKeyboard?.constant = -gap
+        hostingBottomToContainer?.constant = -gap
+        // `keyboardLayoutGuide` can report a stale non-zero frame on cold launch.
+        // Stay pinned to the container bottom until we know the keyboard is truly visible.
+        hostingBottomToKeyboard?.isActive = isKeyboardVisible
+        hostingBottomToContainer?.isActive = !isKeyboardVisible
         let hasVersionText = versionLabel.attributedText != nil && !versionLabel.attributedText!.string.isEmpty
+        versionLabelBottomToKeyboard?.isActive = isKeyboardVisible
+        versionLabelBottomToContainer?.isActive = !isKeyboardVisible
         versionLabel.isHidden = isKeyboardVisible || !hasVersionText
 #endif
     }
@@ -2313,7 +2388,7 @@ private final class KeyboardPinnedContainerView<Content: View>: UIView, Keyboard
     private func ensureConstraints(desiredBottomGap: CGFloat) {
         guard let hostingView = hostingController.view else { return }
 #if os(visionOS)
-        if bottomToContainerConstraint == nil {
+        if hostingBottomToContainer == nil {
             hostingView.translatesAutoresizingMaskIntoConstraints = false
             hostingView.setContentHuggingPriority(.required, for: .vertical)
             hostingView.setContentCompressionResistancePriority(.required, for: .vertical)
@@ -2340,7 +2415,7 @@ private final class KeyboardPinnedContainerView<Content: View>: UIView, Keyboard
                 versionLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -24),
                 versionLabel.bottomAnchor.constraint(equalTo: hostingView.topAnchor, constant: -4),
             ])
-            self.bottomToContainerConstraint = bottomToContainerConstraint
+            hostingBottomToContainer = bottomToContainerConstraint
         }
 #else
         if minHeightConstraint == nil {
@@ -2360,6 +2435,11 @@ private final class KeyboardPinnedContainerView<Content: View>: UIView, Keyboard
                 equalTo: keyboardLayoutGuide.topAnchor,
                 constant: -desiredBottomGap
             )
+            let hostingToContainer = hostingView.bottomAnchor.constraint(
+                equalTo: bottomAnchor,
+                constant: -desiredBottomGap
+            )
+            hostingToContainer.isActive = false
 
             let versionToKeyboard = versionLabel.bottomAnchor.constraint(
                 equalTo: keyboardLayoutGuide.topAnchor,
@@ -2370,6 +2450,7 @@ private final class KeyboardPinnedContainerView<Content: View>: UIView, Keyboard
                 constant: -4
             )
             versionToContainer.priority = .defaultLow
+            versionToContainer.isActive = false
 
             NSLayoutConstraint.activate([
                 hostingView.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -2377,6 +2458,7 @@ private final class KeyboardPinnedContainerView<Content: View>: UIView, Keyboard
                 minHeight,
                 topConstraint,
                 hostingToKeyboard,
+                hostingToContainer,
                 versionLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 24),
                 versionLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -24),
                 versionToKeyboard,
@@ -2385,6 +2467,7 @@ private final class KeyboardPinnedContainerView<Content: View>: UIView, Keyboard
 
             minHeightConstraint = minHeight
             hostingBottomToKeyboard = hostingToKeyboard
+            hostingBottomToContainer = hostingToContainer
             versionLabelBottomToKeyboard = versionToKeyboard
             versionLabelBottomToContainer = versionToContainer
         }
@@ -2573,6 +2656,19 @@ private final class PreviewChatService: ChatServicing {
     func send(id: String, content: String, attachments: [WireAttachment], sessionKey: String?) async throws {}
     func sendInteractiveCallback(sourceMessageId: String, action: String, data: JSONValue?) async throws {}
     func fetchStreams() async throws -> [StreamSession] { [] }
+    func fetchTrackableSessions() async throws -> [TrackableSession] { [] }
+    func adoptStream(sessionKey: String) async throws -> StreamSession {
+        StreamSession(
+            sessionKey: sessionKey,
+            displayName: "Preview Adopted",
+            kind: "custom",
+            orderIndex: 0,
+            isBuiltIn: false,
+            createdAt: Date(),
+            updatedAt: Date(),
+            trackingMode: .adopted
+        )
+    }
     func createStream(displayName: String, idempotencyKey: String) async throws -> StreamSession {
         StreamSession(
             sessionKey: "preview",

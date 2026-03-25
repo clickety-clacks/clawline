@@ -105,7 +105,7 @@ final class SettingsManager {
         appearanceMode = .dark
         trustSelfSignedCertificates = true
         pinnedLeafCertificateSHA256 = ""
-        fontScale = AppFontScale.defaultValue
+        resetFontScale()
         isLifecycleDebugOverlayEnabled = false
     }
 
@@ -129,13 +129,21 @@ final class SettingsManager {
         adjustFontScale(by: -AppFontScale.step)
     }
 
+    func resetFontScale() {
+        applyFontScale(AppFontScale.defaultValue)
+    }
+
     func consumePendingFontScaleToastMessage() -> String? {
         defer { pendingFontScaleToastMessage = nil }
         return pendingFontScaleToastMessage
     }
 
     private func adjustFontScale(by delta: CGFloat) {
-        let next = AppFontScale.clamp(fontScale + delta)
+        applyFontScale(fontScale + delta)
+    }
+
+    private func applyFontScale(_ value: CGFloat) {
+        let next = AppFontScale.clamp(value)
         if next != fontScale {
             fontScale = next
             fontScaleChangeSequence &+= 1

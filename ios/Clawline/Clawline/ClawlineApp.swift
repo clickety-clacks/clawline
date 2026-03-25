@@ -42,23 +42,12 @@ struct ClawlineApp: App {
         _authManager = State(initialValue: authManager)
         let settingsManager = SettingsManager()
         _settingsManager = State(initialValue: settingsManager)
-        let device = DeviceIdentifier()
-        let connector = URLSessionWebSocketConnector(connectTimeout: 20, resourceTimeout: 360)
-        self.deviceIdentifier = device
-        self.connectionService = ProviderConnectionService(connector: connector)
-        let chatService = ProviderChatService(
-            connector: connector,
-            deviceId: device.deviceId,
-            userIdProvider: { authManager.currentUserId },
-            authTokenProvider: {
-                await MainActor.run { authManager.token }
-            }
-        )
+        let coreServices = ClawlineCoreRuntimeServicesFactory.make(authManager: authManager)
+        self.deviceIdentifier = coreServices.deviceIdentifier
+        self.connectionService = coreServices.connectionService
+        let chatService = coreServices.chatService
         self.chatService = chatService
-        self.uploadService = UploadService(
-            auth: authManager,
-            session: connector.tlsAwareURLSession
-        )
+        self.uploadService = coreServices.uploadService
 
         let sharedKeychain = KeychainSecureStore(accessGroup: "group.co.clicketyclacks.Clawline")
         let sonioxKeyStore = SonioxKeyStore(keychain: sharedKeychain)
@@ -116,12 +105,17 @@ struct ClawlineApp: App {
                 Button("Increase Font Size") {
                     settingsManager.increaseFontScale()
                 }
-                .keyboardShortcut("=", modifiers: [.command, .shift])
+                .keyboardShortcut("=", modifiers: .command)
 
                 Button("Decrease Font Size") {
                     settingsManager.decreaseFontScale()
                 }
                 .keyboardShortcut("-", modifiers: .command)
+
+                Button("Reset Font Size") {
+                    settingsManager.resetFontScale()
+                }
+                .keyboardShortcut("0", modifiers: .command)
 
                 Divider()
 

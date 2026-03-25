@@ -108,7 +108,8 @@ enum UnifiedMarkdownRenderer {
     static func configureTextView(
         _ textView: UITextView,
         delegate: UITextViewDelegate?,
-        linkTextAttributes: [NSAttributedString.Key: Any] = [:]
+        linkTextAttributes: [NSAttributedString.Key: Any] = [:],
+        enableDataDetectors: Bool = true
     ) {
         textView.backgroundColor = .clear
         textView.isUserInteractionEnabled = true
@@ -119,7 +120,7 @@ enum UnifiedMarkdownRenderer {
         textView.showsHorizontalScrollIndicator = false
         textView.textContainerInset = .zero
         textView.textContainer.lineFragmentPadding = 0
-        textView.dataDetectorTypes = [.link]
+        textView.dataDetectorTypes = enableDataDetectors ? [.link] : []
         textView.delegate = delegate
         textView.linkTextAttributes = linkTextAttributes
     }

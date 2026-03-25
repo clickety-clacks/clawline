@@ -16,6 +16,14 @@ struct CodeBlockView: View {
     @Environment(\.settingsManager) private var settings
     @State private var highlightedCode: AttributedString?
 
+    private var supportsSyntaxHighlighting: Bool {
+#if os(visionOS)
+        false
+#else
+        true
+#endif
+    }
+
     private var isDark: Bool {
 #if os(visionOS)
         return settings.appearanceMode == .dark
@@ -51,7 +59,7 @@ struct CodeBlockView: View {
                     .tracking(0.5)
             }
             ScrollView(.horizontal, showsIndicators: true) {
-                if let highlighted = highlightedCode {
+                if supportsSyntaxHighlighting, let highlighted = highlightedCode {
                     Text(highlighted)
                         .font(.clawline(.secondaryLabel, design: .monospaced))
                         .lineSpacing(4)
@@ -71,6 +79,10 @@ struct CodeBlockView: View {
         .background(backgroundColor)
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
         .task(id: "\(code)\(isDark)") {
+            guard supportsSyntaxHighlighting else {
+                highlightedCode = nil
+                return
+            }
             await highlightCode()
         }
     }

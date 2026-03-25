@@ -34,6 +34,10 @@ final class StreamAPIClient {
         let streams: [StreamSession]
     }
 
+    private struct FetchTrackableSessionsResponse: Decodable {
+        let sessions: [TrackableSession]
+    }
+
     private struct MutateStreamResponse: Decodable {
         let stream: StreamSession
     }
@@ -45,6 +49,10 @@ final class StreamAPIClient {
     private struct CreateStreamRequest: Encodable {
         let idempotencyKey: String
         let displayName: String
+    }
+
+    private struct AdoptStreamRequest: Encodable {
+        let sessionKey: String
     }
 
     private struct RenameStreamRequest: Encodable {
@@ -85,12 +93,32 @@ final class StreamAPIClient {
         return response.streams
     }
 
+    func fetchTrackableSessions(token: String?) async throws -> [TrackableSession] {
+        let response: FetchTrackableSessionsResponse = try await sendRequest(
+            method: "GET",
+            path: "/api/trackable-sessions",
+            token: token,
+            body: Optional<String>.none
+        )
+        return response.sessions
+    }
+
     func createStream(displayName: String, idempotencyKey: String, token: String?) async throws -> StreamSession {
         let response: MutateStreamResponse = try await sendRequest(
             method: "POST",
             path: "/api/streams",
             token: token,
             body: CreateStreamRequest(idempotencyKey: idempotencyKey, displayName: displayName)
+        )
+        return response.stream
+    }
+
+    func adoptStream(sessionKey: String, token: String?) async throws -> StreamSession {
+        let response: MutateStreamResponse = try await sendRequest(
+            method: "POST",
+            path: "/api/streams/adopt",
+            token: token,
+            body: AdoptStreamRequest(sessionKey: sessionKey)
         )
         return response.stream
     }

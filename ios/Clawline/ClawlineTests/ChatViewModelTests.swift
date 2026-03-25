@@ -315,6 +315,40 @@ struct ChatViewModelTests {
         #expect(messages.contains("That message is too large to send."))
     }
 
+    @Test("Oversized text is blocked before optimistic send and surfaces a clear toast")
+    @MainActor
+    func oversizedTextIsRejectedBeforeSend() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let toastManager = ToastManager()
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: toastManager,
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        try await setReadyToSend(chatService: chatService, viewModel: viewModel)
+        let oversized = String(repeating: "a", count: 65_537)
+        viewModel.inputContent = NSAttributedString(string: oversized)
+
+        viewModel.send()
+
+        #expect(chatService.lastSentId == nil)
+        #expect(viewModel.messages.isEmpty)
+        #expect(viewModel.isSending == false)
+        #expect(viewModel.inputContent.string == oversized)
+        let messages = await MainActor.run { toastManager.debugMessages }
+        #expect(messages.contains("That message is too large to send."))
+    }
+
     @Test("Connection interruptions update send button state without passive toast")
     @MainActor
     func connectionInterruptionTriggersAlert() async throws {
@@ -1738,6 +1772,621 @@ struct ChatViewModelTests {
         #expect(displayName == "Research v2")
     }
 
+    @Test("Track adopts untracked session and preserves it across snapshots")
+    @MainActor
+    func trackAdoptsUntrackedSessionAcrossSnapshots() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        chatService.streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+        ]
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        let adoptedKey = "agent:main:clawline:user:s_trackme"
+        chatService.trackableSessions = [
+            TrackableSession(
+                sessionKey: adoptedKey,
+                displayName: "Tracked Session",
+                updatedAt: Date()
+            )
+        ]
+
+        await viewModel.onAppear()
+        chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
+        for _ in 0..<50 {
+            if viewModel.untrackedSessionCandidates.map(\.sessionKey) == [adoptedKey] { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(viewModel.untrackedSessionCandidates.map(\.sessionKey) == [adoptedKey])
+        #expect(await viewModel.trackSession(sessionKey: adoptedKey))
+        for _ in 0..<50 {
+            if viewModel.isAdoptedStream(sessionKey: adoptedKey) { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(viewModel.isAdoptedStream(sessionKey: adoptedKey))
+        #expect(viewModel.canUntrackStream(sessionKey: adoptedKey))
+        #expect(!viewModel.canDeleteStream(sessionKey: adoptedKey))
+        #expect(chatService.adoptStreamCallCount == 1)
+        #expect(chatService.lastAdoptedSessionKey == adoptedKey)
+
+        chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
+        for _ in 0..<50 {
+            if viewModel.stream(for: adoptedKey) != nil, viewModel.isAdoptedStream(sessionKey: adoptedKey) { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(viewModel.stream(for: adoptedKey) != nil)
+        #expect(viewModel.isAdoptedStream(sessionKey: adoptedKey))
+    }
+
+    @Test("Adopted gateway session remains sendable when session info stays stream-only")
+    @MainActor
+    func adoptedGatewaySessionSendBypassesStreamOnlySessionInfo() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let toastManager = ToastManager()
+        chatService.streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+        ]
+        let adoptedKey = "agent:main:openclaw:user:s_trackme"
+        chatService.trackableSessions = [
+            TrackableSession(
+                sessionKey: adoptedKey,
+                displayName: "Tracked Session",
+                updatedAt: Date()
+            )
+        ]
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: toastManager,
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        chatService.emitConnectionState(.connected)
+        chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
+        for _ in 0..<50 {
+            if viewModel.untrackedSessionCandidates.map(\.sessionKey) == [adoptedKey] { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(await viewModel.trackSession(sessionKey: adoptedKey))
+        viewModel.setActiveSessionKeyForTesting(adoptedKey)
+
+        chatService.emitServiceEvent(.sessionProvisioningAvailable(true))
+        chatService.emitServiceEvent(.sessionInfo(
+            SessionInfo(
+                userId: "user",
+                isAdmin: false,
+                dmScope: "main",
+                sessionKeys: [personalSessionKey]
+            )
+        ))
+
+        viewModel.inputContent = NSAttributedString(string: "hello adopted")
+        viewModel.send()
+        for _ in 0..<50 {
+            if chatService.lastSentId != nil { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(chatService.lastSessionKey == adoptedKey)
+        #expect(!toastManager.debugMessages.contains("This stream is unavailable. Switch streams and try again."))
+    }
+
+    @Test("Non-admin users do not fetch or expose Track candidates")
+    @MainActor
+    func nonAdminUsersDoNotFetchOrExposeTrackCandidates() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        auth.isAdmin = false
+        let chatService = TestChatService()
+        let toastManager = ToastManager()
+        chatService.streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+        ]
+        chatService.trackableSessions = [
+            TrackableSession(
+                sessionKey: "agent:main:openclaw:user:s_trackme",
+                displayName: "Tracked Session",
+                updatedAt: Date()
+            )
+        ]
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: toastManager,
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
+        try await Task.sleep(for: .milliseconds(50))
+
+        #expect(!viewModel.canUseTrackFeature)
+        #expect(viewModel.untrackedSessionCandidates.isEmpty)
+        #expect(chatService.fetchTrackableSessionsCallCount == 0)
+        #expect(!toastManager.debugMessages.contains(where: { $0.contains("Could not load Track candidates.") }))
+    }
+
+    @Test("Track candidates load from provider trackable sessions endpoint")
+    @MainActor
+    func trackCandidatesLoadFromProviderEndpoint() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        chatService.streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+        ]
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        let agentSessionKey = "agent:main:openclaw:user:s_tracklocal"
+        chatService.trackableSessions = [
+            TrackableSession(
+                sessionKey: agentSessionKey,
+                displayName: "OpenClaw Session",
+                updatedAt: Date()
+            )
+        ]
+
+        await viewModel.onAppear()
+        chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
+
+        for _ in 0..<50 {
+            if viewModel.untrackedSessionCandidates.map(\.sessionKey).contains(agentSessionKey) {
+                break
+            }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(viewModel.untrackedSessionCandidates.map(\.sessionKey).contains(agentSessionKey))
+        #expect(viewModel.canTrackSession(sessionKey: agentSessionKey))
+        #expect(await viewModel.trackSession(sessionKey: agentSessionKey))
+        #expect(viewModel.isAdoptedStream(sessionKey: agentSessionKey))
+    }
+
+    @Test("Track candidates can be refreshed on demand")
+    @MainActor
+    func trackCandidatesRefreshOnDemand() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        auth.updateAdminStatus(true)
+        let chatService = TestChatService()
+        chatService.streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+        ]
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        let agentSessionKey = "agent:main:openclaw:user:s_manualrefresh"
+        chatService.trackableSessions = [
+            TrackableSession(
+                sessionKey: agentSessionKey,
+                displayName: "Manual Refresh Session",
+                updatedAt: Date()
+            )
+        ]
+
+        viewModel.refreshTrackableSessionsOnDemand()
+
+        for _ in 0..<50 {
+            if viewModel.untrackedSessionCandidates.map(\.sessionKey).contains(agentSessionKey) {
+                break
+            }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(chatService.fetchTrackableSessionsCallCount == 1)
+        #expect(viewModel.untrackedSessionCandidates.map(\.sessionKey).contains(agentSessionKey))
+    }
+
+    @Test("Initial trackable sessions load failure is surfaced")
+    @MainActor
+    func initialTrackableSessionsLoadFailureIsSurfaced() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let toastManager = ToastManager()
+        chatService.fetchTrackableSessionsError = StreamAPIError(
+            code: "trackable_fetch_failed",
+            message: "trackable session load failed",
+            statusCode: 500
+        )
+        chatService.streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+        ]
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: toastManager,
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
+
+        for _ in 0..<50 {
+            if toastManager.debugMessages.contains("Could not load Track candidates. trackable session load failed") {
+                break
+            }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(toastManager.debugMessages.contains("Could not load Track candidates. trackable session load failed"))
+        #expect(viewModel.untrackedSessionCandidates.isEmpty)
+    }
+
+    @Test("Adopted delete removes Clawline linkage without deleting preserved messages")
+    @MainActor
+    func untrackRemovesLocalLinkOnly() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let toastManager = ToastManager()
+        chatService.streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+        ]
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: toastManager,
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        let adoptedKey = "agent:main:clawline:user:s_untrack"
+        chatService.trackableSessions = [
+            TrackableSession(
+                sessionKey: adoptedKey,
+                displayName: "Adoptable Session",
+                updatedAt: Date()
+            )
+        ]
+
+        await viewModel.onAppear()
+        chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
+        for _ in 0..<50 {
+            if viewModel.untrackedSessionCandidates.map(\.sessionKey) == [adoptedKey] { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(await viewModel.trackSession(sessionKey: adoptedKey))
+        for _ in 0..<50 {
+            if viewModel.isAdoptedStream(sessionKey: adoptedKey) { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        chatService.emit(
+            Message(
+                id: "s_adopted_1",
+                role: .assistant,
+                content: "Preserve me",
+                timestamp: Date(),
+                streaming: false,
+                attachments: [],
+                deviceId: nil,
+                sessionKey: adoptedKey
+            )
+        )
+        for _ in 0..<50 {
+            if viewModel.messages(for: adoptedKey).last?.content == "Preserve me" { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(!viewModel.canDeleteStream(sessionKey: adoptedKey))
+        #expect(await viewModel.deleteStream(sessionKey: adoptedKey))
+        #expect(viewModel.stream(for: adoptedKey) == nil)
+        #expect(viewModel.messages(for: adoptedKey).last?.content == "Preserve me")
+        #expect(toastManager.toast?.message == "Session untracked.")
+        #expect(toastManager.toast?.actionTitle == "Undo")
+        #expect(chatService.deleteStreamCallCount == 1)
+        #expect(chatService.lastDeletedSessionKey == adoptedKey)
+
+        chatService.emitServiceEvent(.streamDeleted(sessionKey: adoptedKey))
+
+        #expect(viewModel.messages(for: adoptedKey).last?.content == "Preserve me")
+    }
+
+    @Test("Undo after adopted delete restores session linkage through track")
+    @MainActor
+    func untrackUndoRestoresAdoptedSession() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let toastManager = ToastManager()
+        chatService.streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+        ]
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: toastManager,
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        let adoptedKey = "agent:main:clawline:user:s_undo"
+        chatService.trackableSessions = [
+            TrackableSession(
+                sessionKey: adoptedKey,
+                displayName: "Undo Session",
+                updatedAt: Date()
+            )
+        ]
+
+        await viewModel.onAppear()
+        chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
+        for _ in 0..<50 {
+            if viewModel.untrackedSessionCandidates.map(\.sessionKey) == [adoptedKey] { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(await viewModel.trackSession(sessionKey: adoptedKey))
+        for _ in 0..<50 {
+            if viewModel.isAdoptedStream(sessionKey: adoptedKey) { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(await viewModel.deleteStream(sessionKey: adoptedKey))
+        #expect(viewModel.stream(for: adoptedKey) == nil)
+        #expect(toastManager.toast?.actionTitle == "Undo")
+
+        toastManager.performAction()
+
+        for _ in 0..<50 {
+            if viewModel.isAdoptedStream(sessionKey: adoptedKey) { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(viewModel.isAdoptedStream(sessionKey: adoptedKey))
+        #expect(viewModel.stream(for: adoptedKey)?.displayName == "Undo Session")
+        #expect(toastManager.toast == nil)
+        #expect(chatService.adoptStreamCallCount == 2)
+    }
+
+    @Test("Adopted sessions remain renameable while delete stays unavailable")
+    @MainActor
+    func adoptedSessionsCanBeRenamedWithoutDelete() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        chatService.renameReturnedTrackingMode = .serverManaged
+        chatService.streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+        ]
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        let adoptedKey = "agent:main:clawline:user:s_rename"
+        chatService.trackableSessions = [
+            TrackableSession(
+                sessionKey: adoptedKey,
+                displayName: "Rename Me",
+                updatedAt: Date()
+            )
+        ]
+
+        await viewModel.onAppear()
+        chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
+        for _ in 0..<50 {
+            if viewModel.untrackedSessionCandidates.map(\.sessionKey) == [adoptedKey] { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(await viewModel.trackSession(sessionKey: adoptedKey))
+        for _ in 0..<50 {
+            if viewModel.isAdoptedStream(sessionKey: adoptedKey) { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(viewModel.canRenameStream(sessionKey: adoptedKey))
+        #expect(!viewModel.canDeleteStream(sessionKey: adoptedKey))
+        #expect(viewModel.canUntrackStream(sessionKey: adoptedKey))
+        let renamed = await viewModel.renameStream(sessionKey: adoptedKey, displayName: "Renamed")
+
+        #expect(renamed)
+        #expect(chatService.renameStreamCallCount == 1)
+        #expect(viewModel.stream(for: adoptedKey)?.displayName == "Renamed")
+        #expect(viewModel.isAdoptedStream(sessionKey: adoptedKey))
+        #expect(viewModel.canUntrackStream(sessionKey: adoptedKey))
+        #expect(!viewModel.canDeleteStream(sessionKey: adoptedKey))
+    }
+
+    @Test("Server-adopted streams from provider override websocket snapshot without adopted flag")
+    @MainActor
+    func adoptedSessionsUseServerAdoptedFlagFromSnapshot() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let adoptedKey = "agent:main:clawline:user:s_snapshot"
+        chatService.streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            StreamSession(
+                sessionKey: adoptedKey,
+                displayName: "Snapshot Session",
+                kind: "custom",
+                orderIndex: 1,
+                isBuiltIn: false,
+                createdAt: Date(),
+                updatedAt: Date(),
+                trackingMode: .adopted
+            )
+        ]
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        chatService.emitServiceEvent(
+            .streamSnapshot([
+                makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+                makeStreamSession(sessionKey: adoptedKey, displayName: "Snapshot Session", kind: "custom", orderIndex: 1, isBuiltIn: false),
+            ])
+        )
+        for _ in 0..<50 {
+            if viewModel.isAdoptedStream(sessionKey: adoptedKey), chatService.fetchStreamsCallCount > 0 { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(chatService.fetchStreamsCallCount > 0)
+        #expect(viewModel.isAdoptedStream(sessionKey: adoptedKey))
+        #expect(viewModel.canUntrackStream(sessionKey: adoptedKey))
+        #expect(!viewModel.canDeleteStream(sessionKey: adoptedKey))
+    }
+
+    @Test("Adopted session restores as last saved chat on startup")
+    @MainActor
+    func adoptedSessionRestoresAsLastSavedChat() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let firstService = TestChatService()
+        firstService.streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+        ]
+        let firstViewModel = ChatViewModel(
+            auth: auth,
+            chatService: firstService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+
+        let adoptedKey = "agent:main:clawline:user:s_restore"
+
+        await firstViewModel.onAppear()
+        firstService.emitServiceEvent(.streamSnapshot(firstService.streams))
+        firstService.emitServiceEvent(.sessionInfo(
+            SessionInfo(
+                userId: "user",
+                isAdmin: false,
+                dmScope: "dm",
+                sessionKeys: [personalSessionKey, adoptedKey]
+            )
+        ))
+        for _ in 0..<50 {
+            if firstViewModel.untrackedSessionCandidates.map(\.sessionKey) == [adoptedKey] { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(await firstViewModel.trackSession(sessionKey: adoptedKey))
+        for _ in 0..<50 {
+            if firstViewModel.isAdoptedStream(sessionKey: adoptedKey) { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        firstViewModel.setActiveSessionKeyForTesting(adoptedKey)
+        #expect(firstViewModel.activeSessionKey == adoptedKey)
+        try await Task.sleep(for: .milliseconds(80))
+        firstViewModel.onDisappear()
+
+        let secondService = TestChatService()
+        secondService.streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+        ]
+        let secondViewModel = ChatViewModel(
+            auth: auth,
+            chatService: secondService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { secondViewModel.onDisappear() }
+
+        await secondViewModel.onAppear()
+        secondService.emitServiceEvent(.streamSnapshot(secondService.streams))
+        secondService.emitServiceEvent(.sessionInfo(
+            SessionInfo(
+                userId: "user",
+                isAdmin: false,
+                dmScope: "dm",
+                sessionKeys: [personalSessionKey, adoptedKey]
+            )
+        ))
+        for _ in 0..<50 {
+            if secondViewModel.activeSessionKey == adoptedKey, secondViewModel.isAdoptedStream(sessionKey: adoptedKey) { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(secondViewModel.activeSessionKey == adoptedKey)
+        #expect(secondViewModel.isAdoptedStream(sessionKey: adoptedKey))
+    }
+
     @Test("Deleting active stream falls back to main stream")
     @MainActor
     func deletingActiveStreamFallsBack() async throws {
@@ -2147,9 +2796,18 @@ private final class TestChatService: ChatServicing {
     var createStreamError: Error?
     var deleteStreamError: Error?
     var deleteStreamErrorSequence: [Error] = []
+    var fetchTrackableSessionsError: Error?
     var streams: [StreamSession] = []
+    var trackableSessions: [TrackableSession] = []
+    private(set) var fetchStreamsCallCount: Int = 0
+    private(set) var fetchTrackableSessionsCallCount: Int = 0
     private(set) var deleteStreamCallCount: Int = 0
     private(set) var lastDeletedSessionKey: String?
+    private(set) var renameStreamCallCount: Int = 0
+    private(set) var adoptStreamCallCount: Int = 0
+    private(set) var lastAdoptedSessionKey: String?
+    var adoptStreamReturnedTrackingMode: StreamSession.TrackingMode = .adopted
+    var renameReturnedTrackingMode: StreamSession.TrackingMode?
 
     private(set) lazy var incomingMessages: AsyncStream<Message> = {
         AsyncStream { continuation in
@@ -2284,7 +2942,14 @@ private final class TestChatService: ChatServicing {
     }
 
     func fetchStreams() async throws -> [StreamSession] {
-        streams
+        fetchStreamsCallCount += 1
+        return streams
+    }
+
+    func fetchTrackableSessions() async throws -> [TrackableSession] {
+        fetchTrackableSessionsCallCount += 1
+        if let fetchTrackableSessionsError { throw fetchTrackableSessionsError }
+        return trackableSessions
     }
 
     func createStream(displayName: String, idempotencyKey: String) async throws -> StreamSession {
@@ -2302,10 +2967,34 @@ private final class TestChatService: ChatServicing {
         return stream
     }
 
+    func adoptStream(sessionKey: String) async throws -> StreamSession {
+        adoptStreamCallCount += 1
+        lastAdoptedSessionKey = sessionKey
+        if let existing = streams.first(where: { $0.sessionKey == sessionKey }) {
+            return existing
+        }
+        let stream = StreamSession(
+            sessionKey: sessionKey,
+            displayName: trackableSessions.first(where: { $0.sessionKey == sessionKey })?.displayName ?? sessionKey,
+            kind: "custom",
+            orderIndex: streams.count,
+            isBuiltIn: false,
+            createdAt: Date(),
+            updatedAt: Date(),
+            trackingMode: adoptStreamReturnedTrackingMode
+        )
+        streams.append(stream)
+        return stream
+    }
+
     func renameStream(sessionKey: String, displayName: String) async throws -> StreamSession {
+        renameStreamCallCount += 1
         if let index = streams.firstIndex(where: { $0.sessionKey == sessionKey }) {
             var stream = streams[index]
             stream.displayName = displayName
+            if let renameReturnedTrackingMode {
+                stream.trackingMode = renameReturnedTrackingMode
+            }
             streams[index] = stream
             return stream
         }

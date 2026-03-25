@@ -41,11 +41,27 @@ struct SelectableAttributedText: UIViewRepresentable {
     }
 
     private final class TraitResponsiveTextView: UITextView {
-        override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
-            super.traitCollectionDidChange(previousTraitCollection)
-            guard let previousTraitCollection else { return }
-            guard traitCollection.hasDifferentColorAppearance(comparedTo: previousTraitCollection) else { return }
+        private var traitObservation: (any NSObjectProtocol)?
 
+        override init(frame: CGRect, textContainer: NSTextContainer?) {
+            super.init(frame: frame, textContainer: textContainer)
+            registerColorTraitObservation()
+        }
+
+        required init?(coder: NSCoder) {
+            super.init(coder: coder)
+            registerColorTraitObservation()
+        }
+
+        private func registerColorTraitObservation() {
+            traitObservation = registerForTraitChanges([UITraitUserInterfaceStyle.self]) { [weak self] (_: TraitResponsiveTextView, previousTraitCollection: UITraitCollection) in
+                guard let self else { return }
+                guard self.traitCollection.hasDifferentColorAppearance(comparedTo: previousTraitCollection) else { return }
+                self.refreshAttributedTextForCurrentTraits()
+            }
+        }
+
+        private func refreshAttributedTextForCurrentTraits() {
             // TextKit can cache resolved run colors; reassigning forces it to resolve dynamic UIColor
             // attributes with the new trait collection.
             let selection = selectedRange

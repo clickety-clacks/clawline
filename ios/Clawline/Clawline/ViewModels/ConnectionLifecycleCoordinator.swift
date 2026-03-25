@@ -1,7 +1,7 @@
 import Foundation
 import OSLog
 
-enum ConnectionLifecyclePhase: Equatable {
+enum ConnectionLifecyclePhase: Equatable, Sendable {
     case idle
     case connecting
     case authenticating
@@ -9,9 +9,24 @@ enum ConnectionLifecyclePhase: Equatable {
     case live
     case recovering
     case failed
+
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        switch (lhs, rhs) {
+        case (.idle, .idle),
+            (.connecting, .connecting),
+            (.authenticating, .authenticating),
+            (.replaying, .replaying),
+            (.live, .live),
+            (.recovering, .recovering),
+            (.failed, .failed):
+            return true
+        default:
+            return false
+        }
+    }
 }
 
-enum AuthFailureReason: Equatable {
+enum AuthFailureReason: Equatable, Sendable {
     case rejected
     case sessionReplaced
     case tokenRevoked
@@ -19,14 +34,14 @@ enum AuthFailureReason: Equatable {
     case invalidLastMessageId
 }
 
-enum TransportCloseReason: Equatable {
+enum TransportCloseReason: Equatable, Sendable {
     case clean
     case error
     case keepaliveTimeout
 }
 
-struct LifecycleTransportEvent: Equatable {
-    enum Payload: Equatable {
+struct LifecycleTransportEvent: Equatable, Sendable {
+    enum Payload: Equatable, Sendable {
         case transportOpened
         case authResult(
             success: Bool,
@@ -44,7 +59,7 @@ struct LifecycleTransportEvent: Equatable {
     let payload: Payload
 }
 
-enum ConnectionLifecycleFailureReason: Equatable {
+enum ConnectionLifecycleFailureReason: Equatable, Sendable {
     case authRejected
     case sessionReplaced
     case tokenRevoked
@@ -52,9 +67,24 @@ enum ConnectionLifecycleFailureReason: Equatable {
     case protocolOverflow
     case historyResetTimeout
     case reconnectAttemptsExhausted
+
+    nonisolated static func == (lhs: Self, rhs: Self) -> Bool {
+        switch (lhs, rhs) {
+        case (.authRejected, .authRejected),
+            (.sessionReplaced, .sessionReplaced),
+            (.tokenRevoked, .tokenRevoked),
+            (.protocolMismatch, .protocolMismatch),
+            (.protocolOverflow, .protocolOverflow),
+            (.historyResetTimeout, .historyResetTimeout),
+            (.reconnectAttemptsExhausted, .reconnectAttemptsExhausted):
+            return true
+        default:
+            return false
+        }
+    }
 }
 
-enum ConnectionLifecycleReason: Equatable {
+enum ConnectionLifecycleReason: Equatable, Sendable {
     case appBackgrounded
     case appForegrounded
     case manualRetry
@@ -70,7 +100,7 @@ enum ConnectionLifecycleReason: Equatable {
     case failure(ConnectionLifecycleFailureReason)
 }
 
-enum ConnectionLifecycleOutput: Equatable {
+enum ConnectionLifecycleOutput: Equatable, Sendable {
     case phaseTransition(
         from: ConnectionLifecyclePhase,
         to: ConnectionLifecyclePhase,
@@ -105,8 +135,8 @@ struct StartupGateDebugEvent: Sendable {
 }
 
 actor ConnectionLifecycleCoordinator {
-    typealias StartAttemptHandler = (_ epoch: Int, _ lastMessageId: String?, _ token: String) -> Void
-    typealias StopAttemptHandler = () -> Void
+    typealias StartAttemptHandler = @Sendable (_ epoch: Int, _ lastMessageId: String?, _ token: String) -> Void
+    typealias StopAttemptHandler = @Sendable () -> Void
 
     private let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "ConnectionLifecycle")
     private let startAttempt: StartAttemptHandler
@@ -253,7 +283,7 @@ actor ConnectionLifecycleCoordinator {
                 } catch {
                     return
                 }
-                await self.startIfNeeded()
+                self.startIfNeeded()
             }
             coordinatorDiag("appDidBecomeActive delayed startIfNeeded in \(2 - sinceBackground)s")
             return
@@ -370,7 +400,7 @@ actor ConnectionLifecycleCoordinator {
             } catch {
                 return
             }
-            await self.handleAuthTimeout(epoch: epoch)
+            self.handleAuthTimeout(epoch: epoch)
         }
     }
 
@@ -461,7 +491,7 @@ actor ConnectionLifecycleCoordinator {
                 } catch {
                     return
                 }
-                await self.handleHistoryResetAckTimeout(epoch: epoch)
+                self.handleHistoryResetAckTimeout(epoch: epoch)
             }
             return
         }
@@ -498,7 +528,7 @@ actor ConnectionLifecycleCoordinator {
             } catch {
                 return
             }
-            await self.handleReplayTotalTimeout(epoch: epoch)
+            self.handleReplayTotalTimeout(epoch: epoch)
         }
         resetReplayProgressTimeout(epoch: epoch)
     }
@@ -529,7 +559,7 @@ actor ConnectionLifecycleCoordinator {
             } catch {
                 return
             }
-            await self.handleReplayProgressTimeout(epoch: epoch)
+            self.handleReplayProgressTimeout(epoch: epoch)
         }
     }
 
@@ -688,7 +718,7 @@ actor ConnectionLifecycleCoordinator {
             } catch {
                 return
             }
-            await self.handleConnectTimeout(epoch: epoch)
+            self.handleConnectTimeout(epoch: epoch)
         }
         // Do not await between epoch increment and service dispatch.
         startAttempt(epoch, canonicalCursor, authToken)
@@ -718,7 +748,7 @@ actor ConnectionLifecycleCoordinator {
             } catch {
                 return
             }
-            await self.executeRecoveringReconnect(incrementRecoveringAttempt: incrementRecoveringAttempt)
+            self.executeRecoveringReconnect(incrementRecoveringAttempt: incrementRecoveringAttempt)
         }
     }
 

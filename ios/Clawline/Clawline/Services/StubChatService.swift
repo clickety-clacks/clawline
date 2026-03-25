@@ -149,6 +149,10 @@ final class StubChatService: ChatServicing {
         streams
     }
 
+    func fetchTrackableSessions() async throws -> [TrackableSession] {
+        []
+    }
+
     func createStream(displayName: String, idempotencyKey: String) async throws -> StreamSession {
         let now = Date()
         let stream = StreamSession(
@@ -159,6 +163,23 @@ final class StubChatService: ChatServicing {
             isBuiltIn: false,
             createdAt: now,
             updatedAt: now
+        )
+        streams.append(stream)
+        serviceEventContinuation?.yield(.streamCreated(stream))
+        return stream
+    }
+
+    func adoptStream(sessionKey: String) async throws -> StreamSession {
+        let now = Date()
+        let stream = StreamSession(
+            sessionKey: sessionKey,
+            displayName: "Adopted Session",
+            kind: "custom",
+            orderIndex: streams.count,
+            isBuiltIn: false,
+            createdAt: now,
+            updatedAt: now,
+            trackingMode: .adopted
         )
         streams.append(stream)
         serviceEventContinuation?.yield(.streamCreated(stream))

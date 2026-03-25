@@ -79,7 +79,7 @@ struct StreamToast: View {
 }
 
 /// Manages the channel toast display with debounce behavior.
-/// Toast stays visible while switching and only dismisses after 1 second of no activity.
+/// Toast stays visible while switching and only dismisses after 2 seconds of no activity.
 @Observable
 @MainActor
 final class StreamToastManager {
@@ -88,8 +88,14 @@ final class StreamToastManager {
     private(set) var sessionKey: String = ""
     private(set) var isBusy = false
 
+    private let clock = ContinuousClock()
+    private let dismissDelay: Duration
+    private var shownAt: ContinuousClock.Instant?
     private var dismissTask: Task<Void, Never>?
-    private let dismissDelay: Duration = .seconds(2)
+
+    init(dismissDelay: Duration = .seconds(2)) {
+        self.dismissDelay = dismissDelay
+    }
 
     /// Shows or updates the toast with stream display metadata.
     /// If already visible, just updates the name without dismissing.
@@ -102,6 +108,7 @@ final class StreamToastManager {
         self.displayName = displayName
         self.sessionKey = sessionKey
         self.isBusy = isBusy
+        shownAt = clock.now
         isVisible = true
 
         scheduleDismissIfIdle()
@@ -117,11 +124,29 @@ final class StreamToastManager {
 
     private func scheduleDismissIfIdle() {
         guard isVisible, !isBusy else { return }
+        let remaining = remainingDismissDelay()
+        guard remaining > .zero else {
+            hide()
+            return
+        }
         dismissTask = Task {
-            try? await Task.sleep(for: dismissDelay)
+            do {
+                try await Task.sleep(for: remaining)
+            } catch is CancellationError {
+                return
+            } catch {
+                return
+            }
             guard !Task.isCancelled else { return }
             isVisible = false
+            shownAt = nil
         }
+    }
+
+    private func remainingDismissDelay() -> Duration {
+        guard let shownAt else { return dismissDelay }
+        let elapsed = shownAt.duration(to: clock.now)
+        return max(.zero, dismissDelay - elapsed)
     }
 
     /// Immediately hides the toast.
@@ -130,6 +155,7 @@ final class StreamToastManager {
         dismissTask = nil
         isBusy = false
         isVisible = false
+        shownAt = nil
     }
 }
 

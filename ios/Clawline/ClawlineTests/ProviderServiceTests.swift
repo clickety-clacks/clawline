@@ -159,6 +159,63 @@ struct ProviderServiceTests {
         #expect(message?.content == "Hi")
     }
 
+    @Test("Chat connect reports adopted session keys during auth")
+    @MainActor
+    func chatConnectReportsAdoptedSessionKeysDuringAuth() async throws {
+        SessionRegistry.shared.replace(with: [])
+        defer { SessionRegistry.shared.replace(with: []) }
+
+        let adoptedKey = "agent:main:openclaw:user:s_trackme"
+        SessionRegistry.shared.upsert(
+            StreamSession(
+                sessionKey: adoptedKey,
+                displayName: "Tracked Session",
+                kind: "custom",
+                orderIndex: 1,
+                isBuiltIn: false,
+                createdAt: Date(),
+                updatedAt: Date(),
+                trackingMode: .adopted
+            )
+        )
+        SessionRegistry.shared.upsert(
+            StreamSession(
+                sessionKey: "agent:main:clawline:user:main",
+                displayName: "Personal",
+                kind: "main",
+                orderIndex: 0,
+                isBuiltIn: true,
+                createdAt: Date(),
+                updatedAt: Date(),
+                trackingMode: .serverManaged
+            )
+        )
+
+        let mockSocket = MockWebSocketClient()
+        let connector = MockWebSocketConnector(client: mockSocket)
+        let baseURL = URL(string: "https://example.com")!
+        let service = ProviderChatService(
+            connector: connector,
+            deviceId: "device_123",
+            baseURLProvider: { baseURL },
+            adoptedSessionKeysProvider: { SessionRegistry.shared.adoptedSessionKeys() }
+        )
+
+        Task {
+            try await Task.sleep(forDuration: .milliseconds(20))
+            mockSocket.enqueue(text: #"{ "type": "auth_result", "success": true }"#)
+        }
+
+        try await service.connect(token: "jwt", lastMessageId: nil)
+
+        #expect(
+            mockSocket.sentTexts.contains {
+                $0.contains("\"type\":\"auth\"")
+                    && $0.contains("\"adoptedSessionKeys\":[\"agent:main:openclaw:user:s_trackme\"]")
+            }
+        )
+    }
+
     @Test("Chat connect falls back from wss to ws when TLS handshake fails")
     func chatConnectFallsBackToPlainWebSocket() async throws {
         let mockSocket = MockWebSocketClient()
@@ -424,6 +481,187 @@ struct ProviderServiceTests {
         #expect(snapshot.first?.sessionKey == "agent:main:clawline:user:main")
     }
 
+    @Test("Trackable sessions fetch is authorized during initial stream snapshot")
+    func trackableSessionsFetchDuringInitialSnapshot() async throws {
+        let mockSocket = MockWebSocketClient()
+        let connector = MockWebSocketConnector(client: mockSocket)
+        let baseURL = URL(string: "https://example.com")!
+        defer { HTTPStubURLProtocol.requestHandler = nil }
+        HTTPStubURLProtocol.requestHandler = { request in
+            #expect(request.url?.path == "/api/trackable-sessions")
+            #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer jwt")
+            let data = #"""
+            {
+              "sessions": [
+                {
+                  "sessionKey": "agent:main:clawline:user:s_trackable",
+                  "displayName": "Trackable Session",
+                  "updatedAt": 1700000000000
+                }
+              ]
+            }
+            """#.data(using: .utf8) ?? Data()
+            return (
+                HTTPURLResponse(
+                    url: request.url ?? baseURL,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                data
+            )
+        }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [HTTPStubURLProtocol.self]
+        let urlSession = URLSession(configuration: configuration)
+        let streamAPIClient = StreamAPIClient(baseURLProvider: { baseURL }, session: urlSession)
+        let service = ProviderChatService(
+            connector: connector,
+            deviceId: "device_123",
+            baseURLProvider: { baseURL },
+            streamAPIClient: streamAPIClient
+        )
+
+        var eventIterator = service.serviceEvents.makeAsyncIterator()
+        let fetchTask = Task {
+            while let event = await eventIterator.next() {
+                if case .streamSnapshot = event {
+                    return try await service.fetchTrackableSessions()
+                }
+            }
+            return [TrackableSession]()
+        }
+
+        Task {
+            try await Task.sleep(forDuration: .milliseconds(20))
+            mockSocket.enqueue(text: #"{ "type": "auth_result", "success": true }"#)
+            try await Task.sleep(forDuration: .milliseconds(20))
+            mockSocket.enqueue(text: #"{ "type": "stream_snapshot", "streams": [{ "sessionKey": "agent:main:clawline:user:main", "displayName": "Personal", "kind": "main", "orderIndex": 0, "isBuiltIn": true, "createdAt": 1700000000000, "updatedAt": 1700000000000 }] }"#)
+        }
+
+        try await service.connect(token: "jwt", lastMessageId: nil)
+        let sessions = try await fetchTask.value
+
+        #expect(sessions.map(\.sessionKey) == ["agent:main:clawline:user:s_trackable"])
+    }
+
+    @Test("Fetch streams decodes adopted flag and defaults missing field to false")
+    func fetchStreamsDecodesAdoptedFlag() async throws {
+        let mockSocket = MockWebSocketClient()
+        let connector = MockWebSocketConnector(client: mockSocket)
+        let baseURL = URL(string: "https://example.com")!
+        defer { HTTPStubURLProtocol.requestHandler = nil }
+        HTTPStubURLProtocol.requestHandler = { request in
+            #expect(request.url?.path == "/api/streams")
+            let data = #"""
+            {
+              "streams": [
+                {
+                  "sessionKey": "agent:main:clawline:user:s_adopted",
+                  "displayName": "Adopted Session",
+                  "kind": "custom",
+                  "orderIndex": 1,
+                  "isBuiltIn": false,
+                  "createdAt": 1700000000000,
+                  "updatedAt": 1700000000000,
+                  "adopted": true
+                },
+                {
+                  "sessionKey": "agent:main:clawline:user:s_regular",
+                  "displayName": "Regular Session",
+                  "kind": "custom",
+                  "orderIndex": 2,
+                  "isBuiltIn": false,
+                  "createdAt": 1700000000000,
+                  "updatedAt": 1700000000000
+                }
+              ]
+            }
+            """#.data(using: .utf8) ?? Data()
+            return (
+                HTTPURLResponse(
+                    url: request.url ?? baseURL,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                data
+            )
+        }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [HTTPStubURLProtocol.self]
+        let urlSession = URLSession(configuration: configuration)
+        let streamAPIClient = StreamAPIClient(baseURLProvider: { baseURL }, session: urlSession)
+        let service = ProviderChatService(
+            connector: connector,
+            deviceId: "device_123",
+            baseURLProvider: { baseURL },
+            authTokenProvider: { "jwt" },
+            streamAPIClient: streamAPIClient
+        )
+
+        let streams = try await service.fetchStreams()
+
+        #expect(streams.count == 2)
+        #expect(streams[0].adopted)
+        #expect(!streams[1].adopted)
+    }
+
+    @Test("Adopt stream request posts session key to provider")
+    func adoptStreamPostsSessionKeyToProvider() async throws {
+        let mockSocket = MockWebSocketClient()
+        let connector = MockWebSocketConnector(client: mockSocket)
+        let baseURL = URL(string: "https://example.com")!
+        defer { HTTPStubURLProtocol.requestHandler = nil }
+        HTTPStubURLProtocol.requestHandler = { request in
+            #expect(request.url?.path == "/api/streams/adopt")
+            #expect(request.httpMethod == "POST")
+            #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer jwt")
+            let body = try JSONSerialization.jsonObject(with: request.httpBody ?? Data()) as? [String: Any]
+            #expect(body?["sessionKey"] as? String == "agent:main:openclaw:user:s_trackable")
+            let data = #"""
+            {
+              "stream": {
+                "sessionKey": "agent:main:openclaw:user:s_trackable",
+                "displayName": "Trackable Session",
+                "kind": "custom",
+                "orderIndex": 3,
+                "isBuiltIn": false,
+                "createdAt": 1700000000000,
+                "updatedAt": 1700000000000,
+                "adopted": true
+              }
+            }
+            """#.data(using: .utf8) ?? Data()
+            return (
+                HTTPURLResponse(
+                    url: request.url ?? baseURL,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                data
+            )
+        }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [HTTPStubURLProtocol.self]
+        let urlSession = URLSession(configuration: configuration)
+        let streamAPIClient = StreamAPIClient(baseURLProvider: { baseURL }, session: urlSession)
+        let service = ProviderChatService(
+            connector: connector,
+            deviceId: "device_123",
+            baseURLProvider: { baseURL },
+            authTokenProvider: { "jwt" },
+            streamAPIClient: streamAPIClient
+        )
+
+        let stream = try await service.adoptStream(sessionKey: "agent:main:openclaw:user:s_trackable")
+
+        #expect(stream.sessionKey == "agent:main:openclaw:user:s_trackable")
+        #expect(stream.displayName == "Trackable Session")
+        #expect(stream.adopted)
+    }
+
     @Test("Chat service emits incremental stream events")
     func chatIncrementalStreamEvents() async throws {
         let mockSocket = MockWebSocketClient()
@@ -487,6 +725,31 @@ private final class MockWebSocketConnector: WebSocketConnecting {
         connectedURL = url
         return client
     }
+}
+
+private final class HTTPStubURLProtocol: URLProtocol, @unchecked Sendable {
+    nonisolated(unsafe) static var requestHandler: ((URLRequest) throws -> (HTTPURLResponse, Data))?
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        guard let handler = Self.requestHandler else {
+            client?.urlProtocol(self, didFailWithError: URLError(.badServerResponse))
+            return
+        }
+
+        do {
+            let (response, data) = try handler(request)
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: data)
+            client?.urlProtocolDidFinishLoading(self)
+        } catch {
+            client?.urlProtocol(self, didFailWithError: error)
+        }
+    }
+
+    override func stopLoading() {}
 }
 
 private final class FallbackMockWebSocketConnector: WebSocketConnecting {

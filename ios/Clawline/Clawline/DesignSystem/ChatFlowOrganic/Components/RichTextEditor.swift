@@ -17,12 +17,14 @@ struct RichTextEditor: UIViewRepresentable {
     @Binding var calculatedHeight: CGFloat
     @Binding var selectionRange: NSRange
     @Binding var pendingInsertions: [PendingAttachment]
+    var fontScaleChangeSequence: Int
     var resetToken: Int
     var focusTrigger: Int
     var isEditable: Bool
     var tintColor: UIColor
     var textColor: UIColor = .label
     var onFocusChange: (Bool) -> Void
+    var onTextEditActivity: (() -> Void)?
     var onSubmit: (() -> Void)?
     var onPasteImages: (([UIImage]) -> Void)?
     var trailingPadding: CGFloat = 20
@@ -42,7 +44,7 @@ struct RichTextEditor: UIViewRepresentable {
         textView.textContainerInset = UIEdgeInsets(top: 12, left: 20, bottom: 12, right: trailingPadding)
         textView.textContainer.lineFragmentPadding = 0
         textView.adjustsFontForContentSizeCategory = true
-        textView.font = UIFont.preferredFont(forTextStyle: .body)
+        textView.font = UIFont.clawline(.bodyText)
         textView.allowsEditingTextAttributes = true
 #if !os(visionOS)
         textView.keyboardDismissMode = .interactive
@@ -85,7 +87,6 @@ struct RichTextEditor: UIViewRepresentable {
                 textView.selectedRange = selectionRange
                 context.coordinator.isApplyingParentSelection = false
             }
-            logger.info("[trace] updateUIView applied reset len=\(attributedText.length)")
         }
         context.coordinator.isApplyingLocalEdit = false
 
@@ -99,6 +100,10 @@ struct RichTextEditor: UIViewRepresentable {
         if textView.textColor != textColor {
             textView.textColor = textColor
         }
+        let baseFont = UIFont.clawline(.bodyText)
+        if textView.font?.pointSize != baseFont.pointSize {
+            textView.font = baseFont
+        }
 
         let currentInset = textView.textContainerInset
         if abs(currentInset.right - trailingPadding) > 0.5 {
@@ -110,7 +115,10 @@ struct RichTextEditor: UIViewRepresentable {
 
         context.coordinator.applyFocusIfNeeded(on: textView, trigger: focusTrigger)
         context.coordinator.updateHeight(for: textView, allowAutoScroll: false)
-        context.coordinator.enforceBaseAttributesIfNeeded(on: textView)
+        context.coordinator.enforceBaseAttributesIfNeeded(
+            on: textView,
+            fontScaleChangeSequence: fontScaleChangeSequence
+        )
         context.coordinator.ensureTypingAttributes(on: textView)
 
         if !pendingInsertions.isEmpty, !isComposing, !context.coordinator.isInsertingAttachments {
@@ -137,6 +145,8 @@ struct RichTextEditor: UIViewRepresentable {
         var isApplyingParentSelection = false
         var lastResetToken: Int = 0
         private var lastBaseTextColor: UIColor?
+        private var lastBaseFontPointSize: CGFloat?
+        private var lastFontScaleChangeSequence: Int?
 
         init(parent: RichTextEditor) {
             self.parent = parent
@@ -153,13 +163,12 @@ struct RichTextEditor: UIViewRepresentable {
         func textViewDidChange(_ textView: UITextView) {
             guard !isUpdatingFromSwiftUI else { return }
             isApplyingLocalEdit = true
+            parent.onTextEditActivity?()
             parent.attributedText = textView.attributedText
             setSelectionRange(textView.selectedRange)
             updateHeight(for: textView, allowAutoScroll: true)
             ensureCaretVisible(in: textView)
             ensureTypingAttributes(on: textView)
-            let length = textView.attributedText?.length ?? 0
-            logger.info("[trace] textViewDidChange len=\(length) sel=\(textView.selectedRange.location),\(textView.selectedRange.length)")
         }
 
         func textViewDidChangeSelection(_ textView: UITextView) {
@@ -256,21 +265,26 @@ struct RichTextEditor: UIViewRepresentable {
 
         func ensureTypingAttributes(on textView: UITextView) {
             var attributes = textView.typingAttributes
-            attributes[.font] = UIFont.preferredFont(forTextStyle: .body)
+            attributes[.font] = UIFont.clawline(.bodyText)
             attributes[.foregroundColor] = parent.textColor
             textView.typingAttributes = attributes
         }
 
-        func enforceBaseAttributesIfNeeded(on textView: UITextView) {
-            if let lastBaseTextColor, lastBaseTextColor.isEqual(parent.textColor) {
+        func enforceBaseAttributesIfNeeded(on textView: UITextView, fontScaleChangeSequence: Int) {
+            let baseFont = UIFont.clawline(.bodyText)
+            let colorUnchanged = lastBaseTextColor?.isEqual(parent.textColor) == true
+            let fontUnchanged = lastBaseFontPointSize == baseFont.pointSize
+            let sequenceUnchanged = lastFontScaleChangeSequence == fontScaleChangeSequence
+            if colorUnchanged && fontUnchanged && sequenceUnchanged {
                 return
             }
             lastBaseTextColor = parent.textColor
-            enforceBaseAttributes(on: textView)
+            lastBaseFontPointSize = baseFont.pointSize
+            lastFontScaleChangeSequence = fontScaleChangeSequence
+            enforceBaseAttributes(on: textView, baseFont: baseFont)
         }
 
-        func enforceBaseAttributes(on textView: UITextView) {
-            let baseFont = UIFont.preferredFont(forTextStyle: .body)
+        func enforceBaseAttributes(on textView: UITextView, baseFont: UIFont = UIFont.clawline(.bodyText)) {
             let baseColor = parent.textColor
             let fullRange = NSRange(location: 0, length: textView.textStorage.length)
             guard fullRange.length > 0 else { return }
@@ -488,7 +502,7 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
 
     func textPasteConfigurationSupporting(
         _ textPasteConfigurationSupporting: UITextPasteConfigurationSupporting,
-        transforming item: UITextPasteItem
+        transform item: UITextPasteItem
     ) {
         let isImage = Self.providerHasImage(item.itemProvider)
         logger.info("[paste] transforming item isImage=\(isImage) types=\(item.itemProvider.registeredTypeIdentifiers)")
@@ -523,9 +537,9 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
                     texts.append(text)
                 }
             }
-            await MainActor.run {
+            let combined = texts.joined()
+            await MainActor.run { [weak self, combined] in
                 guard let self else { return }
-                let combined = texts.joined()
                 if !combined.isEmpty {
                     self.insertPlainText(combined)
                 }
@@ -553,7 +567,7 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
         delegate?.textViewDidChange?(self)
     }
 
-    private static func loadSanitizedText(from provider: NSItemProvider) async -> String? {
+    nonisolated private static func loadSanitizedText(from provider: NSItemProvider) async -> String? {
         if provider.hasItemConformingToTypeIdentifier(UTType.plainText.identifier) {
             return await loadText(for: UTType.plainText.identifier, from: provider)
         }
@@ -586,7 +600,7 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
         return nil
     }
 
-    private static func loadText(for typeIdentifier: String, from provider: NSItemProvider) async -> String? {
+    nonisolated private static func loadText(for typeIdentifier: String, from provider: NSItemProvider) async -> String? {
         await withCheckedContinuation { continuation in
             provider.loadItem(forTypeIdentifier: typeIdentifier, options: nil) { obj, _ in
                 let text = (obj as? String) ?? (obj as? Data).flatMap { String(data: $0, encoding: .utf8) }
@@ -595,7 +609,7 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
         }
     }
 
-    private static func loadData(for typeIdentifier: String, from provider: NSItemProvider) async -> Data? {
+    nonisolated private static func loadData(for typeIdentifier: String, from provider: NSItemProvider) async -> Data? {
         await withCheckedContinuation { continuation in
             provider.loadItem(forTypeIdentifier: typeIdentifier, options: nil) { obj, _ in
                 let data = (obj as? Data) ?? (obj as? String).flatMap { $0.data(using: .utf8) }
@@ -604,7 +618,7 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
         }
     }
 
-    private static func providerHasText(_ provider: NSItemProvider) -> Bool {
+    nonisolated private static func providerHasText(_ provider: NSItemProvider) -> Bool {
         provider.hasItemConformingToTypeIdentifier(UTType.plainText.identifier)
             || provider.hasItemConformingToTypeIdentifier(UTType.utf8PlainText.identifier)
             || provider.hasItemConformingToTypeIdentifier(UTType.text.identifier)
@@ -614,7 +628,7 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
 
     // MARK: - Image detection
 
-    private static func providerHasImage(_ provider: NSItemProvider) -> Bool {
+    nonisolated private static func providerHasImage(_ provider: NSItemProvider) -> Bool {
         provider.canLoadObject(ofClass: UIImage.self)
             || provider.hasItemConformingToTypeIdentifier(UTType.image.identifier)
     }
@@ -627,9 +641,9 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
                     texts.append(text)
                 }
             }
-            await MainActor.run {
+            let combined = texts.joined()
+            await MainActor.run { [weak self, combined] in
                 guard let self else { return }
-                let combined = texts.joined()
                 if !combined.isEmpty {
                     self.insertPlainText(combined)
                 }
@@ -642,7 +656,7 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
     private func handleImageProviders(_ imageProviders: [NSItemProvider]) {
         Task.detached { [weak self] in
             let images = await Self.loadImages(from: imageProviders)
-            await MainActor.run {
+            await MainActor.run { [weak self, images] in
                 guard let self else { return }
                 logger.info("[paste] loaded \(images.count) image(s)")
                 self.onPasteImages?(images)
@@ -650,7 +664,7 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
         }
     }
 
-    private static func loadImages(from providers: [NSItemProvider]) async -> [UIImage] {
+    nonisolated private static func loadImages(from providers: [NSItemProvider]) async -> [UIImage] {
         await withTaskGroup(of: UIImage?.self) { group in
             for provider in providers {
                 group.addTask {

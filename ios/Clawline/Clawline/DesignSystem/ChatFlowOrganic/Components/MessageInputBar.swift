@@ -7,10 +7,7 @@
 
 import SwiftUI
 import UIKit
-import OSLog
 import Foundation
-
-private let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "MessageInputBar")
 
 // MARK: - ⚠️⚠️⚠️ CRITICAL: READ ChatView.swift HEADER BEFORE MODIFYING ⚠️⚠️⚠️
 //
@@ -45,6 +42,7 @@ struct MessageInputBar: View {
     @Binding var selectionRange: NSRange
     @Binding var pendingInsertions: [PendingAttachment]
     var placeholderText: String = "Message"
+    let fontScaleChangeSequence: Int
     var resetToken: Int
     let canSend: Bool
     let isSending: Bool
@@ -60,9 +58,11 @@ struct MessageInputBar: View {
     let onReconnect: () -> Void
     let onAdd: () -> Void
     let onFocusChange: (Bool) -> Void
+    let onTextEditActivity: () -> Void
     var onPasteImages: (([UIImage]) -> Void)?
 
     @State private var editorHeight: CGFloat = 44
+    @State private var cachedMaxBarWidth: CGFloat?
     let isCompact: Bool
 
     private var metrics: MessageInputBarMetrics {
@@ -106,15 +106,20 @@ struct MessageInputBar: View {
         ChatFlowTheme.Metrics(isCompact: isCompact).inputBarPaddingHorizontal
     }
 
-    private var maxBarWidth: CGFloat? {
-        guard !isCompact else { return nil }
+    private func refreshMaxBarWidth() {
+        guard !isCompact else {
+            cachedMaxBarWidth = nil
+            return
+        }
+
         let themeMetrics = ChatFlowTheme.Metrics(isCompact: isCompact)
-        let textWidth = ChatFlowTheme.maxLineWidth(bodyFontSize: themeMetrics.bodyFontSize)
+        let bodyFont = UIFont.clawline(.bodyText)
+        let textWidth = ChatFlowTheme.maxLineWidth(bodyFont: bodyFont)
         let chromeWidth = (themeMetrics.inputBarPaddingHorizontal * 2)
             + metrics.inputBarHeight
             + metrics.inputBarHeight
             + (MessageInputBarMetrics.elementSpacing * 2)
-        return textWidth + chromeWidth
+        cachedMaxBarWidth = textWidth + chromeWidth
     }
 
     // #61: On visionOS, keep the input bar in dark mode regardless of the global theme toggle.
@@ -170,6 +175,11 @@ struct MessageInputBar: View {
         !isSending && hasSubmittableDraft
     }
 
+    static func reconnectBubbleScale(phase: CGFloat) -> CGFloat {
+        let clampedPhase = min(1, max(0, phase))
+        return 0.75 + (0.25 * clampedPhase)
+    }
+
     private func handleEditorSubmitIntent() {
         guard Self.shouldDispatchEditorSubmitIntent(
             isSending: isSending,
@@ -179,6 +189,7 @@ struct MessageInputBar: View {
     }
 
     var body: some View {
+        let _ = fontScaleChangeSequence
         HStack(alignment: .bottom, spacing: MessageInputBarMetrics.elementSpacing) {
 #if os(visionOS)
             // Appearance toggle button
@@ -240,6 +251,7 @@ struct MessageInputBar: View {
                 selectionRange: $selectionRange,
                 pendingInsertions: $pendingInsertions,
                 editorHeight: $editorHeight,
+                fontScaleChangeSequence: fontScaleChangeSequence,
                 resetToken: resetToken,
                 focusTrigger: focusTrigger,
                 inputHeight: inputHeight,
@@ -247,6 +259,7 @@ struct MessageInputBar: View {
                 editorOpacity: editorOpacity,
                 onSubmitRequested: handleEditorSubmitIntent,
                 onFocusChange: onFocusChange,
+                onTextEditActivity: onTextEditActivity,
                 onPasteImages: onPasteImages,
                 placeholderText: placeholderText,
                 isLightModeForInputBar: isLightModeForInputBar,
@@ -269,15 +282,20 @@ struct MessageInputBar: View {
         }
         .padding(.horizontal, containerPadding)
         .padding(.bottom, metrics.bottomPadding)
-        .frame(maxWidth: maxBarWidth)
+        .frame(maxWidth: cachedMaxBarWidth)
         .frame(maxWidth: .infinity, alignment: .center)
-        .simultaneousGesture(TapGesture().onEnded {
-            logger.info("Input bar tap gesture")
-            NSLog("DIAG: Input bar tap gesture")
-        })
         .onChange(of: content.length) { _, newValue in
             guard newValue == 0 else { return }
             editorHeight = metrics.inputBarHeight
+        }
+        .onAppear {
+            refreshMaxBarWidth()
+        }
+        .onChange(of: isCompact) { _, _ in
+            refreshMaxBarWidth()
+        }
+        .onChange(of: settings.fontScale) { _, _ in
+            refreshMaxBarWidth()
         }
     }
 }
@@ -287,6 +305,7 @@ private struct MessageEditorChrome: View {
     @Binding var selectionRange: NSRange
     @Binding var pendingInsertions: [PendingAttachment]
     @Binding var editorHeight: CGFloat
+    let fontScaleChangeSequence: Int
     let resetToken: Int
     let focusTrigger: Int
     let inputHeight: CGFloat
@@ -294,6 +313,7 @@ private struct MessageEditorChrome: View {
     let editorOpacity: Double
     let onSubmitRequested: () -> Void
     let onFocusChange: (Bool) -> Void
+    let onTextEditActivity: () -> Void
     var onPasteImages: (([UIImage]) -> Void)?
     let placeholderText: String
     let isLightModeForInputBar: Bool
@@ -327,12 +347,14 @@ private struct MessageEditorChrome: View {
                 calculatedHeight: $editorHeight,
                 selectionRange: $selectionRange,
                 pendingInsertions: $pendingInsertions,
+                fontScaleChangeSequence: fontScaleChangeSequence,
                 resetToken: resetToken,
                 focusTrigger: focusTrigger,
                 isEditable: true,
                 tintColor: chrome.tintColor,
                 textColor: chrome.textColor,
                 onFocusChange: onFocusChange,
+                onTextEditActivity: onTextEditActivity,
                 onSubmit: {
                     onSubmitRequested()
                 },
@@ -343,6 +365,7 @@ private struct MessageEditorChrome: View {
 
             if content.length == 0 {
                 Text(placeholderText)
+                    .font(.clawline(.bodyText))
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .minimumScaleFactor(0.7)
@@ -443,8 +466,7 @@ private struct MessageSendControl: View {
         case .active, .error:
             return 1
         case .reconnecting:
-            let phase = reconnectPulsePhase(at: date)
-            return 0.5 + (0.5 * phase)
+            return MessageInputBar.reconnectBubbleScale(phase: reconnectPulsePhase(at: date))
         }
     }
 
@@ -517,6 +539,7 @@ private struct MessageSendControl: View {
                 content: $content,
                 selectionRange: $selection,
                 pendingInsertions: .constant([]),
+                fontScaleChangeSequence: 0,
                 resetToken: 0,
                 canSend: true,
                 isSending: false,
@@ -530,6 +553,7 @@ private struct MessageSendControl: View {
                 onReconnect: {},
                 onAdd: {},
                 onFocusChange: { _ in },
+                onTextEditActivity: {},
                 onPasteImages: nil,
                 isCompact: true
             )

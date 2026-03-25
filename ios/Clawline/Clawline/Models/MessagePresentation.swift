@@ -166,7 +166,7 @@ struct MarkdownRenderPlan: Equatable {
     let containsTextualContent: Bool
     let isEmojiOnly: Bool
 
-    static let empty = MarkdownRenderPlan(
+    nonisolated static let empty = MarkdownRenderPlan(
         blocks: [],
         plainTextForMetrics: "",
         containsTextualContent: false,
@@ -290,7 +290,7 @@ enum MessagePresentationBuilder {
         let hasAttachments = !attachmentBuckets.richParts.isEmpty || !imageAttachments.isEmpty || !fileAttachments.isEmpty
         var parts: [MessagePart] = []
         var markdownParts: [MessagePart] = []
-        var hasTextual = markdownPlan.containsTextualContent
+        let hasTextual = markdownPlan.containsTextualContent
         var emojiOnly = markdownPlan.isEmojiOnly
         var hasBlockedParts = hasAttachments
         var detectedURLOccurrences: [URL] = []
@@ -569,7 +569,7 @@ enum MessagePresentationBuilder {
 }
 
 extension TableModel {
-    static func makeRowIdentifier(
+    nonisolated static func makeRowIdentifier(
         messageID: String,
         rowIndex: Int,
         cells: [String]

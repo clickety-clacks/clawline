@@ -18,6 +18,10 @@ enum ChatFlowTheme {
         scheme == .dark ? Color(red: 0.878, green: 0.478, blue: 0.373) : Color(red: 0.769, green: 0.471, blue: 0.361)
     }
 
+    static func unreadIndicator(_ scheme: ColorScheme) -> Color {
+        terracotta(scheme)
+    }
+
     static func softCoral(_ scheme: ColorScheme) -> Color {
         scheme == .dark ? Color(red: 0.769, green: 0.478, blue: 0.431) : Color(red: 0.910, green: 0.659, blue: 0.612)
     }
@@ -120,11 +124,15 @@ enum ChatFlowTheme {
     }
 
     // MARK: - Typography helpers
+    static func maxLineWidth(bodyFont: UIFont) -> CGFloat {
+        let sample = String(repeating: "n", count: 65)
+        let size = (sample as NSString).size(withAttributes: [.font: bodyFont])
+        return ceil(size.width)
+    }
+
     static func maxLineWidth(bodyFontSize _: CGFloat = 0) -> CGFloat {
         let scaledFont = UIFont.clawline(.bodyText)
-        let sample = String(repeating: "n", count: 65)
-        let size = (sample as NSString).size(withAttributes: [.font: scaledFont])
-        return ceil(size.width)
+        return maxLineWidth(bodyFont: scaledFont)
     }
 }
 

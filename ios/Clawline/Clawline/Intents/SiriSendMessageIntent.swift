@@ -31,12 +31,13 @@ struct SendMessageIntent: AppIntent {
     )
     var message: String?
 
+    @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
         NSLog("[SiriIntent][1] perform() entered – message=%@ botName=%@", String(describing: message), String(describing: botName))
 
         if message?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true {
             NSLog("[SiriIntent][2] message nil/empty – calling requestValue")
-            try await $message.requestValue("What do you want to say?")
+            message = try await $message.requestValue("What do you want to say?")
             NSLog("[SiriIntent][3] after requestValue – message=%@", String(describing: message))
         }
         guard let trimmedMessage = message?.trimmingCharacters(in: .whitespacesAndNewlines),
@@ -46,11 +47,11 @@ struct SendMessageIntent: AppIntent {
         }
         NSLog("[SiriIntent][4] message resolved: %@", trimmedMessage)
 
-        let authSnapshot = await loadAuthSnapshot()
+        let authSnapshot = loadAuthSnapshot()
         let hasBaseURL = ProviderBaseURLStore.baseURL != nil
         NSLog("[SiriIntent][5] auth – token=%d userId=%d admin=%d baseURL=%d", authSnapshot.token != nil ? 1 : 0, authSnapshot.userId != nil ? 1 : 0, authSnapshot.isAdmin ? 1 : 0, hasBaseURL ? 1 : 0)
         guard let token = authSnapshot.token,
-              let userId = authSnapshot.userId,
+              authSnapshot.userId != nil,
               hasBaseURL else {
             NSLog("[SiriIntent][!] notPaired – missing auth or baseURL")
             throw SiriSendMessageIntentError.notPaired
@@ -116,7 +117,7 @@ struct SendMessageIntent: AppIntent {
             try await ackTask.value
             NSLog("[SiriIntent][11] acked")
         } catch let error as SiriSendMessageIntentError {
-            NSLog("[SiriIntent][!] SiriSendMessageIntentError: %@", error.localizedDescription ?? "nil")
+            NSLog("[SiriIntent][!] SiriSendMessageIntentError: %@", error.localizedDescription)
             throw error
         } catch let error as ProviderChatService.Error {
             NSLog("[SiriIntent][!] ProviderChatService.Error: %@", String(describing: error))
@@ -272,7 +273,17 @@ private func waitForAck(
                     return
                 case .messageError(let errorMessageId, let code, let message)
                         where errorMessageId == messageId:
-                    throw mapMessageError(code: code, message: message)
+                    switch code {
+                    case "auth_failed", "token_revoked":
+                        throw SiriSendMessageIntentError.authExpired
+                    case "connection_lost":
+                        throw SiriSendMessageIntentError.offline
+                    default:
+                        if let message, message.lowercased().contains("offline") {
+                            throw SiriSendMessageIntentError.offline
+                        }
+                        throw SiriSendMessageIntentError.connectionTimeout
+                    }
                 case .connectionInterrupted:
                     throw SiriSendMessageIntentError.offline
                 default:
@@ -304,21 +315,6 @@ private func mapChatServiceError(_ error: ProviderChatService.Error) -> SiriSend
     case .policyViolation:
         return .notPaired
     case .notConnected, .sessionReplaced, .invalidMessageId, .serverError:
-        return .connectionTimeout
-    }
-}
-
-@available(iOS 17.0, *)
-private func mapMessageError(code: String, message: String?) -> SiriSendMessageIntentError {
-    switch code {
-    case "auth_failed", "token_revoked":
-        return .authExpired
-    case "connection_lost":
-        return .offline
-    default:
-        if let message, message.lowercased().contains("offline") {
-            return .offline
-        }
         return .connectionTimeout
     }
 }

@@ -1935,6 +1935,7 @@ private final class KeyboardLayoutGuideObserverView: UIView {
     private var lastDuration: TimeInterval = 0
     private var lastCurve: UIView.AnimationCurve = .easeInOut
     private var lastRefreshToken: Int = 0
+    private var needsForegroundRefresh: Bool = false
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -2016,19 +2017,23 @@ private final class KeyboardLayoutGuideObserverView: UIView {
 
     @objc private func willEnterForeground(_ notification: Notification) {
         // #24: Keyboard notifications aren't guaranteed when returning to foreground with the keyboard already up.
-        // Refresh from the layout guide immediately and again on the next tick after layout settles.
-        refreshFromLayoutGuide()
-        DispatchQueue.main.async { [weak self] in
-            self?.refreshFromLayoutGuide()
-        }
+        // Schedule one foreground refresh after layout settles.
+        scheduleForegroundRefresh()
     }
 
     @objc private func didBecomeActive(_ notification: Notification) {
         // #12200: Keyboard can be dismissed while we're backgrounded (e.g. web form in Safari/WebView).
         // Ensure we re-sample from `keyboardLayoutGuide` after activation, not just on keyboard notifications.
-        refreshFromLayoutGuide()
+        scheduleForegroundRefresh()
+    }
+
+    private func scheduleForegroundRefresh() {
+        guard !needsForegroundRefresh else { return }
+        needsForegroundRefresh = true
         DispatchQueue.main.async { [weak self] in
-            self?.refreshFromLayoutGuide()
+            guard let self else { return }
+            self.needsForegroundRefresh = false
+            self.refreshFromLayoutGuide()
         }
     }
 
@@ -2125,7 +2130,6 @@ private struct KeyboardPinnedContainer<Content: View>: UIViewRepresentable {
     func updateUIView(_ uiView: KeyboardPinnedContainerView<Content>, context: Context) {
         uiView.hostingController.rootView = content
         uiView.updateVersionText(versionText)
-        uiView.setDesiredBottomGap(desiredBottomGap, isKeyboardVisible: isKeyboardVisible)
         uiView.updateScrollButton(
             scrollButtonView,
             gap: scrollButtonGap,

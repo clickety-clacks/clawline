@@ -2239,7 +2239,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     private func distanceFromBottomClamped() -> CGFloat {
         let contentInset = collectionView.contentInset
         let minY = -contentInset.top
-        let maxY = max(minY, collectionView.contentSize.height - collectionView.bounds.height + contentInset.bottom)
+        let maxY = max(minY, collectionView.contentSize.height - collectionView.bounds.height + currentBottomInset)
         guard maxY.isFinite, minY.isFinite else { return .greatestFiniteMagnitude }
         let offsetY = collectionView.contentOffset.y
         let clampedOffsetY = min(max(offsetY, minY), maxY)
@@ -2511,7 +2511,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         guard collectionView.contentSize.height > 0 else { return nil }
         let contentInset = collectionView.contentInset
         let minY = -contentInset.top
-        let maxY = max(minY, collectionView.contentSize.height - collectionView.bounds.height + contentInset.bottom)
+        let maxY = max(minY, collectionView.contentSize.height - collectionView.bounds.height + currentBottomInset)
         guard maxY.isFinite, minY.isFinite else { return nil }
         let offsetY = collectionView.contentOffset.y
         let clampedOffsetY = min(max(offsetY, minY), maxY)
@@ -2564,7 +2564,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         if collectionView != nil {
             let contentInset = collectionView.contentInset
             let minY = -contentInset.top
-            let maxY = max(minY, collectionView.contentSize.height - collectionView.bounds.height + contentInset.bottom)
+            let maxY = max(minY, collectionView.contentSize.height - collectionView.bounds.height + currentBottomInset)
             let rawOffsetY = collectionView.contentOffset.y
             let clampedOffsetY = min(max(rawOffsetY, minY), maxY)
             let computedDistance = max(0, maxY - clampedOffsetY)
@@ -2714,7 +2714,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         collectionView.layoutIfNeeded()
         let contentInset = collectionView.contentInset
         let minY = -contentInset.top
-        let maxY = max(minY, collectionView.contentSize.height - collectionView.bounds.height + contentInset.bottom)
+        let maxY = max(minY, collectionView.contentSize.height - collectionView.bounds.height + currentBottomInset)
         guard maxY.isFinite, minY.isFinite else { return }
 
         let desiredDistance = persistedState.atBottom ? 0 : CGFloat(persistedState.distanceFromBottom)

@@ -123,7 +123,6 @@ final class ChatLayoutCoordinator {
     @ObservationIgnored private var pendingInputs: (ChatLayoutInputs, ChatLayoutMetrics)?
     @ObservationIgnored private var didApplyThisTick: Bool = false
     @ObservationIgnored private var pendingFallback: Bool = false
-    @ObservationIgnored private var generation: Int = 0
 
     func registerBarView(_ view: KeyboardPinnedContainerViewProtocol) {
         dispatchPrecondition(condition: .onQueue(.main))
@@ -200,9 +199,6 @@ final class ChatLayoutCoordinator {
         }
         if isApplyingTransition {
             pendingInputs = (inputs, metrics)
-            DispatchQueue.main.async { [weak self] in
-                self?.applyTransitionIfPossible(reason: "reentrant")
-            }
             return
         }
         applyIndex += 1
@@ -240,8 +236,6 @@ final class ChatLayoutCoordinator {
         lastAppliedBarHeight = currentBarHeight
         isApplyingTransition = transition.animateInsets || transition.animateBarPosition
         lastAppliedInset = targetInset
-        generation += 1
-        let currentGeneration = generation
 
         let applyChanges = { [weak self] in
             guard let self else { return }
@@ -269,15 +263,12 @@ final class ChatLayoutCoordinator {
                 applyChanges()
             } completion: { [weak self] _ in
                 guard let self else { return }
-                guard self.generation == currentGeneration else { return }
                 self.isApplyingTransition = false
                 self.performScrollAction(transition.scrollAction)
                 if let pending = self.pendingInputs {
                     self.pendingInputs = nil
-                    DispatchQueue.main.async { [weak self] in
-                        self?.updateInputs(pending.0, metrics: pending.1)
-                        self?.applyTransitionIfPossible(reason: "pendingCompletion")
-                    }
+                    self.updateInputs(pending.0, metrics: pending.1)
+                    self.applyTransitionIfPossible(reason: "pendingCompletion")
                 }
             }
         } else {
@@ -365,6 +356,9 @@ final class ChatLayoutCoordinator {
         let sanitizedHeight = max(0, height)
         if sanitizedHeight > 0.5 {
             lastKnownGoodBarHeight = sanitizedHeight
+            if !hasStableBarHeight {
+                hasStableBarHeight = true
+            }
         } else if hasStableBarHeight, lastKnownGoodBarHeight > 0.5 {
             // Ignore transient zero-height reports during keyboard transitions.
             // The input bar remains mounted; collapsing to zero causes inset underfill/overlap.
@@ -375,7 +369,7 @@ final class ChatLayoutCoordinator {
         // The initial inset application often runs before the input bar has a measured height,
         // so we bootstrap with `minInputBarHeight`. Once the real height is known (layoutSubviews),
         // schedule a re-apply so the bottom inset includes the true bar height + flow gap.
-        markInputsChanged()
+        applyTransitionIfPossible(reason: "barHeight")
     }
 
     func currentInsetBarHeight(for inputs: ChatLayoutInputs, metrics: ChatLayoutMetrics) -> CGFloat {

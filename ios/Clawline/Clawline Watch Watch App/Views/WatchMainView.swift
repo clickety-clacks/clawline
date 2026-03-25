@@ -2,61 +2,41 @@ import SwiftUI
 import WatchKit
 
 struct WatchMainView: View {
-    @Environment(WatchCredentialStore.self) private var credentials
     @Environment(WatchProviderTransport.self) private var transport
     @Environment(WatchVoiceSession.self) private var voiceSession
     @Environment(WatchChannelManager.self) private var channelManager
+    @Environment(WatchConnectionPresentationState.self) private var presentationState
 
-    @State private var didBind = false
-    @State private var pressStartTime: Date?
-    @State private var holdStarted = false
-
-    @State private var connectionInterruptionReason: String?
+    @State private var activeGesture = ActiveGesture()
+    @State private var holdTask: Task<Void, Never>?
 
     @State private var showTextInputSheet = false
     @State private var textInput = ""
 
     var body: some View {
-        VStack(spacing: 8) {
+        Group {
+            if presentationState.hasProviderCredentials {
+                content
+            } else {
+                pairingPrompt
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(.horizontal, 8)
+        .padding(.bottom, 6)
+        .safeAreaInset(edge: .top, spacing: 4) {
             HStack {
-                RouteIndicatorChip(transportState: transport.transportState)
+                RouteIndicatorChip(presentation: presentationState.routeChip)
                     .layoutPriority(1)
                 Spacer(minLength: 0)
             }
-
-            Group {
-                if !credentials.hasProviderCredentials {
-                    VStack(spacing: 8) {
-                        Text("Open Clawline")
-                            .font(.system(size: 16, weight: .semibold, design: .rounded))
-                        Text("on iPhone to pair")
-                            .font(.system(size: 13, weight: .medium, design: .rounded))
-                            .foregroundStyle(.secondary)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .padding()
-                } else {
-                    content
-                }
-            }
+            .padding(.horizontal, 8)
+            .padding(.top, 2)
         }
-        .padding(.horizontal, 8)
-        .padding(.top, 12)
-        .padding(.bottom, 6)
-        .task {
-            guard !didBind else { return }
-            didBind = true
-            channelManager.bind(transport: transport)
-            observeIncomingResponses()
-            observeTransportEvents()
-        }
+        .task { observeIncomingResponses() }
         .onChange(of: transport.transportState) { _, newValue in
             voiceSession.routeChanged(to: newValue)
             WKInterfaceDevice.current().play(.click)
-
-            if newValue != .disconnected {
-                connectionInterruptionReason = nil
-            }
         }
         .sheet(isPresented: $showTextInputSheet) {
             VStack(spacing: 10) {
@@ -68,7 +48,7 @@ struct WatchMainView: View {
                 Button("Send") {
                     let text = textInput.trimmingCharacters(in: .whitespacesAndNewlines)
                     guard !text.isEmpty else { return }
-                    sendTextMessage(text)
+                    Task { await presentationState.sendTextMessage(text) }
                     textInput = ""
                     showTextInputSheet = false
                 }
@@ -79,37 +59,65 @@ struct WatchMainView: View {
     }
 
     private var content: some View {
-        VStack(spacing: 8) {
-            ZStack {
-                WaveformRingView(audioLevel: voiceSession.audioLevel, isActive: isVoiceActive)
-                    .frame(width: 128, height: 128)
-
-                Image(systemName: centerIcon)
-                    .font(.system(size: 30, weight: .semibold))
-                    .foregroundStyle(.white)
-            }
-            .contentShape(Circle())
-            .gesture(pressGesture)
-            .onTapGesture {
-                handleTapAction()
-            }
-
-            Text(statusLine)
-                .font(.system(size: 13, weight: .medium, design: .rounded))
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-
-            WatchStreamDotsView(
-                sessionKeys: channelManager.streams.map(\.sessionKey),
-                activeSessionKey: channelManager.currentSessionKey,
-                unreadSessionKeys: channelManager.unreadSessionKeys
+        GeometryReader { proxy in
+            let availableSize = proxy.size
+            let ringDiameter = WatchShellMetrics.ringDiameter(for: availableSize)
+            let ringFrame = CGRect(
+                x: (availableSize.width - ringDiameter) / 2,
+                y: 0,
+                width: ringDiameter,
+                height: ringDiameter
             )
 
-            Text(channelManager.currentChannelName())
-                .font(.system(size: 13, weight: .semibold, design: .rounded))
-                .foregroundStyle(.secondary)
+            VStack(spacing: 8) {
+                ZStack {
+                    WaveformRingView(audioLevel: voiceSession.audioLevel, isActive: isVoiceActive)
+                        .frame(width: ringDiameter, height: ringDiameter)
+
+                    Image(systemName: centerIcon)
+                        .font(.system(size: ringDiameter * 0.34, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(
+                            width: max(44, ringDiameter * 0.4),
+                            height: max(44, ringDiameter * 0.4)
+                        )
+                }
+
+                Text(presentationState.statusText)
+                    .font(.system(size: 13, weight: .medium, design: .rounded))
+                    .lineLimit(2)
+                    .multilineTextAlignment(.center)
+                    .minimumScaleFactor(0.8)
+
+                WatchStreamDotsView(
+                    sessionKeys: channelManager.streams.map(\.sessionKey),
+                    activeSessionKey: channelManager.currentSessionKey,
+                    unreadSessionKeys: channelManager.unreadSessionKeys
+                )
+
+                Text(presentationState.channelDisplayName)
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .contentShape(Rectangle())
+            .gesture(interactionGesture(ringFrame: ringFrame))
         }
-        .simultaneousGesture(channelSwipeGesture)
+    }
+
+    private var pairingPrompt: some View {
+        VStack(spacing: 8) {
+            Spacer(minLength: 0)
+            Text("Open Clawline")
+                .font(.system(size: 16, weight: .semibold, design: .rounded))
+            Text("on iPhone to pair")
+                .font(.system(size: 13, weight: .medium, design: .rounded))
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var centerIcon: String {
@@ -132,77 +140,43 @@ struct WatchMainView: View {
         }
     }
 
-    private var statusLine: String {
-        switch voiceSession.voiceState {
-        case .idle:
-            switch transport.transportState {
-            case .direct:
-                return "Tap or hold to talk"
-            case .probing:
-                return "Reconnecting..."
-            case .relay:
-                return voiceSession.canUseVoice ? "Via iPhone" : "Voice unavailable — text only via iPhone"
-            case .disconnected:
-                return connectionInterruptionReason ?? "No Connection"
-            }
-        case .listening:
-            return voiceSession.transcript.isEmpty ? "Listening..." : voiceSession.transcript
-        case .finalizing:
-            return "Finalizing..."
-        case .sending:
-            return "Sending..."
-        case .speaking:
-            return "Speaking..."
-        case .error:
-            return voiceSession.errorMessage ?? "Error"
-        }
-    }
-
-    private var pressGesture: some Gesture {
+    private func interactionGesture(ringFrame: CGRect) -> some Gesture {
         DragGesture(minimumDistance: 0)
-            .onChanged { _ in
-                if pressStartTime == nil {
-                    pressStartTime = Date()
-                    holdStarted = false
+            .onChanged { value in
+                if !activeGesture.isActive {
+                    activeGesture = ActiveGesture(
+                        isActive: true,
+                        startedInRing: ringFrame.contains(value.startLocation)
+                    )
+                    armHoldIfNeeded()
                 }
 
-                guard !holdStarted,
-                      let pressStartTime,
-                      Date().timeIntervalSince(pressStartTime) >= 0.2 else {
+                guard !activeGesture.holdStarted,
+                      WatchGestureArbitration.shouldPreemptHold(translation: value.translation) else {
                     return
                 }
 
-                holdStarted = true
-                if transport.transportState == .disconnected || !voiceSession.canUseVoice {
-                    showTextInputSheet = true
-                } else {
-                    voiceSession.startHold()
-                }
+                activeGesture.swipePreemptedHold = true
+                cancelHold()
             }
-            .onEnded { _ in
-                defer {
-                    pressStartTime = nil
-                    holdStarted = false
-                }
-
-                if holdStarted {
-                    voiceSession.releaseHold()
-                }
-            }
-    }
-
-    private var channelSwipeGesture: some Gesture {
-        DragGesture(minimumDistance: 20)
             .onEnded { value in
-                let horizontal = value.translation.width
-                let vertical = abs(value.translation.height)
-                guard abs(horizontal) > 30, abs(horizontal) > vertical else { return }
-                if horizontal < 0 {
-                    channelManager.switchBy(delta: 1)
-                } else {
-                    channelManager.switchBy(delta: -1)
+                defer { resetGesture() }
+
+                if let delta = WatchGestureArbitration.swipeDelta(for: value.translation),
+                   activeGesture.swipePreemptedHold {
+                    channelManager.switchBy(delta: delta)
+                    WKInterfaceDevice.current().play(.click)
+                    return
                 }
-                WKInterfaceDevice.current().play(.click)
+
+                if activeGesture.holdStarted {
+                    voiceSession.releaseHold()
+                    return
+                }
+
+                if activeGesture.startedInRing {
+                    handleTapAction()
+                }
             }
     }
 
@@ -211,7 +185,7 @@ struct WatchMainView: View {
         case .speaking:
             voiceSession.bargeIn()
         case .idle, .error:
-            if transport.transportState == .disconnected || !voiceSession.canUseVoice {
+            if transport.transportState == .disconnected || !presentationState.voiceInputAvailable {
                 showTextInputSheet = true
             } else {
                 voiceSession.startTap()
@@ -220,24 +194,6 @@ struct WatchMainView: View {
             voiceSession.stop()
         case .sending:
             break
-        }
-    }
-
-    private func sendTextMessage(_ text: String) {
-        let messageId = "c_\(UUID().uuidString)"
-        let sessionKey = channelManager.engineSessionKey ?? channelManager.currentSessionKey
-
-        Task {
-            do {
-                try await transport.send(
-                    id: messageId,
-                    content: text,
-                    attachments: [],
-                    sessionKey: sessionKey
-                )
-            } catch {
-                connectionInterruptionReason = error.localizedDescription
-            }
         }
     }
 
@@ -258,19 +214,43 @@ struct WatchMainView: View {
         }
     }
 
-    private func observeTransportEvents() {
-        Task {
-            for await event in transport.serviceEvents {
-                guard case .connectionInterrupted(let reason) = event,
-                      let reason,
-                      !reason.isEmpty else {
-                    continue
+    private func armHoldIfNeeded() {
+        guard activeGesture.startedInRing else { return }
+        cancelHold()
+        holdTask = Task { [weak voiceSession] in
+            try? await Task.sleep(for: .seconds(WatchGestureArbitration.holdDelay))
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                guard activeGesture.startedInRing,
+                      !activeGesture.swipePreemptedHold,
+                      !activeGesture.holdStarted else {
+                    return
                 }
 
-                await MainActor.run {
-                    connectionInterruptionReason = reason
+                activeGesture.holdStarted = true
+                if transport.transportState == .disconnected || !presentationState.voiceInputAvailable {
+                    showTextInputSheet = true
+                } else {
+                    voiceSession?.startHold()
                 }
             }
         }
     }
+
+    private func cancelHold() {
+        holdTask?.cancel()
+        holdTask = nil
+    }
+
+    private func resetGesture() {
+        cancelHold()
+        activeGesture = ActiveGesture()
+    }
+}
+
+private struct ActiveGesture {
+    var isActive = false
+    var startedInRing = false
+    var swipePreemptedHold = false
+    var holdStarted = false
 }

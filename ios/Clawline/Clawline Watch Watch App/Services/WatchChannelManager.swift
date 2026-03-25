@@ -7,9 +7,15 @@ final class WatchChannelManager {
     private(set) var streams: [StreamSession] = []
     private(set) var currentSessionKey: String?
     private(set) var unreadSessionKeys: Set<String> = []
+    private(set) var streamListLoaded = false
 
     private(set) var engineSessionKey: String?
     private var debounceTask: Task<Void, Never>?
+
+    var currentStream: StreamSession? {
+        guard let currentSessionKey else { return nil }
+        return streams.first(where: { $0.sessionKey == currentSessionKey })
+    }
 
     func bind(transport: WatchProviderTransport) {
         Task { [weak self] in
@@ -76,14 +82,6 @@ final class WatchChannelManager {
         }
     }
 
-    func currentChannelName() -> String {
-        guard let key = currentSessionKey,
-              let stream = streams.first(where: { $0.sessionKey == key }) else {
-            return "general"
-        }
-        return stream.displayName
-    }
-
     private func apply(event: ChatServiceEvent) {
         switch event {
         case .streamSnapshot(let snapshot):
@@ -108,6 +106,7 @@ final class WatchChannelManager {
     }
 
     private func applyStreamSnapshot(_ snapshot: [StreamSession]) {
+        streamListLoaded = true
         streams = snapshot.sorted { lhs, rhs in
             if lhs.orderIndex == rhs.orderIndex {
                 return lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName) == .orderedAscending

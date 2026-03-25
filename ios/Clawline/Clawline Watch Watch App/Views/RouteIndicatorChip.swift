@@ -4,20 +4,22 @@ struct RouteIndicatorChip: View {
     let transportState: WatchProviderTransportState
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 4) {
             Image(systemName: icon)
-                .font(.system(size: 10, weight: .semibold))
+                .font(.system(size: 9, weight: .semibold))
             Text(label)
-                .font(.system(size: 12, weight: .semibold, design: .rounded))
+                .font(.system(size: 11, weight: .semibold, design: .rounded))
                 .lineLimit(1)
+                .minimumScaleFactor(0.7)
         }
         .foregroundStyle(color)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 4)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 3)
         .background(
             Capsule()
                 .fill(color.opacity(0.16))
         )
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     private var icon: String {

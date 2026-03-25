@@ -11,8 +11,6 @@ struct WatchMainView: View {
     @State private var pressStartTime: Date?
     @State private var holdStarted = false
 
-    @State private var statusOverride: String?
-    @State private var statusOverrideTask: Task<Void, Never>?
     @State private var connectionInterruptionReason: String?
 
     @State private var showTextInputSheet = false
@@ -22,11 +20,8 @@ struct WatchMainView: View {
         VStack(spacing: 8) {
             HStack {
                 RouteIndicatorChip(transportState: transport.transportState)
+                    .layoutPriority(1)
                 Spacer(minLength: 0)
-                if credentials.hasProviderCredentials {
-                    keyStatusBadges
-                        .padding(.trailing, 44)
-                }
             }
 
             Group {
@@ -46,7 +41,8 @@ struct WatchMainView: View {
             }
         }
         .padding(.horizontal, 8)
-        .padding(.vertical, 6)
+        .padding(.top, 12)
+        .padding(.bottom, 6)
         .task {
             guard !didBind else { return }
             didBind = true
@@ -54,25 +50,12 @@ struct WatchMainView: View {
             observeIncomingResponses()
             observeTransportEvents()
         }
-        .onChange(of: transport.transportState) { oldValue, newValue in
+        .onChange(of: transport.transportState) { _, newValue in
             voiceSession.routeChanged(to: newValue)
             WKInterfaceDevice.current().play(.click)
 
             if newValue != .disconnected {
                 connectionInterruptionReason = nil
-            }
-
-            switch (oldValue, newValue) {
-            case (.relay, .direct):
-                showTemporaryStatus("Direct restored")
-            case (_, .relay):
-                showTemporaryStatus("Switched to Via iPhone")
-            case (_, .probing):
-                showTemporaryStatus("Reconnecting...")
-            case (_, .disconnected):
-                showTemporaryStatus(connectionInterruptionReason ?? "No Connection")
-            default:
-                break
             }
         }
         .sheet(isPresented: $showTextInputSheet) {
@@ -149,37 +132,18 @@ struct WatchMainView: View {
         }
     }
 
-    private var keyStatusBadges: some View {
-        HStack(spacing: 5) {
-            keyBadge("S", hasKey: credentials.sonioxApiKey?.isEmpty == false)
-            keyBadge("C", hasKey: credentials.cartesiaApiKey?.isEmpty == false)
-        }
-    }
-
-    private func keyBadge(_ initial: String, hasKey: Bool) -> some View {
-        HStack(spacing: 2) {
-            Text(initial)
-                .font(.system(size: 9, weight: .bold, design: .monospaced))
-            Image(systemName: hasKey ? "checkmark" : "xmark")
-                .font(.system(size: 8, weight: .bold))
-        }
-        .foregroundStyle(hasKey ? Color.green : Color.red)
-    }
-
     private var statusLine: String {
-        if let statusOverride {
-            return statusOverride
-        }
-
         switch voiceSession.voiceState {
         case .idle:
             switch transport.transportState {
+            case .direct:
+                return "Tap or hold to talk"
+            case .probing:
+                return "Reconnecting..."
             case .relay:
                 return voiceSession.canUseVoice ? "Via iPhone" : "Voice unavailable — text only via iPhone"
             case .disconnected:
                 return connectionInterruptionReason ?? "No Connection"
-            case .direct, .probing:
-                return "Tap or hold to talk"
             }
         case .listening:
             return voiceSession.transcript.isEmpty ? "Listening..." : voiceSession.transcript
@@ -271,9 +235,8 @@ struct WatchMainView: View {
                     attachments: [],
                     sessionKey: sessionKey
                 )
-                showTemporaryStatus("Sending...")
             } catch {
-                showTemporaryStatus(error.localizedDescription)
+                connectionInterruptionReason = error.localizedDescription
             }
         }
     }
@@ -306,22 +269,7 @@ struct WatchMainView: View {
 
                 await MainActor.run {
                     connectionInterruptionReason = reason
-                    if transport.transportState == .disconnected {
-                        showTemporaryStatus(reason)
-                    }
                 }
-            }
-        }
-    }
-
-    private func showTemporaryStatus(_ text: String) {
-        statusOverrideTask?.cancel()
-        statusOverride = text
-        statusOverrideTask = Task {
-            try? await Task.sleep(for: .seconds(2))
-            guard !Task.isCancelled else { return }
-            await MainActor.run {
-                statusOverride = nil
             }
         }
     }

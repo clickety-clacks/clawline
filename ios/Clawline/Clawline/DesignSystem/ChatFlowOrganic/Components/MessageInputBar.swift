@@ -931,16 +931,15 @@ struct MessageInputBar: View {
 #endif
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 0) {
             inputRow
 
-            if motion.isSurfaceVisible {
-                dictationSurface
-                    .frame(height: 100, alignment: .top)
-                    .opacity(motion.surfaceInteractiveProgress)
-                    .clipped()
-            }
-
+            dictationSurface
+                .frame(height: motion.isSurfaceVisible ? 100 : 0, alignment: .top)
+                .opacity(motion.surfaceInteractiveProgress)
+                .clipped()
+                .padding(.top, motion.isSurfaceVisible ? 8 : 0)
+                .animation(.easeInOut(duration: 0.25), value: motion.isSurfaceVisible)
         }
         .padding(.horizontal, containerPadding)
         .padding(.bottom, metrics.bottomPadding)
@@ -1113,6 +1112,7 @@ struct MessageInputBar: View {
                     dismissTrigger: dismissTrigger,
                     isEditable: true,
                     isKeyboardVisible: isKeyboardVisible,
+                    isDictationActive: dictation.isDictationActive,
                     tintColor: editorTintUIColor,
                     textColor: {
 #if os(visionOS)

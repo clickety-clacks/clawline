@@ -23,6 +23,7 @@ struct RichTextEditor: UIViewRepresentable {
     var dismissTrigger: Int
     var isEditable: Bool
     var isKeyboardVisible: Bool
+    var isDictationActive: Bool = false
     var tintColor: UIColor
     var textColor: UIColor = .label
     var onFocusChange: (Bool) -> Void
@@ -204,6 +205,12 @@ struct RichTextEditor: UIViewRepresentable {
 
         @objc func handleEditorTap(_ gesture: UITapGestureRecognizer) {
             guard let textView = gesture.view as? UITextView else { return }
+            // During dictation, allow normal tap behavior (cursor placement, selection)
+            // without cycling first responder — the keyboard is managed by the coordinator.
+            if parent.isDictationActive {
+                parent.onFocusChange(true)
+                return
+            }
             if Self.shouldCycleFirstResponder(
                 isFirstResponder: textView.isFirstResponder,
                 isKeyboardVisible: parent.isKeyboardVisible
@@ -466,6 +473,7 @@ struct RichTextEditor: UIViewRepresentable {
 ///   3. `UITextPasteDelegate.transforming` – item-level safety net that discards
 ///      image items before they can be converted to text
 final class PastableTextView: UITextView, UITextPasteDelegate {
+    private(set) var dictationProgrammaticSelectionTransactionInFlight: Bool = false
     var onPasteImages: (([UIImage]) -> Void)?
     var onEscape: (() -> Void)?
     var onEscapeLongPress: (() -> Void)?
@@ -473,6 +481,7 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
     private(set) var dictationProgrammaticUpdateInFlight: Bool = false
     private(set) var dictationProgrammaticEditInFlight: Bool = false
     var dictationIgnoreNextSelectionInteraction: Bool = false
+    var lastProgrammaticSelection: NSRange?
     var isInputEnabled: Bool = true {
         didSet {
             guard oldValue != isInputEnabled else { return }
@@ -492,7 +501,6 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
     private var isEscapePressed = false
     private var didFireEscapeLongPress = false
     private let escapeLongPressDuration: Duration = .milliseconds(700)
-    private let dictationProgrammaticUpdateGracePeriod: Duration = .milliseconds(120)
 
     override init(frame: CGRect, textContainer: NSTextContainer?) {
         super.init(frame: frame, textContainer: textContainer)
@@ -504,41 +512,41 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
         pasteDelegate = self
     }
 
-    private var dictationProgrammaticUpdateGeneration: UInt64 = 0
     override func layoutSubviews() {
         super.layoutSubviews()
         onLayout?(bounds.width)
     }
 
-    var shouldSuppressDictationSelectionCallbacks: Bool {
-        dictationProgrammaticUpdateInFlight && dictationIgnoreNextSelectionInteraction
-    }
-
     func beginDictationProgrammaticUpdate() {
-        dictationProgrammaticUpdateGeneration &+= 1
         dictationProgrammaticUpdateInFlight = true
+        dictationProgrammaticSelectionTransactionInFlight = true
         dictationProgrammaticEditInFlight = true
         dictationIgnoreNextSelectionInteraction = true
     }
 
     func endDictationProgrammaticUpdate() {
-        let generation = dictationProgrammaticUpdateGeneration
+        dictationProgrammaticSelectionTransactionInFlight = false
         dictationProgrammaticEditInFlight = false
-        DispatchQueue.main.asyncAfter(
-            deadline: .now() + TimeInterval(dictationProgrammaticUpdateGracePeriod.components.seconds)
-            + Double(dictationProgrammaticUpdateGracePeriod.components.attoseconds) / 1_000_000_000_000_000_000
-        ) { [weak self] in
-            guard let self else { return }
-            guard self.dictationProgrammaticUpdateGeneration == generation else { return }
-            self.dictationProgrammaticUpdateInFlight = false
-            self.dictationIgnoreNextSelectionInteraction = false
-        }
+        dictationProgrammaticUpdateInFlight = false
+        // dictationIgnoreNextSelectionInteraction stays true —
+        // consumed by the first post-edit selection callback (the UIKit echo)
     }
 
     func consumeDictationSelectionInteractionSuppression() -> Bool {
         guard dictationIgnoreNextSelectionInteraction else { return false }
+        if dictationProgrammaticSelectionTransactionInFlight {
+            return true  // Still mid-transaction — suppress all
+        }
+        // Post-transaction: suppress if this selection matches the programmatic edit's result
+        if let expected = lastProgrammaticSelection, selectedRange == expected {
+            lastProgrammaticSelection = nil
+            dictationIgnoreNextSelectionInteraction = false
+            return true
+        }
+        // Non-matching selection = user-initiated — stop suppressing
         dictationIgnoreNextSelectionInteraction = false
-        return true
+        lastProgrammaticSelection = nil
+        return false
     }
 
     override var keyCommands: [UIKeyCommand]? {

@@ -46,6 +46,11 @@ struct DictationTextApplicationPlan {
 
 @MainActor
 final class DictationTranscriptApplicator {
+    private enum BoundaryAffinity {
+        case start
+        case end
+    }
+
     private weak var host: (any DictationComposeDraftHosting)?
     private weak var composeTextView: PastableTextView?
     private var replayPlanProvider: (@MainActor () -> DictationTextApplicationPlan?)?
@@ -95,7 +100,12 @@ final class DictationTranscriptApplicator {
                 textLength: textView.attributedText.length,
                 fallbackLocation: plan.fallbackLocation
             )
-            replaceText(in: textView, range: safeRange, with: plan.replacementText.string)
+            replaceText(
+                in: textView,
+                range: safeRange,
+                with: plan.replacementText.string,
+                moveCursorToEnd: plan.moveCursorToEnd
+            )
             return
         }
 
@@ -149,15 +159,126 @@ final class DictationTranscriptApplicator {
         return NSRange(location: location, length: length)
     }
 
-    private func replaceText(in textView: UITextView, range: NSRange, with text: String) {
+    private func replaceText(
+        in textView: UITextView,
+        range: NSRange,
+        with text: String,
+        moveCursorToEnd: Bool
+    ) {
         guard let textRange = textRange(in: textView, nsRange: range) else { return }
         if let textView = textView as? PastableTextView {
+            let replacementLength = text.utf16.count
+            let preservedSelection = preservedSelectionRange(
+                currentSelection: textView.selectedRange,
+                replacing: range,
+                replacementUTF16Length: replacementLength,
+                moveCursorToEnd: moveCursorToEnd
+            )
             textView.beginDictationProgrammaticUpdate()
             defer { textView.endDictationProgrammaticUpdate() }
             textView.replace(textRange, withText: text)
+            if textView.selectedRange != preservedSelection {
+                textView.selectedRange = preservedSelection
+            }
+            textView.lastProgrammaticSelection = textView.selectedRange
             return
         }
         textView.replace(textRange, withText: text)
+    }
+
+    private func preservedSelectionRange(
+        currentSelection: NSRange,
+        replacing editedRange: NSRange,
+        replacementUTF16Length: Int,
+        moveCursorToEnd: Bool
+    ) -> NSRange {
+        let selection = sanitizedSelectionRange(currentSelection)
+        guard selection.location != NSNotFound else {
+            let replacementEnd = editedRange.location + replacementUTF16Length
+            return NSRange(
+                location: moveCursorToEnd ? replacementEnd : editedRange.location,
+                length: 0
+            )
+        }
+
+        if selection.length == 0 {
+            let newLocation = transformCaretBoundary(
+                selection.location,
+                editedRange: editedRange,
+                replacementUTF16Length: replacementUTF16Length,
+                moveCursorToEnd: moveCursorToEnd
+            )
+            return NSRange(location: newLocation, length: 0)
+        }
+
+        let selectionStart = transformBoundary(
+            selection.location,
+            editedRange: editedRange,
+            replacementUTF16Length: replacementUTF16Length,
+            affinity: .start
+        )
+        let selectionEnd = transformBoundary(
+            selection.location + selection.length,
+            editedRange: editedRange,
+            replacementUTF16Length: replacementUTF16Length,
+            affinity: .end
+        )
+        return NSRange(
+            location: selectionStart,
+            length: max(0, selectionEnd - selectionStart)
+        )
+    }
+
+    private func sanitizedSelectionRange(_ range: NSRange) -> NSRange {
+        guard range.location != NSNotFound else {
+            return NSRange(location: NSNotFound, length: 0)
+        }
+        return NSRange(location: max(0, range.location), length: max(0, range.length))
+    }
+
+    private func transformCaretBoundary(
+        _ boundary: Int,
+        editedRange: NSRange,
+        replacementUTF16Length: Int,
+        moveCursorToEnd: Bool
+    ) -> Int {
+        let editStart = editedRange.location
+        let editEnd = editedRange.location + editedRange.length
+        let delta = replacementUTF16Length - editedRange.length
+
+        if boundary < editStart {
+            return boundary
+        }
+        if boundary > editEnd {
+            return boundary + delta
+        }
+
+        return moveCursorToEnd ? editStart + replacementUTF16Length : editStart
+    }
+
+    private func transformBoundary(
+        _ boundary: Int,
+        editedRange: NSRange,
+        replacementUTF16Length: Int,
+        affinity: BoundaryAffinity
+    ) -> Int {
+        let editStart = editedRange.location
+        let editEnd = editedRange.location + editedRange.length
+        let delta = replacementUTF16Length - editedRange.length
+
+        if boundary < editStart {
+            return boundary
+        }
+        if boundary > editEnd {
+            return boundary + delta
+        }
+
+        switch affinity {
+        case .start:
+            return editStart
+        case .end:
+            return editStart + replacementUTF16Length
+        }
     }
 
     private func textRange(in textView: UITextView, nsRange: NSRange) -> UITextRange? {

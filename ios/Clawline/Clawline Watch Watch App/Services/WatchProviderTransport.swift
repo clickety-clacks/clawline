@@ -192,6 +192,11 @@ final class WatchProviderTransport: ChatServicing {
         []
     }
 
+    func adoptStream(sessionKey: String) async throws -> StreamSession {
+        _ = sessionKey
+        throw TransportError.unsupported
+    }
+
     func send(id: String, content: String, attachments: [WireAttachment], sessionKey: String?) async throws {
         let message = BufferedMessage(
             id: id,

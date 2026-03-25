@@ -68,6 +68,8 @@ protocol ChatServicing {
     func sendInteractiveCallback(sourceMessageId: String, action: String, data: JSONValue?) async throws
 
     func fetchStreams() async throws -> [StreamSession]
+    func fetchTrackableSessions() async throws -> [TrackableSession]
+    func adoptStream(sessionKey: String) async throws -> StreamSession
     func createStream(displayName: String, idempotencyKey: String) async throws -> StreamSession
     func renameStream(sessionKey: String, displayName: String) async throws -> StreamSession
     func deleteStream(sessionKey: String, idempotencyKey: String?) async throws -> String
@@ -172,6 +174,59 @@ struct StreamSession: Codable, Equatable, Identifiable {
         try container.encode(isBuiltIn, forKey: .isBuiltIn)
         try container.encode(createdAt.timeIntervalSince1970 * 1000, forKey: .createdAt)
         try container.encode(updatedAt.timeIntervalSince1970 * 1000, forKey: .updatedAt)
+    }
+}
+
+struct TrackableSession: Codable, Equatable, Identifiable {
+    var id: String { sessionKey }
+    let sessionKey: String
+    let displayName: String
+    let updatedAt: Date
+    let channel: String?
+    let lastChannel: String?
+    let lastTo: String?
+
+    enum CodingKeys: String, CodingKey {
+        case sessionKey
+        case displayName
+        case updatedAt
+        case channel
+        case lastChannel
+        case lastTo
+    }
+
+    init(sessionKey: String,
+         displayName: String,
+         updatedAt: Date,
+         channel: String? = nil,
+         lastChannel: String? = nil,
+         lastTo: String? = nil) {
+        self.sessionKey = sessionKey
+        self.displayName = displayName
+        self.updatedAt = updatedAt
+        self.channel = channel
+        self.lastChannel = lastChannel
+        self.lastTo = lastTo
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        sessionKey = try container.decode(String.self, forKey: .sessionKey)
+        displayName = try container.decode(String.self, forKey: .displayName)
+        updatedAt = try container.decodeUnixMillisDate(forKey: .updatedAt)
+        channel = try container.decodeIfPresent(String.self, forKey: .channel)
+        lastChannel = try container.decodeIfPresent(String.self, forKey: .lastChannel)
+        lastTo = try container.decodeIfPresent(String.self, forKey: .lastTo)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(sessionKey, forKey: .sessionKey)
+        try container.encode(displayName, forKey: .displayName)
+        try container.encode(updatedAt.timeIntervalSince1970 * 1000, forKey: .updatedAt)
+        try container.encodeIfPresent(channel, forKey: .channel)
+        try container.encodeIfPresent(lastChannel, forKey: .lastChannel)
+        try container.encodeIfPresent(lastTo, forKey: .lastTo)
     }
 }
 

@@ -427,7 +427,7 @@ struct ChatView: View {
             }
             return
         }
-        layoutCoordinator.scrollToBottom(sessionKey: sessionKey, animated: false, attempts: 1)
+        layoutCoordinator.scrollToBottom(sessionKey: sessionKey, animated: true, attempts: 1)
     }
 
     private func scrollButtonControl(

@@ -2476,7 +2476,15 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             return
         }
 
-        prepareIncomingStateOnSwitch(sessionKey: incomingSessionKey, allowTailStage: true)
+        if materializationStateBySessionKey[incomingSessionKey] == nil {
+            prepareIncomingStateOnSwitch(sessionKey: incomingSessionKey, allowTailStage: true)
+        } else {
+            mutateState(for: incomingSessionKey) { state in
+                state.pendingScrollRestoreState = nil
+                state.restorePhase = .none
+                state.suspendScrollPersistenceUntilRestoreConfirmed = false
+            }
+        }
         mutateState(for: incomingSessionKey) { state in
             state.restoreGeneration &+= 1
             state.restoreConfirmationRetries = 0

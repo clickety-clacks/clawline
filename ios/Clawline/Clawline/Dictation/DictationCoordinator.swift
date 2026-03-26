@@ -680,6 +680,11 @@ final class DictationSession {
             dismissComposeKeyPrompt()
             return
         }
+        if state == .error {
+            errorMessage = nil
+            state = .idleSurfaceClosed
+            return
+        }
         beginStopKeepTransitionIfNeeded()
         Task { [weak self] in
             await self?.stopKeep(

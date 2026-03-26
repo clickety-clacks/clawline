@@ -111,7 +111,7 @@ final class DictationMotion {
         return session.isListening ? .openListening : .openPaused
     }
 
-    var shouldFreezeLayout: Bool { gesturePhase != .idle }
+    var shouldFreezeLayout: Bool { gesturePhase == .dragging }
 
     var settleTarget: SurfaceTarget { session.surfaceTarget }
 

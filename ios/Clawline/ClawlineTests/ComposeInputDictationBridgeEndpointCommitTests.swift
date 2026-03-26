@@ -24,7 +24,6 @@ struct DictationCoordinatorTranscriptOwnershipTests {
 
         rig.coordinator.captureComposeSelectionRangeForActivation(capturedRange)
         rig.textView.selectedRange = NSRange(location: initial.utf16.count, length: 0)
-        rig.coordinator.setComposeSelectionRange(rig.textView.selectedRange)
         syncContext(rig)
 
         rig.coordinator.startStickyDictation()
@@ -43,7 +42,6 @@ struct DictationCoordinatorTranscriptOwnershipTests {
         await waitUntil { rig.textView.attributedText.string == "There" }
 
         rig.textView.selectedRange = NSRange(location: rig.textView.attributedText.length, length: 0)
-        rig.coordinator.setComposeSelectionRange(rig.textView.selectedRange)
         syncContext(rig)
 
         emitProvisional("There's also", into: rig)
@@ -129,12 +127,12 @@ struct DictationCoordinatorTranscriptOwnershipTests {
         emitProvisional("hello worl", into: rig)
         await waitUntil { rig.textView.attributedText.string == "seed hello worl" }
 
-        rig.textView.beginDictationProgrammaticUpdate()
+        rig.textView.dictationProgrammaticEditInFlight = true
         rig.coordinator.noteComposeUserEditDuringDictation(
             editedRangeUTF16: NSRange(location: "seed hello worl".utf16.count, length: 0),
             replacementUTF16Length: 1
         )
-        rig.textView.endDictationProgrammaticUpdate()
+        rig.textView.dictationProgrammaticEditInFlight = false
 
         emitProvisional("hello world from soniox", into: rig)
         await waitUntil { rig.textView.attributedText.string == "seed hello world from soniox" }
@@ -172,7 +170,6 @@ struct DictationCoordinatorTranscriptOwnershipTests {
 
     private func startDictation(_ rig: CoordinatorTranscriptRig) {
         rig.coordinator.captureComposeSelectionRangeForActivation(rig.textView.selectedRange)
-        rig.coordinator.setComposeSelectionRange(rig.textView.selectedRange)
         syncContext(rig)
         rig.coordinator.startStickyDictation()
     }

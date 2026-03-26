@@ -103,7 +103,6 @@ enum DictationDiscardIntentSource {
 }
 
 enum DictationInteractionIntent {
-    case composeSelectionChanged(NSRange)
     case activationSelectionCaptured(NSRange)
     case composeUserEdited(range: NSRange, replacementUTF16Length: Int)
     case composeTextViewChanged(PastableTextView?)
@@ -1019,16 +1018,12 @@ struct MessageInputBar: View {
             guard newValue == 0 else { return }
             editorHeight = metrics.inputBarHeight
         }
-        .onChange(of: selectionRange) { _, newValue in
-            dictationEmitter.emit(.composeSelectionChanged(newValue))
-        }
         .onDisappear {
             micFadeTask?.cancel()
             gestureSettleTask?.cancel()
             motion.clearGestureState()
         }
         .onAppear {
-            dictationEmitter.emit(.composeSelectionChanged(selectionRange))
             motion.settle(to: dictation.surfaceTarget)
         }
         .onChange(of: dictation.surfaceTarget) { _, target in
@@ -1506,7 +1501,6 @@ struct MessageInputBar: View {
             holdDuration: walkieHoldDurationSeconds
            ) {
             logDictation("DICTATION_UI gesture_classification=walkie_hold_activated up=\(up) dx=\(dx) dy=\(dy)")
-            dictationEmitter.emit(.composeSelectionChanged(selectionRange))
             dictationEmitter.emit(.gestureCommitRequested(.startWalkieTalkie))
             beginMicFadeOut(fromSwipe: false)
         }
@@ -1560,7 +1554,6 @@ struct MessageInputBar: View {
             dictationEmitter.emit(.gestureCommitRequested(.dismissSurface))
         case .startSticky:
             logDictation("DICTATION_UI gesture_end classification=sticky_start up=\(up) down=\(down)")
-            dictationEmitter.emit(.composeSelectionChanged(selectionRange))
             dictationEmitter.emit(.gestureCommitRequested(.startSticky))
             beginMicFadeOut(fromSwipe: false)
             if shouldRestoreFocusAfterGestureDictationStart {
@@ -1950,8 +1943,6 @@ struct DictationMicAffordanceAnimationPlan {
                 dictationEmitter: DictationInteractionEmitter(
                     emit: { intent in
                         switch intent {
-                        case .composeSelectionChanged(let selectionRange):
-                            dictation.setComposeSelectionRange(selectionRange)
                         case .activationSelectionCaptured(let selectionRange):
                             dictation.captureComposeSelectionRangeForActivation(selectionRange)
                         case .composeUserEdited(let range, let replacementUTF16Length):

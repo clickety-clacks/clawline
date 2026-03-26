@@ -261,7 +261,6 @@ final class DictationSession {
         var committedText: String
         var pendingUpdate: DictationSegmentUpdate?
         var activationSelectionRange: NSRange?
-        var preferredSelectionRange: NSRange?
         var walkieOrigin: WalkieOrigin?
 
         var provisionalLenUTF16: Int {
@@ -298,7 +297,6 @@ final class DictationSession {
     private var pendingActivationMode: DictationMode?
     private var pendingActivationWalkieOrigin: WalkieOrigin?
     private var pendingActivationSelectionRange: NSRange?
-    private var pendingPreferredSelectionRange: NSRange?
     private var gesturePrewarmGeneration: UInt64?
     private var gestureActivationFailed = false
     private(set) var mode: DictationMode?
@@ -534,34 +532,6 @@ final class DictationSession {
                 collapseSurface: true,
                 collapseSurfaceImmediately: true,
                 trigger: "ui_test_keyboard_dismiss"
-            )
-        }
-    }
-
-    func setComposeSelectionRange(_ selectionRange: NSRange) {
-        let resolvedSelectionRange: NSRange?
-        if selectionRange.location != NSNotFound {
-            resolvedSelectionRange = selectionRange
-        } else if let liveSelectionRange = bridge.boundComposeTextView?.selectedRange,
-                  liveSelectionRange.location != NSNotFound {
-            resolvedSelectionRange = liveSelectionRange
-        } else {
-            resolvedSelectionRange = nil
-        }
-
-        pendingPreferredSelectionRange = resolvedSelectionRange
-
-        guard let resolvedSelectionRange else { return }
-        updateActiveTranscriptSession { session in
-            session.preferredSelectionRange = resolvedSelectionRange
-            guard session.originSessionKey == currentSessionKey,
-                  shouldReanchorTranscriptSession(session),
-                  let textView = bridge.boundComposeTextView else { return }
-            reanchorTranscriptSession(
-                &session,
-                to: resolvedSelectionRange,
-                text: textView.attributedText.string,
-                textLength: textView.attributedText.length
             )
         }
     }
@@ -1910,7 +1880,6 @@ final class DictationSession {
         logDictation("DICTATION_PERF ts=\(Date().timeIntervalSince1970) event=capture_snapshot_end session=\(sessionKey)")
         let selectedRange = resolvedTranscriptAnchorRange(
             activationSelectionRange: pendingActivationSelectionRange,
-            preferredSelectionRange: pendingPreferredSelectionRange,
             snapshot: snapshot
         )
         let initialProvisionalText = substring(text: snapshot.content.string, utf16Range: selectedRange) ?? ""
@@ -1925,7 +1894,6 @@ final class DictationSession {
                 committedText: "",
                 pendingUpdate: nil,
                 activationSelectionRange: pendingActivationSelectionRange,
-                preferredSelectionRange: pendingPreferredSelectionRange,
                 walkieOrigin: walkieOrigin
             )
         )
@@ -2019,10 +1987,9 @@ final class DictationSession {
 
     private func resolvedTranscriptAnchorRange(
         activationSelectionRange: NSRange?,
-        preferredSelectionRange: NSRange?,
         snapshot: ComposeDraftSnapshot
     ) -> NSRange {
-        let selectedRange = activationSelectionRange ?? preferredSelectionRange
+        let selectedRange = activationSelectionRange
         return safeReplacementRange(
             selectedRange: selectedRange ?? NSRange(location: NSNotFound, length: 0),
             textLength: snapshot.content.length,
@@ -2035,30 +2002,6 @@ final class DictationSession {
             .font: UIFont.preferredFont(forTextStyle: .body),
             .foregroundColor: UIColor.label
         ]
-    }
-
-    private func reanchorTranscriptSession(
-        _ session: inout TranscriptSession,
-        to selectionRange: NSRange,
-        text: String,
-        textLength: Int
-    ) {
-        let clampedSelectionRange = safeReplacementRange(
-            selectedRange: selectionRange,
-            textLength: textLength,
-            fallbackLocation: textLength
-        )
-        let selectedText = substring(text: text, utf16Range: clampedSelectionRange) ?? ""
-
-        session.dictationStartUTF16 = clampedSelectionRange.location
-        session.committedLenUTF16 = 0
-        session.provisionalText = selectedText
-        session.suppressedUntilNextEndpoint = false
-        session.committedText = ""
-    }
-
-    private func shouldReanchorTranscriptSession(_ session: TranscriptSession) -> Bool {
-        session.pendingUpdate == nil && session.previousTranscriptUTF16Length == 0
     }
 
     private func noteUserEdit(

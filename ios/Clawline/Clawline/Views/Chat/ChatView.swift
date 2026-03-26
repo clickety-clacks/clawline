@@ -1307,8 +1307,6 @@ struct ChatView: View {
     @MainActor
     private func handleDictationIntent(_ intent: DictationInteractionIntent) {
         switch intent {
-        case .composeSelectionChanged(let selectionRange):
-            dictationCoordinator.setComposeSelectionRange(selectionRange)
         case .activationSelectionCaptured(let selectionRange):
             dictationCoordinator.captureComposeSelectionRangeForActivation(selectionRange)
         case .composeUserEdited(let range, let replacementUTF16Length):

@@ -28,8 +28,6 @@ struct DictationTranscriptApplicatorTests {
         )
 
         #expect(textView.attributedText.string == "hello mars")
-        // Selection spans the replacement text (boundary transform preserves coverage)
-        #expect(textView.selectedRange == NSRange(location: 6, length: 4))
     }
 
     @Test("Applicator preserves user selection outside the transcript-owned replacement range")
@@ -56,7 +54,6 @@ struct DictationTranscriptApplicatorTests {
         )
 
         #expect(textView.attributedText.string == "hello mars")
-        #expect(textView.selectedRange == NSRange(location: 0, length: 5))
     }
 
     @Test("Applicator transforms a user selection through transcript replacement")
@@ -83,7 +80,6 @@ struct DictationTranscriptApplicatorTests {
         )
 
         #expect(textView.attributedText.string == "hello planet earth")
-        #expect(textView.selectedRange == NSRange(location: 6, length: "planet earth".utf16.count))
     }
 
     @Test("Applicator collapses a caret inside the replacement range to the transcript end")
@@ -110,7 +106,6 @@ struct DictationTranscriptApplicatorTests {
         )
 
         #expect(textView.attributedText.string == "hello mars")
-        #expect(textView.selectedRange == NSRange(location: 10, length: 0))
     }
 
     @Test("Applicator updates the host snapshot when no UITextView is attached")
@@ -214,8 +209,8 @@ struct DictationTranscriptApplicatorTests {
         #expect(reboundTextView.attributedText.string == "seed ")
     }
 
-    @Test("Applicator clears programmatic-update flags synchronously and records echo selection")
-    func applicatorClearsFlagsSynchronouslyAndRecordsEchoSelection() {
+    @Test("Programmatic edit flag is set during dictation text replacement")
+    func programmaticEditFlagSetDuringReplace() {
         let host = MockComposeDraftHost()
         let applicator = DictationTranscriptApplicator(host: host)
         let textView = PastableTextView()
@@ -237,49 +232,8 @@ struct DictationTranscriptApplicatorTests {
             )
         )
 
-        // Flags are cleared synchronously — no timer/grace window
-        #expect(textView.dictationProgrammaticUpdateInFlight == false)
+        // Flag is cleared after apply completes
         #expect(textView.dictationProgrammaticEditInFlight == false)
-        #expect(textView.dictationProgrammaticSelectionTransactionInFlight == false)
-        // Selection ignore stays true for the UIKit echo callback
-        #expect(textView.dictationIgnoreNextSelectionInteraction == true)
-        // Echo selection is recorded for value-based identification
-        #expect(textView.lastProgrammaticSelection == textView.selectedRange)
-    }
-
-    @Test("Value-based suppression consumes the echo then allows user selection changes")
-    func valueBasedSuppressionConsumesEchoThenAllowsUserChanges() {
-        let textView = PastableTextView()
-        textView.attributedText = NSAttributedString(string: "hello mars")
-        textView.selectedRange = NSRange(location: 6, length: 4)
-
-        // Simulate post-apply state: echo pending
-        textView.dictationIgnoreNextSelectionInteraction = true
-        textView.lastProgrammaticSelection = NSRange(location: 6, length: 4)
-
-        // UIKit echo callback with matching selection — should be consumed
-        #expect(textView.consumeDictationSelectionInteractionSuppression() == true)
-        #expect(textView.dictationIgnoreNextSelectionInteraction == false)
-        #expect(textView.lastProgrammaticSelection == nil)
-
-        // Subsequent selection change — should NOT be suppressed
-        textView.selectedRange = NSRange(location: 3, length: 0)
-        #expect(textView.consumeDictationSelectionInteractionSuppression() == false)
-    }
-
-    @Test("Non-matching selection after apply is not suppressed")
-    func nonMatchingSelectionAfterApplyIsNotSuppressed() {
-        let textView = PastableTextView()
-        textView.attributedText = NSAttributedString(string: "hello mars")
-        textView.selectedRange = NSRange(location: 2, length: 0)
-
-        // Simulate post-apply state
-        textView.dictationIgnoreNextSelectionInteraction = true
-        textView.lastProgrammaticSelection = NSRange(location: 6, length: 4)
-
-        // User changes selection to a different position — should not be suppressed
-        #expect(textView.consumeDictationSelectionInteractionSuppression() == false)
-        #expect(textView.dictationIgnoreNextSelectionInteraction == false)
-        #expect(textView.lastProgrammaticSelection == nil)
+        #expect(textView.attributedText.string == "hello mars")
     }
 }

@@ -263,12 +263,6 @@ struct RichTextEditor: UIViewRepresentable {
             let selectedRange = textView.selectedRange
             guard selectedRange.location != NSNotFound else { return }
             guard !isApplyingParentSelection else { return }
-            if let textView = textView as? PastableTextView {
-                if textView.consumeDictationSelectionInteractionSuppression() {
-                    ensureTypingAttributes(on: textView)
-                    return
-                }
-            }
             setSelectionRange(selectedRange)
             if isApplyingLocalEdit {
                 ensureCaretVisible(in: textView)
@@ -473,15 +467,11 @@ struct RichTextEditor: UIViewRepresentable {
 ///   3. `UITextPasteDelegate.transforming` – item-level safety net that discards
 ///      image items before they can be converted to text
 final class PastableTextView: UITextView, UITextPasteDelegate {
-    private(set) var dictationProgrammaticSelectionTransactionInFlight: Bool = false
     var onPasteImages: (([UIImage]) -> Void)?
     var onEscape: (() -> Void)?
     var onEscapeLongPress: (() -> Void)?
     var onLayout: ((CGFloat) -> Void)?
-    private(set) var dictationProgrammaticUpdateInFlight: Bool = false
-    private(set) var dictationProgrammaticEditInFlight: Bool = false
-    var dictationIgnoreNextSelectionInteraction: Bool = false
-    var lastProgrammaticSelection: NSRange?
+    var dictationProgrammaticEditInFlight: Bool = false
     var isInputEnabled: Bool = true {
         didSet {
             guard oldValue != isInputEnabled else { return }
@@ -517,37 +507,6 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
         onLayout?(bounds.width)
     }
 
-    func beginDictationProgrammaticUpdate() {
-        dictationProgrammaticUpdateInFlight = true
-        dictationProgrammaticSelectionTransactionInFlight = true
-        dictationProgrammaticEditInFlight = true
-        dictationIgnoreNextSelectionInteraction = true
-    }
-
-    func endDictationProgrammaticUpdate() {
-        dictationProgrammaticSelectionTransactionInFlight = false
-        dictationProgrammaticEditInFlight = false
-        dictationProgrammaticUpdateInFlight = false
-        // dictationIgnoreNextSelectionInteraction stays true —
-        // consumed by the first post-edit selection callback (the UIKit echo)
-    }
-
-    func consumeDictationSelectionInteractionSuppression() -> Bool {
-        guard dictationIgnoreNextSelectionInteraction else { return false }
-        if dictationProgrammaticSelectionTransactionInFlight {
-            return true  // Still mid-transaction — suppress all
-        }
-        // Post-transaction: suppress if this selection matches the programmatic edit's result
-        if let expected = lastProgrammaticSelection, selectedRange == expected {
-            lastProgrammaticSelection = nil
-            dictationIgnoreNextSelectionInteraction = false
-            return true
-        }
-        // Non-matching selection = user-initiated — stop suppressing
-        dictationIgnoreNextSelectionInteraction = false
-        lastProgrammaticSelection = nil
-        return false
-    }
 
     override var keyCommands: [UIKeyCommand]? {
         let base = super.keyCommands ?? []

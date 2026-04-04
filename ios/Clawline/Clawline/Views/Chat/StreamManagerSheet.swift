@@ -59,7 +59,11 @@ struct StreamManagerSheet: View {
     private let rowTrailingAccessoryReserve: CGFloat = 28
 
     private var maximumPopoverWidth: CGFloat {
-        let windowWidth = UIScreen.main.bounds.width
+        let windowWidth = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap { $0.windows }
+            .first { $0.isKeyWindow }?
+            .bounds.width ?? baselineMaximumPopoverWidth
         return max(baselineMaximumPopoverWidth, floor(windowWidth * 0.8))
     }
 

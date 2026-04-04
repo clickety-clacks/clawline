@@ -3,6 +3,7 @@ import { useAuthSessionStore } from "../../runtime/auth/authSessionStore";
 import { useChatDomainStore } from "../../runtime/chat/chatDomainStore";
 import type {
   ChatMessageRecord,
+  PendingMessageRecord,
   SessionScrollState
 } from "../../runtime/chat/chatDomainStore";
 import { useTransportMachine } from "../../runtime/transport/transportMachine";
@@ -15,6 +16,7 @@ import {
   getMessageSenderLabel,
   hasStreamingAssistantMessage
 } from "./messagePresentation";
+import { projectFailedMessageRetryState } from "./chatSendState";
 import { RichMessageBody, shouldOfferExpandedMessage } from "./RichMessageBody";
 import { useVirtualMessageWindow } from "./useVirtualMessageWindow";
 
@@ -200,11 +202,18 @@ export function MessageList({
 
   async function handleRetryMessage(messageId: string) {
     const pendingMessage = chatStore.getState().pendingMessages[messageId];
-    if (!pendingMessage) {
+    const message = messages.find((entry) => entry.id === messageId);
+    const retryState = projectFailedMessageRetryState({
+      delivery: message?.delivery ?? "server",
+      pendingMessage,
+      transportPhase: transportStore.getState().phase
+    });
+
+    if (!retryState.canRetry || !pendingMessage) {
       return;
     }
 
-    if (transportStore.getState().phase !== "live") {
+    if (retryState.action === "reconnect") {
       transportStore.retryNow();
       return;
     }
@@ -281,6 +290,8 @@ export function MessageList({
                 message={message}
                 onExpand={() => setExpandedMessageId(message.id)}
                 onRetry={() => void handleRetryMessage(message.id)}
+                pendingMessage={chatStore.getState().pendingMessages[message.id]}
+                transportPhase={transportStore.getState().phase}
                 serverUrl={authState.session?.serverUrl}
                 token={authState.session?.token}
               />
@@ -354,12 +365,16 @@ function MeasuredMessageRow({
       return;
     }
 
-      function measure() {
-        if (!rowRef.current) {
-          return;
-        }
+    function measure() {
+      if (!rowRef.current) {
+        return;
+      }
 
-      const rect = rowRef.current.getBoundingClientRect();
+      const measuredTarget =
+        rowRef.current.firstElementChild instanceof HTMLElement
+          ? rowRef.current.firstElementChild
+          : rowRef.current;
+      const rect = measuredTarget.getBoundingClientRect();
       onSizeChange(messageId, {
         height: rect.height,
         width: rect.width
@@ -401,13 +416,17 @@ function MessageBubble({
   message,
   onExpand,
   onRetry,
+  pendingMessage,
   serverUrl,
+  transportPhase,
   token
 }: {
   message: ChatMessageRecord;
   onExpand: () => void;
   onRetry: () => void;
+  pendingMessage?: PendingMessageRecord;
   serverUrl?: string;
+  transportPhase: Parameters<typeof projectFailedMessageRetryState>[0]["transportPhase"];
   token?: string;
 }) {
   const contentRef = useRef<HTMLDivElement | null>(null);
@@ -416,6 +435,11 @@ function MessageBubble({
   const senderInitial = getMessageSenderInitial(message);
   const isUser = message.role === "user";
   const presentation = analyzeMessagePresentation(message, shouldOfferExpandedMessage);
+  const retryState = projectFailedMessageRetryState({
+    delivery: message.delivery,
+    pendingMessage,
+    transportPhase
+  });
   const timestampLabel = formatMessageTimestamp(message.timestamp);
 
   function handlePointerUp(event: PointerEvent<HTMLElement>) {
@@ -487,7 +511,7 @@ function MessageBubble({
       <footer className="message-status">
         {message.delivery === "pending" ? "Sending..." : null}
         {message.delivery === "acked" ? "Accepted by provider" : null}
-        {message.delivery === "failed" ? (
+        {retryState.shouldShowRetry ? (
           <>
             <span>Send failed</span>
             <button

@@ -1,4 +1,9 @@
 import { useEffect, useState, type RefObject } from "react";
+import {
+  fallbackLinkCardMetadata,
+  fetchLinkCardMetadata,
+  type LinkCardMetadata
+} from "./linkCardMetadata";
 
 export function MessageLinkCards({
   content,
@@ -36,7 +41,24 @@ export function MessageLinkCards({
 }
 
 function MessageLinkCard({ href }: { href: string }) {
-  const metadata = metadataFromUrl(href);
+  const [metadata, setMetadata] = useState<LinkCardMetadata>(() => fallbackLinkCardMetadata(href));
+
+  useEffect(() => {
+    let cancelled = false;
+    setMetadata(fallbackLinkCardMetadata(href));
+
+    void fetchLinkCardMetadata(href).then((nextMetadata) => {
+      if (cancelled || !nextMetadata) {
+        return;
+      }
+
+      setMetadata(nextMetadata);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [href]);
 
   return (
     <a
@@ -45,10 +67,18 @@ function MessageLinkCard({ href }: { href: string }) {
       rel="noreferrer"
       target="_blank"
     >
+      {metadata.imageUrl ? (
+        <img
+          alt=""
+          aria-hidden="true"
+          className="message-link-card-thumbnail"
+          src={metadata.imageUrl}
+        />
+      ) : null}
       <div className="message-link-card-copy">
         <span className="message-link-card-domain">{metadata.domain}</span>
         <strong>{metadata.title}</strong>
-        <span>{metadata.description}</span>
+        {metadata.description ? <span>{metadata.description}</span> : null}
       </div>
       <span aria-hidden="true" className="message-link-card-arrow">
         ↗
@@ -79,19 +109,4 @@ function uniqueHttpUrls(urls: string[]) {
   }
 
   return unique;
-}
-
-function metadataFromUrl(value: string) {
-  const url = new URL(value);
-  const pathname = decodeURIComponent(url.pathname).replace(/\/+$/, "");
-  const title =
-    pathname.length > 1
-      ? `${url.hostname}${pathname}${url.search}${url.hash}`
-      : url.hostname;
-
-  return {
-    description: value,
-    domain: url.hostname.toUpperCase(),
-    title
-  };
 }

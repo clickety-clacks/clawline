@@ -18,9 +18,11 @@ import { Composer } from "./Composer";
 
 function renderComposer({
   phase = "live" as const,
+  retryNow = vi.fn(),
   sendMessage = vi.fn().mockResolvedValue(undefined)
 }: {
   phase?: TransportPhase;
+  retryNow?: TransportMachine["retryNow"];
   sendMessage?: TransportMachine["sendMessage"];
 } = {}) {
   const authStore = createAuthSessionStore();
@@ -37,7 +39,8 @@ function renderComposer({
     getState() {
       return transportState;
     },
-    retryNow() {},
+    retryNow,
+    setSelectedSessionKey() {},
     sendMessage,
     subscribe() {
       return () => {};
@@ -68,6 +71,7 @@ function renderComposer({
   return {
     chatStore,
     renderResult,
+    retryNow,
     sendMessage
   };
 }
@@ -150,12 +154,24 @@ describe("Composer", () => {
 
   it("shows reconnecting and disconnected send button states", () => {
     const reconnecting = renderComposer({ phase: "recovering" });
-    expect(screen.getByRole("button", { name: "Send unavailable while reconnecting" }))
+    expect(screen.getByRole("button", { name: "Reconnecting" }))
       .toHaveAttribute("data-connection-state", "reconnecting");
+    expect(screen.getByRole("button", { name: "Reconnecting" })).toBeDisabled();
     reconnecting.renderResult.unmount();
 
     renderComposer({ phase: "failed" });
-    expect(screen.getByRole("button", { name: "Send unavailable while disconnected" }))
+    expect(screen.getByRole("button", { name: "Disconnected. Tap to reconnect." }))
       .toHaveAttribute("data-connection-state", "disconnected");
+    expect(screen.getByRole("button", { name: "Disconnected. Tap to reconnect." })).toBeEnabled();
+  });
+
+  it("taps reconnect from the send button when disconnected", () => {
+    const { retryNow, sendMessage } = renderComposer({ phase: "failed" });
+
+    fireEvent.change(screen.getByLabelText("Message"), { target: { value: "Hello" } });
+    fireEvent.click(screen.getByRole("button", { name: "Disconnected. Tap to reconnect." }));
+
+    expect(retryNow).toHaveBeenCalledTimes(1);
+    expect(sendMessage).not.toHaveBeenCalled();
   });
 });

@@ -6,113 +6,107 @@ import { useAuthSessionStore } from "../../runtime/auth/authSessionStore";
 import { useChatDomainStore } from "../../runtime/chat/chatDomainStore";
 import { useTransportMachine } from "../../runtime/transport/transportMachine";
 import { ChatShell } from "./ChatShell";
+import {
+  type ChatSessionSwitchSource,
+  useChatSessionCoordinator,
+  useChatSessionInteractionCoordinator
+} from "./useChatSessionCoordinator";
 
 export function ChatRoute() {
   const navigate = useNavigate();
   const params = useParams();
   const { state: authState } = useAuthSessionStore();
   const { state: chatState, store: chatStore } = useChatDomainStore();
-  const { state: transportState } = useTransportMachine();
-  const [isSessionListOpen, setSessionListOpen] = useState(false);
-  const [isStreamManagerOpen, setStreamManagerOpen] = useState(false);
+  const { state: transportState, store: transportStore } = useTransportMachine();
   const [selectedUnreadAnchorMessageId, setSelectedUnreadAnchorMessageId] = useState<
     string | null
   >(null);
-  const [bootRequestedSessionKey, setBootRequestedSessionKey] = useState(
-    params.sessionKey ?? null
-  );
-
-  const firstProviderValidSessionKey =
-    chatState.streams.find((stream) =>
-      chatState.provisionedSessionKeys.includes(stream.sessionKey)
-    )?.sessionKey ?? chatState.streams[0]?.sessionKey;
-
-  const selectedSessionKey = params.sessionKey ?? firstProviderValidSessionKey;
+  const coordinator = useChatSessionCoordinator({
+    provisionedSessionKeys: chatState.provisionedSessionKeys,
+    routeSessionKey: params.sessionKey,
+    streams: chatState.streams,
+    transportPhase: transportState.phase
+  });
+  const engineActiveSessionKey = coordinator.engineActiveSessionKey;
+  const uiSelectedSessionKey =
+    coordinator.uiSelectedSessionKey ?? coordinator.engineActiveSessionKey;
   const activeStream = chatState.streams.find(
-    (stream) => stream.sessionKey === selectedSessionKey
+    (stream) => stream.sessionKey === engineActiveSessionKey
   );
   const provisioningState = getSessionProvisioningState({
     hasStream: Boolean(activeStream),
     provisionedSessionKeys: chatState.provisionedSessionKeys,
-    sessionKey: selectedSessionKey,
+    sessionKey: engineActiveSessionKey,
     transportPhase: transportState.phase
   });
 
   const selectedMessages = useMemo(
     () =>
-      selectedSessionKey
-        ? chatState.messagesBySessionKey[selectedSessionKey] ?? []
+      engineActiveSessionKey
+        ? chatState.messagesBySessionKey[engineActiveSessionKey] ?? []
         : [],
-    [chatState.messagesBySessionKey, selectedSessionKey]
+    [chatState.messagesBySessionKey, engineActiveSessionKey]
   );
 
   useEffect(() => {
-    if (!selectedSessionKey) {
+    transportStore.setSelectedSessionKey(engineActiveSessionKey);
+  }, [engineActiveSessionKey, transportStore]);
+
+  const handleSelectSession = (sessionKey: string, source: ChatSessionSwitchSource) => {
+    coordinator.requestSessionSwitch(sessionKey, source);
+    navigate(`/chat/${sessionKey}`);
+  };
+
+  const interactionCoordinator = useChatSessionInteractionCoordinator({
+    activeSessionKey: engineActiveSessionKey,
+    onSelectSession: handleSelectSession,
+    orderedSessionKeys: chatState.streams.map((stream) => stream.sessionKey)
+  });
+
+  useEffect(() => {
+    if (!engineActiveSessionKey) {
       return;
     }
 
     const unreadAnchor =
-      chatState.firstUnreadMessageIdBySessionKey[selectedSessionKey] ?? null;
+      chatState.firstUnreadMessageIdBySessionKey[engineActiveSessionKey] ?? null;
 
     setSelectedUnreadAnchorMessageId(unreadAnchor);
 
     if (!unreadAnchor) {
-      chatStore.markSessionRead(selectedSessionKey);
+      chatStore.markSessionRead(engineActiveSessionKey);
     }
   }, [
     chatState.firstUnreadMessageIdBySessionKey,
     chatStore,
-    selectedSessionKey
-  ]);
-
-  useEffect(() => {
-    if (!bootRequestedSessionKey) {
-      return;
-    }
-
-    if (params.sessionKey !== bootRequestedSessionKey) {
-      setBootRequestedSessionKey(null);
-      return;
-    }
-
-    if (
-      transportState.phase === "live" &&
-      chatState.provisionedSessionKeys.includes(bootRequestedSessionKey)
-    ) {
-      setBootRequestedSessionKey(null);
-    }
-  }, [
-    bootRequestedSessionKey,
-    chatState.provisionedSessionKeys,
-    params.sessionKey,
-    transportState.phase
+    engineActiveSessionKey
   ]);
 
   if (!authState.session?.token) {
     return <Navigate to="/pair" replace />;
   }
 
-  if (!params.sessionKey && firstProviderValidSessionKey) {
-    return <Navigate replace to={`/chat/${firstProviderValidSessionKey}`} />;
+  if (!params.sessionKey && coordinator.firstProviderValidSessionKey) {
+    return <Navigate replace to={`/chat/${coordinator.firstProviderValidSessionKey}`} />;
   }
 
   if (
-    bootRequestedSessionKey &&
-    params.sessionKey === bootRequestedSessionKey &&
+    coordinator.transition.bootRequestedSessionKey &&
+    params.sessionKey === coordinator.transition.bootRequestedSessionKey &&
     transportState.phase === "live" &&
     chatState.provisionedSessionKeys.length > 0 &&
-    !chatState.provisionedSessionKeys.includes(bootRequestedSessionKey)
+    !chatState.provisionedSessionKeys.includes(coordinator.transition.bootRequestedSessionKey)
   ) {
-    return firstProviderValidSessionKey ? (
-      <Navigate replace to={`/chat/${firstProviderValidSessionKey}`} />
+    return coordinator.firstProviderValidSessionKey ? (
+      <Navigate replace to={`/chat/${coordinator.firstProviderValidSessionKey}`} />
     ) : (
       <Navigate replace to="/chat" />
     );
   }
 
-  if (params.sessionKey && !activeStream) {
-    return firstProviderValidSessionKey ? (
-      <Navigate replace to={`/chat/${firstProviderValidSessionKey}`} />
+  if (params.sessionKey && chatState.streams.length > 0 && !coordinator.routeSessionExists) {
+    return coordinator.firstProviderValidSessionKey ? (
+      <Navigate replace to={`/chat/${coordinator.firstProviderValidSessionKey}`} />
     ) : (
       <Navigate replace to="/chat" />
     );
@@ -121,35 +115,35 @@ export function ChatRoute() {
   return (
     <>
       <ChatShell
-        activeSessionKey={selectedSessionKey}
-        isSessionListOpen={isSessionListOpen}
-        onCloseSessionList={() => setSessionListOpen(false)}
-        onOpenSessionList={() => setSessionListOpen(true)}
-        onOpenStreamManager={() => {
-          setSessionListOpen(false);
-          setStreamManagerOpen(true);
-        }}
+        activeSessionKey={engineActiveSessionKey}
+        chatLayoutStyle={interactionCoordinator.layoutStyle}
+        keyboardInset={interactionCoordinator.keyboardInset}
+        isSessionListOpen={coordinator.isSessionListOpen}
+        onCloseSessionList={coordinator.closeSessionList}
+        onChatPanelTouchCancel={interactionCoordinator.handleChatPanelTouchCancel}
+        onChatPanelTouchEnd={interactionCoordinator.handleChatPanelTouchEnd}
+        onChatPanelTouchStart={interactionCoordinator.handleChatPanelTouchStart}
+        onOpenSessionList={coordinator.openSessionList}
+        onOpenStreamManager={coordinator.openStreamManager}
+        onPopupSessionSelect={interactionCoordinator.handlePopupSessionSelect}
         onRememberScrollState={(input) => chatStore.rememberSessionScrollState(input)}
         provisioningState={provisioningState}
-        onSelectSession={(sessionKey) => {
-          setSessionListOpen(false);
-          navigate(`/chat/${sessionKey}`);
-        }}
         onUnreadAnchorConsumed={(messageId) => {
-          if (!selectedSessionKey || selectedUnreadAnchorMessageId !== messageId) {
+          if (!engineActiveSessionKey || selectedUnreadAnchorMessageId !== messageId) {
             return;
           }
 
-          chatStore.markSessionRead(selectedSessionKey);
+          chatStore.markSessionRead(engineActiveSessionKey);
           setSelectedUnreadAnchorMessageId(null);
         }}
         rememberedScrollState={
-          selectedSessionKey
-            ? chatState.scrollStateBySessionKey[selectedSessionKey]
+          engineActiveSessionKey
+            ? chatState.scrollStateBySessionKey[engineActiveSessionKey]
             : undefined
         }
         selectedMessages={selectedMessages}
-        selectedSessionKey={selectedSessionKey}
+        selectedSessionKey={engineActiveSessionKey}
+        uiSelectedSessionKey={uiSelectedSessionKey}
         selectedUnreadAnchorMessageId={selectedUnreadAnchorMessageId}
         provisionedSessionKeys={chatState.provisionedSessionKeys}
         streams={chatState.streams}
@@ -157,12 +151,16 @@ export function ChatRoute() {
         unreadBySessionKey={chatState.unreadBySessionKey}
       />
       <StreamManagerDrawer
-        activeSessionKey={selectedSessionKey}
-        isOpen={isStreamManagerOpen}
-        onClose={() => setStreamManagerOpen(false)}
+        activeSessionKey={uiSelectedSessionKey}
+        isOpen={coordinator.isStreamManagerOpen}
+        onClose={coordinator.closeStreamManager}
         onSelectSession={(sessionKey) => {
-          setStreamManagerOpen(false);
-          navigate(sessionKey ? `/chat/${sessionKey}` : "/chat");
+          if (sessionKey) {
+            handleSelectSession(sessionKey, "stream-manager");
+          } else {
+            coordinator.closeStreamManager();
+            navigate("/chat");
+          }
         }}
       />
     </>

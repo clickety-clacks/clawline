@@ -100,12 +100,6 @@ struct SelectableAttributedText: UIViewRepresentable {
             emitSelectionChange(hasSelection)
         }
 
-        #if !os(visionOS)
-        func textView(_ textView: UITextView, shouldInteractWith url: URL, in characterRange: NSRange) -> Bool {
-            UnifiedMarkdownRenderer.handleReleaseTriggeredLinkActivation(url, openURL: onLinkTap)
-        }
-        #endif
-
         @available(iOS 17.0, macCatalyst 17.0, visionOS 1.0, *)
         func textView(
             _ textView: UITextView,

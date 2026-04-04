@@ -21,6 +21,11 @@ test.describe("Phase 5 responsive and keyboard flow", () => {
         await applyAppearance(page, appearance);
         await expect(page.getByRole("button", { name: "Manage streams" })).toBeVisible();
         const dots = page.getByRole("button", { name: "Manage streams" });
+        expect(
+          await dots
+            .locator(".stream-page-dot--active")
+            .evaluate((element) => window.getComputedStyle(element).backgroundColor)
+        ).toBe("rgb(107, 156, 107)");
         await expect(page.getByTestId("composer-input-bar")).toBeVisible();
 
         await expect(page.getByTestId("chat-layout")).toHaveScreenshot(
@@ -100,6 +105,24 @@ test.describe("Phase 5 responsive and keyboard flow", () => {
               return window.getComputedStyle(element).display;
             })
           ).toBe("grid");
+          expect(
+            await page.locator(".composer-input-bar").evaluate((element) => {
+              return window.getComputedStyle(element).backgroundColor;
+            })
+          ).toBe("rgba(0, 0, 0, 0)");
+          expect(
+            await page.locator(".composer-input-field").evaluate((element) => {
+              return window.getComputedStyle(element).backgroundColor;
+            })
+          ).not.toBe("rgba(0, 0, 0, 0)");
+          const attachBox = await page.getByRole("button", { name: "Add attachment" }).boundingBox();
+          const inputBox = await page.locator(".composer-input-field").boundingBox();
+          const sendBox = await page.getByRole("button", { name: "Send" }).boundingBox();
+          expect(attachBox).not.toBeNull();
+          expect(inputBox).not.toBeNull();
+          expect(sendBox).not.toBeNull();
+          expect(inputBox!.x - (attachBox!.x + attachBox!.width)).toBeGreaterThan(8);
+          expect(sendBox!.x - (inputBox!.x + inputBox!.width)).toBeGreaterThan(8);
         }
       }
     } finally {
@@ -192,6 +215,45 @@ test.describe("Phase 5 responsive and keyboard flow", () => {
     }
   });
 
+  test("send button tap still sends after the keyboard is dismissed", async ({ browser }) => {
+    const { close, port, receivedClientMessages } = await startPhase5Server();
+    const context = await browser.newContext({
+      hasTouch: true,
+      isMobile: true,
+      viewport: { height: 844, width: 390 }
+    });
+    const page = await context.newPage();
+
+    try {
+      await page.addInitScript((session) => {
+        window.localStorage.setItem("clawline-web:auth-session", JSON.stringify(session));
+        window.localStorage.setItem(
+          "clawline-web:device-id",
+          JSON.stringify(session.deviceId)
+        );
+      }, makeSession(port));
+
+      await page.goto(`/chat/${MAIN_SESSION_KEY}`);
+      const composer = page.getByRole("textbox", { name: "Message" });
+      await composer.click();
+      await composer.fill("Tap send after blur");
+      await page.keyboard.press("Escape");
+      await expect(composer).not.toBeFocused();
+
+      const sendButton = page.getByRole("button", { name: "Send" });
+      await expect(sendButton).toBeEnabled();
+      await sendButton.tap();
+
+      await expect
+        .poll(() => receivedClientMessages.at(-1)?.content ?? null)
+        .toBe("Tap send after blur");
+      await expect(page.getByText("Tap send after blur")).toBeVisible();
+    } finally {
+      await context.close();
+      await close();
+    }
+  });
+
   test("message bubbles stay within the mobile viewport width", async ({ page }) => {
     const transcript = Array.from({ length: 6 }, (_, index) => ({
       type: "message" as const,
@@ -227,6 +289,40 @@ test.describe("Phase 5 responsive and keyboard flow", () => {
           messageList.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)
         )
         .toBe(true);
+    } finally {
+      await close();
+    }
+  });
+
+  test("sending after switching chats from the popup targets the selected session", async ({
+    page
+  }) => {
+    const { close, port, receivedClientMessages } = await startPhase5Server();
+
+    try {
+      await page.addInitScript((session) => {
+        window.localStorage.setItem("clawline-web:auth-session", JSON.stringify(session));
+        window.localStorage.setItem(
+          "clawline-web:device-id",
+          JSON.stringify(session.deviceId)
+        );
+      }, makeSession(port));
+
+      await page.setViewportSize({ height: 844, width: 390 });
+      await page.goto(`/chat/${MAIN_SESSION_KEY}`);
+
+      await page.getByRole("button", { name: "Manage streams" }).click();
+      await page.getByRole("button", { name: /Side/ }).click();
+      await expect(page).toHaveURL(new RegExp(`${SIDE_SESSION_KEY.replaceAll(":", "\\:")}$`));
+
+      const composer = page.getByRole("textbox", { name: "Message" });
+      await composer.fill("Send to side");
+      await page.getByRole("button", { name: "Send" }).click();
+
+      await expect
+        .poll(() => receivedClientMessages.at(-1)?.sessionKey ?? null)
+        .toBe(SIDE_SESSION_KEY);
+      await expect(page.getByText("Send to side")).toBeVisible();
     } finally {
       await close();
     }

@@ -1581,7 +1581,7 @@ final class ChatViewModel: ChatViewModelHosting {
         }
         setMessages(messageList, for: resolvedMessage.sessionKey)
         if resolvedMessage.sessionKey == engineActiveSessionKey,
-           resolvedMessage.id.hasPrefix("s_") {
+           isServerReadableMessageID(resolvedMessage.id) {
             markSessionRead(resolvedMessage.sessionKey)
         }
         maybeTriggerAssistantIncomingHaptic(for: resolvedMessage, didAppendNewMessage: didAppendNewMessage)
@@ -2789,10 +2789,16 @@ final class ChatViewModel: ChatViewModelHosting {
     }
 
     private func lastServerMessageId(from messages: [Message]) -> String? {
-        for message in messages.reversed() where message.id.hasPrefix("s_") {
+        for message in messages.reversed() where isServerReadableMessageID(message.id) {
             return message.id
         }
         return nil
+    }
+
+    private func isServerReadableMessageID(_ messageID: String) -> Bool {
+        let trimmed = messageID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        return !trimmed.hasPrefix("c_")
     }
 
     private func clearMessageCache() {
@@ -3439,7 +3445,7 @@ final class ChatViewModel: ChatViewModelHosting {
     }
 
     private func publishReadStateIfPossible(sessionKey: String, lastReadMessageId: String) {
-        guard lastReadMessageId.hasPrefix("s_") else { return }
+        guard isServerReadableMessageID(lastReadMessageId) else { return }
         Task { [chatService, logger] in
             do {
                 try await chatService.publishReadState(

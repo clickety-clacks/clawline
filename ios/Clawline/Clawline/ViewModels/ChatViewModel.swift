@@ -3392,18 +3392,9 @@ final class ChatViewModel: ChatViewModelHosting {
             guard !sessionKey.isEmpty, !lastReadMessageId.isEmpty else { continue }
             normalizedSnapshot[sessionKey] = lastReadMessageId
         }
-        let snapshotSessionKeys = Set(normalizedSnapshot.keys)
-        let staleSessionKeys = lastReadMessageIdBySession.keys
-            .reduce(into: Set<String>()) { $0.insert($1) }
-            .union(persistedLastReadSessionKeys())
-            .subtracting(snapshotSessionKeys)
 
-        for sessionKey in staleSessionKeys {
-            lastReadMessageIdBySession.removeValue(forKey: sessionKey)
-            persistLastReadMessageId(nil, for: sessionKey)
-            recomputeStreamDotState(for: sessionKey)
-        }
-
+        // The server snapshot is not guaranteed to be exhaustive for every tracked stream.
+        // Merge present keys and leave local cursors in place until an explicit stream removal clears them.
         for (sessionKey, lastReadMessageId) in normalizedSnapshot {
             lastReadMessageIdBySession[sessionKey] = lastReadMessageId
             persistLastReadMessageId(lastReadMessageId, for: sessionKey)

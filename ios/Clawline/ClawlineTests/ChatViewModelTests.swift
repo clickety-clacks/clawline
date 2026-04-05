@@ -2067,6 +2067,76 @@ struct ChatViewModelTests {
         #expect(viewModel.streamDotState(for: customKey) == .inactive)
     }
 
+    @Test("Partial read-state snapshot does not clear local read cursor for omitted stream")
+    @MainActor
+    func partialReadStateSnapshotPreservesOmittedLocalCursor() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let customKey = "agent:main:clawline:user:s_partial_snapshot"
+        chatService.streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: customKey, displayName: "Heimdal", kind: "custom", orderIndex: 1, isBuiltIn: false),
+        ]
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
+        try await Task.sleep(for: .milliseconds(30))
+
+        chatService.emit(
+            Message(
+                id: "s_seen_tail",
+                role: .assistant,
+                content: "Seen already",
+                timestamp: Date(),
+                streaming: false,
+                attachments: [],
+                deviceId: nil,
+                sessionKey: customKey
+            )
+        )
+
+        for _ in 0..<50 {
+            if viewModel.streamDotState(for: customKey) == .unread { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(viewModel.streamDotState(for: customKey) == .unread)
+
+        viewModel.setActiveSessionKeyForTesting(customKey)
+        for _ in 0..<50 {
+            if viewModel.lastReadMessageIdBySession[customKey] == "s_seen_tail" { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(viewModel.lastReadMessageIdBySession[customKey] == "s_seen_tail")
+        #expect(viewModel.streamDotState(for: customKey) == .active)
+
+        chatService.emitServiceEvent(.streamReadStateSnapshot([personalSessionKey: "s_personal_read"]))
+        try await Task.sleep(for: .milliseconds(30))
+
+        #expect(viewModel.lastReadMessageIdBySession[customKey] == "s_seen_tail")
+        #expect(viewModel.streamDotState(for: customKey) == .active)
+
+        viewModel.setActiveSessionKeyForTesting(personalSessionKey)
+        for _ in 0..<50 {
+            if viewModel.streamDotState(for: customKey) == .inactive { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(viewModel.lastReadMessageIdBySession[customKey] == "s_seen_tail")
+        #expect(viewModel.streamDotState(for: customKey) == .inactive)
+    }
+
     @Test("Track adopts untracked session and preserves it across snapshots")
     @MainActor
     func trackAdoptsUntrackedSessionAcrossSnapshots() async throws {

@@ -1594,21 +1594,6 @@ struct ChatView: View {
                 pageDotsControl
                     .popover(
                         isPresented: $isStreamManagerPopoverPresented,
-<<<<<<< HEAD
-                        shouldAutoFocusSearchOnAppear: streamPopupShouldAutoFocusSearch,
-                        searchFocusRequestID: streamPopupSearchFocusRequestID,
-                        maxAvailableHeight: streamSelectorMaxHeight,
-                        maxAvailableWidth: containerWidth,
-                        onSelectStream: { sessionKey in
-                            selectStream(sessionKey, source: .programmatic)
-                        },
-                        onPresentTrackPicker: {
-                            prepareForAttachmentPicker()
-                            isStreamManagerPopoverPresented = false
-                            Task { @MainActor in
-                                await Task.yield()
-                                isTrackPickerPresented = true
-=======
                         attachmentAnchor: .rect(.bounds),
                         arrowEdge: .bottom
                     ) {
@@ -1616,7 +1601,8 @@ struct ChatView: View {
                             viewModel: viewModel,
                             effectiveStreams: effectiveStreams,
                             dotStatesBySession: dotStatesBySession,
-                            streamSelectorMaxHeight: streamSelectorMaxHeight
+                            streamSelectorMaxHeight: streamSelectorMaxHeight,
+                            containerWidth: containerWidth
                         )
                     }
             } else {
@@ -1635,9 +1621,9 @@ struct ChatView: View {
                                     viewModel: viewModel,
                                     effectiveStreams: effectiveStreams,
                                     dotStatesBySession: dotStatesBySession,
-                                    streamSelectorMaxHeight: streamSelectorMaxHeight
+                                    streamSelectorMaxHeight: streamSelectorMaxHeight,
+                                    containerWidth: containerWidth
                                 )
->>>>>>> clawline-catalyst-dots-popup-fix
                             }
                     }
             }
@@ -1656,7 +1642,8 @@ struct ChatView: View {
         viewModel: ChatViewModel,
         effectiveStreams: [StreamSession],
         dotStatesBySession: [String: StreamDotState],
-        streamSelectorMaxHeight: CGFloat
+        streamSelectorMaxHeight: CGFloat,
+        containerWidth: CGFloat
     ) -> some View {
         StreamManagerSheet(
             viewModel: viewModel,
@@ -1666,6 +1653,7 @@ struct ChatView: View {
             shouldAutoFocusSearchOnAppear: streamPopupShouldAutoFocusSearch,
             searchFocusRequestID: streamPopupSearchFocusRequestID,
             maxAvailableHeight: streamSelectorMaxHeight,
+            maxAvailableWidth: containerWidth,
             onSelectStream: { sessionKey in
                 selectStream(sessionKey, source: .programmatic)
             },

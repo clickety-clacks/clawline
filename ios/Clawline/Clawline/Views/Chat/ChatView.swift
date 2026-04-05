@@ -1582,28 +1582,19 @@ struct ChatView: View {
             containerWidth: containerWidth,
             bottomSafeAreaInset: bottomSafeAreaInset
         )
-        return StreamPageDotsView(
+        let pageDotsControl = StreamPageDotsView(
             sessionKeys: effectiveSessionKeys,
             activeSessionKey: viewModel.uiSelectedSessionKey,
             dotStatesBySession: dotStatesBySession,
             maxWidth: pageDotsMaxWidth,
             onTap: { isStreamManagerPopoverPresented = true }
         )
-        .overlay(alignment: .top) {
-            Color.clear
-                .frame(maxWidth: .infinity)
-                .frame(height: 1)
-                .allowsHitTesting(false)
-                .popover(
-                    isPresented: $isStreamManagerPopoverPresented,
-                    attachmentAnchor: .rect(.bounds),
-                    arrowEdge: .bottom
-                ) {
-                    StreamManagerSheet(
-                        viewModel: viewModel,
-                        streams: effectiveStreams,
-                        dotStatesBySession: dotStatesBySession,
+        return Group {
+            if usesDirectStreamManagerPopoverAnchor {
+                pageDotsControl
+                    .popover(
                         isPresented: $isStreamManagerPopoverPresented,
+<<<<<<< HEAD
                         shouldAutoFocusSearchOnAppear: streamPopupShouldAutoFocusSearch,
                         searchFocusRequestID: streamPopupSearchFocusRequestID,
                         maxAvailableHeight: streamSelectorMaxHeight,
@@ -1617,12 +1608,39 @@ struct ChatView: View {
                             Task { @MainActor in
                                 await Task.yield()
                                 isTrackPickerPresented = true
+=======
+                        attachmentAnchor: .rect(.bounds),
+                        arrowEdge: .bottom
+                    ) {
+                        streamManagerSheet(
+                            viewModel: viewModel,
+                            effectiveStreams: effectiveStreams,
+                            dotStatesBySession: dotStatesBySession,
+                            streamSelectorMaxHeight: streamSelectorMaxHeight
+                        )
+                    }
+            } else {
+                pageDotsControl
+                    .overlay(alignment: .top) {
+                        Color.clear
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 1)
+                            .allowsHitTesting(false)
+                            .popover(
+                                isPresented: $isStreamManagerPopoverPresented,
+                                attachmentAnchor: .rect(.bounds),
+                                arrowEdge: .bottom
+                            ) {
+                                streamManagerSheet(
+                                    viewModel: viewModel,
+                                    effectiveStreams: effectiveStreams,
+                                    dotStatesBySession: dotStatesBySession,
+                                    streamSelectorMaxHeight: streamSelectorMaxHeight
+                                )
+>>>>>>> clawline-catalyst-dots-popup-fix
                             }
-                        }
-                    )
-                    .presentationCompactAdaptation(.popover)
-                    .presentationBackground(.clear)
-                }
+                    }
+            }
         }
         .sheet(
             isPresented: $isTrackPickerPresented,
@@ -1632,6 +1650,48 @@ struct ChatView: View {
         ) {
             TrackPickerSheet(viewModel: viewModel)
         }
+    }
+
+    private func streamManagerSheet(
+        viewModel: ChatViewModel,
+        effectiveStreams: [StreamSession],
+        dotStatesBySession: [String: StreamDotState],
+        streamSelectorMaxHeight: CGFloat
+    ) -> some View {
+        StreamManagerSheet(
+            viewModel: viewModel,
+            streams: effectiveStreams,
+            dotStatesBySession: dotStatesBySession,
+            isPresented: $isStreamManagerPopoverPresented,
+            shouldAutoFocusSearchOnAppear: streamPopupShouldAutoFocusSearch,
+            searchFocusRequestID: streamPopupSearchFocusRequestID,
+            maxAvailableHeight: streamSelectorMaxHeight,
+            onSelectStream: { sessionKey in
+                selectStream(sessionKey, source: .programmatic)
+            },
+            onPresentTrackPicker: {
+                prepareForAttachmentPicker()
+                isStreamManagerPopoverPresented = false
+                Task { @MainActor in
+                    await Task.yield()
+                    isTrackPickerPresented = true
+                }
+            }
+        )
+        .presentationCompactAdaptation(.popover)
+        .presentationBackground(.clear)
+    }
+
+    private var usesDirectStreamManagerPopoverAnchor: Bool {
+#if targetEnvironment(macCatalyst)
+        true
+#else
+        if #available(iOS 14.0, *) {
+            ProcessInfo.processInfo.isiOSAppOnMac
+        } else {
+            false
+        }
+#endif
     }
 
     private func selectStream(_ sessionKey: String, source: ChatViewModel.StreamSwitchSource) {

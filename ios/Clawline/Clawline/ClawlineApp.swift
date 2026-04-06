@@ -30,9 +30,6 @@ struct ClawlineApp: App {
             UIScrollView.appearance(whenContainedInInstancesOf: [UIHostingController<AnyView>.self]).backgroundColor = .clear
             UIScrollView.appearance().backgroundColor = .clear
         }
-#if DEBUG
-        logViewHierarchyOnce()
-#endif
         clearHostingBackgrounds()
 
         let authManager = AuthManager()
@@ -110,36 +107,6 @@ private extension ClawlineApp {
         }
         authManager.updateAdminStatus(true)
         logger.info("Debug admin now active? \(authManager.isAdmin, privacy: .public)")
-    }
-}
-#endif
-
-#if DEBUG
-private func logViewHierarchyOnce() {
-    let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "ViewHierarchy")
-    DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-        guard let windowScene = UIApplication.shared.connectedScenes
-            .compactMap({ $0 as? UIWindowScene })
-            .first(where: { $0.activationState == .foregroundActive }),
-            let window = windowScene.windows.first(where: { $0.isKeyWindow }) else {
-            logger.info("ViewHierarchyLogger: No active window")
-            return
-        }
-        logger.info("--- View Hierarchy ---")
-        printHierarchy(view: window, indent: "", logger: logger)
-    }
-}
-
-private func printHierarchy(view: UIView, indent: String, logger: Logger) {
-    let bgDescription = view.backgroundColor?.description ?? "nil"
-    let frameDescription = NSCoder.string(for: view.frame)
-    let line = "\(indent)\(String(describing: type(of: view))) bg=\(bgDescription) frame=\(frameDescription) hit=\(view.isUserInteractionEnabled)"
-    logger.info("\(line, privacy: .public)")
-#if DEBUG
-    print("ViewHierarchy: \(line)")
-#endif
-    for subview in view.subviews {
-        printHierarchy(view: subview, indent: indent + "  ", logger: logger)
     }
 }
 #endif

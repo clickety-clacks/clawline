@@ -212,6 +212,7 @@ final class ProviderChatService: ChatServicing {
     private let serviceEventBroadcaster = AsyncStreamBroadcaster<ChatServiceEvent>()
     private let lifecycleTransportEventBroadcaster = AsyncStreamBroadcaster<LifecycleTransportEvent>()
     private var lastConnectionState: ConnectionState = .disconnected
+    private var lastPublishedReadState: (sessionKey: String, lastReadMessageId: String)?
 
     private var socket: (any WebSocketClient)?
     private var receiveTask: Task<Void, Never>?
@@ -545,6 +546,12 @@ final class ProviderChatService: ChatServicing {
         guard let socket else {
             throw Error.notConnected
         }
+        lastPublishedReadState = (sessionKey, lastReadMessageId)
+        emitReadStateDiagnostic(
+            reason: "publishReadState.outbound",
+            sessionKey: sessionKey,
+            lastReadMessageId: lastReadMessageId
+        )
         let payload = ClientStreamReadPayload(sessionKey: sessionKey, lastReadMessageId: lastReadMessageId)
         let encoded = try encoder.encode(payload)
         guard let text = String(data: encoded, encoding: .utf8) else {
@@ -807,6 +814,13 @@ final class ProviderChatService: ChatServicing {
                 emitServiceEvent(.sessionInfo(info))
             }
             if let streamReadStates = result.streamReadStates {
+                for (sessionKey, lastReadMessageId) in streamReadStates {
+                    emitReadStateDiagnostic(
+                        reason: "handleAuthResult.streamReadStateSnapshot",
+                        sessionKey: sessionKey,
+                        lastReadMessageId: lastReadMessageId
+                    )
+                }
                 emitServiceEvent(.streamReadStateSnapshot(streamReadStates))
             }
             if let streamTailStates = result.streamTailStates {
@@ -962,6 +976,15 @@ final class ProviderChatService: ChatServicing {
         case "invalid_message", "payload_too_large", "invalid_channel":
             let invalidLastMessageId = payload.code == "invalid_message"
                 && isInvalidLastMessageIdMessage(payload.message)
+            if payload.code == "invalid_message" && isUnknownLastReadMessageIdMessage(payload.message) {
+                emitReadStateDiagnostic(
+                    reason: "handleServerError.unknownLastReadMessageId",
+                    sessionKey: lastPublishedReadState?.sessionKey,
+                    lastReadMessageId: lastPublishedReadState?.lastReadMessageId,
+                    code: payload.code,
+                    message: payload.message
+                )
+            }
             if invalidLastMessageId {
                 clearReplayCursors()
                 if let lifecycleEpoch {
@@ -1084,6 +1107,11 @@ final class ProviderChatService: ChatServicing {
             logger.warning("Failed to decode stream_read_state payload")
             return
         }
+        emitReadStateDiagnostic(
+            reason: "handleStreamReadState.inbound",
+            sessionKey: payload.sessionKey,
+            lastReadMessageId: payload.lastReadMessageId
+        )
         emitServiceEvent(
             .streamReadStateUpdated(
                 sessionKey: payload.sessionKey,
@@ -1142,6 +1170,37 @@ final class ProviderChatService: ChatServicing {
         activeLifecycleConnectionToken == token
     }
 
+    private func shouldLogReadStateDiagnostics(sessionKey: String? = nil, message: String? = nil) -> Bool {
+        if let sessionKey {
+            let normalizedSessionKey = sessionKey.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if normalizedSessionKey.contains("heimd") { return true }
+        }
+        if let lastPublishedReadState {
+            let normalizedSessionKey = lastPublishedReadState.sessionKey.lowercased()
+            if normalizedSessionKey.contains("heimd") { return true }
+        }
+        if let message {
+            let normalizedMessage = message.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if normalizedMessage.contains("lastreadmessageid") || normalizedMessage.contains("heimd") {
+                return true
+            }
+        }
+        return false
+    }
+
+    private func emitReadStateDiagnostic(
+        reason: String,
+        sessionKey: String? = nil,
+        lastReadMessageId: String? = nil,
+        code: String? = nil,
+        message: String? = nil
+    ) {
+        guard shouldLogReadStateDiagnostics(sessionKey: sessionKey, message: message) else { return }
+        let rendered = "[RDOT] provider reason=\(reason) sessionKey=\(sessionKey ?? "nil") lastRead=\(lastReadMessageId ?? "nil") code=\(code ?? "nil") message=\(message ?? "nil")"
+        logger.info("\(rendered, privacy: .public)")
+        print(rendered)
+    }
+
     private func authFailureReason(from rawReason: String?) -> AuthFailureReason? {
         let normalized = (rawReason ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         switch normalized {
@@ -1164,6 +1223,14 @@ final class ProviderChatService: ChatServicing {
             .lowercased()
             .replacingOccurrences(of: " ", with: "")
         return normalized == "invalidlastmessageid"
+    }
+
+    private func isUnknownLastReadMessageIdMessage(_ message: String?) -> Bool {
+        let normalized = (message ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: " ", with: "")
+        return normalized.contains("unknownlastreadmessageid")
     }
 
     private static let clientID = "openclaw"

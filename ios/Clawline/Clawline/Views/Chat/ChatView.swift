@@ -1675,14 +1675,6 @@ struct ChatView: View {
         streamSelectorMaxHeight: CGFloat,
         containerWidth: CGFloat
     ) -> some View {
-#if DEBUG
-        emitStreamPopupConsoleEvent(
-            "presentation_path_entered",
-            sessionKey: viewModel.uiSelectedSessionKey,
-            isPresented: isStreamManagerPopoverPresented,
-            note: "popover content builder entered"
-        )
-#endif
         return StreamManagerSheet(
             viewModel: viewModel,
             streams: effectiveStreams,
@@ -1716,6 +1708,12 @@ struct ChatView: View {
         .presentationBackground(.clear)
         .onAppear {
 #if DEBUG
+            emitStreamPopupConsoleEvent(
+                "presentation_path_entered",
+                sessionKey: viewModel.uiSelectedSessionKey,
+                isPresented: isStreamManagerPopoverPresented,
+                note: "popover content lifecycle entered"
+            )
             emitStreamPopupConsoleEvent(
                 "popover_content_appear",
                 sessionKey: viewModel.uiSelectedSessionKey,

@@ -1629,15 +1629,18 @@ struct ChatView: View {
                     note: "page dots button action entered"
                 )
 #endif
-                isStreamManagerPopoverPresented = true
+                Task { @MainActor in
+                    await Task.yield()
+                    isStreamManagerPopoverPresented = true
 #if DEBUG
-                emitStreamPopupConsoleEvent(
-                    "dots_tap_set_true",
-                    sessionKey: viewModel.uiSelectedSessionKey,
-                    isPresented: isStreamManagerPopoverPresented,
-                    note: "page dots button set popover true"
-                )
+                    emitStreamPopupConsoleEvent(
+                        "dots_tap_set_true",
+                        sessionKey: viewModel.uiSelectedSessionKey,
+                        isPresented: isStreamManagerPopoverPresented,
+                        note: "page dots button set popover true after yielding past tap"
+                    )
 #endif
+                }
             }
         )
         .popover(

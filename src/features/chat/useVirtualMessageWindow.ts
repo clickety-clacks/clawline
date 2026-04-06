@@ -12,9 +12,11 @@ const BUBBLE_MIN_WIDTH = 120;
 const BUBBLE_PADDING_HORIZONTAL = 40;
 const BUBBLE_HEADER_AVATAR_WIDTH = 32;
 const BUBBLE_HEADER_GAP = 10;
+const BUBBLE_HEADER_TIMESTAMP_GAP = 12;
 const MAX_LINE_WIDTH_PX = 560;
 const MEDIUM_WIDTH_SAFETY_MARGIN_PX = 24;
 const PHONE_MEDIUM_WIDTH_SAFETY_MARGIN_PX = 8;
+const TIMESTAMP_WIDTH_SAMPLE = "Yesterday, 12:00 PM";
 let textMeasureCanvas: HTMLCanvasElement | null = null;
 const textMeasureCache = new Map<string, number>();
 const bubbleWidthCache = new Map<string, number>();
@@ -480,12 +482,15 @@ function normalizeForMeasurement(content: string) {
 
 function estimateBubbleChromeWidth(message: ChatMessageRecord) {
   const senderWidth = measureSingleLineWidth(getMessageSenderLabel(message), 12, 600);
+  const timestampWidth = measureSingleLineWidth(TIMESTAMP_WIDTH_SAMPLE, 11, 400);
 
   return Math.ceil(
     BUBBLE_PADDING_HORIZONTAL
     + BUBBLE_HEADER_AVATAR_WIDTH
     + BUBBLE_HEADER_GAP
     + senderWidth
+    + BUBBLE_HEADER_TIMESTAMP_GAP
+    + timestampWidth
   );
 }
 

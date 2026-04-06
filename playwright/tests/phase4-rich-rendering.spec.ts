@@ -18,6 +18,7 @@ test("markdown messages render rich blocks and expand into an overlay", async ({
   ].join("\n");
   const expandedRichContent = `${richContent}\n\n${"More detail. ".repeat(90)}`;
   const shortContent = "Hey there";
+  const highlightContent = "Please ==watch the market signal== before heading out.";
   const mediumContent = "Found a better route through the market if you still want plants later.";
   const longContent =
     "This should settle into the long-form body treatment because it crosses the medium threshold and reads more like a full thought than a quick exchange.";
@@ -84,6 +85,18 @@ test("markdown messages render rich blocks and expand into an overlay", async ({
             role: "assistant",
             content: shortContent,
             timestamp: Date.now() - 15_000,
+            streaming: false,
+            sessionKey,
+            attachments: []
+          })
+        );
+        socket.send(
+          JSON.stringify({
+            type: "message",
+            id: "s_highlight_1",
+            role: "assistant",
+            content: highlightContent,
+            timestamp: 1_764_201_200_080,
             streaming: false,
             sessionKey,
             attachments: []
@@ -172,6 +185,17 @@ test("markdown messages render rich blocks and expand into an overlay", async ({
       await expect(page.getByTestId("message-s_rich_1").locator(".message-markdown pre")).toContainText(
         "console.log('phase4');"
       );
+      const mark = page.getByTestId("message-s_highlight_1").locator(".message-markdown mark");
+      await expect(mark).toContainText("watch the market signal");
+      const highlightColors = await page.getByTestId("message-s_highlight_1").locator(".message-markdown").evaluate((element) => {
+        const markElement = element.querySelector("mark");
+        return {
+          baseColor: window.getComputedStyle(element).color,
+          markColor: markElement ? window.getComputedStyle(markElement).color : null
+        };
+      });
+      expect(highlightColors.markColor).not.toBeNull();
+      expect(highlightColors.markColor).not.toBe(highlightColors.baseColor);
       const shortTypography = await page.getByTestId("message-s_short_1").locator(".message-markdown").evaluate((element) => {
         const style = window.getComputedStyle(element);
         return {
@@ -216,6 +240,10 @@ test("markdown messages render rich blocks and expand into an overlay", async ({
         fontWeight: "400",
         lineHeight: "22.5px"
       });
+      const assistantBubbleRadius = await page
+        .getByTestId("message-s_medium_1")
+        .evaluate((element) => window.getComputedStyle(element).borderRadius);
+      expect(assistantBubbleRadius).toBe("28px 28px 28px 6px / 30px 30px 20px 14px");
       await expect(page.getByTestId("message-s_rich_1").locator(".message-markdown table")).toContainText(
         "alpha"
       );

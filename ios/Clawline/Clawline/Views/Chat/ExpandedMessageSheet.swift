@@ -16,7 +16,6 @@ struct ExpandedMessageSheet: View {
     let terminalConnectionPool: TerminalSessionConnectionPool
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.settingsManager) private var settings
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     @State private var dragOffset: CGFloat = 0
@@ -24,13 +23,7 @@ struct ExpandedMessageSheet: View {
 
     private var isCompact: Bool { horizontalSizeClass == .compact }
     private var metrics: ChatFlowTheme.Metrics { ChatFlowTheme.Metrics(isCompact: isCompact) }
-    private var effectiveColorScheme: ColorScheme {
-#if os(visionOS)
-        return settings.appearanceMode == .dark ? .dark : .light
-#else
-        return colorScheme
-#endif
-    }
+    private var effectiveColorScheme: ColorScheme { colorScheme }
 
     var body: some View {
         let _ = fontScaleChangeSequence

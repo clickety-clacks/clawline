@@ -56,9 +56,7 @@ struct RootView: View {
             }
         }
         .modifier(KeyboardSafeAreaMode(isActive: auth.isAuthenticated && isProviderConfigured))
-#if os(visionOS)
         .preferredColorScheme(settings.preferredColorScheme)
-#endif
         .task(id: auth.isAuthenticated) {
             // Recovery: after reinstall, Keychain credentials can persist while UserDefaults are wiped.
             // Being "authenticated" without a provider config is an invalid state and has proven to

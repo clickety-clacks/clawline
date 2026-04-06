@@ -14,17 +14,10 @@ struct ScrollToBottomButton: View {
     let onTap: () -> Void
 
     @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.settingsManager) private var settings
     @State private var bounceTask: Task<Void, Never>?
     @State private var bounceScale: CGFloat = 1
 
-    private var resolvedScheme: ColorScheme {
-#if os(visionOS)
-        return settings.appearanceMode == .light ? .light : .dark
-#else
-        return colorScheme
-#endif
-    }
+    private var resolvedScheme: ColorScheme { colorScheme }
 
     private var visionOSBorderColor: Color {
         Color.white.opacity(0.9)

@@ -145,6 +145,97 @@ describe("transportMachine", () => {
     ]);
   });
 
+  it("does not infer selected session from window.location when no explicit selection is injected", async () => {
+    window.history.replaceState({}, "", "/chat/agent:main:clawline:user_1:main");
+
+    const authStore = seedSession();
+    const chatStore = createChatDomainStore({
+      persistence: createMemoryChatPersistence()
+    });
+    const factory = new FakeWebSocketFactory();
+    createTransportMachine({
+      authSessionStore: authStore,
+      chatDomainStore: chatStore,
+      webSocketFactory: factory.create
+    });
+
+    await waitForSocket(factory);
+    factory.sockets[0].emitOpen();
+    factory.sockets[0].emitMessage(
+      JSON.stringify({
+        type: "auth_result",
+        success: true,
+        userId: "user_1",
+        sessionKeys: [
+          "agent:main:clawline:user_1:main",
+          "agent:main:clawline:user_1:side"
+        ]
+      })
+    );
+
+    factory.sockets[0].emitMessage(
+      JSON.stringify({
+        type: "message",
+        id: "s_side_101",
+        role: "assistant",
+        content: "Side message",
+        timestamp: 101,
+        streaming: false,
+        sessionKey: "agent:main:clawline:user_1:side",
+        attachments: []
+      })
+    );
+
+    expect(chatStore.getState().unreadBySessionKey["agent:main:clawline:user_1:side"]).toBe(1);
+  });
+
+  it("uses the explicitly injected selected session instead of the URL", async () => {
+    window.history.replaceState({}, "", "/chat/agent:main:clawline:user_1:main");
+
+    const authStore = seedSession();
+    const chatStore = createChatDomainStore({
+      persistence: createMemoryChatPersistence()
+    });
+    const factory = new FakeWebSocketFactory();
+    const transport = createTransportMachine({
+      authSessionStore: authStore,
+      chatDomainStore: chatStore,
+      webSocketFactory: factory.create
+    });
+    transport.setSelectedSessionKey("agent:main:clawline:user_1:side");
+
+    await waitForSocket(factory);
+    factory.sockets[0].emitOpen();
+    factory.sockets[0].emitMessage(
+      JSON.stringify({
+        type: "auth_result",
+        success: true,
+        userId: "user_1",
+        sessionKeys: [
+          "agent:main:clawline:user_1:main",
+          "agent:main:clawline:user_1:side"
+        ]
+      })
+    );
+
+    factory.sockets[0].emitMessage(
+      JSON.stringify({
+        type: "message",
+        id: "s_side_102",
+        role: "assistant",
+        content: "Side message",
+        timestamp: 102,
+        streaming: false,
+        sessionKey: "agent:main:clawline:user_1:side",
+        attachments: []
+      })
+    );
+
+    expect(
+      chatStore.getState().unreadBySessionKey["agent:main:clawline:user_1:side"]
+    ).toBeUndefined();
+  });
+
   it("stays replaying until replay messages complete even after auth succeeds", async () => {
     const authStore = seedSession();
     const chatStore = createChatDomainStore({

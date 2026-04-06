@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
-import { Paperclip, SendHorizontal } from "lucide-react";
+import { Plus, RefreshCw, SendHorizontal } from "lucide-react";
 import type { SessionProvisioningState } from "../streams/provisioning";
 import { useAuthSessionStore } from "../../runtime/auth/authSessionStore";
 import { useChatDomainStore } from "../../runtime/chat/chatDomainStore";
@@ -9,6 +9,7 @@ import {
   isUploadAuthFailure
 } from "../../protocol/upload-api";
 import { prepareOutboundAttachments } from "./outboundAttachments";
+import { projectComposerSendState } from "./chatSendState";
 
 interface ComposerAttachmentDraft {
   file: File;
@@ -36,20 +37,15 @@ export function Composer({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
-  const canSend =
-    Boolean(sessionKey) &&
-    transportState.phase === "live" &&
-    provisioningState === "ready" &&
-    !isSubmitting &&
-    (draft.trim().length > 0 || stagedAttachments.length > 0);
-  const sendConnectionState =
-    !sessionKey || provisioningState !== "ready"
-      ? "idle"
-      : transportState.phase === "live"
-        ? "live"
-        : transportState.phase === "failed"
-          ? "disconnected"
-          : "reconnecting";
+  const sendState = projectComposerSendState({
+    activeStreamDisplayName,
+    draft,
+    isSubmitting,
+    provisioningState,
+    sessionKey,
+    stagedAttachmentCount: stagedAttachments.length,
+    transportPhase: transportState.phase
+  });
 
   useEffect(() => {
     const textarea = textareaRef.current;
@@ -158,6 +154,17 @@ export function Composer({
     void submit();
   }
 
+  function handleSendButtonClick() {
+    if (sendState.sendAction === "reconnect") {
+      transportStore.retryNow();
+      return;
+    }
+
+    if (sendState.sendAction === "send") {
+      void submit();
+    }
+  }
+
   return (
     <section
       className={
@@ -227,11 +234,11 @@ export function Composer({
         <button
           aria-label="Add attachment"
           className="composer-circle-button composer-circle-button--attach"
-          disabled={!sessionKey || isSubmitting}
+          disabled={!sendState.canAttach}
           onClick={() => fileInputRef.current?.click()}
           type="button"
         >
-          <Paperclip aria-hidden="true" size={18} strokeWidth={2.1} />
+          <Plus aria-hidden="true" size={18} strokeWidth={2.3} />
         </button>
         <div className="composer-input-field">
           <textarea
@@ -258,45 +265,28 @@ export function Composer({
                 appendFiles(files);
               }
             }}
-            placeholder={
-              sessionKey
-                ? transportState.phase === "live" && provisioningState === "ready"
-                  ? activeStreamDisplayName
-                    ? `${activeStreamDisplayName} — ${sessionKey}`
-                    : sessionKey
-                  : provisioningState === "unavailable"
-                    ? "This stream is unavailable for sending"
-                    : provisioningState === "waiting"
-                      ? "Waiting for provisioning"
-                      : "Waiting for connection"
-                : "Select a session"
-            }
+            placeholder={sendState.placeholder}
             ref={textareaRef}
             rows={1}
             value={draft}
           />
         </div>
         <button
-          aria-label={
-            isSubmitting
-              ? "Uploading…"
-              : sendConnectionState === "reconnecting"
-                ? "Send unavailable while reconnecting"
-                : sendConnectionState === "disconnected"
-                  ? "Send unavailable while disconnected"
-                  : "Send"
-          }
+          aria-label={sendState.sendAriaLabel}
           className={[
             "composer-circle-button",
             "composer-circle-button--send",
-            `composer-circle-button--${sendConnectionState}`
+            `composer-circle-button--${sendState.connectionState}`
           ].join(" ")}
-          data-connection-state={sendConnectionState}
-          disabled={!canSend}
-          type="submit"
+          data-connection-state={sendState.connectionState}
+          disabled={!sendState.isSendButtonEnabled}
+          onClick={handleSendButtonClick}
+          type="button"
         >
           {isSubmitting ? (
             <span aria-hidden="true">…</span>
+          ) : sendState.sendAction === "reconnect" ? (
+            <RefreshCw aria-hidden="true" size={18} strokeWidth={2.1} />
           ) : (
             <SendHorizontal aria-hidden="true" size={18} strokeWidth={2.1} />
           )}

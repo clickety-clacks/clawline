@@ -45,6 +45,7 @@ export interface TransportMachine {
   getState(): TransportState;
   subscribe(listener: () => void): () => void;
   retryNow(): void;
+  setSelectedSessionKey(sessionKey: string | undefined): void;
   sendMessage(input: SendMessageInput): Promise<void>;
 }
 
@@ -81,13 +82,14 @@ export function createTransportMachine({
   authSessionStore,
   chatDomainStore,
   browserRuntime = createBrowserRuntime(),
-  selectedSessionKeySource = createSelectedSessionKeySource(),
+  selectedSessionKeySource,
   webSocketFactory = createBrowserWebSocketFactory()
 }: CreateTransportMachineOptions): TransportMachine {
   const baseStore = createStore<TransportState>({
     ...INITIAL_STATE,
     isBrowserOnline: browserRuntime.isOnline()
   });
+  let selectedSessionKey: string | undefined;
   let socket: SocketLike | null = null;
   let reconnectTimer: number | null = null;
   let replayFlushTimer: number | null = null;
@@ -287,7 +289,7 @@ export function createTransportMachine({
           const messageInput = {
             localDeviceId: authSessionStore.getState().session?.deviceId ?? "",
             message: payload,
-            selectedSessionKey: selectedSessionKeySource(),
+            selectedSessionKey: selectedSessionKeySource?.() ?? selectedSessionKey,
             source
           };
           if (
@@ -463,6 +465,9 @@ export function createTransportMachine({
     retryNow() {
       void connect("retry");
     },
+    setSelectedSessionKey(sessionKey) {
+      selectedSessionKey = sessionKey;
+    },
     async sendMessage(input) {
       if (baseStore.getState().phase !== "live" || !socket) {
         throw new Error("Transport is not live");
@@ -535,17 +540,6 @@ function toReplayCursorPayload(
   );
 
   return entries.length > 0 ? Object.fromEntries(entries) : undefined;
-}
-
-function createSelectedSessionKeySource() {
-  return () => {
-    const hashPath =
-      window.location.hash.startsWith("#/") ?
-        window.location.hash.slice(1)
-      : window.location.pathname;
-    const match = hashPath.match(/^\/chat\/(.+)$/);
-    return match ? decodeURIComponent(match[1]) : undefined;
-  };
 }
 
 export function TransportMachineProvider({

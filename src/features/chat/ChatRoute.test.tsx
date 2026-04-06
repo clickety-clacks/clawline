@@ -34,7 +34,7 @@ const TEST_STREAMS = [
   },
   {
     sessionKey: "agent:main:main",
-    displayName: "Global DM",
+    displayName: "Heimdal",
     kind: "global_dm",
     orderIndex: 1,
     isBuiltIn: true,
@@ -62,8 +62,31 @@ function LocationProbe() {
 function renderChatRoute(
   initialPath: string,
   {
+    initialMessages = [
+      {
+        content: "Main thread",
+        id: "s_main",
+        selectedSessionKey: "agent:main:clawline:user_1:main",
+        sessionKey: "agent:main:clawline:user_1:main",
+        timestamp: 10
+      },
+      {
+        content: "Side thread",
+        id: "s_side",
+        selectedSessionKey: "agent:main:clawline:user_1:main",
+        sessionKey: "agent:main:clawline:user_1:side",
+        timestamp: 11
+      }
+    ],
     sessionKeys = ["agent:main:clawline:user_1:main", "agent:main:main"]
   }: {
+    initialMessages?: Array<{
+      content: string;
+      id: string;
+      selectedSessionKey: string;
+      sessionKey: string;
+      timestamp: number;
+    }>;
     sessionKeys?: string[];
   } = {}
 ) {
@@ -87,40 +110,23 @@ function renderChatRoute(
     type: "session_info",
     sessionKeys
   });
-  chatStore.applyIncomingMessage(
-    {
+  for (const message of initialMessages) {
+    chatStore.applyIncomingMessage({
       localDeviceId: "browser-device-1",
       message: {
         type: "message",
-        id: "s_main",
+        id: message.id,
         role: "assistant",
-        content: "Main thread",
-        timestamp: 10,
+        content: message.content,
+        timestamp: message.timestamp,
         streaming: false,
-        sessionKey: "agent:main:clawline:user_1:main",
+        sessionKey: message.sessionKey,
         attachments: []
       },
-      selectedSessionKey: "agent:main:clawline:user_1:main",
+      selectedSessionKey: message.selectedSessionKey,
       source: "live"
-    },
-  );
-  chatStore.applyIncomingMessage(
-    {
-      localDeviceId: "browser-device-1",
-      message: {
-        type: "message",
-        id: "s_side",
-        role: "assistant",
-        content: "Side thread",
-        timestamp: 11,
-        streaming: false,
-        sessionKey: "agent:main:clawline:user_1:side",
-        attachments: []
-      },
-      selectedSessionKey: "agent:main:clawline:user_1:main",
-      source: "live"
-    },
-  );
+    });
+  }
 
   const transportMachine = createTransportMachine({
     authSessionStore: authStore,
@@ -289,6 +295,81 @@ describe("ChatRoute", () => {
     await waitFor(() => {
       expect(screen.queryByLabelText("1 unread messages")).not.toBeInTheDocument();
     });
+  });
+
+  it("clears built-in stream unread dots after each stream is visited", async () => {
+    renderChatRoute("/chat/agent:main:clawline:user_1:side", {
+      initialMessages: [
+        {
+          content: "Side thread",
+          id: "s_side",
+          selectedSessionKey: "agent:main:clawline:user_1:side",
+          sessionKey: "agent:main:clawline:user_1:side",
+          timestamp: 10
+        },
+        {
+          content: "Personal ping",
+          id: "s_personal_unread",
+          selectedSessionKey: "agent:main:clawline:user_1:side",
+          sessionKey: "agent:main:clawline:user_1:main",
+          timestamp: 11
+        },
+        {
+          content: "Heimdal ping",
+          id: "s_heimdal_unread",
+          selectedSessionKey: "agent:main:clawline:user_1:side",
+          sessionKey: "agent:main:main",
+          timestamp: 12
+        }
+      ],
+      sessionKeys: [
+        "agent:main:clawline:user_1:main",
+        "agent:main:main",
+        "agent:main:clawline:user_1:side"
+      ]
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Manage streams" }));
+
+    const personalUnreadCard = screen.getByRole("button", { name: /Personal/i });
+    const heimdalUnreadCard = screen.getByRole("button", { name: /Heimdal/i });
+
+    expect(within(personalUnreadCard).getByLabelText("1 unread messages")).toBeInTheDocument();
+    expect(within(heimdalUnreadCard).getByLabelText("1 unread messages")).toBeInTheDocument();
+
+    fireEvent.click(personalUnreadCard);
+
+    await waitFor(() => {
+      expect(screen.getByText("Personal ping")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Manage streams" }));
+
+    const personalReadCard = screen.getByRole("button", { name: /Personal/i });
+    const heimdalStillUnreadCard = screen.getByRole("button", { name: /Heimdal/i });
+
+    expect(within(personalReadCard).queryByLabelText("1 unread messages")).toBeNull();
+    expect(
+      personalReadCard.querySelector(".session-sheet-card-indicator--unread")
+    ).toBeNull();
+    expect(
+      within(heimdalStillUnreadCard).getByLabelText("1 unread messages")
+    ).toBeInTheDocument();
+
+    fireEvent.click(heimdalStillUnreadCard);
+
+    await waitFor(() => {
+      expect(screen.getByText("Heimdal ping")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Manage streams" }));
+
+    const heimdalReadCard = screen.getByRole("button", { name: /Heimdal/i });
+
+    expect(within(heimdalReadCard).queryByLabelText("1 unread messages")).toBeNull();
+    expect(
+      heimdalReadCard.querySelector(".session-sheet-card-indicator--unread")
+    ).toBeNull();
   });
 
   it("shows unavailable provisioning state when the user explicitly switches to a non-provisioned session", () => {

@@ -11,6 +11,11 @@
   --color-panel-soft-strong: rgba(41, 37, 36, 0.92);
   --color-panel-glass: rgba(60, 60, 60, 0.25);
   --color-panel-glass-strong: rgba(80, 80, 80, 0.35);
+  --color-glass-specular: rgba(255, 255, 255, 0.16);
+  --color-glass-specular-soft: rgba(255, 255, 255, 0.08);
+  --color-glass-shadow: rgba(0, 0, 0, 0.28);
+  --color-glass-shadow-soft: rgba(0, 0, 0, 0.14);
+  --color-glass-tint: rgba(255, 255, 255, 0.03);
   --color-border: rgba(255, 255, 255, 0.08);
   --color-border-strong: rgba(255, 255, 255, 0.12);
   --color-text: #e8e4e0;
@@ -19,7 +24,11 @@
   --color-accent: #7ba376;
   --color-accent-soft: linear-gradient(135deg, #2d3b2a 0%, #243322 100%);
   --color-accent-warm: #e07a5f;
+  --color-mark-assistant: rgb(217, 175, 98);
+  --color-mark-user: rgb(123, 163, 118);
   --color-danger: #c47a6e;
+  --color-connection-reconnecting: rgb(235, 194, 77);
+  --color-connection-disconnected: rgb(224, 77, 77);
   --color-bubble-user: linear-gradient(135deg, #2d3b2a 0%, #243322 100%);
   --color-bubble-user-solid: #243322;
   --color-bubble-assistant: #292524;
@@ -36,6 +45,10 @@
     0 30px 90px rgba(0, 0, 0, 0.5),
     0 12px 40px rgba(0, 0, 0, 0.35);
   --color-shadow: rgba(0, 0, 0, 0.22);
+  --surface-radius-bubble-large: 28px;
+  --surface-radius-bubble-tight: 6px;
+  --surface-radius-card: 18px;
+  --surface-radius-card-inner: 14px;
   --layout-max-width: 1200px;
   --font-scale: 1;
 }
@@ -115,6 +128,11 @@ html[data-appearance="light"] {
   --color-panel-soft-strong: rgba(253, 246, 238, 0.92);
   --color-panel-glass: rgba(255, 255, 255, 0.3);
   --color-panel-glass-strong: rgba(255, 255, 255, 0.45);
+  --color-glass-specular: rgba(255, 255, 255, 0.72);
+  --color-glass-specular-soft: rgba(255, 255, 255, 0.34);
+  --color-glass-shadow: rgba(92, 74, 61, 0.18);
+  --color-glass-shadow-soft: rgba(92, 74, 61, 0.08);
+  --color-glass-tint: rgba(255, 255, 255, 0.22);
   --color-border: rgba(93, 74, 61, 0.1);
   --color-border-strong: rgba(255, 255, 255, 0.6);
   --color-text: #3d3429;
@@ -123,7 +141,11 @@ html[data-appearance="light"] {
   --color-accent: #8fa68a;
   --color-accent-soft: linear-gradient(135deg, #b8ceaf 0%, #c8d9c0 100%);
   --color-accent-warm: #c4785c;
+  --color-mark-assistant: rgb(158, 62, 28);
+  --color-mark-user: rgb(143, 166, 138);
   --color-danger: #c4785c;
+  --color-connection-reconnecting: rgb(227, 171, 20);
+  --color-connection-disconnected: rgb(199, 48, 43);
   --color-bubble-user: linear-gradient(135deg, #b8ceaf 0%, #c8d9c0 100%);
   --color-bubble-user-solid: #c8d9c0;
   --color-bubble-assistant: linear-gradient(180deg, #fffdf9 0%, #fdf6ee 100%);
@@ -416,11 +438,15 @@ html[data-appearance="light"] body::before {
 
 .message-list-virtual-surface {
   position: relative;
+  width: 100%;
   min-height: 100%;
+  overflow-x: clip;
 }
 
 .message-list-row {
   position: absolute;
+  max-width: 100%;
+  overflow-x: clip;
 }
 
 .message-cluster {
@@ -447,10 +473,10 @@ html[data-appearance="light"] body::before {
 
 .message-header-text {
   display: flex;
+  flex: 1 1 auto;
   align-items: baseline;
   justify-content: space-between;
   gap: 0.65rem;
-  width: 100%;
   min-width: 0;
 }
 
@@ -518,17 +544,33 @@ html[data-appearance="light"] body::before {
 .message-list-jump-button {
   pointer-events: auto;
   border-color: var(--color-border-strong);
-  background: var(--color-panel-glass);
-  box-shadow: var(--color-shadow-bubble);
-  backdrop-filter: blur(16px) saturate(180%);
+  background:
+    linear-gradient(180deg, var(--color-glass-specular-soft), transparent 42%),
+    linear-gradient(180deg, var(--color-glass-tint), rgba(255, 255, 255, 0.01)),
+    var(--color-panel-glass);
+  box-shadow:
+    0 10px 28px var(--color-glass-shadow),
+    0 2px 10px var(--color-glass-shadow-soft),
+    inset 0 1px 0 var(--color-glass-specular);
+  backdrop-filter: blur(22px) saturate(190%);
+  -webkit-backdrop-filter: blur(22px) saturate(190%);
 }
 
 .provisioning-banner {
   padding: 0.8rem 1rem;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--color-accent-warm) 12%, var(--color-panel));
+  background:
+    linear-gradient(180deg, var(--color-glass-specular-soft), transparent 48%),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--color-accent-warm) 14%, var(--color-glass-tint)),
+      color-mix(in srgb, var(--color-accent-warm) 8%, var(--color-panel-glass))
+    );
   color: var(--color-text-secondary);
   border: 1px solid color-mix(in srgb, var(--color-accent-warm) 24%, var(--color-border));
+  box-shadow:
+    0 10px 24px var(--color-glass-shadow-soft),
+    inset 0 1px 0 var(--color-glass-specular-soft);
 }
 
 .provisioning-banner--floating {
@@ -544,22 +586,43 @@ html[data-appearance="light"] body::before {
 }
 
 .message-bubble {
+  --message-mark-color: var(--color-mark-assistant);
   width: 100%;
   max-width: 100%;
   min-width: 0;
   display: grid;
   gap: 0.75rem;
   padding: var(--message-bubble-padding-vertical) var(--message-bubble-padding-horizontal);
-  border-radius: 24px 24px 24px 4px;
+  border-radius:
+    var(--surface-radius-bubble-large)
+    var(--surface-radius-bubble-large)
+    var(--surface-radius-bubble-large)
+    var(--surface-radius-bubble-tight)
+    /
+    calc(var(--surface-radius-bubble-large) + 2px)
+    calc(var(--surface-radius-bubble-large) + 2px)
+    calc(var(--surface-radius-bubble-large) - 8px)
+    calc(var(--surface-radius-bubble-tight) + 8px);
   border: 1px solid var(--color-border);
   background: var(--color-bubble-assistant);
+  overflow: clip;
   box-shadow:
     var(--color-shadow-bubble),
     inset 0 1px 0 rgba(255, 255, 255, 0.15);
 }
 
 .message-bubble--user {
-  border-radius: 24px 24px 4px 24px;
+  --message-mark-color: var(--color-mark-user);
+  border-radius:
+    var(--surface-radius-bubble-large)
+    var(--surface-radius-bubble-large)
+    var(--surface-radius-bubble-tight)
+    var(--surface-radius-bubble-large)
+    /
+    calc(var(--surface-radius-bubble-large) + 2px)
+    calc(var(--surface-radius-bubble-large) + 2px)
+    calc(var(--surface-radius-bubble-tight) + 8px)
+    calc(var(--surface-radius-bubble-large) - 8px);
   background: var(--color-bubble-user);
   border-color: color-mix(in srgb, var(--color-accent) 22%, var(--color-border));
 }
@@ -614,9 +677,19 @@ html[data-appearance="light"] body::before {
   margin-right: auto;
   display: grid;
   place-items: center;
-  border-radius: 24px 24px 24px 4px;
+  border-radius:
+    var(--surface-radius-bubble-large)
+    var(--surface-radius-bubble-large)
+    var(--surface-radius-bubble-large)
+    var(--surface-radius-bubble-tight)
+    /
+    calc(var(--surface-radius-bubble-large) + 2px)
+    calc(var(--surface-radius-bubble-large) + 2px)
+    calc(var(--surface-radius-bubble-large) - 8px)
+    calc(var(--surface-radius-bubble-tight) + 8px);
   border: 1px solid var(--color-border);
   background: var(--color-bubble-assistant);
+  overflow: clip;
   box-shadow:
     var(--color-shadow-bubble),
     inset 0 1px 1px rgba(255, 255, 255, 0.08);
@@ -682,15 +755,18 @@ html[data-appearance="light"] body::before {
 @keyframes composer-send-reconnecting-pulse {
   0%,
   100% {
+    transform: scale(0.75);
     box-shadow:
-      0 0 0 0 color-mix(in srgb, var(--color-accent-warm) 22%, transparent),
+      0 0 0 0 color-mix(in srgb, var(--color-connection-reconnecting) 16%, transparent),
+      0 8px 22px color-mix(in srgb, var(--color-connection-reconnecting) 18%, transparent),
       inset 0 1px 1px rgba(255, 255, 255, 0.08);
   }
 
   50% {
+    transform: scale(1);
     box-shadow:
-      0 0 0 8px color-mix(in srgb, var(--color-accent-warm) 0%, transparent),
-      0 0 24px color-mix(in srgb, var(--color-accent-warm) 28%, transparent),
+      0 0 0 6px color-mix(in srgb, var(--color-connection-reconnecting) 12%, transparent),
+      0 12px 28px color-mix(in srgb, var(--color-connection-reconnecting) 22%, transparent),
       inset 0 1px 1px rgba(255, 255, 255, 0.08);
   }
 }
@@ -798,7 +874,7 @@ html[data-appearance="light"] body::before {
   border-collapse: collapse;
   border-spacing: 0;
   overflow: hidden;
-  border-radius: 1rem;
+  border-radius: var(--surface-radius-card);
   border: 1px solid var(--color-border);
   background: color-mix(in srgb, var(--color-panel-soft) 94%, transparent);
 }
@@ -822,10 +898,10 @@ html[data-appearance="light"] body::before {
 }
 
 .message-markdown mark {
-  background: color-mix(in srgb, var(--color-accent-warm) 26%, transparent);
-  color: inherit;
-  padding: 0.05rem 0.2rem;
-  border-radius: 0.2rem;
+  background: transparent;
+  color: var(--message-mark-color);
+  font-weight: 600;
+  padding: 0;
 }
 
 .message-actions {
@@ -844,23 +920,56 @@ html[data-appearance="light"] body::before {
 }
 
 .message-link-card {
+  position: relative;
   display: flex;
-  align-items: center;
+  align-items: stretch;
   justify-content: space-between;
   gap: 1rem;
   padding: 0.95rem 1rem;
-  border-radius: 1rem;
+  border-radius:
+    var(--surface-radius-card)
+    var(--surface-radius-card)
+    calc(var(--surface-radius-card) - 2px)
+    calc(var(--surface-radius-card) - 2px)
+    /
+    calc(var(--surface-radius-card) + 2px)
+    calc(var(--surface-radius-card) + 2px)
+    calc(var(--surface-radius-card) - 4px)
+    calc(var(--surface-radius-card) - 4px);
   border: 1px solid var(--color-border);
   background: color-mix(in srgb, var(--color-panel-soft) 92%, transparent);
-  box-shadow: var(--color-shadow-bubble);
+  overflow: clip;
+  box-shadow:
+    var(--color-shadow-bubble),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
   color: inherit;
   text-decoration: none;
+}
+
+.message-link-card-thumbnail {
+  width: 56px;
+  min-width: 56px;
+  height: 56px;
+  border-radius:
+    var(--surface-radius-card-inner)
+    var(--surface-radius-card-inner)
+    calc(var(--surface-radius-card-inner) - 2px)
+    calc(var(--surface-radius-card-inner) - 2px)
+    /
+    calc(var(--surface-radius-card-inner) + 1px)
+    calc(var(--surface-radius-card-inner) + 1px)
+    calc(var(--surface-radius-card-inner) - 3px)
+    calc(var(--surface-radius-card-inner) - 3px);
+  object-fit: cover;
+  background: color-mix(in srgb, var(--color-panel-soft-strong) 96%, transparent);
+  align-self: center;
 }
 
 .message-link-card-copy {
   display: grid;
   gap: 0.2rem;
   min-width: 0;
+  flex: 1 1 auto;
 }
 
 .message-link-card-copy strong,
@@ -884,16 +993,29 @@ html[data-appearance="light"] body::before {
 .message-link-card-arrow {
   color: var(--color-accent-warm);
   font-size: 1.1rem;
+  align-self: center;
 }
 
 .message-attachment-card {
   display: grid;
   gap: 0.6rem;
   padding: 0.85rem;
-  border-radius: 1rem;
+  border-radius:
+    var(--surface-radius-card)
+    var(--surface-radius-card)
+    calc(var(--surface-radius-card) - 2px)
+    calc(var(--surface-radius-card) - 2px)
+    /
+    calc(var(--surface-radius-card) + 2px)
+    calc(var(--surface-radius-card) + 2px)
+    calc(var(--surface-radius-card) - 4px)
+    calc(var(--surface-radius-card) - 4px);
   background: color-mix(in srgb, var(--color-panel-soft) 92%, transparent);
   border: 1px solid var(--color-border);
-  box-shadow: var(--color-shadow-bubble);
+  overflow: clip;
+  box-shadow:
+    var(--color-shadow-bubble),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
 }
 
 .message-attachment-card figcaption,
@@ -914,7 +1036,16 @@ html[data-appearance="light"] body::before {
 .message-attachment-video {
   width: 100%;
   max-height: 24rem;
-  border-radius: 0.9rem;
+  border-radius:
+    var(--surface-radius-card-inner)
+    var(--surface-radius-card-inner)
+    calc(var(--surface-radius-card-inner) - 2px)
+    calc(var(--surface-radius-card-inner) - 2px)
+    /
+    calc(var(--surface-radius-card-inner) + 1px)
+    calc(var(--surface-radius-card-inner) + 1px)
+    calc(var(--surface-radius-card-inner) - 3px)
+    calc(var(--surface-radius-card-inner) - 3px);
   background: color-mix(in srgb, var(--color-panel-soft-strong) 96%, transparent);
 }
 
@@ -970,8 +1101,10 @@ html[data-appearance="light"] body::before {
 }
 
 .stream-page-dot--active {
-  background: var(--color-text);
-  box-shadow: 0 0 0.65rem color-mix(in srgb, var(--color-text) 42%, transparent);
+  background: rgb(107 156 107);
+  box-shadow:
+    0 0 0.4rem color-mix(in srgb, rgb(107 156 107) 72%, transparent),
+    0 0 1rem color-mix(in srgb, rgb(107 156 107) 48%, transparent);
 }
 
 .stream-page-dot--unread {
@@ -1043,36 +1176,47 @@ html[data-appearance="light"] body::before {
 
 .composer-input-bar {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: end;
-  gap: 0.7rem;
-  width: min(54rem, 100%);
-  padding: 0.6rem 0.68rem;
-  border-radius: 2rem;
-  border: 1px solid var(--color-border-strong);
-  background: var(--color-panel-glass);
-  box-shadow:
-    0 8px 32px rgba(0, 0, 0, 0.1),
-    0 2px 8px rgba(0, 0, 0, 0.05),
-    inset 0 1px 1px rgba(255, 255, 255, 0.08);
-  backdrop-filter: blur(16px) saturate(180%);
-  -webkit-backdrop-filter: blur(16px) saturate(180%);
+  grid-template-columns: max-content minmax(0, 1fr) max-content;
+  align-items: center;
+  gap: 0.9rem;
+  width: min(46rem, 100%);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 .composer-circle-button {
   display: grid;
   place-items: center;
+  flex: 0 0 auto;
   width: 2.95rem;
   height: 2.95rem;
   border-radius: 999px;
-  border: 1px solid var(--color-border-strong);
-  background: var(--color-panel-glass);
+  border: 1px solid color-mix(in srgb, var(--color-border-strong) 78%, var(--color-glass-specular) 22%);
+  background:
+    radial-gradient(circle at 50% 18%, var(--color-glass-specular) 0%, transparent 52%),
+    linear-gradient(180deg, var(--color-glass-tint), rgba(255, 255, 255, 0.01)),
+    var(--color-panel-glass);
   color: var(--color-text);
   box-shadow:
-    0 8px 24px rgba(0, 0, 0, 0.14),
-    inset 0 1px 1px rgba(255, 255, 255, 0.08);
-  backdrop-filter: blur(16px) saturate(180%);
-  -webkit-backdrop-filter: blur(16px) saturate(180%);
+    0 12px 28px var(--color-glass-shadow),
+    0 2px 10px var(--color-glass-shadow-soft),
+    inset 0 1px 0 var(--color-glass-specular),
+    inset 0 -10px 18px rgba(0, 0, 0, 0.06);
+  backdrop-filter: blur(22px) saturate(190%);
+  -webkit-backdrop-filter: blur(22px) saturate(190%);
+}
+
+.composer-circle-button:disabled {
+  cursor: default;
+  opacity: 0.72;
+}
+
+.composer-circle-button--reconnecting:disabled {
+  opacity: 1;
 }
 
 .composer-circle-button span {
@@ -1081,8 +1225,18 @@ html[data-appearance="light"] body::before {
 }
 
 .composer-circle-button--send {
-  background: var(--color-accent-soft);
+  background:
+    radial-gradient(circle at 50% 16%, rgba(255, 255, 255, 0.28) 0%, transparent 46%),
+    var(--color-accent-soft);
   color: var(--color-text);
+  border-color: color-mix(in srgb, var(--color-accent) 36%, var(--color-glass-specular) 64%);
+}
+
+.composer-circle-button--attach {
+  background:
+    radial-gradient(circle at 50% 18%, var(--color-glass-specular-soft) 0%, transparent 48%),
+    linear-gradient(180deg, var(--color-glass-tint), rgba(255, 255, 255, 0.01)),
+    color-mix(in srgb, var(--color-panel-glass) 92%, transparent);
 }
 
 .composer-circle-button--live {
@@ -1091,18 +1245,31 @@ html[data-appearance="light"] body::before {
 }
 
 .composer-circle-button--reconnecting {
-  background: color-mix(in srgb, var(--color-accent-warm) 26%, var(--color-panel-glass));
-  border-color: color-mix(in srgb, var(--color-accent-warm) 42%, var(--color-border-strong));
-  color: color-mix(in srgb, var(--color-accent-warm) 72%, var(--color-text));
-  animation: composer-send-reconnecting-pulse 1.8s ease-in-out infinite;
+  background:
+    radial-gradient(circle at 50% 16%, rgba(255, 255, 255, 0.3) 0%, transparent 45%),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--color-connection-reconnecting) 88%, white 12%),
+      var(--color-connection-reconnecting)
+    );
+  border-color: color-mix(in srgb, var(--color-connection-reconnecting) 76%, white 24%);
+  color: white;
+  animation: composer-send-reconnecting-pulse 0.8s ease-in-out infinite;
 }
 
 .composer-circle-button--disconnected {
-  background: color-mix(in srgb, var(--color-danger) 22%, var(--color-panel-glass));
-  border-color: color-mix(in srgb, var(--color-danger) 42%, var(--color-border-strong));
-  color: color-mix(in srgb, var(--color-danger) 78%, white);
+  background:
+    radial-gradient(circle at 50% 16%, rgba(255, 255, 255, 0.26) 0%, transparent 45%),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--color-connection-disconnected) 88%, white 12%),
+      var(--color-connection-disconnected)
+    );
+  border-color: color-mix(in srgb, var(--color-connection-disconnected) 76%, white 24%);
+  color: white;
   box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--color-danger) 24%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--color-connection-disconnected) 26%, transparent),
+    0 10px 26px color-mix(in srgb, var(--color-connection-disconnected) 18%, transparent),
     inset 0 1px 1px rgba(255, 255, 255, 0.08);
 }
 
@@ -1110,7 +1277,22 @@ html[data-appearance="light"] body::before {
   min-width: 0;
   display: flex;
   align-items: center;
-  padding: 0.55rem 0.2rem;
+  justify-self: stretch;
+  min-height: 3.05rem;
+  padding: 0.58rem 1rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--color-border-strong) 74%, var(--color-glass-specular) 26%);
+  background:
+    radial-gradient(circle at 50% -16%, var(--color-glass-specular) 0%, transparent 56%),
+    linear-gradient(180deg, var(--color-glass-tint), rgba(255, 255, 255, 0.01)),
+    color-mix(in srgb, var(--color-panel-glass-strong) 88%, transparent);
+  box-shadow:
+    0 14px 34px var(--color-glass-shadow),
+    0 3px 12px var(--color-glass-shadow-soft),
+    inset 0 1px 0 var(--color-glass-specular),
+    inset 0 -14px 22px rgba(0, 0, 0, 0.04);
+  backdrop-filter: blur(24px) saturate(195%);
+  -webkit-backdrop-filter: blur(24px) saturate(195%);
 }
 
 .composer-input-field textarea {

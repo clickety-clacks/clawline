@@ -126,15 +126,6 @@ enum UnifiedMarkdownRenderer {
         textView.linkTextAttributes = linkTextAttributes
     }
 
-    @MainActor
-    static func handleReleaseTriggeredLinkActivation(
-        _ url: URL,
-        openURL: (URL) -> Void
-    ) -> Bool {
-        openURL(url)
-        return false
-    }
-
     @available(iOS 17.0, macCatalyst 17.0, visionOS 1.0, *)
     @MainActor
     static func primaryActionForTextItem(

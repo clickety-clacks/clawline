@@ -19,6 +19,7 @@ struct StreamManagerSheet: View {
     let shouldAutoFocusSearchOnAppear: Bool
     let searchFocusRequestID: Int
     let maxAvailableHeight: CGFloat
+    let maxAvailableWidth: CGFloat
     let onSelectStream: (String) -> Void
     let onPresentTrackPicker: () -> Void
 
@@ -59,8 +60,7 @@ struct StreamManagerSheet: View {
     private let rowTrailingAccessoryReserve: CGFloat = 28
 
     private var maximumPopoverWidth: CGFloat {
-        let windowWidth = UIScreen.main.bounds.width
-        return max(baselineMaximumPopoverWidth, floor(windowWidth * 0.8))
+        max(baselineMaximumPopoverWidth, floor(maxAvailableWidth * 0.8))
     }
 
     private var idealPopoverWidth: CGFloat {
@@ -633,12 +633,6 @@ struct TrackPickerSheet: View {
 
     private func clearTrackPickerFirstResponder() {
         isTrackSearchFieldFocused = false
-        UIApplication.shared.sendAction(
-            #selector(UIResponder.resignFirstResponder),
-            to: nil,
-            from: nil,
-            for: nil
-        )
     }
 
     private func adoptSelectedTrackSession() {

@@ -1,6 +1,10 @@
 import type { RefObject } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import {
+  preprocessDoubleEqualsHighlights,
+  remarkDoubleEqualsHighlight
+} from "./markdownHighlight";
 
 export function RichMessageBody({
   content,
@@ -20,6 +24,7 @@ export function RichMessageBody({
   ]
     .filter(Boolean)
     .join(" ");
+  const normalizedContent = preprocessDoubleEqualsHighlights(content);
 
   return (
     <div
@@ -32,9 +37,9 @@ export function RichMessageBody({
             return <a {...properties} rel="noreferrer" target="_blank" />;
           }
         }}
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={[remarkGfm, remarkDoubleEqualsHighlight]}
       >
-        {content}
+        {normalizedContent}
       </ReactMarkdown>
     </div>
   );

@@ -7,17 +7,70 @@ test("message links render as lightweight cards without turning code-block URLs 
 }) => {
   const port = 21_941 + Math.floor(Math.random() * 1_000);
   const sessionKey = "agent:main:clawline:flynn:main";
+  const docsUrl = `http://127.0.0.1:${port}/docs`;
+  const researchUrl = `http://127.0.0.1:${port}/research`;
   const linkContent = [
-    "Visit https://example.com/docs for docs.",
+    `Visit ${docsUrl} for docs.`,
     "",
-    "Here is a markdown link to [OpenAI](https://openai.com/research).",
+    `Here is a markdown link to [Research](${researchUrl}).`,
     "",
     "```",
-    "https://example.com/in-code",
+    `${docsUrl}/in-code`,
     "```"
   ].join("\n");
 
-  const server = createServer();
+  const server = createServer((request, response) => {
+    if (request.url === "/docs") {
+      response.writeHead(200, {
+        "access-control-allow-origin": "*",
+        "content-type": "text/html"
+      });
+      response.end(
+        [
+          "<html><head>",
+          "<title>Garden Guide</title>",
+          '<meta property="og:title" content="Garden Guide" />',
+          '<meta property="og:description" content="Fresh herbs, flowers, and paths." />',
+          '<meta property="og:image" content="/card.png" />',
+          "</head><body>Guide</body></html>"
+        ].join("")
+      );
+      return;
+    }
+
+    if (request.url === "/research") {
+      response.writeHead(200, {
+        "access-control-allow-origin": "*",
+        "content-type": "text/html"
+      });
+      response.end(
+        [
+          "<html><head>",
+          "<title>Research Brief</title>",
+          '<meta name="description" content="Open field notes." />',
+          "</head><body>Brief</body></html>"
+        ].join("")
+      );
+      return;
+    }
+
+    if (request.url === "/card.png") {
+      response.writeHead(200, {
+        "access-control-allow-origin": "*",
+        "content-type": "image/png"
+      });
+      response.end(
+        Buffer.from(
+          "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9sX6ix0AAAAASUVORK5CYII=",
+          "base64"
+        )
+      );
+      return;
+    }
+
+    response.writeHead(404);
+    response.end("not found");
+  });
   const wss = new WebSocketServer({ server, path: "/ws" });
 
   wss.on("connection", (socket) => {
@@ -104,13 +157,26 @@ test("message links render as lightweight cards without turning code-block URLs 
 
       await expect(page).toHaveURL(new RegExp(`/chat/${escapeForRegExp(sessionKey)}$`));
 
-      const docsCard = page.locator('.message-link-card[href="https://example.com/docs"]');
+      const docsCard = page.locator(`.message-link-card[href="${docsUrl}"]`);
       await expect(docsCard).toBeVisible();
-      await expect(docsCard).toHaveAttribute("href", "https://example.com/docs");
+      await expect(docsCard).toHaveAttribute("href", docsUrl);
+      await expect(docsCard).toContainText("Garden Guide");
+      await expect(docsCard).toContainText("Fresh herbs, flowers, and paths.");
+      await expect(docsCard.locator(".message-link-card-thumbnail")).toBeVisible();
+      expect(await docsCard.evaluate((element) => window.getComputedStyle(element).borderRadius)).toBe(
+        "18px 18px 16px 16px / 20px 20px 14px 14px"
+      );
+      expect(
+        await docsCard
+          .locator(".message-link-card-thumbnail")
+          .evaluate((element) => window.getComputedStyle(element).borderRadius)
+      ).toBe("14px 14px 12px 12px / 15px 15px 11px 11px");
 
-      const openAiCard = page.locator('.message-link-card[href="https://openai.com/research"]');
-      await expect(openAiCard).toBeVisible();
-      await expect(openAiCard).toHaveAttribute("href", "https://openai.com/research");
+      const researchCard = page.locator(`.message-link-card[href="${researchUrl}"]`);
+      await expect(researchCard).toBeVisible();
+      await expect(researchCard).toHaveAttribute("href", researchUrl);
+      await expect(researchCard).toContainText("Research Brief");
+      await expect(researchCard).toContainText("Open field notes.");
       await expect(page.getByTestId("message-s_links_1")).toHaveScreenshot(
         `phase4-link-cards-surface-${appearance}.png`,
         {
@@ -120,7 +186,7 @@ test("message links render as lightweight cards without turning code-block URLs 
         }
       );
 
-      await expect(page.getByText("https://example.com/in-code")).toBeVisible();
+      await expect(page.getByText(`${docsUrl}/in-code`)).toBeVisible();
       await expect(page.locator('.message-link-card[href*="in-code"]')).toHaveCount(0);
     }
   } finally {

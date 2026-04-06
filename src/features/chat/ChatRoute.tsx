@@ -18,9 +18,10 @@ export function ChatRoute() {
   const { state: authState } = useAuthSessionStore();
   const { state: chatState, store: chatStore } = useChatDomainStore();
   const { state: transportState, store: transportStore } = useTransportMachine();
-  const [selectedUnreadAnchorMessageId, setSelectedUnreadAnchorMessageId] = useState<
-    string | null
-  >(null);
+  const [selectedUnreadAnchor, setSelectedUnreadAnchor] = useState<{
+    messageId: string;
+    sessionKey: string;
+  } | null>(null);
   const coordinator = useChatSessionCoordinator({
     provisionedSessionKeys: chatState.provisionedSessionKeys,
     routeSessionKey: params.sessionKey,
@@ -71,11 +72,21 @@ export function ChatRoute() {
     const unreadAnchor =
       chatState.firstUnreadMessageIdBySessionKey[engineActiveSessionKey] ?? null;
 
-    setSelectedUnreadAnchorMessageId(unreadAnchor);
+    setSelectedUnreadAnchor((current) => {
+      if (unreadAnchor) {
+        return current?.sessionKey === engineActiveSessionKey &&
+          current.messageId === unreadAnchor
+          ? current
+          : {
+              messageId: unreadAnchor,
+              sessionKey: engineActiveSessionKey
+            };
+      }
 
-    if (!unreadAnchor) {
-      chatStore.markSessionRead(engineActiveSessionKey);
-    }
+      return current?.sessionKey === engineActiveSessionKey ? current : null;
+    });
+
+    chatStore.markSessionRead(engineActiveSessionKey);
   }, [
     chatState.firstUnreadMessageIdBySessionKey,
     chatStore,
@@ -129,12 +140,15 @@ export function ChatRoute() {
         onRememberScrollState={(input) => chatStore.rememberSessionScrollState(input)}
         provisioningState={provisioningState}
         onUnreadAnchorConsumed={(messageId) => {
-          if (!engineActiveSessionKey || selectedUnreadAnchorMessageId !== messageId) {
+          if (
+            !engineActiveSessionKey ||
+            selectedUnreadAnchor?.sessionKey !== engineActiveSessionKey ||
+            selectedUnreadAnchor.messageId !== messageId
+          ) {
             return;
           }
 
-          chatStore.markSessionRead(engineActiveSessionKey);
-          setSelectedUnreadAnchorMessageId(null);
+          setSelectedUnreadAnchor(null);
         }}
         rememberedScrollState={
           engineActiveSessionKey
@@ -144,7 +158,11 @@ export function ChatRoute() {
         selectedMessages={selectedMessages}
         selectedSessionKey={engineActiveSessionKey}
         uiSelectedSessionKey={uiSelectedSessionKey}
-        selectedUnreadAnchorMessageId={selectedUnreadAnchorMessageId}
+        selectedUnreadAnchorMessageId={
+          selectedUnreadAnchor?.sessionKey === engineActiveSessionKey
+            ? selectedUnreadAnchor?.messageId ?? null
+            : null
+        }
         provisionedSessionKeys={chatState.provisionedSessionKeys}
         streams={chatState.streams}
         transportPhase={transportState.phase}

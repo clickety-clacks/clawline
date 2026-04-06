@@ -2067,6 +2067,331 @@ struct ChatViewModelTests {
         #expect(viewModel.streamDotState(for: customKey) == .inactive)
     }
 
+    @Test("Adopted non-main general stream publishes non-client tail IDs on visit")
+    @MainActor
+    func adoptedNonMainGeneralStreamPublishesNonClientTailIDOnVisit() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let adoptedGeneralKey = "agent:general:clawline:user:main"
+        chatService.streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            StreamSession(
+                sessionKey: adoptedGeneralKey,
+                displayName: "General",
+                kind: "main",
+                orderIndex: 1,
+                isBuiltIn: true,
+                createdAt: Date(),
+                updatedAt: Date(),
+                trackingMode: .adopted
+            ),
+        ]
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
+        try await Task.sleep(for: .milliseconds(30))
+
+        chatService.emitServiceEvent(
+            .streamTailStateUpdated(
+                sessionKey: adoptedGeneralKey,
+                tailState: StreamTailState(lastMessageId: "evt_general_2", lastMessageRole: .assistant)
+            )
+        )
+        chatService.emitServiceEvent(
+            .streamReadStateUpdated(
+                sessionKey: adoptedGeneralKey,
+                lastReadMessageId: "evt_general_1"
+            )
+        )
+        for _ in 0..<50 {
+            if viewModel.streamDotState(for: adoptedGeneralKey) == .unread { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(viewModel.streamDotState(for: adoptedGeneralKey) == .unread)
+
+        chatService.lastPublishedReadState = nil
+        viewModel.setActiveSessionKeyForTesting(adoptedGeneralKey)
+
+        for _ in 0..<50 {
+            if chatService.lastPublishedReadState?.lastReadMessageId == "evt_general_2" { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(chatService.lastPublishedReadState?.sessionKey == adoptedGeneralKey)
+        #expect(chatService.lastPublishedReadState?.lastReadMessageId == "evt_general_2")
+        #expect(viewModel.lastReadMessageIdBySession[adoptedGeneralKey] == "evt_general_2")
+        #expect(viewModel.streamDotState(for: adoptedGeneralKey) == .inactive)
+    }
+
+    @Test("Active adopted non-main general stream clears unread for non-client incoming IDs")
+    @MainActor
+    func activeAdoptedNonMainGeneralStreamClearsUnreadForNonClientIncomingIDs() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let adoptedGeneralKey = "agent:general:clawline:user:main"
+        chatService.streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            StreamSession(
+                sessionKey: adoptedGeneralKey,
+                displayName: "General",
+                kind: "main",
+                orderIndex: 1,
+                isBuiltIn: true,
+                createdAt: Date(),
+                updatedAt: Date(),
+                trackingMode: .adopted
+            ),
+        ]
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
+        try await Task.sleep(for: .milliseconds(30))
+
+        viewModel.setActiveSessionKeyForTesting(adoptedGeneralKey)
+        chatService.lastPublishedReadState = nil
+
+        chatService.emitServiceEvent(
+            .streamTailStateUpdated(
+                sessionKey: adoptedGeneralKey,
+                tailState: StreamTailState(lastMessageId: "evt_general_3", lastMessageRole: .assistant)
+            )
+        )
+        chatService.emit(
+            Message(
+                id: "evt_general_3",
+                role: .assistant,
+                content: "hello",
+                timestamp: Date(),
+                streaming: false,
+                attachments: [],
+                deviceId: nil,
+                sessionKey: adoptedGeneralKey
+            )
+        )
+
+        for _ in 0..<50 {
+            if chatService.lastPublishedReadState?.lastReadMessageId == "evt_general_3" { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(chatService.lastPublishedReadState?.sessionKey == adoptedGeneralKey)
+        #expect(chatService.lastPublishedReadState?.lastReadMessageId == "evt_general_3")
+        #expect(viewModel.lastReadMessageIdBySession[adoptedGeneralKey] == "evt_general_3")
+        #expect(viewModel.streamDotState(for: adoptedGeneralKey) == .inactive)
+    }
+
+    @Test("Heimdsl-style read-state updates preserve the exact non-agent-main session key")
+    @MainActor
+    func heimdslReadStateUpdatePreservesExactSessionKey() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let heimdslKey = "agent:heimdsl:clawline:user:main"
+        chatService.streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            StreamSession(
+                sessionKey: heimdslKey,
+                displayName: "Heimdsl",
+                kind: "main",
+                orderIndex: 1,
+                isBuiltIn: true,
+                createdAt: Date(),
+                updatedAt: Date(),
+                trackingMode: .adopted
+            ),
+        ]
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
+        try await Task.sleep(for: .milliseconds(30))
+
+        chatService.emitServiceEvent(
+            .streamTailStateUpdated(
+                sessionKey: heimdslKey,
+                tailState: StreamTailState(lastMessageId: "evt_heimdsl_2", lastMessageRole: .assistant)
+            )
+        )
+        chatService.emitServiceEvent(
+            .streamReadStateUpdated(sessionKey: heimdslKey, lastReadMessageId: "evt_heimdsl_1")
+        )
+
+        for _ in 0..<50 {
+            if viewModel.lastReadMessageIdBySession[heimdslKey] == "evt_heimdsl_1" { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(viewModel.lastReadMessageIdBySession[heimdslKey] == "evt_heimdsl_1")
+        #expect(viewModel.lastReadMessageIdBySession[personalSessionKey] != "evt_heimdsl_1")
+
+        chatService.lastPublishedReadState = nil
+        viewModel.setActiveSessionKeyForTesting(heimdslKey)
+
+        for _ in 0..<50 {
+            if chatService.lastPublishedReadState?.lastReadMessageId == "evt_heimdsl_2" { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(chatService.lastPublishedReadState?.sessionKey == heimdslKey)
+        #expect(chatService.lastPublishedReadState?.lastReadMessageId == "evt_heimdsl_2")
+        #expect(viewModel.streamDotState(for: heimdslKey) == .inactive)
+    }
+
+    @Test("Heimdsl-style read-state snapshots preserve the exact non-agent-main session key")
+    @MainActor
+    func heimdslReadStateSnapshotPreservesExactSessionKey() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let heimdslKey = "agent:heimdsl:clawline:user:main"
+        chatService.streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            StreamSession(
+                sessionKey: heimdslKey,
+                displayName: "Heimdsl",
+                kind: "main",
+                orderIndex: 1,
+                isBuiltIn: true,
+                createdAt: Date(),
+                updatedAt: Date(),
+                trackingMode: .adopted
+            ),
+        ]
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
+        try await Task.sleep(for: .milliseconds(30))
+
+        chatService.emitServiceEvent(
+            .streamReadStateSnapshot([
+                heimdslKey: "evt_heimdsl_1"
+            ])
+        )
+
+        for _ in 0..<50 {
+            if viewModel.lastReadMessageIdBySession[heimdslKey] == "evt_heimdsl_1" { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(viewModel.lastReadMessageIdBySession[heimdslKey] == "evt_heimdsl_1")
+        #expect(viewModel.lastReadMessageIdBySession[personalSessionKey] != "evt_heimdsl_1")
+    }
+
+    @Test("Partial read-state snapshot does not clear local read cursor for omitted stream")
+    @MainActor
+    func partialReadStateSnapshotPreservesOmittedLocalCursor() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let customKey = "agent:main:clawline:user:s_partial_snapshot"
+        chatService.streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: customKey, displayName: "Heimdal", kind: "custom", orderIndex: 1, isBuiltIn: false),
+        ]
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
+        try await Task.sleep(for: .milliseconds(30))
+
+        chatService.emit(
+            Message(
+                id: "s_seen_tail",
+                role: .assistant,
+                content: "Seen already",
+                timestamp: Date(),
+                streaming: false,
+                attachments: [],
+                deviceId: nil,
+                sessionKey: customKey
+            )
+        )
+
+        for _ in 0..<50 {
+            if viewModel.streamDotState(for: customKey) == .unread { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(viewModel.streamDotState(for: customKey) == .unread)
+
+        viewModel.setActiveSessionKeyForTesting(customKey)
+        for _ in 0..<50 {
+            if viewModel.lastReadMessageIdBySession[customKey] == "s_seen_tail" { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(viewModel.lastReadMessageIdBySession[customKey] == "s_seen_tail")
+        #expect(viewModel.streamDotState(for: customKey) == .active)
+
+        chatService.emitServiceEvent(.streamReadStateSnapshot([personalSessionKey: "s_personal_read"]))
+        try await Task.sleep(for: .milliseconds(30))
+
+        #expect(viewModel.lastReadMessageIdBySession[customKey] == "s_seen_tail")
+        #expect(viewModel.streamDotState(for: customKey) == .active)
+
+        viewModel.setActiveSessionKeyForTesting(personalSessionKey)
+        for _ in 0..<50 {
+            if viewModel.streamDotState(for: customKey) == .inactive { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(viewModel.lastReadMessageIdBySession[customKey] == "s_seen_tail")
+        #expect(viewModel.streamDotState(for: customKey) == .inactive)
+    }
+
     @Test("Track adopts untracked session and preserves it across snapshots")
     @MainActor
     func trackAdoptsUntrackedSessionAcrossSnapshots() async throws {

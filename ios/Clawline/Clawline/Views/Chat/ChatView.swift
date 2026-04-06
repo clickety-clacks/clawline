@@ -1615,7 +1615,7 @@ struct ChatView: View {
             containerWidth: containerWidth,
             bottomSafeAreaInset: bottomSafeAreaInset
         )
-        return StreamPageDotsView(
+        let pageDotsControl = StreamPageDotsView(
             sessionKeys: effectiveSessionKeys,
             activeSessionKey: viewModel.uiSelectedSessionKey,
             dotStatesBySession: dotStatesBySession,
@@ -1643,18 +1643,44 @@ struct ChatView: View {
                 }
             }
         )
-        .popover(
-            isPresented: $isStreamManagerPopoverPresented,
-            attachmentAnchor: .rect(.bounds),
-            arrowEdge: .bottom
-        ) {
-            streamManagerPopoverContent(
-                viewModel: viewModel,
-                effectiveStreams: effectiveStreams,
-                dotStatesBySession: dotStatesBySession,
-                streamSelectorMaxHeight: streamSelectorMaxHeight,
-                containerWidth: containerWidth
-            )
+        return Group {
+            if usesDirectStreamManagerPopoverAnchor {
+                pageDotsControl
+                    .popover(
+                        isPresented: $isStreamManagerPopoverPresented,
+                        attachmentAnchor: .rect(.bounds),
+                        arrowEdge: .bottom
+                    ) {
+                        streamManagerPopoverContent(
+                            viewModel: viewModel,
+                            effectiveStreams: effectiveStreams,
+                            dotStatesBySession: dotStatesBySession,
+                            streamSelectorMaxHeight: streamSelectorMaxHeight,
+                            containerWidth: containerWidth
+                        )
+                    }
+            } else {
+                pageDotsControl
+                    .overlay(alignment: .top) {
+                        Color.clear
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 1)
+                            .allowsHitTesting(false)
+                            .popover(
+                                isPresented: $isStreamManagerPopoverPresented,
+                                attachmentAnchor: .rect(.bounds),
+                                arrowEdge: .bottom
+                            ) {
+                                streamManagerPopoverContent(
+                                    viewModel: viewModel,
+                                    effectiveStreams: effectiveStreams,
+                                    dotStatesBySession: dotStatesBySession,
+                                    streamSelectorMaxHeight: streamSelectorMaxHeight,
+                                    containerWidth: containerWidth
+                                )
+                            }
+                    }
+            }
         }
         .sheet(
             isPresented: $isTrackPickerPresented,
@@ -1664,6 +1690,50 @@ struct ChatView: View {
         ) {
             TrackPickerSheet(viewModel: viewModel)
         }
+    }
+
+    private func streamManagerSheet(
+        viewModel: ChatViewModel,
+        effectiveStreams: [StreamSession],
+        dotStatesBySession: [String: StreamDotState],
+        streamSelectorMaxHeight: CGFloat,
+        containerWidth: CGFloat
+    ) -> some View {
+        StreamManagerSheet(
+            viewModel: viewModel,
+            streams: effectiveStreams,
+            dotStatesBySession: dotStatesBySession,
+            isPresented: $isStreamManagerPopoverPresented,
+            shouldAutoFocusSearchOnAppear: streamPopupShouldAutoFocusSearch,
+            searchFocusRequestID: streamPopupSearchFocusRequestID,
+            maxAvailableHeight: streamSelectorMaxHeight,
+            maxAvailableWidth: containerWidth,
+            onSelectStream: { sessionKey in
+                selectStream(sessionKey, source: .programmatic)
+            },
+            onPresentTrackPicker: {
+                prepareForAttachmentPicker()
+                isStreamManagerPopoverPresented = false
+                Task { @MainActor in
+                    await Task.yield()
+                    isTrackPickerPresented = true
+                }
+            }
+        )
+        .presentationCompactAdaptation(.popover)
+        .presentationBackground(.clear)
+    }
+
+    private var usesDirectStreamManagerPopoverAnchor: Bool {
+#if targetEnvironment(macCatalyst)
+        true
+#else
+        if #available(iOS 14.0, *) {
+            ProcessInfo.processInfo.isiOSAppOnMac
+        } else {
+            false
+        }
+#endif
     }
 
     private func selectStream(_ sessionKey: String, source: ChatViewModel.StreamSwitchSource) {
@@ -2455,6 +2525,31 @@ private struct KeyboardPinnedContainer<Content: View>: UIViewRepresentable {
     }
 }
 
+enum KeyboardPinnedHitTesting {
+    @MainActor
+    static func contains(
+        _ point: CGPoint,
+        in candidate: UIView,
+        from container: UIView,
+        event: UIEvent?
+    ) -> Bool {
+        guard !candidate.isHidden, candidate.alpha > 0.01 else { return false }
+
+        let pointInCandidate = container.convert(point, to: candidate)
+        if candidate.hitTest(pointInCandidate, with: event) != nil {
+            return true
+        }
+        if candidate.point(inside: pointInCandidate, with: event) {
+            return true
+        }
+        if let presentationFrame = candidate.layer.presentation()?.frame,
+           presentationFrame.contains(point) {
+            return true
+        }
+        return false
+    }
+}
+
 private final class KeyboardPinnedContainerView<Content: View>: UIView, KeyboardPinnedContainerViewProtocol {
     let hostingController: UIHostingController<Content>
     let versionLabel: UILabel
@@ -2742,16 +2837,20 @@ private final class KeyboardPinnedContainerView<Content: View>: UIView, Keyboard
     }
 
     override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
-        if let hitView = hostingController.view, hitView.frame.contains(point) {
+        layoutIfNeeded()
+        if let hitView = hostingController.view,
+           KeyboardPinnedHitTesting.contains(point, in: hitView, from: self, event: event) {
             return true
         }
-        if let scrollButtonHost, scrollButtonHost.view.frame.contains(point) {
+        if let scrollButtonHost,
+           KeyboardPinnedHitTesting.contains(point, in: scrollButtonHost.view, from: self, event: event) {
             return true
         }
-        if let pageDotsHost, pageDotsHost.view.frame.contains(point) {
+        if let pageDotsHost,
+           KeyboardPinnedHitTesting.contains(point, in: pageDotsHost.view, from: self, event: event) {
             return true
         }
-        if !versionLabel.isHidden && versionLabel.frame.contains(point) {
+        if KeyboardPinnedHitTesting.contains(point, in: versionLabel, from: self, event: event) {
             return true
         }
         return false

@@ -204,6 +204,7 @@ final class ChatViewModel: ChatViewModelHosting {
 
     func requestStreamSwitch(to sessionKey: String, source: StreamSwitchSource) {
         guard orderedSessionKeys.contains(sessionKey) else { return }
+        logHeimdalDotState(for: sessionKey, reason: "requestStreamSwitch source=\(source)")
 
         // Step 1-2: stream-switch intent + epoch bump.
         uiSwitchEpoch &+= 1
@@ -260,6 +261,7 @@ final class ChatViewModel: ChatViewModelHosting {
     // Engine-active key mutation seam: all writes go through this method.
     private func setEngineActiveSessionKey(_ sessionKey: String) {
         StreamSwitchTiming.log("setEngineActiveSessionKey_enter", sessionKey: sessionKey)
+        logHeimdalDotState(for: sessionKey, reason: "setEngineActiveSessionKey.enter")
         if sessionKey.isEmpty {
             engineActiveSessionKey = ""
             return
@@ -267,12 +269,14 @@ final class ChatViewModel: ChatViewModelHosting {
         guard orderedSessionKeys.contains(sessionKey) else { return }
         guard engineActiveSessionKey != sessionKey else { return }
         applyActiveSessionKey(sessionKey)
+        logHeimdalDotState(for: sessionKey, reason: "setEngineActiveSessionKey.afterApplyActive")
         markSessionRead(sessionKey)
         // Keep intent selection coherent for non-switch engine mutations (bootstrap/deletion fallback).
         // Stream-switch path still writes uiSelectedSessionKey explicitly before this runs.
         if uiSelectedSessionKey != sessionKey {
             setUISelectedSessionKey(sessionKey)
         }
+        logHeimdalDotState(for: sessionKey, reason: "setEngineActiveSessionKey.exit")
     }
 
     // UI-intent key mutation seam: all UI selection writes go through this method.
@@ -1183,7 +1187,7 @@ final class ChatViewModel: ChatViewModelHosting {
     }
 
     func sendInteractiveCallback(sourceMessageId: String, action: String, data: JSONValue?) {
-        Task { [chatService, logger] in
+        Task { [chatService] in
             do {
                 try await chatService.sendInteractiveCallback(
                     sourceMessageId: sourceMessageId,
@@ -1581,7 +1585,7 @@ final class ChatViewModel: ChatViewModelHosting {
         }
         setMessages(messageList, for: resolvedMessage.sessionKey)
         if resolvedMessage.sessionKey == engineActiveSessionKey,
-           resolvedMessage.id.hasPrefix("s_") {
+           isServerReadableMessageID(resolvedMessage.id) {
             markSessionRead(resolvedMessage.sessionKey)
         }
         maybeTriggerAssistantIncomingHaptic(for: resolvedMessage, didAppendNewMessage: didAppendNewMessage)
@@ -2614,6 +2618,22 @@ final class ChatViewModel: ChatViewModelHosting {
         return normalized
     }
 
+    private func readStateSessionKey(_ rawSessionKey: String) -> String? {
+        let trimmed = rawSessionKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        // Preserve real wire session keys exactly as sent. Only map legacy enum-shaped
+        // placeholders that older compatibility paths may still emit.
+        if trimmed.contains(":") {
+            return trimmed
+        }
+
+        guard let legacyStream = ChatStream(rawValue: trimmed) else {
+            return trimmed
+        }
+        return preferredSessionKey(for: legacyStream) ?? trimmed
+    }
+
     private func activeSessionDefaultsKey() -> String {
         if let userId = auth.currentUserId, !userId.isEmpty {
             return "clawline.lastSessionKey.\(userId)"
@@ -2789,10 +2809,47 @@ final class ChatViewModel: ChatViewModelHosting {
     }
 
     private func lastServerMessageId(from messages: [Message]) -> String? {
-        for message in messages.reversed() where message.id.hasPrefix("s_") {
+        for message in messages.reversed() where isServerReadableMessageID(message.id) {
             return message.id
         }
         return nil
+    }
+
+    private func isServerReadableMessageID(_ messageID: String) -> Bool {
+        let trimmed = messageID.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        return !trimmed.hasPrefix("c_")
+    }
+
+    private func shouldLogHeimdalDotDiagnostics(for sessionKey: String) -> Bool {
+        guard !sessionKey.isEmpty else { return false }
+        if let stream = streamsBySessionKey[sessionKey] {
+            let normalizedName = stream.displayName.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if normalizedName.contains("heimd") { return true }
+        }
+        if sessionKey.lowercased().contains("heimd") { return true }
+        return sessionKey == engineActiveSessionKey || sessionKey == uiSelectedSessionKey
+    }
+
+    private func emitHeimdalDotDiagnostic(_ message: String) {
+        logger.info("\(message, privacy: .public)")
+        print(message)
+    }
+
+    private func emitHeimdalDotError(_ message: String) {
+        logger.error("\(message, privacy: .public)")
+        print(message)
+    }
+
+    private func logHeimdalDotState(for sessionKey: String, reason: String) {
+        guard shouldLogHeimdalDotDiagnostics(for: sessionKey) else { return }
+        let stream = streamsBySessionKey[sessionKey]
+        let tailState = streamTailStateBySession[sessionKey]
+        let lastRead = lastReadMessageIdBySession[sessionKey] ?? "nil"
+        let currentDot = streamDotStateBySession[sessionKey]?.rawValue ?? "nil"
+        emitHeimdalDotDiagnostic(
+            "[RDOT] reason=\(reason) sessionKey=\(sessionKey) displayName=\(stream?.displayName ?? "nil") kind=\(stream?.kind ?? "nil") adopted=\(String(describing: stream?.adopted)) engineActive=\(self.engineActiveSessionKey) uiSelected=\(self.uiSelectedSessionKey) tailId=\(tailState?.lastMessageId ?? "nil") tailRole=\(tailState?.lastMessageRole.rawValue ?? "nil") lastRead=\(lastRead) dot=\(currentDot)"
+        )
     }
 
     private func clearMessageCache() {
@@ -3375,49 +3432,63 @@ final class ChatViewModel: ChatViewModelHosting {
     }
 
     private func markSessionRead(_ sessionKey: String) {
-        let tailMessageId =
-            lastServerMessageId(from: sessionMessages[sessionKey] ?? [])
-            ?? streamTailStateBySession[sessionKey]?.lastMessageId
+        let transcriptTailMessageId = lastServerMessageId(from: sessionMessages[sessionKey] ?? [])
+        let providerTailMessageId = streamTailStateBySession[sessionKey]?.lastMessageId
+        let tailMessageId = transcriptTailMessageId ?? providerTailMessageId
+        if shouldLogHeimdalDotDiagnostics(for: sessionKey) {
+            emitHeimdalDotDiagnostic(
+                "[RDOT] reason=markSessionRead.tailLookup sessionKey=\(sessionKey) transcriptTail=\(transcriptTailMessageId ?? "nil") providerTail=\(providerTailMessageId ?? "nil")"
+            )
+        }
         if let tailMessageId {
             lastReadMessageIdBySession[sessionKey] = tailMessageId
             persistLastReadMessageId(tailMessageId, for: sessionKey)
+            logHeimdalDotState(for: sessionKey, reason: "markSessionRead.afterLocalWrite")
             publishReadStateIfPossible(sessionKey: sessionKey, lastReadMessageId: tailMessageId)
             recomputeStreamDotState(for: sessionKey)
+            logHeimdalDotState(for: sessionKey, reason: "markSessionRead.afterRecompute")
+        } else {
+            logHeimdalDotState(for: sessionKey, reason: "markSessionRead.noTail")
         }
     }
 
     private func applyStreamReadStateSnapshot(_ snapshot: [String: String]) {
         var normalizedSnapshot: [String: String] = [:]
         for (sessionKey, lastReadMessageId) in snapshot {
-            guard !sessionKey.isEmpty, !lastReadMessageId.isEmpty else { continue }
-            normalizedSnapshot[sessionKey] = lastReadMessageId
-        }
-        let snapshotSessionKeys = Set(normalizedSnapshot.keys)
-        let staleSessionKeys = lastReadMessageIdBySession.keys
-            .reduce(into: Set<String>()) { $0.insert($1) }
-            .union(persistedLastReadSessionKeys())
-            .subtracting(snapshotSessionKeys)
-
-        for sessionKey in staleSessionKeys {
-            lastReadMessageIdBySession.removeValue(forKey: sessionKey)
-            persistLastReadMessageId(nil, for: sessionKey)
-            recomputeStreamDotState(for: sessionKey)
+            guard let resolvedSessionKey = readStateSessionKey(sessionKey),
+                  !lastReadMessageId.isEmpty else { continue }
+            normalizedSnapshot[resolvedSessionKey] = lastReadMessageId
         }
 
+        // The server snapshot is not guaranteed to be exhaustive for every tracked stream.
+        // Merge present keys and leave local cursors in place until an explicit stream removal clears them.
         for (sessionKey, lastReadMessageId) in normalizedSnapshot {
+            if shouldLogHeimdalDotDiagnostics(for: sessionKey) {
+                emitHeimdalDotDiagnostic(
+                    "[RDOT] reason=applyStreamReadStateSnapshot.entry sessionKey=\(sessionKey) lastRead=\(lastReadMessageId)"
+                )
+            }
             lastReadMessageIdBySession[sessionKey] = lastReadMessageId
             persistLastReadMessageId(lastReadMessageId, for: sessionKey)
             recomputeStreamDotState(for: sessionKey)
+            logHeimdalDotState(for: sessionKey, reason: "applyStreamReadStateSnapshot.afterRecompute")
         }
     }
 
     private func applyStreamReadStateUpdate(sessionKey: String, lastReadMessageId: String) {
-        guard !sessionKey.isEmpty, !lastReadMessageId.isEmpty else { return }
-        let current = lastReadMessageIdBySession[sessionKey]
+        guard let resolvedSessionKey = readStateSessionKey(sessionKey),
+              !lastReadMessageId.isEmpty else { return }
+        let current = lastReadMessageIdBySession[resolvedSessionKey]
+        if shouldLogHeimdalDotDiagnostics(for: resolvedSessionKey) {
+            emitHeimdalDotDiagnostic(
+                "[RDOT] reason=applyStreamReadStateUpdate sessionKey=\(resolvedSessionKey) current=\(current ?? "nil") incoming=\(lastReadMessageId)"
+            )
+        }
         if current == lastReadMessageId { return }
-        lastReadMessageIdBySession[sessionKey] = lastReadMessageId
-        persistLastReadMessageId(lastReadMessageId, for: sessionKey)
-        recomputeStreamDotState(for: sessionKey)
+        lastReadMessageIdBySession[resolvedSessionKey] = lastReadMessageId
+        persistLastReadMessageId(lastReadMessageId, for: resolvedSessionKey)
+        recomputeStreamDotState(for: resolvedSessionKey)
+        logHeimdalDotState(for: resolvedSessionKey, reason: "applyStreamReadStateUpdate.afterRecompute")
     }
 
     private func applyStreamTailStateSnapshot(_ snapshot: [String: StreamTailState]) {
@@ -3432,32 +3503,66 @@ final class ChatViewModel: ChatViewModelHosting {
         for sessionKey in staleSessionKeys {
             streamTailStateBySession.removeValue(forKey: sessionKey)
             recomputeStreamDotState(for: sessionKey)
+            logHeimdalDotState(for: sessionKey, reason: "applyStreamTailStateSnapshot.staleRemoved")
         }
 
         for (sessionKey, tailState) in normalizedSnapshot {
+            if shouldLogHeimdalDotDiagnostics(for: sessionKey) {
+                emitHeimdalDotDiagnostic(
+                    "[RDOT] reason=applyStreamTailStateSnapshot.entry sessionKey=\(sessionKey) tailId=\(tailState.lastMessageId) tailRole=\(tailState.lastMessageRole.rawValue)"
+                )
+            }
             streamTailStateBySession[sessionKey] = tailState
             recomputeStreamDotState(for: sessionKey)
+            logHeimdalDotState(for: sessionKey, reason: "applyStreamTailStateSnapshot.afterRecompute")
         }
     }
 
     private func applyStreamTailStateUpdate(sessionKey: String, tailState: StreamTailState) {
         guard !sessionKey.isEmpty else { return }
+        if shouldLogHeimdalDotDiagnostics(for: sessionKey) {
+            emitHeimdalDotDiagnostic(
+                "[RDOT] reason=applyStreamTailStateUpdate sessionKey=\(sessionKey) tailId=\(tailState.lastMessageId) tailRole=\(tailState.lastMessageRole.rawValue)"
+            )
+        }
         if streamTailStateBySession[sessionKey] == tailState { return }
         streamTailStateBySession[sessionKey] = tailState
         recomputeStreamDotState(for: sessionKey)
+        logHeimdalDotState(for: sessionKey, reason: "applyStreamTailStateUpdate.afterRecompute")
     }
 
     private func publishReadStateIfPossible(sessionKey: String, lastReadMessageId: String) {
-        guard lastReadMessageId.hasPrefix("s_") else { return }
-        Task { [chatService, logger] in
+        guard let resolvedSessionKey = readStateSessionKey(sessionKey) else { return }
+        let isPublishEligible = isServerReadableMessageID(lastReadMessageId)
+        let shouldTrace = shouldLogHeimdalDotDiagnostics(for: resolvedSessionKey)
+        if shouldTrace {
+            emitHeimdalDotDiagnostic(
+                "[RDOT] reason=publishReadStateIfPossible sessionKey=\(resolvedSessionKey) lastRead=\(lastReadMessageId) eligible=\(isPublishEligible)"
+            )
+        }
+        guard isPublishEligible else {
+            logHeimdalDotState(for: resolvedSessionKey, reason: "publishReadStateIfPossible.ineligible")
+            return
+        }
+        Task { [chatService] in
             do {
+                if shouldTrace {
+                    emitHeimdalDotDiagnostic(
+                        "[RDOT] reason=publishReadStateIfPossible.sending sessionKey=\(resolvedSessionKey) lastRead=\(lastReadMessageId)"
+                    )
+                }
                 try await chatService.publishReadState(
-                    sessionKey: sessionKey,
+                    sessionKey: resolvedSessionKey,
                     lastReadMessageId: lastReadMessageId
                 )
+                if shouldTrace {
+                    emitHeimdalDotDiagnostic(
+                        "[RDOT] reason=publishReadStateIfPossible.sent sessionKey=\(resolvedSessionKey) lastRead=\(lastReadMessageId)"
+                    )
+                }
             } catch {
-                logger.error(
-                    "stream_read_publish_failed sessionKey=\(sessionKey, privacy: .public) lastReadMessageId=\(lastReadMessageId, privacy: .public) error=\(error.localizedDescription, privacy: .public)"
+                emitHeimdalDotError(
+                    "[RDOT] reason=publishReadStateIfPossible.failed sessionKey=\(resolvedSessionKey) lastRead=\(lastReadMessageId) error=\(error.localizedDescription)"
                 )
             }
         }
@@ -3467,17 +3572,28 @@ final class ChatViewModel: ChatViewModelHosting {
         guard !sessionKey.isEmpty else { return }
         guard let tailState = streamTailStateBySession[sessionKey] else {
             streamDotStateBySession.removeValue(forKey: sessionKey)
+            logHeimdalDotState(for: sessionKey, reason: "recomputeStreamDotState.noTail")
             return
         }
         let dotState: StreamDotState
+        let derivation: String
         if tailState.lastMessageRole == .user {
             dotState = .userTail
+            derivation = "userTail"
         } else if lastReadMessageIdBySession[sessionKey] != tailState.lastMessageId {
             dotState = .unread
+            derivation = "unread"
         } else {
             dotState = .inactive
+            derivation = "inactive"
+        }
+        if shouldLogHeimdalDotDiagnostics(for: sessionKey) {
+            emitHeimdalDotDiagnostic(
+                "[RDOT] reason=recomputeStreamDotState.derive sessionKey=\(sessionKey) tailId=\(tailState.lastMessageId) tailRole=\(tailState.lastMessageRole.rawValue) lastRead=\(lastReadMessageIdBySession[sessionKey] ?? "nil") derived=\(derivation)"
+            )
         }
         streamDotStateBySession[sessionKey] = dotState
+        logHeimdalDotState(for: sessionKey, reason: "recomputeStreamDotState.result")
     }
 
 #if DEBUG

@@ -41,7 +41,7 @@ Keep `DictationCoordinator` as the single owner of dictation interaction state.
 
 After the refactor:
 - `DictationCoordinator` owns all lifecycle state and all transcript ownership state
-- `ComposeInputDictationBridge` becomes a thin text-application helper with no per-session dictation memory
+- `ComposeInputDictationBridge` becomes a bindable text-application helper with no per-session dictation memory
 - `ChatView` projects dictation state and reports raw UI observations; it does not co-own dictation behavior
 - `MessageInputBar` becomes a gesture adapter that emits intents and applies local UIKit interaction locks, but does not own dictation semantics
 
@@ -66,6 +66,18 @@ The published external contract remains conceptually similar to the current one:
 The UI must continue to consume projections, not internal lifecycle details.
 
 Internal lifecycle details remain private.
+
+### Concurrency and Isolation
+
+All unified machine state mutations are `@MainActor`.
+
+Rules:
+- transport callbacks, audio events, timer completions, and gesture callbacks must hop onto `@MainActor` before mutating machine state
+- `TranscriptOwnership`, `PendingAction`, and lifecycle phase are never mutated off-main
+- the text helper is also `@MainActor`, but it is write-only with respect to the machine; it may not mutate machine state directly
+- UI callbacks caused by machine-authored text application must re-enter the machine through explicit guarded observation paths, not implicit delegate side effects
+
+This is mandatory. The unification refactor is not allowed to introduce a second serialization mechanism or ad hoc locking layer.
 
 ## State Model
 
@@ -106,6 +118,7 @@ Notes:
 - `pendingUpdate: DictationSegmentUpdate?`
 - `activationSelectionRange: NSRange?`
 - `preferredSelectionRange: NSRange?`
+- `walkieOrigin: WalkieOrigin?`
 
 This replaces all bridge-owned per-session dictionaries and transcript state.
 
@@ -152,15 +165,27 @@ After the refactor, these invariants are mandatory:
 5. Endpoint commits and provisional revisions flow through one mutation seam.
 - Token buffering, coalescing, suppression, and text replacement planning all originate in the machine.
 
-6. `ComposeInputDictationBridge` stores no session-keyed dictation state.
+6. Machine-authored text application must suppress re-entrant user-edit and selection callbacks.
+- The machine owns the rule that programmatic dictation replacement does not feed back as a fresh user edit.
+- The text helper may implement the local UIKit guard mechanics, but only under machine-directed policy.
+
+7. `ComposeInputDictationBridge` stores no session-keyed dictation state.
 - No `transcriptStateBySession`
 - No `preferredSelectionRangeBySession`
 - No `activationSelectionRangeBySession`
 
-7. UI never reads internal finalization state.
+8. If the compose surface is temporarily unavailable, transcript ownership remains in the machine.
+- Surface rebinding must not reset transcript ownership.
+- On rebind, the helper re-applies the machine-authored current transcript session to the new surface.
+
+9. Attachment preservation and prefix-mismatch recovery remain machine-specified behavior.
+- If the live compose content diverges from `baseSnapshot`, the machine must still define the fallback replacement behavior.
+- Attachment state restoration remains part of the compose draft contract.
+
+10. UI never reads internal finalization state.
 - UI reads the published projection only.
 
-8. Keyboard state is preserved, not dictated.
+11. Keyboard state is preserved, not dictated.
 - The machine may remember activation-time UI context, but it does not own keyboard visibility.
 
 ## Transition Model
@@ -252,15 +277,17 @@ If active dictation ownership exists and `currentSessionKey` no longer matches `
 
 `ComposeInputDictationBridge` stops being a state machine.
 
-It becomes a text-application helper. Rename is optional; shrinking its responsibility is mandatory.
+It becomes a bindable text-application helper. Rename is optional; shrinking its responsibility is mandatory.
 
 ### Allowed Responsibilities
 
 - hold weak references to the host / current compose text view
+- bind / unbind to the current compose surface
 - capture a `ComposeDraftSnapshot`
 - apply a caller-provided text delta to the compose text view or host
 - restore a caller-provided snapshot
 - expose raw compose-view observations needed by the machine, if convenient
+- perform local UIKit guard mechanics for machine-authored text replacement
 
 ### Forbidden Responsibilities
 
@@ -282,8 +309,19 @@ Conceptually:
 - replacement range or previous transcript length
 - replacement attributed text
 - cursor movement policy
+- whether this apply must suppress re-entrant user-edit / selection callbacks
 
 The helper applies; it does not decide.
+
+### Surface Rebinding Contract
+
+The helper is allowed to be temporarily unbound from a live `UITextView`.
+
+Required behavior:
+- if the compose view is recreated, the helper may unbind without clearing transcript ownership
+- while unbound, the machine continues to own transcript state and may continue buffering/coalescing updates
+- on rebind, the helper must apply the machine-authored current transcript session to the newly bound compose surface
+- rebinding is not allowed to invent a new insertion anchor or clear suppression state
 
 ## ChatView Cleanup
 
@@ -378,15 +416,22 @@ It is not a full flag day, but it does require one explicit ownership cutover wh
 ### Phase 1: Introduce Unified Transcript Ownership in `DictationCoordinator`
 
 - Add `TranscriptOwnership` and related structs inside `DictationCoordinator`
-- Mirror current bridge-owned state there without removing existing bridge behavior yet
+- Introduce shadow transcript state there for validation without changing the authoritative owner yet
 - No public API change
 
 Exit condition:
 - coordinator can represent all transcript ownership state without consulting bridge dictionaries
 
-### Phase 2: Flip Ownership of Selection + Suppression State
+### Phase 2: Flip Full Transcript Ownership
 
-- Move activation selection, preferred selection, suppression-after-edit, and insertion-anchor state into coordinator
+- Move the full `TranscriptSession` authority into coordinator in one cutover:
+  - activation selection
+  - preferred selection
+  - suppression-after-edit
+  - insertion anchor
+  - committed/provisional transcript text
+  - pending transcript update
+  - walkie-origin routing state tied to the active transcript session
 - `MessageInputBar` and `ChatView` continue sending the same observations/commands
 - Bridge stops storing session-keyed selection/transcript state
 
@@ -395,11 +440,16 @@ This is the atomic cutover phase.
 Exit condition:
 - all transcript ownership mutations occur in coordinator only
 
+Rollback rule:
+- Phase 2 must land as a single isolated ownership-flip commit.
+- If production or device validation finds transcript ownership regressions, revert the entire Phase 2 commit as one unit.
+- Do not introduce a runtime dual-owner fallback path.
+
 ### Phase 3: Shrink the Bridge to a Text Helper
 
 - Replace bridge policy methods with text-application methods
 - Remove state dictionaries and transcript interpretation logic
-- Bridge becomes stateless or near-stateless apart from weak references to host/text view
+- Bridge becomes a bindable helper with only ephemeral UI references to host/text view
 
 Exit condition:
 - bridge applies plans but does not derive them
@@ -425,10 +475,11 @@ Exit condition:
 
 During migration:
 
-1. There must never be two live owners of suppression-after-edit.
-2. There must never be two live owners of activation/preferred selection.
-3. The bridge may temporarily forward raw observations, but not persist dictation policy state after Phase 2.
-4. The external UI contract must remain stable until the bridge ownership cutover is complete.
+1. There must never be two live owners of any `TranscriptSession` field after Phase 2 begins.
+2. Phase 1 mirroring may exist only as non-authoritative shadow state for validation; behavior still comes from the existing owner until the Phase 2 cutover commit.
+3. After the Phase 2 cutover commit, the bridge may not persist committed text, provisional text, insertion anchor, suppression state, or pending transcript updates.
+4. The bridge may temporarily forward raw observations, but not persist dictation policy state after Phase 2.
+5. The external UI contract must remain stable until the bridge ownership cutover is complete.
 
 ## Acceptance Checks
 
@@ -440,7 +491,15 @@ The implementation is correct only if all of the following are true:
 4. Selection anchoring for activation and re-anchoring lives in coordinator-owned state only.
 5. `ChatView` does not implement transcript/session guard logic.
 6. `MessageInputBar` emits intents and applies local UI locks, but does not own dictation product transitions.
-7. Existing dictation UX invariants from shared workspace implementation details remain true.
+7. The machine serialization boundary is explicit and all state mutation occurs on `@MainActor`.
+8. Machine-authored text application suppresses re-entrant user-edit / selection feedback correctly.
+9. Rebinding the compose surface does not reset transcript ownership or lose buffered/provisional text.
+10. Send does not close the dictation surface.
+11. Dictation does not force keyboard dismiss or keyboard show.
+12. Internal finalization state remains private while `surfaceTarget` may project immediately from user intent.
+13. `originSessionKey` remains machine-owned and stream-switch cleanup remains machine-owned.
+14. Walkie-origin routing remains machine-owned and preserved across the new transcript session model.
+15. Attachment state and prefix-mismatch compose recovery still work under transcript replacement.
 
 ## Open Questions
 
@@ -466,3 +525,6 @@ Required regression coverage:
 - send during active dictation
 - dismiss during finalization
 - keyboard-up and keyboard-down activation parity
+- compose view recreate / rebind during active dictation
+- dictation replacement while attachments are present
+- prefix-mismatch fallback during transcript apply

@@ -233,6 +233,8 @@ private final class VerificationChatService: ChatServicing {
         let _ = sessionKey
         throw ProviderChatService.Error.notConnected
     }
+
+    func publishReadState(sessionKey: String, lastReadMessageId: String) async throws {}
 }
 
 @MainActor

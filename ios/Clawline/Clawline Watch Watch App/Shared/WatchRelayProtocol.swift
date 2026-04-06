@@ -10,6 +10,7 @@ enum RelayMessageType {
     static let streamsRename = "streams.rename"
     static let streamsDelete = "streams.delete"
     static let event = "event"
+    static let streamRead = "stream.read"
     static let authRefresh = "auth.refresh"
     static let relayActivated = "relay.activated"
     static let relayDeactivated = "relay.deactivated"
@@ -31,6 +32,10 @@ struct RelayEventEnvelope: Codable, Equatable {
         case streamCreated
         case streamUpdated
         case streamDeleted
+        case streamReadStateSnapshot
+        case streamReadStateUpdated
+        case streamTailStateSnapshot
+        case streamTailStateUpdated
         case sessionProvisioningAvailable
         case sessionInfo
     }
@@ -48,6 +53,10 @@ struct RelayEventEnvelope: Codable, Equatable {
     let stream: StreamSession?
     let available: Bool?
     let sessionInfo: SessionInfo?
+    let streamReadStates: [String: String]?
+    let lastReadMessageId: String?
+    let streamTailStates: [String: StreamTailState]?
+    let tailState: StreamTailState?
 
     init(kind: Kind,
          messageId: String? = nil,
@@ -61,7 +70,11 @@ struct RelayEventEnvelope: Codable, Equatable {
          streams: [StreamSession]? = nil,
          stream: StreamSession? = nil,
          available: Bool? = nil,
-         sessionInfo: SessionInfo? = nil) {
+         sessionInfo: SessionInfo? = nil,
+         streamReadStates: [String: String]? = nil,
+         lastReadMessageId: String? = nil,
+         streamTailStates: [String: StreamTailState]? = nil,
+         tailState: StreamTailState? = nil) {
         self.kind = kind
         self.messageId = messageId
         self.code = code
@@ -75,6 +88,10 @@ struct RelayEventEnvelope: Codable, Equatable {
         self.stream = stream
         self.available = available
         self.sessionInfo = sessionInfo
+        self.streamReadStates = streamReadStates
+        self.lastReadMessageId = lastReadMessageId
+        self.streamTailStates = streamTailStates
+        self.tailState = tailState
     }
 
     func toEvent() -> ChatServiceEvent? {
@@ -103,6 +120,16 @@ struct RelayEventEnvelope: Codable, Equatable {
         case .streamDeleted:
             guard let sessionKey else { return nil }
             return .streamDeleted(sessionKey: sessionKey)
+        case .streamReadStateSnapshot:
+            return .streamReadStateSnapshot(streamReadStates ?? [:])
+        case .streamReadStateUpdated:
+            guard let sessionKey, let lastReadMessageId else { return nil }
+            return .streamReadStateUpdated(sessionKey: sessionKey, lastReadMessageId: lastReadMessageId)
+        case .streamTailStateSnapshot:
+            return .streamTailStateSnapshot(streamTailStates ?? [:])
+        case .streamTailStateUpdated:
+            guard let sessionKey, let tailState else { return nil }
+            return .streamTailStateUpdated(sessionKey: sessionKey, tailState: tailState)
         case .sessionProvisioningAvailable:
             return .sessionProvisioningAvailable(available ?? false)
         case .sessionInfo:
@@ -131,6 +158,14 @@ struct RelayEventEnvelope: Codable, Equatable {
             return RelayEventEnvelope(kind: .streamUpdated, stream: stream)
         case .streamDeleted(let sessionKey):
             return RelayEventEnvelope(kind: .streamDeleted, sessionKey: sessionKey)
+        case .streamReadStateSnapshot(let streamReadStates):
+            return RelayEventEnvelope(kind: .streamReadStateSnapshot, streamReadStates: streamReadStates)
+        case .streamReadStateUpdated(let sessionKey, let lastReadMessageId):
+            return RelayEventEnvelope(kind: .streamReadStateUpdated, sessionKey: sessionKey, lastReadMessageId: lastReadMessageId)
+        case .streamTailStateSnapshot(let streamTailStates):
+            return RelayEventEnvelope(kind: .streamTailStateSnapshot, streamTailStates: streamTailStates)
+        case .streamTailStateUpdated(let sessionKey, let tailState):
+            return RelayEventEnvelope(kind: .streamTailStateUpdated, sessionKey: sessionKey, tailState: tailState)
         case .sessionProvisioningAvailable(let available):
             return RelayEventEnvelope(kind: .sessionProvisioningAvailable, available: available)
         case .sessionInfo(let sessionInfo):

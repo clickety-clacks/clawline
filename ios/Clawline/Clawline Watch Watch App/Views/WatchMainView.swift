@@ -105,7 +105,7 @@ struct WatchMainView: View {
             WatchStreamDotsView(
                 sessionKeys: channelManager.streams.map(\.sessionKey),
                 activeSessionKey: channelManager.currentSessionKey,
-                unreadSessionKeys: channelManager.unreadSessionKeys
+                dotStatesBySession: channelManager.streamDotStateBySession
             )
 
             Text(channelManager.currentChannelName())

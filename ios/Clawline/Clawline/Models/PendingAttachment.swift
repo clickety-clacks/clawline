@@ -13,6 +13,8 @@ struct PendingAttachment: Identifiable {
     static let inlineTotalByteLimit: Int = 256 * 1024
     static let totalPayloadByteLimit: Int = 320 * 1024
     static let maxUploadByteLimit: Int = 100 * 1024 * 1024
+    static let anthropicImageBase64ByteLimit: Int = 5 * 1024 * 1024
+    static let modelAwareMaxImageRawByteLimit: Int = (anthropicImageBase64ByteLimit * 3) / 4
     static let inlineMimeTypes: Set<String> = [
         "image/png",
         "image/jpeg",

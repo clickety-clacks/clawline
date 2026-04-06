@@ -1,0 +1,15 @@
+{
+  "type": "stream_snapshot",
+  "streams": [
+    {
+      "sessionKey": "agent:main:clawline:user_1:main",
+      "displayName": "Personal",
+      "kind": "main",
+      "orderIndex": 0,
+      "isBuiltIn": true,
+      "createdAt": 1704672000000,
+      "updatedAt": 1704672000000,
+      "adopted": false
+    }
+  ]
+}

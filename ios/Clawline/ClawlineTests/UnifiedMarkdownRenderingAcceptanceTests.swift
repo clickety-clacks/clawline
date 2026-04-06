@@ -45,8 +45,8 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
         #expect(expanded.count == plan.blocks.count)
     }
 
-    @Test("R48-03: bubble and expanded share one plan; options-only divergence")
-    func r48_03_surfaceDifferenceIsOptionsOnly() {
+    @Test("R48-03: bubble and expanded share one plan and preserve the same text content")
+    func r48_03_surfaceTextMatches() {
         let markdown = """
         # Heading
 
@@ -72,8 +72,9 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
 
         let bubbleText = joinedText(from: bubble)
         let expandedText = joinedText(from: expanded)
-        #expect(!bubbleText.contains("https://one.example"))
+        #expect(bubbleText.contains("https://one.example"))
         #expect(expandedText.contains("https://one.example"))
+        #expect(bubbleText == expandedText)
     }
 
     @Test("R50-01: fenced code with language does not regress to plain text")
@@ -212,6 +213,38 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
 
         let four = UnifiedMarkdownParser.parse(markdown: "😀😁😂🤣", messageID: "em_01_4", metrics: metrics)
         #expect(!four.isEmojiOnly)
+    }
+
+    @Test("EM-02: emoji-only messages preserve all inline blocks across surfaces")
+    func em_02_emojiOnlyPreservesAllInlineBlocks() {
+        let markdown = """
+        😀
+
+        😁
+        """
+
+        let plan = UnifiedMarkdownParser.parse(markdown: markdown, messageID: "em_02", metrics: metrics)
+        let content = UnifiedMarkdownRenderer.makeContent(
+            presentation: MessagePresentation(
+                parts: [.inlineEmoji("😀"), .inlineEmoji("😁")],
+                markdownRenderPlan: plan,
+                wordCount: 0,
+                hasTextualContent: true,
+                isEmojiOnly: true,
+                hasMediaOnly: false,
+                detectedURLs: [],
+                detectedURLCount: 0,
+                hasSingleURL: false
+            ),
+            baseFont: UIFont.systemFont(ofSize: metrics.bodyFontSize, weight: .regular),
+            inkColor: .black,
+            lineSpacing: 4,
+            stripDetectedURLs: false,
+            role: .assistant,
+            isDark: false
+        )
+
+        #expect(content.joinedInlineEmojiValues == "😀\n\n😁")
     }
 
     @Test("TB-01: broken table input falls back to rich text without dropping content")
@@ -391,7 +424,7 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
             baseFont: UIFont.systemFont(ofSize: metrics.bodyFontSize, weight: .regular),
             inkColor: .black,
             lineSpacing: 4,
-            stripDetectedURLs: true,
+            stripDetectedURLs: false,
             markHighlightColor: nil
         )
     }

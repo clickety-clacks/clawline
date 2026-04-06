@@ -320,6 +320,40 @@ struct ChatViewModelTests {
         #expect(messages.contains("That message is too large to send."))
     }
 
+    @Test("Oversized text is blocked before optimistic send and surfaces a clear toast")
+    @MainActor
+    func oversizedTextIsRejectedBeforeSend() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let toastManager = ToastManager()
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: toastManager,
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        try await setReadyToSend(chatService: chatService, viewModel: viewModel)
+        let oversized = String(repeating: "a", count: 65_537)
+        viewModel.inputContent = NSAttributedString(string: oversized)
+
+        viewModel.send()
+
+        #expect(chatService.lastSentId == nil)
+        #expect(viewModel.messages.isEmpty)
+        #expect(viewModel.isSending == false)
+        #expect(viewModel.inputContent.string == oversized)
+        let messages = await MainActor.run { toastManager.debugMessages }
+        #expect(messages.contains("That message is too large to send."))
+    }
+
     @Test("Connection interruptions update send button state without passive toast")
     @MainActor
     func connectionInterruptionTriggersAlert() async throws {
@@ -2102,6 +2136,301 @@ struct ChatViewModelTests {
         #expect(displayName == "Research v2")
     }
 
+    @Test("Provider tail plus read state produce user-tail classification in one place")
+    @MainActor
+    func streamTailStateAndReadStateProduceUserTail() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let customKey = "agent:main:clawline:user:s_deadbeef"
+        chatService.streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: customKey, displayName: "Research", kind: "custom", orderIndex: 1, isBuiltIn: false),
+        ]
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
+        try await Task.sleep(for: .milliseconds(30))
+
+        chatService.emitServiceEvent(
+            .streamTailStateUpdated(
+                sessionKey: customKey,
+                tailState: StreamTailState(lastMessageId: "s_remote_tail", lastMessageRole: .user)
+            )
+        )
+        chatService.emitServiceEvent(
+            .streamReadStateUpdated(sessionKey: customKey, lastReadMessageId: "s_remote_tail")
+        )
+        for _ in 0..<50 {
+            if viewModel.streamDotState(for: customKey) == .userTail { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(viewModel.streamDotState(for: customKey) == .userTail)
+    }
+
+    @Test("User-tail classification does not require a matching read cursor")
+    @MainActor
+    func streamTailStateWithoutReadCursorStillProducesUserTail() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let customKey = "agent:main:clawline:user:s_user_tail"
+        chatService.streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: customKey, displayName: "Research", kind: "custom", orderIndex: 1, isBuiltIn: false),
+        ]
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
+        try await Task.sleep(for: .milliseconds(30))
+
+        chatService.emitServiceEvent(
+            .streamTailStateUpdated(
+                sessionKey: customKey,
+                tailState: StreamTailState(lastMessageId: "s_remote_tail", lastMessageRole: .user)
+            )
+        )
+
+        for _ in 0..<50 {
+            if viewModel.streamDotState(for: customKey) == .userTail { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(viewModel.streamDotState(for: customKey) == .userTail)
+    }
+
+    @Test("Tail snapshot clears yellow classification when the server removes that stream state")
+    @MainActor
+    func streamTailStateSnapshotClearsMissingStreams() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let customKey = "agent:main:clawline:user:s_snapshot_clear"
+        chatService.streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: customKey, displayName: "Research", kind: "custom", orderIndex: 1, isBuiltIn: false),
+        ]
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
+        try await Task.sleep(for: .milliseconds(30))
+
+        chatService.emitServiceEvent(
+            .streamTailStateUpdated(
+                sessionKey: customKey,
+                tailState: StreamTailState(lastMessageId: "s_remote_tail", lastMessageRole: .user)
+            )
+        )
+        chatService.emitServiceEvent(.streamReadStateUpdated(sessionKey: customKey, lastReadMessageId: "s_remote_tail"))
+        for _ in 0..<50 {
+            if viewModel.streamDotState(for: customKey) == .userTail { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(viewModel.streamDotState(for: customKey) == .userTail)
+
+        chatService.emitServiceEvent(.streamTailStateSnapshot([:]))
+        for _ in 0..<50 {
+            if viewModel.streamDotStateBySession[customKey] == nil { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(viewModel.streamDotStateBySession[customKey] == nil)
+        #expect(viewModel.streamDotState(for: customKey) == .inactive)
+    }
+
+    @Test("Activating a stream publishes provider read-state for its latest server message")
+    @MainActor
+    func activatingStreamPublishesReadState() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let customKey = "agent:main:clawline:user:s_c0ffee"
+        chatService.streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: customKey, displayName: "Research", kind: "custom", orderIndex: 1, isBuiltIn: false),
+        ]
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
+        try await Task.sleep(for: .milliseconds(30))
+
+        chatService.emit(
+            Message(
+                id: "s_publish_read_target",
+                role: .assistant,
+                content: "hello",
+                timestamp: Date(),
+                streaming: false,
+                attachments: [],
+                deviceId: nil,
+                sessionKey: customKey
+            )
+        )
+        try await Task.sleep(for: .milliseconds(30))
+
+        viewModel.setActiveSessionKeyForTesting(customKey)
+        for _ in 0..<50 {
+            if chatService.lastPublishedReadState?.lastReadMessageId == "s_publish_read_target" { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(chatService.lastPublishedReadState?.sessionKey == customKey)
+        #expect(chatService.lastPublishedReadState?.lastReadMessageId == "s_publish_read_target")
+        #expect(viewModel.lastReadMessageIdBySession[customKey] == "s_publish_read_target")
+    }
+
+    @Test("Active stream assistant arrivals publish updated read-state immediately")
+    @MainActor
+    func activeStreamIncomingAssistantPublishesReadState() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let customKey = "agent:main:clawline:user:s_active_publish"
+        chatService.streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: customKey, displayName: "Research", kind: "custom", orderIndex: 1, isBuiltIn: false),
+        ]
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
+        try await Task.sleep(for: .milliseconds(30))
+
+        viewModel.setActiveSessionKeyForTesting(customKey)
+        chatService.lastPublishedReadState = nil
+
+        chatService.emit(
+            Message(
+                id: "s_active_publish_target",
+                role: .assistant,
+                content: "hello",
+                timestamp: Date(),
+                streaming: false,
+                attachments: [],
+                deviceId: nil,
+                sessionKey: customKey
+            )
+        )
+
+        for _ in 0..<50 {
+            if chatService.lastPublishedReadState?.lastReadMessageId == "s_active_publish_target" { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(chatService.lastPublishedReadState?.sessionKey == customKey)
+        #expect(chatService.lastPublishedReadState?.lastReadMessageId == "s_active_publish_target")
+        #expect(viewModel.lastReadMessageIdBySession[customKey] == "s_active_publish_target")
+    }
+
+    @Test("Activating unread stream uses server tail state when local transcript is not loaded")
+    @MainActor
+    func activatingUnreadStreamWithoutLocalTranscriptPublishesTailReadState() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let customKey = "agent:main:clawline:user:s_tail_fallback"
+        chatService.streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: customKey, displayName: "Research", kind: "custom", orderIndex: 1, isBuiltIn: false),
+        ]
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
+        try await Task.sleep(for: .milliseconds(30))
+
+        chatService.emitServiceEvent(
+            .streamTailStateUpdated(
+                sessionKey: customKey,
+                tailState: StreamTailState(lastMessageId: "s_server_tail", lastMessageRole: .assistant)
+            )
+        )
+        chatService.emitServiceEvent(.streamReadStateUpdated(sessionKey: customKey, lastReadMessageId: "s_old_read"))
+        for _ in 0..<50 {
+            if viewModel.streamDotState(for: customKey) == .unread { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(viewModel.streamDotState(for: customKey) == .unread)
+
+        chatService.lastPublishedReadState = nil
+        viewModel.setActiveSessionKeyForTesting(customKey)
+
+        for _ in 0..<50 {
+            if chatService.lastPublishedReadState?.lastReadMessageId == "s_server_tail" { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(chatService.lastPublishedReadState?.sessionKey == customKey)
+        #expect(chatService.lastPublishedReadState?.lastReadMessageId == "s_server_tail")
+        #expect(viewModel.lastReadMessageIdBySession[customKey] == "s_server_tail")
+        #expect(viewModel.streamDotState(for: customKey) == .inactive)
+    }
+
     @Test("Track adopts untracked session and preserves it across snapshots")
     @MainActor
     func trackAdoptsUntrackedSessionAcrossSnapshots() async throws {
@@ -2307,6 +2636,50 @@ struct ChatViewModelTests {
         #expect(viewModel.canTrackSession(sessionKey: agentSessionKey))
         #expect(await viewModel.trackSession(sessionKey: agentSessionKey))
         #expect(viewModel.isAdoptedStream(sessionKey: agentSessionKey))
+    }
+
+    @Test("Track candidates can be refreshed on demand")
+    @MainActor
+    func trackCandidatesRefreshOnDemand() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        auth.updateAdminStatus(true)
+        let chatService = TestChatService()
+        chatService.streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+        ]
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        let agentSessionKey = "agent:main:openclaw:user:s_manualrefresh"
+        chatService.trackableSessions = [
+            TrackableSession(
+                sessionKey: agentSessionKey,
+                displayName: "Manual Refresh Session",
+                updatedAt: Date()
+            )
+        ]
+
+        viewModel.refreshTrackableSessionsOnDemand()
+
+        for _ in 0..<50 {
+            if viewModel.untrackedSessionCandidates.map(\.sessionKey).contains(agentSessionKey) {
+                break
+            }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(chatService.fetchTrackableSessionsCallCount == 1)
+        #expect(viewModel.untrackedSessionCandidates.map(\.sessionKey).contains(agentSessionKey))
     }
 
     @Test("Initial trackable sessions load failure is surfaced")
@@ -3084,6 +3457,7 @@ private final class TestChatService: ChatServicing {
     private(set) var lastSentId: String?
     private(set) var lastSessionKey: String?
     private(set) var sendCallCount: Int = 0
+    private(set) var lastPublishedReadState: (sessionKey: String, lastReadMessageId: String)?
     private(set) var connectCallCount: Int = 0
     var emitConnectedOnConnect: Bool = true
     var emitInitialDisconnectedState: Bool = true
@@ -3191,6 +3565,10 @@ private final class TestChatService: ChatServicing {
 
     func sendInteractiveCallback(sourceMessageId: String, action: String, data: JSONValue?) async throws {
         // No-op for tests.
+    }
+
+    func publishReadState(sessionKey: String, lastReadMessageId: String) async throws {
+        lastPublishedReadState = (sessionKey, lastReadMessageId)
     }
 
     func emit(_ message: Message) {
@@ -3350,6 +3728,7 @@ private func resetChatPersistence() {
     let defaults = UserDefaults.standard
     for key in defaults.dictionaryRepresentation().keys {
         if key.hasPrefix("clawline.lastServerMessageId.")
+            || key.hasPrefix("clawline.lastReadMessageId.")
             || key.hasPrefix("clawline.lastStream")
             || key.hasPrefix("clawline.lastSessionKey")
             || key.hasPrefix("clawline.scrollState.v1.") {

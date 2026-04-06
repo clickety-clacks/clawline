@@ -167,6 +167,37 @@ struct ChatLayoutCoordinatorTests {
         #expect(transition.scrollAction == .none)
     }
 
+    @Test("Pinned multiline growth does not schedule redundant scroll-to-bottom")
+    @MainActor
+    func pinnedBarGrowthSkipsExtraScrollToBottom() {
+        let coordinator = ChatLayoutCoordinator()
+        let inputs = ChatLayoutInputs(
+            keyboardHeight: 300,
+            keyboardVisible: true,
+            isInputFocused: true,
+            keyboardAnimationDuration: 0.25,
+            keyboardAnimationCurve: .easeInOut,
+            safeAreaBottom: 0,
+            usesExternalKeyboardInsets: true
+        )
+        let transition = coordinator.computeTransition(
+            inputs: inputs,
+            previousInputs: inputs,
+            previousInset: 180,
+            targetInset: 220,
+            barHeight: 88,
+            previousBarHeight: 44,
+            isUserInteracting: false,
+            isPinnedToBottomIntent: true,
+            didJustStabilize: false,
+            wasNearBottom: true,
+            keyboardJustAppeared: false
+        )
+
+        #expect(transition.animationDuration == 0.3)
+        #expect(transition.scrollAction == .none)
+    }
+
     @Test("T071: First measured bar height immediately updates list bottom inset")
     @MainActor
     func firstMeasuredBarHeightAppliesWithoutSecondTick() {

@@ -1,0 +1,14 @@
+{
+  "type": "session_info",
+  "userId": "user_1",
+  "isAdmin": false,
+  "sessionKeys": [
+    "agent:main:clawline:user_1:main"
+  ],
+  "sessions": [
+    {
+      "stream": "personal",
+      "sessionKey": "agent:main:clawline:user_1:main"
+    }
+  ]
+}

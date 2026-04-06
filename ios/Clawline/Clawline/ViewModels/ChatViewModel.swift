@@ -50,6 +50,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
     @MainActor
     private static var connectionOwnershipDisabledForTesting = false
 #endif
+    private static let providerMaxTextMessageBytes = 65_536
     private static let richDocumentMimeTypesNeedingPayload: Set<String> = [
         InteractiveHTMLDescriptor.mimeType,
         TerminalSessionDescriptor.mimeType
@@ -131,8 +132,9 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
     private(set) var messages: [Message] = []
     private(set) var streamsBySessionKey: [String: StreamSession] = [:]
     private(set) var orderedSessionKeys: [String] = []
+    private(set) var streamDotStateBySession: [String: StreamDotState] = [:]
     private(set) var lastReadMessageIdBySession: [String: String] = [:]
-    private(set) var hasUnreadBySession: [String: Bool] = [:]
+    private(set) var streamTailStateBySession: [String: StreamTailState] = [:]
     private var syntheticSessionKeys: Set<String> = []
     private var didRestoreActiveSessionKey = false
 
@@ -183,6 +185,10 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
 
     func messages(for sessionKey: String) -> [Message] {
         sessionMessages[sessionKey] ?? []
+    }
+
+    func streamDotState(for sessionKey: String) -> StreamDotState {
+        streamDotStateBySession[sessionKey] ?? .inactive
     }
 
     func stream(for sessionKey: String) -> StreamSession? {
@@ -403,6 +409,18 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
     var activeSessionDisplayName: String {
         streamsBySessionKey[uiSelectedSessionKey]?.displayName ?? fallbackDisplayName(for: uiSelectedSessionKey)
     }
+
+    var activeSessionPlaceholderText: String {
+        Self.placeholderText(
+            displayName: activeSessionDisplayName,
+            sessionKey: uiSelectedSessionKey
+        )
+    }
+
+    nonisolated static func placeholderText(displayName: String, sessionKey: String) -> String {
+        guard !sessionKey.isEmpty else { return displayName }
+        return "\(displayName) — \(sessionKey)"
+    }
     var inputContent: NSAttributedString = NSAttributedString() {
         didSet {
             pruneAttachmentData()
@@ -490,6 +508,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
     private let uploadService: any UploadServicing
     private let settings: SettingsManager
     private let deviceId: String
+    let terminalConnectionPool: TerminalSessionConnectionPool
     let salientHighlightService: any SalientHighlightServicing
     private var observationTask: Task<Void, Never>?
     private var observationStartupTask: Task<Void, Never>?
@@ -718,6 +737,9 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         self.settings = settings
         self.deviceId = device.deviceId
         self.uploadService = uploadService
+        self.terminalConnectionPool = TerminalSessionConnectionPool { descriptor in
+            TerminalSessionService(descriptor: descriptor, auth: auth, deviceId: device)
+        }
         self.toastManager = toastManager
         self.salientHighlightService = salientHighlightService
         self.lifecycleCoordinator = ConnectionLifecycleCoordinator(
@@ -1126,6 +1148,21 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         return "connectionState=\(String(describing: connectionState)) providerReady=\(providerReady ? "1" : "0") transportReady=\(transportReady ? "1" : "0")"
     }
 
+    private func validateTextByteLimitForSend(_ text: String) -> Bool {
+        let textBytes = text.lengthOfBytes(using: .utf8)
+        guard textBytes <= Self.providerMaxTextMessageBytes else {
+#if DEBUG
+            recordImageSendDebugEvent(
+                .sendResult,
+                detail: "failure reason=text_too_large bytes=\(textBytes) limit=\(Self.providerMaxTextMessageBytes)"
+            )
+#endif
+            toastManager.show("That message is too large to send.")
+            return false
+        }
+        return true
+    }
+
     func send() {
         guard !isSending else { return }
         let referencedIds = Set(inputContent.pendingAttachmentIds())
@@ -1156,6 +1193,10 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
 #if DEBUG
             recordImageSendDebugEvent(.sendResult, detail: "failure reason=empty_input")
 #endif
+            return
+        }
+
+        if !validateTextByteLimitForSend(text) {
             return
         }
 
@@ -1270,6 +1311,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
     func resendFailedMessage(messageId: String) {
         guard !isSending else { return }
         guard let (message, sessionKey, index) = findMessage(id: messageId) else { return }
+        guard validateTextByteLimitForSend(message.content) else { return }
 
         let clientId = "c_\(UUID().uuidString)"
         let resentMessage = Message(
@@ -1380,8 +1422,8 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
             persistLastServerMessageId(nil, for: key)
         }
         lastReadMessageIdBySession.removeAll()
-        lastServerMessageIdBySession.removeAll()
-        hasUnreadBySession.removeAll()
+        streamTailStateBySession.removeAll()
+        streamDotStateBySession.removeAll()
         auth.clearCredentials()
         messageFailures.removeAll()
         clearInput()
@@ -1464,6 +1506,10 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
             toastManager.show(error.localizedDescription)
             return false
         }
+    }
+
+    func refreshTrackableSessionsOnDemand() {
+        refreshTrackableSessions(reason: "manualRefresh")
     }
 
     func createStream(displayName: String) async -> Bool {
@@ -1653,7 +1699,6 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
 
         if replacePendingMessageIfNeeded(with: resolvedMessage) {
             logger.info("incoming replacePending id=\(resolvedMessage.id, privacy: .public)")
-            markUnreadIfNeeded(for: resolvedMessage)
             resolveAssetAttachmentsIfNeeded(for: resolvedMessage)
             return
         }
@@ -1670,9 +1715,12 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
             didAppendNewMessage = true
         }
         setMessages(messageList, for: resolvedMessage.sessionKey)
+        if resolvedMessage.sessionKey == engineActiveSessionKey,
+           resolvedMessage.id.hasPrefix("s_") {
+            markSessionRead(resolvedMessage.sessionKey)
+        }
         maybeTriggerAssistantIncomingHaptic(for: resolvedMessage, didAppendNewMessage: didAppendNewMessage)
 
-        markUnreadIfNeeded(for: resolvedMessage)
         resolveAssetAttachmentsIfNeeded(for: resolvedMessage)
     }
 
@@ -1910,7 +1958,6 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
             StreamSwitchTiming.log("stream_messages_reloaded oldCount=0 newCount=\(newCount)", sessionKey: sessionKey)
         }
         persistMessages(newMessages, for: sessionKey)
-        refreshUnreadState(for: sessionKey)
         if sessionKey == engineActiveSessionKey {
             messages = newMessages
             let total = newMessages.count
@@ -2154,6 +2201,71 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         }
     }
 
+    // MARK: - Image downscale for model limits
+
+    private static let modelAwareMaxImageDimension: CGFloat = 1568
+    private static let minImageDimension: CGFloat = 512
+    private static let initialJPEGQuality: CGFloat = 0.9
+    private static let minJPEGQuality: CGFloat = 0.58
+    private static let qualityStep: CGFloat = 0.08
+    private static let resizeStep: CGFloat = 0.85
+    private static let downscalePassLimit: Int = 12
+
+    private func prepareImageDataForModel(data: Data, mimeType: String) throws -> (Data, String) {
+        guard PendingAttachment.inlineMimeTypes.contains(mimeType.lowercased()) else {
+            return (data, mimeType)
+        }
+        guard data.count > PendingAttachment.modelAwareMaxImageRawByteLimit else {
+            return (data, mimeType)
+        }
+        guard let image = UIImage(data: data) else {
+            return (data, mimeType)
+        }
+
+        var maxDim = Self.modelAwareMaxImageDimension
+        var quality = Self.initialJPEGQuality
+        var pass = 0
+
+        while pass < Self.downscalePassLimit {
+            pass += 1
+            if let compressed = downscaleImage(image, maxDimension: maxDim, quality: quality) {
+                if compressed.count <= PendingAttachment.modelAwareMaxImageRawByteLimit {
+                    logger.info("image downscaled pass=\(pass, privacy: .public) from=\(data.count, privacy: .public) to=\(compressed.count, privacy: .public)")
+                    return (compressed, "image/jpeg")
+                }
+            }
+            if quality > Self.minJPEGQuality {
+                quality -= Self.qualityStep
+            } else {
+                maxDim *= Self.resizeStep
+                quality = Self.initialJPEGQuality
+            }
+            if maxDim < Self.minImageDimension {
+                break
+            }
+        }
+
+        throw AttachmentError.imageTooLargeForModel
+    }
+
+    private func downscaleImage(_ image: UIImage, maxDimension: CGFloat, quality: CGFloat) -> Data? {
+        let size = image.size
+        let scale: CGFloat
+        if size.width > size.height {
+            scale = size.width > maxDimension ? maxDimension / size.width : 1
+        } else {
+            scale = size.height > maxDimension ? maxDimension / size.height : 1
+        }
+        let newSize = CGSize(width: (size.width * scale).rounded(), height: (size.height * scale).rounded())
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let renderer = UIGraphicsImageRenderer(size: newSize, format: format)
+        let resized = renderer.image { _ in
+            image.draw(in: CGRect(origin: .zero, size: newSize))
+        }
+        return resized.jpegData(compressionQuality: quality)
+    }
+
     private func buildWireAttachments(from attachments: [PendingAttachment],
                                       content: String) async throws -> [WireAttachment] {
         var results: [WireAttachment] = []
@@ -2165,19 +2277,22 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         var inlineBytes = 0
         for attachment in attachments {
             try Task.checkCancellation()
-            let canInline = attachment.isInlineCapableImage
-                && attachment.size <= PendingAttachment.inlineByteLimit
-                && inlineBytes + attachment.size <= PendingAttachment.inlineTotalByteLimit
-                && contentBytes + inlineBytes + attachment.size <= PendingAttachment.totalPayloadByteLimit
+            let (preparedData, preparedMime) = try prepareImageDataForModel(
+                data: attachment.data, mimeType: attachment.mimeType
+            )
+            let canInline = PendingAttachment.inlineMimeTypes.contains(preparedMime.lowercased())
+                && preparedData.count <= PendingAttachment.inlineByteLimit
+                && inlineBytes + preparedData.count <= PendingAttachment.inlineTotalByteLimit
+                && contentBytes + inlineBytes + preparedData.count <= PendingAttachment.totalPayloadByteLimit
 
             if canInline {
-                logger.info("attachment inline id=\(attachment.id.uuidString, privacy: .public) bytes=\(attachment.size, privacy: .public)")
-                results.append(.image(mimeType: attachment.mimeType, data: attachment.data))
-                inlineBytes += attachment.size
+                logger.info("attachment inline id=\(attachment.id.uuidString, privacy: .public) bytes=\(preparedData.count, privacy: .public)")
+                results.append(.image(mimeType: preparedMime, data: preparedData))
+                inlineBytes += preparedData.count
                 continue
             }
 
-            if attachment.size > PendingAttachment.maxUploadByteLimit {
+            if preparedData.count > PendingAttachment.maxUploadByteLimit {
                 throw AttachmentError.uploadTooLarge
             }
 
@@ -2187,12 +2302,12 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
             }
 
             let assetId = try await uploadService.upload(
-                data: attachment.data,
-                mimeType: attachment.mimeType,
+                data: preparedData,
+                mimeType: preparedMime,
                 filename: attachment.filename
             )
             uploadedAssetIds[attachment.id] = assetId
-            logger.info("attachment uploaded id=\(attachment.id.uuidString, privacy: .public) assetId=\(assetId, privacy: .public) bytes=\(attachment.size, privacy: .public)")
+            logger.info("attachment uploaded id=\(attachment.id.uuidString, privacy: .public) assetId=\(assetId, privacy: .public) bytes=\(preparedData.count, privacy: .public)")
             results.append(.asset(assetId: assetId))
         }
         return results
@@ -2215,10 +2330,11 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
                 continue
             }
 
-            guard let data = attachment.data else {
+            guard let rawData = attachment.data else {
                 throw AttachmentError.invalidData
             }
-            let mimeType = attachment.mimeType ?? "application/octet-stream"
+            let rawMime = attachment.mimeType ?? "application/octet-stream"
+            let (data, mimeType) = try prepareImageDataForModel(data: rawData, mimeType: rawMime)
             let canInline = PendingAttachment.inlineMimeTypes.contains(mimeType.lowercased())
                 && data.count <= PendingAttachment.inlineByteLimit
                 && inlineBytes + data.count <= PendingAttachment.inlineTotalByteLimit
@@ -2501,6 +2617,14 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
             refreshStreamsFromProvider(reason: "streamDeleted")
             refreshTrackableSessions(reason: "streamDeleted")
             attemptPendingProvisionedSendIfPossible()
+        case .streamReadStateSnapshot(let snapshot):
+            applyStreamReadStateSnapshot(snapshot)
+        case .streamReadStateUpdated(let sessionKey, let lastReadMessageId):
+            applyStreamReadStateUpdate(sessionKey: sessionKey, lastReadMessageId: lastReadMessageId)
+        case .streamTailStateSnapshot(let snapshot):
+            applyStreamTailStateSnapshot(snapshot)
+        case .streamTailStateUpdated(let sessionKey, let tailState):
+            applyStreamTailStateUpdate(sessionKey: sessionKey, tailState: tailState)
         case .sessionProvisioningAvailable(let supported):
             hasResolvedProvisioningCapability = true
             supportsSessionProvisioning = supported
@@ -2703,6 +2827,25 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         return components.joined(separator: ".")
     }
 
+    private func lastReadMessageDefaultsPrefix() -> String {
+        var components = ["clawline.lastReadMessageId"]
+        if let userId = auth.currentUserId, !userId.isEmpty {
+            components.append(userId)
+        }
+        return components.joined(separator: ".") + "."
+    }
+
+    private func persistedLastReadSessionKeys() -> Set<String> {
+        let prefix = lastReadMessageDefaultsPrefix()
+        return Set(
+            streamDefaults.dictionaryRepresentation().keys.compactMap { key in
+                guard key.hasPrefix(prefix) else { return nil }
+                let sessionKey = String(key.dropFirst(prefix.count))
+                return sessionKey.isEmpty ? nil : sessionKey
+            }
+        )
+    }
+
     private func persistLastReadMessageId(_ value: String?, for sessionKey: String) {
         let key = lastReadMessageDefaultsKey(for: sessionKey)
         if let value, !value.isEmpty {
@@ -2844,7 +2987,6 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         self.chatService.setReplayCursor(nil, for: sessionKey)
         Task { await lifecycleCoordinator.updateCanonicalCursor(nil) }
         self.armForceReRead(for: sessionKey)
-        self.refreshUnreadState(for: sessionKey)
     }
 
     private func persistMessages(_ messages: [Message], for sessionKey: String) {
@@ -3007,8 +3149,8 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         for sessionKey in removedSessionKeys {
             sessionMessages.removeValue(forKey: sessionKey)
             lastReadMessageIdBySession.removeValue(forKey: sessionKey)
-            lastServerMessageIdBySession.removeValue(forKey: sessionKey)
-            hasUnreadBySession.removeValue(forKey: sessionKey)
+            streamTailStateBySession.removeValue(forKey: sessionKey)
+            streamDotStateBySession.removeValue(forKey: sessionKey)
             let removedIDs = Set(pendingLocalMessages.filter { $0.sessionKey == sessionKey }.map(\.id))
             pendingLocalMessages.removeAll { $0.sessionKey == sessionKey }
             ackedPendingLocalMessageIDs.subtract(removedIDs)
@@ -3023,7 +3165,6 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
             restoreLastReadMessageIdIfNeeded(for: sessionKey)
             restoreLastServerMessageIdIfNeeded(for: sessionKey)
             restoreCachedMessagesIfNeeded(for: sessionKey)
-            refreshUnreadState(for: sessionKey)
         }
         restoreActiveSessionKeyIfNeeded()
         ensureDefaultActiveSessionIfNeeded()
@@ -3044,7 +3185,6 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         restoreLastReadMessageIdIfNeeded(for: stream.sessionKey)
         restoreLastServerMessageIdIfNeeded(for: stream.sessionKey)
         restoreCachedMessagesIfNeeded(for: stream.sessionKey)
-        refreshUnreadState(for: stream.sessionKey)
         ensureDefaultActiveSessionIfNeeded()
         SessionRegistry.shared.upsert(stream)
         persistStreamMetadata()
@@ -3056,8 +3196,8 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         recalculateOrderedSessionKeys()
         sessionMessages.removeValue(forKey: sessionKey)
         lastReadMessageIdBySession.removeValue(forKey: sessionKey)
-        lastServerMessageIdBySession.removeValue(forKey: sessionKey)
-        hasUnreadBySession.removeValue(forKey: sessionKey)
+        streamTailStateBySession.removeValue(forKey: sessionKey)
+        streamDotStateBySession.removeValue(forKey: sessionKey)
         chatService.setReplayCursor(nil, for: sessionKey)
         persistLastReadMessageId(nil, for: sessionKey)
         persistLastServerMessageId(nil, for: sessionKey)
@@ -3269,8 +3409,17 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         }
     }
 
+    private func isImageRelatedError(_ text: String) -> Bool {
+        let lower = text.lowercased()
+        let keywords = ["image", "size", "bytes", "mb", "payload_too_large"]
+        return keywords.contains(where: { lower.contains($0) })
+    }
+
     private func userFacingMessage(for code: String, fallback: String?) -> String {
         if let fallback, !fallback.isEmpty {
+            if isImageRelatedError(fallback) {
+                return "That image is too large for this model. Reduce image size and try again."
+            }
             return fallback
         }
         switch code {
@@ -3486,33 +3635,110 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         (auth.token, chatService.replayCursorSnapshot().values.max())
     }
 
-    private func markUnreadIfNeeded(for message: Message) {
-        guard message.role == .assistant else { return }
-        guard message.sessionKey != engineActiveSessionKey else { return }
-        hasUnreadBySession[message.sessionKey] = true
-    }
-
     private func markSessionRead(_ sessionKey: String) {
-        let tailMessageId = sessionMessages[sessionKey]?.last?.id
+        let tailMessageId =
+            lastServerMessageId(from: sessionMessages[sessionKey] ?? [])
+            ?? streamTailStateBySession[sessionKey]?.lastMessageId
         if let tailMessageId {
             lastReadMessageIdBySession[sessionKey] = tailMessageId
             persistLastReadMessageId(tailMessageId, for: sessionKey)
+            publishReadStateIfPossible(sessionKey: sessionKey, lastReadMessageId: tailMessageId)
+            recomputeStreamDotState(for: sessionKey)
         }
-        hasUnreadBySession[sessionKey] = false
     }
 
-    private func refreshUnreadState(for sessionKey: String) {
-        if sessionKey == engineActiveSessionKey {
-            hasUnreadBySession[sessionKey] = false
+    private func applyStreamReadStateSnapshot(_ snapshot: [String: String]) {
+        var normalizedSnapshot: [String: String] = [:]
+        for (sessionKey, lastReadMessageId) in snapshot {
+            guard !sessionKey.isEmpty, !lastReadMessageId.isEmpty else { continue }
+            normalizedSnapshot[sessionKey] = lastReadMessageId
+        }
+        let snapshotSessionKeys = Set(normalizedSnapshot.keys)
+        let staleSessionKeys = lastReadMessageIdBySession.keys
+            .reduce(into: Set<String>()) { $0.insert($1) }
+            .union(persistedLastReadSessionKeys())
+            .subtracting(snapshotSessionKeys)
+
+        for sessionKey in staleSessionKeys {
+            lastReadMessageIdBySession.removeValue(forKey: sessionKey)
+            persistLastReadMessageId(nil, for: sessionKey)
+            recomputeStreamDotState(for: sessionKey)
+        }
+
+        for (sessionKey, lastReadMessageId) in normalizedSnapshot {
+            lastReadMessageIdBySession[sessionKey] = lastReadMessageId
+            persistLastReadMessageId(lastReadMessageId, for: sessionKey)
+            recomputeStreamDotState(for: sessionKey)
+        }
+    }
+
+    private func applyStreamReadStateUpdate(sessionKey: String, lastReadMessageId: String) {
+        guard !sessionKey.isEmpty, !lastReadMessageId.isEmpty else { return }
+        let current = lastReadMessageIdBySession[sessionKey]
+        if current == lastReadMessageId { return }
+        lastReadMessageIdBySession[sessionKey] = lastReadMessageId
+        persistLastReadMessageId(lastReadMessageId, for: sessionKey)
+        recomputeStreamDotState(for: sessionKey)
+    }
+
+    private func applyStreamTailStateSnapshot(_ snapshot: [String: StreamTailState]) {
+        var normalizedSnapshot: [String: StreamTailState] = [:]
+        for (sessionKey, tailState) in snapshot {
+            guard !sessionKey.isEmpty else { continue }
+            normalizedSnapshot[sessionKey] = tailState
+        }
+
+        let snapshotSessionKeys = Set(normalizedSnapshot.keys)
+        let staleSessionKeys = Set(streamTailStateBySession.keys).subtracting(snapshotSessionKeys)
+        for sessionKey in staleSessionKeys {
+            streamTailStateBySession.removeValue(forKey: sessionKey)
+            recomputeStreamDotState(for: sessionKey)
+        }
+
+        for (sessionKey, tailState) in normalizedSnapshot {
+            streamTailStateBySession[sessionKey] = tailState
+            recomputeStreamDotState(for: sessionKey)
+        }
+    }
+
+    private func applyStreamTailStateUpdate(sessionKey: String, tailState: StreamTailState) {
+        guard !sessionKey.isEmpty else { return }
+        if streamTailStateBySession[sessionKey] == tailState { return }
+        streamTailStateBySession[sessionKey] = tailState
+        recomputeStreamDotState(for: sessionKey)
+    }
+
+    private func publishReadStateIfPossible(sessionKey: String, lastReadMessageId: String) {
+        guard lastReadMessageId.hasPrefix("s_") else { return }
+        Task { [chatService, logger] in
+            do {
+                try await chatService.publishReadState(
+                    sessionKey: sessionKey,
+                    lastReadMessageId: lastReadMessageId
+                )
+            } catch {
+                logger.error(
+                    "stream_read_publish_failed sessionKey=\(sessionKey, privacy: .public) lastReadMessageId=\(lastReadMessageId, privacy: .public) error=\(error.localizedDescription, privacy: .public)"
+                )
+            }
+        }
+    }
+
+    private func recomputeStreamDotState(for sessionKey: String) {
+        guard !sessionKey.isEmpty else { return }
+        guard let tailState = streamTailStateBySession[sessionKey] else {
+            streamDotStateBySession.removeValue(forKey: sessionKey)
             return
         }
-        restoreLastReadMessageIdIfNeeded(for: sessionKey)
-        guard let tailMessageId = sessionMessages[sessionKey]?.last?.id else {
-            hasUnreadBySession[sessionKey] = false
-            return
+        let dotState: StreamDotState
+        if tailState.lastMessageRole == .user {
+            dotState = .userTail
+        } else if lastReadMessageIdBySession[sessionKey] != tailState.lastMessageId {
+            dotState = .unread
+        } else {
+            dotState = .inactive
         }
-        let lastReadMessageId = lastReadMessageIdBySession[sessionKey]
-        hasUnreadBySession[sessionKey] = (lastReadMessageId != tailMessageId)
+        streamDotStateBySession[sessionKey] = dotState
     }
 
 #if DEBUG

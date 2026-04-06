@@ -1,0 +1,10 @@
+{
+  "type": "pair_request",
+  "protocolVersion": 1,
+  "deviceId": "browser-device-1",
+  "claimedName": "Desk Browser",
+  "deviceInfo": {
+    "platform": "Web",
+    "model": "Vitest"
+  }
+}

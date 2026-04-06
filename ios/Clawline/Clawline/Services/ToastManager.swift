@@ -31,7 +31,7 @@ final class ToastManager {
 #endif
 
     func show(_ message: String,
-              duration: Duration = .seconds(3),
+              duration: Duration = .seconds(5),
               actionTitle: String? = nil,
               action: (@MainActor () -> Void)? = nil) {
         guard !message.isEmpty else { return }

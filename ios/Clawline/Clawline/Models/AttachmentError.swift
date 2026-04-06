@@ -20,6 +20,7 @@ enum AttachmentError: LocalizedError {
     case cancelled
     case payloadTooLarge
     case uploadTooLarge
+    case imageTooLargeForModel
     case unknown
 
     var errorDescription: String? {
@@ -48,6 +49,8 @@ enum AttachmentError: LocalizedError {
             return "Message is too large to send."
         case .uploadTooLarge:
             return "File is too large to upload."
+        case .imageTooLargeForModel:
+            return "That image is too large for this model. Reduce image size and try again."
         case .unknown:
             return "Something went wrong."
         }

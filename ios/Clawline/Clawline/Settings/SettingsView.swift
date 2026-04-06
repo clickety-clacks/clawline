@@ -15,16 +15,8 @@ struct SettingsView: View {
     @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
     @Environment(\.colorScheme) private var colorScheme
 
-    private var effectiveColorScheme: ColorScheme {
-#if os(visionOS)
-        return settings.appearanceMode == .dark ? .dark : .light
-#else
-        return colorScheme
-#endif
-    }
-
     private var previewBackgroundColor: Color {
-        effectiveColorScheme == .dark
+        colorScheme == .dark
             ? Color(red: 0.1, green: 0.12, blue: 0.15)
             : Color(uiColor: .systemGray6)
     }

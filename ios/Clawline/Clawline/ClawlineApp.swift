@@ -50,22 +50,12 @@ struct ClawlineApp: App {
         _cartesiaKeyStore = State(initialValue: cartesiaKeyStore)
         let settingsManager = SettingsManager(sonioxKeyStore: sonioxKeyStore)
         _settingsManager = State(initialValue: settingsManager)
-        let device = DeviceIdentifier()
-        let connector = URLSessionWebSocketConnector(connectTimeout: 20, resourceTimeout: 360)
-        self.deviceIdentifier = device
-        self.connectionService = ProviderConnectionService(connector: connector)
-        let chatService = ProviderChatService(
-            connector: connector,
-            deviceId: device.deviceId,
-            userIdProvider: { authManager.currentUserId },
-            authTokenProvider: { @MainActor in authManager.token },
-            adoptedSessionKeysProvider: { SessionRegistry.shared.adoptedSessionKeys() }
-        )
+        let coreServices = ClawlineCoreRuntimeServicesFactory.make(authManager: authManager)
+        self.deviceIdentifier = coreServices.deviceIdentifier
+        self.connectionService = coreServices.connectionService
+        let chatService = coreServices.chatService
         self.chatService = chatService
-        self.uploadService = UploadService(
-            auth: authManager,
-            session: connector.tlsAwareURLSession
-        )
+        self.uploadService = coreServices.uploadService
 
         let watchService = WatchConnectivityService(
             authManager: authManager,
@@ -94,47 +84,7 @@ struct ClawlineApp: App {
                 }
         }
         .commands {
-            CommandGroup(replacing: .appSettings) {
-                Button("Settings...") {
-                    settingsManager.toggleSettings()
-                }
-                .keyboardShortcut(",", modifiers: .command)
-            }
-            CommandMenu("View") {
-                Button("Increase Font Size") {
-                    settingsManager.increaseFontScale()
-                }
-                .keyboardShortcut("=", modifiers: .command)
-
-                Button("Decrease Font Size") {
-                    settingsManager.decreaseFontScale()
-                }
-                .keyboardShortcut("-", modifiers: .command)
-
-                Button("Reset Font Size") {
-                    settingsManager.resetFontScale()
-                }
-                .keyboardShortcut("0", modifiers: .command)
-
-                Divider()
-
-                Button("Open Streams") {
-                    NotificationCenter.default.post(name: .clawlineOpenStreamPopupCommand, object: nil)
-                }
-                .keyboardShortcut("/", modifiers: .command)
-
-                Divider()
-
-                Button("Scroll to Bottom") {
-                    NotificationCenter.default.post(name: .clawlineScrollToBottomCommand, object: nil)
-                }
-                .keyboardShortcut("j", modifiers: .command)
-
-                Button("Scroll to Top") {
-                    NotificationCenter.default.post(name: .clawlineScrollToTopCommand, object: nil)
-                }
-                .keyboardShortcut("k", modifiers: .command)
-            }
+            ClawlineAppCommands(settingsManager: settingsManager)
         }
     }
 }

@@ -13,15 +13,10 @@ struct CodeBlockView: View {
     let code: String
 
     @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.settingsManager) private var settings
     @State private var highlightedCode: AttributedString?
 
     private var isDark: Bool {
-#if os(visionOS)
-        return settings.appearanceMode == .dark
-#else
         return colorScheme == .dark
-#endif
     }
 
     private var backgroundColor: Color {

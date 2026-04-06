@@ -41,7 +41,7 @@ struct ScrollToBottomUnreadTests {
     @Test("Bottom fallback: incremental append must not schedule autojump")
     func bottomFallbackSkipsIncrementalAppend() {
         let shouldSchedule = MessageFlowCollectionViewController.shouldScheduleBottomFallbackAfterApply(
-            hasPendingRestoreState: false,
+            hasAuthoritativeRestoreTarget: false,
             restorePhaseIsNone: true,
             isIncrementalAppend: true,
             previousLastMessageId: "m1"
@@ -52,7 +52,7 @@ struct ScrollToBottomUnreadTests {
     @Test("Bottom fallback: first population may schedule one-time placement")
     func bottomFallbackAllowsFirstPopulation() {
         let shouldSchedule = MessageFlowCollectionViewController.shouldScheduleBottomFallbackAfterApply(
-            hasPendingRestoreState: false,
+            hasAuthoritativeRestoreTarget: false,
             restorePhaseIsNone: true,
             isIncrementalAppend: false,
             previousLastMessageId: nil
@@ -76,5 +76,39 @@ struct ScrollToBottomUnreadTests {
             hasMessageAnchor: true
         )
         #expect(shouldFallback == false)
+    }
+
+    @Test("Automated bottom scroll is disqualified when a non-bottom restore target exists")
+    func automatedBottomScrollDisqualifiedForNonBottomRestoreTarget() {
+        let shouldSchedule = MessageFlowCollectionViewController.shouldScheduleAutomatedBottomScroll(
+            hasAuthoritativeRestoreTarget: true
+        )
+        #expect(shouldSchedule == false)
+    }
+
+    @Test("Automated bottom scroll stays enabled for at-bottom state")
+    func automatedBottomScrollAllowedForAtBottomState() {
+        let shouldSchedule = MessageFlowCollectionViewController.shouldScheduleAutomatedBottomScroll(
+            hasAuthoritativeRestoreTarget: false
+        )
+        #expect(shouldSchedule == true)
+    }
+
+    @Test("Pinned inset adjustment is disqualified when a non-bottom restore target exists")
+    func pinnedInsetAdjustmentDisqualifiedForNonBottomRestoreTarget() {
+        let shouldAdjust = MessageFlowCollectionViewController.shouldAdjustForBottomInsetPinnedPosition(
+            hasAuthoritativeRestoreTarget: true,
+            isPinnedToBottomIntent: true,
+            isActivelyDraggingOrTracking: false
+        )
+        #expect(shouldAdjust == false)
+    }
+
+    @Test("Viewport compensation is disqualified when a non-bottom restore target exists")
+    func viewportCompensationDisqualifiedForNonBottomRestoreTarget() {
+        let shouldCompensate = MessageFlowCollectionViewController.shouldApplyViewportAnchorCompensation(
+            hasAuthoritativeRestoreTarget: true
+        )
+        #expect(shouldCompensate == false)
     }
 }

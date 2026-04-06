@@ -8,6 +8,15 @@
 import UIKit
 import OSLog
 import SwiftTerm
+import CoreText
+
+#if DEBUG
+private let terminalGlyphDiagnosticScalars: [UnicodeScalar] = [
+    "\u{E0B0}", // powerline separator
+    "\u{E0B6}", // rounded powerline cap
+    "\u{F0E7}"  // common Nerd Font icon
+]
+#endif
 
 /// A TerminalView that reliably focuses itself when touched so keyboard input routes correctly.
 final class FocusableTerminalView: TerminalView {
@@ -17,10 +26,21 @@ final class FocusableTerminalView: TerminalView {
     }
 }
 
+struct TerminalBubbleLifecycleContext: Equatable {
+    enum Source: String, Equatable {
+        case bubble
+        case expanded
+    }
+
+    let messageId: String
+    let slotIndex: Int
+    let source: Source
+}
+
 /// Embedded terminal session view intended for use inside chat bubbles and expanded message sheets.
 /// Policy decisions (Flynn / #46):
 /// - Auto-connect on render (no tap-to-connect).
-/// - No standard bubble chrome: this view is responsible for minimal title/status affordances.
+/// - No standard bubble chrome: this view renders the terminal surface directly.
 /// - When offscreen for a while, tear down the WS and show a reconnect affordance.
 final class TerminalBubbleUIKitView: UIView, TerminalViewDelegate {
     enum Style {
@@ -36,17 +56,23 @@ final class TerminalBubbleUIKitView: UIView, TerminalViewDelegate {
     }
 
     private let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "TerminalBubble")
+    // Match Floatty's current terminal wrapper:
+    // - theme base colors come from Floatty's Catppuccin Mocha terminal theme
+    // - font comes from Floatty's bundled BlexMono Nerd Font Mono faces
+    private let terminalSurfaceBackgroundColor = UIColor(red: 30 / 255, green: 30 / 255, blue: 46 / 255, alpha: 1)
+    private let terminalSurfaceForegroundColor = UIColor(red: 205 / 255, green: 214 / 255, blue: 244 / 255, alpha: 1)
+    private let terminalSelectionColor = UIColor(red: 69 / 255, green: 71 / 255, blue: 90 / 255, alpha: 1)
+    private let terminalRegularFontName = "BlexMonoNFM"
+    private let terminalBoldFontName = "BlexMonoNFM-Bold"
+    private let terminalItalicFontName = "BlexMonoNFM-Italic"
+    private let terminalBoldItalicFontName = "BlexMonoNFM-BoldItalic"
+    private let connectionPool: TerminalSessionConnectionPool?
+    private let lifecycleTraceId = UUID().uuidString
 
     var onRequestExpand: (() -> Void)?
 
-    private let topBar = UIStackView()
-    private let titleLabel = UILabel()
-    private let statusLabel = UILabel()
-    private let expandButton = UIButton(type: .system)
-    private let closeButton = UIButton(type: .system)
-
     private let terminalView = FocusableTerminalView(frame: .zero)
-    private var terminalHeightConstraint: NSLayoutConstraint?
+    private var bubbleHeightConstraint: NSLayoutConstraint?
 
     private let deadOverlay = UIView()
     private let deadLabel = UILabel()
@@ -55,22 +81,31 @@ final class TerminalBubbleUIKitView: UIView, TerminalViewDelegate {
     private var sanitizer = TerminalInputSanitizer()
 
     private var descriptor: TerminalSessionDescriptor?
+    private var lifecycleContext: TerminalBubbleLifecycleContext?
     private var style: Style = .bubble(height: 360)
-
-    private var service: TerminalSessionService?
-    private var outputTask: Task<Void, Never>?
-    private var stateTask: Task<Void, Never>?
+    private var displayTitle: String = "Terminal"
+    private var attachmentID: TerminalSessionConnectionPool.AttachmentID?
 
     private var lastCols: Int = 80
     private var lastRows: Int = 24
 
-    private var disconnectTimer: Timer?
-    private var hasAttemptedConnection = false
-    private var hasEverBeenLive = false
     private var requiresUserReconnect = false
     private var scrollCaptureWired = false
 
-    override init(frame: CGRect) {
+    static func visibleRows(forReportedRows reportedRows: Int) -> Int {
+        // SwiftTerm reports one extra row for this pinned, full-bleed bubble surface,
+        // which leaves a small internal scroll range at the bottom.
+        max(reportedRows - 1, 1)
+    }
+
+    override init(frame: CGRect = .zero) {
+        self.connectionPool = nil
+        super.init(frame: frame)
+        buildUI()
+    }
+
+    init(connectionPool: TerminalSessionConnectionPool?, frame: CGRect = .zero) {
+        self.connectionPool = connectionPool
         super.init(frame: frame)
         buildUI()
     }
@@ -83,53 +118,64 @@ final class TerminalBubbleUIKitView: UIView, TerminalViewDelegate {
         teardown()
     }
 
-    func configure(descriptor: TerminalSessionDescriptor, style: Style) {
+    func configure(descriptor: TerminalSessionDescriptor,
+                   style: Style,
+                   context: TerminalBubbleLifecycleContext) {
+        let descriptorChanged = self.descriptor != descriptor
+        if descriptorChanged {
+            detachFromConnection(reason: "configure_descriptor_change")
+            resetTerminalSurface()
+        }
+
         self.descriptor = descriptor
+        self.lifecycleContext = context
         self.style = style
         self.requiresUserReconnect = false
-        self.hasAttemptedConnection = false
-        self.hasEverBeenLive = false
 
-        titleLabel.text = descriptor.title?.isEmpty == false ? descriptor.title : "Terminal"
-        statusLabel.text = "Connecting"
+        if let title = descriptor.title?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !title.isEmpty {
+            displayTitle = title
+        } else {
+            displayTitle = "Terminal"
+        }
 
-        terminalHeightConstraint?.constant = style.height
+        bubbleHeightConstraint?.constant = style.height
 
         // Auto-connect when we hit the window (didMoveToWindow), so cols/rows are not zero.
         showTerminal()
+        logLifecycle("configure")
 
         // Cells are often configured after they're already on-screen; don't rely solely on didMoveToWindow.
         if window != nil {
             wireScrollCaptureIfNeeded()
-            connectIfNeeded()
+            attachToConnectionIfNeeded(reason: "configure")
         }
     }
 
     func prepareForReuse() {
+        logLifecycle("prepareForReuse")
         teardown()
         descriptor = nil
+        lifecycleContext = nil
         requiresUserReconnect = false
-        hasAttemptedConnection = false
-        hasEverBeenLive = false
         scrollCaptureWired = false
     }
 
     override func didMoveToWindow() {
         super.didMoveToWindow()
+        logLifecycle("didMoveToWindow")
 
-        // Offscreen: defer disconnect to avoid thrash during fast scroll.
         if window == nil {
-            scheduleDisconnect()
+            detachFromConnection(reason: "didMoveToWindow_nil")
             return
         }
 
-        cancelScheduledDisconnect()
         wireScrollCaptureIfNeeded()
         if requiresUserReconnect {
-            showDeadState(reason: titleLabel.text ?? "Terminal")
+            showDeadState(reason: displayTitle)
             return
         }
-        connectIfNeeded()
+        attachToConnectionIfNeeded(reason: "didMoveToWindow_attached")
     }
 
     // Terminal focus is handled by FocusableTerminalView.touchesBegan.
@@ -138,51 +184,16 @@ final class TerminalBubbleUIKitView: UIView, TerminalViewDelegate {
 
     private func buildUI() {
         translatesAutoresizingMaskIntoConstraints = false
-
-        // Top bar (minimal; not message bubble chrome).
-        topBar.axis = .horizontal
-        topBar.alignment = .center
-        topBar.spacing = 10
-        topBar.translatesAutoresizingMaskIntoConstraints = false
-
-        titleLabel.font = UIFont.clawline(.senderName)
-        titleLabel.adjustsFontForContentSizeCategory = true
-        titleLabel.textColor = .secondaryLabel
-        titleLabel.numberOfLines = 1
-        titleLabel.lineBreakMode = .byTruncatingTail
-
-        statusLabel.font = UIFont.clawlineMonospaced(.timestamp, weight: .semibold)
-        statusLabel.adjustsFontForContentSizeCategory = true
-        statusLabel.textColor = .tertiaryLabel
-        statusLabel.setContentHuggingPriority(.required, for: .horizontal)
-
-        expandButton.setTitle("Expand", for: .normal)
-        expandButton.titleLabel?.font = UIFont.clawline(.senderName)
-        expandButton.titleLabel?.adjustsFontForContentSizeCategory = true
-        expandButton.addTarget(self, action: #selector(handleExpandTap), for: .touchUpInside)
-
-        closeButton.setTitle("Close", for: .normal)
-        closeButton.titleLabel?.font = UIFont.clawline(.senderName)
-        closeButton.titleLabel?.adjustsFontForContentSizeCategory = true
-        closeButton.addTarget(self, action: #selector(handleCloseTap), for: .touchUpInside)
-
-        let left = UIStackView(arrangedSubviews: [titleLabel, UIView()])
-        left.axis = .horizontal
-        left.alignment = .center
-
-        topBar.addArrangedSubview(left)
-        topBar.addArrangedSubview(statusLabel)
-        topBar.addArrangedSubview(expandButton)
-        topBar.addArrangedSubview(closeButton)
+        backgroundColor = terminalSurfaceBackgroundColor
 
         // Terminal surface.
         terminalView.translatesAutoresizingMaskIntoConstraints = false
         terminalView.terminalDelegate = self
-        terminalView.font = UIFont.clawlineMonospaced(.secondaryLabel)
-        terminalView.nativeForegroundColor = .label
-        terminalView.nativeBackgroundColor = UIColor.clear
-        terminalView.backgroundColor = .clear
-        terminalView.selectedTextBackgroundColor = UIColor.systemGray.withAlphaComponent(0.35)
+        installTerminalFonts()
+        terminalView.nativeForegroundColor = terminalSurfaceForegroundColor
+        terminalView.nativeBackgroundColor = terminalSurfaceBackgroundColor
+        terminalView.backgroundColor = terminalSurfaceBackgroundColor
+        terminalView.selectedTextBackgroundColor = terminalSelectionColor
         terminalView.isAccessibilityElement = true
         terminalView.accessibilityLabel = "Terminal session"
         terminalView.accessibilityHint = "Terminal output; double tap to focus; swipe to scroll."
@@ -195,18 +206,20 @@ final class TerminalBubbleUIKitView: UIView, TerminalViewDelegate {
 
         // Dead overlay (reconnect UX).
         deadOverlay.translatesAutoresizingMaskIntoConstraints = false
+        deadOverlay.backgroundColor = terminalSurfaceBackgroundColor
         deadOverlay.isHidden = true
 
         deadLabel.translatesAutoresizingMaskIntoConstraints = false
         deadLabel.font = UIFont.clawline(.secondaryLabel, weight: .semibold)
         deadLabel.adjustsFontForContentSizeCategory = true
-        deadLabel.textColor = .secondaryLabel
+        deadLabel.textColor = terminalSurfaceForegroundColor
         deadLabel.numberOfLines = 2
         deadLabel.textAlignment = .center
 
         reconnectButton.setTitle("Reconnect", for: .normal)
         reconnectButton.titleLabel?.font = UIFont.clawline(.secondaryLabel, weight: .semibold)
         reconnectButton.titleLabel?.adjustsFontForContentSizeCategory = true
+        reconnectButton.setTitleColor(terminalSurfaceForegroundColor, for: .normal)
         reconnectButton.addTarget(self, action: #selector(handleReconnectTap), for: .touchUpInside)
 
         let deadStack = UIStackView(arrangedSubviews: [deadLabel, reconnectButton])
@@ -222,44 +235,30 @@ final class TerminalBubbleUIKitView: UIView, TerminalViewDelegate {
             deadStack.trailingAnchor.constraint(lessThanOrEqualTo: deadOverlay.trailingAnchor, constant: -12)
         ])
 
-        addSubview(topBar)
         addSubview(terminalView)
         addSubview(deadOverlay)
 
         NSLayoutConstraint.activate([
-            topBar.topAnchor.constraint(equalTo: topAnchor),
-            topBar.leadingAnchor.constraint(equalTo: leadingAnchor),
-            topBar.trailingAnchor.constraint(equalTo: trailingAnchor),
-
-            terminalView.topAnchor.constraint(equalTo: topBar.bottomAnchor, constant: 6),
+            terminalView.topAnchor.constraint(equalTo: topAnchor),
             terminalView.leadingAnchor.constraint(equalTo: leadingAnchor),
             terminalView.trailingAnchor.constraint(equalTo: trailingAnchor),
             terminalView.bottomAnchor.constraint(equalTo: bottomAnchor),
 
-            deadOverlay.topAnchor.constraint(equalTo: topBar.bottomAnchor, constant: 6),
+            deadOverlay.topAnchor.constraint(equalTo: topAnchor),
             deadOverlay.leadingAnchor.constraint(equalTo: leadingAnchor),
             deadOverlay.trailingAnchor.constraint(equalTo: trailingAnchor),
             deadOverlay.bottomAnchor.constraint(equalTo: bottomAnchor)
         ])
 
-        terminalHeightConstraint = terminalView.heightAnchor.constraint(equalToConstant: style.height)
-        terminalHeightConstraint?.isActive = true
-    }
-
-    @objc private func handleExpandTap() {
-        onRequestExpand?()
-    }
-
-    @objc private func handleCloseTap() {
-        service?.close()
-        teardownConnectionOnly()
-        requiresUserReconnect = true
-        showDeadState(reason: "Closed: \(titleLabel.text ?? "Terminal")")
+        bubbleHeightConstraint = heightAnchor.constraint(equalToConstant: style.height)
+        bubbleHeightConstraint?.isActive = true
     }
 
     @objc private func handleReconnectTap() {
         requiresUserReconnect = false
-        connectOrReconnect()
+        showTerminal()
+        guard let descriptor else { return }
+        connectionPool?.requestReconnect(descriptor: descriptor, initialCols: lastCols, initialRows: lastRows)
     }
 
     // Focus is handled by FocusableTerminalView.touchesBegan.
@@ -268,8 +267,14 @@ final class TerminalBubbleUIKitView: UIView, TerminalViewDelegate {
 
     func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {
         lastCols = max(newCols, 1)
-        lastRows = max(newRows, 1)
-        service?.resize(cols: lastCols, rows: lastRows)
+        lastRows = Self.visibleRows(forReportedRows: newRows)
+        guard let descriptor, let attachmentID else { return }
+        connectionPool?.resize(
+            descriptor: descriptor,
+            attachmentID: attachmentID,
+            cols: lastCols,
+            rows: lastRows
+        )
     }
 
     func setTerminalTitle(source: TerminalView, title: String) {}
@@ -278,7 +283,12 @@ final class TerminalBubbleUIKitView: UIView, TerminalViewDelegate {
     func send(source: TerminalView, data: ArraySlice<UInt8>) {
         guard let sanitized = sanitizer.sanitize(data) else { return }
         logger.debug("terminal_input bytes=\(sanitized.count, privacy: .public)")
-        service?.sendInput(Data(sanitized))
+        guard let descriptor, let attachmentID else { return }
+        connectionPool?.sendInput(
+            descriptor: descriptor,
+            attachmentID: attachmentID,
+            data: Data(sanitized)
+        )
     }
 
     func scrolled(source: TerminalView, position: Double) {}
@@ -294,72 +304,60 @@ final class TerminalBubbleUIKitView: UIView, TerminalViewDelegate {
 
     // MARK: - Connection
 
-    private func connectIfNeeded() {
-        guard descriptor != nil else { return }
-        guard service == nil else { return }
-        if requiresUserReconnect { return }
-        connectOrReconnect()
-    }
-
-    private func connectOrReconnect() {
+    private func attachToConnectionIfNeeded(reason: String) {
         guard let descriptor else { return }
+        guard attachmentID == nil else { return }
+        if requiresUserReconnect { return }
 
-        hasAttemptedConnection = true
-        statusLabel.text = "Connecting"
-
-        let service = TerminalSessionService(descriptor: descriptor)
-        self.service = service
-        bind(service)
-        service.connect(initialCols: lastCols, initialRows: lastRows)
+        resetTerminalSurface()
+        attachmentID = connectionPool?.attach(
+            owner: self,
+            descriptor: descriptor,
+            initialCols: lastCols,
+            initialRows: lastRows,
+            onStateChange: { [weak self] state in
+                self?.handleConnectionState(state)
+            },
+            onOutput: { [weak self] data in
+                self?.appendOutput(data)
+            }
+        )
+        logLifecycle("attach", reason: reason)
     }
 
-    private func bind(_ service: TerminalSessionService) {
-        outputTask?.cancel()
-        stateTask?.cancel()
+    private func detachFromConnection(reason: String) {
+        guard let descriptor, let attachmentID else { return }
+        connectionPool?.detach(descriptor: descriptor, attachmentID: attachmentID)
+        self.attachmentID = nil
+        logLifecycle("teardown", reason: reason)
+    }
 
-        outputTask = Task { [weak self] in
-            guard let self else { return }
-            for await data in service.output {
-                let bytes = [UInt8](data)
-                await MainActor.run {
-                    self.terminalView.feed(byteArray: bytes[...])
-                }
-            }
-        }
+    private func appendOutput(_ data: Data) {
+        let bytes = [UInt8](data)
+        terminalView.feed(byteArray: bytes[...])
+    }
 
-        stateTask = Task { [weak self] in
-            guard let self else { return }
-            for await state in service.state {
-                await MainActor.run {
-                    switch state {
-                    case .disconnected:
-                        self.statusLabel.text = self.hasAttemptedConnection ? "Disconnected" : "Connecting"
-                        if self.hasAttemptedConnection {
-                            self.requiresUserReconnect = true
-                            self.showDeadState(reason: self.titleLabel.text ?? "Terminal")
-                        }
-                    case .connecting:
-                        self.statusLabel.text = "Connecting"
-                        self.showTerminal()
-                    case .ready:
-                        self.hasEverBeenLive = true
-                        self.statusLabel.text = "Live"
-                        self.showTerminal()
-                    case .exited(let code):
-                        if let code {
-                            self.statusLabel.text = "Exit \(code)"
-                        } else {
-                            self.statusLabel.text = "Exit"
-                        }
-                        self.requiresUserReconnect = true
-                        self.showDeadState(reason: self.titleLabel.text ?? "Terminal")
-                    case .failed(let message):
-                        self.statusLabel.text = "Error"
-                        self.requiresUserReconnect = true
-                        self.showDeadState(reason: message)
-                    }
-                }
+    private func handleConnectionState(_ state: TerminalSessionService.State) {
+        switch state {
+        case .disconnected:
+            requiresUserReconnect = true
+            showDeadState(reason: displayTitle)
+        case .connecting:
+            requiresUserReconnect = false
+            showTerminal()
+        case .ready:
+            requiresUserReconnect = false
+            showTerminal()
+        case .exited(let code):
+            requiresUserReconnect = true
+            if let code {
+                showDeadState(reason: "Exited (\(code))")
+            } else {
+                showDeadState(reason: displayTitle)
             }
+        case .failed(let message):
+            requiresUserReconnect = true
+            showDeadState(reason: message)
         }
     }
 
@@ -369,40 +367,14 @@ final class TerminalBubbleUIKitView: UIView, TerminalViewDelegate {
     }
 
     private func showDeadState(reason: String) {
-        deadLabel.text = reason
+        let trimmed = reason.trimmingCharacters(in: .whitespacesAndNewlines)
+        deadLabel.text = trimmed.isEmpty ? displayTitle : trimmed
         deadOverlay.isHidden = false
         terminalView.isHidden = true
     }
 
-    private func scheduleDisconnect() {
-        cancelScheduledDisconnect()
-        disconnectTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: false) { [weak self] _ in
-            guard let self else { return }
-            self.teardownConnectionOnly()
-            self.requiresUserReconnect = true
-            if let title = self.titleLabel.text {
-                self.showDeadState(reason: title)
-            }
-        }
-    }
-
-    private func cancelScheduledDisconnect() {
-        disconnectTimer?.invalidate()
-        disconnectTimer = nil
-    }
-
-    private func teardownConnectionOnly() {
-        cancelScheduledDisconnect()
-        outputTask?.cancel()
-        outputTask = nil
-        stateTask?.cancel()
-        stateTask = nil
-        service?.disconnect()
-        service = nil
-    }
-
     private func teardown() {
-        teardownConnectionOnly()
+        detachFromConnection(reason: "teardown")
     }
 
     private func wireScrollCaptureIfNeeded() {
@@ -422,10 +394,122 @@ final class TerminalBubbleUIKitView: UIView, TerminalViewDelegate {
 
         scrollCaptureWired = true
     }
+
+    private func installTerminalFonts() {
+        Self.registerBundledFonts()
+        let normal = loadTerminalFont(named: terminalRegularFontName)
+        let bold = loadTerminalFont(named: terminalBoldFontName)
+        let italic = loadTerminalFont(named: terminalItalicFontName)
+        let boldItalic = loadTerminalFont(named: terminalBoldItalicFontName)
+
+        #if DEBUG
+        print(terminalGlyphDiagnosticLine(label: "normal", font: normal))
+        print(terminalGlyphDiagnosticLine(label: "bold", font: bold))
+        print(terminalGlyphDiagnosticLine(label: "italic", font: italic))
+        print(terminalGlyphDiagnosticLine(label: "boldItalic", font: boldItalic))
+        #endif
+
+        if let normal, let bold, let italic, let boldItalic {
+            terminalView.setFonts(normal: normal, bold: bold, italic: italic, boldItalic: boldItalic)
+            return
+        }
+
+        terminalView.font = normal ?? UIFont.monospacedSystemFont(
+            ofSize: UIFont.clawlineMonospaced(.secondaryLabel).pointSize,
+            weight: .regular
+        )
+    }
+
+    private func loadTerminalFont(named name: String) -> UIFont? {
+        let fontSize = UIFont.clawlineMonospaced(.secondaryLabel).pointSize
+        return UIFont(name: name, size: fontSize)
+    }
+
+    static func registerBundledFonts(in bundle: Bundle = Bundle(for: TerminalBubbleUIKitView.self)) {
+        if didRegisterBundledFonts { return }
+
+        for fontFile in bundledFontFiles {
+            guard let url = bundle.url(forResource: fontFile, withExtension: "ttf", subdirectory: "Fonts")
+                ?? bundle.url(forResource: fontFile, withExtension: "ttf") else {
+                continue
+            }
+            registerFont(at: url)
+        }
+
+        didRegisterBundledFonts = true
+    }
+
+    private static func registerFont(at url: URL) {
+        var error: Unmanaged<CFError>?
+        let didRegister = CTFontManagerRegisterFontsForURL(url as CFURL, .process, &error)
+        guard !didRegister else { return }
+        guard let registrationCFError = error?.takeRetainedValue() else { return }
+        let registrationError = (registrationCFError as Error) as NSError
+        let isAlreadyRegistered = registrationError.domain == kCTFontManagerErrorDomain as String
+            && registrationError.code == CTFontManagerError.alreadyRegistered.rawValue
+        if !isAlreadyRegistered {
+            assertionFailure("Failed to register bundled terminal font at \(url.lastPathComponent): \(registrationError)")
+        }
+    }
+
+    private static let bundledFontFiles = [
+        "BlexMonoNerdFontMono-Regular",
+        "BlexMonoNerdFontMono-Bold",
+        "BlexMonoNerdFontMono-Italic",
+        "BlexMonoNerdFontMono-BoldItalic"
+    ]
+    private static var didRegisterBundledFonts = false
+
+
+    private func resetTerminalSurface() {
+        terminalView.contentOffset = .zero
+        terminalView.feed(text: "\u{001B}c")
+    }
+
+    private func logLifecycle(_ event: String, reason: String? = nil) {
+        let context = lifecycleContext
+        let cellIdentity = ancestorCellIdentity() ?? "none"
+        let terminalSessionId = descriptor?.terminalSessionId ?? "-"
+        let detail = reason ?? "-"
+        logger.info(
+            "terminal_bubble_lifecycle event=\(event, privacy: .public) reason=\(detail, privacy: .public) viewId=\(self.lifecycleTraceId, privacy: .public) terminalSessionId=\(terminalSessionId, privacy: .public) messageId=\(context?.messageId ?? "-", privacy: .public) slotIndex=\(String(context?.slotIndex ?? -1), privacy: .public) source=\(context?.source.rawValue ?? "-", privacy: .public) cellId=\(cellIdentity, privacy: .public) windowAttached=\(self.window != nil, privacy: .public) attached=\(self.attachmentID != nil, privacy: .public)"
+        )
+    }
+
+    private func ancestorCellIdentity() -> String? {
+        var ancestor: UIView? = self
+        while let view = ancestor {
+            if let cell = view as? MessageBubbleUIKitCell {
+                return String(describing: ObjectIdentifier(cell))
+            }
+            ancestor = view.superview
+        }
+        return nil
+    }
+
+    #if DEBUG
+    private func terminalGlyphDiagnosticLine(label: String, font: UIFont?) -> String {
+        let ts = ISO8601DateFormatter().string(from: Date())
+        guard let font else {
+            return "[TERM_GLYPH_DIAG] \(ts) install label=\(label) status=missing"
+        }
+
+        let ctFont = font as CTFont
+        let scalarStatus = terminalGlyphDiagnosticScalars.map { scalar -> String in
+            let value = scalar.value
+            var utf16 = [UniChar(scalar.utf16.first ?? 0)]
+            var glyph = CGGlyph()
+            let hasGlyph = CTFontGetGlyphsForCharacters(ctFont, &utf16, &glyph, 1)
+            return String(format: "U+%04X:%@:%d", value, hasGlyph ? "glyph" : "missing", glyph)
+        }.joined(separator: ",")
+
+        return "[TERM_GLYPH_DIAG] \(ts) install label=\(label) postscript=\(font.fontName) family=\(font.familyName) pointSize=\(font.pointSize) scalars=\(scalarStatus)"
+    }
+    #endif
 }
 
-/// Filters potentially dangerous control bytes during paste/keyboard input so tmux sessions don't pause.
-private struct TerminalInputSanitizer {
+/// Filters potentially dangerous control bytes during bracketed paste so tmux sessions don't pause.
+struct TerminalInputSanitizer {
     private var bracketedPasteDepth = 0
     private var scratch: [UInt8] = []
 
@@ -453,7 +537,7 @@ private struct TerminalInputSanitizer {
     }
 
     private func shouldFilter(_ data: ArraySlice<UInt8>) -> Bool {
-        guard bracketedPasteDepth > 0 || data.count > 1 else { return false }
+        guard bracketedPasteDepth > 0 else { return false }
         return data.contains(where: isDisallowedPasteByte)
     }
 

@@ -539,6 +539,57 @@ struct BubbleScrollTests {
         #expect(webView.scrollView.layer.cornerRadius == 0)
     }
 
+    @Test("T191: Link preview keeps video embedded and blocks in-bubble playback")
+    @MainActor
+    func linkPreviewBlocksMediaPlaybackAndFullscreenPromotion() {
+        let preview = LinkPreviewView()
+        preview.frame = CGRect(x: 0, y: 0, width: 320, height: 200)
+        preview.layoutIfNeeded()
+
+        guard let webView = firstWebView(in: preview) else {
+            Issue.record("Expected WKWebView in LinkPreviewView hierarchy")
+            return
+        }
+
+        #expect(preview.mediaPlaybackSuspendedForPreview)
+        #expect(webView.configuration.mediaTypesRequiringUserActionForPlayback == .all)
+        #expect(webView.configuration.allowsInlineMediaPlayback)
+        #expect(webView.configuration.allowsAirPlayForMediaPlayback == false)
+        #expect(webView.configuration.allowsPictureInPictureMediaPlayback == false)
+        #expect(webView.configuration.preferences.isElementFullscreenEnabled == false)
+    }
+
+    @Test("T191: Direct video previews use embedded aspect-height sizing")
+    @MainActor
+    func directVideoPreviewUsesAspectHeightSizing() {
+        let preview = LinkPreviewView()
+        let url = URL(string: "https://example.com/demo.mp4")!
+
+        preview.configure(url: url, maxHeight: 360)
+
+        let measured = preview.sizeThatFits(CGSize(width: 320, height: UIView.layoutFittingCompressedSize.height))
+
+        #expect(LinkPreviewView.isDirectMediaPreviewURL(url))
+        #expect(abs(measured.height - 180) <= 1)
+    }
+
+    @Test("T191: Plug-in handled load is suppressed for direct media navigation")
+    func directVideoPluginHandledLoadErrorIsRecognized() {
+        let pluginError = NSError(
+            domain: "WebKitErrorDomain",
+            code: 204,
+            userInfo: [NSLocalizedDescriptionKey: "Plug-in handled load"]
+        )
+        let unrelatedError = NSError(
+            domain: "WebKitErrorDomain",
+            code: 102,
+            userInfo: [NSLocalizedDescriptionKey: "Frame load interrupted"]
+        )
+
+        #expect(LinkPreviewView.isPluginHandledLoadNavigationError(pluginError))
+        #expect(!LinkPreviewView.isPluginHandledLoadNavigationError(unrelatedError))
+    }
+
     @Test("T057: Bubble uses per-block text containers without re-merging rich text")
     @MainActor
     func bubbleUsesPerBlockTextContainers() {

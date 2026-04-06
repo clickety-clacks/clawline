@@ -63,3 +63,15 @@ When working on GitHub issues, follow these rules:
 - If unstaged changes are yours, commit and push that work first, then proceed.
 - If unstaged changes were inherited from a different agent, do not commit them; flag it so the owning agent can resolve it.
 - New workspaces are always created with `git worktree add ~/src/worktrees/clawline-{agent-name} -b {agent-name}`.
+
+## visionOS Platform Forks — Mandatory Reference
+
+Before writing any `#if os(visionOS)` block in the shared `ios/Clawline/Clawline/` target, read:
+
+**[`docs/visionos-platform-invariants.md`](./docs/visionos-platform-invariants.md)**
+
+That document defines the **complete list** of valid platform differences. It is authoritative.
+
+**Default rule: share the code.**
+
+If your change adds a new platform fork that is not on the list, or removes/modifies an existing one — stop and raise it with Flynn before committing. Do not make a judgment call.

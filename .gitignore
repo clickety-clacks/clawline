@@ -27,6 +27,11 @@ scratch/
 # Node.js
 node_modules/
 provider/node_modules/
+dist/
+playwright-report/
+test-results/
+coverage/
+tsconfig.tsbuildinfo
 
 # Build artifacts
 *.log

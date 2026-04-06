@@ -169,7 +169,7 @@ struct ChatFlowOrganicComplianceTests {
 
         let renderedText = renderedMarkdownText(
             from: presentation,
-            stripDetectedURLs: true
+            stripDetectedURLs: false
         )
         #expect(renderedText.contains("Intro paragraph."))
         #expect(renderedText.contains("Middle paragraph with markdown."))
@@ -178,17 +178,18 @@ struct ChatFlowOrganicComplianceTests {
         #expect(!renderedText.contains("print(\"second\")"))
     }
 
-    @Test("Bug #50: Expanded text extraction preserves URLs")
-    func expandedTextExtractionPreservesURLs() {
+    @Test("Bubble and expanded text extraction both preserve URLs")
+    func textExtractionPreservesURLsAcrossSurfaces() {
         let message = sampleMessage(content: "See https://a.example and https://b.example")
         let presentation = buildPresentation(message)
-        let bubbleText = renderedMarkdownText(from: presentation, stripDetectedURLs: true)
+        let bubbleText = renderedMarkdownText(from: presentation, stripDetectedURLs: false)
         let expandedText = renderedMarkdownText(from: presentation, stripDetectedURLs: false)
 
-        #expect(!bubbleText.contains("https://a.example"))
-        #expect(!bubbleText.contains("https://b.example"))
+        #expect(bubbleText.contains("https://a.example"))
+        #expect(bubbleText.contains("https://b.example"))
         #expect(expandedText.contains("https://a.example"))
         #expect(expandedText.contains("https://b.example"))
+        #expect(bubbleText == expandedText)
     }
 
     @Test("Doc §5: Markdown tables promote to table part")
@@ -403,6 +404,154 @@ struct ChatFlowOrganicComplianceTests {
         }))
     }
 
+    @Test("Bug T190: URLs inside inline code stay tappable without preview extraction")
+    func messagePresentationKeepsInlineCodeURLsTappable() {
+        let presentation = buildPresentation(sampleMessage(content: "Visit `https://example.com/path` now"))
+
+        #expect(presentation.detectedURLs.isEmpty)
+        #expect(!presentation.parts.contains(where: { part in
+            if case .linkPreview = part { return true }
+            return false
+        }))
+        #expect(renderedMarkdownText(from: presentation, stripDetectedURLs: false) == "Visit https://example.com/path now")
+
+        let rendered = UnifiedMarkdownRenderer.render(
+            plan: presentation.markdownRenderPlan,
+            options: MarkdownRenderOptions(
+                baseFont: UIFont.systemFont(ofSize: ChatFlowTheme.Metrics(isCompact: true).bodyFontSize, weight: .regular),
+                inkColor: .black,
+                lineSpacing: 4,
+                stripDetectedURLs: false,
+                markHighlightColor: nil
+            )
+        )
+        guard case .attributedText(let attributed)? = rendered.first else {
+            Issue.record("Expected attributed text block")
+            return
+        }
+        let range = (attributed.string as NSString).range(of: "https://example.com/path")
+        #expect(range.location != NSNotFound)
+        #expect(attributed.attribute(.link, at: range.location, effectiveRange: nil) != nil)
+        #expect(attributed.attribute(.link, at: range.location + range.length - 1, effectiveRange: nil) != nil)
+    }
+
+    @Test("Bug T190: URL detection respects markdown boundaries after links")
+    func messagePresentationStopsDetectedURLsAtMarkdownBoundaries() {
+        let presentation = buildPresentation(sampleMessage(content: "Visit https://example.com/html**URL** now"))
+
+        #expect(presentation.detectedURLs.map(\.absoluteString) == ["https://example.com/html"])
+        #expect(presentation.parts.contains(where: { part in
+            if case .linkPreview(let url) = part {
+                return url.absoluteString == "https://example.com/html"
+            }
+            return false
+        }))
+        #expect(renderedMarkdownText(from: presentation, stripDetectedURLs: false) == "Visit https://example.com/htmlURL now")
+    }
+
+    @Test("Bug T190: Markdown link runs strip trailing backticks before preview extraction")
+    func messagePresentationStripsTrailingBackticksFromMarkdownDetectedURLs() {
+        let presentation = buildPresentation(sampleMessage(content: "http://tars:18800/www/tracker-dashboard.html`"))
+
+        #expect(presentation.detectedURLs.map(\.absoluteString) == ["http://tars:18800/www/tracker-dashboard.html"])
+        #expect(presentation.parts.contains(where: { part in
+            if case .linkPreview(let url) = part {
+                return url.absoluteString == "http://tars:18800/www/tracker-dashboard.html"
+            }
+            return false
+        }))
+        #expect(renderedMarkdownText(from: presentation, stripDetectedURLs: false) == "http://tars:18800/www/tracker-dashboard.html`")
+
+        let rendered = UnifiedMarkdownRenderer.render(
+            plan: presentation.markdownRenderPlan,
+            options: MarkdownRenderOptions(
+                baseFont: UIFont.systemFont(ofSize: ChatFlowTheme.Metrics(isCompact: true).bodyFontSize, weight: .regular),
+                inkColor: .black,
+                lineSpacing: 4,
+                stripDetectedURLs: false,
+                markHighlightColor: nil
+            )
+        )
+        guard case .attributedText(let attributed)? = rendered.first else {
+            Issue.record("Expected attributed text block")
+            return
+        }
+        let text = attributed.string as NSString
+        let urlRange = text.range(of: "http://tars:18800/www/tracker-dashboard.html")
+        let backtickRange = text.range(of: "`")
+        #expect(urlRange.location != NSNotFound)
+        #expect(backtickRange.location != NSNotFound)
+        #expect(attributed.attribute(.link, at: urlRange.location, effectiveRange: nil) != nil)
+        #expect(attributed.attribute(.link, at: urlRange.location + urlRange.length - 1, effectiveRange: nil) != nil)
+        #expect(attributed.attribute(.link, at: backtickRange.location, effectiveRange: nil) == nil)
+    }
+
+    @Test("Bug T190: Markdown link runs stop at highlight delimiters")
+    func messagePresentationStripsHighlightDelimitersFromMarkdownDetectedURLs() {
+        let presentation = buildPresentation(sampleMessage(content: "http://example.com==nice=="))
+
+        #expect(presentation.detectedURLs.map(\.absoluteString) == ["http://example.com"])
+        #expect(presentation.parts.contains(where: { part in
+            if case .linkPreview(let url) = part {
+                return url.absoluteString == "http://example.com"
+            }
+            return false
+        }))
+        #expect(renderedMarkdownText(from: presentation, stripDetectedURLs: false) == "http://example.com==nice==")
+
+        let rendered = UnifiedMarkdownRenderer.render(
+            plan: presentation.markdownRenderPlan,
+            options: MarkdownRenderOptions(
+                baseFont: UIFont.systemFont(ofSize: ChatFlowTheme.Metrics(isCompact: true).bodyFontSize, weight: .regular),
+                inkColor: .black,
+                lineSpacing: 4,
+                stripDetectedURLs: false,
+                markHighlightColor: nil
+            )
+        )
+        guard case .attributedText(let attributed)? = rendered.first else {
+            Issue.record("Expected attributed text block")
+            return
+        }
+        let text = attributed.string as NSString
+        let urlRange = text.range(of: "http://example.com")
+        let delimiterRange = text.range(of: "==")
+        #expect(urlRange.location != NSNotFound)
+        #expect(delimiterRange.location != NSNotFound)
+        #expect(attributed.attribute(.link, at: urlRange.location, effectiveRange: nil) != nil)
+        #expect(attributed.attribute(.link, at: urlRange.location + urlRange.length - 1, effectiveRange: nil) != nil)
+        #expect(attributed.attribute(.link, at: delimiterRange.location, effectiveRange: nil) == nil)
+    }
+
+    @Test("Bug T190: Markdown link runs stop at adjacent highlight delimiters without whitespace")
+    func messagePresentationStripsAdjacentHighlightDelimitersFromMarkdownDetectedURLs() {
+        let presentation = buildPresentation(sampleMessage(content: "http://example.com==text=="))
+
+        #expect(presentation.detectedURLs.map(\.absoluteString) == ["http://example.com"])
+        #expect(presentation.parts.contains(where: { part in
+            if case .linkPreview(let url) = part {
+                return url.absoluteString == "http://example.com"
+            }
+            return false
+        }))
+        #expect(renderedMarkdownText(from: presentation, stripDetectedURLs: false) == "http://example.com==text==")
+    }
+
+    @Test("Bug T190: Legitimate query values containing double equals are preserved")
+    func messagePresentationPreservesURLsContainingDoubleEquals() {
+        let url = "https://example.com/path?token=YWJjZA=="
+        let presentation = buildPresentation(sampleMessage(content: url))
+
+        #expect(presentation.detectedURLs.map(\.absoluteString) == [url])
+        #expect(presentation.parts.contains(where: { part in
+            if case .linkPreview(let detected) = part {
+                return detected.absoluteString == url
+            }
+            return false
+        }))
+        #expect(renderedMarkdownText(from: presentation, stripDetectedURLs: false) == url)
+    }
+
     @Test("Doc §5: Link previews disabled by setting")
     func linkPreviewsRespectDisabledSetting() {
         let presentation = buildPresentation(
@@ -458,8 +607,8 @@ struct ChatFlowOrganicComplianceTests {
         #expect(presentation.hasMediaOnly)
     }
 
-    @Test("Terminal bubbles: terminal-session document attachment maps to terminalSession part (not file)")
-    func messagePresentationTerminalSessionAttachmentParses() throws {
+    @Test("Terminal bubbles: terminal-session document attachment maps to terminalSession part on built-in personal streams")
+    func messagePresentationTerminalSessionAttachmentParsesOnBuiltInPersonalStream() throws {
         let descriptor = TerminalSessionDescriptor(
             version: 1,
             terminalSessionId: "ts_test",
@@ -477,7 +626,7 @@ struct ChatFlowOrganicComplianceTests {
             data: data,
             assetId: nil
         )
-        let message = sampleMessage(content: "Live logs:", attachments: [terminalAttachment], sessionKey: SessionKey.clawlineMain(userId: "mike"))
+        let message = sampleMessage(content: "Live logs:", attachments: [terminalAttachment], sessionKey: "agent:main:clawline:mike:dm")
         let presentation = buildPresentation(message)
 
         #expect(presentation.parts.contains(where: { part in
@@ -490,6 +639,46 @@ struct ChatFlowOrganicComplianceTests {
         #expect(!presentation.parts.contains(where: { part in
             if case .file(let attachment) = part {
                 return attachment.id == "term1"
+            }
+            return false
+        }))
+    }
+
+    @Test("Terminal bubbles: terminal-session document attachment maps to terminalSession part on custom personal streams")
+    func messagePresentationTerminalSessionAttachmentParsesOnCustomPersonalStream() throws {
+        let descriptor = TerminalSessionDescriptor(
+            version: 1,
+            terminalSessionId: "ts_custom",
+            title: "gateway logs",
+            provider: .init(baseUrl: "https://example.com", wsPath: "/ws/terminal"),
+            capabilities: .init(interactive: true, supportsBinaryFrames: true, supportsResize: true, supportsDetach: true),
+            auth: .init(mode: .chatToken, terminalAccessToken: nil),
+            expiresAtMs: 1_700_000_000_000
+        )
+        let data = try JSONEncoder().encode(descriptor)
+        let terminalAttachment = Clawline.Attachment(
+            id: "term-custom",
+            type: .document,
+            mimeType: TerminalSessionDescriptor.mimeType,
+            data: data,
+            assetId: nil
+        )
+        let message = sampleMessage(
+            content: "Live logs:",
+            attachments: [terminalAttachment],
+            sessionKey: "agent:main:clawline:mike:s_abcd1234"
+        )
+        let presentation = buildPresentation(message)
+
+        #expect(presentation.parts.contains(where: { part in
+            if case .terminalSession(let decoded) = part {
+                return decoded.terminalSessionId == "ts_custom"
+            }
+            return false
+        }))
+        #expect(!presentation.parts.contains(where: { part in
+            if case .file(let attachment) = part {
+                return attachment.id == "term-custom"
             }
             return false
         }))

@@ -22,6 +22,36 @@ struct StreamDeletedPayload: Codable, Equatable {
     let sessionKey: String
 }
 
+
+struct StreamReadStatePayload: Codable, Equatable {
+    let type: String
+    let sessionKey: String
+    let lastReadMessageId: String
+}
+
+struct StreamTailStatePayload: Codable, Equatable {
+    let type: String
+    let sessionKey: String
+    let lastMessageId: String
+    let lastMessageRole: Message.Role
+
+    var tailState: StreamTailState {
+        StreamTailState(lastMessageId: lastMessageId, lastMessageRole: lastMessageRole)
+    }
+}
+
+struct ClientStreamReadPayload: Codable, Equatable {
+    let type: String
+    let sessionKey: String
+    let lastReadMessageId: String
+
+    init(sessionKey: String, lastReadMessageId: String, type: String = "stream_read") {
+        self.type = type
+        self.sessionKey = sessionKey
+        self.lastReadMessageId = lastReadMessageId
+    }
+}
+
 struct ServerMessagePayload: Codable, Equatable {
     let type: String
     let id: String

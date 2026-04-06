@@ -41,7 +41,7 @@ private final class BubbleSafeAreaNeutralScrollView: UIScrollView {
 }
 
 final class MessageBubbleUIKitContainerView: UIView {
-    private let bubbleView = MessageBubbleUIKitView()
+    private let bubbleView: MessageBubbleUIKitView
     private let badgeView = MessageFailureBadgeView()
     private var bubbleBottomConstraint: NSLayoutConstraint!
     private var badgeBottomConstraint: NSLayoutConstraint!
@@ -50,6 +50,7 @@ final class MessageBubbleUIKitContainerView: UIView {
     private var onRequestLayout: ((String) -> Void)?
 
     override init(frame: CGRect) {
+        self.bubbleView = MessageBubbleUIKitView()
         super.init(frame: frame)
         backgroundColor = .clear
 
@@ -93,6 +94,7 @@ final class MessageBubbleUIKitContainerView: UIView {
                    maxWidthOverride: CGFloat? = nil,
                    useContinuousCorners: Bool = true,
                    isDark: Bool? = nil,
+                   terminalConnectionPool: TerminalSessionConnectionPool? = nil,
                    salientHighlightService: (any SalientHighlightServicing)? = nil,
                    onRequestExpand: (() -> Void)?,
                    onRequestLayout: ((String) -> Void)?,
@@ -115,6 +117,7 @@ final class MessageBubbleUIKitContainerView: UIView {
             maxWidthOverride: maxWidthOverride,
             useContinuousCorners: useContinuousCorners,
             isDark: isDark,
+            terminalConnectionPool: terminalConnectionPool,
             onRequestExpand: onRequestExpand,
             onRequestLayout: onRequestLayout,
             onInteractiveCallback: onInteractiveCallback,
@@ -169,6 +172,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
     private static let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "BubbleTheme")
     override var safeAreaInsets: UIEdgeInsets { .zero }
     private let enableDataDetectors: Bool
+    private var terminalConnectionPool: TerminalSessionConnectionPool?
     private let shadowContainerView = UIView()  // Separate view for shadow (masks clip shadows)
     private let bubbleBackgroundView = UIView()
     private let contentStack = UIStackView()
@@ -250,13 +254,16 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
     }
 
     override init(frame: CGRect) {
-        self.enableDataDetectors = true
+        self.enableDataDetectors = false
         super.init(frame: frame)
         configureViewHierarchy()
     }
 
-    init(frame: CGRect = .zero, enableDataDetectors: Bool) {
+    init(frame: CGRect = .zero,
+         enableDataDetectors: Bool,
+         terminalConnectionPool: TerminalSessionConnectionPool? = nil) {
         self.enableDataDetectors = enableDataDetectors
+        self.terminalConnectionPool = terminalConnectionPool
         super.init(frame: frame)
         configureViewHierarchy()
     }
@@ -596,14 +603,14 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
                    maxWidthOverride: CGFloat? = nil,
                    useContinuousCorners: Bool = true,
                    isDark: Bool? = nil,
+                   terminalConnectionPool: TerminalSessionConnectionPool? = nil,
                    onRequestExpand: (() -> Void)?,
                    onRequestLayout: ((String) -> Void)?,
                    onInteractiveCallback: ((String, String, JSONValue?) -> Void)?,
                    salientHighlightService: (any SalientHighlightServicing)? = nil) {
         assert(Thread.isMainThread)
-        let previousIdentity = currentIdentityKey
-        let incomingIdentity = Self.identityKey(message: message)
-        let isMessageReuse = previousIdentity != nil && previousIdentity != incomingIdentity
+        self.terminalConnectionPool = terminalConnectionPool
+        let isMessageReuse = (currentMessageId != nil && currentMessageId != message.id)
         currentMessageId = message.id
         currentSessionKey = message.sessionKey
         // Store for trait collection updates
@@ -690,7 +697,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
             baseFont: markdownStyle.baseFont,
             inkColor: palette.ink,
             lineSpacing: markdownStyle.lineSpacing,
-            stripDetectedURLs: true,
+            stripDetectedURLs: false,
             role: message.role,
             isDark: effectiveIsDark
         )
@@ -702,7 +709,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
         bodyLabel.attributedText = nil
         salientBaseAttributedText = nil
 
-        if isChromelessEmoji, let value = markdownContent.firstInlineEmojiValue {
+        if isChromelessEmoji, let value = markdownContent.joinedInlineEmojiValues {
             let baseEmojiFont = UIFont.clawline(.shortMessage)
             let emojiFont = UIFont(descriptor: baseEmojiFont.fontDescriptor, size: baseEmojiFont.pointSize * 2)
             let paragraph = NSMutableParagraphStyle()
@@ -827,6 +834,12 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
                     let previewMaxHeight = isSingleLinkPreview
                         ? rawPreviewMaxHeight
                         : min(rawPreviewMaxHeight, metrics.truncationHeight)
+                    let directMediaInitialHeight: CGFloat? = {
+                        guard isSingleLinkPreview, LinkPreviewView.isDirectMediaPreviewURL(linkPreviewURL) else { return nil }
+                        let paddingHorizontal = round((presentation.hasMediaOnly ? 8 : metrics.bubblePaddingHorizontal) * paddingScale)
+                        let contentWidth = max(1, maxWidth - (paddingHorizontal * 2))
+                        return LinkPreviewView.preferredDirectMediaHeight(for: contentWidth, maxHeight: previewMaxHeight)
+                    }()
                     if let bubbleSizingV2, let cacheKey = bubbleSizingV2.linkPreviewCacheKey {
                         previewView.configure(
                             url: linkPreviewURL,
@@ -834,6 +847,13 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
                             minHeight: bubbleSizingV2.linkPreviewMinHeight,
                             cacheKey: cacheKey,
                             initialHeight: bubbleSizingV2.linkPreviewEstimatedHeight
+                        )
+                    } else if let directMediaInitialHeight {
+                        previewView.configure(
+                            url: linkPreviewURL,
+                            maxHeight: previewMaxHeight,
+                            minHeight: directMediaInitialHeight,
+                            initialHeight: directMediaInitialHeight
                         )
                     } else if isSingleLinkPreview {
                         previewView.configure(
@@ -877,6 +897,12 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
             let previewMaxHeight = isSingleLinkPreview
                 ? rawPreviewMaxHeight
                 : min(rawPreviewMaxHeight, metrics.truncationHeight)
+            let directMediaInitialHeight: CGFloat? = {
+                guard isSingleLinkPreview, LinkPreviewView.isDirectMediaPreviewURL(linkPreviewURL) else { return nil }
+                let paddingHorizontal = round((presentation.hasMediaOnly ? 8 : metrics.bubblePaddingHorizontal) * paddingScale)
+                let contentWidth = max(1, maxWidth - (paddingHorizontal * 2))
+                return LinkPreviewView.preferredDirectMediaHeight(for: contentWidth, maxHeight: previewMaxHeight)
+            }()
             if let bubbleSizingV2, let cacheKey = bubbleSizingV2.linkPreviewCacheKey {
                 previewView.configure(
                     url: linkPreviewURL,
@@ -884,6 +910,13 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
                     minHeight: bubbleSizingV2.linkPreviewMinHeight,
                     cacheKey: cacheKey,
                     initialHeight: bubbleSizingV2.linkPreviewEstimatedHeight
+                )
+            } else if let directMediaInitialHeight {
+                previewView.configure(
+                    url: linkPreviewURL,
+                    maxHeight: previewMaxHeight,
+                    minHeight: directMediaInitialHeight,
+                    initialHeight: directMediaInitialHeight
                 )
             } else if isSingleLinkPreview {
                 previewView.configure(
@@ -912,12 +945,16 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
             if case .terminalSession(let descriptor) = part { return descriptor }
             return nil
         }
-        for descriptor in terminalSessions {
-            let terminalBubble = TerminalBubbleUIKitView()
+        for (index, descriptor) in terminalSessions.enumerated() {
+            let terminalBubble = TerminalBubbleUIKitView(connectionPool: terminalConnectionPool)
             terminalBubble.onRequestExpand = { [weak self] in self?.onRequestExpand?() }
             // Flynn: sizing matches HTML previews (wide content uses truncation cap, internal scroll).
             let heightCap = effectiveTruncationHeight
-            terminalBubble.configure(descriptor: descriptor, style: .bubble(height: heightCap))
+            terminalBubble.configure(
+                descriptor: descriptor,
+                style: .bubble(height: heightCap),
+                context: .init(messageId: message.id, slotIndex: index, source: .bubble)
+            )
             dynamicContentStack.addArrangedSubview(terminalBubble)
             dynamicContentViews.append(terminalBubble)
         }
@@ -1438,13 +1475,15 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
         fileTapHandlers[ObjectIdentifier(view)]?()
     }
 
-    @available(iOS 17.0, *)
-    func textView(_ textView: UITextView, primaryActionFor textItem: UITextItem, defaultAction: UIAction) -> UIAction? {
-        if case .link(let url) = textItem.content {
-            UIApplication.shared.open(url)
-            return nil
+    @available(iOS 17.0, macCatalyst 17.0, visionOS 1.0, *)
+    func textView(
+        _ textView: UITextView,
+        primaryActionFor textItem: UITextItem,
+        defaultAction: UIAction
+    ) -> UIAction? {
+        UnifiedMarkdownRenderer.primaryActionForTextItem(textItem, defaultAction: defaultAction) { tappedURL in
+            UIApplication.shared.open(tappedURL)
         }
-        return defaultAction
     }
 
     private static func markdownStyle(
@@ -1648,7 +1687,8 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
         UnifiedMarkdownRenderer.configureTextView(
             textView,
             delegate: self,
-            linkTextAttributes: bodyLabel.linkTextAttributes ?? [:]
+            linkTextAttributes: bodyLabel.linkTextAttributes ?? [:],
+            enableDataDetectors: false
         )
         textView.attributedText = attributed
 
@@ -2331,6 +2371,7 @@ final class MessageBubbleUIKitCell: UICollectionViewCell {
                    bubbleSizingV2: BubbleSizingV2.LayoutState? = nil,
                    showsHeader: Bool = true,
                    isDark: Bool? = nil,
+                   terminalConnectionPool: TerminalSessionConnectionPool? = nil,
                    salientHighlightService: (any SalientHighlightServicing)? = nil,
                    onRequestExpand: (() -> Void)?,
                    onRequestLayout: ((String) -> Void)?,
@@ -2354,6 +2395,7 @@ final class MessageBubbleUIKitCell: UICollectionViewCell {
             bubbleSizingV2: bubbleSizingV2,
             showsHeader: showsHeader,
             isDark: isDark,
+            terminalConnectionPool: terminalConnectionPool,
             salientHighlightService: salientHighlightService,
             onRequestExpand: onRequestExpand,
             onRequestLayout: guardedRequestLayout,

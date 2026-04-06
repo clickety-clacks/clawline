@@ -618,6 +618,7 @@ struct MessageInputBar: View {
     @State private var gestureSettleTask: Task<Void, Never>?
     @State private var textEditorGlobalFrame: CGRect = .zero
     @State private var inputBarGlobalFrame: CGRect = .zero
+    @State private var cachedMaxBarWidth: CGFloat?
     @State private var shouldRestoreFocusAfterGestureDictationStart = false
     let isCompact: Bool
     private let verticalDominanceRatio: CGFloat = 1.4
@@ -826,15 +827,69 @@ struct MessageInputBar: View {
         ChatFlowTheme.Metrics(isCompact: isCompact).inputBarPaddingHorizontal
     }
 
-    private var maxBarWidth: CGFloat? {
-        guard !isCompact else { return nil }
+    static func chromeWidth(
+        isCompact: Bool,
+        bottomSafeAreaInset: CGFloat,
+        isFieldFocused: Bool
+    ) -> CGFloat {
         let themeMetrics = ChatFlowTheme.Metrics(isCompact: isCompact)
-        let textWidth = ChatFlowTheme.maxLineWidth(bodyFontSize: themeMetrics.bodyFontSize)
-        let chromeWidth = (themeMetrics.inputBarPaddingHorizontal * 2)
-            + sendButtonWidth
+        let metrics = MessageInputBarMetrics(
+            horizontalSizeClass: isCompact ? .compact : .regular,
+            bottomSafeAreaInset: bottomSafeAreaInset,
+            deviceCornerRadius: 0,
+            isFieldFocused: isFieldFocused
+        )
+        return (themeMetrics.inputBarPaddingHorizontal * 2)
+            + metrics.inputBarHeight
             + metrics.inputBarHeight
             + (MessageInputBarMetrics.elementSpacing * 2)
-        return textWidth + chromeWidth
+    }
+
+    static func maxBarWidth(
+        isCompact: Bool,
+        bottomSafeAreaInset: CGFloat,
+        isFieldFocused: Bool
+    ) -> CGFloat? {
+        guard !isCompact else { return nil }
+        let bodyFont = UIFont.clawline(.bodyText)
+        let textWidth = ChatFlowTheme.maxLineWidth(bodyFont: bodyFont)
+        return textWidth + chromeWidth(
+            isCompact: isCompact,
+            bottomSafeAreaInset: bottomSafeAreaInset,
+            isFieldFocused: isFieldFocused
+        )
+    }
+
+    static func renderedInputFieldWidthCap(
+        containerWidth: CGFloat,
+        isCompact: Bool,
+        bottomSafeAreaInset: CGFloat,
+        isFieldFocused: Bool
+    ) -> CGFloat {
+        let resolvedBarWidth = min(
+            containerWidth,
+            maxBarWidth(
+                isCompact: isCompact,
+                bottomSafeAreaInset: bottomSafeAreaInset,
+                isFieldFocused: isFieldFocused
+            ) ?? containerWidth
+        )
+        return max(
+            0,
+            resolvedBarWidth - chromeWidth(
+                isCompact: isCompact,
+                bottomSafeAreaInset: bottomSafeAreaInset,
+                isFieldFocused: isFieldFocused
+            )
+        )
+    }
+
+    private func refreshMaxBarWidth() {
+        cachedMaxBarWidth = Self.maxBarWidth(
+            isCompact: isCompact,
+            bottomSafeAreaInset: bottomSafeAreaInset,
+            isFieldFocused: isKeyboardVisible
+        )
     }
 
     // #61: On visionOS, keep the input bar in dark mode regardless of the global theme toggle.
@@ -843,7 +898,7 @@ struct MessageInputBar: View {
 #if os(visionOS)
         return false
 #else
-        return settings.appearanceMode == .light
+        return colorScheme == .light
 #endif
     }
 
@@ -942,7 +997,7 @@ struct MessageInputBar: View {
         }
         .padding(.horizontal, containerPadding)
         .padding(.bottom, metrics.bottomPadding)
-        .frame(maxWidth: maxBarWidth)
+        .frame(maxWidth: cachedMaxBarWidth)
         .frame(maxWidth: .infinity, alignment: .center)
         .background(
             GeometryReader { geometry in
@@ -1025,6 +1080,13 @@ struct MessageInputBar: View {
         }
         .onAppear {
             motion.settle(to: dictation.surfaceTarget)
+            refreshMaxBarWidth()
+        }
+        .onChange(of: isCompact) { _, _ in
+            refreshMaxBarWidth()
+        }
+        .onChange(of: settings.fontScale) { _, _ in
+            refreshMaxBarWidth()
         }
         .onChange(of: dictation.surfaceTarget) { _, target in
             motion.settle(to: target)

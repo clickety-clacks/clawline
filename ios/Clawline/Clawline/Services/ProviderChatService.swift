@@ -488,6 +488,8 @@ class ProviderChatService: ChatServicing {
         let replayCount: Int?
         let replayTruncated: Bool?
         let historyReset: Bool?
+        let streamReadStates: [String: String]?
+        let streamTailStates: [String: StreamTailState]?
         let reason: String?
     }
 
@@ -674,10 +676,12 @@ class ProviderChatService: ChatServicing {
             throw Error.notConnected
         }
         do {
-            return try await streamAPIClient.adoptStream(
+            let stream = try await streamAPIClient.adoptStream(
                 sessionKey: sessionKey,
                 token: token
             )
+            emitServiceEvent(.streamCreated(stream))
+            return stream
         } catch {
             throw mapStreamAPIError(error)
         }
@@ -703,11 +707,13 @@ class ProviderChatService: ChatServicing {
             throw Error.notConnected
         }
         do {
-            return try await streamAPIClient.deleteStream(
+            let deletedKey = try await streamAPIClient.deleteStream(
                 sessionKey: sessionKey,
                 idempotencyKey: idempotencyKey,
                 token: token
             )
+            emitServiceEvent(.streamDeleted(sessionKey: deletedKey))
+            return deletedKey
         } catch {
             throw mapStreamAPIError(error)
         }
@@ -928,6 +934,21 @@ class ProviderChatService: ChatServicing {
         try await transportSessionCoordinator.send(text: text)
     }
 
+    func publishReadState(sessionKey: String, lastReadMessageId: String) async throws {
+        let payload = ClientStreamReadPayload(sessionKey: sessionKey, lastReadMessageId: lastReadMessageId)
+        let encoded = try encoder.encode(payload)
+        guard let text = String(data: encoded, encoding: .utf8) else {
+            logger.error(
+                "Failed to encode stream read payload as UTF-8 sessionKey=\(sessionKey, privacy: .public) lastReadMessageId=\(lastReadMessageId, privacy: .public)"
+            )
+            throw Error.serverError(
+                code: "client_encode_failed",
+                message: "Failed to encode stream read payload."
+            )
+        }
+        try await transportSessionCoordinator.send(text: text)
+    }
+
     // MARK: - Internal helpers
 
     private func makeWebSocketURLs(from baseURL: URL) -> [URL] {
@@ -1143,6 +1164,10 @@ class ProviderChatService: ChatServicing {
             handleStreamUpdated(data: data)
         case "stream_deleted":
             handleStreamDeleted(data: data)
+        case "stream_read_state":
+            handleStreamReadState(data: data)
+        case "stream_tail_state":
+            handleStreamTailState(data: data)
         case "event":
             handleEvent(data: data)
         default:
@@ -1180,6 +1205,12 @@ class ProviderChatService: ChatServicing {
             emitServiceEvent(.sessionProvisioningAvailable(supportsSessionProvisioning))
             if let info = sessionInfo(from: result) {
                 emitServiceEvent(.sessionInfo(info))
+            }
+            if let streamReadStates = result.streamReadStates {
+                emitServiceEvent(.streamReadStateSnapshot(streamReadStates))
+            }
+            if let streamTailStates = result.streamTailStates {
+                emitServiceEvent(.streamTailStateSnapshot(streamTailStates))
             }
             if let isAdmin = result.isAdmin {
                 logger.info("Auth result received (userId: \(result.userId ?? "unknown", privacy: .public), isAdmin: \(isAdmin, privacy: .public))")
@@ -1476,6 +1507,32 @@ class ProviderChatService: ChatServicing {
         knownSessionKeys.remove(payload.sessionKey)
         setReplayCursor(nil, for: payload.sessionKey)
         emitServiceEvent(.streamDeleted(sessionKey: payload.sessionKey))
+    }
+
+    private func handleStreamReadState(data: Data) {
+        guard let payload = try? decoder.decode(StreamReadStatePayload.self, from: data) else {
+            logger.warning("Failed to decode stream_read_state payload")
+            return
+        }
+        emitServiceEvent(
+            .streamReadStateUpdated(
+                sessionKey: payload.sessionKey,
+                lastReadMessageId: payload.lastReadMessageId
+            )
+        )
+    }
+
+    private func handleStreamTailState(data: Data) {
+        guard let payload = try? decoder.decode(StreamTailStatePayload.self, from: data) else {
+            logger.warning("Failed to decode stream_tail_state payload")
+            return
+        }
+        emitServiceEvent(
+            .streamTailStateUpdated(
+                sessionKey: payload.sessionKey,
+                tailState: payload.tailState
+            )
+        )
     }
 
     private func resolveSessionKey(from payload: TypingEventPayload) -> String? {

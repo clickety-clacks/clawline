@@ -1,0 +1,6 @@
+{
+  "type": "error",
+  "code": "invalid_message",
+  "message": "Message rejected",
+  "messageId": "c_101"
+}

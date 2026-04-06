@@ -14,7 +14,11 @@ struct SelectableAttributedText: UIViewRepresentable {
 
     func makeUIView(context: Context) -> UITextView {
         let textView = TraitResponsiveTextView()
-        UnifiedMarkdownRenderer.configureTextView(textView, delegate: context.coordinator)
+        UnifiedMarkdownRenderer.configureTextView(
+            textView,
+            delegate: context.coordinator,
+            enableDataDetectors: false
+        )
         textView.textContainer.widthTracksTextView = true
         textView.adjustsFontForContentSizeCategory = true
         textView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
@@ -96,13 +100,17 @@ struct SelectableAttributedText: UIViewRepresentable {
             emitSelectionChange(hasSelection)
         }
 
-        @available(iOS 17.0, *)
-        func textView(_ textView: UITextView, primaryActionFor textItem: UITextItem, defaultAction: UIAction) -> UIAction? {
-            if case .link(let url) = textItem.content {
-                onLinkTap(url)
-                return nil
-            }
-            return defaultAction
+        @available(iOS 17.0, macCatalyst 17.0, visionOS 1.0, *)
+        func textView(
+            _ textView: UITextView,
+            primaryActionFor textItem: UITextItem,
+            defaultAction: UIAction
+        ) -> UIAction? {
+            UnifiedMarkdownRenderer.primaryActionForTextItem(
+                textItem,
+                defaultAction: defaultAction,
+                openURL: onLinkTap
+            )
         }
 
         private func emitSelectionChange(_ hasSelection: Bool) {

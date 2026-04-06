@@ -3,7 +3,7 @@ import SwiftUI
 struct WatchStreamDotsView: View {
     let sessionKeys: [String]
     let activeSessionKey: String?
-    let unreadSessionKeys: Set<String>
+    let dotStatesBySession: [String: StreamDotState]
 
     private let maxVisibleDots = 11
 
@@ -44,10 +44,10 @@ struct WatchStreamDotsView: View {
             ForEach(visibleDotIndices, id: \.self) { index in
                 let key = sessionKeys[index]
                 let isActive = index == activeIndex
-                let hasUnread = unreadSessionKeys.contains(key)
+                let dotState = dotStatesBySession[key] ?? .inactive
 
                 Circle()
-                    .fill(dotColor(isActive: isActive, hasUnread: hasUnread))
+                    .fill(dotColor(isActive: isActive, dotState: dotState))
                     .frame(width: 7, height: 7)
             }
 
@@ -62,10 +62,20 @@ struct WatchStreamDotsView: View {
         .background(.ultraThinMaterial, in: Capsule())
     }
 
-    private func dotColor(isActive: Bool, hasUnread: Bool) -> Color {
+    private func dotColor(isActive: Bool, dotState: StreamDotState) -> Color {
+        if dotState == .unread {
+            return .primary.opacity(0.75)
+        }
         if isActive {
             return .primary
         }
-        return hasUnread ? .primary.opacity(0.75) : .primary.opacity(0.35)
+        switch dotState {
+        case .userTail:
+            return .yellow
+        case .inactive:
+            return .primary.opacity(0.35)
+        case .unread:
+            return .primary.opacity(0.75)
+        }
     }
 }

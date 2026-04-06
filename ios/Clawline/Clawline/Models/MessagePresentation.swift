@@ -7,6 +7,7 @@
 
 import Foundation
 import CryptoKit
+import Markdown
 import OSLog
 import UIKit
 
@@ -309,7 +310,7 @@ enum MessagePresentationBuilder {
             for block in markdownPlan.blocks {
                 switch block {
                 case .richText(let source):
-                    detectedURLOccurrences.append(contentsOf: extractURLs(from: source))
+                    detectedURLOccurrences.append(contentsOf: extractMarkdownURLs(from: source))
                     let trimmed = source.trimmingCharacters(in: .whitespacesAndNewlines)
                     guard !trimmed.isEmpty else { continue }
                     if hasAttachments, isAttachmentSummaryLine(trimmed) {
@@ -545,15 +546,104 @@ enum MessagePresentationBuilder {
         let range = NSRange(text.startIndex..<text.endIndex, in: text)
         var urls: [URL] = []
         detector.enumerateMatches(in: text, options: [], range: range) { match, _, _ in
-            guard let match, let url = match.url else { return }
-            guard let scheme = url.scheme?.lowercased(),
-                  scheme == "http" || scheme == "https" else { return }
-            guard url.host != nil else { return }
-            guard url.user == nil, url.password == nil else { return }
-            if url.absoluteString.count > 2048 { return }
+            guard let match,
+                  let matchRange = Range(match.range, in: text) else { return }
+            let rawMatch = String(text[matchRange])
+            let validatedURL = wrappedMarkTrimmedURL(
+                displayedText: rawMatch,
+                href: rawMatch,
+                previousRunText: wrappedMarkPrefix(in: text, matchRange: match.range)
+            ) ?? sanitizedDetectedURL(from: rawMatch)
+            guard let url = validatedURL else { return }
             urls.append(url)
         }
         return urls
+    }
+
+    private static func extractMarkdownURLs(from source: String) -> [URL] {
+        guard let attributed = try? AttributedString(
+            markdown: source,
+            options: .init(interpretedSyntax: .full)
+        ) else {
+            return extractURLs(from: markdownPlainText(from: source))
+        }
+
+        let runs = attributed.runs.map { run in
+            (
+                text: String(attributed[run.range].characters),
+                link: run.link
+            )
+        }
+        var urls: [URL] = []
+        for index in runs.indices {
+            guard let url = runs[index].link else { continue }
+            let displayedText = runs[index].text
+            let previousRunText = index > 0 ? runs[index - 1].text : nil
+            let validatedURL = wrappedMarkTrimmedURL(
+                    displayedText: displayedText,
+                    href: url.absoluteString,
+                    previousRunText: previousRunText
+                )
+                ?? sanitizedDetectedURL(from: displayedText)
+                ?? sanitizedDetectedURL(from: url.absoluteString)
+                ?? validatedDetectedURL(from: url.absoluteString)
+            guard let validatedURL else { continue }
+            urls.append(validatedURL)
+        }
+
+        // Bare URLs (e.g. `http://host:port`) are not recognized as links by the
+        // CommonMark parser, but NSDataDetector *does* detect them—matching
+        // UITextView's `.link` data-detector behavior.  Supplement the markdown-
+        // extracted set so these URLs also produce link cards.
+        let plainText = NSAttributedString(attributed).string
+        let detectedBareURLs = extractURLs(from: plainText)
+        let seen = Set(urls.map(\.absoluteString))
+        for url in detectedBareURLs where !seen.contains(url.absoluteString) {
+            urls.append(url)
+        }
+
+        return urls
+    }
+
+    private static func sanitizedDetectedURL(from rawMatch: String) -> URL? {
+        MarkdownURLBoundarySanitizer.sanitizedURL(from: rawMatch)
+    }
+
+    private static func validatedDetectedURL(from candidate: String) -> URL? {
+        guard let url = MarkdownURLBoundarySanitizer.validatedHTTPURL(from: candidate) else { return nil }
+        if url.absoluteString.count > 2048 { return nil }
+        return url
+    }
+
+    private static func wrappedMarkTrimmedURL(
+        displayedText: String,
+        href: String,
+        previousRunText: String?
+    ) -> URL? {
+        guard previousRunText == "==" else { return nil }
+        for candidate in [displayedText, href] where candidate.hasSuffix("==") {
+            let trimmed = String(candidate.dropLast(2))
+            if let url = validatedDetectedURL(from: trimmed) {
+                return url
+            }
+        }
+        return nil
+    }
+
+    private static func wrappedMarkPrefix(in text: String, matchRange: NSRange) -> String? {
+        guard matchRange.location >= 2 else { return nil }
+        let nsText = text as NSString
+        return nsText.substring(with: NSRange(location: matchRange.location - 2, length: 2))
+    }
+
+    private static func markdownPlainText(from source: String) -> String {
+        if let attributed = try? AttributedString(
+            markdown: source,
+            options: .init(interpretedSyntax: .full)
+        ) {
+            return NSAttributedString(attributed).string.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return source.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private static func stripMarkdownMarkers(from text: String) -> String {

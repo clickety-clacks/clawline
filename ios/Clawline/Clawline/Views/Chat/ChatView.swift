@@ -15,14 +15,14 @@ import os.log
 private let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "ChatView")
 
 #if DEBUG
-private func logStreamPopupDebugEvent(
+private func emitStreamPopupConsoleEvent(
     _ event: StaticString,
     sessionKey: String?,
     isPresented: Bool,
     note: String? = nil
 ) {
-    logger.info(
-        "[POPUP-TAPDBG] event=\(event, privacy: .public) sessionKey=\(sessionKey ?? "nil", privacy: .public) isPresented=\(isPresented, privacy: .public) note=\(note ?? "-", privacy: .public)"
+    print(
+        "[POPUP-CONSOLE] event=\(event) sessionKey=\(sessionKey ?? "nil") isPresented=\(isPresented) note=\(note ?? "-")"
     )
 }
 #endif
@@ -128,6 +128,9 @@ struct ChatView: View {
     @State private var isStreamManagerPopoverPresented = false
     @State private var streamPopupShouldAutoFocusSearch = false
     @State private var streamPopupSearchFocusRequestID = 0
+#if DEBUG
+    @State private var hasEmittedStreamPopupStartupSentinel = false
+#endif
     @State private var isTrackPickerPresented = false
     @State private var isPhotosPickerPresented = false
     @State private var isFileImporterPresented = false
@@ -566,6 +569,15 @@ struct ChatView: View {
                 vmObject: String(describing: ObjectIdentifier(viewModel)),
                 connState: String(describing: viewModel.connectionState)
             )
+            if !hasEmittedStreamPopupStartupSentinel {
+                hasEmittedStreamPopupStartupSentinel = true
+                emitStreamPopupConsoleEvent(
+                    "startup_sentinel",
+                    sessionKey: viewModel.uiSelectedSessionKey,
+                    isPresented: isStreamManagerPopoverPresented,
+                    note: "ChatView debug build visible to MCP capture"
+                )
+            }
 #endif
             logger.info(
                 "[T099-PIN] chatView=\(self.chatViewTraceId, privacy: .public) event=onAppear vm=\(self.viewModel.debugInstanceId, privacy: .public) vmObject=\(String(describing: ObjectIdentifier(self.viewModel)), privacy: .public) scenePhase=\(String(describing: scenePhase), privacy: .public) connState=\(String(describing: self.viewModel.connectionState), privacy: .public)"
@@ -597,7 +609,7 @@ struct ChatView: View {
         }
         .onChange(of: isStreamManagerPopoverPresented) { _, isPresented in
 #if DEBUG
-            logStreamPopupDebugEvent(
+            emitStreamPopupConsoleEvent(
                 "state_changed",
                 sessionKey: viewModel.uiSelectedSessionKey,
                 isPresented: isPresented,
@@ -1610,7 +1622,7 @@ struct ChatView: View {
             maxWidth: pageDotsMaxWidth,
             onTap: {
 #if DEBUG
-                logStreamPopupDebugEvent(
+                emitStreamPopupConsoleEvent(
                     "dots_tap_received",
                     sessionKey: viewModel.uiSelectedSessionKey,
                     isPresented: isStreamManagerPopoverPresented,
@@ -1619,7 +1631,7 @@ struct ChatView: View {
 #endif
                 isStreamManagerPopoverPresented = true
 #if DEBUG
-                logStreamPopupDebugEvent(
+                emitStreamPopupConsoleEvent(
                     "dots_tap_set_true",
                     sessionKey: viewModel.uiSelectedSessionKey,
                     isPresented: isStreamManagerPopoverPresented,
@@ -1633,57 +1645,13 @@ struct ChatView: View {
             attachmentAnchor: .rect(.bounds),
             arrowEdge: .bottom
         ) {
-            StreamManagerSheet(
+            streamManagerPopoverContent(
                 viewModel: viewModel,
-                streams: effectiveStreams,
+                effectiveStreams: effectiveStreams,
                 dotStatesBySession: dotStatesBySession,
-                isPresented: $isStreamManagerPopoverPresented,
-                shouldAutoFocusSearchOnAppear: streamPopupShouldAutoFocusSearch,
-                searchFocusRequestID: streamPopupSearchFocusRequestID,
-                maxAvailableHeight: streamSelectorMaxHeight,
-                maxAvailableWidth: containerWidth,
-                onSelectStream: { sessionKey in
-                    selectStream(sessionKey, source: .programmatic)
-                },
-                onPresentTrackPicker: {
-#if DEBUG
-                    logStreamPopupDebugEvent(
-                        "track_picker_handoff",
-                        sessionKey: viewModel.uiSelectedSessionKey,
-                        isPresented: isStreamManagerPopoverPresented,
-                        note: "track picker requested from stream popup"
-                    )
-#endif
-                    prepareForAttachmentPicker()
-                    isStreamManagerPopoverPresented = false
-                    Task { @MainActor in
-                        await Task.yield()
-                        isTrackPickerPresented = true
-                    }
-                }
+                streamSelectorMaxHeight: streamSelectorMaxHeight,
+                containerWidth: containerWidth
             )
-            .presentationCompactAdaptation(.popover)
-            .presentationBackground(.clear)
-            .onAppear {
-#if DEBUG
-                logStreamPopupDebugEvent(
-                    "popover_content_appear",
-                    sessionKey: viewModel.uiSelectedSessionKey,
-                    isPresented: isStreamManagerPopoverPresented,
-                    note: "stream manager content appeared"
-                )
-#endif
-            }
-            .onDisappear {
-#if DEBUG
-                logStreamPopupDebugEvent(
-                    "popover_content_disappear",
-                    sessionKey: viewModel.uiSelectedSessionKey,
-                    isPresented: isStreamManagerPopoverPresented,
-                    note: "stream manager content disappeared"
-                )
-#endif
-            }
         }
         .sheet(
             isPresented: $isTrackPickerPresented,
@@ -1698,6 +1666,74 @@ struct ChatView: View {
     private func selectStream(_ sessionKey: String, source: ChatViewModel.StreamSwitchSource) {
         StreamSwitchTiming.log("selectStream_called", sessionKey: sessionKey)
         viewModel.requestStreamSwitch(to: sessionKey, source: source)
+    }
+
+    private func streamManagerPopoverContent(
+        viewModel: ChatViewModel,
+        effectiveStreams: [StreamSession],
+        dotStatesBySession: [String: StreamDotState],
+        streamSelectorMaxHeight: CGFloat,
+        containerWidth: CGFloat
+    ) -> some View {
+#if DEBUG
+        emitStreamPopupConsoleEvent(
+            "presentation_path_entered",
+            sessionKey: viewModel.uiSelectedSessionKey,
+            isPresented: isStreamManagerPopoverPresented,
+            note: "popover content builder entered"
+        )
+#endif
+        return StreamManagerSheet(
+            viewModel: viewModel,
+            streams: effectiveStreams,
+            dotStatesBySession: dotStatesBySession,
+            isPresented: $isStreamManagerPopoverPresented,
+            shouldAutoFocusSearchOnAppear: streamPopupShouldAutoFocusSearch,
+            searchFocusRequestID: streamPopupSearchFocusRequestID,
+            maxAvailableHeight: streamSelectorMaxHeight,
+            maxAvailableWidth: containerWidth,
+            onSelectStream: { sessionKey in
+                selectStream(sessionKey, source: .programmatic)
+            },
+            onPresentTrackPicker: {
+#if DEBUG
+                emitStreamPopupConsoleEvent(
+                    "track_picker_handoff",
+                    sessionKey: viewModel.uiSelectedSessionKey,
+                    isPresented: isStreamManagerPopoverPresented,
+                    note: "track picker requested from stream popup"
+                )
+#endif
+                prepareForAttachmentPicker()
+                isStreamManagerPopoverPresented = false
+                Task { @MainActor in
+                    await Task.yield()
+                    isTrackPickerPresented = true
+                }
+            }
+        )
+        .presentationCompactAdaptation(.popover)
+        .presentationBackground(.clear)
+        .onAppear {
+#if DEBUG
+            emitStreamPopupConsoleEvent(
+                "popover_content_appear",
+                sessionKey: viewModel.uiSelectedSessionKey,
+                isPresented: isStreamManagerPopoverPresented,
+                note: "stream manager content appeared"
+            )
+#endif
+        }
+        .onDisappear {
+#if DEBUG
+            emitStreamPopupConsoleEvent(
+                "popover_content_disappear",
+                sessionKey: viewModel.uiSelectedSessionKey,
+                isPresented: isStreamManagerPopoverPresented,
+                note: "stream manager content disappeared"
+            )
+#endif
+        }
     }
 
     private var supportsKeyboardNavigationShortcuts: Bool {

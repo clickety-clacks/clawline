@@ -15,6 +15,19 @@ import os.log
 private let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "ChatView")
 
 #if DEBUG
+private func logStreamPopupDebugEvent(
+    _ event: StaticString,
+    sessionKey: String?,
+    isPresented: Bool,
+    note: String? = nil
+) {
+    logger.info(
+        "[POPUP-TAPDBG] event=\(event, privacy: .public) sessionKey=\(sessionKey ?? "nil", privacy: .public) isPresented=\(isPresented, privacy: .public) note=\(note ?? "-", privacy: .public)"
+    )
+}
+#endif
+
+#if DEBUG
 @MainActor
 private final class T099OnDisappearProbeStore {
     struct PendingActiveDisappear {
@@ -583,6 +596,14 @@ struct ChatView: View {
             keyboardRefreshToken &+= 1
         }
         .onChange(of: isStreamManagerPopoverPresented) { _, isPresented in
+#if DEBUG
+            logStreamPopupDebugEvent(
+                "state_changed",
+                sessionKey: viewModel.uiSelectedSessionKey,
+                isPresented: isPresented,
+                note: "popover state binding changed"
+            )
+#endif
             if !isPresented {
                 streamPopupShouldAutoFocusSearch = false
             }
@@ -1587,41 +1608,81 @@ struct ChatView: View {
             activeSessionKey: viewModel.uiSelectedSessionKey,
             dotStatesBySession: dotStatesBySession,
             maxWidth: pageDotsMaxWidth,
-            onTap: { isStreamManagerPopoverPresented = true }
+            onTap: {
+#if DEBUG
+                logStreamPopupDebugEvent(
+                    "dots_tap_received",
+                    sessionKey: viewModel.uiSelectedSessionKey,
+                    isPresented: isStreamManagerPopoverPresented,
+                    note: "page dots button action entered"
+                )
+#endif
+                isStreamManagerPopoverPresented = true
+#if DEBUG
+                logStreamPopupDebugEvent(
+                    "dots_tap_set_true",
+                    sessionKey: viewModel.uiSelectedSessionKey,
+                    isPresented: isStreamManagerPopoverPresented,
+                    note: "page dots button set popover true"
+                )
+#endif
+            }
         )
-        .overlay(alignment: .top) {
-            Color.clear
-                .frame(maxWidth: .infinity)
-                .frame(height: 1)
-                .allowsHitTesting(false)
-                .popover(
-                    isPresented: $isStreamManagerPopoverPresented,
-                    attachmentAnchor: .rect(.bounds),
-                    arrowEdge: .bottom
-                ) {
-                    StreamManagerSheet(
-                        viewModel: viewModel,
-                        streams: effectiveStreams,
-                        dotStatesBySession: dotStatesBySession,
-                        isPresented: $isStreamManagerPopoverPresented,
-                        shouldAutoFocusSearchOnAppear: streamPopupShouldAutoFocusSearch,
-                        searchFocusRequestID: streamPopupSearchFocusRequestID,
-                        maxAvailableHeight: streamSelectorMaxHeight,
-                        onSelectStream: { sessionKey in
-                            selectStream(sessionKey, source: .programmatic)
-                        },
-                        onPresentTrackPicker: {
-                            prepareForAttachmentPicker()
-                            isStreamManagerPopoverPresented = false
-                            Task { @MainActor in
-                                await Task.yield()
-                                isTrackPickerPresented = true
-                            }
-                        }
+        .popover(
+            isPresented: $isStreamManagerPopoverPresented,
+            attachmentAnchor: .rect(.bounds),
+            arrowEdge: .bottom
+        ) {
+            StreamManagerSheet(
+                viewModel: viewModel,
+                streams: effectiveStreams,
+                dotStatesBySession: dotStatesBySession,
+                isPresented: $isStreamManagerPopoverPresented,
+                shouldAutoFocusSearchOnAppear: streamPopupShouldAutoFocusSearch,
+                searchFocusRequestID: streamPopupSearchFocusRequestID,
+                maxAvailableHeight: streamSelectorMaxHeight,
+                onSelectStream: { sessionKey in
+                    selectStream(sessionKey, source: .programmatic)
+                },
+                onPresentTrackPicker: {
+#if DEBUG
+                    logStreamPopupDebugEvent(
+                        "track_picker_handoff",
+                        sessionKey: viewModel.uiSelectedSessionKey,
+                        isPresented: isStreamManagerPopoverPresented,
+                        note: "track picker requested from stream popup"
                     )
-                    .presentationCompactAdaptation(.popover)
-                    .presentationBackground(.clear)
+#endif
+                    prepareForAttachmentPicker()
+                    isStreamManagerPopoverPresented = false
+                    Task { @MainActor in
+                        await Task.yield()
+                        isTrackPickerPresented = true
+                    }
                 }
+            )
+            .presentationCompactAdaptation(.popover)
+            .presentationBackground(.clear)
+            .onAppear {
+#if DEBUG
+                logStreamPopupDebugEvent(
+                    "popover_content_appear",
+                    sessionKey: viewModel.uiSelectedSessionKey,
+                    isPresented: isStreamManagerPopoverPresented,
+                    note: "stream manager content appeared"
+                )
+#endif
+            }
+            .onDisappear {
+#if DEBUG
+                logStreamPopupDebugEvent(
+                    "popover_content_disappear",
+                    sessionKey: viewModel.uiSelectedSessionKey,
+                    isPresented: isStreamManagerPopoverPresented,
+                    note: "stream manager content disappeared"
+                )
+#endif
+            }
         }
         .sheet(
             isPresented: $isTrackPickerPresented,

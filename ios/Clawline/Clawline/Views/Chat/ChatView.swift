@@ -1629,18 +1629,7 @@ struct ChatView: View {
                     note: "page dots button action entered"
                 )
 #endif
-                Task { @MainActor in
-                    await Task.yield()
-                    isStreamManagerPopoverPresented = true
-#if DEBUG
-                    emitStreamPopupConsoleEvent(
-                        "dots_tap_set_true",
-                        sessionKey: viewModel.uiSelectedSessionKey,
-                        isPresented: isStreamManagerPopoverPresented,
-                        note: "page dots button set popover true after yielding past tap"
-                    )
-#endif
-                }
+                presentStreamManagerPopoverFromDotsTap(sessionKey: viewModel.uiSelectedSessionKey)
             }
         )
         return Group {
@@ -1734,6 +1723,27 @@ struct ChatView: View {
             false
         }
 #endif
+    }
+
+    private func presentStreamManagerPopoverFromDotsTap(sessionKey: String?) {
+        let presentPopover = {
+            isStreamManagerPopoverPresented = true
+#if DEBUG
+            emitStreamPopupConsoleEvent(
+                "dots_tap_set_true",
+                sessionKey: sessionKey,
+                isPresented: isStreamManagerPopoverPresented,
+                note: usesDirectStreamManagerPopoverAnchor
+                    ? "page dots button set popover true on next main-queue turn"
+                    : "page dots button set popover true immediately"
+            )
+#endif
+        }
+        if usesDirectStreamManagerPopoverAnchor {
+            DispatchQueue.main.async(execute: presentPopover)
+        } else {
+            presentPopover()
+        }
     }
 
     private func selectStream(_ sessionKey: String, source: ChatViewModel.StreamSwitchSource) {

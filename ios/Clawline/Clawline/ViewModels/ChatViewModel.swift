@@ -2983,8 +2983,21 @@ final class ChatViewModel: ChatViewModelHosting {
             persistMessages([], for: sessionKey)
         }
         recalculateOrderedSessionKeys()
+        let staleLocallyRehydratedAdoptedKeys = Set(
+            byKey.values
+                .filter { $0.adopted && !serverKeys.contains($0.sessionKey) }
+                .map(\.sessionKey)
+        )
         for sessionKey in orderedSessionKeys {
             ensureSessionStorage(for: sessionKey)
+            if staleLocallyRehydratedAdoptedKeys.contains(sessionKey) {
+                lastReadMessageIdBySession.removeValue(forKey: sessionKey)
+                streamDotStateBySession.removeValue(forKey: sessionKey)
+                chatService.setReplayCursor(nil, for: sessionKey)
+                persistLastReadMessageId(nil, for: sessionKey)
+                persistMessages([], for: sessionKey)
+                continue
+            }
             restoreLastReadMessageIdIfNeeded(for: sessionKey)
             restoreCachedMessagesIfNeeded(for: sessionKey)
         }

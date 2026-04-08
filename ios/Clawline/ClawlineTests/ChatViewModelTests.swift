@@ -2392,6 +2392,101 @@ struct ChatViewModelTests {
         #expect(viewModel.streamDotState(for: customKey) == .inactive)
     }
 
+    @Test("Auth stream snapshot clears stale local read state for adopted stream omitted by server")
+    @MainActor
+    func authStreamSnapshotClearsStaleLocalStateForOmittedAdoptedStream() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let heimdalKey = "agent:heimdal:clawline:user:main"
+
+        let firstService = TestChatService()
+        firstService.streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            StreamSession(
+                sessionKey: heimdalKey,
+                displayName: "Heimdal",
+                kind: "main",
+                orderIndex: 1,
+                isBuiltIn: true,
+                createdAt: Date(),
+                updatedAt: Date(),
+                trackingMode: .adopted
+            ),
+        ]
+        let firstViewModel = ChatViewModel(
+            auth: auth,
+            chatService: firstService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+
+        await firstViewModel.onAppear()
+        firstService.emitServiceEvent(.streamSnapshot(firstService.streams))
+        try await Task.sleep(for: .milliseconds(30))
+
+        firstViewModel.setActiveSessionKeyForTesting(heimdalKey)
+        firstService.emitServiceEvent(
+            .streamTailStateUpdated(
+                sessionKey: heimdalKey,
+                tailState: StreamTailState(lastMessageId: "evt_heimdal_2", lastMessageRole: .assistant)
+            )
+        )
+        firstService.emit(
+            Message(
+                id: "evt_heimdal_2",
+                role: .assistant,
+                content: "stale cached tail",
+                timestamp: Date(),
+                streaming: false,
+                attachments: [],
+                deviceId: nil,
+                sessionKey: heimdalKey
+            )
+        )
+
+        for _ in 0..<50 {
+            if firstViewModel.lastReadMessageIdBySession[heimdalKey] == "evt_heimdal_2" { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(firstViewModel.lastReadMessageIdBySession[heimdalKey] == "evt_heimdal_2")
+        #expect(firstViewModel.messages(for: heimdalKey).last?.id == "evt_heimdal_2")
+        firstViewModel.onDisappear()
+
+        let secondService = TestChatService()
+        secondService.streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+        ]
+        let secondViewModel = ChatViewModel(
+            auth: auth,
+            chatService: secondService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { secondViewModel.onDisappear() }
+
+        await secondViewModel.onAppear()
+        secondService.emitServiceEvent(.streamSnapshot(secondService.streams))
+        try await Task.sleep(for: .milliseconds(30))
+
+        #expect(secondViewModel.stream(for: heimdalKey) != nil)
+        #expect(secondViewModel.isAdoptedStream(sessionKey: heimdalKey))
+        #expect(secondViewModel.lastReadMessageIdBySession[heimdalKey] == nil)
+        #expect(secondViewModel.messages(for: heimdalKey).isEmpty)
+
+        secondService.lastPublishedReadState = nil
+        secondViewModel.setActiveSessionKeyForTesting(heimdalKey)
+        try await Task.sleep(for: .milliseconds(30))
+        #expect(secondService.lastPublishedReadState == nil)
+    }
+
     @Test("Track adopts untracked session and preserves it across snapshots")
     @MainActor
     func trackAdoptsUntrackedSessionAcrossSnapshots() async throws {

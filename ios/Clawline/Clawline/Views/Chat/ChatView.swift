@@ -1729,33 +1729,19 @@ struct ChatView: View {
                 "dots_tap_set_true",
                 sessionKey: sessionKey,
                 isPresented: isStreamManagerPopoverPresented,
-                note: usesDirectStreamManagerPopoverAnchor
-                    ? "page dots button set popover true on next main-queue turn"
-                    : "page dots button set popover true immediately"
+                note: "page dots button set popover true on next main-queue turn"
             )
 #endif
         }
-        if usesDirectStreamManagerPopoverAnchor {
 #if DEBUG
-            emitStreamPopupConsoleEvent(
-                "dots_tap_schedule_open",
-                sessionKey: sessionKey,
-                isPresented: isStreamManagerPopoverPresented,
-                note: "scheduling popover true onto next main-queue turn"
-            )
+        emitStreamPopupConsoleEvent(
+            "dots_tap_schedule_open",
+            sessionKey: sessionKey,
+            isPresented: isStreamManagerPopoverPresented,
+            note: "scheduling popover true onto next main-queue turn"
+        )
 #endif
-            DispatchQueue.main.async(execute: presentPopover)
-        } else {
-#if DEBUG
-            emitStreamPopupConsoleEvent(
-                "dots_tap_schedule_open",
-                sessionKey: sessionKey,
-                isPresented: isStreamManagerPopoverPresented,
-                note: "opening popover immediately on touch path"
-            )
-#endif
-            presentPopover()
-        }
+        DispatchQueue.main.async(execute: presentPopover)
     }
 
     private func selectStream(_ sessionKey: String, source: ChatViewModel.StreamSwitchSource) {

@@ -1646,27 +1646,29 @@ struct ChatView: View {
             },
             activationBehavior: usesDirectStreamManagerPopoverAnchor ? .directTapGesture : .button
         )
+        let pageDotsPopoverAnchor = pageDotsControl
+            .hidden()
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
         return Group {
             if usesDirectStreamManagerPopoverAnchor {
-                pageDotsControl
-                    .overlay {
-                        Color.clear
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .allowsHitTesting(false)
-                            .popover(
-                                isPresented: $isStreamManagerPopoverPresented,
-                                attachmentAnchor: .rect(.bounds),
-                                arrowEdge: .bottom
-                            ) {
-                                streamManagerPopoverContent(
-                                    viewModel: viewModel,
-                                    effectiveStreams: effectiveStreams,
-                                    dotStatesBySession: dotStatesBySession,
-                                    streamSelectorMaxHeight: streamSelectorMaxHeight,
-                                    containerWidth: containerWidth
-                                )
-                            }
-                    }
+                ZStack {
+                    pageDotsPopoverAnchor
+                        .popover(
+                            isPresented: $isStreamManagerPopoverPresented,
+                            attachmentAnchor: .rect(.bounds),
+                            arrowEdge: .bottom
+                        ) {
+                            streamManagerPopoverContent(
+                                viewModel: viewModel,
+                                effectiveStreams: effectiveStreams,
+                                dotStatesBySession: dotStatesBySession,
+                                streamSelectorMaxHeight: streamSelectorMaxHeight,
+                                containerWidth: containerWidth
+                            )
+                        }
+                    pageDotsControl
+                }
             } else {
                 pageDotsControl
                     .overlay(alignment: .top) {

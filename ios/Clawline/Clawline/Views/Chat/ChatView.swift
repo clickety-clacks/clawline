@@ -21,8 +21,9 @@ private func emitStreamPopupConsoleEvent(
     isPresented: Bool,
     note: String? = nil
 ) {
+    let timestamp = ISO8601DateFormatter().string(from: Date())
     print(
-        "[POPUP-CONSOLE] event=\(event) sessionKey=\(sessionKey ?? "nil") isPresented=\(isPresented) note=\(note ?? "-")"
+        "[POPUP-CONSOLE] ts=\(timestamp) event=\(event) sessionKey=\(sessionKey ?? "nil") isPresented=\(isPresented) note=\(note ?? "-")"
     )
 }
 #endif
@@ -575,7 +576,9 @@ struct ChatView: View {
                     "startup_sentinel",
                     sessionKey: viewModel.uiSelectedSessionKey,
                     isPresented: isStreamManagerPopoverPresented,
-                    note: "ChatView debug build visible to MCP capture"
+                    note: usesDirectStreamManagerPopoverAnchor
+                        ? "ChatView debug build visible to MCP capture direct_anchor=mac_hosted"
+                        : "ChatView debug build visible to MCP capture direct_anchor=iOS_touch"
                 )
             }
 #endif
@@ -615,6 +618,14 @@ struct ChatView: View {
                 isPresented: isPresented,
                 note: "popover state binding changed"
             )
+            if !isPresented {
+                emitStreamPopupConsoleEvent(
+                    "dismiss_or_reset_observed",
+                    sessionKey: viewModel.uiSelectedSessionKey,
+                    isPresented: isPresented,
+                    note: "popover binding changed false"
+                )
+            }
 #endif
             if !isPresented {
                 streamPopupShouldAutoFocusSearch = false
@@ -1626,9 +1637,11 @@ struct ChatView: View {
                     "dots_tap_received",
                     sessionKey: viewModel.uiSelectedSessionKey,
                     isPresented: isStreamManagerPopoverPresented,
-                    note: "page dots button action entered"
+                    note: usesDirectStreamManagerPopoverAnchor
+                        ? "page dots action entered directTapGesture+directAnchor"
+                        : "page dots action entered button+touchAnchor"
                 )
-#endif
+            #endif
                 presentStreamManagerPopoverFromDotsTap(sessionKey: viewModel.uiSelectedSessionKey)
             },
             activationBehavior: usesDirectStreamManagerPopoverAnchor ? .directTapGesture : .button
@@ -1746,8 +1759,24 @@ struct ChatView: View {
 #endif
         }
         if usesDirectStreamManagerPopoverAnchor {
+#if DEBUG
+            emitStreamPopupConsoleEvent(
+                "dots_tap_schedule_open",
+                sessionKey: sessionKey,
+                isPresented: isStreamManagerPopoverPresented,
+                note: "scheduling popover true onto next main-queue turn"
+            )
+#endif
             DispatchQueue.main.async(execute: presentPopover)
         } else {
+#if DEBUG
+            emitStreamPopupConsoleEvent(
+                "dots_tap_schedule_open",
+                sessionKey: sessionKey,
+                isPresented: isStreamManagerPopoverPresented,
+                note: "opening popover immediately on touch path"
+            )
+#endif
             presentPopover()
         }
     }
@@ -1778,12 +1807,12 @@ struct ChatView: View {
             },
             onPresentTrackPicker: {
 #if DEBUG
-                emitStreamPopupConsoleEvent(
-                    "track_picker_handoff",
-                    sessionKey: viewModel.uiSelectedSessionKey,
-                    isPresented: isStreamManagerPopoverPresented,
-                    note: "track picker requested from stream popup"
-                )
+            emitStreamPopupConsoleEvent(
+                "track_picker_handoff",
+                sessionKey: viewModel.uiSelectedSessionKey,
+                isPresented: isStreamManagerPopoverPresented,
+                note: "track picker requested from stream popup explicit local dismiss"
+            )
 #endif
                 prepareForAttachmentPicker()
                 isStreamManagerPopoverPresented = false
@@ -1801,7 +1830,7 @@ struct ChatView: View {
                 "presentation_path_entered",
                 sessionKey: viewModel.uiSelectedSessionKey,
                 isPresented: isStreamManagerPopoverPresented,
-                note: "popover content lifecycle entered"
+                note: "popover content lifecycle entered after attach/presentation"
             )
             emitStreamPopupConsoleEvent(
                 "popover_content_appear",
@@ -1817,7 +1846,7 @@ struct ChatView: View {
                 "popover_content_disappear",
                 sessionKey: viewModel.uiSelectedSessionKey,
                 isPresented: isStreamManagerPopoverPresented,
-                note: "stream manager content disappeared"
+                note: "stream manager content disappeared after system dismiss/reset"
             )
 #endif
         }

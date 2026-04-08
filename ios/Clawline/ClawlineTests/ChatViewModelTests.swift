@@ -3457,7 +3457,7 @@ private final class TestChatService: ChatServicing {
     private(set) var lastSentId: String?
     private(set) var lastSessionKey: String?
     private(set) var sendCallCount: Int = 0
-    private(set) var lastPublishedReadState: (sessionKey: String, lastReadMessageId: String)?
+    var lastPublishedReadState: (sessionKey: String, lastReadMessageId: String)?
     private(set) var connectCallCount: Int = 0
     var emitConnectedOnConnect: Bool = true
     var emitInitialDisconnectedState: Bool = true

@@ -9,6 +9,7 @@ import Foundation
 import Testing
 @testable import Clawline
 
+@Suite(.serialized)
 struct ProviderServiceTests {
     @Test("Pairing request sends payload and resolves success")
     func pairingSuccess() async throws {
@@ -763,7 +764,19 @@ struct ProviderServiceTests {
             #expect(request.url?.path == "/api/streams/adopt")
             #expect(request.httpMethod == "POST")
             #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer jwt")
-            let body = try JSONSerialization.jsonObject(with: request.httpBody ?? Data()) as? [String: Any]
+            let bodyData = request.httpBody ?? request.httpBodyStream.flatMap { stream -> Data? in
+                stream.open(); defer { stream.close() }
+                var data = Data()
+                let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: 4096)
+                defer { buffer.deallocate() }
+                while stream.hasBytesAvailable {
+                    let count = stream.read(buffer, maxLength: 4096)
+                    guard count > 0 else { break }
+                    data.append(buffer, count: count)
+                }
+                return data
+            } ?? Data()
+            let body = try JSONSerialization.jsonObject(with: bodyData) as? [String: Any]
             #expect(body?["sessionKey"] as? String == "agent:main:openclaw:user:s_trackable")
             let data = #"""
             {
@@ -874,7 +887,7 @@ struct ProviderServiceTests {
         HTTPStubURLProtocol.requestHandler = { request in
             let data = #"""
             {
-              "sessionKey": "agent:main:openclaw:user:s_trackable"
+              "deletedSessionKey": "agent:main:openclaw:user:s_trackable"
             }
             """#.data(using: .utf8) ?? Data()
             return (

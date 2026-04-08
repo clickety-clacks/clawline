@@ -802,6 +802,32 @@ class ProviderChatService: ChatServicing {
         }
     }
 
+    /// Synchronous connect used by tests and standalone callers.
+    /// Establishes a WebSocket connection, authenticates, and returns once the
+    /// auth handshake completes (or throws on failure).
+    func connect(token: String, lastMessageId: String?) async throws {
+        let admission = await transportSessionCoordinator.prepareStandaloneConnect(
+            token: token,
+            lastMessageId: lastMessageId
+        )
+        if admission.shouldReuseConnected { return }
+        if let generation = admission.generation {
+            let task = Task { [weak self] in
+                guard let self else { return }
+                do {
+                    try await self.performStandaloneConnect(token: token, lastMessageId: lastMessageId)
+                } catch {
+                    await self.transportSessionCoordinator.applyDisconnect(
+                        shouldNotify: false,
+                        reason: error.localizedDescription
+                    )
+                }
+            }
+            _ = await transportSessionCoordinator.attachAttemptTask(task, generation: generation)
+        }
+        try await transportSessionCoordinator.waitForStandaloneAttemptToFinish()
+    }
+
     func stopConnectionAttempt() {
         Task { [weak self] in
             guard let self else { return }
@@ -1849,32 +1875,7 @@ class ProviderChatService: ChatServicing {
     }
 }
 
-private final class StandaloneProviderTransportService: ProviderChatService, DirectChatConnecting {
-    func connect(token: String, lastMessageId: String?) async throws {
-        let admission = await transportSessionCoordinator.prepareStandaloneConnect(
-            token: token,
-            lastMessageId: lastMessageId
-        )
-        if admission.shouldReuseConnected {
-            return
-        }
-        if let generation = admission.generation {
-            let task = Task { [weak self] in
-                guard let self else { return }
-                do {
-                    try await self.performStandaloneConnect(token: token, lastMessageId: lastMessageId)
-                } catch {
-                    await self.transportSessionCoordinator.applyDisconnect(
-                        shouldNotify: false,
-                        reason: error.localizedDescription
-                    )
-                }
-            }
-            _ = await transportSessionCoordinator.attachAttemptTask(task, generation: generation)
-        }
-        try await transportSessionCoordinator.waitForStandaloneAttemptToFinish()
-    }
-}
+private final class StandaloneProviderTransportService: ProviderChatService, DirectChatConnecting {}
 
 final class ProviderDirectChatClient: DirectChatConnecting {
     private let service: StandaloneProviderTransportService

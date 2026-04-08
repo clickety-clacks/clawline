@@ -224,6 +224,9 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     private var currentFontScaleChangeSequence: Int = 0
     private var onExpand: ((Message) -> Void)?
     private var onScrollEvent: (@MainActor (MessageFlowScrollEvent) -> Void)?
+    private let webBubbleCoordinator = WebBubbleCoordinator()
+    private var lastMessages: [Message] = []
+    private var lastEffectiveStream: ChatStream?
     // Staged stream materialization (approved spec: tail window -> full history).
     // WHY N=50: device measurements showed 500-item first apply taking 1.4-2.7s.
     // A 50-item first paint targets ~10% of that cost while still showing meaningful recent context.
@@ -730,6 +733,15 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         view.clipsToBounds = false
         configureCollectionView()
         configureDataSource()
+        webBubbleCoordinator.onItemsChanged = { [weak self] in
+            self?.applySnapshotForWebBubbles()
+        }
+        webBubbleCoordinator.onReconfigureItem = { [weak self] id in
+            self?.reconfigureItem(id: id)
+        }
+        webBubbleCoordinator.onScrollToItem = { [weak self] id in
+            self?.scrollToItem(id: id)
+        }
 
         // currentIsDark will be set by the first update() call from SwiftUI
         // which passes the colorScheme environment value
@@ -2077,8 +2089,15 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         case .full:
             snapshotMessages = messages
         }
+        lastMessages = messages
+        let effectiveStream = SessionKey.stream(for: effectiveSessionKey)
+        lastEffectiveStream = effectiveStream
+        webBubbleCoordinator.currentStream = effectiveStream
         let snapshotMessageIds = snapshotMessages.map(\.id)
-        let snapshotItemIds = snapshotItemsWithDateSeparators(from: snapshotMessages)
+        let snapshotItemIds = snapshotItemsWithWebBubbles(
+            from: snapshotItemsWithDateSeparators(from: snapshotMessages),
+            stream: effectiveStream
+        )
         logScrollRestore(
             "materializationStage.start sessionKey=\(effectiveSessionKey) stage=\(materializationPlan.stage.rawValue) firstActivation=\(isFirstActivationForSession) snapshotMessages=\(snapshotMessageIds.count) totalMessages=\(messageCount) pendingRestore={\(describePersistedScrollState(readState(for: effectiveSessionKey).pendingScrollRestoreState))}"
         )
@@ -3161,6 +3180,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         collectionView.clipsToBounds = false  // Allow content to render past bounds during scroll
         collectionView.delegate = self
         collectionView.register(MessageBubbleUIKitCell.self, forCellWithReuseIdentifier: MessageBubbleUIKitCell.reuseIdentifier)
+        collectionView.register(WebBubbleUIKitCell.self, forCellWithReuseIdentifier: WebBubbleUIKitCell.reuseIdentifier)
         collectionView.register(TypingIndicatorCell.self, forCellWithReuseIdentifier: TypingIndicatorCell.reuseIdentifier)
         collectionView.register(DateSeparatorCell.self, forCellWithReuseIdentifier: DateSeparatorCell.reuseIdentifier)
 
@@ -3181,6 +3201,16 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 ) as? DateSeparatorCell
                 let text = self.dateSeparatorTextByItemId[id] ?? ""
                 cell?.configure(text: text, isDark: self.currentIsDark)
+                return cell
+            }
+
+            if id.hasPrefix("web_") {
+                let cell = collectionView.dequeueReusableCell(
+                    withReuseIdentifier: WebBubbleUIKitCell.reuseIdentifier,
+                    for: indexPath
+                ) as? WebBubbleUIKitCell
+                guard let item = self.webBubbleCoordinator.webBubbleItem(for: id) else { return cell }
+                cell?.configure(item: item, coordinator: self.webBubbleCoordinator, isDark: self.currentIsDark)
                 return cell
             }
 
@@ -3284,6 +3314,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 showsHeader: !hideHeader,
                 isDark: self.currentIsDark,
                 terminalConnectionPool: viewModel.terminalConnectionPool,
+                webBubbleCoordinator: self.webBubbleCoordinator,
                 salientHighlightService: viewModel.salientHighlightService,
                 onRequestExpand: { [weak self] in
                     guard let self else { return }
@@ -3711,6 +3742,14 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 maxWidthOverride: TypingIndicatorCell.bubbleWidth,
                 minHeightOverride: TypingIndicatorCell.bubbleHeight
             )
+        }
+
+        if id.hasPrefix("web_") {
+            let metrics = ChatFlowTheme.Metrics(isCompact: isCompact)
+            let availableWidth = effectiveContentWidth(metrics: metrics)
+            let heightCap = metrics.truncationHeight
+            let height = max(240, min(heightCap, 520))
+            return CGSize(width: availableWidth, height: height)
         }
 
         guard let message = messagesById[id] else {
@@ -4858,6 +4897,64 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             guard !existing.isEmpty else { return }
             snapshot.reconfigureItems(existing)
             self.dataSource.apply(snapshot, animatingDifferences: false)
+        }
+    }
+
+    private func reconfigureItem(id: String) {
+        scheduleReconfigure(for: id)
+    }
+
+    private func scrollToItem(id: String) {
+        scrollToMessageCentered(messageId: id, animated: true)
+    }
+
+    private func snapshotItemsWithWebBubbles(from itemIds: [String], stream: ChatStream) -> [String] {
+        var merged = itemIds
+        for item in webBubbleCoordinator.items(for: stream) {
+            if let parentItemId = item.parentItemId,
+               let parentIndex = merged.lastIndex(of: parentItemId) {
+                merged.insert(item.id, at: parentIndex + 1)
+            } else {
+                merged.append(item.id)
+            }
+        }
+        return merged
+    }
+
+    private func applySnapshotForWebBubbles() {
+        guard let viewModel,
+              let effectiveSessionKey = callbackSessionKey(),
+              let stream = lastEffectiveStream else { return }
+
+        var snapshot = dataSource.snapshot()
+        let snapshotMessages = materializeMessagesForActiveStage(
+            allMessages: lastMessages,
+            sessionKey: effectiveSessionKey
+        )
+        let desiredItemIds = snapshotItemsWithWebBubbles(
+            from: snapshotItemsWithDateSeparators(from: snapshotMessages),
+            stream: stream
+        )
+        snapshot.deleteAllItems()
+        snapshot.appendSections([0])
+        snapshot.appendItems(desiredItemIds)
+        if viewModel.isAssistantTyping && viewModel.typingSessionKey == effectiveSessionKey {
+            snapshot.appendItems([TypingIndicatorCell.itemId])
+        }
+        dataSource.apply(snapshot, animatingDifferences: false)
+    }
+
+    private func materializeMessagesForActiveStage(allMessages: [Message], sessionKey: String) -> [Message] {
+        guard let materializationState = materializationStateBySessionKey[sessionKey] else {
+            return allMessages
+        }
+        switch materializationState.stage {
+        case .tail:
+            let lower = max(0, min(materializationState.windowBounds.lowerBound, allMessages.count))
+            let upper = max(lower, min(materializationState.windowBounds.upperBound, allMessages.count))
+            return Array(allMessages[lower..<upper])
+        case .full:
+            return allMessages
         }
     }
 

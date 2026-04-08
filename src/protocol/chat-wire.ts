@@ -28,6 +28,13 @@ export interface AuthPayload {
   deviceId: string;
   lastMessageId?: string | null;
   replayCursorsBySessionKey?: Record<string, string>;
+  clientFeatures?: string[];
+  client?: ClientDescriptorPayload;
+}
+
+export interface ClientDescriptorPayload {
+  id: string;
+  features?: string[];
 }
 
 export interface AuthResultPayload {
@@ -149,15 +156,37 @@ export interface StreamDeletedPayload {
   sessionKey: string;
 }
 
+export interface StreamReadStatePayload {
+  type: "stream_read_state";
+  sessionKey: string;
+  lastReadMessageId: string;
+}
+
+export interface StreamTailStatePayload {
+  type: "stream_tail_state";
+  sessionKey: string;
+  lastMessageId: string;
+  lastMessageRole: MessageRole;
+}
+
+export interface EventPayload {
+  type: "event";
+  event: string;
+  payload?: Record<string, unknown> | null;
+}
+
 export type PhaseOneServerPayload =
   | AckPayload
   | AuthResultPayload
+  | EventPayload
   | ErrorPayload
   | ServerMessagePayload
   | SessionInfoPayload
   | StreamDeletedPayload
+  | StreamReadStatePayload
   | StreamMutationPayload
-  | StreamSnapshotPayload;
+  | StreamSnapshotPayload
+  | StreamTailStatePayload;
 
 export function serializePairRequest(payload: PairRequestPayload) {
   return JSON.stringify(payload);
@@ -224,8 +253,14 @@ export function parseServerPayload(raw: string): PhaseOneServerPayload {
       return parseStreamMutationFromRecord(value);
     case "stream_deleted":
       return parseStreamDeletedFromRecord(value);
+    case "stream_read_state":
+      return parseStreamReadStateFromRecord(value);
+    case "stream_tail_state":
+      return parseStreamTailStateFromRecord(value);
     case "session_info":
       return parseSessionInfoFromRecord(value);
+    case "event":
+      return parseEventFromRecord(value);
     case "auth_result":
       return parseAuthResultPayload(raw);
     case "error":
@@ -292,6 +327,59 @@ function parseStreamDeletedFromRecord(value: JsonRecord): StreamDeletedPayload {
   return {
     type: "stream_deleted",
     sessionKey: requiredString(value.sessionKey, "stream_deleted.sessionKey")
+  };
+}
+
+function parseStreamReadStateFromRecord(
+  value: JsonRecord
+): StreamReadStatePayload {
+  assertLiteral(value.type, "stream_read_state", "stream_read_state.type");
+  return {
+    type: "stream_read_state",
+    sessionKey: requiredString(value.sessionKey, "stream_read_state.sessionKey"),
+    lastReadMessageId: requiredString(
+      value.lastReadMessageId,
+      "stream_read_state.lastReadMessageId"
+    )
+  };
+}
+
+function parseStreamTailStateFromRecord(
+  value: JsonRecord
+): StreamTailStatePayload {
+  assertLiteral(value.type, "stream_tail_state", "stream_tail_state.type");
+  const lastMessageRole = requiredString(
+    value.lastMessageRole,
+    "stream_tail_state.lastMessageRole"
+  );
+  if (lastMessageRole !== "user" && lastMessageRole !== "assistant") {
+    throw new Error(
+      `Invalid stream_tail_state.lastMessageRole: ${lastMessageRole}`
+    );
+  }
+
+  return {
+    type: "stream_tail_state",
+    sessionKey: requiredString(value.sessionKey, "stream_tail_state.sessionKey"),
+    lastMessageId: requiredString(
+      value.lastMessageId,
+      "stream_tail_state.lastMessageId"
+    ),
+    lastMessageRole
+  };
+}
+
+function parseEventFromRecord(value: JsonRecord): EventPayload {
+  assertLiteral(value.type, "event", "event.type");
+  const payload = value.payload;
+  if (payload != null && (typeof payload !== "object" || Array.isArray(payload))) {
+    throw new Error("event.payload must be an object");
+  }
+
+  return {
+    type: "event",
+    event: requiredString(value.event, "event.event"),
+    payload: (payload as Record<string, unknown> | null | undefined) ?? undefined
   };
 }
 

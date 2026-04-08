@@ -38,6 +38,28 @@ describe("chat-wire protocol fixtures", () => {
     );
   });
 
+  it("serializes auth payloads with native client parity fields", () => {
+    expect(
+      JSON.parse(
+        serializeAuthPayload({
+          ...(authFixture as AuthPayload),
+          clientFeatures: ["terminal_bubbles_v1"],
+          client: {
+            id: "clawline-web",
+            features: ["terminal_bubbles_v1"]
+          }
+        })
+      )
+    ).toEqual({
+      ...authFixture,
+      clientFeatures: ["terminal_bubbles_v1"],
+      client: {
+        id: "clawline-web",
+        features: ["terminal_bubbles_v1"]
+      }
+    });
+  });
+
   it("parses auth_result fixtures", () => {
     expect(parseAuthResultPayload(JSON.stringify(authResultFixture))).toEqual(
       authResultFixture
@@ -215,6 +237,56 @@ describe("chat-wire protocol fixtures", () => {
     expect(parseServerPayload(JSON.stringify(sessionInfoFixture))).toEqual(
       sessionInfoFixture
     );
+  });
+
+  it("parses stream read-state, tail-state, and event payloads", () => {
+    expect(
+      parseServerPayload(
+        JSON.stringify({
+          type: "stream_read_state",
+          sessionKey: "agent:main:clawline:flynn:main",
+          lastReadMessageId: "s_101"
+        })
+      )
+    ).toEqual({
+      type: "stream_read_state",
+      sessionKey: "agent:main:clawline:flynn:main",
+      lastReadMessageId: "s_101"
+    });
+
+    expect(
+      parseServerPayload(
+        JSON.stringify({
+          type: "stream_tail_state",
+          sessionKey: "agent:main:clawline:flynn:main",
+          lastMessageId: "s_102",
+          lastMessageRole: "assistant"
+        })
+      )
+    ).toEqual({
+      type: "stream_tail_state",
+      sessionKey: "agent:main:clawline:flynn:main",
+      lastMessageId: "s_102",
+      lastMessageRole: "assistant"
+    });
+
+    expect(
+      parseServerPayload(
+        JSON.stringify({
+          type: "event",
+          event: "activity",
+          payload: {
+            sessionKey: "agent:main:clawline:flynn:main"
+          }
+        })
+      )
+    ).toEqual({
+      type: "event",
+      event: "activity",
+      payload: {
+        sessionKey: "agent:main:clawline:flynn:main"
+      }
+    });
   });
 
   it("parses error fixtures", () => {

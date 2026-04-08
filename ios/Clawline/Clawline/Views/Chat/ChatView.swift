@@ -1630,7 +1630,8 @@ struct ChatView: View {
                 )
 #endif
                 presentStreamManagerPopoverFromDotsTap(sessionKey: viewModel.uiSelectedSessionKey)
-            }
+            },
+            activationBehavior: usesDirectStreamManagerPopoverAnchor ? .directTapGesture : .button
         )
         return Group {
             if usesDirectStreamManagerPopoverAnchor {

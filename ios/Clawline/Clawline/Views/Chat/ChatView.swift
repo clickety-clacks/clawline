@@ -1650,47 +1650,22 @@ struct ChatView: View {
             .hidden()
             .allowsHitTesting(false)
             .accessibilityHidden(true)
-        return Group {
-            if usesDirectStreamManagerPopoverAnchor {
-                ZStack {
-                    pageDotsPopoverAnchor
-                        .popover(
-                            isPresented: $isStreamManagerPopoverPresented,
-                            attachmentAnchor: .rect(.bounds),
-                            arrowEdge: .bottom
-                        ) {
-                            streamManagerPopoverContent(
-                                viewModel: viewModel,
-                                effectiveStreams: effectiveStreams,
-                                dotStatesBySession: dotStatesBySession,
-                                streamSelectorMaxHeight: streamSelectorMaxHeight,
-                                containerWidth: containerWidth
-                            )
-                        }
-                    pageDotsControl
+        return ZStack {
+            pageDotsPopoverAnchor
+                .popover(
+                    isPresented: $isStreamManagerPopoverPresented,
+                    attachmentAnchor: .rect(.bounds),
+                    arrowEdge: .bottom
+                ) {
+                    streamManagerPopoverContent(
+                        viewModel: viewModel,
+                        effectiveStreams: effectiveStreams,
+                        dotStatesBySession: dotStatesBySession,
+                        streamSelectorMaxHeight: streamSelectorMaxHeight,
+                        containerWidth: containerWidth
+                    )
                 }
-            } else {
-                pageDotsControl
-                    .overlay(alignment: .top) {
-                        Color.clear
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 1)
-                            .allowsHitTesting(false)
-                            .popover(
-                                isPresented: $isStreamManagerPopoverPresented,
-                                attachmentAnchor: .rect(.bounds),
-                                arrowEdge: .bottom
-                            ) {
-                                streamManagerPopoverContent(
-                                    viewModel: viewModel,
-                                    effectiveStreams: effectiveStreams,
-                                    dotStatesBySession: dotStatesBySession,
-                                    streamSelectorMaxHeight: streamSelectorMaxHeight,
-                                    containerWidth: containerWidth
-                                )
-                            }
-                    }
-            }
+            pageDotsControl
         }
         .sheet(
             isPresented: $isTrackPickerPresented,

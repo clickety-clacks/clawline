@@ -2487,6 +2487,85 @@ struct ChatViewModelTests {
         #expect(secondService.lastPublishedReadState == nil)
     }
 
+    @Test("Startup restore does not publish read state for adopted stream before provisioning")
+    @MainActor
+    func startupRestoreDoesNotPublishReadStateForAdoptedStreamBeforeProvisioning() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let heimdalKey = "agent:heimdal:clawline:user:main"
+
+        let firstService = TestChatService()
+        firstService.streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            StreamSession(
+                sessionKey: heimdalKey,
+                displayName: "Heimdal",
+                kind: "main",
+                orderIndex: 1,
+                isBuiltIn: true,
+                createdAt: Date(),
+                updatedAt: Date(),
+                trackingMode: .adopted
+            ),
+        ]
+        let firstViewModel = ChatViewModel(
+            auth: auth,
+            chatService: firstService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+
+        await firstViewModel.onAppear()
+        firstService.emitServiceEvent(.streamSnapshot(firstService.streams))
+        try await Task.sleep(for: .milliseconds(30))
+
+        firstViewModel.setActiveSessionKeyForTesting(heimdalKey)
+        firstService.emit(
+            Message(
+                id: "evt_heimdal_bootstrap",
+                role: .assistant,
+                content: "cached",
+                timestamp: Date(),
+                streaming: false,
+                attachments: [],
+                deviceId: nil,
+                sessionKey: heimdalKey
+            )
+        )
+        for _ in 0..<50 {
+            if firstViewModel.messages(for: heimdalKey).last?.id == "evt_heimdal_bootstrap" { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        firstViewModel.onDisappear()
+
+        let secondService = TestChatService()
+        secondService.streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+        ]
+        let secondViewModel = ChatViewModel(
+            auth: auth,
+            chatService: secondService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { secondViewModel.onDisappear() }
+
+        await secondViewModel.onAppear()
+        try await Task.sleep(for: .milliseconds(30))
+
+        #expect(secondViewModel.activeSessionKey == heimdalKey)
+        #expect(secondViewModel.messages(for: heimdalKey).last?.id == "evt_heimdal_bootstrap")
+        #expect(secondService.lastPublishedReadState == nil)
+        #expect(secondViewModel.lastReadMessageIdBySession[heimdalKey] == nil)
+    }
+
     @Test("Track adopts untracked session and preserves it across snapshots")
     @MainActor
     func trackAdoptsUntrackedSessionAcrossSnapshots() async throws {

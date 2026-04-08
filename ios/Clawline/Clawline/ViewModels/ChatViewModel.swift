@@ -3445,6 +3445,12 @@ final class ChatViewModel: ChatViewModelHosting {
     }
 
     private func markSessionRead(_ sessionKey: String) {
+        if let stream = streamsBySessionKey[sessionKey],
+           stream.adopted,
+           !hasReceivedSessionProvisioning {
+            logHeimdalDotState(for: sessionKey, reason: "markSessionRead.deferredUntilProvisioning")
+            return
+        }
         let transcriptTailMessageId = lastServerMessageId(from: sessionMessages[sessionKey] ?? [])
         let providerTailMessageId = streamTailStateBySession[sessionKey]?.lastMessageId
         let tailMessageId = transcriptTailMessageId ?? providerTailMessageId

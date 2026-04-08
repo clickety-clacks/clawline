@@ -127,6 +127,7 @@ struct ChatView: View {
     @State private var pendingInputInsertions: [PendingAttachment] = []
     @State private var activeSheet: ChatSheet?
     @State private var isStreamManagerPopoverPresented = false
+    @State private var hasStreamManagerPopoverBecomeVisible = false
     @State private var streamPopupShouldAutoFocusSearch = false
     @State private var streamPopupSearchFocusRequestID = 0
 #if DEBUG
@@ -1653,7 +1654,7 @@ struct ChatView: View {
         return ZStack {
             pageDotsPopoverAnchor
                 .popover(
-                    isPresented: $isStreamManagerPopoverPresented,
+                    isPresented: streamManagerPopoverPresentationBinding,
                     attachmentAnchor: .rect(.bounds),
                     arrowEdge: .bottom
                 ) {
@@ -1688,7 +1689,7 @@ struct ChatView: View {
             viewModel: viewModel,
             streams: effectiveStreams,
             dotStatesBySession: dotStatesBySession,
-            isPresented: $isStreamManagerPopoverPresented,
+            isPresented: streamManagerPopoverPresentationBinding,
             shouldAutoFocusSearchOnAppear: streamPopupShouldAutoFocusSearch,
             searchFocusRequestID: streamPopupSearchFocusRequestID,
             maxAvailableHeight: streamSelectorMaxHeight,
@@ -1698,7 +1699,10 @@ struct ChatView: View {
             },
             onPresentTrackPicker: {
                 prepareForAttachmentPicker()
-                isStreamManagerPopoverPresented = false
+                dismissStreamManagerPopoverIfVisible(
+                    sessionKey: viewModel.uiSelectedSessionKey,
+                    reason: "track picker requested from stream popup"
+                )
                 Task { @MainActor in
                     await Task.yield()
                     isTrackPickerPresented = true
@@ -1721,7 +1725,32 @@ struct ChatView: View {
 #endif
     }
 
+    private var streamManagerPopoverPresentationBinding: Binding<Bool> {
+        Binding(
+            get: { isStreamManagerPopoverPresented },
+            set: { newValue in
+                if newValue {
+                    isStreamManagerPopoverPresented = true
+                    return
+                }
+                guard hasStreamManagerPopoverBecomeVisible else {
+#if DEBUG
+                    emitStreamPopupConsoleEvent(
+                        "dismiss_blocked_before_visible",
+                        sessionKey: viewModel.uiSelectedSessionKey,
+                        isPresented: isStreamManagerPopoverPresented,
+                        note: "ignored downstream dismiss/reset before popup became visible"
+                    )
+#endif
+                    return
+                }
+                isStreamManagerPopoverPresented = false
+            }
+        )
+    }
+
     private func presentStreamManagerPopoverFromDotsTap(sessionKey: String?) {
+        hasStreamManagerPopoverBecomeVisible = false
         let presentPopover = {
             isStreamManagerPopoverPresented = true
 #if DEBUG
@@ -1760,7 +1789,7 @@ struct ChatView: View {
             viewModel: viewModel,
             streams: effectiveStreams,
             dotStatesBySession: dotStatesBySession,
-            isPresented: $isStreamManagerPopoverPresented,
+            isPresented: streamManagerPopoverPresentationBinding,
             shouldAutoFocusSearchOnAppear: streamPopupShouldAutoFocusSearch,
             searchFocusRequestID: streamPopupSearchFocusRequestID,
             maxAvailableHeight: streamSelectorMaxHeight,
@@ -1778,7 +1807,10 @@ struct ChatView: View {
             )
 #endif
                 prepareForAttachmentPicker()
-                isStreamManagerPopoverPresented = false
+                dismissStreamManagerPopoverIfVisible(
+                    sessionKey: viewModel.uiSelectedSessionKey,
+                    reason: "track picker requested from stream popup"
+                )
                 Task { @MainActor in
                     await Task.yield()
                     isTrackPickerPresented = true
@@ -1788,6 +1820,7 @@ struct ChatView: View {
         .presentationCompactAdaptation(.popover)
         .presentationBackground(.clear)
         .onAppear {
+            hasStreamManagerPopoverBecomeVisible = true
 #if DEBUG
             emitStreamPopupConsoleEvent(
                 "presentation_path_entered",
@@ -1804,6 +1837,7 @@ struct ChatView: View {
 #endif
         }
         .onDisappear {
+            hasStreamManagerPopoverBecomeVisible = false
 #if DEBUG
             emitStreamPopupConsoleEvent(
                 "popover_content_disappear",
@@ -1813,6 +1847,21 @@ struct ChatView: View {
             )
 #endif
         }
+    }
+
+    private func dismissStreamManagerPopoverIfVisible(sessionKey: String?, reason: StaticString) {
+        guard hasStreamManagerPopoverBecomeVisible else {
+#if DEBUG
+            emitStreamPopupConsoleEvent(
+                "dismiss_ignored_not_visible",
+                sessionKey: sessionKey,
+                isPresented: isStreamManagerPopoverPresented,
+                note: "\(reason)"
+            )
+#endif
+            return
+        }
+        isStreamManagerPopoverPresented = false
     }
 
     private var supportsKeyboardNavigationShortcuts: Bool {

@@ -1635,18 +1635,23 @@ struct ChatView: View {
         return Group {
             if usesDirectStreamManagerPopoverAnchor {
                 pageDotsControl
-                    .popover(
-                        isPresented: $isStreamManagerPopoverPresented,
-                        attachmentAnchor: .rect(.bounds),
-                        arrowEdge: .bottom
-                    ) {
-                        streamManagerPopoverContent(
-                            viewModel: viewModel,
-                            effectiveStreams: effectiveStreams,
-                            dotStatesBySession: dotStatesBySession,
-                            streamSelectorMaxHeight: streamSelectorMaxHeight,
-                            containerWidth: containerWidth
-                        )
+                    .overlay {
+                        Color.clear
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .allowsHitTesting(false)
+                            .popover(
+                                isPresented: $isStreamManagerPopoverPresented,
+                                attachmentAnchor: .rect(.bounds),
+                                arrowEdge: .bottom
+                            ) {
+                                streamManagerPopoverContent(
+                                    viewModel: viewModel,
+                                    effectiveStreams: effectiveStreams,
+                                    dotStatesBySession: dotStatesBySession,
+                                    streamSelectorMaxHeight: streamSelectorMaxHeight,
+                                    containerWidth: containerWidth
+                                )
+                            }
                     }
             } else {
                 pageDotsControl

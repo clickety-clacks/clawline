@@ -1678,38 +1678,37 @@ struct ChatView: View {
         inputBarTopFromScreenBottom: CGFloat
     ) -> some View {
         let effectiveSessionKeys = effectiveStreams.map(\.sessionKey)
-        if !effectiveSessionKeys.isEmpty {
-            let dotStatesBySession = Dictionary(
-                uniqueKeysWithValues: effectiveSessionKeys.map { ($0, viewModel.streamDotState(for: $0)) }
-            )
-            let pageDotsMaxWidth = inputFieldWidthCap(
-                containerWidth: containerWidth,
-                bottomSafeAreaInset: bottomSafeAreaInset
-            )
-            let pageDotsAnchorWidth = StreamPageDotsView.renderedControlWidth(
-                totalSessionCount: effectiveSessionKeys.count,
-                maxWidth: pageDotsMaxWidth
-            )
-            Color.clear
-                .frame(width: pageDotsAnchorWidth, height: StreamPageDotsView.controlHeight)
-                .allowsHitTesting(false)
-                .accessibilityHidden(true)
-                .padding(.bottom, inputBarTopFromScreenBottom + floatingPageDotsBottomGap)
-                .ignoresSafeArea(.container, edges: .bottom)
-                .popover(
-                    isPresented: streamManagerPopoverPresentationBinding,
-                    attachmentAnchor: .rect(.bounds),
-                    arrowEdge: .bottom
-                ) {
-                    streamManagerPopoverContent(
-                        viewModel: viewModel,
-                        effectiveStreams: effectiveStreams,
-                        dotStatesBySession: dotStatesBySession,
-                        streamSelectorMaxHeight: streamSelectorMaxHeight,
-                        containerWidth: containerWidth
-                    )
-                }
-        }
+        let dotStatesBySession = Dictionary(
+            uniqueKeysWithValues: effectiveSessionKeys.map { ($0, viewModel.streamDotState(for: $0)) }
+        )
+        let pageDotsMaxWidth = inputFieldWidthCap(
+            containerWidth: containerWidth,
+            bottomSafeAreaInset: bottomSafeAreaInset
+        )
+        let pageDotsAnchorWidth = StreamPageDotsView.renderedControlWidth(
+            totalSessionCount: effectiveSessionKeys.count,
+            maxWidth: pageDotsMaxWidth
+        )
+        Color.clear
+            .frame(width: pageDotsAnchorWidth, height: StreamPageDotsView.controlHeight)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+            .id("stream-page-dots-popover-anchor")
+            .padding(.bottom, inputBarTopFromScreenBottom + floatingPageDotsBottomGap)
+            .ignoresSafeArea(.container, edges: .bottom)
+            .popover(
+                isPresented: streamManagerPopoverPresentationBinding,
+                attachmentAnchor: .rect(.bounds),
+                arrowEdge: .bottom
+            ) {
+                streamManagerPopoverContent(
+                    viewModel: viewModel,
+                    effectiveStreams: effectiveStreams,
+                    dotStatesBySession: dotStatesBySession,
+                    streamSelectorMaxHeight: streamSelectorMaxHeight,
+                    containerWidth: containerWidth
+                )
+            }
     }
 
     private func streamManagerSheet(

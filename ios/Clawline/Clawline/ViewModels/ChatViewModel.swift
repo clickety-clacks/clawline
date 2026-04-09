@@ -2716,6 +2716,11 @@ final class ChatViewModel: ChatViewModelHosting {
     }
 
     private func clearLocalReadAndMessageState(for sessionKey: String) {
+        if shouldLogHeimdalDotDiagnostics(for: sessionKey) {
+            emitHeimdalDotDiagnostic(
+                "[HEIMDAL] reason=clearLocalReadAndMessageState sessionKey=\(sessionKey) cachedMessages=\((sessionMessages[sessionKey] ?? []).count) tailId=\(streamTailStateBySession[sessionKey]?.lastMessageId ?? "nil") lastRead=\(lastReadMessageIdBySession[sessionKey] ?? "nil")"
+            )
+        }
         sessionMessages.removeValue(forKey: sessionKey)
         lastReadMessageIdBySession.removeValue(forKey: sessionKey)
         streamTailStateBySession.removeValue(forKey: sessionKey)
@@ -3027,6 +3032,11 @@ final class ChatViewModel: ChatViewModelHosting {
                 uniquingKeysWith: { _, latest in latest }
             )
         restoredAdoptedStreamsBySessionKey = restoredAdoptedStreams
+        for stream in omittedAdoptedStreams where shouldLogHeimdalDotDiagnostics(for: stream.sessionKey) {
+            emitHeimdalDotDiagnostic(
+                "[HEIMDAL] reason=applyStreamSnapshot.omittedAdopted sessionKey=\(stream.sessionKey) displayName=\(stream.displayName) kind=\(stream.kind)"
+            )
+        }
         syntheticSessionKeys = Set(
             byKey.values
                 .filter { !$0.adopted && !serverKeys.contains($0.sessionKey) }
@@ -3045,6 +3055,11 @@ final class ChatViewModel: ChatViewModelHosting {
         for sessionKey in orderedSessionKeys {
             ensureSessionStorage(for: sessionKey)
             if byKey[sessionKey]?.adopted == true {
+                if shouldLogHeimdalDotDiagnostics(for: sessionKey) {
+                    emitHeimdalDotDiagnostic(
+                        "[HEIMDAL] reason=applyStreamSnapshot.serverAdoptedCleared sessionKey=\(sessionKey)"
+                    )
+                }
                 clearLocalReadAndMessageState(for: sessionKey)
                 continue
             }
@@ -3069,6 +3084,11 @@ final class ChatViewModel: ChatViewModelHosting {
         recalculateOrderedSessionKeys()
         ensureSessionStorage(for: stream.sessionKey)
         if stream.adopted {
+            if shouldLogHeimdalDotDiagnostics(for: stream.sessionKey) {
+                emitHeimdalDotDiagnostic(
+                    "[HEIMDAL] reason=applyStreamUpsert.serverAdoptedCleared sessionKey=\(stream.sessionKey) displayName=\(stream.displayName) kind=\(stream.kind)"
+                )
+            }
             clearLocalReadAndMessageState(for: stream.sessionKey)
             ensureDefaultActiveSessionIfNeeded()
             SessionRegistry.shared.upsert(stream)
@@ -3544,6 +3564,14 @@ final class ChatViewModel: ChatViewModelHosting {
             )
         }
         if let tailMessageId {
+            if shouldLogHeimdalDotDiagnostics(for: sessionKey),
+               transcriptTailMessageId != nil,
+               providerTailMessageId != nil,
+               transcriptTailMessageId != providerTailMessageId {
+                emitHeimdalDotError(
+                    "[HEIMDAL] reason=markSessionRead.tailMismatch sessionKey=\(sessionKey) transcriptTail=\(transcriptTailMessageId ?? "nil") providerTail=\(providerTailMessageId ?? "nil")"
+                )
+            }
             lastReadMessageIdBySession[sessionKey] = tailMessageId
             persistLastReadMessageId(tailMessageId, for: sessionKey)
             logHeimdalDotState(for: sessionKey, reason: "markSessionRead.afterLocalWrite")

@@ -5,8 +5,8 @@ describe("computeKeyboardInset", () => {
   it("returns zero when the composer is not focused", () => {
     expect(
       computeKeyboardInset({
-        baseViewportHeight: 844,
         isComposerFocused: false,
+        layoutViewportHeight: 844,
         viewportHeight: 564,
         viewportOffsetTop: 0
       })
@@ -16,8 +16,8 @@ describe("computeKeyboardInset", () => {
   it("returns the visual viewport delta when the composer is focused", () => {
     expect(
       computeKeyboardInset({
-        baseViewportHeight: 844,
         isComposerFocused: true,
+        layoutViewportHeight: 844,
         viewportHeight: 564,
         viewportOffsetTop: 0
       })
@@ -27,11 +27,22 @@ describe("computeKeyboardInset", () => {
   it("accounts for offset visual viewports", () => {
     expect(
       computeKeyboardInset({
-        baseViewportHeight: 844,
         isComposerFocused: true,
+        layoutViewportHeight: 844,
         viewportHeight: 600,
         viewportOffsetTop: 44
       })
     ).toBe(200);
+  });
+
+  it("returns zero when the layout viewport has already shrunk with the keyboard", () => {
+    expect(
+      computeKeyboardInset({
+        isComposerFocused: true,
+        layoutViewportHeight: 564,
+        viewportHeight: 564,
+        viewportOffsetTop: 0
+      })
+    ).toBe(0);
   });
 });

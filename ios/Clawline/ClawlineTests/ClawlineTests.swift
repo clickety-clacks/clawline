@@ -119,4 +119,18 @@ struct ClawlineTests {
         #expect(!SessionKey.isClawlinePersonalDM("agent:main:clawline::main"))
         #expect(!SessionKey.isClawlinePersonalDM("server:main"))
     }
+
+    @Test("T201: RootView keeps iOS system-follow by scoping preferredColorScheme to visionOS")
+    func rootViewScopesPreferredColorSchemeToVisionOS() throws {
+        let rootViewPath = URL(filePath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appending(path: "Clawline/Views/RootView.swift")
+        let source = try String(contentsOf: rootViewPath, encoding: .utf8)
+        let pattern = #"#if os\(visionOS\)[\s\S]*?\.preferredColorScheme\(settings\.preferredColorScheme\)[\s\S]*?#endif"#
+        let range = NSRange(source.startIndex..<source.endIndex, in: source)
+        let regex = try NSRegularExpression(pattern: pattern)
+
+        #expect(regex.firstMatch(in: source, range: range) != nil)
+    }
 }

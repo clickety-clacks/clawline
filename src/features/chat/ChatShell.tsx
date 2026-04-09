@@ -2,6 +2,7 @@ import type { CSSProperties, TouchEvent } from "react";
 import type {
   ChatMessageRecord,
   SessionScrollState,
+  StreamDotState,
   StreamRecord
 } from "../../runtime/chat/chatDomainStore";
 import type { TransportPhase } from "../../runtime/transport/transportMachine";
@@ -32,9 +33,9 @@ export function ChatShell({
   selectedSessionKey,
   uiSelectedSessionKey,
   selectedUnreadAnchorMessageId,
+  streamDotStateBySessionKey,
   streams,
-  transportPhase,
-  unreadBySessionKey
+  transportPhase
 }: {
   activeSessionKey?: string;
   chatLayoutStyle: CSSProperties;
@@ -65,15 +66,10 @@ export function ChatShell({
   selectedSessionKey?: string;
   uiSelectedSessionKey?: string;
   selectedUnreadAnchorMessageId?: string | null;
+  streamDotStateBySessionKey: Record<string, StreamDotState>;
   streams: StreamRecord[];
   transportPhase: TransportPhase;
-  unreadBySessionKey: Record<string, number>;
 }) {
-  const unreadSessionKeys = new Set(
-    Object.entries(unreadBySessionKey)
-      .filter(([, unreadCount]) => unreadCount > 0)
-      .map(([sessionKey]) => sessionKey)
-  );
   const shouldEnableSwipeNavigation = keyboardInset <= 0;
 
   return (
@@ -132,7 +128,7 @@ export function ChatShell({
                 activeSessionKey={uiSelectedSessionKey}
                 onClick={onOpenSessionList}
                 sessionKeys={streams.map((stream) => stream.sessionKey)}
-                unreadSessionKeys={unreadSessionKeys}
+                streamDotStateBySessionKey={streamDotStateBySessionKey}
               />
             </div>
           ) : null}
@@ -150,9 +146,9 @@ export function ChatShell({
         onOpenStreamManager={onOpenStreamManager}
         onSelectSession={onPopupSessionSelect}
         provisionedSessionKeys={provisionedSessionKeys}
+        streamDotStateBySessionKey={streamDotStateBySessionKey}
         streams={streams}
         transportPhase={transportPhase}
-        unreadBySessionKey={unreadBySessionKey}
       />
     </section>
   );

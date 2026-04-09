@@ -56,7 +56,11 @@ struct RootView: View {
             }
         }
         .modifier(KeyboardSafeAreaMode(isActive: auth.isAuthenticated && isProviderConfigured))
+        // iOS and iPadOS must follow the live system appearance. Widening this override back to
+        // shared platforms breaks `@Environment(\.colorScheme)` updates and regresses auto-follow.
+#if os(visionOS)
         .preferredColorScheme(settings.preferredColorScheme)
+#endif
         .task(id: auth.isAuthenticated) {
             // Recovery: after reinstall, Keychain credentials can persist while UserDefaults are wiped.
             // Being "authenticated" without a provider config is an invalid state and has proven to

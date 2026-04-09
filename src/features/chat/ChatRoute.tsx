@@ -3,7 +3,10 @@ import { Navigate, useNavigate, useParams } from "react-router-dom";
 import { StreamManagerDrawer } from "../streams/StreamManagerDrawer";
 import { getSessionProvisioningState } from "../streams/provisioning";
 import { useAuthSessionStore } from "../../runtime/auth/authSessionStore";
-import { useChatDomainStore } from "../../runtime/chat/chatDomainStore";
+import {
+  resolveStreamDotStateMap,
+  useChatDomainStore
+} from "../../runtime/chat/chatDomainStore";
 import { useTransportMachine } from "../../runtime/transport/transportMachine";
 import { ChatShell } from "./ChatShell";
 import {
@@ -48,6 +51,14 @@ export function ChatRoute() {
         : [],
     [chatState.messagesBySessionKey, engineActiveSessionKey]
   );
+  const streamDotStateBySessionKey = useMemo(
+    () =>
+      resolveStreamDotStateMap(
+        chatState.streamReadStateBySessionKey,
+        chatState.streamTailStateBySessionKey
+      ),
+    [chatState.streamReadStateBySessionKey, chatState.streamTailStateBySessionKey]
+  );
 
   useEffect(() => {
     transportStore.setSelectedSessionKey(engineActiveSessionKey);
@@ -86,11 +97,15 @@ export function ChatRoute() {
       return current?.sessionKey === engineActiveSessionKey ? current : null;
     });
 
-    chatStore.markSessionRead(engineActiveSessionKey);
+    const lastReadMessageId = chatStore.markSessionRead(engineActiveSessionKey);
+    if (lastReadMessageId) {
+      void transportStore.publishReadState(engineActiveSessionKey, lastReadMessageId);
+    }
   }, [
     chatState.firstUnreadMessageIdBySessionKey,
     chatStore,
-    engineActiveSessionKey
+    engineActiveSessionKey,
+    transportStore
   ]);
 
   if (!authState.session?.token) {
@@ -164,9 +179,9 @@ export function ChatRoute() {
             : null
         }
         provisionedSessionKeys={chatState.provisionedSessionKeys}
+        streamDotStateBySessionKey={streamDotStateBySessionKey}
         streams={chatState.streams}
         transportPhase={transportState.phase}
-        unreadBySessionKey={chatState.unreadBySessionKey}
       />
       <StreamManagerDrawer
         activeSessionKey={uiSelectedSessionKey}

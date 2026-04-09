@@ -14,6 +14,7 @@ import {
   parseServerPayload,
   serializeAuthPayload,
   serializeClientMessage,
+  serializeClientStreamRead,
   serializePairRequest
 } from "./chat-wire";
 
@@ -66,6 +67,38 @@ describe("chat-wire protocol fixtures", () => {
     );
   });
 
+  it("parses auth_result read and tail snapshots", () => {
+    expect(
+      parseAuthResultPayload(
+        JSON.stringify({
+          type: "auth_result",
+          success: true,
+          streamReadStates: {
+            "agent:main:clawline:user_1:main": "s_101"
+          },
+          streamTailStates: {
+            "agent:main:clawline:user_1:main": {
+              lastMessageId: "s_102",
+              lastMessageRole: "assistant"
+            }
+          }
+        })
+      )
+    ).toEqual({
+      type: "auth_result",
+      success: true,
+      streamReadStates: {
+        "agent:main:clawline:user_1:main": "s_101"
+      },
+      streamTailStates: {
+        "agent:main:clawline:user_1:main": {
+          lastMessageId: "s_102",
+          lastMessageRole: "assistant"
+        }
+      }
+    });
+  });
+
   it("serializes client message payloads", () => {
     const payload = {
       type: "message" as const,
@@ -86,6 +119,16 @@ describe("chat-wire protocol fixtures", () => {
     };
 
     expect(JSON.parse(serializeClientMessage(payload))).toEqual(payload);
+  });
+
+  it("serializes client stream_read payloads", () => {
+    const payload = {
+      type: "stream_read" as const,
+      sessionKey: "agent:main:clawline:user_1:main",
+      lastReadMessageId: "s_101"
+    };
+
+    expect(JSON.parse(serializeClientStreamRead(payload))).toEqual(payload);
   });
 
   it("parses message fixtures", () => {

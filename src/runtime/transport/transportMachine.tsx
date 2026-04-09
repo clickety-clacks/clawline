@@ -4,7 +4,8 @@ import {
   parseAuthResultPayload,
   parseServerPayload,
   serializeAuthPayload,
-  serializeClientMessage
+  serializeClientMessage,
+  serializeClientStreamRead
 } from "../../protocol/chat-wire";
 import type { ClientAttachmentPayload } from "../../protocol/chat-wire";
 import type { AuthSessionStore } from "../auth/authSessionStore";
@@ -44,6 +45,7 @@ export interface SendMessageInput {
 export interface TransportMachine {
   getState(): TransportState;
   subscribe(listener: () => void): () => void;
+  publishReadState(sessionKey: string, lastReadMessageId: string): Promise<void>;
   retryNow(): void;
   setSelectedSessionKey(sessionKey: string | undefined): void;
   sendMessage(input: SendMessageInput): Promise<void>;
@@ -270,6 +272,12 @@ export function createTransportMachine({
               sessionKeys: payload.sessionKeys,
               sessions: payload.sessions
             });
+            if (payload.streamReadStates) {
+              chatDomainStore.applyStreamReadStateSnapshot(payload.streamReadStates);
+            }
+            if (payload.streamTailStates) {
+              chatDomainStore.applyStreamTailStateSnapshot(payload.streamTailStates);
+            }
 
             syncReplayProgress(trigger);
             return;
@@ -338,7 +346,20 @@ export function createTransportMachine({
             syncReplayProgress(trigger);
             return;
           case "stream_read_state":
+            chatDomainStore.applyStreamReadStateUpdate({
+              lastReadMessageId: payload.lastReadMessageId,
+              sessionKey: payload.sessionKey
+            });
+            return;
           case "stream_tail_state":
+            chatDomainStore.applyStreamTailStateUpdate({
+              sessionKey: payload.sessionKey,
+              tailState: {
+                lastMessageId: payload.lastMessageId,
+                lastMessageRole: payload.lastMessageRole
+              }
+            });
+            return;
           case "event":
             return;
           case "error":
@@ -469,6 +490,24 @@ export function createTransportMachine({
   return {
     getState: baseStore.getState,
     subscribe: baseStore.subscribe,
+    async publishReadState(sessionKey, lastReadMessageId) {
+      if (
+        baseStore.getState().phase !== "live" ||
+        !socket ||
+        !sessionKey ||
+        !lastReadMessageId.startsWith("s_")
+      ) {
+        return;
+      }
+
+      socket.send(
+        serializeClientStreamRead({
+          type: "stream_read",
+          sessionKey,
+          lastReadMessageId
+        })
+      );
+    },
     retryNow() {
       void connect("retry");
     },

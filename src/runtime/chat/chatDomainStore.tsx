@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { createContext, useContext } from "react";
 import type {
   ClientAttachmentPayload,
+  MessageRole,
   ServerAttachmentPayload,
   ServerMessagePayload,
   SessionInfoPayload,
@@ -50,6 +51,13 @@ export interface ReplayCursorRecord {
   lastReadMessageId: string | null;
 }
 
+export interface StreamTailStateRecord {
+  lastMessageId: string;
+  lastMessageRole: MessageRole;
+}
+
+export type StreamDotState = "inactive" | "unread" | "userTail";
+
 export interface SessionScrollState {
   offsetTop: number;
   stickToBottom: boolean;
@@ -66,6 +74,8 @@ export interface ChatDomainState {
   provisionedSessionKeys: string[];
   replayCursorsBySessionKey: Record<string, ReplayCursorRecord>;
   scrollStateBySessionKey: Record<string, SessionScrollState>;
+  streamReadStateBySessionKey: Record<string, string>;
+  streamTailStateBySessionKey: Record<string, StreamTailStateRecord>;
   streams: StreamRecord[];
   unreadBySessionKey: Record<string, number>;
 }
@@ -99,13 +109,25 @@ export interface ChatDomainStore {
     source: IncomingMessageSource;
   }): void;
   applySessionInfo(info: SessionInfoPayload): void;
+  applyStreamReadStateSnapshot(snapshot: Record<string, string>): void;
+  applyStreamReadStateUpdate(input: {
+    lastReadMessageId: string;
+    sessionKey: string;
+  }): void;
   applyStreamSnapshot(streams: StreamSessionPayload[]): void;
+  applyStreamTailStateSnapshot(
+    snapshot: Record<string, StreamTailStateRecord>
+  ): void;
+  applyStreamTailStateUpdate(input: {
+    sessionKey: string;
+    tailState: StreamTailStateRecord;
+  }): void;
   rememberSessionScrollState(input: {
     offsetTop: number;
     sessionKey: string;
     stickToBottom: boolean;
   }): void;
-  markSessionRead(sessionKey?: string): void;
+  markSessionRead(sessionKey?: string): string | null;
   reset(): void;
 }
 
@@ -120,6 +142,8 @@ const EMPTY_STATE: ChatDomainState = {
   provisionedSessionKeys: [],
   replayCursorsBySessionKey: {},
   scrollStateBySessionKey: {},
+  streamReadStateBySessionKey: {},
+  streamTailStateBySessionKey: {},
   streams: [],
   unreadBySessionKey: {}
 };
@@ -311,9 +335,37 @@ export function createChatDomainStore(options?: {
         return nextState;
       });
     },
+    applyStreamReadStateSnapshot(snapshot) {
+      baseStore.setState((current) => {
+        const nextState = applyStreamReadStateSnapshot(current, snapshot);
+        persist(nextState);
+        return nextState;
+      });
+    },
+    applyStreamReadStateUpdate(input) {
+      baseStore.setState((current) => {
+        const nextState = applyStreamReadStateUpdate(current, input);
+        persist(nextState);
+        return nextState;
+      });
+    },
     applyStreamSnapshot(streams) {
       baseStore.setState((current) => {
         const nextState = applyStreamSnapshotToState(current, streams);
+        persist(nextState);
+        return nextState;
+      });
+    },
+    applyStreamTailStateSnapshot(snapshot) {
+      baseStore.setState((current) => {
+        const nextState = applyStreamTailStateSnapshot(current, snapshot);
+        persist(nextState);
+        return nextState;
+      });
+    },
+    applyStreamTailStateUpdate(input) {
+      baseStore.setState((current) => {
+        const nextState = applyStreamTailStateUpdate(current, input);
         persist(nextState);
         return nextState;
       });
@@ -347,64 +399,16 @@ export function createChatDomainStore(options?: {
     },
     markSessionRead(sessionKey) {
       if (!sessionKey) {
-        return;
+        return null;
       }
 
-      baseStore.setState((current) => {
-        const unreadCount = current.unreadBySessionKey[sessionKey] ?? 0;
-        const firstUnread = current.firstUnreadMessageIdBySessionKey[sessionKey];
-
-        const latestMessageId =
-          current.messagesBySessionKey[sessionKey]?.at(-1)?.id ?? null;
-
-        if (unreadCount === 0 && firstUnread == null) {
-          const currentCursor = current.replayCursorsBySessionKey[sessionKey];
-
-          if ((currentCursor?.lastReadMessageId ?? null) === latestMessageId) {
-            return current;
-          }
-
-          const nextState = {
-            ...current,
-            replayCursorsBySessionKey: {
-              ...current.replayCursorsBySessionKey,
-              [sessionKey]: {
-                lastServerEventId:
-                  current.replayCursorsBySessionKey[sessionKey]?.lastServerEventId ?? null,
-                lastReadMessageId: latestMessageId
-              }
-            }
-          };
-
-          persist(nextState);
-          return nextState;
-        }
-
-        const nextUnreadBySessionKey = { ...current.unreadBySessionKey };
-        delete nextUnreadBySessionKey[sessionKey];
-
-        const nextFirstUnreadBySessionKey = {
-          ...current.firstUnreadMessageIdBySessionKey
-        };
-        delete nextFirstUnreadBySessionKey[sessionKey];
-
-        const nextState = {
-          ...current,
-          firstUnreadMessageIdBySessionKey: nextFirstUnreadBySessionKey,
-          replayCursorsBySessionKey: {
-            ...current.replayCursorsBySessionKey,
-            [sessionKey]: {
-              lastServerEventId:
-                current.replayCursorsBySessionKey[sessionKey]?.lastServerEventId ?? null,
-              lastReadMessageId: latestMessageId
-            }
-          },
-          unreadBySessionKey: nextUnreadBySessionKey
-        };
-
-        persist(nextState);
-        return nextState;
-      });
+      const current = baseStore.getState();
+      const result = markSessionReadState(current, sessionKey);
+      if (result.nextState !== current) {
+        baseStore.setState(result.nextState);
+        persist(result.nextState);
+      }
+      return result.lastReadMessageId;
     },
     reset() {
       void persistence.clear();
@@ -483,6 +487,14 @@ function mergeHydratedState(
       ...persistedState.scrollStateBySessionKey,
       ...liveState.scrollStateBySessionKey
     },
+    streamReadStateBySessionKey: {
+      ...persistedState.streamReadStateBySessionKey,
+      ...liveState.streamReadStateBySessionKey
+    },
+    streamTailStateBySessionKey: {
+      ...persistedState.streamTailStateBySessionKey,
+      ...liveState.streamTailStateBySessionKey
+    },
     provisionedSessionKeys:
       liveState.provisionedSessionKeys.length > 0
         ? [...liveState.provisionedSessionKeys]
@@ -496,4 +508,328 @@ function mergeHydratedState(
       ...liveState.unreadBySessionKey
     }
   };
+}
+
+export function resolveStreamDotStateMap(
+  streamReadStateBySessionKey: Record<string, string>,
+  streamTailStateBySessionKey: Record<string, StreamTailStateRecord>
+) {
+  return Object.fromEntries(
+    Object.keys(streamTailStateBySessionKey).map((sessionKey) => [
+      sessionKey,
+      resolveStreamDotState(
+        streamReadStateBySessionKey[sessionKey],
+        streamTailStateBySessionKey[sessionKey]
+      )
+    ])
+  ) as Record<string, StreamDotState>;
+}
+
+export function resolveStreamDotState(
+  lastReadMessageId: string | undefined,
+  tailState: StreamTailStateRecord | undefined
+): StreamDotState {
+  if (!tailState) {
+    return "inactive";
+  }
+
+  if (tailState.lastMessageRole === "user") {
+    return "userTail";
+  }
+
+  return lastReadMessageId !== tailState.lastMessageId ? "unread" : "inactive";
+}
+
+function applyStreamReadStateSnapshot(
+  state: ChatDomainState,
+  snapshot: Record<string, string>
+) {
+  const normalizedSnapshot = Object.fromEntries(
+    Object.entries(snapshot).filter(
+      ([sessionKey, lastReadMessageId]) =>
+        sessionKey.length > 0 && lastReadMessageId.length > 0
+    )
+  );
+
+  let nextState: ChatDomainState = state;
+  const staleSessionKeys = Object.keys(state.streamReadStateBySessionKey).filter(
+    (sessionKey) => !(sessionKey in normalizedSnapshot)
+  );
+  for (const sessionKey of staleSessionKeys) {
+    nextState = clearStreamReadState(nextState, sessionKey);
+  }
+
+  for (const [sessionKey, lastReadMessageId] of Object.entries(normalizedSnapshot)) {
+    nextState = applyStreamReadStateUpdate(nextState, {
+      lastReadMessageId,
+      sessionKey
+    });
+  }
+
+  return nextState;
+}
+
+function applyStreamReadStateUpdate(
+  state: ChatDomainState,
+  input: {
+    lastReadMessageId: string;
+    sessionKey: string;
+  }
+) {
+  if (input.sessionKey.length === 0 || input.lastReadMessageId.length === 0) {
+    return state;
+  }
+
+  const currentLastRead = state.streamReadStateBySessionKey[input.sessionKey];
+  const currentCursor = state.replayCursorsBySessionKey[input.sessionKey];
+  if (
+    currentLastRead === input.lastReadMessageId &&
+    (currentCursor?.lastReadMessageId ?? null) === input.lastReadMessageId
+  ) {
+    return state;
+  }
+
+  return reconcileLocalUnreadWithRemoteRead({
+    ...state,
+    replayCursorsBySessionKey: {
+      ...state.replayCursorsBySessionKey,
+      [input.sessionKey]: {
+        lastServerEventId: currentCursor?.lastServerEventId ?? null,
+        lastReadMessageId: input.lastReadMessageId
+      }
+    },
+    streamReadStateBySessionKey: {
+      ...state.streamReadStateBySessionKey,
+      [input.sessionKey]: input.lastReadMessageId
+    }
+  }, input.sessionKey, input.lastReadMessageId);
+}
+
+function applyStreamTailStateSnapshot(
+  state: ChatDomainState,
+  snapshot: Record<string, StreamTailStateRecord>
+) {
+  const normalizedSnapshot = Object.fromEntries(
+    Object.entries(snapshot).filter(
+      ([sessionKey, tailState]) =>
+        sessionKey.length > 0 &&
+        tailState.lastMessageId.length > 0 &&
+        (tailState.lastMessageRole === "user" || tailState.lastMessageRole === "assistant")
+    )
+  );
+
+  const nextTailStateBySessionKey = { ...normalizedSnapshot };
+  if (
+    shallowEqualStreamTailStateMaps(
+      state.streamTailStateBySessionKey,
+      nextTailStateBySessionKey
+    )
+  ) {
+    return state;
+  }
+
+  const nextState = {
+    ...state,
+    streamTailStateBySessionKey: nextTailStateBySessionKey
+  };
+
+  return Object.entries(nextTailStateBySessionKey).reduce(
+    (currentState, [sessionKey, tailState]) => {
+      const lastReadMessageId = currentState.streamReadStateBySessionKey[sessionKey];
+      return lastReadMessageId === tailState.lastMessageId
+        ? clearLocalUnread(currentState, sessionKey)
+        : currentState;
+    },
+    nextState
+  );
+}
+
+function applyStreamTailStateUpdate(
+  state: ChatDomainState,
+  input: {
+    sessionKey: string;
+    tailState: StreamTailStateRecord;
+  }
+) {
+  const { sessionKey, tailState } = input;
+  if (
+    sessionKey.length === 0 ||
+    tailState.lastMessageId.length === 0 ||
+    (tailState.lastMessageRole !== "user" && tailState.lastMessageRole !== "assistant")
+  ) {
+    return state;
+  }
+
+  const currentTailState = state.streamTailStateBySessionKey[sessionKey];
+  if (
+    currentTailState?.lastMessageId === tailState.lastMessageId &&
+    currentTailState.lastMessageRole === tailState.lastMessageRole
+  ) {
+    return state;
+  }
+
+  const nextState = {
+    ...state,
+    streamTailStateBySessionKey: {
+      ...state.streamTailStateBySessionKey,
+      [sessionKey]: tailState
+    }
+  };
+
+  return state.streamReadStateBySessionKey[sessionKey] === tailState.lastMessageId
+    ? clearLocalUnread(nextState, sessionKey)
+    : nextState;
+}
+
+function clearStreamReadState(state: ChatDomainState, sessionKey: string) {
+  if (!(sessionKey in state.streamReadStateBySessionKey)) {
+    return state;
+  }
+
+  const nextStreamReadStateBySessionKey = { ...state.streamReadStateBySessionKey };
+  delete nextStreamReadStateBySessionKey[sessionKey];
+
+  const currentCursor = state.replayCursorsBySessionKey[sessionKey];
+  const nextReplayCursorsBySessionKey = { ...state.replayCursorsBySessionKey };
+  if (currentCursor) {
+    nextReplayCursorsBySessionKey[sessionKey] = {
+      lastServerEventId: currentCursor.lastServerEventId ?? null,
+      lastReadMessageId: null
+    };
+  }
+
+  return {
+    ...state,
+    replayCursorsBySessionKey: nextReplayCursorsBySessionKey,
+    streamReadStateBySessionKey: nextStreamReadStateBySessionKey
+  };
+}
+
+function reconcileLocalUnreadWithRemoteRead(
+  state: ChatDomainState,
+  sessionKey: string,
+  lastReadMessageId: string
+) {
+  const firstUnreadMessageId = state.firstUnreadMessageIdBySessionKey[sessionKey];
+  if (!firstUnreadMessageId) {
+    return state;
+  }
+
+  const tailMessageId = state.streamTailStateBySessionKey[sessionKey]?.lastMessageId;
+  if (tailMessageId != null && tailMessageId === lastReadMessageId) {
+    return clearLocalUnread(state, sessionKey);
+  }
+
+  const messages = state.messagesBySessionKey[sessionKey] ?? [];
+  const firstUnreadIndex = messages.findIndex((message) => message.id === firstUnreadMessageId);
+  const lastReadIndex = messages.findIndex((message) => message.id === lastReadMessageId);
+  if (firstUnreadIndex < 0 || lastReadIndex < 0) {
+    return state;
+  }
+  if (firstUnreadIndex >= 0 && lastReadIndex >= firstUnreadIndex) {
+    return clearLocalUnread(state, sessionKey);
+  }
+
+  return state;
+}
+
+function clearLocalUnread(state: ChatDomainState, sessionKey: string) {
+  if (
+    !(sessionKey in state.firstUnreadMessageIdBySessionKey) &&
+    !(sessionKey in state.unreadBySessionKey)
+  ) {
+    return state;
+  }
+
+  const nextFirstUnreadBySessionKey = { ...state.firstUnreadMessageIdBySessionKey };
+  delete nextFirstUnreadBySessionKey[sessionKey];
+
+  const nextUnreadBySessionKey = { ...state.unreadBySessionKey };
+  delete nextUnreadBySessionKey[sessionKey];
+
+  return {
+    ...state,
+    firstUnreadMessageIdBySessionKey: nextFirstUnreadBySessionKey,
+    unreadBySessionKey: nextUnreadBySessionKey
+  };
+}
+
+function markSessionReadState(state: ChatDomainState, sessionKey: string) {
+  const unreadCount = state.unreadBySessionKey[sessionKey] ?? 0;
+  const firstUnread = state.firstUnreadMessageIdBySessionKey[sessionKey];
+  const lastReadMessageId =
+    findLastServerMessageId(state.messagesBySessionKey[sessionKey] ?? []) ??
+    state.streamTailStateBySessionKey[sessionKey]?.lastMessageId ??
+    null;
+
+  if (lastReadMessageId == null) {
+    return {
+      lastReadMessageId: null,
+      nextState: state
+    };
+  }
+
+  const currentCursor = state.replayCursorsBySessionKey[sessionKey];
+  const currentReadState = state.streamReadStateBySessionKey[sessionKey] ?? null;
+  if (
+    unreadCount === 0 &&
+    firstUnread == null &&
+    (currentCursor?.lastReadMessageId ?? null) === lastReadMessageId &&
+    currentReadState === lastReadMessageId
+  ) {
+    return {
+      lastReadMessageId,
+      nextState: state
+    };
+  }
+
+  const nextState = clearLocalUnread({
+    ...state,
+    replayCursorsBySessionKey: {
+      ...state.replayCursorsBySessionKey,
+      [sessionKey]: {
+        lastServerEventId: currentCursor?.lastServerEventId ?? null,
+        lastReadMessageId
+      }
+    },
+    streamReadStateBySessionKey: {
+      ...state.streamReadStateBySessionKey,
+      [sessionKey]: lastReadMessageId
+    }
+  }, sessionKey);
+
+  return {
+    lastReadMessageId,
+    nextState
+  };
+}
+
+function findLastServerMessageId(messages: ChatMessageRecord[]) {
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const messageId = messages[index]?.id;
+    if (typeof messageId === "string" && messageId.startsWith("s_")) {
+      return messageId;
+    }
+  }
+
+  return null;
+}
+
+function shallowEqualStreamTailStateMaps(
+  left: Record<string, StreamTailStateRecord>,
+  right: Record<string, StreamTailStateRecord>
+) {
+  const leftEntries = Object.entries(left);
+  const rightEntries = Object.entries(right);
+  if (leftEntries.length !== rightEntries.length) {
+    return false;
+  }
+
+  return leftEntries.every(([sessionKey, tailState]) => {
+    const rightTailState = right[sessionKey];
+    return (
+      rightTailState?.lastMessageId === tailState.lastMessageId &&
+      rightTailState.lastMessageRole === tailState.lastMessageRole
+    );
+  });
 }

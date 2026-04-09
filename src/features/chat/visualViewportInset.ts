@@ -1,6 +1,6 @@
 export function computeKeyboardInset(input: {
-  baseViewportHeight: number;
   isComposerFocused: boolean;
+  layoutViewportHeight: number;
   viewportHeight: number;
   viewportOffsetTop: number;
 }) {
@@ -10,7 +10,8 @@ export function computeKeyboardInset(input: {
 
   return Math.max(
     0,
-    Math.round(input.baseViewportHeight - (input.viewportHeight + input.viewportOffsetTop))
+    Math.round(
+      input.layoutViewportHeight - (input.viewportHeight + input.viewportOffsetTop)
+    )
   );
 }
-

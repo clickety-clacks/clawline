@@ -1627,6 +1627,10 @@ struct ChatView: View {
             containerWidth: containerWidth,
             bottomSafeAreaInset: bottomSafeAreaInset
         )
+        let pageDotsAnchorWidth = StreamPageDotsView.renderedControlWidth(
+            totalSessionCount: effectiveSessionKeys.count,
+            maxWidth: pageDotsMaxWidth
+        )
         let pageDotsControl = StreamPageDotsView(
             sessionKeys: effectiveSessionKeys,
             activeSessionKey: viewModel.uiSelectedSessionKey,
@@ -1645,8 +1649,8 @@ struct ChatView: View {
             },
             activationBehavior: .directTapGesture
         )
-        let pageDotsPopoverAnchor = pageDotsControl
-            .hidden()
+        let pageDotsPopoverAnchor = Color.clear
+            .frame(width: pageDotsAnchorWidth, height: StreamPageDotsView.controlHeight)
             .allowsHitTesting(false)
             .accessibilityHidden(true)
         return ZStack {

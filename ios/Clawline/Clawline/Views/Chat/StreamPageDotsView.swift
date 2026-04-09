@@ -137,6 +137,16 @@ struct StreamPageDotsView: View {
         return min(maxWidth, requiredWidth)
     }
 
+    static func renderedControlWidth(totalSessionCount: Int, maxWidth: CGFloat?) -> CGFloat {
+        let visibleDotCount = fittingVisibleDotCount(totalSessionCount: totalSessionCount, maxWidth: maxWidth)
+        let includesOverflowIndicators = visibleDotCount < totalSessionCount
+        return targetControlWidth(totalSessionCount: totalSessionCount, maxWidth: maxWidth)
+            ?? requiredControlWidth(
+                visibleDotCount: visibleDotCount,
+                includesOverflowIndicators: includesOverflowIndicators
+            )
+    }
+
     var body: some View {
         interactiveBody
         .accessibilityLabel("Manage streams")

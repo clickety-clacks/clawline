@@ -2887,12 +2887,29 @@ private final class KeyboardPinnedContainerView<Content: View>: UIView, Keyboard
                 host.view.centerXAnchor.constraint(equalTo: centerXAnchor),
                 bottom,
             ])
+#if DEBUG
+            emitStreamPopupConsoleEvent(
+                "pinned_page_dots_host_created",
+                sessionKey: nil,
+                isPresented: false,
+                note: "gap=\(Int(gap.rounded()))"
+            )
+#endif
         }
 
         pageDotsHost?.rootView = view ?? AnyView(EmptyView())
         pageDotsHost?.view.isHidden = (view == nil)
         pageDotsHost?.view.isUserInteractionEnabled = (view != nil)
         pageDotsBottomToBarTop?.constant = -gap
+#if DEBUG
+        let hostBounds = pageDotsHost?.view.bounds ?? .zero
+        emitStreamPopupConsoleEvent(
+            "pinned_page_dots_host_updated",
+            sessionKey: nil,
+            isPresented: false,
+            note: "hasView=\(view != nil) hidden=\(view == nil) gap=\(Int(gap.rounded())) bounds=\(Int(hostBounds.width.rounded()))x\(Int(hostBounds.height.rounded()))"
+        )
+#endif
 #endif
     }
 

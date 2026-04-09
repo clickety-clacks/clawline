@@ -3044,6 +3044,10 @@ final class ChatViewModel: ChatViewModelHosting {
         recalculateOrderedSessionKeys()
         for sessionKey in orderedSessionKeys {
             ensureSessionStorage(for: sessionKey)
+            if byKey[sessionKey]?.adopted == true {
+                clearLocalReadAndMessageState(for: sessionKey)
+                continue
+            }
             restoreLastReadMessageIdIfNeeded(for: sessionKey)
             restoreCachedMessagesIfNeeded(for: sessionKey)
         }
@@ -3064,6 +3068,13 @@ final class ChatViewModel: ChatViewModelHosting {
         syntheticSessionKeys.remove(stream.sessionKey)
         recalculateOrderedSessionKeys()
         ensureSessionStorage(for: stream.sessionKey)
+        if stream.adopted {
+            clearLocalReadAndMessageState(for: stream.sessionKey)
+            ensureDefaultActiveSessionIfNeeded()
+            SessionRegistry.shared.upsert(stream)
+            persistStreamMetadata()
+            return
+        }
         restoreLastReadMessageIdIfNeeded(for: stream.sessionKey)
         restoreCachedMessagesIfNeeded(for: stream.sessionKey)
         ensureDefaultActiveSessionIfNeeded()

@@ -2715,6 +2715,18 @@ final class ChatViewModel: ChatViewModelHosting {
         }
     }
 
+    private func clearLocalReadAndMessageState(for sessionKey: String) {
+        sessionMessages.removeValue(forKey: sessionKey)
+        lastReadMessageIdBySession.removeValue(forKey: sessionKey)
+        streamDotStateBySession.removeValue(forKey: sessionKey)
+        restoredSessionKeys.remove(sessionKey)
+        restoreTaskBySessionKey[sessionKey]?.cancel()
+        restoreTaskBySessionKey.removeValue(forKey: sessionKey)
+        chatService.setReplayCursor(nil, for: sessionKey)
+        persistLastReadMessageId(nil, for: sessionKey)
+        persistMessages([], for: sessionKey)
+    }
+
     private func messageCacheDirectoryURL() -> URL? {
         let fileManager = FileManager.default
         guard let baseURL = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
@@ -3009,16 +3021,11 @@ final class ChatViewModel: ChatViewModelHosting {
         let validSessionKeys = Set(byKey.keys)
         let removedSessionKeys = previousSessionKeys.subtracting(validSessionKeys)
         for sessionKey in removedSessionKeys {
-            sessionMessages.removeValue(forKey: sessionKey)
-            lastReadMessageIdBySession.removeValue(forKey: sessionKey)
+            clearLocalReadAndMessageState(for: sessionKey)
             streamTailStateBySession.removeValue(forKey: sessionKey)
-            streamDotStateBySession.removeValue(forKey: sessionKey)
             let removedIDs = Set(pendingLocalMessages.filter { $0.sessionKey == sessionKey }.map(\.id))
             pendingLocalMessages.removeAll { $0.sessionKey == sessionKey }
             ackedPendingLocalMessageIDs.subtract(removedIDs)
-            chatService.setReplayCursor(nil, for: sessionKey)
-            persistLastReadMessageId(nil, for: sessionKey)
-            persistMessages([], for: sessionKey)
         }
         recalculateOrderedSessionKeys()
         let staleLocallyRehydratedAdoptedKeys = Set(
@@ -3029,11 +3036,7 @@ final class ChatViewModel: ChatViewModelHosting {
         for sessionKey in orderedSessionKeys {
             ensureSessionStorage(for: sessionKey)
             if staleLocallyRehydratedAdoptedKeys.contains(sessionKey) {
-                lastReadMessageIdBySession.removeValue(forKey: sessionKey)
-                streamDotStateBySession.removeValue(forKey: sessionKey)
-                chatService.setReplayCursor(nil, for: sessionKey)
-                persistLastReadMessageId(nil, for: sessionKey)
-                persistMessages([], for: sessionKey)
+                clearLocalReadAndMessageState(for: sessionKey)
                 continue
             }
             restoreLastReadMessageIdIfNeeded(for: sessionKey)
@@ -3269,8 +3272,7 @@ final class ChatViewModel: ChatViewModelHosting {
         recalculateOrderedSessionKeys()
         for sessionKey in adoptedKeysToRestore {
             ensureSessionStorage(for: sessionKey)
-            restoreLastReadMessageIdIfNeeded(for: sessionKey)
-            restoreCachedMessagesIfNeeded(for: sessionKey)
+            clearLocalReadAndMessageState(for: sessionKey)
         }
         restoreActiveSessionKeyIfNeeded()
         ensureDefaultActiveSessionIfNeeded()

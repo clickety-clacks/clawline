@@ -2476,6 +2476,25 @@ struct ChatViewModelTests {
         secondService.emitServiceEvent(.streamSnapshot(secondService.streams))
         try await Task.sleep(for: .milliseconds(30))
 
+        #expect(secondViewModel.stream(for: heimdalKey) == nil)
+        #expect(!secondViewModel.isAdoptedStream(sessionKey: heimdalKey))
+        #expect(secondViewModel.activeSessionKey != heimdalKey)
+        #expect(secondViewModel.lastReadMessageIdBySession[heimdalKey] == nil)
+        #expect(secondViewModel.messages(for: heimdalKey).isEmpty)
+
+        secondService.emitServiceEvent(.sessionInfo(
+            SessionInfo(
+                userId: "user",
+                isAdmin: false,
+                dmScope: "dm",
+                sessionKeys: [personalSessionKey, heimdalKey]
+            )
+        ))
+        for _ in 0..<50 {
+            if secondViewModel.stream(for: heimdalKey) != nil { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
         #expect(secondViewModel.stream(for: heimdalKey) != nil)
         #expect(secondViewModel.isAdoptedStream(sessionKey: heimdalKey))
         #expect(secondViewModel.lastReadMessageIdBySession[heimdalKey] == nil)
@@ -2560,8 +2579,9 @@ struct ChatViewModelTests {
         await secondViewModel.onAppear()
         try await Task.sleep(for: .milliseconds(30))
 
-        #expect(secondViewModel.activeSessionKey == heimdalKey)
-        #expect(secondViewModel.messages(for: heimdalKey).last?.id == "evt_heimdal_bootstrap")
+        #expect(secondViewModel.activeSessionKey != heimdalKey)
+        #expect(secondViewModel.stream(for: heimdalKey) == nil)
+        #expect(secondViewModel.messages(for: heimdalKey).isEmpty)
         #expect(secondService.lastPublishedReadState == nil)
         #expect(secondViewModel.lastReadMessageIdBySession[heimdalKey] == nil)
     }

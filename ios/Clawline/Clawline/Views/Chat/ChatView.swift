@@ -128,6 +128,7 @@ struct ChatView: View {
     @State private var activeSheet: ChatSheet?
     @State private var isStreamManagerPopoverPresented = false
     @State private var hasStreamManagerPopoverBecomeVisible = false
+    @State private var streamManagerPopoverOpenRequestID = 0
     @State private var streamPopupShouldAutoFocusSearch = false
     @State private var streamPopupSearchFocusRequestID = 0
 #if DEBUG
@@ -1752,8 +1753,22 @@ struct ChatView: View {
     }
 
     private func presentStreamManagerPopoverFromDotsTap(sessionKey: String?) {
+        streamManagerPopoverOpenRequestID &+= 1
+        let requestID = streamManagerPopoverOpenRequestID
+        if isStreamManagerPopoverPresented && !hasStreamManagerPopoverBecomeVisible {
+            isStreamManagerPopoverPresented = false
+#if DEBUG
+            emitStreamPopupConsoleEvent(
+                "stale_nonvisible_open_reset",
+                sessionKey: sessionKey,
+                isPresented: isStreamManagerPopoverPresented,
+                note: "cleared stuck true state before retrying dots popup open"
+            )
+#endif
+        }
         hasStreamManagerPopoverBecomeVisible = false
         let presentPopover = {
+            guard streamManagerPopoverOpenRequestID == requestID else { return }
             isStreamManagerPopoverPresented = true
 #if DEBUG
             emitStreamPopupConsoleEvent(

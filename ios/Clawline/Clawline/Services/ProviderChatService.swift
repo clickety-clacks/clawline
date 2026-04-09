@@ -984,6 +984,9 @@ final class ProviderChatService: ChatServicing {
                     code: payload.code,
                     message: payload.message
                 )
+                let rendered = "[HEIMDAL] provider reason=unknownLastReadMessageId.emitMessageError sessionKey=\(lastPublishedReadState?.sessionKey ?? "nil") lastRead=\(lastPublishedReadState?.lastReadMessageId ?? "nil") pendingMessages=\(pendingMessages.count) messageId=\(payload.messageId ?? "nil") code=\(payload.code) message=\(payload.message ?? "nil")"
+                logger.error("\(rendered, privacy: .public)")
+                print(rendered)
             }
             if invalidLastMessageId {
                 clearReplayCursors()

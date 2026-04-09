@@ -2343,8 +2343,19 @@ final class ChatViewModel: ChatViewModelHosting {
                 handleNoReplyAck(messageId: messageId)
                 return
             }
+            if shouldLogHeimdalDotDiagnostics(for: engineActiveSessionKey) || isUnknownLastReadMessageIdMessage(message) {
+                emitHeimdalDotError(
+                    "[HEIMDAL] reason=messageError.received code=\(code) message=\(message ?? "nil") messageId=\(messageId ?? "nil") engineActive=\(engineActiveSessionKey) uiSelected=\(uiSelectedSessionKey)"
+                )
+            }
             if shouldShowMessageErrorToast(code: code) {
                 let resolved = userFacingMessage(for: code, fallback: message)
+                if shouldLogHeimdalDotDiagnostics(for: engineActiveSessionKey) || isUnknownLastReadMessageIdMessage(message) {
+                    emitHeimdalDotError(
+                        "[HEIMDAL] reason=messageError.toast resolved=\(resolved) code=\(code) engineActive=\(engineActiveSessionKey) uiSelected=\(uiSelectedSessionKey)"
+                    )
+                    logHeimdalDotState(for: engineActiveSessionKey, reason: "messageError.toast")
+                }
                 toastManager.show(resolved)
             }
             guard let messageId else {
@@ -2625,13 +2636,29 @@ final class ChatViewModel: ChatViewModelHosting {
         // Preserve real wire session keys exactly as sent. Only map legacy enum-shaped
         // placeholders that older compatibility paths may still emit.
         if trimmed.contains(":") {
+            if shouldLogHeimdalDotDiagnostics(for: trimmed) {
+                emitHeimdalDotDiagnostic(
+                    "[HEIMDAL] reason=readStateSessionKey.wire raw=\(rawSessionKey) resolved=\(trimmed)"
+                )
+            }
             return trimmed
         }
 
         guard let legacyStream = ChatStream(rawValue: trimmed) else {
+            if shouldLogHeimdalDotDiagnostics(for: trimmed) {
+                emitHeimdalDotDiagnostic(
+                    "[HEIMDAL] reason=readStateSessionKey.nonLegacy raw=\(rawSessionKey) resolved=\(trimmed)"
+                )
+            }
             return trimmed
         }
-        return preferredSessionKey(for: legacyStream) ?? trimmed
+        let resolved = preferredSessionKey(for: legacyStream) ?? trimmed
+        if shouldLogHeimdalDotDiagnostics(for: resolved) || shouldLogHeimdalDotDiagnostics(for: trimmed) {
+            emitHeimdalDotDiagnostic(
+                "[HEIMDAL] reason=readStateSessionKey.legacy raw=\(rawSessionKey) legacy=\(legacyStream.rawValue) resolved=\(resolved)"
+            )
+        }
+        return resolved
     }
 
     private func activeSessionDefaultsKey() -> String {
@@ -2829,6 +2856,14 @@ final class ChatViewModel: ChatViewModelHosting {
         }
         if sessionKey.lowercased().contains("heimd") { return true }
         return sessionKey == engineActiveSessionKey || sessionKey == uiSelectedSessionKey
+    }
+
+    private func isUnknownLastReadMessageIdMessage(_ message: String?) -> Bool {
+        let normalized = (message ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .replacingOccurrences(of: " ", with: "")
+        return normalized.contains("unknownlastreadmessageid")
     }
 
     private func emitHeimdalDotDiagnostic(_ message: String) {

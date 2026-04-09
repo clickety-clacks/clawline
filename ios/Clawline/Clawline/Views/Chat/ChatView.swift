@@ -1709,6 +1709,40 @@ struct ChatView: View {
                     containerWidth: containerWidth
                 )
             }
+#if DEBUG
+            .onAppear {
+                emitStreamPopupConsoleEvent(
+                    "anchor_overlay_appear",
+                    sessionKey: viewModel.uiSelectedSessionKey,
+                    isPresented: isStreamManagerPopoverPresented,
+                    note: "sessionCount=\(effectiveSessionKeys.count) anchorWidth=\(Int(pageDotsAnchorWidth.rounded()))"
+                )
+            }
+            .onDisappear {
+                emitStreamPopupConsoleEvent(
+                    "anchor_overlay_disappear",
+                    sessionKey: viewModel.uiSelectedSessionKey,
+                    isPresented: isStreamManagerPopoverPresented,
+                    note: "sessionCount=\(effectiveSessionKeys.count) anchorWidth=\(Int(pageDotsAnchorWidth.rounded()))"
+                )
+            }
+            .onChange(of: effectiveSessionKeys.count) { _, newCount in
+                emitStreamPopupConsoleEvent(
+                    "anchor_overlay_session_count_changed",
+                    sessionKey: viewModel.uiSelectedSessionKey,
+                    isPresented: isStreamManagerPopoverPresented,
+                    note: "sessionCount=\(newCount) anchorWidth=\(Int(pageDotsAnchorWidth.rounded()))"
+                )
+            }
+            .onChange(of: pageDotsAnchorWidth) { _, newWidth in
+                emitStreamPopupConsoleEvent(
+                    "anchor_overlay_width_changed",
+                    sessionKey: viewModel.uiSelectedSessionKey,
+                    isPresented: isStreamManagerPopoverPresented,
+                    note: "sessionCount=\(effectiveSessionKeys.count) anchorWidth=\(Int(newWidth.rounded()))"
+                )
+            }
+#endif
     }
 
     private func streamManagerSheet(

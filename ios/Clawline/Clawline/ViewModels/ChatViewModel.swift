@@ -3016,11 +3016,17 @@ final class ChatViewModel: ChatViewModelHosting {
         let previousSessionKeys = Set(streamsBySessionKey.keys)
         let normalizedStreams = streams
         let serverKeys = Set(normalizedStreams.map(\.sessionKey))
-        let adoptedStreams = streamsBySessionKey.values.filter {
+        let omittedAdoptedStreams = streamsBySessionKey.values.filter {
             $0.adopted && !serverKeys.contains($0.sessionKey)
         }
-        let mergedStreams = normalizedStreams + adoptedStreams
-        let byKey: [String: StreamSession] = Dictionary(uniqueKeysWithValues: mergedStreams.map { ($0.sessionKey, $0) })
+        let byKey: [String: StreamSession] = Dictionary(uniqueKeysWithValues: normalizedStreams.map { ($0.sessionKey, $0) })
+        let restoredAdoptedStreams = restoredAdoptedStreamsBySessionKey
+            .filter { !serverKeys.contains($0.key) }
+            .merging(
+                Dictionary(uniqueKeysWithValues: omittedAdoptedStreams.map { ($0.sessionKey, $0) }),
+                uniquingKeysWith: { _, latest in latest }
+            )
+        restoredAdoptedStreamsBySessionKey = restoredAdoptedStreams
         syntheticSessionKeys = Set(
             byKey.values
                 .filter { !$0.adopted && !serverKeys.contains($0.sessionKey) }
@@ -3031,23 +3037,13 @@ final class ChatViewModel: ChatViewModelHosting {
         let removedSessionKeys = previousSessionKeys.subtracting(validSessionKeys)
         for sessionKey in removedSessionKeys {
             clearLocalReadAndMessageState(for: sessionKey)
-            streamTailStateBySession.removeValue(forKey: sessionKey)
             let removedIDs = Set(pendingLocalMessages.filter { $0.sessionKey == sessionKey }.map(\.id))
             pendingLocalMessages.removeAll { $0.sessionKey == sessionKey }
             ackedPendingLocalMessageIDs.subtract(removedIDs)
         }
         recalculateOrderedSessionKeys()
-        let staleLocallyRehydratedAdoptedKeys = Set(
-            byKey.values
-                .filter { $0.adopted && !serverKeys.contains($0.sessionKey) }
-                .map(\.sessionKey)
-        )
         for sessionKey in orderedSessionKeys {
             ensureSessionStorage(for: sessionKey)
-            if staleLocallyRehydratedAdoptedKeys.contains(sessionKey) {
-                clearLocalReadAndMessageState(for: sessionKey)
-                continue
-            }
             restoreLastReadMessageIdIfNeeded(for: sessionKey)
             restoreCachedMessagesIfNeeded(for: sessionKey)
         }
@@ -3064,6 +3060,7 @@ final class ChatViewModel: ChatViewModelHosting {
 
     private func applyStreamUpsert(_ stream: StreamSession) {
         streamsBySessionKey[stream.sessionKey] = stream
+        restoredAdoptedStreamsBySessionKey.removeValue(forKey: stream.sessionKey)
         syntheticSessionKeys.remove(stream.sessionKey)
         recalculateOrderedSessionKeys()
         ensureSessionStorage(for: stream.sessionKey)
@@ -3076,6 +3073,7 @@ final class ChatViewModel: ChatViewModelHosting {
 
     private func applyStreamDeletion(sessionKey: String) {
         streamsBySessionKey.removeValue(forKey: sessionKey)
+        restoredAdoptedStreamsBySessionKey.removeValue(forKey: sessionKey)
         syntheticSessionKeys.remove(sessionKey)
         recalculateOrderedSessionKeys()
         sessionMessages.removeValue(forKey: sessionKey)
@@ -3277,6 +3275,7 @@ final class ChatViewModel: ChatViewModelHosting {
         for sessionKey in adoptedKeysToRestore {
             guard let stream = restoredAdoptedStreamsBySessionKey[sessionKey] else { continue }
             streamsBySessionKey[sessionKey] = stream
+            restoredAdoptedStreamsBySessionKey.removeValue(forKey: sessionKey)
         }
         recalculateOrderedSessionKeys()
         for sessionKey in adoptedKeysToRestore {

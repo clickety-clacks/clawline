@@ -2575,7 +2575,7 @@ struct ChatViewModelTests {
         ]))
         try await Task.sleep(for: .milliseconds(30))
 
-        #expect(viewModel.stream(for: heimdalKey) != nil)
+        #expect(viewModel.stream(for: heimdalKey) == nil)
         #expect(viewModel.lastReadMessageIdBySession[heimdalKey] == nil)
         #expect(viewModel.messages(for: heimdalKey).isEmpty)
         #expect(viewModel.streamDotState(for: heimdalKey) == nil)
@@ -2588,8 +2588,12 @@ struct ChatViewModelTests {
                 sessionKeys: [personalSessionKey, heimdalKey]
             )
         ))
-        try await Task.sleep(for: .milliseconds(30))
+        for _ in 0..<50 {
+            if viewModel.stream(for: heimdalKey) != nil { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
 
+        #expect(viewModel.stream(for: heimdalKey) != nil)
         viewModel.setActiveSessionKeyForTesting(heimdalKey)
         try await Task.sleep(for: .milliseconds(30))
 

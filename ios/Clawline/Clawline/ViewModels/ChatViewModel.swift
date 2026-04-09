@@ -489,6 +489,7 @@ final class ChatViewModel: ChatViewModelHosting {
     private let messageCacheLimit = 500
     private var restoredSessionKeys: Set<String> = []
     private var restoredStreamMetadataForUserId: String?
+    private var restoredAdoptedStreamsBySessionKey: [String: StreamSession] = [:]
     private var supportsSessionProvisioning = false
     private var hasResolvedProvisioningCapability = true
     private var hasReceivedSessionProvisioning = false
@@ -1338,6 +1339,7 @@ final class ChatViewModel: ChatViewModelHosting {
         restoredSessionKeys.removeAll()
         forceReReadGenerationBySession.removeAll()
         restoredStreamMetadataForUserId = nil
+        restoredAdoptedStreamsBySessionKey.removeAll()
         resetSessionProvisioningState(clearPendingSend: true)
         clearMessageCache()
         clearStreamMetadataCache()
@@ -2453,6 +2455,7 @@ final class ChatViewModel: ChatViewModelHosting {
             hasReceivedSessionProvisioning = true
             hasReceivedExplicitSessionInfo = true
             replaceAccessibleSessionKeys(with: info.sessionKeys)
+            restoreProvisionedAdoptedStreamsIfNeeded(sessionKeys: info.sessionKeys)
             refreshTrackableSessions(reason: "sessionInfo")
             attemptPendingProvisionedSendIfPossible()
         }
@@ -3242,11 +3245,36 @@ final class ChatViewModel: ChatViewModelHosting {
         }
         let decoder = JSONDecoder()
         if let streams = try? decoder.decode([StreamSession].self, from: data) {
-            streamsBySessionKey = Dictionary(uniqueKeysWithValues: streams.map { ($0.sessionKey, $0) })
+            let serverManagedStreams = streams.filter { !$0.adopted }
+            let adoptedStreams = streams.filter(\.adopted)
+            streamsBySessionKey = Dictionary(uniqueKeysWithValues: serverManagedStreams.map { ($0.sessionKey, $0) })
+            restoredAdoptedStreamsBySessionKey = Dictionary(uniqueKeysWithValues: adoptedStreams.map { ($0.sessionKey, $0) })
             syntheticSessionKeys.removeAll()
             recalculateOrderedSessionKeys()
             SessionRegistry.shared.replace(with: orderedStreams)
         }
+    }
+
+    private func restoreProvisionedAdoptedStreamsIfNeeded(sessionKeys: [String]) {
+        let normalizedKeys = normalizeSessionKeyList(sessionKeys)
+        guard !normalizedKeys.isEmpty else { return }
+        let adoptedKeysToRestore = normalizedKeys.filter {
+            streamsBySessionKey[$0] == nil && restoredAdoptedStreamsBySessionKey[$0] != nil
+        }
+        guard !adoptedKeysToRestore.isEmpty else { return }
+        for sessionKey in adoptedKeysToRestore {
+            guard let stream = restoredAdoptedStreamsBySessionKey[sessionKey] else { continue }
+            streamsBySessionKey[sessionKey] = stream
+        }
+        recalculateOrderedSessionKeys()
+        for sessionKey in adoptedKeysToRestore {
+            ensureSessionStorage(for: sessionKey)
+            restoreLastReadMessageIdIfNeeded(for: sessionKey)
+            restoreCachedMessagesIfNeeded(for: sessionKey)
+        }
+        restoreActiveSessionKeyIfNeeded()
+        ensureDefaultActiveSessionIfNeeded()
+        SessionRegistry.shared.replace(with: orderedStreams)
     }
 
     private func persistStreamMetadata() {

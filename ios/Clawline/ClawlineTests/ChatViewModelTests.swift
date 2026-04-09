@@ -3164,6 +3164,11 @@ struct ChatViewModelTests {
 
         await secondViewModel.onAppear()
         secondService.emitServiceEvent(.streamSnapshot(secondService.streams))
+        try await Task.sleep(for: .milliseconds(30))
+
+        #expect(secondViewModel.stream(for: adoptedKey) == nil)
+        #expect(secondViewModel.activeSessionKey != adoptedKey)
+
         secondService.emitServiceEvent(.sessionInfo(
             SessionInfo(
                 userId: "user",

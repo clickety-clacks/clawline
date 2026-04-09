@@ -3011,6 +3011,30 @@ private final class KeyboardPinnedContainerView<Content: View>: UIView, Keyboard
         return false
     }
 
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        let resolved = super.hitTest(point, with: event)
+#if DEBUG
+        if let pageDotsHost {
+            let hostFrame = pageDotsHost.view.frame
+            if hostFrame.contains(point) {
+                let resolvedDescription: String
+                if let resolved {
+                    resolvedDescription = String(describing: type(of: resolved))
+                } else {
+                    resolvedDescription = "nil"
+                }
+                emitStreamPopupConsoleEvent(
+                    "pinned_page_dots_hit_test",
+                    sessionKey: nil,
+                    isPresented: false,
+                    note: "point=\(Int(point.x.rounded())),\(Int(point.y.rounded())) hostFrame=\(Int(hostFrame.origin.x.rounded())),\(Int(hostFrame.origin.y.rounded())),\(Int(hostFrame.size.width.rounded()))x\(Int(hostFrame.size.height.rounded())) resolved=\(resolvedDescription)"
+                )
+            }
+        }
+#endif
+        return resolved
+    }
+
     override func layoutSubviews() {
         super.layoutSubviews()
         let height = barHeight

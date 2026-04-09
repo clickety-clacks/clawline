@@ -515,7 +515,6 @@ struct ChatView: View {
             streamPageDotsControl(
                 viewModel: viewModel,
                 effectiveStreams: effectiveStreams,
-                streamSelectorMaxHeight: streamSelectorMaxHeight,
                 containerWidth: containerWidth,
                 bottomSafeAreaInset: bottomSafeAreaInset
             )
@@ -909,6 +908,20 @@ struct ChatView: View {
 #endif
         }
         .overlay(alignment: .bottom) {
+#if !os(visionOS)
+            streamPageDotsPopoverAnchorOverlay(
+                viewModel: viewModel,
+                effectiveStreams: effectiveStreams,
+                streamSelectorMaxHeight: streamSelectorMaxHeight,
+                containerWidth: geometry.size.width,
+                bottomSafeAreaInset: geometry.safeAreaInsets.bottom,
+                inputBarTopFromScreenBottom: inputBarTopFromScreenBottom
+            )
+#else
+            EmptyView()
+#endif
+        }
+        .overlay(alignment: .bottom) {
             inputBarOverlay(
                 geometry: geometry,
                 viewModel: viewModel,
@@ -1254,7 +1267,6 @@ struct ChatView: View {
                 streamPageDotsControl(
                     viewModel: viewModel,
                     effectiveStreams: effectiveStreams,
-                    streamSelectorMaxHeight: streamSelectorMaxHeight,
                     containerWidth: geometry.size.width,
                     bottomSafeAreaInset: geometry.safeAreaInsets.bottom
                 )
@@ -1616,7 +1628,6 @@ struct ChatView: View {
     private func streamPageDotsControl(
         viewModel: ChatViewModel,
         effectiveStreams: [StreamSession],
-        streamSelectorMaxHeight: CGFloat,
         containerWidth: CGFloat,
         bottomSafeAreaInset: CGFloat
     ) -> some View {
@@ -1627,10 +1638,6 @@ struct ChatView: View {
         let pageDotsMaxWidth = inputFieldWidthCap(
             containerWidth: containerWidth,
             bottomSafeAreaInset: bottomSafeAreaInset
-        )
-        let pageDotsAnchorWidth = StreamPageDotsView.renderedControlWidth(
-            totalSessionCount: effectiveSessionKeys.count,
-            maxWidth: pageDotsMaxWidth
         )
         let pageDotsControl = StreamPageDotsView(
             sessionKeys: effectiveSessionKeys,
@@ -1650,12 +1657,45 @@ struct ChatView: View {
             },
             activationBehavior: .directTapGesture
         )
-        let pageDotsPopoverAnchor = Color.clear
-            .frame(width: pageDotsAnchorWidth, height: StreamPageDotsView.controlHeight)
-            .allowsHitTesting(false)
-            .accessibilityHidden(true)
-        return ZStack {
-            pageDotsPopoverAnchor
+        return pageDotsControl
+        .sheet(
+            isPresented: $isTrackPickerPresented,
+            onDismiss: {
+                restoreFocusIfNeeded()
+            }
+        ) {
+            TrackPickerSheet(viewModel: viewModel)
+        }
+    }
+
+    @ViewBuilder
+    private func streamPageDotsPopoverAnchorOverlay(
+        viewModel: ChatViewModel,
+        effectiveStreams: [StreamSession],
+        streamSelectorMaxHeight: CGFloat,
+        containerWidth: CGFloat,
+        bottomSafeAreaInset: CGFloat,
+        inputBarTopFromScreenBottom: CGFloat
+    ) -> some View {
+        let effectiveSessionKeys = effectiveStreams.map(\.sessionKey)
+        if !effectiveSessionKeys.isEmpty {
+            let dotStatesBySession = Dictionary(
+                uniqueKeysWithValues: effectiveSessionKeys.map { ($0, viewModel.streamDotState(for: $0)) }
+            )
+            let pageDotsMaxWidth = inputFieldWidthCap(
+                containerWidth: containerWidth,
+                bottomSafeAreaInset: bottomSafeAreaInset
+            )
+            let pageDotsAnchorWidth = StreamPageDotsView.renderedControlWidth(
+                totalSessionCount: effectiveSessionKeys.count,
+                maxWidth: pageDotsMaxWidth
+            )
+            Color.clear
+                .frame(width: pageDotsAnchorWidth, height: StreamPageDotsView.controlHeight)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+                .padding(.bottom, inputBarTopFromScreenBottom + floatingPageDotsBottomGap)
+                .ignoresSafeArea(.container, edges: .bottom)
                 .popover(
                     isPresented: streamManagerPopoverPresentationBinding,
                     attachmentAnchor: .rect(.bounds),
@@ -1669,15 +1709,6 @@ struct ChatView: View {
                         containerWidth: containerWidth
                     )
                 }
-            pageDotsControl
-        }
-        .sheet(
-            isPresented: $isTrackPickerPresented,
-            onDismiss: {
-                restoreFocusIfNeeded()
-            }
-        ) {
-            TrackPickerSheet(viewModel: viewModel)
         }
     }
 

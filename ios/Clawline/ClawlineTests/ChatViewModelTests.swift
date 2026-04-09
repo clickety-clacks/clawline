@@ -2506,6 +2506,98 @@ struct ChatViewModelTests {
         #expect(secondService.lastPublishedReadState == nil)
     }
 
+    @Test("Reconnect clears stale adopted tail state before Heimdal reprovision")
+    @MainActor
+    func reconnectClearsStaleAdoptedTailStateBeforeReprovision() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let heimdalKey = "agent:heimdal:clawline:user:main"
+        let chatService = TestChatService()
+        chatService.streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            StreamSession(
+                sessionKey: heimdalKey,
+                displayName: "Heimdal",
+                kind: "main",
+                orderIndex: 1,
+                isBuiltIn: true,
+                createdAt: Date(),
+                updatedAt: Date(),
+                trackingMode: .adopted
+            ),
+        ]
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
+        try await Task.sleep(for: .milliseconds(30))
+
+        viewModel.setActiveSessionKeyForTesting(heimdalKey)
+        chatService.emitServiceEvent(
+            .streamTailStateUpdated(
+                sessionKey: heimdalKey,
+                tailState: StreamTailState(lastMessageId: "evt_heimdal_stale", lastMessageRole: .assistant)
+            )
+        )
+        chatService.emit(
+            Message(
+                id: "evt_heimdal_stale",
+                role: .assistant,
+                content: "stale cached tail",
+                timestamp: Date(),
+                streaming: false,
+                attachments: [],
+                deviceId: nil,
+                sessionKey: heimdalKey
+            )
+        )
+        for _ in 0..<50 {
+            if viewModel.lastReadMessageIdBySession[heimdalKey] == "evt_heimdal_stale" { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(viewModel.lastReadMessageIdBySession[heimdalKey] == "evt_heimdal_stale")
+        #expect(viewModel.streamDotState(for: heimdalKey) == .inactive)
+
+        chatService.lastPublishedReadState = nil
+        chatService.emitServiceEvent(.streamSnapshot([
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+        ]))
+        try await Task.sleep(for: .milliseconds(30))
+
+        #expect(viewModel.stream(for: heimdalKey) != nil)
+        #expect(viewModel.lastReadMessageIdBySession[heimdalKey] == nil)
+        #expect(viewModel.messages(for: heimdalKey).isEmpty)
+        #expect(viewModel.streamDotState(for: heimdalKey) == nil)
+
+        chatService.emitServiceEvent(.sessionInfo(
+            SessionInfo(
+                userId: "user",
+                isAdmin: false,
+                dmScope: "dm",
+                sessionKeys: [personalSessionKey, heimdalKey]
+            )
+        ))
+        try await Task.sleep(for: .milliseconds(30))
+
+        viewModel.setActiveSessionKeyForTesting(heimdalKey)
+        try await Task.sleep(for: .milliseconds(30))
+
+        #expect(viewModel.messages(for: heimdalKey).isEmpty)
+        #expect(viewModel.streamDotState(for: heimdalKey) == nil)
+        #expect(chatService.lastPublishedReadState == nil)
+    }
+
     @Test("Startup restore does not publish read state for adopted stream before provisioning")
     @MainActor
     func startupRestoreDoesNotPublishReadStateForAdoptedStreamBeforeProvisioning() async throws {

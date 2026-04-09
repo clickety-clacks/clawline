@@ -2718,13 +2718,22 @@ final class ChatViewModel: ChatViewModelHosting {
     private func clearLocalReadAndMessageState(for sessionKey: String) {
         sessionMessages.removeValue(forKey: sessionKey)
         lastReadMessageIdBySession.removeValue(forKey: sessionKey)
+        streamTailStateBySession.removeValue(forKey: sessionKey)
         streamDotStateBySession.removeValue(forKey: sessionKey)
         restoredSessionKeys.remove(sessionKey)
         restoreTaskBySessionKey[sessionKey]?.cancel()
         restoreTaskBySessionKey.removeValue(forKey: sessionKey)
+        pendingPersistPayloads.removeValue(forKey: sessionKey)
+        persistDebounceTasks[sessionKey]?.cancel()
+        persistDebounceTasks.removeValue(forKey: sessionKey)
         chatService.setReplayCursor(nil, for: sessionKey)
         persistLastReadMessageId(nil, for: sessionKey)
-        persistMessages([], for: sessionKey)
+        clearPersistedMessages(for: sessionKey)
+    }
+
+    private func clearPersistedMessages(for sessionKey: String) {
+        guard let url = messageCacheURL(for: sessionKey) else { return }
+        try? FileManager.default.removeItem(at: url)
     }
 
     private func messageCacheDirectoryURL() -> URL? {

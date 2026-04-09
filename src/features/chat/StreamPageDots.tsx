@@ -1,15 +1,17 @@
+import type { StreamDotState } from "../../runtime/chat/chatDomainStore";
+
 const MAX_VISIBLE_DOTS = 11;
 
 export function StreamPageDots({
   activeSessionKey,
   onClick,
   sessionKeys,
-  unreadSessionKeys
+  streamDotStateBySessionKey
 }: {
   activeSessionKey?: string;
   onClick: () => void;
   sessionKeys: string[];
-  unreadSessionKeys: Set<string>;
+  streamDotStateBySessionKey: Record<string, StreamDotState>;
 }) {
   const activeIndex = Math.max(
     0,
@@ -58,15 +60,17 @@ export function StreamPageDots({
         {visibleDotIndices.map((index) => {
           const sessionKey = sessionKeys[index];
           const isActive = sessionKey === activeSessionKey;
-          const hasUnread = unreadSessionKeys.has(sessionKey);
+          const dotState = streamDotStateBySessionKey[sessionKey] ?? "inactive";
 
           return (
             <span
               className={
                 isActive
                   ? "stream-page-dot stream-page-dot--active"
-                  : hasUnread
+                  : dotState === "unread"
                     ? "stream-page-dot stream-page-dot--unread"
+                    : dotState === "userTail"
+                      ? "stream-page-dot stream-page-dot--user-tail"
                     : "stream-page-dot"
               }
               key={sessionKey}

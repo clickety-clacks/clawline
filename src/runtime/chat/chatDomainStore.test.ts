@@ -498,6 +498,87 @@ describe("chatDomainStore", () => {
       lastServerEventId: "s_side_2",
       lastReadMessageId: "s_side_2"
     });
+    expect(store.getState().streamReadStateBySessionKey).toEqual({
+      "agent:main:clawline:user_1:side": "s_side_2"
+    });
+  });
+
+  it("clears local unread once inbound remote read reaches the authoritative tail", () => {
+    const store = createChatDomainStore({
+      persistence: createMemoryChatPersistence()
+    });
+
+    store.applyIncomingMessage({
+      localDeviceId: "browser-device-1",
+      message: {
+        type: "message",
+        id: "s_side_1",
+        role: "assistant",
+        content: "Side reply",
+        timestamp: 101,
+        streaming: false,
+        sessionKey: "agent:main:clawline:user_1:side",
+        attachments: []
+      },
+      selectedSessionKey: "agent:main:clawline:user_1:main",
+      source: "live"
+    });
+    store.applyStreamTailStateUpdate({
+      sessionKey: "agent:main:clawline:user_1:side",
+      tailState: {
+        lastMessageId: "s_side_1",
+        lastMessageRole: "assistant"
+      }
+    });
+
+    expect(store.getState().unreadBySessionKey).toEqual({
+      "agent:main:clawline:user_1:side": 1
+    });
+
+    store.applyStreamReadStateUpdate({
+      lastReadMessageId: "s_side_1",
+      sessionKey: "agent:main:clawline:user_1:side"
+    });
+
+    expect(store.getState().unreadBySessionKey).toEqual({});
+    expect(store.getState().firstUnreadMessageIdBySessionKey).toEqual({});
+  });
+
+  it("hydrates persisted local unread anchor independently from authoritative read-state", async () => {
+    const store = createChatDomainStore({
+      persistence: createMemoryChatPersistence({
+        ...phase1TranscriptFixture,
+        firstUnreadMessageIdBySessionKey: {
+          "agent:main:clawline:user_1:main": "s_101"
+        },
+        unreadBySessionKey: {
+          "agent:main:clawline:user_1:main": 1
+        },
+        streamReadStateBySessionKey: {
+          "agent:main:clawline:user_1:main": "s_100"
+        },
+        streamTailStateBySessionKey: {
+          "agent:main:clawline:user_1:main": {
+            lastMessageId: "s_101",
+            lastMessageRole: "assistant"
+          }
+        }
+      })
+    });
+    await waitForHydration(store);
+
+    expect(store.getState().firstUnreadMessageIdBySessionKey).toEqual({
+      "agent:main:clawline:user_1:main": "s_101"
+    });
+    expect(store.getState().streamReadStateBySessionKey).toEqual({
+      "agent:main:clawline:user_1:main": "s_100"
+    });
+    expect(store.getState().streamTailStateBySessionKey).toEqual({
+      "agent:main:clawline:user_1:main": {
+        lastMessageId: "s_101",
+        lastMessageRole: "assistant"
+      }
+    });
   });
 
   it("does not rewrite replay cursors when a session is already read at the tail", () => {

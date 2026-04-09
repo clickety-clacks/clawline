@@ -28,6 +28,13 @@ export interface AuthPayload {
   deviceId: string;
   lastMessageId?: string | null;
   replayCursorsBySessionKey?: Record<string, string>;
+  clientFeatures?: string[];
+  client?: ClientDescriptorPayload;
+}
+
+export interface ClientDescriptorPayload {
+  id: string;
+  features?: string[];
 }
 
 export interface AuthResultPayload {
@@ -41,6 +48,8 @@ export interface AuthResultPayload {
   historyReset?: boolean;
   sessionKeys?: string[];
   sessions?: SessionDescriptor[];
+  streamReadStates?: Record<string, string>;
+  streamTailStates?: Record<string, StreamTailStateRecord>;
   reason?: string;
 }
 
@@ -149,15 +158,48 @@ export interface StreamDeletedPayload {
   sessionKey: string;
 }
 
+export interface StreamReadStatePayload {
+  type: "stream_read_state";
+  sessionKey: string;
+  lastReadMessageId: string;
+}
+
+export interface StreamTailStatePayload {
+  type: "stream_tail_state";
+  sessionKey: string;
+  lastMessageId: string;
+  lastMessageRole: MessageRole;
+}
+
+export interface StreamTailStateRecord {
+  lastMessageId: string;
+  lastMessageRole: MessageRole;
+}
+
+export interface ClientStreamReadPayload {
+  type: "stream_read";
+  sessionKey: string;
+  lastReadMessageId: string;
+}
+
+export interface EventPayload {
+  type: "event";
+  event: string;
+  payload?: Record<string, unknown> | null;
+}
+
 export type PhaseOneServerPayload =
   | AckPayload
   | AuthResultPayload
+  | EventPayload
   | ErrorPayload
   | ServerMessagePayload
   | SessionInfoPayload
   | StreamDeletedPayload
+  | StreamReadStatePayload
   | StreamMutationPayload
-  | StreamSnapshotPayload;
+  | StreamSnapshotPayload
+  | StreamTailStatePayload;
 
 export function serializePairRequest(payload: PairRequestPayload) {
   return JSON.stringify(payload);
@@ -168,6 +210,10 @@ export function serializeAuthPayload(payload: AuthPayload) {
 }
 
 export function serializeClientMessage(payload: ClientMessagePayload) {
+  return JSON.stringify(payload);
+}
+
+export function serializeClientStreamRead(payload: ClientStreamReadPayload) {
   return JSON.stringify(payload);
 }
 
@@ -204,6 +250,14 @@ export function parseAuthResultPayload(raw: string): AuthResultPayload {
     historyReset: optionalBoolean(value.historyReset, "auth_result.historyReset"),
     sessionKeys: optionalStringArray(value.sessionKeys, "auth_result.sessionKeys"),
     sessions: optionalSessionDescriptors(value.sessions, "auth_result.sessions"),
+    streamReadStates: optionalStringRecord(
+      value.streamReadStates,
+      "auth_result.streamReadStates"
+    ),
+    streamTailStates: optionalStreamTailStateRecordMap(
+      value.streamTailStates,
+      "auth_result.streamTailStates"
+    ),
     reason: optionalString(value.reason, "auth_result.reason")
   };
 }
@@ -224,8 +278,14 @@ export function parseServerPayload(raw: string): PhaseOneServerPayload {
       return parseStreamMutationFromRecord(value);
     case "stream_deleted":
       return parseStreamDeletedFromRecord(value);
+    case "stream_read_state":
+      return parseStreamReadStateFromRecord(value);
+    case "stream_tail_state":
+      return parseStreamTailStateFromRecord(value);
     case "session_info":
       return parseSessionInfoFromRecord(value);
+    case "event":
+      return parseEventFromRecord(value);
     case "auth_result":
       return parseAuthResultPayload(raw);
     case "error":
@@ -292,6 +352,45 @@ function parseStreamDeletedFromRecord(value: JsonRecord): StreamDeletedPayload {
   return {
     type: "stream_deleted",
     sessionKey: requiredString(value.sessionKey, "stream_deleted.sessionKey")
+  };
+}
+
+function parseStreamReadStateFromRecord(
+  value: JsonRecord
+): StreamReadStatePayload {
+  assertLiteral(value.type, "stream_read_state", "stream_read_state.type");
+  return {
+    type: "stream_read_state",
+    sessionKey: requiredString(value.sessionKey, "stream_read_state.sessionKey"),
+    lastReadMessageId: requiredString(
+      value.lastReadMessageId,
+      "stream_read_state.lastReadMessageId"
+    )
+  };
+}
+
+function parseStreamTailStateFromRecord(
+  value: JsonRecord
+): StreamTailStatePayload {
+  assertLiteral(value.type, "stream_tail_state", "stream_tail_state.type");
+  return {
+    type: "stream_tail_state",
+    sessionKey: requiredString(value.sessionKey, "stream_tail_state.sessionKey"),
+    ...parseStreamTailStateRecord(value, "stream_tail_state")
+  };
+}
+
+function parseEventFromRecord(value: JsonRecord): EventPayload {
+  assertLiteral(value.type, "event", "event.type");
+  const payload = value.payload;
+  if (payload != null && (typeof payload !== "object" || Array.isArray(payload))) {
+    throw new Error("event.payload must be an object");
+  }
+
+  return {
+    type: "event",
+    event: requiredString(value.event, "event.event"),
+    payload: (payload as Record<string, unknown> | null | undefined) ?? undefined
   };
 }
 
@@ -373,6 +472,59 @@ function optionalSessionDescriptors(
       sessionKey: requiredString(record.sessionKey, `${field}[${index}].sessionKey`)
     };
   });
+}
+
+function optionalStringRecord(
+  value: unknown,
+  field: string
+): Record<string, string> | undefined {
+  if (value == null) {
+    return undefined;
+  }
+
+  const record = asRecord(value, field);
+  return Object.fromEntries(
+    Object.entries(record).map(([key, entryValue]) => [
+      requiredString(key, `${field}.key`),
+      requiredString(entryValue, `${field}.${key}`)
+    ])
+  );
+}
+
+function optionalStreamTailStateRecordMap(
+  value: unknown,
+  field: string
+): Record<string, StreamTailStateRecord> | undefined {
+  if (value == null) {
+    return undefined;
+  }
+
+  const record = asRecord(value, field);
+  return Object.fromEntries(
+    Object.entries(record).map(([key, entryValue]) => [
+      requiredString(key, `${field}.key`),
+      parseStreamTailStateRecord(entryValue, `${field}.${key}`)
+    ])
+  );
+}
+
+function parseStreamTailStateRecord(
+  value: unknown,
+  field: string
+): StreamTailStateRecord {
+  const record = asRecord(value, field);
+  const lastMessageRole = requiredString(
+    record.lastMessageRole,
+    `${field}.lastMessageRole`
+  );
+  if (lastMessageRole !== "user" && lastMessageRole !== "assistant") {
+    throw new Error(`Invalid ${field}.lastMessageRole: ${lastMessageRole}`);
+  }
+
+  return {
+    lastMessageId: requiredString(record.lastMessageId, `${field}.lastMessageId`),
+    lastMessageRole
+  };
 }
 
 function parseStreamSession(value: unknown, field: string): StreamSessionPayload {

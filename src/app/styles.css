@@ -1111,6 +1111,10 @@ html[data-appearance="light"] body::before {
   background: var(--color-accent-warm);
 }
 
+.stream-page-dot--user-tail {
+  background: var(--color-connection-reconnecting);
+}
+
 .stream-page-dot--overflow {
   width: 0.28rem;
   height: 0.28rem;
@@ -1455,6 +1459,12 @@ html[data-appearance="light"] .session-popover {
 .session-sheet-card-indicator--unread {
   background: var(--session-popup-unread);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--session-popup-unread) 18%, transparent);
+}
+
+.session-sheet-card-indicator--user-tail {
+  background: var(--color-connection-reconnecting);
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--color-connection-reconnecting) 18%, transparent);
 }
 
 .session-sheet-card-indicator--active {

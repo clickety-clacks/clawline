@@ -78,7 +78,9 @@ function renderChatRoute(
         timestamp: 11
       }
     ],
-    sessionKeys = ["agent:main:clawline:user_1:main", "agent:main:main"]
+    sessionKeys = ["agent:main:clawline:user_1:main", "agent:main:main"],
+    streamReadStates,
+    streamTailStates
   }: {
     initialMessages?: Array<{
       content: string;
@@ -88,6 +90,14 @@ function renderChatRoute(
       timestamp: number;
     }>;
     sessionKeys?: string[];
+    streamReadStates?: Record<string, string>;
+    streamTailStates?: Record<
+      string,
+      {
+        lastMessageId: string;
+        lastMessageRole: "user" | "assistant";
+      }
+    >;
   } = {}
 ) {
   const authStore = createAuthSessionStore();
@@ -138,11 +148,13 @@ function renderChatRoute(
     JSON.stringify({
       type: "auth_result",
       success: true,
-      sessionKeys
+      sessionKeys,
+      streamReadStates,
+      streamTailStates
     })
   );
 
-  return render(
+  const view = render(
     <SettingsStoreProvider value={settingsStore}>
       <AuthSessionStoreProvider value={authStore}>
         <ChatDomainStoreProvider value={chatStore}>
@@ -165,6 +177,13 @@ function renderChatRoute(
       </AuthSessionStoreProvider>
     </SettingsStoreProvider>
   );
+
+  return {
+    ...view,
+    chatStore,
+    transportMachine,
+    webSocketFactory
+  };
 }
 
 describe("ChatRoute", () => {
@@ -326,7 +345,24 @@ describe("ChatRoute", () => {
         "agent:main:clawline:user_1:main",
         "agent:main:main",
         "agent:main:clawline:user_1:side"
-      ]
+      ],
+      streamReadStates: {
+        "agent:main:clawline:user_1:side": "s_side"
+      },
+      streamTailStates: {
+        "agent:main:clawline:user_1:main": {
+          lastMessageId: "s_personal_unread",
+          lastMessageRole: "assistant"
+        },
+        "agent:main:main": {
+          lastMessageId: "s_heimdal_unread",
+          lastMessageRole: "assistant"
+        },
+        "agent:main:clawline:user_1:side": {
+          lastMessageId: "s_side",
+          lastMessageRole: "assistant"
+        }
+      }
     });
 
     fireEvent.click(screen.getByRole("button", { name: "Manage streams" }));
@@ -334,8 +370,12 @@ describe("ChatRoute", () => {
     const personalUnreadCard = screen.getByRole("button", { name: /Personal/i });
     const heimdalUnreadCard = screen.getByRole("button", { name: /Heimdal/i });
 
-    expect(within(personalUnreadCard).getByLabelText("1 unread messages")).toBeInTheDocument();
-    expect(within(heimdalUnreadCard).getByLabelText("1 unread messages")).toBeInTheDocument();
+    expect(
+      personalUnreadCard.querySelector(".session-sheet-card-indicator--unread")
+    ).not.toBeNull();
+    expect(
+      heimdalUnreadCard.querySelector(".session-sheet-card-indicator--unread")
+    ).not.toBeNull();
 
     fireEvent.click(personalUnreadCard);
 
@@ -348,13 +388,12 @@ describe("ChatRoute", () => {
     const personalReadCard = screen.getByRole("button", { name: /Personal/i });
     const heimdalStillUnreadCard = screen.getByRole("button", { name: /Heimdal/i });
 
-    expect(within(personalReadCard).queryByLabelText("1 unread messages")).toBeNull();
     expect(
       personalReadCard.querySelector(".session-sheet-card-indicator--unread")
     ).toBeNull();
     expect(
-      within(heimdalStillUnreadCard).getByLabelText("1 unread messages")
-    ).toBeInTheDocument();
+      heimdalStillUnreadCard.querySelector(".session-sheet-card-indicator--unread")
+    ).not.toBeNull();
 
     fireEvent.click(heimdalStillUnreadCard);
 
@@ -366,7 +405,6 @@ describe("ChatRoute", () => {
 
     const heimdalReadCard = screen.getByRole("button", { name: /Heimdal/i });
 
-    expect(within(heimdalReadCard).queryByLabelText("1 unread messages")).toBeNull();
     expect(
       heimdalReadCard.querySelector(".session-sheet-card-indicator--unread")
     ).toBeNull();

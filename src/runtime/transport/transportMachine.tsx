@@ -4,7 +4,8 @@ import {
   parseAuthResultPayload,
   parseServerPayload,
   serializeAuthPayload,
-  serializeClientMessage
+  serializeClientMessage,
+  serializeClientStreamRead
 } from "../../protocol/chat-wire";
 import type { ClientAttachmentPayload } from "../../protocol/chat-wire";
 import type { AuthSessionStore } from "../auth/authSessionStore";
@@ -44,6 +45,7 @@ export interface SendMessageInput {
 export interface TransportMachine {
   getState(): TransportState;
   subscribe(listener: () => void): () => void;
+  publishReadState(sessionKey: string, lastReadMessageId: string): Promise<void>;
   retryNow(): void;
   setSelectedSessionKey(sessionKey: string | undefined): void;
   sendMessage(input: SendMessageInput): Promise<void>;
@@ -77,6 +79,8 @@ const MAX_SYNC_REPLAY_MESSAGES = 24;
 const REPLAY_MESSAGE_BATCH_SIZE = 24;
 const SHOULD_WARN_ON_STREAM_SNAPSHOT =
   typeof process === "undefined" || process.env.NODE_ENV !== "production";
+const WEB_CLIENT_FEATURES = ["terminal_bubbles_v1"];
+const WEB_CLIENT_ID = "clawline-web";
 
 export function createTransportMachine({
   authSessionStore,
@@ -95,7 +99,6 @@ export function createTransportMachine({
   let replayFlushTimer: number | null = null;
   let connectionGeneration = 0;
   let replayMessagesRemaining = 0;
-  let hasInitialProvisioning = false;
   let queuedReplayMessages: Array<{
     generation: number;
     payload: Parameters<ChatDomainStore["applyIncomingMessage"]>[0];
@@ -203,7 +206,6 @@ export function createTransportMachine({
 
     connectionGeneration += 1;
     replayMessagesRemaining = 0;
-    hasInitialProvisioning = false;
     const generation = connectionGeneration;
     baseStore.setState((current) => ({
       ...current,
@@ -232,6 +234,11 @@ export function createTransportMachine({
           token: session.token,
           deviceId: session.deviceId,
           lastMessageId: chatDomainStore.getState().lastServerEventId,
+          clientFeatures: WEB_CLIENT_FEATURES,
+          client: {
+            id: WEB_CLIENT_ID,
+            features: WEB_CLIENT_FEATURES
+          },
           replayCursorsBySessionKey: toReplayCursorPayload(
             chatDomainStore.getState().replayCursorsBySessionKey
           )
@@ -244,107 +251,131 @@ export function createTransportMachine({
         return;
       }
 
-      const type = JSON.parse(event.data).type as string | undefined;
-      if (type === "auth_result") {
-        const payload = parseAuthResultPayload(event.data);
-        if (payload.success) {
-          if (payload.historyReset || payload.replayTruncated) {
-            chatDomainStore.resetForAuthoritativeReplay();
-          }
+      try {
+        const type = JSON.parse(event.data).type as string | undefined;
+        if (type === "auth_result") {
+          const payload = parseAuthResultPayload(event.data);
+          if (payload.success) {
+            if (payload.historyReset || payload.replayTruncated) {
+              chatDomainStore.resetForAuthoritativeReplay();
+            }
 
-          replayMessagesRemaining = payload.replayCount ?? 0;
-          hasInitialProvisioning = hasProvisioningSnapshot(payload);
-          if (typeof payload.isAdmin === "boolean") {
-            authSessionStore.updateAdminStatus(payload.isAdmin);
-          }
+            replayMessagesRemaining = payload.replayCount ?? 0;
+            if (typeof payload.isAdmin === "boolean") {
+              authSessionStore.updateAdminStatus(payload.isAdmin);
+            }
 
-          chatDomainStore.applySessionInfo({
-            type: "session_info",
-            userId: payload.userId,
-            isAdmin: payload.isAdmin,
-            sessionKeys: payload.sessionKeys,
-            sessions: payload.sessions
-          });
-
-          syncReplayProgress(trigger);
-          return;
-        }
-
-        baseStore.setState({
-          failureReason: payload.reason ?? "Authentication failed",
-          isBrowserOnline: browserRuntime.isOnline(),
-          phase: "failed",
-          retryAttempt: baseStore.getState().retryAttempt
-        });
-        teardown(false);
-        authSessionStore.logout();
-        return;
-      }
-
-      const payload = parseServerPayload(event.data);
-      switch (payload.type) {
-        case "message":
-          const source: IncomingMessageSource =
-            replayMessagesRemaining > 0 ? "replay" : "live";
-          const messageInput = {
-            localDeviceId: authSessionStore.getState().session?.deviceId ?? "",
-            message: payload,
-            selectedSessionKey: selectedSessionKeySource?.() ?? selectedSessionKey,
-            source
-          };
-          if (
-            source === "replay" &&
-            (queuedReplayMessages.length > 0 ||
-              replayMessagesRemaining > MAX_SYNC_REPLAY_MESSAGES)
-          ) {
-            queuedReplayMessages.push({
-              generation,
-              payload: messageInput
+            chatDomainStore.applySessionInfo({
+              type: "session_info",
+              userId: payload.userId,
+              isAdmin: payload.isAdmin,
+              sessionKeys: payload.sessionKeys,
+              sessions: payload.sessions
             });
-            scheduleReplayFlush(trigger);
+            if (payload.streamReadStates) {
+              chatDomainStore.applyStreamReadStateSnapshot(payload.streamReadStates);
+            }
+            if (payload.streamTailStates) {
+              chatDomainStore.applyStreamTailStateSnapshot(payload.streamTailStates);
+            }
+
+            syncReplayProgress(trigger);
             return;
           }
 
-          chatDomainStore.applyIncomingMessage(messageInput);
-          if (source === "replay") {
-            replayMessagesRemaining -= 1;
+          baseStore.setState({
+            failureReason: payload.reason ?? "Authentication failed",
+            isBrowserOnline: browserRuntime.isOnline(),
+            phase: "failed",
+            retryAttempt: baseStore.getState().retryAttempt
+          });
+          teardown(false);
+          authSessionStore.logout();
+          return;
+        }
+
+        const payload = parseServerPayload(event.data);
+        switch (payload.type) {
+          case "message":
+            const source: IncomingMessageSource =
+              replayMessagesRemaining > 0 ? "replay" : "live";
+            const messageInput = {
+              localDeviceId: authSessionStore.getState().session?.deviceId ?? "",
+              message: payload,
+              selectedSessionKey: selectedSessionKeySource?.() ?? selectedSessionKey,
+              source
+            };
+            if (
+              source === "replay" &&
+              (queuedReplayMessages.length > 0 ||
+                replayMessagesRemaining > MAX_SYNC_REPLAY_MESSAGES)
+            ) {
+              queuedReplayMessages.push({
+                generation,
+                payload: messageInput
+              });
+              scheduleReplayFlush(trigger);
+              return;
+            }
+
+            chatDomainStore.applyIncomingMessage(messageInput);
+            if (source === "replay") {
+              replayMessagesRemaining -= 1;
+              syncReplayProgress(trigger);
+            }
+            return;
+          case "ack":
+            chatDomainStore.markMessageAcked(payload.id);
+            return;
+          case "stream_snapshot":
+            if (SHOULD_WARN_ON_STREAM_SNAPSHOT) {
+              console.warn("clawline stream_snapshot", payload.streams);
+            }
+            chatDomainStore.applyStreamSnapshot(payload.streams);
             syncReplayProgress(trigger);
-          }
-          return;
-        case "ack":
-          chatDomainStore.markMessageAcked(payload.id);
-          return;
-        case "stream_snapshot":
-          if (SHOULD_WARN_ON_STREAM_SNAPSHOT) {
-            console.warn("clawline stream_snapshot", payload.streams);
-          }
-          chatDomainStore.applyStreamSnapshot(payload.streams);
-          hasInitialProvisioning = true;
-          syncReplayProgress(trigger);
-          return;
-        case "stream_created":
-        case "stream_updated":
-          chatDomainStore.upsertStream(payload.stream);
-          return;
-        case "stream_deleted":
-          chatDomainStore.removeStream(payload.sessionKey);
-          return;
-        case "session_info":
-          chatDomainStore.applySessionInfo(payload);
-          hasInitialProvisioning = true;
-          syncReplayProgress(trigger);
-          return;
-        case "error":
-          if (payload.messageId) {
-            chatDomainStore.markMessageFailed(payload.messageId);
-          }
-          baseStore.setState((current) => ({
-            ...current,
-            failureReason: payload.message ?? payload.code
-          }));
-          return;
-        default:
-          return;
+            return;
+          case "stream_created":
+          case "stream_updated":
+            chatDomainStore.upsertStream(payload.stream);
+            return;
+          case "stream_deleted":
+            chatDomainStore.removeStream(payload.sessionKey);
+            return;
+          case "session_info":
+            chatDomainStore.applySessionInfo(payload);
+            syncReplayProgress(trigger);
+            return;
+          case "stream_read_state":
+            chatDomainStore.applyStreamReadStateUpdate({
+              lastReadMessageId: payload.lastReadMessageId,
+              sessionKey: payload.sessionKey
+            });
+            return;
+          case "stream_tail_state":
+            chatDomainStore.applyStreamTailStateUpdate({
+              sessionKey: payload.sessionKey,
+              tailState: {
+                lastMessageId: payload.lastMessageId,
+                lastMessageRole: payload.lastMessageRole
+              }
+            });
+            return;
+          case "event":
+            return;
+          case "error":
+            if (payload.messageId) {
+              chatDomainStore.markMessageFailed(payload.messageId);
+            }
+            baseStore.setState((current) => ({
+              ...current,
+              failureReason: payload.message ?? payload.code
+            }));
+            return;
+          default:
+            return;
+        }
+      } catch (error) {
+        console.warn("clawline transport dropped payload", error, event.data);
       }
     };
 
@@ -390,10 +421,7 @@ export function createTransportMachine({
     baseStore.setState((current) => ({
       failureReason: null,
       isBrowserOnline: true,
-      phase:
-        replayMessagesRemaining === 0 && hasInitialProvisioning
-          ? "live"
-          : "replaying",
+      phase: replayMessagesRemaining === 0 ? "live" : "replaying",
       retryAttempt: trigger === "retry" ? current.retryAttempt : 0
     }));
   }
@@ -462,6 +490,24 @@ export function createTransportMachine({
   return {
     getState: baseStore.getState,
     subscribe: baseStore.subscribe,
+    async publishReadState(sessionKey, lastReadMessageId) {
+      if (
+        baseStore.getState().phase !== "live" ||
+        !socket ||
+        !sessionKey ||
+        !lastReadMessageId.startsWith("s_")
+      ) {
+        return;
+      }
+
+      socket.send(
+        serializeClientStreamRead({
+          type: "stream_read",
+          sessionKey,
+          lastReadMessageId
+        })
+      );
+    },
     retryNow() {
       void connect("retry");
     },
@@ -502,14 +548,6 @@ function createBrowserRuntime(): BrowserRuntime {
       return window.setTimeout(listener, delayMs);
     }
   };
-}
-
-function hasProvisioningSnapshot(
-  payload: ReturnType<typeof parseAuthResultPayload>
-) {
-  return (
-    (payload.sessions?.length ?? 0) > 0 || (payload.sessionKeys?.length ?? 0) > 0
-  );
 }
 
 function isChatReadyForAuth(

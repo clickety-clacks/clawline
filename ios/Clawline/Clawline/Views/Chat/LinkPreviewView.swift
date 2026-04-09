@@ -246,6 +246,8 @@ final class LinkPreviewView: UIView, WKNavigationDelegate, WKUIDelegate, UIGestu
     private var loadStartedAt: CFTimeInterval?
     private var lastFailureReason: FailureReason?
     private var didShowEmptyBodyWarning = false
+    private weak var webBubbleCoordinator: (any WebBubbleCoordinating)?
+    private var ownerItemId: String?
 
     // Invariant (#40): never cancel a preview load that is currently visible (in-window and onscreen)
     // due to memory pressure. Evict queued/offscreen loads first.
@@ -253,9 +255,10 @@ final class LinkPreviewView: UIView, WKNavigationDelegate, WKUIDelegate, UIGestu
 
     override init(frame: CGRect) {
         let configuration = WKWebViewConfiguration()
-        configuration.websiteDataStore = WKWebsiteDataStore.nonPersistent()
+        configuration.websiteDataStore = WebSessionSharedResources.shared.websiteDataStore
+        configuration.processPool = WebSessionSharedResources.shared.processPool
         configuration.defaultWebpagePreferences.allowsContentJavaScript = true
-        configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
+        configuration.preferences.javaScriptCanOpenWindowsAutomatically = true
         configuration.preferences.isElementFullscreenEnabled = false
         configuration.mediaTypesRequiringUserActionForPlayback = .all
         configuration.allowsInlineMediaPlayback = true
@@ -300,6 +303,11 @@ final class LinkPreviewView: UIView, WKNavigationDelegate, WKUIDelegate, UIGestu
         fullscreenStateObservation?.invalidate()
         if let memoryWarningObserver {
             NotificationCenter.default.removeObserver(memoryWarningObserver)
+        }
+        let coordinator = webBubbleCoordinator
+        let webView = webView
+        Task { @MainActor in
+            coordinator?.unregister(webView: webView)
         }
         cancelLoad()
     }
@@ -364,13 +372,18 @@ final class LinkPreviewView: UIView, WKNavigationDelegate, WKUIDelegate, UIGestu
         configuredURLKey
     }
 
-    func configure(url: URL, maxHeight: CGFloat? = nil) {
+    func configure(url: URL,
+                   maxHeight: CGFloat? = nil,
+                   ownerItemId: String? = nil,
+                   webBubbleCoordinator: (any WebBubbleCoordinating)? = nil) {
         configure(
             url: url,
             maxHeight: maxHeight,
             minHeight: nil,
             cacheKey: nil,
-            initialHeight: nil
+            initialHeight: nil,
+            ownerItemId: ownerItemId,
+            webBubbleCoordinator: webBubbleCoordinator
         )
     }
 
@@ -378,7 +391,9 @@ final class LinkPreviewView: UIView, WKNavigationDelegate, WKUIDelegate, UIGestu
                    maxHeight: CGFloat?,
                    minHeight: CGFloat? = nil,
                    cacheKey: String? = nil,
-                   initialHeight: CGFloat? = nil) {
+                   initialHeight: CGFloat? = nil,
+                   ownerItemId: String? = nil,
+                   webBubbleCoordinator: (any WebBubbleCoordinating)? = nil) {
         let desiredMinHeight = max(1, minHeight ?? Constants.defaultMinHeight)
         let desiredMaxHeight = max(desiredMinHeight, maxHeight ?? Constants.defaultMaxHeight)
         let desiredKey = cacheKey ?? url.absoluteString
@@ -389,7 +404,15 @@ final class LinkPreviewView: UIView, WKNavigationDelegate, WKUIDelegate, UIGestu
            abs(self.maxHeight - desiredMaxHeight) <= 1 {
             return
         }
+        if self.webBubbleCoordinator != nil {
+            self.webBubbleCoordinator?.unregister(webView: webView)
+        }
         resetState()
+        self.ownerItemId = ownerItemId
+        self.webBubbleCoordinator = webBubbleCoordinator
+        if let ownerItemId, let webBubbleCoordinator {
+            webBubbleCoordinator.register(webView: webView, ownerItemId: ownerItemId)
+        }
         self.minHeight = desiredMinHeight
         self.maxHeight = desiredMaxHeight
         configuredURLKey = desiredKey
@@ -427,6 +450,9 @@ final class LinkPreviewView: UIView, WKNavigationDelegate, WKUIDelegate, UIGestu
     func prepareForReuse() {
         logCancel(.reuse)
         cancelLoad()
+        webBubbleCoordinator?.unregister(webView: webView)
+        webBubbleCoordinator = nil
+        ownerItemId = nil
         currentURL = nil
         configuredURLKey = nil
         currentHost = nil
@@ -1044,6 +1070,26 @@ final class LinkPreviewView: UIView, WKNavigationDelegate, WKUIDelegate, UIGestu
                  type: WKMediaCaptureType,
                  decisionHandler: @escaping (WKPermissionDecision) -> Void) {
         decisionHandler(.deny)
+    }
+
+    func webView(_ webView: WKWebView,
+                 createWebViewWith configuration: WKWebViewConfiguration,
+                 for navigationAction: WKNavigationAction,
+                 windowFeatures: WKWindowFeatures) -> WKWebView? {
+        guard let webBubbleCoordinator else { return nil }
+        if let ownerItemId {
+            webBubbleCoordinator.register(webView: webView, ownerItemId: ownerItemId)
+        }
+        return webBubbleCoordinator.createPopupWebView(
+            originatingWebView: webView,
+            configuration: configuration,
+            navigationAction: navigationAction,
+            windowFeatures: windowFeatures
+        )
+    }
+
+    func webViewDidClose(_ webView: WKWebView) {
+        webBubbleCoordinator?.dismissBubble(for: webView)
     }
 
     // MARK: - UIGestureRecognizerDelegate

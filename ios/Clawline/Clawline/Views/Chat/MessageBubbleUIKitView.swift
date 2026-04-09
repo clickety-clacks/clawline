@@ -95,6 +95,7 @@ final class MessageBubbleUIKitContainerView: UIView {
                    useContinuousCorners: Bool = true,
                    isDark: Bool? = nil,
                    terminalConnectionPool: TerminalSessionConnectionPool? = nil,
+                   webBubbleCoordinator: (any WebBubbleCoordinating)? = nil,
                    salientHighlightService: (any SalientHighlightServicing)? = nil,
                    onRequestExpand: (() -> Void)?,
                    onRequestLayout: ((String) -> Void)?,
@@ -118,6 +119,7 @@ final class MessageBubbleUIKitContainerView: UIView {
             useContinuousCorners: useContinuousCorners,
             isDark: isDark,
             terminalConnectionPool: terminalConnectionPool,
+            webBubbleCoordinator: webBubbleCoordinator,
             onRequestExpand: onRequestExpand,
             onRequestLayout: onRequestLayout,
             onInteractiveCallback: onInteractiveCallback,
@@ -604,6 +606,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
                    useContinuousCorners: Bool = true,
                    isDark: Bool? = nil,
                    terminalConnectionPool: TerminalSessionConnectionPool? = nil,
+                   webBubbleCoordinator: (any WebBubbleCoordinating)? = nil,
                    onRequestExpand: (() -> Void)?,
                    onRequestLayout: ((String) -> Void)?,
                    onInteractiveCallback: ((String, String, JSONValue?) -> Void)?,
@@ -846,24 +849,35 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
                             maxHeight: previewMaxHeight,
                             minHeight: bubbleSizingV2.linkPreviewMinHeight,
                             cacheKey: cacheKey,
-                            initialHeight: bubbleSizingV2.linkPreviewEstimatedHeight
+                            initialHeight: bubbleSizingV2.linkPreviewEstimatedHeight,
+                            ownerItemId: message.id,
+                            webBubbleCoordinator: webBubbleCoordinator
                         )
                     } else if let directMediaInitialHeight {
                         previewView.configure(
                             url: linkPreviewURL,
                             maxHeight: previewMaxHeight,
                             minHeight: directMediaInitialHeight,
-                            initialHeight: directMediaInitialHeight
+                            initialHeight: directMediaInitialHeight,
+                            ownerItemId: message.id,
+                            webBubbleCoordinator: webBubbleCoordinator
                         )
                     } else if isSingleLinkPreview {
                         previewView.configure(
                             url: linkPreviewURL,
                             maxHeight: previewMaxHeight,
                             minHeight: previewMaxHeight,
-                            initialHeight: previewMaxHeight
+                            initialHeight: previewMaxHeight,
+                            ownerItemId: message.id,
+                            webBubbleCoordinator: webBubbleCoordinator
                         )
                     } else {
-                        previewView.configure(url: linkPreviewURL, maxHeight: previewMaxHeight)
+                        previewView.configure(
+                            url: linkPreviewURL,
+                            maxHeight: previewMaxHeight,
+                            ownerItemId: message.id,
+                            webBubbleCoordinator: webBubbleCoordinator
+                        )
                     }
                     previewView.setBubbleChrome(baseColor: previewChromeBase, isDark: palette.isDark)
                     previewView.onHeightChange = { [weak self] in
@@ -909,24 +923,35 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
                     maxHeight: previewMaxHeight,
                     minHeight: bubbleSizingV2.linkPreviewMinHeight,
                     cacheKey: cacheKey,
-                    initialHeight: bubbleSizingV2.linkPreviewEstimatedHeight
+                    initialHeight: bubbleSizingV2.linkPreviewEstimatedHeight,
+                    ownerItemId: message.id,
+                    webBubbleCoordinator: webBubbleCoordinator
                 )
             } else if let directMediaInitialHeight {
                 previewView.configure(
                     url: linkPreviewURL,
                     maxHeight: previewMaxHeight,
                     minHeight: directMediaInitialHeight,
-                    initialHeight: directMediaInitialHeight
+                    initialHeight: directMediaInitialHeight,
+                    ownerItemId: message.id,
+                    webBubbleCoordinator: webBubbleCoordinator
                 )
             } else if isSingleLinkPreview {
                 previewView.configure(
                     url: linkPreviewURL,
                     maxHeight: previewMaxHeight,
                     minHeight: previewMaxHeight,
-                    initialHeight: previewMaxHeight
+                    initialHeight: previewMaxHeight,
+                    ownerItemId: message.id,
+                    webBubbleCoordinator: webBubbleCoordinator
                 )
             } else {
-                previewView.configure(url: linkPreviewURL, maxHeight: previewMaxHeight)
+                previewView.configure(
+                    url: linkPreviewURL,
+                    maxHeight: previewMaxHeight,
+                    ownerItemId: message.id,
+                    webBubbleCoordinator: webBubbleCoordinator
+                )
             }
             previewView.setBubbleChrome(baseColor: previewChromeBase, isDark: palette.isDark)
             previewView.onHeightChange = { [weak self] in
@@ -2372,6 +2397,7 @@ final class MessageBubbleUIKitCell: UICollectionViewCell {
                    showsHeader: Bool = true,
                    isDark: Bool? = nil,
                    terminalConnectionPool: TerminalSessionConnectionPool? = nil,
+                   webBubbleCoordinator: (any WebBubbleCoordinating)? = nil,
                    salientHighlightService: (any SalientHighlightServicing)? = nil,
                    onRequestExpand: (() -> Void)?,
                    onRequestLayout: ((String) -> Void)?,
@@ -2396,6 +2422,7 @@ final class MessageBubbleUIKitCell: UICollectionViewCell {
             showsHeader: showsHeader,
             isDark: isDark,
             terminalConnectionPool: terminalConnectionPool,
+            webBubbleCoordinator: webBubbleCoordinator,
             salientHighlightService: salientHighlightService,
             onRequestExpand: onRequestExpand,
             onRequestLayout: guardedRequestLayout,

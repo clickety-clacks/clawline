@@ -1,6 +1,9 @@
 import { useMemo, useState } from "react";
 import { Plus, Search } from "lucide-react";
-import type { StreamRecord } from "../../runtime/chat/chatDomainStore";
+import type {
+  StreamDotState,
+  StreamRecord
+} from "../../runtime/chat/chatDomainStore";
 import type { TransportPhase } from "../../runtime/transport/transportMachine";
 import { getSessionProvisioningState } from "../streams/provisioning";
 
@@ -32,9 +35,9 @@ export function SessionListSheet({
   onOpenStreamManager,
   onSelectSession,
   provisionedSessionKeys,
+  streamDotStateBySessionKey,
   streams,
-  transportPhase,
-  unreadBySessionKey
+  transportPhase
 }: {
   activeSessionKey?: string;
   isOpen: boolean;
@@ -42,9 +45,9 @@ export function SessionListSheet({
   onOpenStreamManager: () => void;
   onSelectSession: (sessionKey: string) => void;
   provisionedSessionKeys: string[];
+  streamDotStateBySessionKey: Record<string, StreamDotState>;
   streams: StreamRecord[];
   transportPhase: TransportPhase;
-  unreadBySessionKey: Record<string, number>;
 }) {
   const [filterQuery, setFilterQuery] = useState("");
   const filteredStreams = useMemo(() => {
@@ -81,9 +84,9 @@ export function SessionListSheet({
           ) : (
             filteredStreams.map((stream) => {
               const displayName = resolveStreamDisplayName(stream);
-              const unreadCount = unreadBySessionKey[stream.sessionKey] ?? 0;
-              const hasUnread = unreadCount > 0;
               const isActive = stream.sessionKey === activeSessionKey;
+              const dotState =
+                streamDotStateBySessionKey[stream.sessionKey] ?? "inactive";
               const provisioningState = getSessionProvisioningState({
                 hasStream: true,
                 provisionedSessionKeys,
@@ -112,25 +115,17 @@ export function SessionListSheet({
                       <span
                         aria-hidden="true"
                         className={
-                          hasUnread
-                            ? isActive
-                              ? "session-sheet-card-indicator session-sheet-card-indicator--active"
-                              : "session-sheet-card-indicator session-sheet-card-indicator--unread"
-                            : isActive
-                              ? "session-sheet-card-indicator session-sheet-card-indicator--active"
-                              : "session-sheet-card-indicator"
+                          isActive
+                            ? "session-sheet-card-indicator session-sheet-card-indicator--active"
+                            : dotState === "unread"
+                              ? "session-sheet-card-indicator session-sheet-card-indicator--unread"
+                              : dotState === "userTail"
+                                ? "session-sheet-card-indicator session-sheet-card-indicator--user-tail"
+                                : "session-sheet-card-indicator"
                         }
                       />
                       <span className="session-sheet-card-title">{displayName}</span>
                     </span>
-                    {hasUnread ? (
-                      <span
-                        aria-label={`${unreadCount} unread messages`}
-                        className="stream-unread-badge"
-                      >
-                        {unreadCount}
-                      </span>
-                    ) : null}
                   </span>
                 </button>
               );

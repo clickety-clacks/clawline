@@ -1638,14 +1638,12 @@ struct ChatView: View {
                     "dots_tap_received",
                     sessionKey: viewModel.uiSelectedSessionKey,
                     isPresented: isStreamManagerPopoverPresented,
-                    note: usesDirectStreamManagerPopoverAnchor
-                        ? "page dots action entered directTapGesture+directAnchor"
-                        : "page dots action entered button+touchAnchor"
+                    note: "page dots action entered directTapGesture"
                 )
             #endif
                 presentStreamManagerPopoverFromDotsTap(sessionKey: viewModel.uiSelectedSessionKey)
             },
-            activationBehavior: usesDirectStreamManagerPopoverAnchor ? .directTapGesture : .button
+            activationBehavior: .directTapGesture
         )
         let pageDotsPopoverAnchor = pageDotsControl
             .hidden()

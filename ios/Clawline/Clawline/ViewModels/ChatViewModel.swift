@@ -2408,6 +2408,16 @@ final class ChatViewModel: ChatViewModelHosting {
                     "stream_snapshot_debug sessionKey=\(stream.sessionKey, privacy: .public) adopted=\(stream.adopted, privacy: .public)"
                 )
             }
+            if let heimdalStream = streams.first(where: { shouldLogHeimdalDotDiagnostics(for: $0.sessionKey) }) {
+                emitHeimdalDotDiagnostic(
+                    "[HEIMDAL] reason=serviceEvent.streamSnapshot.present sessionKey=\(heimdalStream.sessionKey) displayName=\(heimdalStream.displayName) adopted=\(heimdalStream.adopted) kind=\(heimdalStream.kind)"
+                )
+            } else if streamsBySessionKey.keys.contains(where: shouldLogHeimdalDotDiagnostics)
+                        || restoredAdoptedStreamsBySessionKey.keys.contains(where: shouldLogHeimdalDotDiagnostics) {
+                emitHeimdalDotDiagnostic(
+                    "[HEIMDAL] reason=serviceEvent.streamSnapshot.omitted engineActive=\(engineActiveSessionKey) uiSelected=\(uiSelectedSessionKey) cachedKeys=\(streamsBySessionKey.keys.sorted()) restoredKeys=\(restoredAdoptedStreamsBySessionKey.keys.sorted())"
+                )
+            }
             if accessibleSessionKeyOrder.isEmpty {
                 replaceAccessibleSessionKeys(with: streams.map(\.sessionKey))
             } else {
@@ -2454,6 +2464,12 @@ final class ChatViewModel: ChatViewModelHosting {
             supportsSessionProvisioning = true
             hasReceivedSessionProvisioning = true
             hasReceivedExplicitSessionInfo = true
+            let heimdalSessionKeys = info.sessionKeys.filter { shouldLogHeimdalDotDiagnostics(for: $0) }
+            if !heimdalSessionKeys.isEmpty || restoredAdoptedStreamsBySessionKey.keys.contains(where: shouldLogHeimdalDotDiagnostics) {
+                emitHeimdalDotDiagnostic(
+                    "[HEIMDAL] reason=serviceEvent.sessionInfo sessionKeys=\(info.sessionKeys) heimdalKeys=\(heimdalSessionKeys) restoredKeys=\(restoredAdoptedStreamsBySessionKey.keys.sorted())"
+                )
+            }
             replaceAccessibleSessionKeys(with: info.sessionKeys)
             restoreProvisionedAdoptedStreamsIfNeeded(sessionKeys: info.sessionKeys)
             refreshTrackableSessions(reason: "sessionInfo")
@@ -2462,6 +2478,11 @@ final class ChatViewModel: ChatViewModelHosting {
     }
 
     private func sendProvisioningState(for sessionKey: String) -> SendProvisioningState {
+        if shouldLogHeimdalDotDiagnostics(for: sessionKey) {
+            emitHeimdalDotDiagnostic(
+                "[HEIMDAL] reason=sendProvisioningState.evaluate sessionKey=\(sessionKey) hasReceivedSessionProvisioning=\(hasReceivedSessionProvisioning) supportsSessionProvisioning=\(supportsSessionProvisioning) hasResolvedProvisioningCapability=\(hasResolvedProvisioningCapability) locallySendable=\(isLocallySendableSessionKey(sessionKey)) accessibleKeys=\(accessibleSessionKeyOrder)"
+            )
+        }
         if hasReceivedSessionProvisioning {
             return isLocallySendableSessionKey(sessionKey) ? .ready : .unavailable
         }
@@ -3299,6 +3320,11 @@ final class ChatViewModel: ChatViewModelHosting {
     private func restoreProvisionedAdoptedStreamsIfNeeded(sessionKeys: [String]) {
         let normalizedKeys = normalizeSessionKeyList(sessionKeys)
         guard !normalizedKeys.isEmpty else { return }
+        for sessionKey in normalizedKeys where shouldLogHeimdalDotDiagnostics(for: sessionKey) || restoredAdoptedStreamsBySessionKey[sessionKey] != nil && shouldLogHeimdalDotDiagnostics(for: sessionKey) {
+            emitHeimdalDotDiagnostic(
+                "[HEIMDAL] reason=restoreProvisionedAdoptedStreamsIfNeeded.evaluate sessionKey=\(sessionKey) streamExists=\(streamsBySessionKey[sessionKey] != nil) restoredExists=\(restoredAdoptedStreamsBySessionKey[sessionKey] != nil)"
+            )
+        }
         let adoptedKeysToRestore = normalizedKeys.filter {
             streamsBySessionKey[$0] == nil && restoredAdoptedStreamsBySessionKey[$0] != nil
         }
@@ -3596,7 +3622,7 @@ final class ChatViewModel: ChatViewModelHosting {
         for (sessionKey, lastReadMessageId) in normalizedSnapshot {
             if shouldLogHeimdalDotDiagnostics(for: sessionKey) {
                 emitHeimdalDotDiagnostic(
-                    "[RDOT] reason=applyStreamReadStateSnapshot.entry sessionKey=\(sessionKey) lastRead=\(lastReadMessageId)"
+                    "[RDOT] reason=applyStreamReadStateSnapshot.entry sessionKey=\(sessionKey) lastRead=\(lastReadMessageId) streamExists=\(streamsBySessionKey[sessionKey] != nil)"
                 )
             }
             lastReadMessageIdBySession[sessionKey] = lastReadMessageId
@@ -3612,7 +3638,7 @@ final class ChatViewModel: ChatViewModelHosting {
         let current = lastReadMessageIdBySession[resolvedSessionKey]
         if shouldLogHeimdalDotDiagnostics(for: resolvedSessionKey) {
             emitHeimdalDotDiagnostic(
-                "[RDOT] reason=applyStreamReadStateUpdate sessionKey=\(resolvedSessionKey) current=\(current ?? "nil") incoming=\(lastReadMessageId)"
+                "[RDOT] reason=applyStreamReadStateUpdate sessionKey=\(resolvedSessionKey) current=\(current ?? "nil") incoming=\(lastReadMessageId) streamExists=\(streamsBySessionKey[resolvedSessionKey] != nil)"
             )
         }
         if current == lastReadMessageId { return }
@@ -3668,7 +3694,7 @@ final class ChatViewModel: ChatViewModelHosting {
         let shouldTrace = shouldLogHeimdalDotDiagnostics(for: resolvedSessionKey)
         if shouldTrace {
             emitHeimdalDotDiagnostic(
-                "[RDOT] reason=publishReadStateIfPossible sessionKey=\(resolvedSessionKey) lastRead=\(lastReadMessageId) eligible=\(isPublishEligible)"
+                "[RDOT] reason=publishReadStateIfPossible sessionKey=\(resolvedSessionKey) lastRead=\(lastReadMessageId) eligible=\(isPublishEligible) streamExists=\(streamsBySessionKey[resolvedSessionKey] != nil) adopted=\(String(describing: streamsBySessionKey[resolvedSessionKey]?.adopted)) locallySendable=\(isLocallySendableSessionKey(resolvedSessionKey))"
             )
         }
         guard isPublishEligible else {

@@ -22,9 +22,48 @@ private func emitStreamPopupConsoleEvent(
     note: String? = nil
 ) {
     let timestamp = ISO8601DateFormatter().string(from: Date())
-    print(
+    let line =
         "[POPUP-CONSOLE] ts=\(timestamp) event=\(event) sessionKey=\(sessionKey ?? "nil") isPresented=\(isPresented) note=\(note ?? "-")"
-    )
+    print(line)
+    appendStreamPopupDeviceProbeLine(line)
+}
+
+private func appendStreamPopupDeviceProbeLine(_ line: String) {
+    guard let cachesDirectory = FileManager.default.urls(
+        for: .cachesDirectory,
+        in: .userDomainMask
+    ).first else {
+        return
+    }
+    let diagnosticsDirectory = cachesDirectory.appendingPathComponent("PopupProbe", isDirectory: true)
+    let logURL = diagnosticsDirectory.appendingPathComponent("popup-console.log")
+    let maxRetainedBytes = 64 * 1024
+    let entry = line + "\n"
+    let entryData = Data(entry.utf8)
+
+    do {
+        try FileManager.default.createDirectory(
+            at: diagnosticsDirectory,
+            withIntermediateDirectories: true
+        )
+
+        if let attributes = try? FileManager.default.attributesOfItem(atPath: logURL.path),
+           let fileSize = attributes[.size] as? NSNumber,
+           fileSize.intValue > maxRetainedBytes {
+            try? FileManager.default.removeItem(at: logURL)
+        }
+
+        if FileManager.default.fileExists(atPath: logURL.path) {
+            let fileHandle = try FileHandle(forWritingTo: logURL)
+            defer { try? fileHandle.close() }
+            try fileHandle.seekToEnd()
+            try fileHandle.write(contentsOf: entryData)
+        } else {
+            try entryData.write(to: logURL, options: .atomic)
+        }
+    } catch {
+        print("[POPUP-CONSOLE] failed to persist popup probe log: \(error.localizedDescription)")
+    }
 }
 #endif
 

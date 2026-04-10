@@ -3625,6 +3625,9 @@ final class ChatViewModel: ChatViewModelHosting {
                     "[RDOT] reason=applyStreamReadStateSnapshot.entry sessionKey=\(sessionKey) lastRead=\(lastReadMessageId) streamExists=\(streamsBySessionKey[sessionKey] != nil)"
                 )
             }
+            guard shouldAcceptIncomingReadState(lastReadMessageId, for: sessionKey) else {
+                continue
+            }
             lastReadMessageIdBySession[sessionKey] = lastReadMessageId
             persistLastReadMessageId(lastReadMessageId, for: sessionKey)
             recomputeStreamDotState(for: sessionKey)
@@ -3642,10 +3645,30 @@ final class ChatViewModel: ChatViewModelHosting {
             )
         }
         if current == lastReadMessageId { return }
+        guard shouldAcceptIncomingReadState(lastReadMessageId, for: resolvedSessionKey) else {
+            return
+        }
         lastReadMessageIdBySession[resolvedSessionKey] = lastReadMessageId
         persistLastReadMessageId(lastReadMessageId, for: resolvedSessionKey)
         recomputeStreamDotState(for: resolvedSessionKey)
         logHeimdalDotState(for: resolvedSessionKey, reason: "applyStreamReadStateUpdate.afterRecompute")
+    }
+
+    private func shouldAcceptIncomingReadState(_ incomingLastReadMessageId: String, for sessionKey: String) -> Bool {
+        guard let currentLastReadMessageId = lastReadMessageIdBySession[sessionKey] else {
+            return true
+        }
+        let transcriptTailMessageId = lastServerMessageId(from: sessionMessages[sessionKey] ?? [])
+        let providerTailMessageId = streamTailStateBySession[sessionKey]?.lastMessageId
+        let authoritativeTailMessageId = transcriptTailMessageId ?? providerTailMessageId
+        let isStaleRegression = authoritativeTailMessageId == currentLastReadMessageId
+            && incomingLastReadMessageId != currentLastReadMessageId
+        if isStaleRegression, shouldLogHeimdalDotDiagnostics(for: sessionKey) {
+            emitHeimdalDotDiagnostic(
+                "[RDOT] reason=readStateRegressionIgnored sessionKey=\(sessionKey) current=\(currentLastReadMessageId) incoming=\(incomingLastReadMessageId) transcriptTail=\(transcriptTailMessageId ?? "nil") providerTail=\(providerTailMessageId ?? "nil")"
+            )
+        }
+        return !isStaleRegression
     }
 
     private func applyStreamTailStateSnapshot(_ snapshot: [String: StreamTailState]) {

@@ -2067,6 +2067,68 @@ struct ChatViewModelTests {
         #expect(viewModel.streamDotState(for: customKey) == .inactive)
     }
 
+    @Test("Stale incoming read-state does not regress a locally read stream away from its current tail")
+    @MainActor
+    func staleIncomingReadStateDoesNotRegressLocallyReadTail() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let customKey = "agent:main:clawline:user:s_read_regression"
+        chatService.streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: customKey, displayName: "Heimdal", kind: "custom", orderIndex: 1, isBuiltIn: false),
+        ]
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
+        try await Task.sleep(for: .milliseconds(30))
+
+        chatService.emitServiceEvent(
+            .streamTailStateUpdated(
+                sessionKey: customKey,
+                tailState: StreamTailState(lastMessageId: "s_server_tail", lastMessageRole: .assistant)
+            )
+        )
+        chatService.emitServiceEvent(.streamReadStateUpdated(sessionKey: customKey, lastReadMessageId: "s_old_read"))
+        for _ in 0..<50 {
+            if viewModel.streamDotState(for: customKey) == .unread { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(viewModel.streamDotState(for: customKey) == .unread)
+
+        viewModel.setActiveSessionKeyForTesting(customKey)
+
+        for _ in 0..<50 {
+            if viewModel.lastReadMessageIdBySession[customKey] == "s_server_tail" { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(viewModel.lastReadMessageIdBySession[customKey] == "s_server_tail")
+        #expect(viewModel.streamDotState(for: customKey) == .inactive)
+
+        chatService.emitServiceEvent(.streamReadStateUpdated(sessionKey: customKey, lastReadMessageId: "s_old_read"))
+        try await Task.sleep(for: .milliseconds(30))
+
+        #expect(viewModel.lastReadMessageIdBySession[customKey] == "s_server_tail")
+        #expect(viewModel.streamDotState(for: customKey) == .inactive)
+
+        chatService.emitServiceEvent(.streamReadStateSnapshot([customKey: "s_old_read"]))
+        try await Task.sleep(for: .milliseconds(30))
+
+        #expect(viewModel.lastReadMessageIdBySession[customKey] == "s_server_tail")
+        #expect(viewModel.streamDotState(for: customKey) == .inactive)
+    }
+
     @Test("Adopted non-main general stream publishes non-client tail IDs on visit")
     @MainActor
     func adoptedNonMainGeneralStreamPublishesNonClientTailIDOnVisit() async throws {

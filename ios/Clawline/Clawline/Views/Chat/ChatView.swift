@@ -129,8 +129,12 @@ struct ChatView: View {
     @State private var isStreamManagerPopoverPresented = false
     @State private var hasStreamManagerPopoverBecomeVisible = false
     @State private var streamManagerPopoverOpenRequestID = 0
+    @State private var streamManagerPopoverVisibilityProbeTask: Task<Void, Never>?
     @State private var streamPopupShouldAutoFocusSearch = false
     @State private var streamPopupSearchFocusRequestID = 0
+    @State private var isStreamManagerPopoverAnchorMounted = false
+    @State private var streamManagerPopoverAnchorWidth: CGFloat = 0
+    @State private var streamManagerPopoverAnchorSessionCount = 0
 #if DEBUG
     @State private var hasEmittedStreamPopupStartupSentinel = false
 #endif
@@ -617,7 +621,7 @@ struct ChatView: View {
                 "state_changed",
                 sessionKey: viewModel.uiSelectedSessionKey,
                 isPresented: isPresented,
-                note: "popover state binding changed"
+                note: streamManagerPopoverDebugNote(prefix: "popover state binding changed")
             )
             if !isPresented {
                 emitStreamPopupConsoleEvent(
@@ -629,6 +633,8 @@ struct ChatView: View {
             }
 #endif
             if !isPresented {
+                streamManagerPopoverVisibilityProbeTask?.cancel()
+                streamManagerPopoverVisibilityProbeTask = nil
                 streamPopupShouldAutoFocusSearch = false
             }
         }
@@ -1711,6 +1717,9 @@ struct ChatView: View {
             }
 #if DEBUG
             .onAppear {
+                isStreamManagerPopoverAnchorMounted = true
+                streamManagerPopoverAnchorWidth = pageDotsAnchorWidth
+                streamManagerPopoverAnchorSessionCount = effectiveSessionKeys.count
                 emitStreamPopupConsoleEvent(
                     "anchor_overlay_appear",
                     sessionKey: viewModel.uiSelectedSessionKey,
@@ -1719,6 +1728,7 @@ struct ChatView: View {
                 )
             }
             .onDisappear {
+                isStreamManagerPopoverAnchorMounted = false
                 emitStreamPopupConsoleEvent(
                     "anchor_overlay_disappear",
                     sessionKey: viewModel.uiSelectedSessionKey,
@@ -1727,6 +1737,7 @@ struct ChatView: View {
                 )
             }
             .onChange(of: effectiveSessionKeys.count) { _, newCount in
+                streamManagerPopoverAnchorSessionCount = newCount
                 emitStreamPopupConsoleEvent(
                     "anchor_overlay_session_count_changed",
                     sessionKey: viewModel.uiSelectedSessionKey,
@@ -1735,6 +1746,7 @@ struct ChatView: View {
                 )
             }
             .onChange(of: pageDotsAnchorWidth) { _, newWidth in
+                streamManagerPopoverAnchorWidth = newWidth
                 emitStreamPopupConsoleEvent(
                     "anchor_overlay_width_changed",
                     sessionKey: viewModel.uiSelectedSessionKey,
@@ -1819,6 +1831,8 @@ struct ChatView: View {
     private func presentStreamManagerPopoverFromDotsTap(sessionKey: String?) {
         streamManagerPopoverOpenRequestID &+= 1
         let requestID = streamManagerPopoverOpenRequestID
+        streamManagerPopoverVisibilityProbeTask?.cancel()
+        streamManagerPopoverVisibilityProbeTask = nil
         if isStreamManagerPopoverPresented && !hasStreamManagerPopoverBecomeVisible {
             isStreamManagerPopoverPresented = false
 #if DEBUG
@@ -1834,12 +1848,15 @@ struct ChatView: View {
         let presentPopover = {
             guard streamManagerPopoverOpenRequestID == requestID else { return }
             isStreamManagerPopoverPresented = true
+            scheduleStreamManagerPopoverVisibilityProbe(sessionKey: sessionKey, requestID: requestID)
 #if DEBUG
             emitStreamPopupConsoleEvent(
                 "dots_tap_set_true",
                 sessionKey: sessionKey,
                 isPresented: isStreamManagerPopoverPresented,
-                note: "page dots button set popover true on next main-queue turn"
+                note: streamManagerPopoverDebugNote(
+                    prefix: "page dots button set popover true on next main-queue turn"
+                )
             )
 #endif
         }
@@ -1902,6 +1919,8 @@ struct ChatView: View {
         .presentationBackground(.clear)
         .onAppear {
             hasStreamManagerPopoverBecomeVisible = true
+            streamManagerPopoverVisibilityProbeTask?.cancel()
+            streamManagerPopoverVisibilityProbeTask = nil
 #if DEBUG
             emitStreamPopupConsoleEvent(
                 "presentation_path_entered",
@@ -1943,6 +1962,35 @@ struct ChatView: View {
             return
         }
         isStreamManagerPopoverPresented = false
+    }
+
+    private func streamManagerPopoverDebugNote(prefix: String) -> String {
+        let anchorWidth = Int(streamManagerPopoverAnchorWidth.rounded())
+        return "\(prefix) anchorMounted=\(isStreamManagerPopoverAnchorMounted) anchorWidth=\(anchorWidth) sessionCount=\(streamManagerPopoverAnchorSessionCount) visible=\(hasStreamManagerPopoverBecomeVisible)"
+    }
+
+    private func scheduleStreamManagerPopoverVisibilityProbe(sessionKey: String?, requestID: Int) {
+        streamManagerPopoverVisibilityProbeTask?.cancel()
+        streamManagerPopoverVisibilityProbeTask = Task { @MainActor in
+            do {
+                try await Task.sleep(for: .milliseconds(400))
+            } catch {
+                return
+            }
+            guard !Task.isCancelled else { return }
+            guard streamManagerPopoverOpenRequestID == requestID else { return }
+            guard isStreamManagerPopoverPresented, !hasStreamManagerPopoverBecomeVisible else { return }
+#if DEBUG
+            emitStreamPopupConsoleEvent(
+                "open_not_visible_after_delay",
+                sessionKey: sessionKey,
+                isPresented: isStreamManagerPopoverPresented,
+                note: streamManagerPopoverDebugNote(
+                    prefix: "popover still not visible 400ms after dots tap"
+                )
+            )
+#endif
+        }
     }
 
     private var supportsKeyboardNavigationShortcuts: Bool {
@@ -2903,11 +2951,13 @@ private final class KeyboardPinnedContainerView<Content: View>: UIView, Keyboard
         pageDotsBottomToBarTop?.constant = -gap
 #if DEBUG
         let hostBounds = pageDotsHost?.view.bounds ?? .zero
+        let hostFrame = pageDotsHost?.view.frame ?? .zero
+        let windowAttached = pageDotsHost?.view.window != nil
         emitStreamPopupConsoleEvent(
             "pinned_page_dots_host_updated",
             sessionKey: nil,
             isPresented: false,
-            note: "hasView=\(view != nil) hidden=\(view == nil) gap=\(Int(gap.rounded())) bounds=\(Int(hostBounds.width.rounded()))x\(Int(hostBounds.height.rounded()))"
+            note: "hasView=\(view != nil) hidden=\(view == nil) windowAttached=\(windowAttached) gap=\(Int(gap.rounded())) bounds=\(Int(hostBounds.width.rounded()))x\(Int(hostBounds.height.rounded())) frame=\(Int(hostFrame.origin.x.rounded())),\(Int(hostFrame.origin.y.rounded())),\(Int(hostFrame.width.rounded()))x\(Int(hostFrame.height.rounded()))"
         )
 #endif
 #endif

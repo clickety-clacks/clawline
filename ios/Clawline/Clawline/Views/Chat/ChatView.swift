@@ -146,6 +146,13 @@ private final class T099OnDisappearProbeStore {
 // ═══════════════════════════════════════════════════════════════════════════════════════════
 
 struct ChatView: View {
+    private enum StreamManagerPopoverInteractionPhase: String {
+        case idle
+        case opening
+        case open
+        case closing
+    }
+
     @Bindable var viewModel: ChatViewModel
     let toastManager: ToastManager
     @Environment(\.scenePhase) private var scenePhase
@@ -167,7 +174,7 @@ struct ChatView: View {
     @State private var activeSheet: ChatSheet?
     @State private var isStreamManagerPopoverPresented = false
     @State private var hasStreamManagerPopoverBecomeVisible = false
-    @State private var streamManagerPopoverVisibleSince: Date?
+    @State private var streamManagerPopoverInteractionPhase: StreamManagerPopoverInteractionPhase = .idle
     @State private var streamManagerPopoverOpenRequestID = 0
     @State private var streamManagerPopoverVisibilityProbeTask: Task<Void, Never>?
     @State private var streamPopupShouldAutoFocusSearch = false
@@ -1704,6 +1711,7 @@ struct ChatView: View {
             activationBehavior: .directTapGesture
         )
         return pageDotsControl
+        .allowsHitTesting(streamManagerPopoverIndicatorIsInteractive)
         .sheet(
             isPresented: $isTrackPickerPresented,
             onDismiss: {
@@ -1852,6 +1860,17 @@ struct ChatView: View {
                     isStreamManagerPopoverPresented = true
                     return
                 }
+                guard streamManagerPopoverInteractionPhase != .opening else {
+#if DEBUG
+                    emitStreamPopupConsoleEvent(
+                        "dismiss_blocked_while_opening",
+                        sessionKey: viewModel.uiSelectedSessionKey,
+                        isPresented: isStreamManagerPopoverPresented,
+                        note: "ignored downstream dismiss/reset while popup opening transition is active"
+                    )
+#endif
+                    return
+                }
                 guard hasStreamManagerPopoverBecomeVisible else {
 #if DEBUG
                     emitStreamPopupConsoleEvent(
@@ -1863,39 +1882,29 @@ struct ChatView: View {
 #endif
                     return
                 }
-                if let visibleSince = streamManagerPopoverVisibleSince,
-                   Date().timeIntervalSince(visibleSince) < streamManagerPopoverDismissStabilizationInterval {
-#if DEBUG
-                    emitStreamPopupConsoleEvent(
-                        "dismiss_blocked_during_stabilization",
-                        sessionKey: viewModel.uiSelectedSessionKey,
-                        isPresented: isStreamManagerPopoverPresented,
-                        note: "ignored downstream dismiss/reset during post-appear stabilization window"
-                    )
-#endif
-                    return
-                }
+                streamManagerPopoverInteractionPhase = .closing
                 isStreamManagerPopoverPresented = false
             }
         )
     }
 
     private func presentStreamManagerPopoverFromDotsTap(sessionKey: String?) {
+        guard streamManagerPopoverInteractionPhase == .idle else {
+#if DEBUG
+            emitStreamPopupConsoleEvent(
+                "dots_tap_ignored_nonidle_phase",
+                sessionKey: sessionKey,
+                isPresented: isStreamManagerPopoverPresented,
+                note: "phase=\(streamManagerPopoverInteractionPhase.rawValue)"
+            )
+#endif
+            return
+        }
         streamManagerPopoverOpenRequestID &+= 1
         let requestID = streamManagerPopoverOpenRequestID
         streamManagerPopoverVisibilityProbeTask?.cancel()
         streamManagerPopoverVisibilityProbeTask = nil
-        if isStreamManagerPopoverPresented && !hasStreamManagerPopoverBecomeVisible {
-            isStreamManagerPopoverPresented = false
-#if DEBUG
-            emitStreamPopupConsoleEvent(
-                "stale_nonvisible_open_reset",
-                sessionKey: sessionKey,
-                isPresented: isStreamManagerPopoverPresented,
-                note: "cleared stuck true state before retrying dots popup open"
-            )
-#endif
-        }
+        streamManagerPopoverInteractionPhase = .opening
         hasStreamManagerPopoverBecomeVisible = false
         let presentPopover = {
             guard streamManagerPopoverOpenRequestID == requestID else { return }
@@ -1971,7 +1980,7 @@ struct ChatView: View {
         .presentationBackground(.clear)
         .onAppear {
             hasStreamManagerPopoverBecomeVisible = true
-            streamManagerPopoverVisibleSince = Date()
+            streamManagerPopoverInteractionPhase = .open
             streamManagerPopoverVisibilityProbeTask?.cancel()
             streamManagerPopoverVisibilityProbeTask = nil
 #if DEBUG
@@ -1991,7 +2000,7 @@ struct ChatView: View {
         }
         .onDisappear {
             hasStreamManagerPopoverBecomeVisible = false
-            streamManagerPopoverVisibleSince = nil
+            streamManagerPopoverInteractionPhase = .idle
 #if DEBUG
             emitStreamPopupConsoleEvent(
                 "popover_content_disappear",
@@ -2015,13 +2024,13 @@ struct ChatView: View {
 #endif
             return
         }
-        streamManagerPopoverVisibleSince = nil
+        streamManagerPopoverInteractionPhase = .closing
         isStreamManagerPopoverPresented = false
     }
 
     private func streamManagerPopoverDebugNote(prefix: String) -> String {
         let anchorWidth = Int(streamManagerPopoverAnchorWidth.rounded())
-        return "\(prefix) anchorMounted=\(isStreamManagerPopoverAnchorMounted) anchorWidth=\(anchorWidth) sessionCount=\(streamManagerPopoverAnchorSessionCount) visible=\(hasStreamManagerPopoverBecomeVisible)"
+        return "\(prefix) anchorMounted=\(isStreamManagerPopoverAnchorMounted) anchorWidth=\(anchorWidth) sessionCount=\(streamManagerPopoverAnchorSessionCount) visible=\(hasStreamManagerPopoverBecomeVisible) phase=\(streamManagerPopoverInteractionPhase.rawValue)"
     }
 
     private func scheduleStreamManagerPopoverVisibilityProbe(sessionKey: String?, requestID: Int) {
@@ -2045,11 +2054,13 @@ struct ChatView: View {
                 )
             )
 #endif
+            streamManagerPopoverInteractionPhase = .idle
+            isStreamManagerPopoverPresented = false
         }
     }
 
-    private var streamManagerPopoverDismissStabilizationInterval: TimeInterval {
-        1.5
+    private var streamManagerPopoverIndicatorIsInteractive: Bool {
+        streamManagerPopoverInteractionPhase == .idle
     }
 
     private var supportsKeyboardNavigationShortcuts: Bool {

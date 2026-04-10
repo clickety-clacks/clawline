@@ -637,6 +637,11 @@ final class DictationSession {
     }
 
     func toggleWaveformTapAction() {
+        if state == .error {
+            errorMessage = nil
+            state = .idleSurfaceClosed
+            return
+        }
         if state == .dictatingPaused {
             resumeFromPaused()
         } else {

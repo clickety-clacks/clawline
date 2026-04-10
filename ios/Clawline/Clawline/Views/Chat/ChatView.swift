@@ -167,6 +167,7 @@ struct ChatView: View {
     @State private var activeSheet: ChatSheet?
     @State private var isStreamManagerPopoverPresented = false
     @State private var hasStreamManagerPopoverBecomeVisible = false
+    @State private var streamManagerPopoverVisibleSince: Date?
     @State private var streamManagerPopoverOpenRequestID = 0
     @State private var streamManagerPopoverVisibilityProbeTask: Task<Void, Never>?
     @State private var streamPopupShouldAutoFocusSearch = false
@@ -1862,6 +1863,18 @@ struct ChatView: View {
 #endif
                     return
                 }
+                if let visibleSince = streamManagerPopoverVisibleSince,
+                   Date().timeIntervalSince(visibleSince) < streamManagerPopoverDismissStabilizationInterval {
+#if DEBUG
+                    emitStreamPopupConsoleEvent(
+                        "dismiss_blocked_during_stabilization",
+                        sessionKey: viewModel.uiSelectedSessionKey,
+                        isPresented: isStreamManagerPopoverPresented,
+                        note: "ignored downstream dismiss/reset during post-appear stabilization window"
+                    )
+#endif
+                    return
+                }
                 isStreamManagerPopoverPresented = false
             }
         )
@@ -1958,6 +1971,7 @@ struct ChatView: View {
         .presentationBackground(.clear)
         .onAppear {
             hasStreamManagerPopoverBecomeVisible = true
+            streamManagerPopoverVisibleSince = Date()
             streamManagerPopoverVisibilityProbeTask?.cancel()
             streamManagerPopoverVisibilityProbeTask = nil
 #if DEBUG
@@ -1977,6 +1991,7 @@ struct ChatView: View {
         }
         .onDisappear {
             hasStreamManagerPopoverBecomeVisible = false
+            streamManagerPopoverVisibleSince = nil
 #if DEBUG
             emitStreamPopupConsoleEvent(
                 "popover_content_disappear",
@@ -2000,6 +2015,7 @@ struct ChatView: View {
 #endif
             return
         }
+        streamManagerPopoverVisibleSince = nil
         isStreamManagerPopoverPresented = false
     }
 
@@ -2030,6 +2046,10 @@ struct ChatView: View {
             )
 #endif
         }
+    }
+
+    private var streamManagerPopoverDismissStabilizationInterval: TimeInterval {
+        1.5
     }
 
     private var supportsKeyboardNavigationShortcuts: Bool {

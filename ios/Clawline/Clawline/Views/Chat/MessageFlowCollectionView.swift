@@ -222,6 +222,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     private var pendingBoundsChange = false
     private var forceReconfigureAll = false
     private var currentFontScaleChangeSequence: Int = 0
+    private var lastKnownBodyFontSize: CGFloat = 0
     private var onExpand: ((Message) -> Void)?
     private var onScrollEvent: (@MainActor (MessageFlowScrollEvent) -> Void)?
     private let webBubbleCoordinator = WebBubbleCoordinator()
@@ -880,6 +881,20 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         bubbleSizingV2MeasurementCache.removeAll()
         bubbleSizingV2KeysByMessageId.removeAll()
         bubbleSizingV2LinkPreviewStateVersionByMessageId.removeAll()
+    }
+
+    private func scaleAllSizeCachesForFontChange(heightRatio ratio: CGFloat) {
+        guard abs(ratio - 1.0) > 0.001 else { return }
+        for key in perStreamStateBySessionKey.keys {
+            mutateState(for: key) { state in
+                for (id, size) in state.sizeCache {
+                    state.sizeCache[id] = CGSize(width: size.width, height: ceil(size.height * ratio))
+                }
+                for (id, size) in state.lastMeasuredSizes {
+                    state.lastMeasuredSizes[id] = CGSize(width: size.width, height: ceil(size.height * ratio))
+                }
+            }
+        }
     }
 
     private func removeBubbleV2PreviewVersions(for ids: [String]) {
@@ -1997,7 +2012,20 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         let didFontScaleChange = currentFontScaleChangeSequence != request.fontScaleChangeSequence
         if didFontScaleChange {
             currentFontScaleChangeSequence = request.fontScaleChangeSequence
-            executeInvalidationPlan(invalidateFor(reason: .envChanged))
+            let metrics = ChatFlowTheme.Metrics(isCompact: isCompact)
+            let newBodyFontSize = metrics.bodyFontSize
+            let ratio: CGFloat = lastKnownBodyFontSize > 0
+                ? newBodyFontSize / lastKnownBodyFontSize : 1.0
+            lastKnownBodyFontSize = newBodyFontSize
+            scaleAllSizeCachesForFontChange(heightRatio: ratio)
+            clearAllBubbleV2State()
+            // Pre-update measurement fingerprint so updateLayout() does not
+            // re-clear the caches we just scaled.
+            lastMeasurementContentWidth = effectiveContentWidth(metrics: metrics)
+            lastMeasurementMetricsFingerprint = BubbleSizingV2.metricsFingerprint(
+                metrics: metrics, traitCollection: view.traitCollection
+            )
+            scheduleLayoutInvalidation()
             forceReconfigureAll = true
         }
         if let isDark = isDark {
@@ -2147,12 +2175,14 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             }).filter { materializedIdSet.contains($0) }
         if !changedIds.isEmpty {
             snapshot.reconfigureItems(changedIds)
-            changedIds.forEach { id in
-                let plan = invalidateFor(reason: .messageChanged(id: id))
-                executeInvalidationPlan(plan)
+            if !didFontScaleChange {
+                changedIds.forEach { id in
+                    let plan = invalidateFor(reason: .messageChanged(id: id))
+                    executeInvalidationPlan(plan)
+                }
+                changedIds.forEach { invalidateBubbleSizingV2Cache(for: $0) }
+                removeBubbleV2PreviewVersions(for: changedIds)
             }
-            changedIds.forEach { invalidateBubbleSizingV2Cache(for: $0) }
-            removeBubbleV2PreviewVersions(for: changedIds)
         }
         forceReconfigureAll = false
 
@@ -3457,6 +3487,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
 
     private func updateLayout() {
         let metrics = ChatFlowTheme.Metrics(isCompact: isCompact)
+        lastKnownBodyFontSize = metrics.bodyFontSize
         flowLayout.minimumInteritemSpacing = metrics.flowGap
         flowLayout.minimumLineSpacing = metrics.flowGap
         // Section inset is just for padding - content insets handle safe areas

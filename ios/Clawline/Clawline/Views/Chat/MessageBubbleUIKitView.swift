@@ -613,6 +613,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
         assert(Thread.isMainThread)
         self.terminalConnectionPool = terminalConnectionPool
         let isMessageReuse = (currentMessageId != nil && currentMessageId != message.id)
+        let isSameMessageReconfigure = (currentMessageId == message.id)
         currentMessageId = message.id
         // Store for trait collection updates
         currentMessageRole = message.role
@@ -1098,7 +1099,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
 
         // Every bubble uses an outer scroll container. Bubble height is capped; if content overflows,
         // scrolling is enabled (inert when content fits).
-        prepareOuterScrollStateForConfigure(isMessageReuse: isMessageReuse)
+        prepareOuterScrollStateForConfigure(isSameMessageReconfigure: isSameMessageReconfigure)
 
         if let bubbleSizingV2 {
             applyBubbleSizingV2(bubbleSizingV2)
@@ -1237,20 +1238,17 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
         applyOuterScrollState(isOverflowing: overflow, forceResetOffset: !overflow)
     }
 
-    private func prepareOuterScrollStateForConfigure(isMessageReuse: Bool) {
-        dynamicContentScrollView.isScrollEnabled = false
-        dynamicContentScrollView.showsVerticalScrollIndicator = false
-        dynamicContentScrollView.showsHorizontalScrollIndicator = false
-        dynamicContentScrollView.alwaysBounceVertical = false
-        dynamicContentScrollView.alwaysBounceHorizontal = false
-        fadeView.isHidden = true
+    private func prepareOuterScrollStateForConfigure(isSameMessageReconfigure: Bool) {
+        // Same-message reconfigure (streaming update, link-preview, highlight change):
+        // preserve the current scroll/fade state. layoutSubviews → updateOuterScrollState()
+        // will reconcile after the new content is laid out. Unconditionally resetting here
+        // caused GH#111: the fade/scroll indicator disappeared between configure and the
+        // next layout pass, leaving long messages visually truncated with no affordance.
+        guard !isSameMessageReconfigure else { return }
 
-        // Cell reuse should always reset stale offsets. For same-message reconfigures
-        // (link preview/highlight updates), defer to overflow transition logic to avoid
-        // forcing the user back to top.
-        if isMessageReuse {
-            resetOuterScrollState(resetOffset: true)
-        }
+        // First configure or cell reuse (different message): reset everything so stale
+        // scroll state from the previous message doesn't leak through.
+        resetOuterScrollState(resetOffset: true)
     }
 
     private func resetOuterScrollState(resetOffset: Bool) {

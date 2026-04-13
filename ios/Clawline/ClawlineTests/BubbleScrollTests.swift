@@ -387,6 +387,135 @@ struct BubbleScrollTests {
         #expect(expandsWithPreview == 0)
     }
 
+    @Test("GH#111: Long plain-text message shows scroll/fade on compact (iPhone) truncation height")
+    @MainActor
+    func longPlainTextShowsScrollOnCompact() {
+        let metrics = ChatFlowTheme.Metrics(isCompact: true) // iPhone: 320pt truncation
+        // ~500 chars — should overflow 320pt on any reasonable iPhone width.
+        let content = Array(
+            repeating: "This is a sentence that should cause the bubble to overflow its truncation height.",
+            count: 8
+        ).joined(separator: " ")
+
+        let message = Message(
+            id: "gh111-compact",
+            role: .assistant,
+            content: content,
+            timestamp: Date(),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: "server:personal"
+        )
+        let presentation = buildPresentation(message, metrics: metrics, enableLinkPreviews: false)
+        let sizeClass = MessageFlowRules.sizeClass(for: presentation)
+        #expect(sizeClass == .long)
+
+        let maxWidth: CGFloat = 320 // typical iPhone bubble width
+        let host = UIView(frame: CGRect(x: 0, y: 0, width: 360, height: 800))
+        host.layoutIfNeeded()
+        let bubble = MessageBubbleUIKitView(frame: CGRect(x: 0, y: 0, width: maxWidth, height: 1))
+        host.addSubview(bubble)
+
+        bubble.configure(
+            message: message,
+            presentation: presentation,
+            sizeClass: sizeClass,
+            metrics: metrics,
+            maxWidth: maxWidth,
+            bubbleSizingV2: nil,
+            showsHeader: true,
+            paddingScale: 1,
+            minWidthOverride: nil,
+            maxWidthOverride: nil,
+            useContinuousCorners: true,
+            isDark: false,
+            onRequestExpand: nil,
+            onRequestLayout: nil,
+            onInteractiveCallback: nil
+        )
+        let measured = bubble.systemLayoutSizeFitting(
+            CGSize(width: maxWidth, height: UIView.layoutFittingCompressedSize.height),
+            withHorizontalFittingPriority: .required,
+            verticalFittingPriority: .fittingSizeLevel
+        )
+        bubble.frame = CGRect(origin: .zero, size: measured)
+        bubble.setNeedsLayout()
+        bubble.layoutIfNeeded()
+
+        guard let scroll = innerBubbleScrollView(in: bubble),
+              let fade = truncationFadeView(in: bubble) else {
+            Issue.record("Expected inner scroll + fade views to exist")
+            return
+        }
+        #expect(scroll.isScrollEnabled, "Inner scroll should be enabled for overflowing long text")
+        #expect(!fade.isHidden, "Fade view should be visible for overflowing long text")
+    }
+
+    @Test("GH#111: Long plain-text message shows scroll/fade on non-compact (iPad) truncation height")
+    @MainActor
+    func longPlainTextShowsScrollOnNonCompact() {
+        let metrics = ChatFlowTheme.Metrics(isCompact: false) // iPad: 400pt truncation
+        let content = Array(
+            repeating: "This is a sentence that should cause the bubble to overflow its truncation height.",
+            count: 12
+        ).joined(separator: " ")
+
+        let message = Message(
+            id: "gh111-noncompact",
+            role: .assistant,
+            content: content,
+            timestamp: Date(),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: "server:personal"
+        )
+        let presentation = buildPresentation(message, metrics: metrics, enableLinkPreviews: false)
+        let sizeClass = MessageFlowRules.sizeClass(for: presentation)
+        #expect(sizeClass == .long)
+
+        let maxWidth: CGFloat = 500 // typical iPad bubble width
+        let host = UIView(frame: CGRect(x: 0, y: 0, width: 560, height: 900))
+        host.layoutIfNeeded()
+        let bubble = MessageBubbleUIKitView(frame: CGRect(x: 0, y: 0, width: maxWidth, height: 1))
+        host.addSubview(bubble)
+
+        bubble.configure(
+            message: message,
+            presentation: presentation,
+            sizeClass: sizeClass,
+            metrics: metrics,
+            maxWidth: maxWidth,
+            bubbleSizingV2: nil,
+            showsHeader: true,
+            paddingScale: 1,
+            minWidthOverride: nil,
+            maxWidthOverride: nil,
+            useContinuousCorners: true,
+            isDark: false,
+            onRequestExpand: nil,
+            onRequestLayout: nil,
+            onInteractiveCallback: nil
+        )
+        let measured = bubble.systemLayoutSizeFitting(
+            CGSize(width: maxWidth, height: UIView.layoutFittingCompressedSize.height),
+            withHorizontalFittingPriority: .required,
+            verticalFittingPriority: .fittingSizeLevel
+        )
+        bubble.frame = CGRect(origin: .zero, size: measured)
+        bubble.setNeedsLayout()
+        bubble.layoutIfNeeded()
+
+        guard let scroll = innerBubbleScrollView(in: bubble),
+              let fade = truncationFadeView(in: bubble) else {
+            Issue.record("Expected inner scroll + fade views to exist")
+            return
+        }
+        #expect(scroll.isScrollEnabled, "Inner scroll should be enabled for overflowing long text")
+        #expect(!fade.isHidden, "Fade view should be visible for overflowing long text")
+    }
+
     @Test("T118: Single-link bubble swipe-up opens expanded viewer")
     @MainActor
     func singleLinkSwipeUpRequestsExpand() {

@@ -897,6 +897,26 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         }
     }
 
+    /// After a font-scale change, the initial layout pass uses scaled estimates for all
+    /// cells (fast). This follow-up clears size caches for only the visible cells so the
+    /// next layout pass re-measures them precisely (~10-15 cells, not the full list).
+    private func schedulePreciseRemeasureForVisibleCells() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            let visibleMessageIds = self.collectionView.indexPathsForVisibleItems.compactMap { indexPath -> String? in
+                guard let id = self.dataSource.itemIdentifier(for: indexPath),
+                      !self.isNonMessageItemID(id) else { return nil }
+                return id
+            }
+            guard !visibleMessageIds.isEmpty else { return }
+            self.clearSizeState(for: visibleMessageIds)
+            if self.bubbleSizingV2Enabled {
+                visibleMessageIds.forEach { self.invalidateBubbleSizingV2Cache(for: $0) }
+            }
+            self.flowLayout.invalidateLayout()
+        }
+    }
+
     private func removeBubbleV2PreviewVersions(for ids: [String]) {
         ids.forEach { bubbleSizingV2LinkPreviewStateVersionByMessageId.removeValue(forKey: $0) }
     }
@@ -2027,6 +2047,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             )
             scheduleLayoutInvalidation()
             forceReconfigureAll = true
+            schedulePreciseRemeasureForVisibleCells()
         }
         if let isDark = isDark {
             let desiredStyle: UIUserInterfaceStyle = isDark ? .dark : .light

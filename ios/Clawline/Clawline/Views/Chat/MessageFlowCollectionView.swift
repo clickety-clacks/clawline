@@ -964,9 +964,19 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         guard size != .zero, size != lastBoundsSize else {
             return
         }
+        let hadPendingFullReconfigure = forceReconfigureAll
         lastBoundsSize = size
         pendingBoundsChange = true
-        updateLayout()
+        let measurementInputsChanged = updateLayout()
+        guard Self.shouldRunUpdateAfterBoundsChange(
+            measurementInputsChanged: measurementInputsChanged,
+            hadPendingFullReconfigure: hadPendingFullReconfigure
+        ) else {
+#if os(visionOS)
+            updateVisibleCellOpacity()
+#endif
+            return
+        }
         if let viewModel {
             update(
                 viewModel: viewModel,
@@ -2374,6 +2384,13 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         !hasAuthoritativeRestoreTarget
     }
 
+    static func shouldRunUpdateAfterBoundsChange(
+        measurementInputsChanged: Bool,
+        hadPendingFullReconfigure: Bool
+    ) -> Bool {
+        measurementInputsChanged || hadPendingFullReconfigure
+    }
+
     private func isNonMessageItemID(_ id: String) -> Bool {
         id == TypingIndicatorCell.itemId || DateSeparatorCell.isDateSeparatorItemID(id)
     }
@@ -3455,7 +3472,8 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         }
     }
 
-    private func updateLayout() {
+    @discardableResult
+    private func updateLayout() -> Bool {
         let metrics = ChatFlowTheme.Metrics(isCompact: isCompact)
         flowLayout.minimumInteritemSpacing = metrics.flowGap
         flowLayout.minimumLineSpacing = metrics.flowGap
@@ -3498,6 +3516,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             // Rebuild layout positions only (bounds/insets may have shifted).
             scheduleLayoutInvalidation()
         }
+        return measurementInputsChanged
     }
 
     private func availableContentWidth() -> CGFloat {

@@ -310,6 +310,81 @@ struct DictationCoordinatorTests {
         #expect(harness.host.currentText(for: harness.host.activeSessionKey) == "hello")
     }
 
+    @Test("Empty model draft owns activation over stale bound compose surface")
+    @MainActor
+    func emptyModelDraftClearsStaleBoundSurfaceOnActivation() async {
+        let harness = DictationTestHarness()
+        let coordinator = harness.makeCoordinator()
+        let textView = PastableTextView()
+        textView.attributedText = NSAttributedString(string: "previous sent message")
+        textView.selectedRange = NSRange(location: textView.attributedText.length, length: 0)
+        coordinator.setComposeTextView(textView)
+
+        coordinator.updateContext(
+            sessionKey: harness.host.activeSessionKey,
+            composeIsEmpty: true,
+            textFieldFocused: true,
+            selectionLength: 0,
+            reduceMotionEnabled: false
+        )
+
+        coordinator.startStickyDictation()
+        harness.client.emit(
+            .response(
+                SonioxStreamingResponse(
+                    tokens: [SonioxTranscriptToken(text: "hello", isFinal: false)],
+                    finished: false,
+                    errorCode: nil,
+                    errorMessage: nil
+                )
+            )
+        )
+
+        await waitUntil {
+            textView.attributedText.string == "hello"
+        }
+
+        #expect(textView.attributedText.string == "hello")
+    }
+
+    @Test("Captured model draft owns activation over stale bound compose surface")
+    @MainActor
+    func capturedModelDraftReplacesStaleBoundSurfaceOnActivation() async {
+        let harness = DictationTestHarness()
+        harness.host.setText("live draft ", for: harness.host.activeSessionKey)
+        let coordinator = harness.makeCoordinator()
+        let textView = PastableTextView()
+        textView.attributedText = NSAttributedString(string: "previous sent message")
+        textView.selectedRange = NSRange(location: textView.attributedText.length, length: 0)
+        coordinator.setComposeTextView(textView)
+
+        coordinator.updateContext(
+            sessionKey: harness.host.activeSessionKey,
+            composeIsEmpty: false,
+            textFieldFocused: true,
+            selectionLength: 0,
+            reduceMotionEnabled: false
+        )
+
+        coordinator.startStickyDictation()
+        harness.client.emit(
+            .response(
+                SonioxStreamingResponse(
+                    tokens: [SonioxTranscriptToken(text: "hello", isFinal: false)],
+                    finished: false,
+                    errorCode: nil,
+                    errorMessage: nil
+                )
+            )
+        )
+
+        await waitUntil {
+            textView.attributedText.string == "live draft hello"
+        }
+
+        #expect(textView.attributedText.string == "live draft hello")
+    }
+
     @Test("Token activity resets inactivity timer while provisional updates are suppressed")
     @MainActor
     func suppressionStillResetsInactivityTimer() async {
@@ -493,6 +568,100 @@ struct DictationCoordinatorTests {
 
         #expect(!coordinator.isSurfaceOpen)
         #expect(!coordinator.isDictationActive)
+    }
+
+    @Test("Reported behavior 3: swipe-right stop collapses surface before finalization")
+    @MainActor
+    func reportedBehaviorSwipeRightPublishesClosedSurfaceImmediately() async {
+        let harness = DictationTestHarness(
+            timing: DictationTiming(
+                maxSessionDuration: .seconds(30),
+                tokenInactivityTimeout: .seconds(30),
+                stopKeepFinalizeTimeout: .milliseconds(600),
+                sendFinalizeTimeout: .milliseconds(600),
+                composeUpdateCoalescingInterval: .milliseconds(75)
+            )
+        )
+        let coordinator = harness.makeCoordinator()
+
+        coordinator.updateContext(
+            sessionKey: harness.host.activeSessionKey,
+            composeIsEmpty: true,
+            textFieldFocused: true,
+            selectionLength: 0,
+            reduceMotionEnabled: false
+        )
+
+        coordinator.startStickyDictation()
+        await waitUntil { coordinator.isStickyDictationActive }
+
+        coordinator.stopDictationFromSwipeRight()
+
+        await waitUntil(timeoutMs: 150) {
+            !coordinator.isSurfaceOpen && !coordinator.isDictationActive
+        }
+
+        #expect(!coordinator.isSurfaceOpen)
+        #expect(!coordinator.isDictationActive)
+    }
+
+    @Test("Swipe-right stop queues restart until finalization exits")
+    @MainActor
+    func swipeRightStopQueuesRestartUntilFinalizationExits() async {
+        let harness = DictationTestHarness(
+            timing: DictationTiming(
+                maxSessionDuration: .seconds(30),
+                tokenInactivityTimeout: .seconds(30),
+                stopKeepFinalizeTimeout: .milliseconds(600),
+                sendFinalizeTimeout: .milliseconds(600),
+                composeUpdateCoalescingInterval: .milliseconds(75)
+            )
+        )
+        let coordinator = harness.makeCoordinator()
+
+        coordinator.updateContext(
+            sessionKey: harness.host.activeSessionKey,
+            composeIsEmpty: true,
+            textFieldFocused: true,
+            selectionLength: 0,
+            reduceMotionEnabled: false
+        )
+
+        coordinator.startStickyDictation()
+        await waitUntil { coordinator.isStickyDictationActive }
+
+        coordinator.stopDictationFromSwipeRight()
+        await waitUntil(timeoutMs: 150) {
+            !coordinator.isSurfaceOpen && !coordinator.isDictationActive
+        }
+
+        coordinator.updateContext(
+            sessionKey: harness.host.activeSessionKey,
+            composeIsEmpty: true,
+            textFieldFocused: true,
+            selectionLength: 0,
+            reduceMotionEnabled: false
+        )
+        coordinator.startStickyDictation()
+
+        #expect(!coordinator.isStickyDictationActive)
+
+        harness.client.emit(
+            .response(
+                SonioxStreamingResponse(
+                    tokens: [],
+                    finished: true,
+                    errorCode: nil,
+                    errorMessage: nil
+                )
+            )
+        )
+
+        await waitUntil(timeoutMs: 1_500) {
+            coordinator.isStickyDictationActive
+        }
+
+        #expect(coordinator.isStickyDictationActive)
     }
 
     @Test("Discard restores pre-dictation snapshot")

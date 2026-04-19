@@ -143,6 +143,9 @@ final class DictationTranscriptApplicator {
             moveCursorToEnd: false,
             announceEditorReset: true
         )
+        guard host?.activeSessionKey == sessionKey,
+              let composeTextView else { return }
+        replaceSnapshot(snapshot, in: composeTextView)
     }
 
     private func safeReplacementRange(selectedRange: NSRange, textLength: Int, fallbackLocation: Int) -> NSRange {
@@ -161,13 +164,117 @@ final class DictationTranscriptApplicator {
         moveCursorToEnd _: Bool
     ) {
         guard let textRange = textRange(in: textView, nsRange: range) else { return }
+        let selectionAfterReplacement = transformedSelection(
+            textView.selectedRange,
+            replacing: range,
+            replacementUTF16Length: (text as NSString).length,
+            textLength: textView.attributedText.length
+        )
         if let pastable = textView as? PastableTextView {
             pastable.dictationProgrammaticEditInFlight = true
-            defer { pastable.dictationProgrammaticEditInFlight = false }
+            pastable.expectDictationProgrammaticSelectionFeedback(selectionAfterReplacement)
             textView.replace(textRange, withText: text)
+            if textView.selectedRange != selectionAfterReplacement {
+                textView.selectedRange = selectionAfterReplacement
+            }
+            pastable.dictationProgrammaticEditInFlight = false
             return
         }
         textView.replace(textRange, withText: text)
+        if textView.selectedRange != selectionAfterReplacement {
+            textView.selectedRange = selectionAfterReplacement
+        }
+    }
+
+    private func replaceSnapshot(_ snapshot: ComposeDraftSnapshot, in textView: UITextView) {
+        let location = snapshot.content.length
+        let selection = NSRange(location: location, length: 0)
+        if let pastable = textView as? PastableTextView {
+            pastable.dictationProgrammaticEditInFlight = true
+            pastable.expectDictationProgrammaticSelectionFeedback(selection)
+            textView.attributedText = snapshot.content
+        } else {
+            textView.attributedText = snapshot.content
+        }
+        if textView.selectedRange != selection {
+            textView.selectedRange = selection
+        }
+        if let pastable = textView as? PastableTextView {
+            pastable.dictationProgrammaticEditInFlight = false
+        }
+    }
+
+    private func transformedSelection(
+        _ selection: NSRange,
+        replacing range: NSRange,
+        replacementUTF16Length: Int,
+        textLength: Int
+    ) -> NSRange {
+        let safeSelection = safeReplacementRange(
+            selectedRange: selection,
+            textLength: textLength,
+            fallbackLocation: textLength
+        )
+        let safeRange = safeReplacementRange(
+            selectedRange: range,
+            textLength: textLength,
+            fallbackLocation: textLength
+        )
+        let replacementEnd = safeRange.location + replacementUTF16Length
+        let selectionStart = safeSelection.location
+        let selectionEnd = safeSelection.location + safeSelection.length
+
+        if safeSelection.length == 0,
+           selectionStart >= safeRange.location,
+           selectionStart <= safeRange.location + safeRange.length {
+            return NSRange(location: replacementEnd, length: 0)
+        }
+
+        let newStart = transformSelectionBoundary(
+            selectionStart,
+            replacing: safeRange,
+            replacementUTF16Length: replacementUTF16Length,
+            affinity: .start
+        )
+        let newEnd = transformSelectionBoundary(
+            selectionEnd,
+            replacing: safeRange,
+            replacementUTF16Length: replacementUTF16Length,
+            affinity: .end
+        )
+        let boundedStart = max(0, newStart)
+        let boundedEnd = max(boundedStart, newEnd)
+        return NSRange(location: boundedStart, length: boundedEnd - boundedStart)
+    }
+
+    private enum SelectionBoundaryAffinity {
+        case start
+        case end
+    }
+
+    private func transformSelectionBoundary(
+        _ boundary: Int,
+        replacing range: NSRange,
+        replacementUTF16Length: Int,
+        affinity: SelectionBoundaryAffinity
+    ) -> Int {
+        let replacementStart = range.location
+        let replacedEnd = range.location + range.length
+        let delta = replacementUTF16Length - range.length
+
+        if boundary < replacementStart {
+            return boundary
+        }
+        if boundary > replacedEnd {
+            return boundary + delta
+        }
+
+        switch affinity {
+        case .start:
+            return replacementStart
+        case .end:
+            return replacementStart + replacementUTF16Length
+        }
     }
 
     private func textRange(in textView: UITextView, nsRange: NSRange) -> UITextRange? {

@@ -54,6 +54,8 @@ struct DictationTranscriptApplicatorTests {
         )
 
         #expect(textView.attributedText.string == "hello mars")
+        #expect(textView.selectedRange == NSRange(location: 0, length: 5))
+        #expect(textView.consumeExpectedDictationProgrammaticSelectionFeedback(textView.selectedRange))
     }
 
     @Test("Applicator transforms a user selection through transcript replacement")
@@ -80,6 +82,7 @@ struct DictationTranscriptApplicatorTests {
         )
 
         #expect(textView.attributedText.string == "hello planet earth")
+        #expect(textView.selectedRange == NSRange(location: 6, length: 12))
     }
 
     @Test("Applicator collapses a caret inside the replacement range to the transcript end")
@@ -106,6 +109,7 @@ struct DictationTranscriptApplicatorTests {
         )
 
         #expect(textView.attributedText.string == "hello mars")
+        #expect(textView.selectedRange == NSRange(location: 10, length: 0))
     }
 
     @Test("Applicator updates the host snapshot when no UITextView is attached")

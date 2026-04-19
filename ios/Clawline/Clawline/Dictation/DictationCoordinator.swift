@@ -481,7 +481,10 @@ final class DictationSession {
         if !isDictationActive,
            state != .error,
            state != .keyPromptModal,
-           state != .keyVerifyingModal {
+           state != .keyVerifyingModal,
+           state != .finalizing,
+           state != .stoppingKeep,
+           state != .stoppingDiscard {
             state = .idleSurfaceClosed
         }
     }
@@ -712,10 +715,12 @@ final class DictationSession {
         guard state == .dictatingSticky || state == .dictatingWalkieTalkie else { return }
         beginStopKeepTransitionIfNeeded()
         Task { [weak self] in
-            logDictation("DICTATION_STOP trace_id=DICTATION_STOP_SWIPE_RIGHT caller=swipe_right_stop ts=\(Date().timeIntervalSince1970)")
-            await self?.stopKeep(
+            guard let self else { return }
+            self.logDictation("DICTATION_STOP trace_id=DICTATION_STOP_SWIPE_RIGHT caller=swipe_right_stop ts=\(Date().timeIntervalSince1970)")
+            await self.stopKeep(
                 reason: "swipe_right",
-                timeout: timing.stopKeepFinalizeTimeout,
+                timeout: self.timing.stopKeepFinalizeTimeout,
+                collapseSurfaceImmediately: true,
                 trigger: "user_swipe_right"
             )
         }
@@ -1406,7 +1411,7 @@ final class DictationSession {
         }
 
         if collapseSurface && collapseSurfaceImmediately {
-            state = .idleSurfaceClosed
+            projectSurfaceClosedForFinalization()
         }
 
         cancelMaxDurationTimer(reason: "stopKeep_enter", caller: "stopKeep")
@@ -1633,6 +1638,11 @@ final class DictationSession {
 
     private func idleStateForCurrentContext() -> DictationState {
         .idleSurfaceClosed
+    }
+
+    private func projectSurfaceClosedForFinalization() {
+        uiProjectionState = .idleSurfaceClosed
+        surfaceTarget = .closed
     }
 
     @discardableResult
@@ -1881,10 +1891,15 @@ final class DictationSession {
 
     private func initializeOriginSessionContext(for sessionKey: String, walkieOrigin: WalkieOrigin?) {
         logDictation("DICTATION_PERF ts=\(Date().timeIntervalSince1970) event=capture_snapshot_begin session=\(sessionKey)")
-        let snapshot = bridge.captureSnapshot(for: sessionKey)
+        let capturedSnapshot = bridge.captureSnapshot(for: sessionKey)
+        let snapshot = authoritativeActivationSnapshot(
+            capturedSnapshot,
+            sessionKey: sessionKey
+        )
         logDictation("DICTATION_PERF ts=\(Date().timeIntervalSince1970) event=capture_snapshot_end session=\(sessionKey)")
+        let activationSelectionRange = activationSelectionRangeForAuthoritativeSnapshot(snapshot)
         let selectedRange = resolvedTranscriptAnchorRange(
-            activationSelectionRange: pendingActivationSelectionRange,
+            activationSelectionRange: activationSelectionRange,
             snapshot: snapshot
         )
         let initialProvisionalText = substring(text: snapshot.content.string, utf16Range: selectedRange) ?? ""
@@ -1898,12 +1913,31 @@ final class DictationSession {
                 suppressedUntilNextEndpoint: false,
                 committedText: "",
                 pendingUpdate: nil,
-                activationSelectionRange: pendingActivationSelectionRange,
+                activationSelectionRange: activationSelectionRange,
                 walkieOrigin: walkieOrigin
             )
         )
         transcriptBuffer.reset()
         pendingActivationSelectionRange = nil
+    }
+
+    private func authoritativeActivationSnapshot(
+        _ capturedSnapshot: ComposeDraftSnapshot,
+        sessionKey: String
+    ) -> ComposeDraftSnapshot {
+        guard let boundComposeTextView = bridge.boundComposeTextView,
+              !((boundComposeTextView.attributedText?.isEqual(capturedSnapshot.content)) ?? false) else {
+            return capturedSnapshot
+        }
+        bridge.restore(snapshot: capturedSnapshot, to: sessionKey)
+        return capturedSnapshot
+    }
+
+    private func activationSelectionRangeForAuthoritativeSnapshot(_ snapshot: ComposeDraftSnapshot) -> NSRange? {
+        if composeIsEmpty, snapshot.content.length == 0 {
+            return nil
+        }
+        return pendingActivationSelectionRange
     }
 
     private func clearOriginSessionContext() {

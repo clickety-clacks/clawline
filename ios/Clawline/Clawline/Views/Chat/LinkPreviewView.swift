@@ -256,7 +256,6 @@ final class LinkPreviewView: UIView, WKNavigationDelegate, WKUIDelegate, UIGestu
     override init(frame: CGRect) {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = WebSessionSharedResources.shared.websiteDataStore
-        configuration.processPool = WebSessionSharedResources.shared.processPool
         configuration.defaultWebpagePreferences.allowsContentJavaScript = true
         configuration.preferences.javaScriptCanOpenWindowsAutomatically = true
         configuration.preferences.isElementFullscreenEnabled = false

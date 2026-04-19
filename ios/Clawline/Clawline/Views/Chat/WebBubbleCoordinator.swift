@@ -89,10 +89,9 @@ final class WebBubbleCoordinator: WebBubbleCoordinating {
         let initialURL = navigationAction.request.url
         let title = initialURL?.host
 
-        // Fresh config: enforce persistent store + shared pool, then copy safe settings.
+        // Fresh config: enforce persistent store, then copy safe settings.
         let popupConfig = WKWebViewConfiguration()
         popupConfig.websiteDataStore = WebSessionSharedResources.shared.websiteDataStore
-        popupConfig.processPool = WebSessionSharedResources.shared.processPool
         popupConfig.defaultWebpagePreferences.allowsContentJavaScript = true
         popupConfig.preferences.javaScriptCanOpenWindowsAutomatically = true
 

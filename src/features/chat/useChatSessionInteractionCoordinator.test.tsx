@@ -177,4 +177,44 @@ describe("useChatSessionInteractionCoordinator", () => {
       "--chat-keyboard-inset": "280px"
     });
   });
+
+  it("does not add extra keyboard inset when the layout viewport already matches the visual viewport", async () => {
+    const viewport = installVisualViewportStub();
+    const originalInnerHeight = window.innerHeight;
+    const onSelectSession = vi.fn();
+    const composer = document.createElement("textarea");
+    composer.id = "composer-input";
+    document.body.appendChild(composer);
+
+    Object.defineProperty(window, "innerHeight", {
+      configurable: true,
+      value: 564
+    });
+
+    const { result } = renderHook(() =>
+      useChatSessionInteractionCoordinator({
+        activeSessionKey: "agent:main:clawline:user_1:main",
+        onSelectSession,
+        orderedSessionKeys: [
+          "agent:main:clawline:user_1:main",
+          "agent:main:main"
+        ]
+      })
+    );
+
+    act(() => {
+      composer.focus();
+      window.dispatchEvent(new FocusEvent("focusin"));
+      viewport.setInset(280);
+    });
+
+    await waitFor(() => {
+      expect(result.current.keyboardInset).toBe(0);
+    });
+
+    Object.defineProperty(window, "innerHeight", {
+      configurable: true,
+      value: originalInnerHeight
+    });
+  });
 });

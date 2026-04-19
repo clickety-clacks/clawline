@@ -183,8 +183,6 @@ export function useChatSessionInteractionCoordinator({
     x: 0,
     y: 0
   });
-  const baseViewportHeightRef = useRef(0);
-
   useEffect(() => {
     if (typeof window === "undefined") {
       return;
@@ -194,14 +192,6 @@ export function useChatSessionInteractionCoordinator({
       const visualViewport = window.visualViewport;
       const viewportHeight = visualViewport?.height ?? window.innerHeight;
       const viewportOffsetTop = visualViewport?.offsetTop ?? 0;
-      const baseViewportHeight = visualViewport
-        ? viewportHeight + viewportOffsetTop
-        : window.innerHeight;
-
-      baseViewportHeightRef.current = Math.max(
-        baseViewportHeightRef.current,
-        baseViewportHeight
-      );
 
       const activeElement = document.activeElement;
       const isComposerFocused =
@@ -210,8 +200,8 @@ export function useChatSessionInteractionCoordinator({
 
       setKeyboardInset(
         computeKeyboardInset({
-          baseViewportHeight: baseViewportHeightRef.current || baseViewportHeight,
           isComposerFocused,
+          layoutViewportHeight: window.innerHeight,
           viewportHeight,
           viewportOffsetTop
         })

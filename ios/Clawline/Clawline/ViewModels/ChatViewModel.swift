@@ -1993,7 +1993,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
 
     private func handleLifecycleOutput(_ output: ConnectionLifecycleOutput) {
         switch output {
-        case .phaseTransition(_, let to, let epoch, _):
+        case .phaseTransition(_, let to, let epoch, let reason):
             if writerCurrentEpoch != epoch {
                 writerCurrentEpoch = epoch
                 firstReplayAppliedEpoch = nil
@@ -2016,6 +2016,13 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
                 mapped = .failed(ProviderChatService.Error.notConnected)
             }
             transitionConnectionState(mapped, source: .lifecycleCoordinator)
+            // Auth-invalid failures: clear credentials so RootView routes to pairing recovery.
+            // Transport/provider-down failures stay in failed state for manual retry.
+            if to == .failed, case .failure(let failureReason) = reason,
+               failureReason == .authRejected || failureReason == .tokenRevoked {
+                logger.info("auth-invalid failure reason=\(String(describing: failureReason), privacy: .public) — clearing credentials for pairing recovery")
+                auth.clearCredentials()
+            }
         case .restoreCacheRequested(let epoch):
             for sessionKey in orderedSessionKeys {
                 restoreCachedMessagesIfNeeded(for: sessionKey, epoch: epoch)

@@ -76,8 +76,11 @@ final class DictationTranscriptApplicator {
         let previousSelection = previousTextView?.selectedRange
         composeTextView = textView
         guard previousTextView !== textView else { return }
-        if let textView,
-           let previousSelection,
+        guard let textView else { return }
+        if let replayPlan = replayPlanProvider?() {
+            apply(replayPlan)
+        }
+        if let previousSelection,
            previousSelection.location != NSNotFound {
             textView.selectedRange = safeReplacementRange(
                 selectedRange: previousSelection,
@@ -85,8 +88,6 @@ final class DictationTranscriptApplicator {
                 fallbackLocation: textView.attributedText.length
             )
         }
-        guard textView != nil, let replayPlan = replayPlanProvider?() else { return }
-        apply(replayPlan)
     }
 
     func focusComposeTextView() {

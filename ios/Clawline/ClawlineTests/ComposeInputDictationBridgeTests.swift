@@ -286,6 +286,36 @@ struct DictationTranscriptApplicatorTests {
         #expect(reboundTextView.selectedRange == NSRange(location: 2, length: 3))
     }
 
+    @Test("Applicator carries selection after replaying transcript into a shorter rebound surface")
+    func applicatorCarriesSelectionAfterReplayOnShorterReboundSurface() {
+        let host = MockComposeDraftHost()
+        let applicator = DictationTranscriptApplicator(host: host)
+        let replayPlan = DictationTextApplicationPlan(
+            sessionKey: host.activeSessionKey,
+            baseSnapshot: ComposeDraftSnapshot(
+                content: NSAttributedString(string: "seed "),
+                attachments: [:]
+            ),
+            replacementRange: NSRange(location: 5, length: 5),
+            fallbackLocation: 5,
+            replacementText: NSAttributedString(string: "hello"),
+            selectionPolicy: .preserveUserSelection
+        )
+        applicator.setReplayPlanProvider { replayPlan }
+
+        let firstTextView = PastableTextView()
+        firstTextView.attributedText = NSAttributedString(string: "seed hello")
+        firstTextView.selectedRange = NSRange(location: 10, length: 0)
+        applicator.setComposeTextView(firstTextView)
+
+        let reboundTextView = PastableTextView()
+        reboundTextView.attributedText = NSAttributedString(string: "seed ")
+        applicator.setComposeTextView(reboundTextView)
+
+        #expect(reboundTextView.attributedText.string == "seed hello")
+        #expect(reboundTextView.selectedRange == NSRange(location: 10, length: 0))
+    }
+
     @Test("Applicator does not replay when the machine reports no active replay plan")
     func applicatorSkipsReplayWhenMachineHasNoActivePlan() {
         let host = MockComposeDraftHost()

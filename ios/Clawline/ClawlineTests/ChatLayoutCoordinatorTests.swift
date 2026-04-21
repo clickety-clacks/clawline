@@ -298,6 +298,48 @@ struct ChatLayoutCoordinatorTests {
         #expect(abs(state.listBottomInset - 458) <= 0.5)
     }
 
+    @Test("Keyboard-visible dictation collapse releases open surface height from runtime inset")
+    @MainActor
+    func keyboardVisibleDictationCollapseUsesCollapsedBarHeight() {
+        let coordinator = ChatLayoutCoordinator()
+        let inputs = ChatLayoutInputs(
+            keyboardHeight: 336,
+            keyboardVisible: true,
+            isInputFocused: true,
+            keyboardAnimationDuration: 0.25,
+            keyboardAnimationCurve: .easeInOut,
+            safeAreaBottom: 34,
+            usesExternalKeyboardInsets: false
+        )
+        let metrics = ChatLayoutMetrics(
+            belowBarGap: 12,
+            flowGap: 10,
+            containerPadding: 12,
+            pageIndicatorClearance: 24
+        )
+
+        coordinator.updateBarHeight(188)
+        let openState = coordinator.runtimeInsetLayoutState(
+            inputs: inputs,
+            metrics: metrics,
+            fallbackBarHeight: MessageInputBarMetrics.minInputBarHeight
+        )
+
+        coordinator.updateBarHeight(88)
+        let collapsedState = coordinator.runtimeInsetLayoutState(
+            inputs: inputs,
+            metrics: metrics,
+            fallbackBarHeight: 188
+        )
+
+        #expect(abs(openState.keyboardInset - 336) <= 0.5)
+        #expect(abs(collapsedState.keyboardInset - 336) <= 0.5)
+        #expect(abs(collapsedState.barHeight - 88) <= 0.5)
+        #expect(abs(collapsedState.inputBarTopFromScreenBottom - 436) <= 0.5)
+        #expect(abs(collapsedState.listBottomInset - 458) <= 0.5)
+        #expect(abs((openState.listBottomInset - collapsedState.listBottomInset) - 100) <= 0.5)
+    }
+
     @Test("T071: Transient zero bar height does not collapse inset after stabilization")
     @MainActor
     func transientZeroBarHeightIsIgnoredAfterStabilization() {

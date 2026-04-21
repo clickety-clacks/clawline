@@ -49,6 +49,61 @@ struct DictationCoordinatorTranscriptOwnershipTests {
         #expect(rig.textView.attributedText.string == "There's also")
     }
 
+    @Test("Caret inside dictated text remains user-owned during active dictation")
+    func movingCursorInsideDictatedTextSurvivesActiveTranscriptUpdate() async {
+        let rig = makeRig(initialText: "", selectedRange: NSRange(location: 0, length: 0))
+
+        startDictation(rig)
+        emitProvisional("hello world", into: rig)
+        await waitUntil { rig.textView.attributedText.string == "hello world" }
+
+        rig.textView.selectedRange = NSRange(location: 5, length: 0)
+        syncContext(rig)
+
+        emitProvisional("hello world again", into: rig)
+        await waitUntil { rig.textView.attributedText.string == "hello world again" }
+
+        #expect(rig.textView.attributedText.string == "hello world again")
+        #expect(rig.textView.selectedRange == NSRange(location: 5, length: 0))
+    }
+
+    @Test("Substring selection inside dictated text remains user-owned during active dictation")
+    func substringSelectionInsideDictatedTextSurvivesActiveTranscriptUpdate() async {
+        let rig = makeRig(initialText: "", selectedRange: NSRange(location: 0, length: 0))
+
+        startDictation(rig)
+        emitProvisional("hello world", into: rig)
+        await waitUntil { rig.textView.attributedText.string == "hello world" }
+
+        rig.textView.selectedRange = NSRange(location: 6, length: 5)
+        syncContext(rig)
+
+        emitProvisional("hello world again", into: rig)
+        await waitUntil { rig.textView.attributedText.string == "hello world again" }
+
+        #expect(rig.textView.attributedText.string == "hello world again")
+        #expect(rig.textView.selectedRange == NSRange(location: 6, length: 5))
+    }
+
+    @Test("Paused dictation does not replay over user cursor movement")
+    func movingCursorDuringPausedDictationSurvivesComposeSurfaceUpdate() async {
+        let rig = makeRig(initialText: "", selectedRange: NSRange(location: 0, length: 0))
+
+        startDictation(rig)
+        emitProvisional("hello world", into: rig)
+        await waitUntil { rig.textView.attributedText.string == "hello world" }
+
+        rig.coordinator.pauseFromWaveformTap()
+        await waitUntil { rig.coordinator.isDictationActive && !rig.coordinator.isListening }
+
+        rig.textView.selectedRange = NSRange(location: 5, length: 0)
+        syncContext(rig)
+        rig.coordinator.setComposeTextView(rig.textView)
+
+        #expect(rig.textView.attributedText.string == "hello world")
+        #expect(rig.textView.selectedRange == NSRange(location: 5, length: 0))
+    }
+
     @Test("User edit in provisional range suppresses Soniox provisional updates until endpoint")
     func userEditInProvisionalRangeSuppressesUntilEndpoint() async {
         let rig = makeRig(initialText: "seed ", selectedRange: NSRange(location: 5, length: 0))

@@ -15,6 +15,11 @@ struct ComposeDraftSnapshot {
     static let empty = ComposeDraftSnapshot(content: NSAttributedString(string: ""), attachments: [:])
 }
 
+enum DictationSelectionPolicy: Equatable {
+    case preserveUserSelection
+    case followTranscriptEndWhenSelectionAlreadyAtEnd
+}
+
 @MainActor
 protocol DictationComposeDraftHosting: AnyObject {
     var activeSessionKey: String { get }
@@ -41,7 +46,7 @@ struct DictationTextApplicationPlan {
     let replacementRange: NSRange
     let fallbackLocation: Int
     let replacementText: NSAttributedString
-    let moveCursorToEnd: Bool
+    let selectionPolicy: DictationSelectionPolicy
 }
 
 @MainActor
@@ -67,7 +72,19 @@ final class DictationTranscriptApplicator {
     }
 
     func setComposeTextView(_ textView: PastableTextView?) {
+        let previousTextView = composeTextView
+        let previousSelection = previousTextView?.selectedRange
         composeTextView = textView
+        guard previousTextView !== textView else { return }
+        if let textView,
+           let previousSelection,
+           previousSelection.location != NSNotFound {
+            textView.selectedRange = safeReplacementRange(
+                selectedRange: previousSelection,
+                textLength: textView.attributedText.length,
+                fallbackLocation: textView.attributedText.length
+            )
+        }
         guard textView != nil, let replayPlan = replayPlanProvider?() else { return }
         apply(replayPlan)
     }
@@ -99,7 +116,7 @@ final class DictationTranscriptApplicator {
                 in: textView,
                 range: safeRange,
                 with: plan.replacementText.string,
-                moveCursorToEnd: plan.moveCursorToEnd
+                selectionPolicy: plan.selectionPolicy
             )
             return
         }
@@ -118,7 +135,7 @@ final class DictationTranscriptApplicator {
             host.applyComposeDraftSnapshot(
                 ComposeDraftSnapshot(content: current, attachments: currentSnapshot.attachments),
                 to: plan.sessionKey,
-                moveCursorToEnd: plan.moveCursorToEnd,
+                moveCursorToEnd: plan.selectionPolicy == .followTranscriptEndWhenSelectionAlreadyAtEnd,
                 announceEditorReset: false
             )
             return
@@ -131,7 +148,7 @@ final class DictationTranscriptApplicator {
         host.applyComposeDraftSnapshot(
             ComposeDraftSnapshot(content: fallback, attachments: plan.baseSnapshot.attachments),
             to: plan.sessionKey,
-            moveCursorToEnd: plan.moveCursorToEnd,
+            moveCursorToEnd: plan.selectionPolicy == .followTranscriptEndWhenSelectionAlreadyAtEnd,
             announceEditorReset: false
         )
     }
@@ -161,14 +178,15 @@ final class DictationTranscriptApplicator {
         in textView: UITextView,
         range: NSRange,
         with text: String,
-        moveCursorToEnd _: Bool
+        selectionPolicy: DictationSelectionPolicy
     ) {
         guard let textRange = textRange(in: textView, nsRange: range) else { return }
         let selectionAfterReplacement = transformedSelection(
             textView.selectedRange,
             replacing: range,
             replacementUTF16Length: (text as NSString).length,
-            textLength: textView.attributedText.length
+            textLength: textView.attributedText.length,
+            selectionPolicy: selectionPolicy
         )
         if let pastable = textView as? PastableTextView {
             pastable.dictationProgrammaticEditInFlight = true
@@ -208,7 +226,8 @@ final class DictationTranscriptApplicator {
         _ selection: NSRange,
         replacing range: NSRange,
         replacementUTF16Length: Int,
-        textLength: Int
+        textLength: Int,
+        selectionPolicy: DictationSelectionPolicy
     ) -> NSRange {
         let safeSelection = safeReplacementRange(
             selectedRange: selection,
@@ -224,9 +243,9 @@ final class DictationTranscriptApplicator {
         let selectionStart = safeSelection.location
         let selectionEnd = safeSelection.location + safeSelection.length
 
-        if safeSelection.length == 0,
-           selectionStart >= safeRange.location,
-           selectionStart <= safeRange.location + safeRange.length {
+        if selectionPolicy == .followTranscriptEndWhenSelectionAlreadyAtEnd,
+           safeSelection.length == 0,
+           selectionStart == safeRange.location + safeRange.length {
             return NSRange(location: replacementEnd, length: 0)
         }
 
@@ -269,11 +288,13 @@ final class DictationTranscriptApplicator {
             return boundary + delta
         }
 
+        let offsetInsideReplacement = max(0, boundary - replacementStart)
+        let transformedInsideReplacement = replacementStart + min(offsetInsideReplacement, replacementUTF16Length)
         switch affinity {
         case .start:
-            return replacementStart
+            return transformedInsideReplacement
         case .end:
-            return replacementStart + replacementUTF16Length
+            return transformedInsideReplacement
         }
     }
 

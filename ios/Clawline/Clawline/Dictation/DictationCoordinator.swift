@@ -1989,7 +1989,7 @@ final class DictationSession {
             replacementRange: replacementRange,
             fallbackLocation: session.dictationStartUTF16,
             replacementText: replacementText,
-            moveCursorToEnd: true
+            selectionPolicy: .followTranscriptEndWhenSelectionAlreadyAtEnd
         )
         transcriptOwnership = .active(session)
         bridge.apply(plan)
@@ -2020,7 +2020,7 @@ final class DictationSession {
                 string: session.committedText + session.provisionalText,
                 attributes: defaultTextAttributes()
             ),
-            moveCursorToEnd: true
+            selectionPolicy: .preserveUserSelection
         )
     }
 

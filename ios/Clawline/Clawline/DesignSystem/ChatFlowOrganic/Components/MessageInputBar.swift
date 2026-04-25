@@ -26,6 +26,173 @@ private struct MessageInputBarFramePreferenceKey: PreferenceKey {
     }
 }
 
+private struct DictationWaveformMetrics {
+    let baseAmplitude: CGFloat
+    let dynamicFrequencyScale: CGFloat
+    let dynamicPhaseSpeedScale: CGFloat
+    let baseLineWidth: CGFloat
+
+    init(audioLevel: Float, isPaused: Bool, t: CGFloat) {
+        let rms = max(0, audioLevel)
+        let minDb: Float = -55
+        let maxDb: Float = -10
+        let db = rms > 0 ? 20 * log10(rms) : minDb
+        let rawAudio = max(0, min(1, (db - minDb) / (maxDb - minDb)))
+        let pauseMultiplier: CGFloat = isPaused ? 0.70 : 1.0
+        let idleDrift = 0.070 + 0.022 * sin(t * 1.9)
+        let pausedAudioScale: CGFloat = isPaused ? 0.80 : 1.0
+        // Invariant 11: asymptotic amplitude curve (fast rise, bounded approach).
+        let boundedAmplitudeDrive = tanh(CGFloat(rawAudio) * 2.4)
+        let targetAmplitude = 0.060 + (0.455 - 0.060) * boundedAmplitudeDrive * pausedAudioScale
+        baseAmplitude = (idleDrift + targetAmplitude) * pauseMultiplier
+
+        // Invariant 12: period curve differs from amplitude and keeps increasing.
+        let periodDrive = log1p(CGFloat(rawAudio) * 1.8)
+        let frequencyAudioScale: CGFloat = isPaused ? 0.64 : 0.95
+        let phaseAudioScale: CGFloat = isPaused ? 0.52 : 0.65
+        dynamicFrequencyScale = 1.0 + frequencyAudioScale * periodDrive
+        dynamicPhaseSpeedScale = 1.0 + phaseAudioScale * periodDrive
+        baseLineWidth = isPaused ? 1.1 : 2.0
+    }
+}
+
+private struct DictationWaveformLine: View {
+    let reduceMotion: Bool
+    let isPaused: Bool
+    let audioLevel: Float
+    let colorScheme: ColorScheme
+
+    private struct WaveConfig: Identifiable {
+        let id: Int
+        let frequency: CGFloat
+        let phaseOffset: CGFloat
+        let speed: CGFloat
+        let amplitudeScale: CGFloat
+    }
+
+    private static let waveConfigs: [WaveConfig] = [
+        WaveConfig(id: 0, frequency: 1.30, phaseOffset: 0.0, speed: 2.0, amplitudeScale: 1.00),
+        WaveConfig(id: 1, frequency: 1.85, phaseOffset: 1.1, speed: 2.7, amplitudeScale: 0.95),
+        WaveConfig(id: 2, frequency: 2.45, phaseOffset: 2.0, speed: 3.4, amplitudeScale: 0.86),
+        WaveConfig(id: 3, frequency: 3.10, phaseOffset: 2.8, speed: 4.0, amplitudeScale: 0.74)
+    ]
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: reduceMotion ? 0.12 : (1 / 60))) { context in
+            GeometryReader { proxy in
+                waveformFrame(
+                    width: max(1, proxy.size.width),
+                    height: max(1, proxy.size.height),
+                    t: CGFloat(context.date.timeIntervalSinceReferenceDate)
+                )
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func waveformFrame(width: CGFloat, height: CGFloat, t: CGFloat) -> some View {
+        let metrics = DictationWaveformMetrics(audioLevel: audioLevel, isPaused: isPaused, t: t)
+        if reduceMotion {
+            reducedMotionWave(width: width, t: t)
+        } else {
+            animatedWave(width: width, height: height, midY: height * 0.5, t: t, metrics: metrics)
+        }
+    }
+
+    private func reducedMotionWave(width: CGFloat, t: CGFloat) -> some View {
+        let pulse = 0.825 + (0.175 * sin(t * 2 * .pi))
+        let alpha = max(0.65, min(1.0, pulse))
+
+        return ZStack {
+            Capsule()
+                .fill(ChatFlowTheme.adminAccent(colorScheme).opacity(alpha))
+                .frame(height: isPaused ? 4 : 6)
+            Capsule()
+                .fill(ChatFlowTheme.sage(colorScheme).opacity(alpha * 0.7))
+                .frame(width: width * 0.72, height: isPaused ? 3 : 4)
+            Capsule()
+                .fill(ChatFlowTheme.softCoral(colorScheme).opacity(alpha * 0.52))
+                .frame(width: width * 0.48, height: isPaused ? 2 : 3)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+    }
+
+    private func animatedWave(
+        width: CGFloat,
+        height: CGFloat,
+        midY: CGFloat,
+        t: CGFloat,
+        metrics: DictationWaveformMetrics
+    ) -> some View {
+        ZStack {
+            ForEach(Self.waveConfigs) { config in
+                DictationWavePath(
+                    width: width,
+                    height: height,
+                    midY: midY,
+                    phase: (t * config.speed * metrics.dynamicPhaseSpeedScale) + config.phaseOffset,
+                    frequency: config.frequency * metrics.dynamicFrequencyScale,
+                    amplitude: min(0.48, max(0.050, metrics.baseAmplitude * config.amplitudeScale)),
+                    color: waveColor(config.id),
+                    opacity: isPaused ? (0.18 - CGFloat(config.id) * 0.02) : (0.62 - CGFloat(config.id) * 0.10),
+                    lineWidth: metrics.baseLineWidth + CGFloat(3 - config.id) * 0.26
+                )
+            }
+        }
+    }
+
+    private func waveColor(_ index: Int) -> Color {
+        switch index {
+        case 0:
+            return ChatFlowTheme.adminAccent(colorScheme)
+        case 1:
+            return ChatFlowTheme.sage(colorScheme)
+        case 2:
+            return ChatFlowTheme.softCoral(colorScheme)
+        default:
+            return ChatFlowTheme.terracotta(colorScheme)
+        }
+    }
+}
+
+private struct DictationWavePath: View {
+    let width: CGFloat
+    let height: CGFloat
+    let midY: CGFloat
+    let phase: CGFloat
+    let frequency: CGFloat
+    let amplitude: CGFloat
+    let color: Color
+    let opacity: CGFloat
+    let lineWidth: CGFloat
+
+    var body: some View {
+        path.stroke(
+            color.opacity(opacity),
+            style: StrokeStyle(
+                lineWidth: lineWidth,
+                lineCap: .round,
+                lineJoin: .round
+            )
+        )
+    }
+
+    private var path: Path {
+        Path { path in
+            path.move(to: CGPoint(x: 0, y: midY))
+            let step: CGFloat = 2
+            var x: CGFloat = 0
+            while x <= width {
+                let progress = x / width
+                let taper = pow(sin(progress * .pi), 0.95)
+                let y = midY + sin((progress * .pi * 2 * frequency) + phase) * height * amplitude * taper
+                path.addLine(to: CGPoint(x: x, y: y))
+                x += step
+            }
+        }
+    }
+}
+
 struct DictationPanEvent {
     let startLocation: CGPoint
     let translation: CGPoint
@@ -1800,92 +1967,12 @@ struct MessageInputBar: View {
     }
 
     private var waveformLine: some View {
-        TimelineView(.periodic(from: .now, by: reduceMotionForDictation ? 0.12 : (1 / 60))) { context in
-            GeometryReader { proxy in
-                let width = max(1, proxy.size.width)
-                let height = max(1, proxy.size.height)
-                let midY = height * 0.5
-                let t = CGFloat(context.date.timeIntervalSinceReferenceDate)
-                let rms = max(0, dictation.audioLevel)
-                let minDb: Float = -55
-                let maxDb: Float = -10
-                let db = rms > 0 ? 20 * log10(rms) : minDb
-                let rawAudio = max(0, min(1, (db - minDb) / (maxDb - minDb)))
-                let isPaused = isPausedSurfaceState
-                let pauseMultiplier: CGFloat = isPaused ? 0.70 : 1.0
-                let idleDrift = 0.070 + 0.022 * sin(t * 1.9)
-                let pausedAudioScale: CGFloat = isPaused ? 0.80 : 1.0
-                // Invariant 11: asymptotic amplitude curve (fast rise, bounded approach).
-                let boundedAmplitudeDrive = tanh(CGFloat(rawAudio) * 2.4)
-                let targetAmplitude = 0.060 + (0.455 - 0.060) * boundedAmplitudeDrive * pausedAudioScale
-                let baseAmplitude = (idleDrift + targetAmplitude) * pauseMultiplier
-                // Invariant 12: period curve differs from amplitude and keeps increasing.
-                let periodDrive = log1p(CGFloat(rawAudio) * 1.8)
-                let frequencyAudioScale: CGFloat = isPaused ? 0.64 : 0.95
-                let phaseAudioScale: CGFloat = isPaused ? 0.52 : 0.65
-                let dynamicFrequencyScale: CGFloat = 1.0 + frequencyAudioScale * periodDrive
-                let dynamicPhaseSpeedScale: CGFloat = 1.0 + phaseAudioScale * periodDrive
-                let baseLineWidth: CGFloat = isPaused ? 1.1 : 2.0
-                let colorSet: [Color] = [
-                    ChatFlowTheme.adminAccent(colorScheme),
-                    ChatFlowTheme.sage(colorScheme),
-                    ChatFlowTheme.softCoral(colorScheme),
-                    ChatFlowTheme.terracotta(colorScheme)
-                ]
-                let waveConfigs: [(frequency: CGFloat, phaseOffset: CGFloat, speed: CGFloat, amplitudeScale: CGFloat)] = [
-                    (1.30, 0.0, 2.0, 1.00),
-                    (1.85, 1.1, 2.7, 0.95),
-                    (2.45, 2.0, 3.4, 0.86),
-                    (3.10, 2.8, 4.0, 0.74)
-                ]
-
-                if reduceMotionForDictation {
-                    let pulse = 0.825 + (0.175 * sin(t * 2 * .pi))
-                    let alpha = max(0.65, min(1.0, pulse))
-                    ZStack {
-                        Capsule()
-                            .fill(ChatFlowTheme.adminAccent(colorScheme).opacity(alpha))
-                            .frame(height: isPaused ? 4 : 6)
-                        Capsule()
-                            .fill(ChatFlowTheme.sage(colorScheme).opacity(alpha * 0.7))
-                            .frame(width: width * 0.72, height: isPaused ? 3 : 4)
-                        Capsule()
-                            .fill(ChatFlowTheme.softCoral(colorScheme).opacity(alpha * 0.52))
-                            .frame(width: width * 0.48, height: isPaused ? 2 : 3)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-                } else {
-                    ZStack {
-                        ForEach(Array(waveConfigs.enumerated()), id: \.offset) { index, config in
-                            let phase = (t * config.speed * dynamicPhaseSpeedScale) + config.phaseOffset
-                            let frequency = config.frequency * dynamicFrequencyScale
-                            // Keep waveform bounded within panel while allowing near-max fill.
-                            let waveAmplitude = min(0.48, max(0.050, baseAmplitude * config.amplitudeScale))
-                            Path { path in
-                                path.move(to: CGPoint(x: 0, y: midY))
-                                let step: CGFloat = 2
-                                var x: CGFloat = 0
-                                while x <= width {
-                                    let progress = x / width
-                                    let taper = pow(sin(progress * .pi), 0.95)
-                                    let y = midY + sin((progress * .pi * 2 * frequency) + phase) * height * waveAmplitude * taper
-                                    path.addLine(to: CGPoint(x: x, y: y))
-                                    x += step
-                                }
-                            }
-                            .stroke(
-                                colorSet[index].opacity(isPaused ? (0.18 - CGFloat(index) * 0.02) : (0.62 - CGFloat(index) * 0.10)),
-                                style: StrokeStyle(
-                                    lineWidth: baseLineWidth + CGFloat(3 - index) * 0.26,
-                                    lineCap: .round,
-                                    lineJoin: .round
-                                )
-                            )
-                        }
-                    }
-                }
-            }
-        }
+        DictationWaveformLine(
+            reduceMotion: reduceMotionForDictation,
+            isPaused: isPausedSurfaceState,
+            audioLevel: dictation.audioLevel,
+            colorScheme: colorScheme
+        )
     }
 
     private func beginMicFadeOut(fromSwipe: Bool) {

@@ -261,6 +261,7 @@ final class DictationSession {
         var committedText: String
         var pendingUpdate: DictationSegmentUpdate?
         var activationSelectionRange: NSRange?
+        var transcriptPrefixToDiscardAfterReanchor: String
         var walkieOrigin: WalkieOrigin?
 
         var provisionalLenUTF16: Int {
@@ -554,6 +555,17 @@ final class DictationSession {
         updateActiveTranscriptSession { session in
             session.activationSelectionRange = resolvedSelectionRange
         }
+    }
+
+    func noteComposeSelectionChanged(_ selectionRange: NSRange) {
+        guard selectionRange.location != NSNotFound else { return }
+        guard isDictationActive else {
+            pendingActivationSelectionRange = selectionRange
+            return
+        }
+        guard let originSessionKey, !originSessionKey.isEmpty, originSessionKey == currentSessionKey else { return }
+        guard bridge.boundComposeTextView?.dictationProgrammaticEditInFlight != true else { return }
+        reanchorActiveTranscriptSession(to: selectionRange)
     }
 
     func noteComposeUserEditDuringDictation(editedRangeUTF16: NSRange, replacementUTF16Length: Int) {
@@ -853,6 +865,11 @@ final class DictationSession {
             state != .dictatingPaused ||
             originSessionKey == nil ||
             originSessionKey != currentSessionKey
+
+        if state == .dictatingPaused, !needsSessionContextInitialization {
+            reanchorActiveTranscriptSessionToLiveSelection()
+            transcriptBuffer.reset()
+        }
 
         if needsSessionContextInitialization {
             initializeOriginSessionContext(for: currentSessionKey, walkieOrigin: walkieOrigin)
@@ -1703,8 +1720,15 @@ final class DictationSession {
             audioCapture = nil
         }
 
+        let queuedActivationMode = pendingActivationMode
+        let queuedActivationWalkieOrigin = pendingActivationWalkieOrigin
         state = .dictatingPaused
         schedulePhase1IdleTeardown()
+        if let queuedActivationMode {
+            pendingActivationMode = nil
+            pendingActivationWalkieOrigin = nil
+            start(mode: queuedActivationMode, walkieOrigin: queuedActivationWalkieOrigin)
+        }
         return finalizedWithinTimeout
     }
 
@@ -1914,6 +1938,7 @@ final class DictationSession {
                 committedText: "",
                 pendingUpdate: nil,
                 activationSelectionRange: activationSelectionRange,
+                transcriptPrefixToDiscardAfterReanchor: "",
                 walkieOrigin: walkieOrigin
             )
         )
@@ -2078,7 +2103,56 @@ final class DictationSession {
         session.committedLenUTF16 = max(0, newCommittedEnd - newCommittedStart)
     }
 
+    private func reanchorActiveTranscriptSessionToLiveSelection() {
+        guard let selectionRange = bridge.boundComposeTextView?.selectedRange,
+              selectionRange.location != NSNotFound else { return }
+        reanchorActiveTranscriptSession(to: selectionRange)
+    }
+
+    private func reanchorActiveTranscriptSession(to selectionRange: NSRange) {
+        guard var session = activeTranscriptSession() else { return }
+        guard session.originSessionKey == currentSessionKey else { return }
+        let snapshot = liveComposeSnapshot(for: session.originSessionKey)
+        let selectedRange = safeReplacementRange(
+            selectedRange: selectionRange,
+            textLength: snapshot.content.length,
+            fallbackLocation: snapshot.content.length
+        )
+        let selectedText = substring(text: snapshot.content.string, utf16Range: selectedRange) ?? ""
+        let currentMachineText =
+            session.transcriptPrefixToDiscardAfterReanchor +
+            session.committedText +
+            session.provisionalText
+        let pendingUpdate = session.pendingUpdate
+
+        transcriptApplyTask?.cancel()
+        transcriptApplyTask = nil
+        session.baseSnapshot = snapshot
+        session.dictationStartUTF16 = selectedRange.location
+        session.committedLenUTF16 = 0
+        session.committedText = ""
+        session.provisionalText = selectedText
+        session.suppressedUntilNextEndpoint = false
+        session.pendingUpdate = pendingUpdate
+        session.activationSelectionRange = selectedRange
+        session.transcriptPrefixToDiscardAfterReanchor = currentMachineText
+        transcriptOwnership = .active(session)
+        if pendingUpdate != nil {
+            flushPendingTranscriptApply()
+        }
+    }
+
+    private func liveComposeSnapshot(for sessionKey: String) -> ComposeDraftSnapshot {
+        let capturedSnapshot = bridge.captureSnapshot(for: sessionKey)
+        guard let textView = bridge.boundComposeTextView else { return capturedSnapshot }
+        return ComposeDraftSnapshot(
+            content: textView.attributedText ?? NSAttributedString(string: ""),
+            attachments: capturedSnapshot.attachments
+        )
+    }
+
     private func applySegmentUpdate(_ update: DictationSegmentUpdate, to session: inout TranscriptSession) {
+        let update = transcriptUpdateByDiscardingReanchorPrefix(update, session: &session)
         var shouldSkipFirstEndpointCommit = session.suppressedUntilNextEndpoint
         var processedAnyEndpoint = false
 
@@ -2118,6 +2192,48 @@ final class DictationSession {
                 session.provisionalText = ""
             }
         }
+    }
+
+    private func transcriptUpdateByDiscardingReanchorPrefix(
+        _ update: DictationSegmentUpdate,
+        session: inout TranscriptSession
+    ) -> DictationSegmentUpdate {
+        guard !session.transcriptPrefixToDiscardAfterReanchor.isEmpty else { return update }
+        var prefix = session.transcriptPrefixToDiscardAfterReanchor
+        var committedSegments: [String] = []
+        var didConsumeEndpointPrefix = false
+
+        for segment in update.committedSegments {
+            let normalized = textByRemovingPrefix(prefix, from: segment)
+            if normalized.didRemovePrefix {
+                didConsumeEndpointPrefix = true
+                prefix = ""
+            }
+            committedSegments.append(normalized.text)
+        }
+
+        let normalizedProvisional = textByRemovingPrefix(prefix, from: update.provisionalText)
+        if update.sawEndpoint || didConsumeEndpointPrefix {
+            session.transcriptPrefixToDiscardAfterReanchor = ""
+        }
+
+        return DictationSegmentUpdate(
+            provisionalText: normalizedProvisional.text,
+            committedSegments: committedSegments,
+            finished: update.finished,
+            sawEndpoint: update.sawEndpoint,
+            hadAnyTokens: update.hadAnyTokens
+        )
+    }
+
+    private func textByRemovingPrefix(_ prefix: String, from text: String) -> (text: String, didRemovePrefix: Bool) {
+        guard !prefix.isEmpty else { return (text, false) }
+        if prefix.hasPrefix(text) {
+            return ("", false)
+        }
+        guard text.hasPrefix(prefix) else { return (text, false) }
+        let index = text.index(text.startIndex, offsetBy: prefix.count)
+        return (String(text[index...]), true)
     }
 
     private func syncCommittedText(from text: String, session: inout TranscriptSession) {

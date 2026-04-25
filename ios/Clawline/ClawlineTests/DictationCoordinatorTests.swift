@@ -1193,6 +1193,7 @@ struct DictationCoordinatorTests {
 final class DictationTestHarness {
     let host = MockComposeDraftHost()
     let client = SonioxMockFixtureClient()
+    private(set) var latestClient: SonioxMockFixtureClient
     let audio = MockDictationAudioCapture()
     let analytics = MockDictationAnalytics()
     let feedback = MockDictationFeedback()
@@ -1201,6 +1202,7 @@ final class DictationTestHarness {
     let timing: DictationTiming
     private(set) var audioFactoryCallCount = 0
     private(set) var clientFactoryCallCount = 0
+    private let freshClientPerFactoryCall: Bool
 
     init(
         timing: DictationTiming = DictationTiming(
@@ -1210,9 +1212,12 @@ final class DictationTestHarness {
             sendFinalizeTimeout: .milliseconds(80)
         ),
         apiKey: String? = "test-key",
-        keyStatus: SonioxKeyVerificationStatus = .validated
+        keyStatus: SonioxKeyVerificationStatus = .validated,
+        freshClientPerFactoryCall: Bool = false
     ) {
         self.timing = timing
+        self.latestClient = client
+        self.freshClientPerFactoryCall = freshClientPerFactoryCall
         SonioxConfigurationStore.setAPIKey(apiKey)
         SonioxConfigurationStore.setKeyStatus(keyStatus)
         self.keyStore = SonioxKeyStore(verifier: keyVerifier)
@@ -1234,6 +1239,12 @@ final class DictationTestHarness {
             },
             streamingClientFactory: {
                 self.clientFactoryCallCount += 1
+                if self.freshClientPerFactoryCall, self.clientFactoryCallCount > 1 {
+                    let client = SonioxMockFixtureClient()
+                    self.latestClient = client
+                    return client
+                }
+                self.latestClient = self.client
                 return self.client
             },
             analytics: analytics,

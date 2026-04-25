@@ -3,6 +3,7 @@ import Testing
 import UIKit
 @testable import Clawline
 
+@Suite(.serialized)
 @MainActor
 struct DictationCoordinatorTranscriptOwnershipTests {
     @Test("Dictation replaces the current selection instead of appending")
@@ -33,56 +34,71 @@ struct DictationCoordinatorTranscriptOwnershipTests {
         #expect(rig.textView.attributedText.string == "alpha spoken omega")
     }
 
-    @Test("Caret changes during active dictation do not re-anchor transcript-owned updates")
-    func movingCursorDuringDictationDoesNotAppendFullTranscript() async {
-        let rig = makeRig(initialText: "", selectedRange: NSRange(location: 0, length: 0))
+    @Test("Moving the cursor during active dictation makes the next dictated text insert at the moved caret")
+    func movingCursorDuringDictationReanchorsNextInsertion() async {
+        let rig = makeRig(initialText: "hello world", selectedRange: NSRange(location: "hello world".utf16.count, length: 0))
 
         startDictation(rig)
-        emitProvisional("There", into: rig)
-        await waitUntil { rig.textView.attributedText.string == "There" }
+        emitCommitted([" tail"], into: rig)
+        await waitUntil { rig.textView.attributedText.string == "hello world tail" }
 
-        rig.textView.selectedRange = NSRange(location: rig.textView.attributedText.length, length: 0)
-        syncContext(rig)
+        moveSelection(in: rig, to: NSRange(location: "hello ".utf16.count, length: 0))
 
-        emitProvisional("There's also", into: rig)
-        await waitUntil { rig.textView.attributedText.string == "There's also" }
-        #expect(rig.textView.attributedText.string == "There's also")
+        emitProvisional("new ", into: rig)
+        await waitUntil { rig.textView.attributedText.string == "hello new world tail" }
+        #expect(rig.textView.attributedText.string == "hello new world tail")
     }
 
-    @Test("Caret inside dictated text remains user-owned during active dictation")
-    func movingCursorInsideDictatedTextSurvivesActiveTranscriptUpdate() async {
+    @Test("Moving the cursor inside active cumulative provisional dictation inserts only the new suffix at the moved caret")
+    func movingCursorInsideCumulativeProvisionalDictationInsertsOnlyNewSuffix() async {
         let rig = makeRig(initialText: "", selectedRange: NSRange(location: 0, length: 0))
 
         startDictation(rig)
-        emitProvisional("hello world", into: rig)
-        await waitUntil { rig.textView.attributedText.string == "hello world" }
+        emitProvisional("abcdef", into: rig)
+        await waitUntil { rig.textView.attributedText.string == "abcdef" }
 
-        rig.textView.selectedRange = NSRange(location: 5, length: 0)
-        syncContext(rig)
+        moveSelection(in: rig, to: NSRange(location: 3, length: 0))
 
-        emitProvisional("hello world again", into: rig)
-        await waitUntil { rig.textView.attributedText.string == "hello world again" }
+        emitProvisional("abcdefXYZ", into: rig)
+        await waitUntil { rig.textView.attributedText.string == "abcXYZdef" }
 
-        #expect(rig.textView.attributedText.string == "hello world again")
-        #expect(rig.textView.selectedRange == NSRange(location: 5, length: 0))
+        #expect(rig.textView.attributedText.string == "abcXYZdef")
+        #expect(rig.textView.selectedRange == NSRange(location: 6, length: 0))
     }
 
-    @Test("Substring selection inside dictated text remains user-owned during active dictation")
-    func substringSelectionInsideDictatedTextSurvivesActiveTranscriptUpdate() async {
+    @Test("Repeated cursor movement keeps cumulative transcript prefix ownership")
+    func repeatedCursorMovementKeepsCumulativeTranscriptPrefixOwnership() async {
         let rig = makeRig(initialText: "", selectedRange: NSRange(location: 0, length: 0))
 
         startDictation(rig)
-        emitProvisional("hello world", into: rig)
-        await waitUntil { rig.textView.attributedText.string == "hello world" }
+        emitProvisional("abcdef", into: rig)
+        await waitUntil { rig.textView.attributedText.string == "abcdef" }
 
-        rig.textView.selectedRange = NSRange(location: 6, length: 5)
-        syncContext(rig)
+        moveSelection(in: rig, to: NSRange(location: 3, length: 0))
+        emitProvisional("abcdefXYZ", into: rig)
+        await waitUntil { rig.textView.attributedText.string == "abcXYZdef" }
 
-        emitProvisional("hello world again", into: rig)
-        await waitUntil { rig.textView.attributedText.string == "hello world again" }
+        moveSelection(in: rig, to: NSRange(location: 4, length: 0))
+        emitProvisional("abcdefXYZ123", into: rig)
+        await waitUntil { rig.textView.attributedText.string == "abcX123YZdef" }
 
-        #expect(rig.textView.attributedText.string == "hello world again")
-        #expect(rig.textView.selectedRange == NSRange(location: 6, length: 5))
+        #expect(rig.textView.attributedText.string == "abcX123YZdef")
+    }
+
+    @Test("Substring selection during active dictation is replaced by the next dictated suffix")
+    func substringSelectionDuringActiveDictationIsReplacedByNextDictatedSuffix() async {
+        let rig = makeRig(initialText: "", selectedRange: NSRange(location: 0, length: 0))
+
+        startDictation(rig)
+        emitProvisional("abcdef", into: rig)
+        await waitUntil { rig.textView.attributedText.string == "abcdef" }
+
+        moveSelection(in: rig, to: NSRange(location: 3, length: 3))
+
+        emitProvisional("abcdefXYZ", into: rig)
+        await waitUntil { rig.textView.attributedText.string == "abcXYZ" }
+
+        #expect(rig.textView.attributedText.string == "abcXYZ")
     }
 
     @Test("Paused dictation does not replay over user cursor movement")
@@ -102,6 +118,30 @@ struct DictationCoordinatorTranscriptOwnershipTests {
 
         #expect(rig.textView.attributedText.string == "hello world")
         #expect(rig.textView.selectedRange == NSRange(location: 5, length: 0))
+    }
+
+    @Test("Paused dictation resume inserts new text at the moved caret")
+    func pausedResumeInsertsAtMovedCaret() async {
+        let rig = makeRig(
+            initialText: "hello world",
+            selectedRange: NSRange(location: "hello world".utf16.count, length: 0),
+            freshClientPerFactoryCall: true
+        )
+
+        startDictation(rig)
+        emitCommitted([" tail"], into: rig)
+        await waitUntil { rig.textView.attributedText.string == "hello world tail" }
+
+        rig.coordinator.pauseFromWaveformTap()
+        await waitUntil { rig.coordinator.isDictationActive && !rig.coordinator.isListening }
+        moveSelection(in: rig, to: NSRange(location: "hello ".utf16.count, length: 0))
+
+        rig.coordinator.startStickyDictation()
+        await waitUntil { rig.harness.clientFactoryCallCount >= 2 && rig.harness.latestClient.connected }
+        emitProvisional("new ", into: rig)
+
+        await waitUntil { rig.textView.attributedText.string == "hello new world tail" }
+        #expect(rig.textView.attributedText.string == "hello new world tail")
     }
 
     @Test("User edit in provisional range suppresses Soniox provisional updates until endpoint")
@@ -194,8 +234,12 @@ struct DictationCoordinatorTranscriptOwnershipTests {
         #expect(rig.textView.attributedText.string == "seed hello world from soniox")
     }
 
-    private func makeRig(initialText: String, selectedRange: NSRange) -> CoordinatorTranscriptRig {
-        let harness = DictationTestHarness()
+    private func makeRig(
+        initialText: String,
+        selectedRange: NSRange,
+        freshClientPerFactoryCall: Bool = false
+    ) -> CoordinatorTranscriptRig {
+        let harness = DictationTestHarness(freshClientPerFactoryCall: freshClientPerFactoryCall)
         harness.host.setText(initialText, for: harness.host.activeSessionKey)
 
         let coordinator = harness.makeCoordinator()
@@ -229,8 +273,14 @@ struct DictationCoordinatorTranscriptOwnershipTests {
         rig.coordinator.startStickyDictation()
     }
 
+    private func moveSelection(in rig: CoordinatorTranscriptRig, to selectedRange: NSRange) {
+        rig.textView.selectedRange = selectedRange
+        rig.coordinator.noteComposeSelectionChanged(selectedRange)
+        syncContext(rig)
+    }
+
     private func emitProvisional(_ text: String, into rig: CoordinatorTranscriptRig) {
-        rig.harness.client.emit(
+        rig.harness.latestClient.emit(
             .response(
                 SonioxStreamingResponse(
                     tokens: [SonioxTranscriptToken(text: text, isFinal: false)],
@@ -248,7 +298,7 @@ struct DictationCoordinatorTranscriptOwnershipTests {
             tokens.append(SonioxTranscriptToken(text: segment, isFinal: true))
             tokens.append(SonioxTranscriptToken(text: "<end>", isFinal: true))
         }
-        rig.harness.client.emit(
+        rig.harness.latestClient.emit(
             .response(
                 SonioxStreamingResponse(
                     tokens: tokens,

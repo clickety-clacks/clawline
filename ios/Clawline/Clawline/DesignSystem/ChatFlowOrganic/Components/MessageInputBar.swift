@@ -273,6 +273,7 @@ enum DictationDiscardIntentSource {
 
 enum DictationInteractionIntent {
     case activationSelectionCaptured(NSRange)
+    case composeSelectionChanged(NSRange)
     case composeUserEdited(range: NSRange, replacementUTF16Length: Int)
     case composeTextViewChanged(PastableTextView?)
     case gesturePrewarmRequested
@@ -1387,6 +1388,9 @@ struct MessageInputBar: View {
                     trailingPadding: micTrailingPadding
                 )
                 .opacity(isSending ? 0.5 : 1)
+                .onChange(of: selectionRange) { _, newValue in
+                    dictationEmitter.emit(.composeSelectionChanged(newValue))
+                }
 
                 if content.length == 0 {
                     Text(placeholderText)
@@ -2113,6 +2117,8 @@ struct DictationMicAffordanceAnimationPlan {
                         switch intent {
                         case .activationSelectionCaptured(let selectionRange):
                             dictation.captureComposeSelectionRangeForActivation(selectionRange)
+                        case .composeSelectionChanged:
+                            break
                         case .composeUserEdited(let range, let replacementUTF16Length):
                             dictation.noteComposeUserEditDuringDictation(
                                 editedRangeUTF16: range,

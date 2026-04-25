@@ -1481,6 +1481,8 @@ struct ChatView: View {
         switch intent {
         case .activationSelectionCaptured(let selectionRange):
             dictationCoordinator.captureComposeSelectionRangeForActivation(selectionRange)
+        case .composeSelectionChanged(let selectionRange):
+            dictationCoordinator.noteComposeSelectionChanged(selectionRange)
         case .composeUserEdited(let range, let replacementUTF16Length):
             dictationCoordinator.noteComposeUserEditDuringDictation(
                 editedRangeUTF16: range,

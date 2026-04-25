@@ -34,13 +34,13 @@ struct MessageInputBarBoundaryTests {
         let ghostState = MessageInputBar.sendButtonBubbleVisualState(
             isSending: false,
             canSend: false,
-            isPreparing: false,
+            isStagingAttachments: false,
             connectionState: .connected
         )
         let activeState = MessageInputBar.sendButtonBubbleVisualState(
             isSending: false,
             canSend: true,
-            isPreparing: false,
+            isStagingAttachments: false,
             connectionState: .connected
         )
 
@@ -80,7 +80,7 @@ struct MessageInputBarBoundaryTests {
             MessageInputBar.sendButtonShowsPreparingSpinner(
                 isSending: false,
                 canSend: false,
-                isPreparing: true,
+                isStagingAttachments: true,
                 connectionState: .connected
             )
         )
@@ -88,7 +88,7 @@ struct MessageInputBarBoundaryTests {
             MessageInputBar.sendButtonBubbleVisualState(
                 isSending: false,
                 canSend: false,
-                isPreparing: true,
+                isStagingAttachments: true,
                 connectionState: .connected
             ) == .active
         )
@@ -96,7 +96,7 @@ struct MessageInputBarBoundaryTests {
             !MessageInputBar.sendButtonShowsPreparingSpinner(
                 isSending: false,
                 canSend: false,
-                isPreparing: true,
+                isStagingAttachments: true,
                 connectionState: .reconnecting
             )
         )
@@ -109,7 +109,7 @@ struct MessageInputBarBoundaryTests {
             MessageInputBar.sendButtonShowsPrimaryIcon(
                 isSending: false,
                 canSend: false,
-                isPreparing: false,
+                isStagingAttachments: false,
                 connectionState: .reconnecting
             )
         )

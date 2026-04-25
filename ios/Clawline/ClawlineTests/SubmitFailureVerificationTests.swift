@@ -188,6 +188,11 @@ private final class VerificationChatService: ChatServicing {
         }
     }
 
+    func seedReplayCursorIfMissing(_ cursor: String?, for sessionKey: String) {
+        guard replayCursorBySessionKey[sessionKey] == nil, let cursor else { return }
+        replayCursorBySessionKey[sessionKey] = cursor
+    }
+
     func clearReplayCursors() {
         replayCursorBySessionKey.removeAll()
     }

@@ -52,6 +52,9 @@ struct RichTextEditor: UIViewRepresentable {
         textView.onLayout = { _ in
             coordinator.updateHeight(for: textView, allowAutoScroll: false)
         }
+        textView.onResponderFocusChange = { isFocused in
+            coordinator.parent.onFocusChange(isFocused)
+        }
         textView.isScrollEnabled = false
         textView.backgroundColor = .clear
         textView.textContainerInset = UIEdgeInsets(top: 12, left: 20, bottom: 12, right: trailingPadding)
@@ -104,6 +107,9 @@ struct RichTextEditor: UIViewRepresentable {
             coordinator.updateHeight(for: textView, allowAutoScroll: false)
         }
         onTextViewReady?(textView)
+        textView.onResponderFocusChange = { isFocused in
+            coordinator.parent.onFocusChange(isFocused)
+        }
 
         let isComposing = textView.markedTextRange != nil
         if resetToken != context.coordinator.lastResetToken, !isComposing {
@@ -489,15 +495,19 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
     var onEscape: (() -> Void)?
     var onEscapeLongPress: (() -> Void)?
     var onLayout: ((CGFloat) -> Void)?
-    var dictationProgrammaticEditInFlight: Bool = false
-    private var expectedDictationProgrammaticSelectionFeedback: NSRange?
-    var isInputEnabled: Bool = true {
-        didSet {
-            guard oldValue != isInputEnabled else { return }
-            isEditable = isInputEnabled
-            isSelectable = isInputEnabled
+        var dictationProgrammaticEditInFlight: Bool = false
+        private var expectedDictationProgrammaticSelectionFeedback: NSRange?
+        var onResponderFocusChange: ((Bool) -> Void)?
+        var isInputEnabled: Bool = true {
+            didSet {
+                guard oldValue != isInputEnabled else { return }
+                isEditable = isInputEnabled
+                isSelectable = isInputEnabled
+                if !isInputEnabled && isFirstResponder {
+                    _ = resignFirstResponder()
+                }
+            }
         }
-    }
 
     /// Image providers collected during the delegate's `transforming` calls,
     /// flushed after the run-loop tick so all items from a single paste are batched.
@@ -543,8 +553,23 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
         onLayout?(bounds.width)
     }
 
+        override func becomeFirstResponder() -> Bool {
+            let didBecomeFirstResponder = super.becomeFirstResponder()
+            if didBecomeFirstResponder {
+            onResponderFocusChange?(true)
+        }
+        return didBecomeFirstResponder
+    }
 
-    override var keyCommands: [UIKeyCommand]? {
+    override func resignFirstResponder() -> Bool {
+        let didResignFirstResponder = super.resignFirstResponder()
+        if didResignFirstResponder {
+            onResponderFocusChange?(false)
+        }
+        return didResignFirstResponder
+        }
+
+        override var keyCommands: [UIKeyCommand]? {
         let base = super.keyCommands ?? []
         let emacsCommands: [UIKeyCommand] = [
             UIKeyCommand(input: "a", modifierFlags: [.control], action: #selector(didPressCtrlA)),
@@ -554,7 +579,14 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
             UIKeyCommand(input: "k", modifierFlags: [.control], action: #selector(didPressCtrlK)),
             UIKeyCommand(input: "c", modifierFlags: [.control], action: #selector(didPressCtrlC))
         ]
-        return base + emacsCommands
+        let appCommandShortcuts = ChatAppCommandShortcut.keyCommandSpecs.map { spec in
+            UIKeyCommand(
+                input: spec.input,
+                modifierFlags: spec.modifierFlags,
+                action: spec.action.selector
+            )
+        }
+        return base + emacsCommands + appCommandShortcuts
     }
 
     private var canHandleInputShortcut: Bool {
@@ -627,9 +659,9 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
         replace(fullRange, withText: "")
     }
 
-    override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
-        guard presses.contains(where: isEscapePress(_:)) else {
-            super.pressesBegan(presses, with: event)
+        override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+            guard presses.contains(where: isEscapePress(_:)) else {
+                super.pressesBegan(presses, with: event)
             return
         }
         guard canHandleInputShortcut else { return }
@@ -679,9 +711,9 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
         didFireEscapeLongPress = false
     }
 
-    private func isEscapePress(_ press: UIPress) -> Bool {
-        guard press.key != nil else { return false }
-        return press.key?.charactersIgnoringModifiers == UIKeyCommand.inputEscape
+        private func isEscapePress(_ press: UIPress) -> Bool {
+            guard press.key != nil else { return false }
+            return press.key?.charactersIgnoringModifiers == UIKeyCommand.inputEscape
     }
 
     // MARK: - Paste action gating

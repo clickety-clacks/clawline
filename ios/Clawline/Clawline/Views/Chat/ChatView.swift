@@ -10,6 +10,7 @@ import PhotosUI
 import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
+import WebKit
 import os.log
 
 private let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "ChatView")
@@ -116,7 +117,7 @@ func runtimeInsetFallbackBarHeight(
 // ═══════════════════════════════════════════════════════════════════════════════════════════
 //
 // 1. @State isInputFocused lives HERE in ChatView (stable parent, survives geometry changes)
-// 2. MessageInputBar reports focus via callback: onFocusChange: { isInputFocused = $0 }
+// 2. MessageInputBar reports focus via callback: onFocusChange: { scheduleInputFocusChange($0) }
 // 3. Offset modifier applied HERE in ChatView (modifiers on .safeAreaInset content DO update)
 //
 // KEY INSIGHT: .safeAreaInset content body doesn't re-render on parent state change,
@@ -134,7 +135,68 @@ func runtimeInsetFallbackBarHeight(
 //
 // ═══════════════════════════════════════════════════════════════════════════════════════════
 
+enum StreamPopupSearchFocus: Equatable {
+    case none
+    case request(id: Int)
+}
+
+enum StreamPopupRoute: Equatable {
+    case closed
+    case popup(searchFocus: StreamPopupSearchFocus)
+    case trackPicker
+}
+
+@MainActor
+@Observable
+final class StreamPopupRouteController {
+    private(set) var route: StreamPopupRoute = .closed
+    private var searchFocusRequestID = 0
+
+    var isPopupPresented: Bool {
+        if case .popup = route {
+            return true
+        }
+        return false
+    }
+
+    var isTrackPickerPresented: Bool {
+        route == .trackPicker
+    }
+
+    var popupSearchFocusRequestID: Int? {
+        guard case .popup(.request(let id)) = route else { return nil }
+        return id
+    }
+
+    func openPopup(focusSearch: Bool) {
+        if focusSearch {
+            searchFocusRequestID &+= 1
+            route = .popup(searchFocus: .request(id: searchFocusRequestID))
+        } else {
+            route = .popup(searchFocus: .none)
+        }
+    }
+
+    func closePopup() {
+        route = .closed
+    }
+
+    func presentTrackPicker() {
+        route = .trackPicker
+    }
+
+    func dismissTrackPicker() {
+        route = .closed
+    }
+
+    func consumeSearchFocusRequest() {
+        guard popupSearchFocusRequestID != nil else { return }
+        route = .popup(searchFocus: .none)
+    }
+}
+
 struct ChatView: View {
+
     @Bindable var viewModel: ChatViewModel
     let toastManager: ToastManager
     @Environment(\.scenePhase) private var scenePhase
@@ -155,11 +217,9 @@ struct ChatView: View {
     @State private var layoutRevision: Int = 0
     @State private var selectionRange = NSRange(location: 0, length: 0)
     @State private var pendingInputInsertions: [PendingAttachment] = []
+    @State private var inputBarSendButtonConnectionState = SendButtonConnectionStateStore()
     @State private var activeSheet: ChatSheet?
-    @State private var isStreamManagerPopoverPresented = false
-    @State private var streamPopupShouldAutoFocusSearch = false
-    @State private var streamPopupSearchFocusRequestID = 0
-    @State private var isTrackPickerPresented = false
+    @State private var streamPopupRouteController = StreamPopupRouteController()
     @State private var isPhotosPickerPresented = false
     @State private var isFileImporterPresented = false
     @State private var photoPickerItems: [PhotosPickerItem] = []
@@ -358,7 +418,7 @@ struct ChatView: View {
     }
 
     private func handleMessageFlowScrollEvent(_ event: MessageFlowScrollEvent) {
-        guard !isStreamManagerPopoverPresented else { return }
+        guard !streamPopupRouteController.isPopupPresented else { return }
         switch event {
         case .isAtBottomChanged(let sessionKey, let isAtBottom):
             mutateScrollButtonState(for: sessionKey) { state in
@@ -713,6 +773,11 @@ struct ChatView: View {
             dictationCoordinator.handleAppBackgrounded()
             viewModel.onDisappear()
             resetScrollButtonInteractionState()
+            streamPopupRouteController.closePopup()
+#if DEBUG
+            lifecycleDebugOverlayDismissTask?.cancel()
+            lifecycleDebugOverlayDismissTask = nil
+#endif
         }
         .onChange(of: scenePhase) { _, phase in
             viewModel.handleSceneActiveStateChanged(isActive: phase == .active)
@@ -723,20 +788,26 @@ struct ChatView: View {
                 dictationCoordinator.handleAppBackgrounded()
             }
         }
-        .onChange(of: isStreamManagerPopoverPresented) { _, isPresented in
-            if !isPresented {
-                streamPopupShouldAutoFocusSearch = false
+        .handlePromptFocusCommand(
+            onFocusRequested: {
+                focusRequestID &+= 1
             }
-        }
+        )
         .handleStreamPopupCommand(
-            isPresented: $isStreamManagerPopoverPresented,
             hasStreams: !viewModel.orderedStreams.isEmpty,
-            onOpen: requestStreamPopupSearchFocus
+            onOpen: {
+                streamPopupRouteController.openPopup(focusSearch: true)
+            }
+        )
+        .handleStreamNavigationCommands(
+            isEnabled: !viewModel.orderedStreams.isEmpty,
+            onNavigatePrevious: { navigateStreamByShortcut(step: -1, sessionKeys: viewModel.orderedStreams.map(\.sessionKey)) },
+            onNavigateNext: { navigateStreamByShortcut(step: 1, sessionKeys: viewModel.orderedStreams.map(\.sessionKey)) }
         )
         .handleKeyboardScrollCommands(
-            isEnabled: supportsKeyboardNavigationShortcuts,
-            onScrollToBottom: { scrollActiveSessionToBottom() },
-            onScrollToTop: { scrollActiveSessionToTop() }
+            isEnabled: keyboardScrollShortcutEnabled,
+            onScrollDown: { scrollActiveSessionByPage(.down) },
+            onScrollUp: { scrollActiveSessionByPage(.up) }
         )
 #if DEBUG
         .onChange(of: viewModel.lifecycleDebugSequence) { _, _ in
@@ -845,6 +916,7 @@ struct ChatView: View {
         let isKeyboardVisible = keyboardVisibleHeight > 0.5
         let effectiveStreams = viewModel.orderedStreams
         let effectiveSessionKeys = effectiveStreams.map(\.sessionKey)
+        let sendButtonConnectionState = viewModel.sendButtonConnectionState
         let showsStreamPager = !effectiveSessionKeys.isEmpty
         let pageIndicatorClearance: CGFloat = {
             guard showsStreamPager else { return 0 }
@@ -915,9 +987,14 @@ struct ChatView: View {
             0,
             geometry.size.height
                 - inputBarTopFromScreenBottom
-                - geometry.safeAreaInsets.top
+                - messageListTopInset
                 - streamSelectorSpacingFromMessageBarTop
         )
+        let promptFocusShortcutEnabled = !isInputFocused
+            && streamPopupRouteController.route == .closed
+            && activeSheet == nil
+            && !isPhotosPickerPresented
+            && !isFileImporterPresented
 
         let messageLayer: AnyView = AnyView(
             pagedStreamView(
@@ -928,103 +1005,106 @@ struct ChatView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .ignoresSafeArea(.container, edges: [.top, .bottom])
         )
-
-        ZStack(alignment: .top) {
-            messageLayer
-                // #31: fade out message content behind the system status bar (mask, not overlay tint).
-                .compositingGroup()
-                .mask(statusBarFadeMask(topInset: statusBarTopInset))
-
-            streamToastView(
-                inputBarTopFromScreenBottom: inputBarTopFromScreenBottom
+        let contentStack: AnyView = AnyView(
+            chatContentBaseLayer(
+                messageLayer: messageLayer,
+                statusBarTopInset: statusBarTopInset,
+                inputBarTopFromScreenBottom: inputBarTopFromScreenBottom,
+                geometry: geometry,
+                toastManager: toastManager
             )
-            toastBannerView(geometry: geometry, toastManager: toastManager)
-        }
-        .ignoresSafeArea(.keyboard)
-#if !os(visionOS)
-        .contentShape(Rectangle())
-#endif
-        .onChange(of: layoutInputs) { _, _ in
-            layoutCoordinator.updateInputs(layoutInputs, metrics: layoutMetrics)
-            layoutCoordinator.markInputsChanged()
-        }
-        .onChange(of: layoutMetrics) { _, _ in
-            layoutCoordinator.updateInputs(layoutInputs, metrics: layoutMetrics)
-            layoutCoordinator.markInputsChanged()
-        }
-        .onChange(of: viewModel.engineActiveSessionKey) { _, newValue in
-            layoutCoordinator.setActiveSessionKey(newValue)
-        }
-        .onAppear {
-            viewModel.bindStreamSwitchCoordinatorIfNeeded()
-            layoutCoordinator.setActiveSessionKey(viewModel.engineActiveSessionKey)
-            layoutCoordinator.updateInputs(layoutInputs, metrics: layoutMetrics)
-            layoutCoordinator.markInputsChanged()
-            reportDictationObservations(viewModel: viewModel)
-        }
-        .onChange(of: viewModel.uiSelectionSequence) { _, _ in
-            guard let selectedSessionKey = viewModel.lastUISelectedSessionKey else { return }
-            let streamDisplayName = viewModel.stream(for: selectedSessionKey)?.displayName ?? viewModel.activeSessionDisplayName
-            let shouldShowBusy = selectedSessionKey != viewModel.engineActiveSessionKey
-            StreamSwitchTiming.log("toast_show_called", sessionKey: selectedSessionKey)
-            #if !os(visionOS)
-            StreamSwitchTiming.log("haptic_fired", sessionKey: selectedSessionKey)
-            let generator = UIImpactFeedbackGenerator(style: .medium)
-            generator.impactOccurred()
-            #endif
-            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                // UI-intent path is immediate; spinner stays up through debounce + engine activation.
-                streamToastManager.show(displayName: streamDisplayName, sessionKey: selectedSessionKey, isBusy: shouldShowBusy)
-            }
-            if shouldShowBusy {
-                streamToastBusySince = Date()
-                streamToastBusyClearTask?.cancel()
-                streamToastBusyClearTask = nil
-            } else {
-                // Same-stream intent has no engine activation phase, so never enter busy state.
-                streamToastBusySince = nil
-                streamToastBusyClearTask?.cancel()
-                streamToastBusyClearTask = nil
-            }
-        }
-        .onChange(of: viewModel.engineActivationCompletedSequence) { _, _ in
-            guard let completedSessionKey = viewModel.lastEngineActivationSessionKey else { return }
-            guard streamToastManager.isVisible, streamToastManager.sessionKey == completedSessionKey else { return }
-            scheduleStreamToastBusyClear()
-        }
-        .onChange(of: keyboardHeight) { _, _ in layoutRevision &+= 1 }
-        .onChange(of: keyboardAnimationDuration) { _, _ in layoutRevision &+= 1 }
-        .onChange(of: keyboardAnimationCurve) { _, _ in layoutRevision &+= 1 }
-        .onChange(of: inputBarHeight) { _, newValue in
-            guard shouldInvalidateLayoutRevisionOnInputBarHeightChange else { return }
-            if !dictationMotion.shouldFreezeLayout {
-                settledInputBarHeight = newValue
-                layoutRevision &+= 1
-            }
-        }
-        .onChange(of: isInputFocused) { _, focused in
-            layoutRevision &+= 1
-            keyboardRefreshToken &+= 1
-            if !focused {
-                DispatchQueue.main.async {
-                    keyboardRefreshToken &+= 1
+        )
+
+        let observedContent: AnyView = AnyView(
+            contentStack
+                .onChange(of: layoutInputs) { _, _ in
+                    layoutCoordinator.updateInputs(layoutInputs, metrics: layoutMetrics)
+                    layoutCoordinator.markInputsChanged()
                 }
-                let refreshDelay = max(0.05, keyboardAnimationDuration)
-                DispatchQueue.main.asyncAfter(deadline: .now() + refreshDelay) {
-                    keyboardRefreshToken &+= 1
+                .onChange(of: layoutMetrics) { _, _ in
+                    layoutCoordinator.updateInputs(layoutInputs, metrics: layoutMetrics)
+                    layoutCoordinator.markInputsChanged()
                 }
-            }
-            reportDictationObservations(viewModel: viewModel)
-        }
-        .onChange(of: dictationMotion.shouldFreezeLayout) { _, isFrozen in
-            if !isFrozen {
-                settledInputBarHeight = inputBarHeight
-                layoutCoordinator.updateBarHeight(inputBarHeight)
-                layoutRevision &+= 1
-            }
-        }
-        .onChange(of: geometry.safeAreaInsets.bottom) { _, _ in layoutRevision &+= 1 }
-        .onChange(of: horizontalSizeClass) { _, _ in layoutRevision &+= 1 }
+                .onChange(of: viewModel.engineActiveSessionKey) { _, newValue in
+                    layoutCoordinator.setActiveSessionKey(newValue)
+                }
+                .onAppear {
+                    viewModel.bindStreamSwitchCoordinatorIfNeeded()
+                    layoutCoordinator.setActiveSessionKey(viewModel.engineActiveSessionKey)
+                    layoutCoordinator.updateInputs(layoutInputs, metrics: layoutMetrics)
+                    layoutCoordinator.markInputsChanged()
+                    reportDictationObservations(viewModel: viewModel)
+                    inputBarSendButtonConnectionState.value = sendButtonConnectionState
+                }
+                .onChange(of: sendButtonConnectionState) { _, newValue in
+                    inputBarSendButtonConnectionState.value = newValue
+                }
+                .onChange(of: viewModel.uiSelectionSequence) { _, _ in
+                    guard let selectedSessionKey = viewModel.lastUISelectedSessionKey else { return }
+                    let streamDisplayName = viewModel.stream(for: selectedSessionKey)?.displayName ?? viewModel.activeSessionDisplayName
+                    let shouldShowBusy = selectedSessionKey != viewModel.engineActiveSessionKey
+                    StreamSwitchTiming.log("toast_show_called", sessionKey: selectedSessionKey)
+                    #if !os(visionOS)
+                    StreamSwitchTiming.log("haptic_fired", sessionKey: selectedSessionKey)
+                    let generator = UIImpactFeedbackGenerator(style: .medium)
+                    generator.impactOccurred()
+                    #endif
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                        // UI-intent path is immediate; spinner stays up through debounce + engine activation.
+                        streamToastManager.show(displayName: streamDisplayName, sessionKey: selectedSessionKey, isBusy: shouldShowBusy)
+                    }
+                    if shouldShowBusy {
+                        streamToastBusySince = Date()
+                        streamToastBusyClearTask?.cancel()
+                        streamToastBusyClearTask = nil
+                    } else {
+                        // Same-stream intent has no engine activation phase, so never enter busy state.
+                        streamToastBusySince = nil
+                        streamToastBusyClearTask?.cancel()
+                        streamToastBusyClearTask = nil
+                    }
+                }
+                .onChange(of: viewModel.engineActivationCompletedSequence) { _, _ in
+                    guard let completedSessionKey = viewModel.lastEngineActivationSessionKey else { return }
+                    guard streamToastManager.isVisible, streamToastManager.sessionKey == completedSessionKey else { return }
+                    scheduleStreamToastBusyClear()
+                }
+                .onChange(of: keyboardHeight) { _, _ in layoutRevision &+= 1 }
+                .onChange(of: keyboardAnimationDuration) { _, _ in layoutRevision &+= 1 }
+                .onChange(of: keyboardAnimationCurve) { _, _ in layoutRevision &+= 1 }
+                .onChange(of: inputBarHeight) { _, newValue in
+                    guard shouldInvalidateLayoutRevisionOnInputBarHeightChange else { return }
+                    if !dictationMotion.shouldFreezeLayout {
+                        settledInputBarHeight = newValue
+                        layoutRevision &+= 1
+                    }
+                }
+                .onChange(of: isInputFocused) { _, focused in
+                    layoutRevision &+= 1
+                    keyboardRefreshToken &+= 1
+                    if !focused {
+                        DispatchQueue.main.async {
+                            keyboardRefreshToken &+= 1
+                        }
+                        let refreshDelay = max(0.05, keyboardAnimationDuration)
+                        DispatchQueue.main.asyncAfter(deadline: .now() + refreshDelay) {
+                            keyboardRefreshToken &+= 1
+                        }
+                    }
+                    reportDictationObservations(viewModel: viewModel)
+                }
+                .onChange(of: dictationMotion.shouldFreezeLayout) { _, isFrozen in
+                    if !isFrozen {
+                        settledInputBarHeight = inputBarHeight
+                        layoutCoordinator.updateBarHeight(inputBarHeight)
+                        layoutRevision &+= 1
+                    }
+                }
+                .onChange(of: geometry.safeAreaInsets.bottom) { _, _ in layoutRevision &+= 1 }
+                .onChange(of: horizontalSizeClass) { _, _ in layoutRevision &+= 1 }
+        )
+
+        observedContent
         .overlay(alignment: .bottom) {
 #if os(visionOS)
             floatingPageDotsView(
@@ -1077,6 +1157,18 @@ struct ChatView: View {
             EmptyView()
 #endif
         }
+        .modifier(
+            PromptFocusShortcutModifier(
+                isEnabled: promptFocusShortcutEnabled,
+                hasStreams: !effectiveSessionKeys.isEmpty,
+                onOpenStreamPopup: {
+                    streamPopupRouteController.openPopup(focusSearch: true)
+                },
+                onFocusRequested: {
+                    focusRequestID &+= 1
+                }
+            )
+        )
 #if DEBUG
         .overlay(alignment: .topTrailing) {
             lifecycleDebugOverlay(
@@ -1084,6 +1176,29 @@ struct ChatView: View {
                 containerHeight: geometry.size.height
             )
         }
+#endif
+    }
+
+    @ViewBuilder
+    private func chatContentBaseLayer(messageLayer: AnyView,
+                                      statusBarTopInset: CGFloat,
+                                      inputBarTopFromScreenBottom: CGFloat,
+                                      geometry: GeometryProxy,
+                                      toastManager: ToastManager) -> some View {
+        ZStack(alignment: .top) {
+            messageLayer
+                // #31: fade out message content behind the system status bar (mask, not overlay tint).
+                .compositingGroup()
+                .mask(statusBarFadeMask(topInset: statusBarTopInset))
+
+            streamToastView(
+                inputBarTopFromScreenBottom: inputBarTopFromScreenBottom
+            )
+            toastBannerView(geometry: geometry, toastManager: toastManager)
+        }
+        .ignoresSafeArea(.keyboard)
+#if !os(visionOS)
+        .contentShape(Rectangle())
 #endif
     }
 
@@ -1541,8 +1656,8 @@ struct ChatView: View {
                 resetToken: viewModel.inputResetToken,
                 canSend: viewModel.canSend,
                 isSending: viewModel.sendButtonIsSending,
-                isPreparing: viewModel.sendButtonIsPreparing,
-                connectionState: viewModel.sendButtonConnectionState,
+                isStagingAttachments: viewModel.sendButtonIsPreparing,
+                connectionStateStore: inputBarSendButtonConnectionState,
                 focusTrigger: focusRequestID,
                 dismissTrigger: dismissRequestID,
                 isTextFieldFocused: isInputFocused,
@@ -1560,10 +1675,7 @@ struct ChatView: View {
                 // ⚠️ This callback is how focus state survives view recreation.
                 // DO NOT replace with @Binding or try to use @FocusState directly.
                 onFocusChange: { focused in
-                    isInputFocused = focused
-                    if !focused {
-                        clearTypingActivity()
-                    }
+                    scheduleInputFocusChange(focused)
                 },
                 onRequestFocus: { requestInputFocus() },
                 onRequestDirectFocus: {
@@ -1864,56 +1976,26 @@ struct ChatView: View {
             containerWidth: containerWidth,
             bottomSafeAreaInset: bottomSafeAreaInset
         )
-        return StreamPageDotsView(
+        return StreamPopupTrigger(
+            routeController: streamPopupRouteController,
+            viewModel: viewModel,
+            streams: effectiveStreams,
             sessionKeys: effectiveSessionKeys,
             activeSessionKey: viewModel.uiSelectedSessionKey,
             dotStatesBySession: dotStatesBySession,
             maxWidth: pageDotsMaxWidth,
-            onTap: { isStreamManagerPopoverPresented = true }
-        )
-        .overlay(alignment: .top) {
-            Color.clear
-                .frame(maxWidth: .infinity)
-                .frame(height: 1)
-                .allowsHitTesting(false)
-                .popover(
-                    isPresented: $isStreamManagerPopoverPresented,
-                    attachmentAnchor: .rect(.bounds),
-                    arrowEdge: .bottom
-                ) {
-                    StreamManagerSheet(
-                        viewModel: viewModel,
-                        streams: effectiveStreams,
-                        dotStatesBySession: dotStatesBySession,
-                        isPresented: $isStreamManagerPopoverPresented,
-                        shouldAutoFocusSearchOnAppear: streamPopupShouldAutoFocusSearch,
-                        searchFocusRequestID: streamPopupSearchFocusRequestID,
-                        maxAvailableHeight: streamSelectorMaxHeight,
-                        maxAvailableWidth: containerWidth,
-                        onSelectStream: { sessionKey in
-                            selectStream(sessionKey, source: .programmatic)
-                        },
-                        onPresentTrackPicker: {
-                            prepareForAttachmentPicker()
-                            isStreamManagerPopoverPresented = false
-                            Task { @MainActor in
-                                await Task.yield()
-                                isTrackPickerPresented = true
-                            }
-                        }
-                    )
-                    .presentationCompactAdaptation(.popover)
-                    .presentationBackground(.clear)
-                }
-        }
-        .sheet(
-            isPresented: $isTrackPickerPresented,
-            onDismiss: {
+            maxAvailableHeight: streamSelectorMaxHeight,
+            maxAvailableWidth: containerWidth,
+            onSelectStream: { sessionKey in
+                selectStream(sessionKey, source: .programmatic)
+            },
+            onPrepareForTrackPicker: {
+                prepareForAttachmentPicker()
+            },
+            onTrackPickerDismiss: {
                 restoreFocusIfNeeded()
             }
-        ) {
-            TrackPickerSheet(viewModel: viewModel)
-        }
+        )
     }
 
     private func selectStream(_ sessionKey: String, source: ChatViewModel.StreamSwitchSource) {
@@ -1922,11 +2004,25 @@ struct ChatView: View {
     }
 
     private var supportsKeyboardNavigationShortcuts: Bool {
-#if os(iOS)
+#if targetEnvironment(macCatalyst)
+        true
+#elseif os(iOS)
         UIDevice.current.userInterfaceIdiom == .pad
+#elseif os(visionOS)
+        true
 #else
         false
 #endif
+    }
+
+    private var keyboardScrollShortcutEnabled: Bool {
+        ChatKeyboardScrollRouting.isEnabled(
+            platformSupportsKeyboardNavigation: supportsKeyboardNavigationShortcuts,
+            streamPopupRoute: streamPopupRouteController.route,
+            activeSheetPresented: activeSheet != nil,
+            photosPickerPresented: isPhotosPickerPresented,
+            fileImporterPresented: isFileImporterPresented
+        )
     }
 
     private var keyboardNavigationSessionKey: String? {
@@ -1941,19 +2037,20 @@ struct ChatView: View {
         return sessionKeys.first
     }
 
-    private func scrollActiveSessionToBottom() {
+    private func scrollActiveSessionByPage(_ direction: ChatScrollPageDirection) {
         guard let sessionKey = keyboardNavigationSessionKey else { return }
-        layoutCoordinator.scrollToBottom(sessionKey: sessionKey, animated: true)
+        layoutCoordinator.scrollByPage(sessionKey: sessionKey, direction: direction, animated: true)
     }
 
-    private func scrollActiveSessionToTop() {
-        guard let sessionKey = keyboardNavigationSessionKey else { return }
-        layoutCoordinator.scrollToTop(sessionKey: sessionKey, animated: true)
-    }
-
-    private func requestStreamPopupSearchFocus() {
-        streamPopupShouldAutoFocusSearch = true
-        streamPopupSearchFocusRequestID &+= 1
+    private func navigateStreamByShortcut(step: Int, sessionKeys: [String]) {
+        guard let targetSessionKey = ChatKeyboardNavigation.targetSessionKey(
+            sessionKeys: sessionKeys,
+            currentSessionKey: keyboardNavigationSessionKey,
+            step: step
+        ) else {
+            return
+        }
+        selectStream(targetSessionKey, source: .programmatic)
     }
 
     private func scheduleStreamToastBusyClear() {
@@ -1993,6 +2090,21 @@ struct ChatView: View {
         typingActivityResetTask?.cancel()
         typingActivityResetTask = nil
         isTypingActive = false
+    }
+
+    private func scheduleInputFocusChange(_ focused: Bool) {
+        Task { @MainActor in
+            applyInputFocusChange(focused)
+        }
+    }
+
+    private func applyInputFocusChange(_ focused: Bool) {
+        if isInputFocused != focused {
+            isInputFocused = focused
+        }
+        if !focused {
+            clearTypingActivity()
+        }
     }
 
     private func deviceCornerRadius() -> CGFloat {
@@ -2318,69 +2430,566 @@ private struct VisionOSInputBarDepthOffset: ViewModifier {
     }
 }
 
+private struct StreamPopupTrigger: View {
+    @Bindable var routeController: StreamPopupRouteController
+
+    let viewModel: ChatViewModel
+    let streams: [StreamSession]
+    let sessionKeys: [String]
+    let activeSessionKey: String
+    let dotStatesBySession: [String: StreamDotState]
+    let maxWidth: CGFloat?
+    let maxAvailableHeight: CGFloat
+    let maxAvailableWidth: CGFloat
+    let onSelectStream: (String) -> Void
+    let onPrepareForTrackPicker: () -> Void
+    let onTrackPickerDismiss: () -> Void
+
+    var body: some View {
+        StreamPageDotsView(
+            sessionKeys: sessionKeys,
+            activeSessionKey: activeSessionKey,
+            dotStatesBySession: dotStatesBySession,
+            maxWidth: maxWidth,
+            onTap: {
+                routeController.openPopup(focusSearch: false)
+            }
+        )
+        .popover(
+            isPresented: popupPresentationBinding,
+            attachmentAnchor: .rect(.bounds),
+            arrowEdge: .bottom
+        ) {
+            StreamManagerSheet(
+                viewModel: viewModel,
+                streams: streams,
+                dotStatesBySession: dotStatesBySession,
+                searchFocusRequestID: routeController.popupSearchFocusRequestID,
+                maxAvailableHeight: maxAvailableHeight,
+                maxAvailableWidth: maxAvailableWidth,
+                onSelectStream: { sessionKey in
+                    routeController.closePopup()
+                    onSelectStream(sessionKey)
+                },
+                onRequestTrackPicker: {
+                    onPrepareForTrackPicker()
+                    routeController.presentTrackPicker()
+                },
+                onConsumeSearchFocusRequest: {
+                    routeController.consumeSearchFocusRequest()
+                }
+            )
+            .presentationCompactAdaptation(.popover)
+            .presentationBackground(.clear)
+            .streamManagerPopoverBackgroundInteraction()
+        }
+        .sheet(
+            isPresented: trackPickerPresentationBinding,
+            onDismiss: {
+                routeController.dismissTrackPicker()
+                onTrackPickerDismiss()
+            }
+        ) {
+            TrackPickerSheet(
+                viewModel: viewModel,
+                onDismissRequested: {
+                    routeController.dismissTrackPicker()
+                }
+            )
+        }
+    }
+
+    private var popupPresentationBinding: Binding<Bool> {
+        Binding(
+            get: { routeController.isPopupPresented },
+            set: { isPresented in
+                if isPresented {
+                    routeController.openPopup(focusSearch: false)
+                } else {
+                    routeController.closePopup()
+                }
+            }
+        )
+    }
+
+    private var trackPickerPresentationBinding: Binding<Bool> {
+        Binding(
+            get: { routeController.isTrackPickerPresented },
+            set: { isPresented in
+                if isPresented {
+                    routeController.presentTrackPicker()
+                } else {
+                    routeController.dismissTrackPicker()
+                }
+            }
+        )
+    }
+}
+
 private extension View {
     func visionOSInputBarDepthOffset() -> some View {
         modifier(VisionOSInputBarDepthOffset())
     }
 
+    @ViewBuilder
+    func streamManagerPopoverBackgroundInteraction() -> some View {
+#if os(visionOS)
+        self
+#else
+        self.presentationBackgroundInteraction(.enabled)
+#endif
+    }
+
+    func handlePromptFocusCommand(
+        onFocusRequested: @escaping () -> Void
+    ) -> some View {
+        modifier(
+            PromptFocusCommandModifier(
+                onFocusRequested: onFocusRequested
+            )
+        )
+    }
+
     func handleStreamPopupCommand(
-        isPresented: Binding<Bool>,
         hasStreams: Bool,
         onOpen: @escaping () -> Void
     ) -> some View {
         modifier(
             StreamPopupCommandModifier(
-                isPresented: isPresented,
                 hasStreams: hasStreams,
                 onOpen: onOpen
             )
         )
     }
 
+    func handleStreamNavigationCommands(
+        isEnabled: Bool,
+        onNavigatePrevious: @escaping () -> Void,
+        onNavigateNext: @escaping () -> Void
+    ) -> some View {
+        modifier(
+            StreamNavigationCommandModifier(
+                isEnabled: isEnabled,
+                onNavigatePrevious: onNavigatePrevious,
+                onNavigateNext: onNavigateNext
+            )
+        )
+    }
+
     func handleKeyboardScrollCommands(
         isEnabled: Bool,
-        onScrollToBottom: @escaping () -> Void,
-        onScrollToTop: @escaping () -> Void
+        onScrollDown: @escaping () -> Void,
+        onScrollUp: @escaping () -> Void
     ) -> some View {
         modifier(
             KeyboardScrollCommandModifier(
                 isEnabled: isEnabled,
-                onScrollToBottom: onScrollToBottom,
-                onScrollToTop: onScrollToTop
+                onScrollDown: onScrollDown,
+                onScrollUp: onScrollUp
             )
         )
     }
 }
 
+private struct PromptFocusCommandModifier: ViewModifier {
+    let onFocusRequested: () -> Void
+
+    func body(content: Content) -> some View {
+        content.onReceive(NotificationCenter.default.publisher(for: .clawlineFocusPromptInputCommand)) { _ in
+            onFocusRequested()
+        }
+    }
+}
+
 private struct StreamPopupCommandModifier: ViewModifier {
-    @Binding var isPresented: Bool
     let hasStreams: Bool
     let onOpen: () -> Void
 
     func body(content: Content) -> some View {
         content.onReceive(NotificationCenter.default.publisher(for: .clawlineOpenStreamPopupCommand)) { _ in
             guard hasStreams else { return }
-            isPresented = true
             onOpen()
         }
     }
 }
 
-private struct KeyboardScrollCommandModifier: ViewModifier {
+private struct StreamNavigationCommandModifier: ViewModifier {
     let isEnabled: Bool
-    let onScrollToBottom: () -> Void
-    let onScrollToTop: () -> Void
+    let onNavigatePrevious: () -> Void
+    let onNavigateNext: () -> Void
 
     func body(content: Content) -> some View {
         content
-            .onReceive(NotificationCenter.default.publisher(for: .clawlineScrollToBottomCommand)) { _ in
+            .onReceive(NotificationCenter.default.publisher(for: .clawlineNavigateToPreviousStreamCommand)) { _ in
                 guard isEnabled else { return }
-                onScrollToBottom()
+                onNavigatePrevious()
             }
-            .onReceive(NotificationCenter.default.publisher(for: .clawlineScrollToTopCommand)) { _ in
+            .onReceive(NotificationCenter.default.publisher(for: .clawlineNavigateToNextStreamCommand)) { _ in
                 guard isEnabled else { return }
-                onScrollToTop()
+                onNavigateNext()
             }
+    }
+}
+
+private struct KeyboardScrollCommandModifier: ViewModifier {
+    let isEnabled: Bool
+    let onScrollDown: () -> Void
+    let onScrollUp: () -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .onReceive(NotificationCenter.default.publisher(for: .clawlineScrollDownCommand)) { _ in
+                guard isEnabled, !UIWindow.clawlineCurrentFirstResponderOwnsEmbeddedScroll else { return }
+                onScrollDown()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .clawlineScrollUpCommand)) { _ in
+                guard isEnabled, !UIWindow.clawlineCurrentFirstResponderOwnsEmbeddedScroll else { return }
+                onScrollUp()
+            }
+    }
+}
+
+private struct PromptFocusShortcutModifier: ViewModifier {
+    let isEnabled: Bool
+    let hasStreams: Bool
+    let onOpenStreamPopup: () -> Void
+    let onFocusRequested: () -> Void
+
+    func body(content: Content) -> some View {
+        content.background {
+            PromptFocusShortcutHost(
+                isEnabled: isEnabled,
+                hasStreams: hasStreams,
+                onOpenStreamPopup: onOpenStreamPopup,
+                onFocusRequested: onFocusRequested
+            )
+            .frame(width: 0, height: 0)
+            .allowsHitTesting(false)
+        }
+    }
+}
+
+private struct PromptFocusShortcutHost: UIViewRepresentable {
+    let isEnabled: Bool
+    let hasStreams: Bool
+    let onOpenStreamPopup: () -> Void
+    let onFocusRequested: () -> Void
+
+    func makeUIView(context: Context) -> PromptFocusShortcutView {
+        let view = PromptFocusShortcutView()
+        view.onOpenStreamPopup = onOpenStreamPopup
+        view.onFocusRequested = onFocusRequested
+        view.isShortcutEnabled = isEnabled
+        view.hasStreams = hasStreams
+        return view
+    }
+
+    func updateUIView(_ view: PromptFocusShortcutView, context: Context) {
+        view.onOpenStreamPopup = onOpenStreamPopup
+        view.onFocusRequested = onFocusRequested
+        view.isShortcutEnabled = isEnabled
+        view.hasStreams = hasStreams
+        if isEnabled {
+            view.activateWhenReady()
+        } else if view.isFirstResponder {
+            view.resignFirstResponder()
+        }
+    }
+}
+
+private final class PromptFocusShortcutView: UIView {
+    var onOpenStreamPopup: (() -> Void)?
+    var onFocusRequested: (() -> Void)?
+    var isShortcutEnabled = false
+    var hasStreams = false
+    private var hasPendingActivationRetry = false
+
+    override var canBecomeFirstResponder: Bool {
+        isShortcutEnabled
+    }
+
+    override var keyCommands: [UIKeyCommand]? {
+        guard isShortcutEnabled else { return nil }
+        let noTextCommands = PromptFocusShortcutConfiguration.keyCommandSpecs.map { spec in
+            UIKeyCommand(
+                input: spec.input,
+                modifierFlags: spec.modifierFlags,
+                action: selector(for: spec.action)
+            )
+        }
+        let appCommandShortcuts = ChatAppCommandShortcut.keyCommandSpecs.map { spec in
+            UIKeyCommand(
+                input: spec.input,
+                modifierFlags: spec.modifierFlags,
+                action: spec.action.selector
+            )
+        }
+        return noTextCommands + appCommandShortcuts
+    }
+
+    private func selector(for action: PromptFocusShortcutConfiguration.Action) -> Selector {
+        switch action {
+        case .focusPromptInput:
+            return #selector(focusPromptInput)
+        case .openStreamPopup:
+            return #selector(openStreamPopup)
+        }
+    }
+
+    func activateWhenReady(textInputRetryCount: Int = 1) {
+        guard window != nil else {
+            DispatchQueue.main.async { [weak self] in
+                self?.activateWhenReady()
+            }
+            return
+        }
+        switch PromptFocusShortcutActivation.action(
+            isShortcutEnabled: isShortcutEnabled,
+            isAlreadyFirstResponder: isFirstResponder,
+            currentFirstResponderIsTextInput: window?.clawlineFirstResponder?.isClawlineTextInputResponder == true,
+            currentFirstResponderOwnsEmbeddedScroll: window?.clawlineFirstResponder?.ownsClawlineEmbeddedScrollInput == true,
+            canRetryAfterTextInput: textInputRetryCount > 0
+        ) {
+        case .activate:
+            hasPendingActivationRetry = false
+            becomeFirstResponder()
+        case .retryAfterTextInputResigns:
+            scheduleActivationRetry(textInputRetryCount: textInputRetryCount - 1)
+        case .skip:
+            hasPendingActivationRetry = false
+        }
+    }
+
+    private func scheduleActivationRetry(textInputRetryCount: Int) {
+        guard !hasPendingActivationRetry else { return }
+        hasPendingActivationRetry = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            hasPendingActivationRetry = false
+            activateWhenReady(textInputRetryCount: textInputRetryCount)
+        }
+    }
+
+    @objc private func focusPromptInput(_ sender: UIKeyCommand) {
+        guard isShortcutEnabled else { return }
+        onFocusRequested?()
+    }
+
+    @objc private func openStreamPopup(_ sender: UIKeyCommand) {
+        guard isShortcutEnabled, hasStreams else { return }
+        onOpenStreamPopup?()
+    }
+}
+
+enum PromptFocusShortcutConfiguration {
+    enum Action: Equatable {
+        case focusPromptInput
+        case openStreamPopup
+    }
+
+    struct KeyCommandSpec {
+        let input: String
+        let modifierFlags: UIKeyModifierFlags
+        let action: Action
+    }
+
+    static let keyCommandSpecs: [KeyCommandSpec] = [
+        KeyCommandSpec(input: "/", modifierFlags: [], action: .openStreamPopup),
+        KeyCommandSpec(input: " ", modifierFlags: [], action: .focusPromptInput),
+        KeyCommandSpec(input: "\r", modifierFlags: [], action: .focusPromptInput)
+    ]
+}
+
+enum ChatAppCommandShortcut {
+    enum Action {
+        case focusPromptInput
+        case openStreamPopup
+        case navigatePreviousStream
+        case navigateNextStream
+        case scrollDown
+        case scrollUp
+
+        var selector: Selector {
+            switch self {
+            case .focusPromptInput:
+                return #selector(UIResponder.clawlineFocusPromptInputCommand(_:))
+            case .openStreamPopup:
+                return #selector(UIResponder.clawlineOpenStreamPopupCommand(_:))
+            case .navigatePreviousStream:
+                return #selector(UIResponder.clawlineNavigateToPreviousStreamCommand(_:))
+            case .navigateNextStream:
+                return #selector(UIResponder.clawlineNavigateToNextStreamCommand(_:))
+            case .scrollDown:
+                return #selector(UIResponder.clawlineScrollDownCommand(_:))
+            case .scrollUp:
+                return #selector(UIResponder.clawlineScrollUpCommand(_:))
+            }
+        }
+    }
+
+    struct KeyCommandSpec {
+        let input: String
+        let modifierFlags: UIKeyModifierFlags
+        let action: Action
+    }
+
+    static let keyCommandSpecs: [KeyCommandSpec] = [
+        KeyCommandSpec(input: "l", modifierFlags: [.command], action: .focusPromptInput),
+        KeyCommandSpec(input: ";", modifierFlags: [.command], action: .openStreamPopup),
+        KeyCommandSpec(input: "h", modifierFlags: [.command, .shift], action: .navigatePreviousStream),
+        KeyCommandSpec(input: "l", modifierFlags: [.command, .shift], action: .navigateNextStream),
+        KeyCommandSpec(input: "j", modifierFlags: [.command, .shift], action: .scrollDown),
+        KeyCommandSpec(input: "k", modifierFlags: [.command, .shift], action: .scrollUp)
+    ]
+}
+
+enum ChatShortcutRouting {
+    enum Owner: Equatable {
+        case appCommand
+        case noTextResponder
+        case textInput
+    }
+
+    static func owner(input: String, modifierFlags: UIKeyModifierFlags) -> Owner {
+        let normalizedInput = input.lowercased()
+        if modifierFlags == [.command], normalizedInput == ";" {
+            return .appCommand
+        }
+        if modifierFlags == [.command], normalizedInput == "l" {
+            return .appCommand
+        }
+        if modifierFlags == [.command, .shift], ["h", "j", "k", "l"].contains(normalizedInput) {
+            return .appCommand
+        }
+        if modifierFlags.contains(.command) {
+            return .textInput
+        }
+        return ["/", " ", "\r"].contains(input) ? .noTextResponder : .textInput
+    }
+}
+
+enum ChatKeyboardScrollRouting {
+    static func isEnabled(
+        platformSupportsKeyboardNavigation: Bool,
+        streamPopupRoute: StreamPopupRoute,
+        activeSheetPresented: Bool,
+        photosPickerPresented: Bool,
+        fileImporterPresented: Bool
+    ) -> Bool {
+        platformSupportsKeyboardNavigation
+            && streamPopupRoute == .closed
+            && !activeSheetPresented
+            && !photosPickerPresented
+            && !fileImporterPresented
+    }
+}
+
+extension UIResponder {
+    @objc func clawlineFocusPromptInputCommand(_ sender: UIKeyCommand) {
+        NotificationCenter.default.post(name: .clawlineFocusPromptInputCommand, object: nil)
+    }
+
+    @objc func clawlineOpenStreamPopupCommand(_ sender: UIKeyCommand) {
+        NotificationCenter.default.post(name: .clawlineOpenStreamPopupCommand, object: nil)
+    }
+
+    @objc func clawlineNavigateToPreviousStreamCommand(_ sender: UIKeyCommand) {
+        NotificationCenter.default.post(name: .clawlineNavigateToPreviousStreamCommand, object: nil)
+    }
+
+    @objc func clawlineNavigateToNextStreamCommand(_ sender: UIKeyCommand) {
+        NotificationCenter.default.post(name: .clawlineNavigateToNextStreamCommand, object: nil)
+    }
+
+    @objc func clawlineScrollDownCommand(_ sender: UIKeyCommand) {
+        NotificationCenter.default.post(name: .clawlineScrollDownCommand, object: nil)
+    }
+
+    @objc func clawlineScrollUpCommand(_ sender: UIKeyCommand) {
+        NotificationCenter.default.post(name: .clawlineScrollUpCommand, object: nil)
+    }
+}
+
+enum ChatKeyboardNavigation {
+    static func targetSessionKey(
+        sessionKeys: [String],
+        currentSessionKey: String?,
+        step: Int
+    ) -> String? {
+        guard !sessionKeys.isEmpty, step != 0 else { return nil }
+        guard let currentSessionKey,
+              let currentIndex = sessionKeys.firstIndex(of: currentSessionKey) else {
+            return sessionKeys.first
+        }
+        let targetIndex = min(sessionKeys.count - 1, max(0, currentIndex + step))
+        guard targetIndex != currentIndex else { return nil }
+        return sessionKeys[targetIndex]
+    }
+}
+
+enum PromptFocusShortcutActivation {
+    enum Action: Equatable {
+        case activate
+        case retryAfterTextInputResigns
+        case skip
+    }
+
+    static func action(
+        isShortcutEnabled: Bool,
+        isAlreadyFirstResponder: Bool,
+        currentFirstResponderIsTextInput: Bool,
+        currentFirstResponderOwnsEmbeddedScroll: Bool,
+        canRetryAfterTextInput: Bool
+    ) -> Action {
+        guard isShortcutEnabled, !isAlreadyFirstResponder else { return .skip }
+        guard !currentFirstResponderOwnsEmbeddedScroll else { return .skip }
+        guard !currentFirstResponderIsTextInput else {
+            return canRetryAfterTextInput ? .retryAfterTextInputResigns : .skip
+        }
+        return .activate
+    }
+}
+
+private extension UIResponder {
+    static weak var clawlineCurrentFirstResponder: UIResponder?
+
+    var isClawlineTextInputResponder: Bool {
+        self is UITextInput
+    }
+
+    var ownsClawlineEmbeddedScrollInput: Bool {
+        var responder: UIResponder? = self
+        while let current = responder {
+            if current is WKWebView {
+                return true
+            }
+            responder = current.next
+        }
+        return false
+    }
+
+    @objc func clawlineCaptureFirstResponder(_ sender: Any) {
+        UIResponder.clawlineCurrentFirstResponder = self
+    }
+}
+
+private extension UIWindow {
+    var clawlineFirstResponder: UIResponder? {
+        UIResponder.clawlineCurrentFirstResponder = nil
+        UIApplication.shared.sendAction(
+            #selector(UIResponder.clawlineCaptureFirstResponder(_:)),
+            to: nil,
+            from: nil,
+            for: nil
+        )
+        return UIResponder.clawlineCurrentFirstResponder
+    }
+
+    static var clawlineCurrentFirstResponderOwnsEmbeddedScroll: Bool {
+        UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows)
+            .contains { $0.clawlineFirstResponder?.ownsClawlineEmbeddedScrollInput == true }
     }
 }
 
@@ -2671,6 +3280,31 @@ func expandedPageDotsHitRect(frame: CGRect, minimumHeight: CGFloat = 44) -> CGRe
     return frame.insetBy(dx: 0, dy: -verticalInset)
 }
 
+enum KeyboardPinnedHitTesting {
+    @MainActor
+    static func contains(
+        _ point: CGPoint,
+        in candidate: UIView,
+        from container: UIView,
+        event: UIEvent?
+    ) -> Bool {
+        guard !candidate.isHidden, candidate.isUserInteractionEnabled, candidate.alpha > 0.01 else { return false }
+
+        let pointInCandidate = container.convert(point, to: candidate)
+        if candidate.hitTest(pointInCandidate, with: event) != nil {
+            return true
+        }
+        if candidate.point(inside: pointInCandidate, with: event) {
+            return true
+        }
+        if let presentationFrame = candidate.layer.presentation()?.frame,
+           presentationFrame.contains(point) {
+            return true
+        }
+        return false
+    }
+}
+
 private final class KeyboardPinnedContainerView<Content: View>: UIView, KeyboardPinnedContainerViewProtocol {
     let hostingController: UIHostingController<Content>
     let versionLabel: UILabel
@@ -2877,7 +3511,16 @@ private final class KeyboardPinnedContainerView<Content: View>: UIView, Keyboard
         pageDotsHost?.view.isHidden = (view == nil)
         pageDotsHost?.view.isUserInteractionEnabled = (view != nil)
         pageDotsBottomToBarTop?.constant = -gap
+        syncPageDotsHostLayout()
 #endif
+    }
+
+    private func syncPageDotsHostLayout() {
+        guard let pageDotsView = pageDotsHost?.view else { return }
+        pageDotsView.invalidateIntrinsicContentSize()
+        pageDotsView.setNeedsLayout()
+        setNeedsLayout()
+        layoutIfNeeded()
     }
 
     func setDesiredBottomGap(_ gap: CGFloat, isKeyboardVisible: Bool) {
@@ -2965,17 +3608,21 @@ private final class KeyboardPinnedContainerView<Content: View>: UIView, Keyboard
     }
 
     override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
-        if let hitView = hostingController.view, hitView.frame.contains(point) {
+        layoutIfNeeded()
+        if let hitView = hostingController.view,
+           KeyboardPinnedHitTesting.contains(point, in: hitView, from: self, event: event) {
             return true
         }
-        if let scrollButtonHost, scrollButtonHost.view.frame.contains(point) {
+        if let scrollButtonHost,
+           KeyboardPinnedHitTesting.contains(point, in: scrollButtonHost.view, from: self, event: event) {
             return true
         }
         if let pageDotsHost,
-           expandedPageDotsHitRect(frame: pageDotsHost.view.frame).contains(point) {
+           (KeyboardPinnedHitTesting.contains(point, in: pageDotsHost.view, from: self, event: event)
+            || expandedPageDotsHitRect(frame: pageDotsHost.view.frame).contains(point)) {
             return true
         }
-        if !versionLabel.isHidden && versionLabel.frame.contains(point) {
+        if KeyboardPinnedHitTesting.contains(point, in: versionLabel, from: self, event: event) {
             return true
         }
         return false
@@ -3290,6 +3937,7 @@ private final class PreviewChatService: ChatServicing, DirectChatConnecting {
     func disconnect() {}
     func replayCursorSnapshot() -> [String: String] { [:] }
     func setReplayCursor(_ cursor: String?, for sessionKey: String) {}
+    func seedReplayCursorIfMissing(_ cursor: String?, for sessionKey: String) {}
     func clearReplayCursors() {}
     func send(id: String, content: String, attachments: [WireAttachment], sessionKey: String?) async throws {}
     func sendInteractiveCallback(sourceMessageId: String, action: String, data: JSONValue?) async throws {}

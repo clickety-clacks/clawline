@@ -22,6 +22,7 @@ struct StreamPageDotsView: View {
     private static let dotSpacing: CGFloat = 7
     private static let horizontalPadding: CGFloat = 12
     private static let verticalPadding: CGFloat = 8
+    private static let minimumHitTargetHeight: CGFloat = 44
     static let controlHeight: CGFloat = 23
 
     private var activeIndex: Int {
@@ -131,69 +132,87 @@ struct StreamPageDotsView: View {
         return min(maxWidth, requiredWidth)
     }
 
+    static func renderedControlWidth(totalSessionCount: Int, maxWidth: CGFloat?) -> CGFloat {
+        let visibleDotCount = fittingVisibleDotCount(totalSessionCount: totalSessionCount, maxWidth: maxWidth)
+        let includesOverflowIndicators = visibleDotCount < totalSessionCount
+        return targetControlWidth(totalSessionCount: totalSessionCount, maxWidth: maxWidth)
+            ?? requiredControlWidth(
+                visibleDotCount: visibleDotCount,
+                includesOverflowIndicators: includesOverflowIndicators
+            )
+    }
+
     var body: some View {
         Button(action: onTap) {
-            HStack(spacing: 7) {
-                if showsLeadingOverflow {
-                    Circle()
-                        .fill(StreamDotColor.inactive(colorScheme: colorScheme))
-                        .frame(width: 4, height: 4)
-                }
-                ForEach(visibleDotIndices, id: \.self) { index in
-                    let sessionKey = sessionKeys[index]
-                    let isActive = index == activeIndex
-                    let dotState = dotStatesBySession[sessionKey] ?? .inactive
-                    Circle()
-                        .fill(
-                            StreamDotColor.resolve(
-                                isActive: isActive,
-                                dotState: dotState,
-                                colorScheme: colorScheme
-                            )
-                        )
-                        .frame(width: 7, height: 7)
-                        .shadow(
-                            color: isActive ? StreamDotColor.activeGlow(colorScheme: colorScheme) : .clear,
-                            radius: isActive ? StreamDotColor.activeOuterGlowRadius(colorScheme: colorScheme) : 0
-                        )
-                        .shadow(
-                            color: isActive ? StreamDotColor.activeGlow(colorScheme: colorScheme) : .clear,
-                            radius: isActive ? StreamDotColor.activeInnerGlowRadius(colorScheme: colorScheme) : 0
-                        )
-                }
-                if showsTrailingOverflow {
-                    Circle()
-                        .fill(StreamDotColor.inactive(colorScheme: colorScheme))
-                        .frame(width: 4, height: 4)
-                }
-            }
-            .fixedSize(horizontal: true, vertical: false)
-            .frame(maxWidth: .infinity, alignment: .center)
-            .padding(.horizontal, Self.horizontalPadding)
-            .padding(.vertical, Self.verticalPadding)
-            .frame(width: targetControlWidth)
-#if !os(visionOS)
-            .glassEffect(.regular.interactive(), in: Capsule())
-#else
-            .background(.regularMaterial, in: Capsule())
-#endif
-            .overlay {
-                unreadEdgeBloomOverlay
-                    .mask(Capsule())
-                    .allowsHitTesting(false)
-            }
-#if os(visionOS)
-            .overlay {
-                Capsule()
-                    .stroke(Color.white.opacity(0.5), lineWidth: 1)
-            }
-#endif
+            controlBody
+                .frame(minHeight: Self.minimumHitTargetHeight, alignment: .bottom)
+                .contentShape(Rectangle())
         }
         .contentShape(Rectangle())
         .buttonStyle(.plain)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction(named: Text("Open stream manager"), onTap)
         .accessibilityLabel("Manage streams")
         .accessibilityValue("Stream \(activeIndex + 1) of \(sessionKeys.count)")
         .accessibilityHint("Opens stream manager")
+    }
+
+    private var controlBody: some View {
+        HStack(spacing: 7) {
+            if showsLeadingOverflow {
+                Circle()
+                    .fill(StreamDotColor.inactive(colorScheme: colorScheme))
+                    .frame(width: 4, height: 4)
+            }
+            ForEach(visibleDotIndices, id: \.self) { index in
+                let sessionKey = sessionKeys[index]
+                let isActive = index == activeIndex
+                let dotState = dotStatesBySession[sessionKey] ?? .inactive
+                Circle()
+                    .fill(
+                        StreamDotColor.resolve(
+                            isActive: isActive,
+                            dotState: dotState,
+                            colorScheme: colorScheme
+                        )
+                    )
+                    .frame(width: 7, height: 7)
+                    .shadow(
+                        color: isActive ? StreamDotColor.activeGlow(colorScheme: colorScheme) : .clear,
+                        radius: isActive ? StreamDotColor.activeOuterGlowRadius(colorScheme: colorScheme) : 0
+                    )
+                    .shadow(
+                        color: isActive ? StreamDotColor.activeGlow(colorScheme: colorScheme) : .clear,
+                        radius: isActive ? StreamDotColor.activeInnerGlowRadius(colorScheme: colorScheme) : 0
+                    )
+            }
+            if showsTrailingOverflow {
+                Circle()
+                    .fill(StreamDotColor.inactive(colorScheme: colorScheme))
+                    .frame(width: 4, height: 4)
+            }
+        }
+        .fixedSize(horizontal: true, vertical: false)
+        .frame(maxWidth: .infinity, alignment: .center)
+        .padding(.horizontal, Self.horizontalPadding)
+        .padding(.vertical, Self.verticalPadding)
+        .frame(width: targetControlWidth)
+#if !os(visionOS)
+        .glassEffect(.regular.interactive(), in: Capsule())
+#else
+        .background(.regularMaterial, in: Capsule())
+#endif
+        .overlay {
+            unreadEdgeBloomOverlay
+                .mask(Capsule())
+                .allowsHitTesting(false)
+        }
+#if os(visionOS)
+        .overlay {
+            Capsule()
+                .stroke(Color.white.opacity(0.5), lineWidth: 1)
+        }
+#endif
     }
 
     private var unreadEdgeBloomOverlay: some View {

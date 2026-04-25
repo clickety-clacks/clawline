@@ -57,6 +57,11 @@ enum ScrollAction: Equatable {
     case adjustOffset(delta: CGFloat)
 }
 
+enum ChatScrollPageDirection: Equatable {
+    case down
+    case up
+}
+
 struct ChatLayoutKey: Equatable {
     let revision: Int
     let keyboardHeightBucket: Int
@@ -163,6 +168,11 @@ final class ChatLayoutCoordinator {
     func scrollToTop(sessionKey: String, animated: Bool) {
         dispatchPrecondition(condition: .onQueue(.main))
         listViews[sessionKey]?.value?.scrollToTop(animated: animated)
+    }
+
+    func scrollByPage(sessionKey: String, direction: ChatScrollPageDirection, animated: Bool) {
+        dispatchPrecondition(condition: .onQueue(.main))
+        listViews[sessionKey]?.value?.scrollByPage(direction: direction, animated: animated)
     }
 
     func scrollToMessageCentered(messageId: String, sessionKey: String, animated: Bool) {

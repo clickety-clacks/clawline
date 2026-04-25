@@ -4589,6 +4589,34 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         }
     }
 
+    func scrollByPage(direction: ChatScrollPageDirection, animated: Bool) {
+        collectionView.layoutIfNeeded()
+        let contentInset = collectionView.contentInset
+        let minY = -contentInset.top
+        let maxY = max(minY, collectionView.contentSize.height - collectionView.bounds.height + contentInset.bottom)
+        let visibleHeight = collectionView.bounds.height - contentInset.top - contentInset.bottom
+        guard visibleHeight > 0, maxY > minY else { return }
+
+        let pageIncrement = max(120, visibleHeight * 0.82)
+        let delta = direction == .down ? pageIncrement : -pageIncrement
+        let targetY = collectionView.contentOffset.y + delta
+        let clampedY = max(minY, min(targetY, maxY))
+        guard abs(collectionView.contentOffset.y - clampedY) > 0.5 else { return }
+
+        logScrollCall(
+            "scrollByPage",
+            sessionKey: callbackSessionKey(),
+            currentY: collectionView.contentOffset.y,
+            targetY: clampedY,
+            animated: animated,
+            reason: "direction=\(direction) increment=\(formatScrollRestore(pageIncrement))"
+        )
+        collectionView.setContentOffset(CGPoint(x: 0, y: clampedY), animated: animated)
+        if !animated, let sessionKey = callbackSessionKey() {
+            refreshLastKnownScrollSnapshot(sessionKey: sessionKey)
+        }
+    }
+
     func scrollToMessageCentered(messageId: String, animated: Bool) {
         guard let sessionKey = callbackSessionKey() else { return }
         guard let indexPath = dataSource.indexPath(for: messageId) else {

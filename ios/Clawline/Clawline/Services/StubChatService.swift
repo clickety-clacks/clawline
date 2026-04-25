@@ -86,6 +86,7 @@ final class StubChatService: ChatServicing, DirectChatConnecting {
                     epoch: epoch,
                     payload: .authResult(success: true, replayCount: 0, replayTruncated: false, historyReset: false, failureReason: nil)
                 ))
+                lifecycleContinuation?.yield(.init(epoch: epoch, payload: .syncComplete))
             } catch {
                 lifecycleContinuation?.yield(.init(epoch: epoch, payload: .transportClosed(reason: .error)))
             }
@@ -110,6 +111,13 @@ final class StubChatService: ChatServicing, DirectChatConnecting {
             replayCursorBySessionKey[sessionKey] = cursor
         } else {
             replayCursorBySessionKey.removeValue(forKey: sessionKey)
+        }
+    }
+
+    func seedReplayCursorIfMissing(_ cursor: String?, for sessionKey: String) {
+        guard replayCursorBySessionKey[sessionKey] == nil else { return }
+        if let cursor, !cursor.isEmpty {
+            replayCursorBySessionKey[sessionKey] = cursor
         }
     }
 

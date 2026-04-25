@@ -19,6 +19,9 @@ enum AppFontScale {
         0.0
 #endif
     }()
+#if targetEnvironment(macCatalyst)
+    private nonisolated static let activeValueStore = ActiveValueStore()
+#endif
 
     nonisolated static func clamp(_ value: CGFloat) -> CGFloat {
         min(max(value, minimum), maximum)
@@ -32,17 +35,60 @@ enum AppFontScale {
     }
 
     nonisolated static func persist(_ value: CGFloat, defaults: UserDefaults = .standard) {
-        defaults.set(Double(clamp(value)), forKey: storageKey)
+        let clamped = clamp(value)
+        defaults.set(Double(clamped), forKey: storageKey)
+#if targetEnvironment(macCatalyst)
+        if defaults === UserDefaults.standard {
+            useActiveValue(clamped)
+        }
+#endif
+    }
+
+    nonisolated static func useActiveValue(_ value: CGFloat) {
+#if targetEnvironment(macCatalyst)
+        activeValueStore.set(clamp(value))
+#endif
+    }
+
+    nonisolated static func currentValue(defaults: UserDefaults = .standard) -> CGFloat {
+#if targetEnvironment(macCatalyst)
+        if defaults !== UserDefaults.standard {
+            return persistedValue(defaults: defaults)
+        }
+        return activeValueStore.get() ?? persistedValue(defaults: defaults)
+#else
+        persistedValue(defaults: defaults)
+#endif
     }
 
     nonisolated static func scaledPointSize(
         for basePointSize: CGFloat,
         defaults: UserDefaults = .standard
     ) -> CGFloat {
-        (basePointSize + platformBasePointDelta) * persistedValue(defaults: defaults)
+        (basePointSize + platformBasePointDelta) * currentValue(defaults: defaults)
     }
 
     nonisolated static func toastMessage(for value: CGFloat) -> String {
         "Font scale \(Int((clamp(value) * 100).rounded()))%"
     }
+
+#if targetEnvironment(macCatalyst)
+    private final class ActiveValueStore: @unchecked Sendable {
+        private let lock = NSLock()
+        nonisolated(unsafe) private var value: CGFloat?
+
+        nonisolated func set(_ value: CGFloat) {
+            lock.lock()
+            self.value = value
+            lock.unlock()
+        }
+
+        nonisolated func get() -> CGFloat? {
+            lock.lock()
+            let value = self.value
+            lock.unlock()
+            return value
+        }
+    }
+#endif
 }

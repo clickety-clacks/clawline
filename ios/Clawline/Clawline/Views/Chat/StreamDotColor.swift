@@ -16,6 +16,7 @@ enum StreamDotColor {
     }
 
     private static let avatarGreen = Color(red: 0.42, green: 0.61, blue: 0.42)
+    private static let avatarGreenHighlight = Color(red: 0.48, green: 0.68, blue: 0.48)
 
     static func inactive(colorScheme: ColorScheme) -> Color {
         ChatFlowTheme.stone(colorScheme).opacity(colorScheme == .dark ? 0.46 : 0.34)
@@ -50,7 +51,7 @@ enum StreamDotColor {
         case .unread:
             return ChatFlowTheme.unreadIndicator(colorScheme)
         case .active:
-            return avatarGreen
+            return avatarGreenHighlight
         case .userTail:
             return userTail(colorScheme: colorScheme)
         case .inactive:

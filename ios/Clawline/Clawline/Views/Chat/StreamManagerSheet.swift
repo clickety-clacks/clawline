@@ -15,13 +15,12 @@ struct StreamManagerSheet: View {
     @Bindable var viewModel: ChatViewModel
     let streams: [StreamSession]
     let dotStatesBySession: [String: StreamDotState]
-    @Binding var isPresented: Bool
-    let shouldAutoFocusSearchOnAppear: Bool
-    let searchFocusRequestID: Int
+    let searchFocusRequestID: Int?
     let maxAvailableHeight: CGFloat
     let maxAvailableWidth: CGFloat
     let onSelectStream: (String) -> Void
-    let onPresentTrackPicker: () -> Void
+    let onRequestTrackPicker: () -> Void
+    let onConsumeSearchFocusRequest: () -> Void
 
     @State private var draftName = ""
     @State private var searchQuery = ""
@@ -30,6 +29,8 @@ struct StreamManagerSheet: View {
     @State private var removingSessionKeys: Set<String> = []
     @State private var pendingCreateRows: [PendingCreateRow] = []
     @State private var pendingRemovalStream: StreamSession?
+    @State private var selectedStreamSessionKey: String?
+    @State private var didActivateSelection = false
     @FocusState private var focusedEditor: EditorMode?
     @FocusState private var isSearchFieldFocused: Bool
 
@@ -105,6 +106,10 @@ struct StreamManagerSheet: View {
         StreamSelectorLayout.filter(streams: streams, query: searchQuery)
     }
 
+    private var filteredStreamSessionKeys: [String] {
+        filteredStreams.map(\.sessionKey)
+    }
+
     private var filteredPendingCreateRows: [PendingCreateRow] {
         guard !searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return pendingCreateRows
@@ -124,8 +129,11 @@ struct StreamManagerSheet: View {
         )
     }
 
-    private var listViewportHeight: CGFloat {
-        max(0, cappedContainerHeight - actionBarReservedHeight)
+    private func listViewportHeight(containerHeight: CGFloat) -> CGFloat {
+        StreamSelectorLayout.listViewportHeight(
+            containerHeight: containerHeight,
+            actionBarReservedHeight: actionBarReservedHeight
+        )
     }
 
     private var cappedContainerHeight: CGFloat {
@@ -143,79 +151,64 @@ struct StreamManagerSheet: View {
 
     var body: some View {
         let _ = settings.fontScaleChangeSequence
-        VStack(spacing: 0) {
-            List {
-                ForEach(filteredStreams) { stream in
-                    rowContent(for: stream)
-                        .frame(height: listRowHeight, alignment: .center)
-                        .listRowInsets(
-                            EdgeInsets(
-                                top: 0,
-                                leading: listRowHorizontalInset,
-                                bottom: 0,
-                                trailing: listRowHorizontalInset
+        GeometryReader { geometry in
+            // Trust the allocated size. If the popover system gives us less than our ideal,
+            // the List viewport shrinks to match instead of overflowing into the popup chrome.
+            let containerHeight = geometry.size.height
+            VStack(spacing: 0) {
+                List {
+                    ForEach(filteredStreams) { stream in
+                        rowContent(for: stream)
+                            .frame(height: listRowHeight, alignment: .center)
+                            .listRowInsets(
+                                EdgeInsets(
+                                    top: 0,
+                                    leading: listRowHorizontalInset,
+                                    bottom: 0,
+                                    trailing: listRowHorizontalInset
+                                )
                             )
-                        )
-                        .listRowSeparator(.hidden)
-                        .listRowBackground(Color.clear)
-                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                            Button {
-                                beginRenaming(stream)
-                            } label: {
-                                Image(systemName: "pencil")
-                                    .font(.title3.weight(.semibold))
-                            }
-                            .accessibilityLabel("Rename")
-                            .disabled(!canPerformRenameAction(for: stream))
-                            .tint(canPerformRenameAction(for: stream) ? .blue : Color.gray.opacity(0.35))
+                            .listRowSeparator(.hidden)
+                            .listRowBackground(rowBackground(for: stream))
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                Button {
+                                    beginRenaming(stream)
+                                } label: {
+                                    Image(systemName: "pencil")
+                                        .font(.title3.weight(.semibold))
+                                }
+                                .accessibilityLabel("Rename")
+                                .disabled(!canPerformRenameAction(for: stream))
+                                .tint(canPerformRenameAction(for: stream) ? .blue : Color.gray.opacity(0.35))
 
-                            Button {
-                                pendingRemovalStream = stream
-                            } label: {
-                                Image(systemName: removalActionImage(for: stream))
-                                    .font(.title3.weight(.semibold))
+                                Button {
+                                    pendingRemovalStream = stream
+                                } label: {
+                                    Image(systemName: removalActionImage(for: stream))
+                                        .font(.title3.weight(.semibold))
+                                }
+                                .accessibilityLabel(removalActionTitle(for: stream))
+                                .disabled(!canPerformRemovalAction(for: stream))
+                                .tint(canPerformRemovalAction(for: stream) ? .red : Color.gray.opacity(0.35))
                             }
-                            .accessibilityLabel(removalActionTitle(for: stream))
-                            .disabled(!canPerformRemovalAction(for: stream))
-                            .tint(canPerformRemovalAction(for: stream) ? .red : Color.gray.opacity(0.35))
-                        }
-                }
-
-                ForEach(filteredPendingCreateRows) { pendingRow in
-                    HStack(spacing: 10) {
-                        Circle()
-                            .fill(Color.primary.opacity(0.18))
-                            .frame(width: 8, height: 8)
-                        Text(pendingRow.displayName)
-                            .font(.clawline(.subsectionHeader).weight(.regular))
-                            .foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        ProgressView()
-                            .controlSize(.small)
-                            .tint(.secondary)
                     }
-                    .listRowSeparator(.hidden)
-                    .listRowBackground(Color.clear)
-                    .frame(height: listRowHeight, alignment: .center)
-                    .listRowInsets(
-                        EdgeInsets(
-                            top: 0,
-                            leading: listRowHorizontalInset,
-                            bottom: 0,
-                            trailing: listRowHorizontalInset
-                        )
-                    )
-                    .contentShape(Rectangle())
-                }
 
-                if filteredStreams.isEmpty && filteredPendingCreateRows.isEmpty {
-                    Text("No streams found")
-                        .font(.clawline(.secondaryLabel))
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .center)
-                        .frame(height: listRowHeight, alignment: .center)
+                    ForEach(filteredPendingCreateRows) { pendingRow in
+                        HStack(spacing: 10) {
+                            Circle()
+                                .fill(Color.primary.opacity(0.18))
+                                .frame(width: 8, height: 8)
+                            Text(pendingRow.displayName)
+                                .font(.clawline(.subsectionHeader).weight(.regular))
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            ProgressView()
+                                .controlSize(.small)
+                                .tint(.secondary)
+                        }
                         .listRowSeparator(.hidden)
                         .listRowBackground(Color.clear)
+                        .frame(height: listRowHeight, alignment: .center)
                         .listRowInsets(
                             EdgeInsets(
                                 top: 0,
@@ -224,49 +217,84 @@ struct StreamManagerSheet: View {
                                 trailing: listRowHorizontalInset
                             )
                         )
-                }
-            }
-            .listStyle(.plain)
-            .environment(\.defaultMinListRowHeight, listRowHeight)
-            .listRowSpacing(listRowSpacing)
-            .scrollBounceBehavior(.always)
-            .contentMargins(.top, listOuterVerticalPadding, for: .scrollContent)
-            .contentMargins(.bottom, listOuterVerticalPadding, for: .scrollContent)
-            .scrollContentBackground(.hidden)
-            .background(Color.clear)
-            .frame(height: listViewportHeight)
-            .clipShape(Rectangle())
-            .disabled(isWorking)
+                        .contentShape(Rectangle())
+                    }
 
-            bottomActionBar
+                    if filteredStreams.isEmpty && filteredPendingCreateRows.isEmpty {
+                        Text("No streams found")
+                            .font(.clawline(.secondaryLabel))
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .center)
+                            .frame(height: listRowHeight, alignment: .center)
+                            .listRowSeparator(.hidden)
+                            .listRowBackground(Color.clear)
+                            .listRowInsets(
+                                EdgeInsets(
+                                    top: 0,
+                                    leading: listRowHorizontalInset,
+                                    bottom: 0,
+                                    trailing: listRowHorizontalInset
+                                )
+                            )
+                    }
+                }
+                .listStyle(.plain)
+                .environment(\.defaultMinListRowHeight, listRowHeight)
+                .listRowSpacing(listRowSpacing)
+                .scrollBounceBehavior(.always)
+                .contentMargins(.top, listOuterVerticalPadding, for: .scrollContent)
+                .contentMargins(.bottom, listOuterVerticalPadding, for: .scrollContent)
+                .scrollContentBackground(.hidden)
+                .background(Color.clear)
+                .frame(height: listViewportHeight(containerHeight: containerHeight))
+                .clipShape(Rectangle())
+                .disabled(isWorking)
+
+                bottomActionBar
+            }
+            .frame(width: geometry.size.width, height: geometry.size.height, alignment: .top)
         }
-        .frame(height: cappedContainerHeight)
         .frame(
             minWidth: minimumPopoverWidth,
             idealWidth: idealPopoverWidth,
             maxWidth: maximumPopoverWidth
         )
+        .frame(
+            // Clamp the floor to the capped height so we never produce an inconsistent
+            // (minHeight > maxHeight) frame when the window is shorter than our preferred minimum.
+            minHeight: min(minimumPopoverHeight, cappedContainerHeight),
+            idealHeight: cappedContainerHeight,
+            maxHeight: cappedContainerHeight,
+            alignment: .top
+        )
         .background(Color.clear)
+        // Hard-clip at the popup's own corner radius so any late-updating list content
+        // cannot visually bleed past the popup bounds when the popover system reallocates height.
+        .clipShape(RoundedRectangle(cornerRadius: popupCornerRadius, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: popupCornerRadius, style: .continuous)
                 .stroke(Color.white.opacity(0.10), lineWidth: 0.5)
                 .allowsHitTesting(false)
         )
-        .onChange(of: isPresented) { _, presented in
-            if !presented {
-                resetInlineEditing()
-                searchQuery = ""
-                isSearchFieldFocused = false
-            }
-        }
         .onAppear {
-            if shouldAutoFocusSearchOnAppear {
-                focusSearchField()
-            }
+            syncSelectionWithFilteredStreams()
+            handleSearchFocusRequest(searchFocusRequestID)
         }
-        .onChange(of: searchFocusRequestID) { _, _ in
-            guard isPresented else { return }
-            focusSearchField()
+        .onDisappear {
+            resetInlineEditing()
+            searchQuery = ""
+            isSearchFieldFocused = false
+            selectedStreamSessionKey = nil
+            didActivateSelection = false
+        }
+        .onChange(of: searchFocusRequestID) { _, requestID in
+            handleSearchFocusRequest(requestID)
+        }
+        .onChange(of: searchQuery) { _, _ in
+            syncSelectionWithFilteredStreams()
+        }
+        .onChange(of: streams.map(\.sessionKey)) { _, _ in
+            syncSelectionWithFilteredStreams()
         }
         .alert(
             pendingRemovalTitle,
@@ -297,7 +325,23 @@ struct StreamManagerSheet: View {
                     .font(.clawline(.uiLabel))
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
+                    .submitLabel(.go)
                     .focused($isSearchFieldFocused)
+                    .onSubmit {
+                        selectHighlightedStream()
+                    }
+                    .onKeyPress(.upArrow) {
+                        moveSelection(step: -1)
+                        return .handled
+                    }
+                    .onKeyPress(.downArrow) {
+                        moveSelection(step: 1)
+                        return .handled
+                    }
+                    .onKeyPress(.return) {
+                        selectHighlightedStream()
+                        return .handled
+                    }
             }
             .padding(.horizontal, 12)
             .frame(maxWidth: .infinity)
@@ -306,7 +350,7 @@ struct StreamManagerSheet: View {
 
             if viewModel.canUseTrackFeature {
                 Button {
-                    onPresentTrackPicker()
+                    onRequestTrackPicker()
                 } label: {
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
                         .fill(Color.clear)
@@ -366,13 +410,7 @@ struct StreamManagerSheet: View {
         } else {
             Button {
                 let selectedSessionKey = stream.sessionKey
-                isPresented = false
-                // Avoid mutating presentation + selected stream in the same synchronous tap turn.
-                // Deferring selection to the next main-actor cycle prevents picker-triggered UI lockups.
-                Task { @MainActor in
-                    await Task.yield()
-                    onSelectStream(selectedSessionKey)
-                }
+                onSelectStream(selectedSessionKey)
             } label: {
                 HStack(spacing: 10) {
                     let isActive = stream.sessionKey == viewModel.uiSelectedSessionKey
@@ -409,6 +447,11 @@ struct StreamManagerSheet: View {
             .buttonStyle(.plain)
             .disabled(isWorking || isRemovingStream(stream.sessionKey))
         }
+    }
+
+    private func rowBackground(for stream: StreamSession) -> Color {
+        guard selectedStreamSessionKey == stream.sessionKey else { return .clear }
+        return Color.primary.opacity(colorScheme == .dark ? 0.16 : 0.08)
     }
 
     private func beginRenaming(_ stream: StreamSession) {
@@ -466,7 +509,43 @@ struct StreamManagerSheet: View {
         Task { @MainActor in
             await Task.yield()
             isSearchFieldFocused = true
+            syncSelectionWithFilteredStreams()
         }
+    }
+
+    private func handleSearchFocusRequest(_ requestID: Int?) {
+        guard requestID != nil else { return }
+        focusSearchField()
+        onConsumeSearchFocusRequest()
+    }
+
+    private func syncSelectionWithFilteredStreams() {
+        selectedStreamSessionKey = StreamSelectorLayout.resolvedSelection(
+            preferredSessionKey: selectedStreamSessionKey,
+            activeSessionKey: viewModel.uiSelectedSessionKey,
+            sessionKeys: filteredStreamSessionKeys
+        )
+        didActivateSelection = false
+    }
+
+    private func moveSelection(step: Int) {
+        selectedStreamSessionKey = StreamSelectorLayout.selectionAfterMoving(
+            currentSessionKey: selectedStreamSessionKey,
+            sessionKeys: filteredStreamSessionKeys,
+            step: step
+        )
+        didActivateSelection = false
+    }
+
+    private func selectHighlightedStream() {
+        guard !didActivateSelection else { return }
+        syncSelectionWithFilteredStreams()
+        guard let selectedStreamSessionKey = StreamSelectorLayout.activationTarget(
+            selectedSessionKey: selectedStreamSessionKey,
+            didActivateSelection: didActivateSelection
+        ) else { return }
+        didActivateSelection = true
+        onSelectStream(selectedStreamSessionKey)
     }
 
     private func renameStream(_ stream: StreamSession) async {
@@ -515,10 +594,10 @@ struct StreamManagerSheet: View {
 
 struct TrackPickerSheet: View {
     @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.dismiss) private var dismiss
     @Environment(\.settingsManager) private var settings
 
     @Bindable var viewModel: ChatViewModel
+    let onDismissRequested: () -> Void
 
     @State private var selectedTrackCandidateSessionKey: String?
     @State private var trackSearchQuery = ""
@@ -628,7 +707,7 @@ struct TrackPickerSheet: View {
         clearTrackPickerFirstResponder()
         selectedTrackCandidateSessionKey = nil
         trackSearchQuery = ""
-        dismiss()
+        onDismissRequested()
     }
 
     private func clearTrackPickerFirstResponder() {
@@ -993,6 +1072,48 @@ enum StreamSelectorLayout {
             || sessionKey.localizedCaseInsensitiveContains(normalized)
     }
 
+    static func resolvedSelection(
+        preferredSessionKey: String?,
+        activeSessionKey: String,
+        sessionKeys: [String]
+    ) -> String? {
+        guard !sessionKeys.isEmpty else { return nil }
+        if let preferredSessionKey, sessionKeys.contains(preferredSessionKey) {
+            return preferredSessionKey
+        }
+        if sessionKeys.contains(activeSessionKey) {
+            return activeSessionKey
+        }
+        return sessionKeys.first
+    }
+
+    static func selectionAfterMoving(
+        currentSessionKey: String?,
+        sessionKeys: [String],
+        step: Int
+    ) -> String? {
+        guard !sessionKeys.isEmpty else { return nil }
+        guard step != 0 else {
+            return resolvedSelection(
+                preferredSessionKey: currentSessionKey,
+                activeSessionKey: "",
+                sessionKeys: sessionKeys
+            )
+        }
+        let currentIndex = currentSessionKey.flatMap { sessionKeys.firstIndex(of: $0) }
+        let startingIndex = currentIndex ?? (step > 0 ? -1 : sessionKeys.count)
+        let targetIndex = min(sessionKeys.count - 1, max(0, startingIndex + step))
+        return sessionKeys[targetIndex]
+    }
+
+    static func activationTarget(
+        selectedSessionKey: String?,
+        didActivateSelection: Bool
+    ) -> String? {
+        guard !didActivateSelection else { return nil }
+        return selectedSessionKey
+    }
+
     static func listContentHeight(
         itemCount: Int,
         showsCreateInlineRow: Bool,
@@ -1023,8 +1144,27 @@ enum StreamSelectorLayout {
             functionBarHeight: functionBarHeight,
             outerVerticalPadding: outerVerticalPadding
         )
-        let cap = max(minimumPopoverHeight, maxAvailableHeight)
-        return min(desired, cap)
+        // Hard ceiling: never ask the popover system for more than the caller's budget.
+        // When the budget is smaller than our preferred minimum (e.g., a very short
+        // spatial window), clamp to the budget so the popup fits inside the available
+        // space instead of requesting a minimum the popover system cannot honor —
+        // which would silently crop the popup body on visionOS.
+        let cap = max(0, maxAvailableHeight)
+        let preferredFloor = min(minimumPopoverHeight, cap)
+        let desiredWithinBudget = min(desired, cap)
+        return max(preferredFloor, desiredWithinBudget)
+    }
+
+    /// Adaptive height for the stream list viewport given an actual allocated container height.
+    ///
+    /// This is used by the popup to shrink the scrollable list viewport when the popover
+    /// system allocates less vertical space than the popup's ideal height, so list content
+    /// never overflows into the popup chrome or past the visible popup bounds.
+    static func listViewportHeight(
+        containerHeight: CGFloat,
+        actionBarReservedHeight: CGFloat
+    ) -> CGFloat {
+        max(0, containerHeight - actionBarReservedHeight)
     }
 
     static func isOverflowing(

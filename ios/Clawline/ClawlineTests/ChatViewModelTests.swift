@@ -137,6 +137,154 @@ struct ChatViewModelTests {
         #expect(finalState.first?.streaming == false)
     }
 
+    @Test("Lifecycle replay advances service-owned per-stream cursor after apply")
+    @MainActor
+    func lifecycleReplayAdvancesServiceReplayCursor() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        chatService.startReplayCount = 1
+        chatService.emitSyncCompleteOnStart = false
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.prepareForReplacement() }
+
+        await viewModel.activate(origin: "test.lifecycleReplayCursor")
+
+        for _ in 0..<50 {
+            if viewModel.debugObservationStartupCount() > 0, chatService.connectCallCount > 0 { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+
+        let payload = #"{"type":"message","id":"s_replay_final","role":"assistant","content":"Replay final","timestamp":1700000000000,"streaming":false,"sessionKey":"\#(personalSessionKey)","attachments":[]}"#
+        chatService.emitLifecycleEvent(.init(epoch: 1, payload: .serverMessage(data: Data(payload.utf8))))
+
+        var cursor: String?
+        for _ in 0..<50 {
+            cursor = chatService.replayCursorSnapshot()[personalSessionKey]
+            if cursor == "s_replay_final" { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+
+        #expect(cursor == "s_replay_final")
+    }
+
+    @Test("History reset preserves cursor-backed active stream with empty replay window")
+    @MainActor
+    func historyResetPreservesCursorBackedActiveStreamWithEmptyReplayWindow() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let customKey = "agent:main:clawline:user:s_reset_side"
+        let streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: customKey, displayName: "Side", kind: "custom", orderIndex: 1, isBuiltIn: false),
+        ]
+        chatService.streams = streams
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.prepareForReplacement() }
+
+        await viewModel.activate(origin: "test.historyResetPreservesCursorBackedActiveStream")
+        chatService.emitServiceEvent(.streamSnapshot(streams))
+        for _ in 0..<50 {
+            if viewModel.activeSessionKey == personalSessionKey,
+               viewModel.orderedSessionKeys.contains(customKey) {
+                break
+            }
+            try await Task.sleep(forDuration: .milliseconds(20))
+        }
+
+        let activePayload = #"{"type":"message","id":"s_active_before_sleep","role":"assistant","content":"Still here","timestamp":1700000000000,"streaming":false,"sessionKey":"\#(personalSessionKey)","attachments":[]}"#
+        let staleSidePayload = #"{"type":"message","id":"s_side_stale","role":"assistant","content":"Old side","timestamp":1700000000001,"streaming":false,"sessionKey":"\#(customKey)","attachments":[]}"#
+        chatService.emitLifecycleEvent(.init(epoch: 1, payload: .serverMessage(data: Data(activePayload.utf8))))
+        chatService.emitLifecycleEvent(.init(epoch: 1, payload: .serverMessage(data: Data(staleSidePayload.utf8))))
+        for _ in 0..<50 {
+            if viewModel.messages.contains(where: { $0.id == "s_active_before_sleep" }),
+               chatService.replayCursorSnapshot()[personalSessionKey] == "s_active_before_sleep" {
+                break
+            }
+            try await Task.sleep(forDuration: .milliseconds(20))
+        }
+        #expect(viewModel.messages.map(\.id).contains("s_active_before_sleep"))
+        #expect(chatService.replayCursorSnapshot()[personalSessionKey] == "s_active_before_sleep")
+        chatService.setReplayCursor(nil, for: customKey)
+
+        chatService.startHistoryReset = true
+        chatService.startReplayCount = 1
+        chatService.emitSyncCompleteOnStart = false
+        NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
+        try await Task.sleep(forDuration: .milliseconds(2100))
+        viewModel.handleSceneActiveStateChanged(isActive: true)
+
+        for _ in 0..<50 {
+            if chatService.connectCallCount >= 2 { break }
+            try await Task.sleep(forDuration: .milliseconds(20))
+        }
+        let replaySidePayload = #"{"type":"message","id":"s_side_replay","role":"assistant","content":"Side replay","timestamp":1700000000002,"streaming":false,"sessionKey":"\#(customKey)","attachments":[]}"#
+        chatService.emitLifecycleEvent(.init(epoch: 2, payload: .serverMessage(data: Data(replaySidePayload.utf8))))
+        chatService.emitLifecycleEvent(.init(epoch: 2, payload: .syncComplete))
+
+        for _ in 0..<50 {
+            if viewModel.messages.map(\.id).contains("s_active_before_sleep"),
+               viewModel.messages(for: customKey).map(\.id) == ["s_side_replay"] {
+                break
+            }
+            try await Task.sleep(forDuration: .milliseconds(20))
+        }
+
+        #expect(viewModel.activeSessionKey == personalSessionKey)
+        #expect(viewModel.messages.map(\.id).contains("s_active_before_sleep"))
+        #expect(viewModel.messages(for: customKey).map(\.id) == ["s_side_replay"])
+        #expect(chatService.replayCursorSnapshot()[personalSessionKey] == nil)
+        #expect(chatService.replayCursorSnapshot()[customKey] == "s_side_replay")
+    }
+
+    @Test("Cache restore seeds missing cursor without replacing a live cursor")
+    @MainActor
+    func cacheRestoreSeedsMissingCursorOnly() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        chatService.setReplayCursor("s_live_final", for: personalSessionKey)
+        await viewModel.onAppear()
+
+        for _ in 0..<50 {
+            if chatService.replayCursorSnapshot()[personalSessionKey] == "s_live_final" { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+
+        #expect(chatService.replayCursorSnapshot()[personalSessionKey] == "s_live_final")
+    }
+
     @Test("Server echoes with matching device id replace placeholder")
     @MainActor
     func userEchoWithoutDeviceIdDoesNotDuplicate() async throws {
@@ -165,8 +313,8 @@ struct ChatViewModelTests {
         viewModel.send()
 
         try await Task.sleep(forDuration: .milliseconds(10))
-        let placeholderId = await MainActor.run { viewModel.messages.first?.id }
-        #expect(placeholderId?.hasPrefix("c_") == true)
+        let placeholderId = try #require(await MainActor.run { viewModel.messages.first?.id })
+        #expect(placeholderId.hasPrefix("c_"))
 
         chatService.emit(
             Message(
@@ -177,8 +325,9 @@ struct ChatViewModelTests {
                 streaming: false,
                 attachments: [],
                 deviceId: "device",
-                sessionKey: sessionKey,
-                )
+                sessionKey: personalSessionKey,
+                clientMessageId: placeholderId
+            )
         )
 
         try await Task.sleep(forDuration: .milliseconds(10))
@@ -2324,6 +2473,66 @@ struct ChatViewModelTests {
         #expect(viewModel.lastReadMessageIdBySession[customKey] == "s_publish_read_target")
     }
 
+    @Test("Activating stream prefers provider tail over stale local transcript")
+    @MainActor
+    func activatingStreamPrefersProviderTailOverStaleLocalTranscript() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let customKey = "agent:main:clawline:user:s_stale_cache"
+        chatService.streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: customKey, displayName: "Research", kind: "custom", orderIndex: 1, isBuiltIn: false),
+        ]
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
+        try await Task.sleep(for: .milliseconds(30))
+
+        chatService.emit(
+            Message(
+                id: "s_stale_cached_tail",
+                role: .assistant,
+                content: "cached",
+                timestamp: Date(),
+                streaming: false,
+                attachments: [],
+                deviceId: nil,
+                sessionKey: customKey
+            )
+        )
+        chatService.emitServiceEvent(
+            .streamTailStateUpdated(
+                sessionKey: customKey,
+                tailState: StreamTailState(lastMessageId: "s_provider_tail", lastMessageRole: .assistant)
+            )
+        )
+        try await Task.sleep(for: .milliseconds(30))
+
+        chatService.lastPublishedReadState = nil
+        viewModel.setActiveSessionKeyForTesting(customKey)
+
+        for _ in 0..<50 {
+            if chatService.lastPublishedReadState?.lastReadMessageId == "s_provider_tail" { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(chatService.lastPublishedReadState?.sessionKey == customKey)
+        #expect(chatService.lastPublishedReadState?.lastReadMessageId == "s_provider_tail")
+        #expect(viewModel.lastReadMessageIdBySession[customKey] == "s_provider_tail")
+    }
+
     @Test("Active stream assistant arrivals publish updated read-state immediately")
     @MainActor
     func activeStreamIncomingAssistantPublishesReadState() async throws {
@@ -3478,6 +3687,9 @@ private final class TestChatService: ChatServicing {
     private(set) var lastAdoptedSessionKey: String?
     var adoptStreamReturnedTrackingMode: StreamSession.TrackingMode = .adopted
     var renameReturnedTrackingMode: StreamSession.TrackingMode?
+    var startReplayCount: Int = 0
+    var startHistoryReset = false
+    var emitSyncCompleteOnStart: Bool = true
 
     private(set) lazy var incomingMessages: AsyncStream<Message> = {
         AsyncStream { continuation in
@@ -3521,13 +3733,16 @@ private final class TestChatService: ChatServicing {
                 epoch: epoch,
                 payload: .authResult(
                     success: true,
-                    replayCount: 0,
+                    replayCount: startReplayCount,
                     replayTruncated: false,
-                    historyReset: false,
+                    historyReset: startHistoryReset,
                     failureReason: nil
                 )
             )
         )
+        if emitSyncCompleteOnStart {
+            lifecycleContinuation?.yield(.init(epoch: epoch, payload: .syncComplete))
+        }
     }
 
     func stopConnectionAttempt() {}
@@ -3546,6 +3761,13 @@ private final class TestChatService: ChatServicing {
             replayCursorBySessionKey[sessionKey] = cursor
         } else {
             replayCursorBySessionKey.removeValue(forKey: sessionKey)
+        }
+    }
+
+    func seedReplayCursorIfMissing(_ cursor: String?, for sessionKey: String) {
+        guard replayCursorBySessionKey[sessionKey] == nil else { return }
+        if let cursor, !cursor.isEmpty {
+            replayCursorBySessionKey[sessionKey] = cursor
         }
     }
 
@@ -3572,11 +3794,18 @@ private final class TestChatService: ChatServicing {
     }
 
     func emit(_ message: Message) {
+        if message.id.hasPrefix("s_"), !message.streaming {
+            replayCursorBySessionKey[message.sessionKey] = message.id
+        }
         if let continuation = messageContinuation {
             continuation.yield(message)
         } else {
             bufferedMessages.append(message)
         }
+    }
+
+    func emitLifecycleEvent(_ event: LifecycleTransportEvent) {
+        lifecycleContinuation?.yield(event)
     }
 
     func emitConnectionState(_ state: ConnectionState) {
@@ -3597,6 +3826,7 @@ private final class TestChatService: ChatServicing {
                     )
                 )
             )
+            lifecycleContinuation?.yield(.init(epoch: 1, payload: .syncComplete))
         case .disconnected:
             lifecycleContinuation?.yield(.init(epoch: 1, payload: .transportClosed(reason: .error)))
         default:
@@ -3729,6 +3959,7 @@ private func resetChatPersistence() {
     for key in defaults.dictionaryRepresentation().keys {
         if key.hasPrefix("clawline.lastServerMessageId.")
             || key.hasPrefix("clawline.lastReadMessageId.")
+            || key.hasPrefix("clawline.replayCursorBySession.v1.")
             || key.hasPrefix("clawline.lastStream")
             || key.hasPrefix("clawline.lastSessionKey")
             || key.hasPrefix("clawline.scrollState.v1.") {

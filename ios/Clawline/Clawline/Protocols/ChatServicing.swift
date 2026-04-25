@@ -68,6 +68,7 @@ protocol ChatServicing: AnyObject {
     func disconnect()
     func replayCursorSnapshot() -> [String: String]
     func setReplayCursor(_ cursor: String?, for sessionKey: String)
+    func seedReplayCursorIfMissing(_ cursor: String?, for sessionKey: String)
     func clearReplayCursors()
     func send(
         id: String,

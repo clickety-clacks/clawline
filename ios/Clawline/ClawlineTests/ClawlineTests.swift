@@ -50,18 +50,22 @@ struct ClawlineTests {
             } else {
                 defaults.removeObject(forKey: AppFontScale.storageKey)
             }
+            AppFontScale.useActiveValue(AppFontScale.persistedValue())
         }
         defaults.removeObject(forKey: AppFontScale.storageKey)
 
         let settings = SettingsManager()
         #expect(settings.fontScale == AppFontScale.defaultValue)
+        #expect(AppFontScale.currentValue() == settings.fontScale)
 
         settings.increaseFontScale()
         #expect(settings.fontScale == AppFontScale.defaultValue + AppFontScale.step)
+        #expect(AppFontScale.currentValue() == settings.fontScale)
         #expect(settings.consumePendingFontScaleToastMessage() == "Font scale 110%")
 
         settings.decreaseFontScale()
         #expect(settings.fontScale == AppFontScale.defaultValue)
+        #expect(AppFontScale.currentValue() == settings.fontScale)
         #expect(settings.consumePendingFontScaleToastMessage() == "Font scale 100%")
     }
 
@@ -76,6 +80,7 @@ struct ClawlineTests {
             } else {
                 defaults.removeObject(forKey: AppFontScale.storageKey)
             }
+            AppFontScale.useActiveValue(AppFontScale.persistedValue())
         }
         defaults.removeObject(forKey: AppFontScale.storageKey)
 
@@ -85,11 +90,13 @@ struct ClawlineTests {
             settings.increaseFontScale()
         }
         #expect(settings.fontScale == AppFontScale.maximum)
+        #expect(AppFontScale.currentValue() == AppFontScale.maximum)
 
         for _ in 0..<60 {
             settings.decreaseFontScale()
         }
         #expect(settings.fontScale == AppFontScale.minimum)
+        #expect(AppFontScale.currentValue() == AppFontScale.minimum)
     }
 
     @Test("T180: placeholder text includes channel name and session key")

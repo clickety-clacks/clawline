@@ -303,7 +303,7 @@ struct PairingView: View {
                         .font(.clawline(.subsectionHeader))
                         .foregroundStyle(.secondary)
                 } else {
-                    Text("Waiting for owner")
+                    Text("Ask your agent to approve registration…")
                         .font(.clawline(.uiLabel))
                         .foregroundStyle(.secondary)
 

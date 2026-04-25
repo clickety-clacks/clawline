@@ -7,6 +7,8 @@
 
 import SwiftUI
 import UIKit
+import Foundation
+import Observation
 import OSLog
 import Combine
 
@@ -707,6 +709,18 @@ struct DictationPanGestureInstaller: UIViewControllerRepresentable {
     }
 }
 
+// The input bar is hosted in a pinned UIKit container, so parent value changes do not always
+// rebuild its content closure. Keep the send button state in a stable observable store.
+@Observable
+@MainActor
+final class SendButtonConnectionStateStore {
+    var value: SendButtonConnectionState
+
+    init(value: SendButtonConnectionState = .disconnected) {
+        self.value = value
+    }
+}
+
 // MARK: - ⚠️⚠️⚠️ CRITICAL: READ ChatView.swift HEADER BEFORE MODIFYING ⚠️⚠️⚠️
 //
 // This view is used inside .safeAreaInset in ChatView. That context has special behavior:
@@ -756,8 +770,8 @@ struct MessageInputBar: View {
     var resetToken: Int
     let canSend: Bool
     let isSending: Bool
-    let isPreparing: Bool
-    let connectionState: SendButtonConnectionState
+    let isStagingAttachments: Bool
+    let connectionStateStore: SendButtonConnectionStateStore
     let focusTrigger: Int
     let dismissTrigger: Int
     let isTextFieldFocused: Bool
@@ -906,7 +920,7 @@ struct MessageInputBar: View {
     static func sendButtonBubbleVisualState(
         isSending: Bool,
         canSend: Bool,
-        isPreparing: Bool,
+        isStagingAttachments: Bool,
         connectionState: SendButtonConnectionState
     ) -> SendButtonBubbleVisualState {
         switch connectionState {
@@ -914,7 +928,7 @@ struct MessageInputBar: View {
             return (isSending || canSend || sendButtonShowsPreparingSpinner(
                 isSending: isSending,
                 canSend: canSend,
-                isPreparing: isPreparing,
+                isStagingAttachments: isStagingAttachments,
                 connectionState: connectionState
             )) ? .active : .ghost
         case .reconnecting:
@@ -927,22 +941,22 @@ struct MessageInputBar: View {
     static func sendButtonShowsPreparingSpinner(
         isSending: Bool,
         canSend: Bool,
-        isPreparing: Bool,
+        isStagingAttachments: Bool,
         connectionState: SendButtonConnectionState
     ) -> Bool {
-        connectionState == .connected && isPreparing && !isSending && !canSend
+        connectionState == .connected && isStagingAttachments && !isSending && !canSend
     }
 
     static func sendButtonShowsPrimaryIcon(
         isSending: Bool,
         canSend: Bool,
-        isPreparing: Bool,
+        isStagingAttachments: Bool,
         connectionState: SendButtonConnectionState
     ) -> Bool {
         !isSending && !sendButtonShowsPreparingSpinner(
             isSending: isSending,
             canSend: canSend,
-            isPreparing: isPreparing,
+            isStagingAttachments: isStagingAttachments,
             connectionState: connectionState
         )
     }
@@ -1067,6 +1081,10 @@ struct MessageInputBar: View {
 #else
         return colorScheme == .light
 #endif
+    }
+
+    private var connectionState: SendButtonConnectionState {
+        connectionStateStore.value
     }
 
     private var inputBarColorScheme: ColorScheme {
@@ -1453,7 +1471,7 @@ struct MessageInputBar: View {
 
             MessageSendControl(
                 isSending: isSending,
-                isPreparing: isPreparing,
+                isStagingAttachments: isStagingAttachments,
                 canSend: canSendNow,
                 connectionState: connectionState,
                 sendButtonSize: sendButtonWidth,
@@ -1470,7 +1488,7 @@ struct MessageInputBar: View {
 
     private struct MessageSendControl: View {
         let isSending: Bool
-        let isPreparing: Bool
+        let isStagingAttachments: Bool
         let canSend: Bool
         let connectionState: SendButtonConnectionState
         let sendButtonSize: CGFloat
@@ -1491,7 +1509,7 @@ struct MessageInputBar: View {
             MessageInputBar.sendButtonShowsPreparingSpinner(
                 isSending: isSending,
                 canSend: canSend,
-                isPreparing: isPreparing,
+                isStagingAttachments: isStagingAttachments,
                 connectionState: connectionState
             )
         }
@@ -1499,7 +1517,7 @@ struct MessageInputBar: View {
             MessageInputBar.sendButtonShowsPrimaryIcon(
                 isSending: isSending,
                 canSend: canSend,
-                isPreparing: isPreparing,
+                isStagingAttachments: isStagingAttachments,
                 connectionState: connectionState
             )
         }
@@ -1508,7 +1526,7 @@ struct MessageInputBar: View {
             MessageInputBar.sendButtonBubbleVisualState(
                 isSending: isSending,
                 canSend: canSend,
-                isPreparing: isPreparing,
+                isStagingAttachments: isStagingAttachments,
                 connectionState: connectionState
             )
         }
@@ -2076,6 +2094,7 @@ struct DictationMicAffordanceAnimationPlan {
 #Preview("Message Input") {
     @Previewable @State var content = NSAttributedString(string: "Hello")
     @Previewable @State var selection = NSRange(location: 5, length: 0)
+    @Previewable @State var connectionStateStore = SendButtonConnectionStateStore(value: .connected)
     let draftHost = PreviewDictationDraftHost()
     let dictation = DictationCoordinator(
         bridge: DictationTranscriptApplicator(host: draftHost),
@@ -2146,8 +2165,8 @@ struct DictationMicAffordanceAnimationPlan {
                 resetToken: 0,
                 canSend: true,
                 isSending: false,
-                isPreparing: false,
-                connectionState: .connected,
+                isStagingAttachments: false,
+                connectionStateStore: connectionStateStore,
                 focusTrigger: 0,
                 dismissTrigger: 0,
                 isTextFieldFocused: false,

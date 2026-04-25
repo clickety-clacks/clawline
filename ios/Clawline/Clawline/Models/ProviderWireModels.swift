@@ -63,6 +63,9 @@ struct ServerMessagePayload: Codable, Equatable {
     let deviceId: String?
     let sessionKey: String?
     let attachments: [Attachment]
+    let clientMessageId: String?
+    let replyToMessageId: String?
+    let replyToClientMessageId: String?
 
     enum CodingKeys: String, CodingKey {
         case type
@@ -77,6 +80,9 @@ struct ServerMessagePayload: Codable, Equatable {
         case deviceId
         case sessionKey
         case attachments
+        case clientMessageId
+        case replyToMessageId
+        case replyToClientMessageId
     }
 
     // Support multiple server metadata shapes for "who is speaking" without hardcoding names.
@@ -141,7 +147,10 @@ struct ServerMessagePayload: Codable, Equatable {
          streaming: Bool,
          deviceId: String?,
          sessionKey: String?,
-         attachments: [Attachment]) {
+         attachments: [Attachment],
+         clientMessageId: String? = nil,
+         replyToMessageId: String? = nil,
+         replyToClientMessageId: String? = nil) {
         self.type = type
         self.id = id
         self.role = role
@@ -152,6 +161,9 @@ struct ServerMessagePayload: Codable, Equatable {
         self.deviceId = deviceId
         self.sessionKey = sessionKey
         self.attachments = attachments
+        self.clientMessageId = clientMessageId
+        self.replyToMessageId = replyToMessageId
+        self.replyToClientMessageId = replyToClientMessageId
     }
 
     init(from decoder: Decoder) throws {
@@ -181,6 +193,9 @@ struct ServerMessagePayload: Codable, Equatable {
         deviceId = try container.decodeIfPresent(String.self, forKey: .deviceId)
         sessionKey = try container.decodeIfPresent(String.self, forKey: .sessionKey)
         attachments = try container.decodeIfPresent([Attachment].self, forKey: .attachments) ?? []
+        clientMessageId = try container.decodeIfPresent(String.self, forKey: .clientMessageId)
+        replyToMessageId = try container.decodeIfPresent(String.self, forKey: .replyToMessageId)
+        replyToClientMessageId = try container.decodeIfPresent(String.self, forKey: .replyToClientMessageId)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -195,6 +210,9 @@ struct ServerMessagePayload: Codable, Equatable {
         try container.encodeIfPresent(deviceId, forKey: .deviceId)
         try container.encodeIfPresent(sessionKey, forKey: .sessionKey)
         try container.encode(attachments, forKey: .attachments)
+        try container.encodeIfPresent(clientMessageId, forKey: .clientMessageId)
+        try container.encodeIfPresent(replyToMessageId, forKey: .replyToMessageId)
+        try container.encodeIfPresent(replyToClientMessageId, forKey: .replyToClientMessageId)
     }
 }
 
@@ -251,7 +269,10 @@ extension Message {
             attachments: payload.attachments,
             deviceId: payload.deviceId,
             sessionKey: sessionKey,
-            sender: payload.sender
+            sender: payload.sender,
+            clientMessageId: payload.clientMessageId,
+            replyToMessageId: payload.replyToMessageId,
+            replyToClientMessageId: payload.replyToClientMessageId
         )
     }
 

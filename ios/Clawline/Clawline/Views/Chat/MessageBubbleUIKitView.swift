@@ -79,6 +79,10 @@ enum ImagePopupViewerLayout {
         let vertical = max(0, (viewportSize.height - contentSize.height) / 2)
         return UIEdgeInsets(top: vertical, left: horizontal, bottom: vertical, right: horizontal)
     }
+
+    static func zoomedContentSize(imageSize: CGSize, zoomScale: CGFloat) -> CGSize {
+        CGSize(width: imageSize.width * zoomScale, height: imageSize.height * zoomScale)
+    }
 }
 
 private class MessageImageThumbnailView: UIImageView {
@@ -236,16 +240,15 @@ private final class ImagePopupViewerController: UIViewController, UIScrollViewDe
         } else if scrollView.zoomScale < initialScale {
             scrollView.zoomScale = initialScale
         }
-        scrollView.contentSize = image.size
+        scrollView.contentSize = ImagePopupViewerLayout.zoomedContentSize(
+            imageSize: image.size,
+            zoomScale: scrollView.zoomScale
+        )
     }
 
     private func centerImage() {
-        let contentSize = CGSize(
-            width: image.size.width * scrollView.zoomScale,
-            height: image.size.height * scrollView.zoomScale
-        )
         scrollView.contentInset = ImagePopupViewerLayout.centeredContentInset(
-            contentSize: contentSize,
+            contentSize: scrollView.contentSize,
             viewportSize: scrollView.bounds.size
         )
     }

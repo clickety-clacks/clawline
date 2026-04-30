@@ -123,6 +123,41 @@ struct BubbleScrollTests {
         #expect(scale == 0.5)
     }
 
+    @Test("T233: Popup viewer uses fit-scaled content size for oversized images")
+    func imagePopupUsesFitScaledContentSizeForOversizedImages() {
+        let imageSize = CGSize(width: 1200, height: 900)
+        let viewportSize = CGSize(width: 600, height: 500)
+        let scale = ImagePopupViewerLayout.initialZoomScale(
+            imageSize: imageSize,
+            viewportSize: viewportSize
+        )
+        let contentSize = ImagePopupViewerLayout.zoomedContentSize(
+            imageSize: imageSize,
+            zoomScale: scale
+        )
+
+        #expect(contentSize.width == 600)
+        #expect(contentSize.height == 450)
+        #expect(contentSize.width <= viewportSize.width)
+        #expect(contentSize.height <= viewportSize.height)
+    }
+
+    @Test("T233: Popup viewer uses natural content size for smaller images")
+    func imagePopupUsesNaturalContentSizeForSmallerImages() {
+        let imageSize = CGSize(width: 320, height: 200)
+        let scale = ImagePopupViewerLayout.initialZoomScale(
+            imageSize: imageSize,
+            viewportSize: CGSize(width: 700, height: 500)
+        )
+        let contentSize = ImagePopupViewerLayout.zoomedContentSize(
+            imageSize: imageSize,
+            zoomScale: scale
+        )
+
+        #expect(scale == 1)
+        #expect(contentSize == imageSize)
+    }
+
     @Test("T233: Popup viewer centers content that is smaller than viewport")
     func imagePopupCentersSmallerScaledContent() {
         let insets = ImagePopupViewerLayout.centeredContentInset(

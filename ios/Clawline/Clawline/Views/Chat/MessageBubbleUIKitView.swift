@@ -122,7 +122,7 @@ private class MessageImageThumbnailView: UIImageView {
     }
 }
 
-private final class ImagePopupViewerController: UIViewController, UIScrollViewDelegate, UIGestureRecognizerDelegate {
+final class ImagePopupViewerController: UIViewController, UIScrollViewDelegate, UIGestureRecognizerDelegate {
     private let image: UIImage
     private let popupView = UIView()
     private let scrollView = UIScrollView()
@@ -228,6 +228,13 @@ private final class ImagePopupViewerController: UIViewController, UIScrollViewDe
     }
 
     private func configureZoomScale() {
+        guard image.size.width > 0,
+              image.size.height > 0,
+              scrollView.bounds.width > 0,
+              scrollView.bounds.height > 0 else {
+            return
+        }
+
         let initialScale = ImagePopupViewerLayout.initialZoomScale(
             imageSize: image.size,
             viewportSize: scrollView.bounds.size
@@ -270,6 +277,13 @@ private final class ImagePopupViewerController: UIViewController, UIScrollViewDe
         dismiss(animated: true)
     }
 }
+
+#if DEBUG
+extension ImagePopupViewerController {
+    var debugScrollView: UIScrollView { scrollView }
+    var debugImageView: UIImageView { imageView }
+}
+#endif
 
 private final class RemoteMessageImageView: MessageImageThumbnailView {
     private var task: URLSessionDataTask?

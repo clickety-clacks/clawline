@@ -533,6 +533,7 @@ final class ChatViewModel: ChatViewModelHosting {
     private var hasResolvedProvisioningCapability = true
     private var hasReceivedSessionProvisioning = false
     private var hasReceivedExplicitSessionInfo = false
+    private var prunedSessionKeys: Set<String> = []
     private var accessibleSessionKeys: Set<String> = []
     private var accessibleSessionKeyOrder: [String] = []
     private var trackableSessionsBySessionKey: [String: TrackableSession] = [:]
@@ -1473,6 +1474,7 @@ final class ChatViewModel: ChatViewModelHosting {
         streamsBySessionKey = [:]
         orderedSessionKeys = []
         syntheticSessionKeys = []
+        prunedSessionKeys = []
         pendingLocalMessages.removeAll()
         ackedPendingLocalMessageIDs.removeAll()
         isAssistantTyping = false
@@ -1701,6 +1703,14 @@ final class ChatViewModel: ChatViewModelHosting {
             )
         }
 
+        guard !isPrunedSessionKey(message.sessionKey) else {
+            logger.info(
+                "incoming suppressed pruned_session id=\(message.id, privacy: .public) sessionKey=\(message.sessionKey, privacy: .public)"
+            )
+            clearCursor(for: message.sessionKey)
+            return
+        }
+
         // Check if this is an assistant message arriving while typing indicator is visible.
         // If so, the UI should morph the typing indicator into this message instead of inserting new.
         ensureStreamEntry(for: message.sessionKey)
@@ -1776,7 +1786,7 @@ final class ChatViewModel: ChatViewModelHosting {
             return
         }
         handleIncoming(message)
-        if isReplayCursorEvent(message) {
+        if !isPrunedSessionKey(sessionKey), isReplayCursorEvent(message) {
             chatService.setReplayCursor(message.id, for: sessionKey)
             Task { await lifecycleCoordinator.updateCanonicalCursor(message.id) }
         }
@@ -1814,6 +1824,11 @@ final class ChatViewModel: ChatViewModelHosting {
             .union(streamsBySessionKey.keys)
             .union(pending.messagesBySessionKey.keys)
         for sessionKey in allSessionKeys {
+            guard !isPrunedSessionKey(sessionKey) else {
+                removeCachedMessages(for: sessionKey)
+                clearCursor(for: sessionKey)
+                continue
+            }
             let replayMessages = pending.messagesBySessionKey[sessionKey] ?? []
             if pending.cursorBackedSessionKeys.contains(sessionKey) {
                 guard !replayMessages.isEmpty else { continue }
@@ -2627,6 +2642,7 @@ final class ChatViewModel: ChatViewModelHosting {
             logger.info(
                 "typingStateChanged isTyping=\(isTyping, privacy: .public) sessionKey=\(sessionKey, privacy: .public) engineActiveSessionKey=\(self.engineActiveSessionKey, privacy: .public) uiSelectedSessionKey=\(self.uiSelectedSessionKey, privacy: .public)"
             )
+            guard !isPrunedSessionKey(sessionKey) else { return }
             ensureStreamEntry(for: sessionKey)
             if isTyping {
                 self.isAssistantTyping = true
@@ -3103,6 +3119,7 @@ final class ChatViewModel: ChatViewModelHosting {
                 await MainActor.run { [weak self, filtered] in
                     guard let self else { return }
                     guard self.restoreTaskBySessionKey[sessionKey] != nil else { return }
+                    guard !self.isPrunedSessionKey(sessionKey) else { return }
                     if let epoch {
                         guard self.writerCurrentEpoch == epoch else { return }
                         guard self.firstReplayAppliedEpoch != epoch else { return }
@@ -3287,6 +3304,7 @@ final class ChatViewModel: ChatViewModelHosting {
 
     private func ensureStreamEntry(for sessionKey: String) {
         guard !sessionKey.isEmpty else { return }
+        guard !isPrunedSessionKey(sessionKey) else { return }
         guard streamsBySessionKey[sessionKey] == nil else { return }
         let synthesized = StreamSession(
             sessionKey: sessionKey,
@@ -3304,10 +3322,15 @@ final class ChatViewModel: ChatViewModelHosting {
         ensureSessionStorage(for: sessionKey)
     }
 
+    private func isPrunedSessionKey(_ sessionKey: String) -> Bool {
+        prunedSessionKeys.contains(sessionKey)
+    }
+
     private func applyStreamSnapshot(_ streams: [StreamSession]) {
         let previousSessionKeys = Set(streamsBySessionKey.keys)
         let normalizedStreams = streams
         let serverKeys = Set(normalizedStreams.map(\.sessionKey))
+        prunedSessionKeys.subtract(serverKeys)
         let adoptedStreams = streamsBySessionKey.values.filter {
             $0.adopted && !serverKeys.contains($0.sessionKey)
         }
@@ -3321,6 +3344,7 @@ final class ChatViewModel: ChatViewModelHosting {
         streamsBySessionKey = byKey
         let validSessionKeys = Set(byKey.keys)
         let removedSessionKeys = previousSessionKeys.subtracting(validSessionKeys)
+        prunedSessionKeys.formUnion(removedSessionKeys)
         for sessionKey in removedSessionKeys {
             sessionMessages.removeValue(forKey: sessionKey)
             lastReadMessageIdBySession.removeValue(forKey: sessionKey)
@@ -3328,6 +3352,11 @@ final class ChatViewModel: ChatViewModelHosting {
             streamDotStateBySession.removeValue(forKey: sessionKey)
             sessionStatusBySessionKey.removeValue(forKey: sessionKey)
             sessionStatusRefreshTasks.removeValue(forKey: sessionKey)?.cancel()
+            restoreTaskBySessionKey.removeValue(forKey: sessionKey)?.cancel()
+            if typingSessionKey == sessionKey {
+                typingSessionKey = nil
+                isAssistantTyping = false
+            }
             let removedIDs = Set(pendingLocalMessages.filter { $0.sessionKey == sessionKey }.map(\.id))
             pendingLocalMessages.removeAll { $0.sessionKey == sessionKey }
             ackedPendingLocalMessageIDs.subtract(removedIDs)
@@ -3353,6 +3382,7 @@ final class ChatViewModel: ChatViewModelHosting {
     }
 
     private func applyStreamUpsert(_ stream: StreamSession) {
+        prunedSessionKeys.remove(stream.sessionKey)
         streamsBySessionKey[stream.sessionKey] = stream
         syntheticSessionKeys.remove(stream.sessionKey)
         recalculateOrderedSessionKeys()
@@ -3365,6 +3395,7 @@ final class ChatViewModel: ChatViewModelHosting {
     }
 
     private func applyStreamDeletion(sessionKey: String) {
+        prunedSessionKeys.insert(sessionKey)
         streamsBySessionKey.removeValue(forKey: sessionKey)
         syntheticSessionKeys.remove(sessionKey)
         recalculateOrderedSessionKeys()
@@ -3430,6 +3461,7 @@ final class ChatViewModel: ChatViewModelHosting {
     }
 
     private func unlinkTrackedSession(sessionKey: String) {
+        prunedSessionKeys.insert(sessionKey)
         streamsBySessionKey.removeValue(forKey: sessionKey)
         syntheticSessionKeys.remove(sessionKey)
         sessionStatusBySessionKey.removeValue(forKey: sessionKey)

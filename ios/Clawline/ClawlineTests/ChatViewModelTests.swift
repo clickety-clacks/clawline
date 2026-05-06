@@ -2154,6 +2154,42 @@ struct ChatViewModelTests {
         #expect(secondViewModel.stream(for: staleKey) == nil)
         #expect(secondViewModel.messages(for: staleKey).isEmpty)
         #expect(secondViewModel.orderedSessionKeys == [personalSessionKey])
+
+        secondService.emitServiceEvent(
+            .streamCreated(
+                makeStreamSession(
+                    sessionKey: staleKey,
+                    displayName: "Parallelism",
+                    kind: "custom",
+                    orderIndex: 1,
+                    isBuiltIn: false
+                )
+            )
+        )
+        for _ in 0..<50 {
+            if secondViewModel.stream(for: staleKey) != nil { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(secondViewModel.stream(for: staleKey) != nil)
+
+        secondService.emit(
+            Message(
+                id: "s_reauthorized_replay",
+                role: .assistant,
+                content: "reauthorized replay",
+                timestamp: Date(),
+                streaming: false,
+                attachments: [],
+                deviceId: nil,
+                sessionKey: staleKey
+            )
+        )
+        for _ in 0..<50 {
+            if secondViewModel.messages(for: staleKey).map(\.id) == ["s_reauthorized_replay"] { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(secondViewModel.messages(for: staleKey).map(\.id) == ["s_reauthorized_replay"])
     }
 
     @Test("Incremental stream events update metadata")

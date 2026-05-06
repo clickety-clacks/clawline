@@ -112,7 +112,10 @@ struct RichTextEditor: UIViewRepresentable {
         }
 
         let isComposing = textView.markedTextRange != nil
-        if resetToken != context.coordinator.lastResetToken, !isComposing {
+        let resetRequested = resetToken != context.coordinator.lastResetToken
+        let parentContentChangedWhileInactive = !textView.isFirstResponder
+            && !textView.attributedText.isEqual(to: attributedText)
+        if (resetRequested || parentContentChangedWhileInactive), !isComposing {
             context.coordinator.lastResetToken = resetToken
             textView.attributedText = attributedText
             context.coordinator.enforceBaseAttributes(on: textView)

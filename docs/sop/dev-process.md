@@ -89,15 +89,39 @@ If you're in a legacy cp-r workspace:
 
 ## Development Lifecycle
 
+There are two different lifecycle modes. Do **not** collapse them.
+
+### Long feature branches — verified before final teardown
+
+Use this when the branch represents a substantial feature branch that has already been deployed, tested, and verified before final closure.
+
 ```
 0. SPEC       — CLU spins up spec agent to write technical spec (stays alive as SME)
 1. SETUP      — create worktree, spin up impl agent in its folder
-2. WORK       — impl agent implements per spec, commits, pushes to origin/main
-3. DEPLOY     — deployer pulls origin/main, builds, installs to device
+2. WORK       — impl agent implements per spec, commits, pushes branch/main as directed
+3. DEPLOY     — deployer pulls intended source, builds, installs to device
 4. VERIFY     — Flynn tests on device
 5. DEBRIEF    — impl agent records impl notes (exit interview)
 6. CLEANUP    — kill impl session, remove worktree (spec agent stays alive)
 ```
+
+### Small feature / review-only branches — merge, rehome, keep agent
+
+Use this when the branch was merged after compile/tests/review but **before Flynn has done full device verification**. This is common for small Clawline feature slices.
+
+In this mode, merging is **not** the end of the agent's useful life. The agent still owns the feature's latent verification bugs.
+
+```
+0. SETUP      — create worktree, spin up impl agent
+1. WORK       — implement, test/build, run review cycle
+2. MERGE      — merge to main when accepted for next deploy
+3. REHOME     — remove feature worktree/branch, but resume the same agent on canonical main
+4. VERIFY     — Flynn tests when main is next deployed
+5. FOLLOW-UP  — if bugs surface, reuse the same rehomed agent
+6. FINAL KILL — kill only after Flynn verifies the feature or explicitly says to end that agent
+```
+
+If a follow-up bug is small, the original rehomed agent may YOLO/fix directly on main when Flynn directs that. If the follow-up is larger or needs isolation, create a new worktree/branch and **move the original agent into that worktree** using `/exit` + `ccx resume <id>`. Do not spawn a fresh agent just because the original branch was merged/deleted.
 
 ### Step 0: Spec (CLU-orchestrated)
 
@@ -160,8 +184,9 @@ git worktree add ~/src/worktrees/clawline-{agent}/ -b {agent}
 
 Flynn tests on device. Two outcomes:
 
-- **🐛 Bug found** → send bug report to the agent (it still has its worktree + session context). Agent fixes in-place, pushes again. Return to Step 3.
-- **✅ Verified** → proceed to Step 5.
+- **🐛 Bug found before branch cleanup** → send bug report to the agent (it still has its worktree + session context). Agent fixes in-place, pushes again. Return to Step 3.
+- **🐛 Bug found after merge/rehome** → use the original rehomed feature agent. Either let it fix on canonical main if Flynn directs a small YOLO fix, or create a follow-up worktree/branch and resume that same agent there. Do **not** create a fresh agent for same-feature verification bugs unless the original agent is unavailable or Flynn explicitly asks.
+- **✅ Verified** → proceed to Step 5/final cleanup as appropriate.
 
 ### Step 4.5: Tag (Optional)
 
@@ -194,7 +219,9 @@ git push origin v{YYYY-MM-DD}
 - Append these notes to the GitHub issue or tracking file.
 - These notes serve as onboarding material if bugs surface later.
 
-### Step 6: Cleanup
+### Step 6: Cleanup vs Rehome
+
+For **long feature branches that Flynn has verified**, final cleanup may kill the tmux session and remove the worktree:
 
 ```bash
 # Kill the tmux session
@@ -204,7 +231,9 @@ tmux kill-session -t {agent-name}
 cd ~/src/clawline && git worktree remove ~/src/worktrees/clawline-{agent}/
 ```
 
-**Cleanup happens ONLY after Flynn says "verified."** Not before.
+For **small/review-only branches merged before full device verification**, do **not** kill the feature agent. Remove the worktree/branch if appropriate, then rehome the same agent to canonical `~/src/clawline` main so it can fix verification bugs with its preserved context.
+
+**Final kill happens ONLY after Flynn says the feature is verified or explicitly says to end that agent.** Merged is not verified.
 
 ---
 
@@ -278,6 +307,7 @@ When working in away mode (agents on TARS instead of eezo):
 - **Personal sessions (`flynn-*`) are never killed** without Flynn explicitly naming them.
 - **Project sessions (Floatty, Helm, etc.) are never killed** without Flynn explicitly naming them.
 - **Agent sessions persist until Flynn verifies** the feature they were working on.
+- **Rehomed feature agents remain responsible for same-feature verification bugs.** Reuse the original agent; do not spawn a fresh one by default.
 - **Canonical repos are never deleted** — they're the source of truth and deploy point.
 
 ---
@@ -289,12 +319,14 @@ Before spinning up an agent:
 - [ ] Create tmux session with agent in that directory
 - [ ] Include notify instruction in dispatch prompt
 
-Before cleaning up:
-- [ ] Flynn has verified on device
-- [ ] Exit debrief completed, notes saved to ticket
-- [ ] Confirm with Flynn which session(s) to kill
-- [ ] Kill session
+Before cleaning up or rehoming:
+- [ ] Classify lifecycle: long verified branch final teardown, or small/review-only branch that still needs later device verification
+- [ ] If final teardown: Flynn has verified on device or explicitly said to end the agent
+- [ ] If small/review-only: rehome the same agent to canonical main instead of killing it
+- [ ] Exit debrief completed when doing final teardown, notes saved to ticket
+- [ ] Confirm with Flynn which session(s) to kill when killing is actually intended
 - [ ] Remove worktree: `cd ~/src/clawline && git worktree remove ~/src/worktrees/clawline-{agent}`
+- [ ] Delete branch local/remote only after merge/subsumption is confirmed
 
 ---
 

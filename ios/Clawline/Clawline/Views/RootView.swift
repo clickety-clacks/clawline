@@ -36,21 +36,10 @@ struct RootView: View {
             : Color(uiColor: .systemGray6)              // Light gray
     }
 
-    private var isPairingRoute: Bool {
-        !auth.isAuthenticated || !isProviderConfigured
-    }
-
-    private var pairingCausticsConfig: BackgroundEffectConfiguration {
-        BackgroundEffectConfiguration(
-            effectType: .caustics,
-            color1: settings.dictationCausticsColor1,
-            color2: settings.dictationCausticsColor1,
-            color3: settings.dictationCausticsColor1,
-            intensity: settings.dictationCausticsBrightness,
-            speed: settings.dictationCausticsBaselineSpeed,
-            scale: settings.dictationCausticsScale,
-            sharpness: settings.dictationCausticsSharpness,
-            isEnabled: true
+    private var isPairingRouteVisible: Bool {
+        RootBackgroundShaderLifecycle.isShaderActive(
+            isAuthenticated: auth.isAuthenticated,
+            isProviderConfigured: isProviderConfigured
         )
     }
 
@@ -117,22 +106,11 @@ struct RootView: View {
                 .accessibilityHidden(true)
 #else
             Group {
-                if isPairingRoute {
+                if isPairingRouteVisible {
                     backgroundColor
-                        .backgroundEffect(pairingCausticsConfig)
-                        .mask {
-                            LinearGradient(
-                                stops: [
-                                    .init(color: .white, location: 0.0),
-                                    .init(color: .white, location: 0.30),
-                                    .init(color: .clear, location: 0.55)
-                                ],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
-                        }
+                        .backgroundEffect(settings.effectConfig)
                 } else {
-                    Color.clear
+                    backgroundColor
                 }
             }
                 .ignoresSafeArea()
@@ -183,6 +161,12 @@ struct RootView: View {
     private func showPendingFontScaleToastIfNeeded() {
         guard let message = settings.consumePendingFontScaleToastMessage() else { return }
         toastManager.show(message, duration: .seconds(3))
+    }
+}
+
+enum RootBackgroundShaderLifecycle {
+    static func isShaderActive(isAuthenticated: Bool, isProviderConfigured: Bool) -> Bool {
+        !isAuthenticated || !isProviderConfigured
     }
 }
 

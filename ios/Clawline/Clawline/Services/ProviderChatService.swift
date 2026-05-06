@@ -648,6 +648,50 @@ class ProviderChatService: ChatServicing {
         }
     }
 
+    func fetchTrackableSessions() async throws -> [TrackableSession] {
+        guard let token = await resolveControlPlaneToken() else {
+            throw Error.notConnected
+        }
+        do {
+            return try await streamAPIClient.fetchTrackableSessions(token: token)
+        } catch {
+            throw mapStreamAPIError(error)
+        }
+    }
+
+    func fetchSessionStatus(sessionKey: String) async throws -> SessionStatus {
+        guard let token = await resolveControlPlaneToken() else {
+            throw Error.notConnected
+        }
+        do {
+            return try await streamAPIClient.fetchSessionStatus(sessionKey: sessionKey, token: token)
+        } catch {
+            throw mapStreamAPIError(error)
+        }
+    }
+
+    func applySessionControl(
+        sessionKey: String,
+        action: SessionControlAction,
+        value: String?,
+        enabled: Bool?
+    ) async throws -> SessionControlResponse {
+        guard let token = await resolveControlPlaneToken() else {
+            throw Error.notConnected
+        }
+        do {
+            return try await streamAPIClient.applySessionControl(
+                sessionKey: sessionKey,
+                action: action,
+                value: value,
+                enabled: enabled,
+                token: token
+            )
+        } catch {
+            throw mapStreamAPIError(error)
+        }
+    }
+
     func createStream(displayName: String, idempotencyKey: String) async throws -> StreamSession {
         guard let token = await resolveControlPlaneToken() else {
             throw Error.notConnected
@@ -658,17 +702,6 @@ class ProviderChatService: ChatServicing {
                 idempotencyKey: idempotencyKey,
                 token: token
             )
-        } catch {
-            throw mapStreamAPIError(error)
-        }
-    }
-
-    func fetchTrackableSessions() async throws -> [TrackableSession] {
-        guard let token = await resolveControlPlaneToken() else {
-            throw Error.notConnected
-        }
-        do {
-            return try await streamAPIClient.fetchTrackableSessions(token: token)
         } catch {
             throw mapStreamAPIError(error)
         }

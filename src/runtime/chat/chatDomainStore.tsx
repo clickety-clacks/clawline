@@ -153,6 +153,7 @@ export function createChatDomainStore(options?: {
 }): ChatDomainStore {
   const persistence = options?.persistence ?? createIndexedDbChatPersistence();
   const baseStore = createStore<ChatDomainState>(EMPTY_STATE);
+  let hydrationEpoch = 0;
 
   void hydrate();
 
@@ -164,9 +165,17 @@ export function createChatDomainStore(options?: {
   }
 
   async function hydrate() {
+    const epoch = hydrationEpoch;
     const persisted = await persistence.load();
 
     baseStore.setState((current) => {
+      if (epoch !== hydrationEpoch) {
+        return {
+          ...current,
+          hydrated: true
+        };
+      }
+
       const hydratedState = persisted ? mergeHydratedState(current, persisted) : current;
 
       return {
@@ -288,6 +297,7 @@ export function createChatDomainStore(options?: {
     },
     resetForAuthoritativeReplay() {
       baseStore.setState((current) => {
+        hydrationEpoch += 1;
         const nextState = {
           ...EMPTY_STATE,
           hydrated: current.hydrated
@@ -411,6 +421,7 @@ export function createChatDomainStore(options?: {
       return result.lastReadMessageId;
     },
     reset() {
+      hydrationEpoch += 1;
       void persistence.clear();
       baseStore.setState({
         ...EMPTY_STATE,

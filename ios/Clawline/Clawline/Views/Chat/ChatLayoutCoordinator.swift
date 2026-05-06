@@ -175,6 +175,11 @@ final class ChatLayoutCoordinator {
         listViews[sessionKey]?.value?.scrollByPage(direction: direction, animated: animated)
     }
 
+    func scrollVisibleBubbleContents(sessionKey: String, direction: ChatScrollPageDirection, animated: Bool) {
+        dispatchPrecondition(condition: .onQueue(.main))
+        listViews[sessionKey]?.value?.scrollVisibleBubbleContents(direction: direction, animated: animated)
+    }
+
     func scrollToMessageCentered(messageId: String, sessionKey: String, animated: Bool) {
         dispatchPrecondition(condition: .onQueue(.main))
         listViews[sessionKey]?.value?.scrollToMessageCentered(messageId: messageId, animated: animated)

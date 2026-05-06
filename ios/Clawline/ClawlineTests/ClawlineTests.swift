@@ -140,4 +140,24 @@ struct ClawlineTests {
 
         #expect(regex.firstMatch(in: source, range: range) != nil)
     }
+
+    @Test("T219: pairing shader is active only while pairing route is visible")
+    func rootBackgroundShaderLifecycleFollowsPairingRoute() {
+        #expect(RootBackgroundShaderLifecycle.isShaderActive(
+            isAuthenticated: false,
+            isProviderConfigured: false
+        ))
+        #expect(RootBackgroundShaderLifecycle.isShaderActive(
+            isAuthenticated: false,
+            isProviderConfigured: true
+        ))
+        #expect(RootBackgroundShaderLifecycle.isShaderActive(
+            isAuthenticated: true,
+            isProviderConfigured: false
+        ))
+        #expect(!RootBackgroundShaderLifecycle.isShaderActive(
+            isAuthenticated: true,
+            isProviderConfigured: true
+        ))
+    }
 }

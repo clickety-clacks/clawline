@@ -40,6 +40,314 @@ private final class BubbleSafeAreaNeutralScrollView: UIScrollView {
     }
 }
 
+enum RemoteMessageImagePolicy {
+    static func request(for url: URL) -> URLRequest {
+        var request = URLRequest(
+            url: url,
+            cachePolicy: .reloadIgnoringLocalAndRemoteCacheData,
+            timeoutInterval: 30
+        )
+        request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+        request.setValue("no-cache", forHTTPHeaderField: "Pragma")
+        return request
+    }
+
+    static func image(from data: Data, response: URLResponse?) -> UIImage? {
+        if let http = response as? HTTPURLResponse,
+           !(200..<400).contains(http.statusCode) {
+            return nil
+        }
+        return UIImage(data: data)
+    }
+}
+
+enum ImagePopupViewerLayout {
+    static func initialZoomScale(imageSize: CGSize, viewportSize: CGSize) -> CGFloat {
+        guard imageSize.width > 0,
+              imageSize.height > 0,
+              viewportSize.width > 0,
+              viewportSize.height > 0 else {
+            return 1
+        }
+
+        let fitScale = min(viewportSize.width / imageSize.width, viewportSize.height / imageSize.height)
+        return min(1, fitScale)
+    }
+
+    static func centeredContentInset(contentSize: CGSize, viewportSize: CGSize) -> UIEdgeInsets {
+        let horizontal = max(0, (viewportSize.width - contentSize.width) / 2)
+        let vertical = max(0, (viewportSize.height - contentSize.height) / 2)
+        return UIEdgeInsets(top: vertical, left: horizontal, bottom: vertical, right: horizontal)
+    }
+}
+
+private class MessageImageThumbnailView: UIImageView {
+    var onImageTap: ((UIImage) -> Void)?
+
+    init() {
+        super.init(frame: .zero)
+        configureTap()
+    }
+
+    override init(image: UIImage?) {
+        super.init(image: image)
+        configureTap()
+    }
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        configureTap()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        configureTap()
+    }
+
+    private func configureTap() {
+        isUserInteractionEnabled = true
+        let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap))
+        tap.cancelsTouchesInView = true
+        addGestureRecognizer(tap)
+        accessibilityTraits.insert(.button)
+    }
+
+    @objc private func handleTap() {
+        guard let image else { return }
+        onImageTap?(image)
+    }
+}
+
+private final class ImagePopupViewerController: UIViewController, UIScrollViewDelegate, UIGestureRecognizerDelegate {
+    private let image: UIImage
+    private let popupView = UIView()
+    private let scrollView = UIScrollView()
+    private let imageView = UIImageView()
+    private var didSetInitialZoomScale = false
+    private weak var indirectZoomRecognizer: UIPanGestureRecognizer?
+
+    init(image: UIImage) {
+        self.image = image
+        super.init(nibName: nil, bundle: nil)
+        modalPresentationStyle = .overFullScreen
+        modalTransitionStyle = .crossDissolve
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+
+        view.backgroundColor = UIColor.black.withAlphaComponent(0.55)
+
+        popupView.translatesAutoresizingMaskIntoConstraints = false
+        popupView.backgroundColor = .systemBackground
+        popupView.layer.cornerRadius = 18
+        popupView.layer.cornerCurve = .continuous
+        popupView.clipsToBounds = true
+        view.addSubview(popupView)
+
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.delegate = self
+        scrollView.backgroundColor = .black
+        scrollView.showsHorizontalScrollIndicator = true
+        scrollView.showsVerticalScrollIndicator = true
+        scrollView.minimumZoomScale = 1
+        scrollView.maximumZoomScale = 8
+        popupView.addSubview(scrollView)
+
+        imageView.image = image
+        imageView.contentMode = .scaleAspectFit
+        imageView.frame = CGRect(origin: .zero, size: image.size)
+        imageView.isUserInteractionEnabled = true
+        scrollView.addSubview(imageView)
+
+        let closeButton = UIButton(type: .system)
+        closeButton.translatesAutoresizingMaskIntoConstraints = false
+        closeButton.setImage(UIImage(systemName: "xmark"), for: .normal)
+        closeButton.tintColor = .label
+        closeButton.backgroundColor = UIColor.systemBackground.withAlphaComponent(0.9)
+        closeButton.layer.cornerRadius = 18
+        closeButton.layer.cornerCurve = .continuous
+        closeButton.accessibilityLabel = "Close image viewer"
+        closeButton.addTarget(self, action: #selector(close), for: .touchUpInside)
+        popupView.addSubview(closeButton)
+
+        let indirectZoom = UIPanGestureRecognizer(target: self, action: #selector(handleIndirectScrollZoom))
+        indirectZoom.allowedScrollTypesMask = .all
+        indirectZoom.delegate = self
+        scrollView.addGestureRecognizer(indirectZoom)
+        scrollView.panGestureRecognizer.require(toFail: indirectZoom)
+        indirectZoomRecognizer = indirectZoom
+
+        NSLayoutConstraint.activate([
+            popupView.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 18),
+            popupView.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -18),
+            popupView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 18),
+            popupView.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -18),
+
+            scrollView.leadingAnchor.constraint(equalTo: popupView.leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: popupView.trailingAnchor),
+            scrollView.topAnchor.constraint(equalTo: popupView.topAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: popupView.bottomAnchor),
+
+            closeButton.topAnchor.constraint(equalTo: popupView.topAnchor, constant: 12),
+            closeButton.trailingAnchor.constraint(equalTo: popupView.trailingAnchor, constant: -12),
+            closeButton.widthAnchor.constraint(equalToConstant: 36),
+            closeButton.heightAnchor.constraint(equalTo: closeButton.widthAnchor)
+        ])
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        configureZoomScale()
+        centerImage()
+    }
+
+    func viewForZooming(in scrollView: UIScrollView) -> UIView? {
+        imageView
+    }
+
+    func scrollViewDidZoom(_ scrollView: UIScrollView) {
+        centerImage()
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer,
+                           shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+        gestureRecognizer !== indirectZoomRecognizer
+    }
+
+    func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        gestureRecognizer.numberOfTouches == 0
+    }
+
+    private func configureZoomScale() {
+        let initialScale = ImagePopupViewerLayout.initialZoomScale(
+            imageSize: image.size,
+            viewportSize: scrollView.bounds.size
+        )
+        scrollView.minimumZoomScale = initialScale
+        scrollView.maximumZoomScale = max(8, initialScale * 8)
+        if !didSetInitialZoomScale {
+            scrollView.zoomScale = initialScale
+            didSetInitialZoomScale = true
+        } else if scrollView.zoomScale < initialScale {
+            scrollView.zoomScale = initialScale
+        }
+        scrollView.contentSize = image.size
+    }
+
+    private func centerImage() {
+        let contentSize = CGSize(
+            width: image.size.width * scrollView.zoomScale,
+            height: image.size.height * scrollView.zoomScale
+        )
+        scrollView.contentInset = ImagePopupViewerLayout.centeredContentInset(
+            contentSize: contentSize,
+            viewportSize: scrollView.bounds.size
+        )
+    }
+
+    @objc private func handleIndirectScrollZoom(_ recognizer: UIPanGestureRecognizer) {
+        guard recognizer.state == .changed else {
+            recognizer.setTranslation(.zero, in: scrollView)
+            return
+        }
+
+        let translation = recognizer.translation(in: scrollView)
+        let multiplier = max(0.5, min(1.5, 1 - (translation.y / 300)))
+        let targetScale = min(scrollView.maximumZoomScale, max(scrollView.minimumZoomScale, scrollView.zoomScale * multiplier))
+        scrollView.setZoomScale(targetScale, animated: false)
+        recognizer.setTranslation(.zero, in: scrollView)
+    }
+
+    @objc private func close() {
+        dismiss(animated: true)
+    }
+}
+
+private final class RemoteMessageImageView: MessageImageThumbnailView {
+    private var task: URLSessionDataTask?
+    private var configuredURL: URL?
+    private var widthConstraint: NSLayoutConstraint?
+    private var heightConstraint: NSLayoutConstraint?
+    private var maxWidth: CGFloat = 0
+    private var maxHeight: CGFloat = 0
+    private var onLoad: (() -> Void)?
+
+    @MainActor deinit {
+        task?.cancel()
+    }
+
+    func configure(
+        url: URL,
+        maxWidth: CGFloat,
+        maxHeight: CGFloat,
+        cornerRadius: CGFloat,
+        onTap: @escaping (UIImage) -> Void,
+        onLoad: @escaping () -> Void
+    ) {
+        task?.cancel()
+        task = nil
+        configuredURL = url
+        self.maxWidth = maxWidth
+        self.maxHeight = maxHeight
+        self.onLoad = onLoad
+        onImageTap = onTap
+        image = nil
+        backgroundColor = UIColor.secondarySystemFill
+        contentMode = .scaleAspectFit
+        clipsToBounds = true
+        layer.cornerRadius = cornerRadius
+        translatesAutoresizingMaskIntoConstraints = false
+        accessibilityLabel = "Image"
+
+        if widthConstraint == nil {
+            let constraint = widthAnchor.constraint(equalToConstant: maxWidth)
+            constraint.isActive = true
+            widthConstraint = constraint
+        } else {
+            widthConstraint?.constant = maxWidth
+        }
+
+        if heightConstraint == nil {
+            let constraint = heightAnchor.constraint(equalToConstant: preferredPlaceholderHeight())
+            constraint.isActive = true
+            heightConstraint = constraint
+        } else {
+            heightConstraint?.constant = preferredPlaceholderHeight()
+        }
+
+        let request = RemoteMessageImagePolicy.request(for: url)
+        task = URLSession.shared.dataTask(with: request) { [weak self] data, response, _ in
+            guard let data,
+                  let image = RemoteMessageImagePolicy.image(from: data, response: response) else {
+                return
+            }
+            DispatchQueue.main.async {
+                guard let self, self.configuredURL == url else { return }
+                self.backgroundColor = .clear
+                self.image = image
+                self.heightConstraint?.constant = self.preferredHeight(for: image)
+                self.invalidateIntrinsicContentSize()
+                self.onLoad?()
+            }
+        }
+        task?.resume()
+    }
+
+    private func preferredPlaceholderHeight() -> CGFloat {
+        min(maxHeight, max(120, maxWidth * 9 / 16))
+    }
+
+    private func preferredHeight(for image: UIImage) -> CGFloat {
+        let aspectRatio = image.size.height / max(image.size.width, 1)
+        return min(maxHeight, maxWidth * aspectRatio)
+    }
+}
+
 final class MessageBubbleUIKitContainerView: UIView {
     private let bubbleView: MessageBubbleUIKitView
     private let badgeView = MessageFailureBadgeView()
@@ -1015,7 +1323,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
         let isSingleImageOnly: Bool = {
             guard presentation.hasMediaOnly, presentation.parts.count == 1 else { return false }
             switch presentation.parts[0] {
-            case .image, .gallery:
+            case .remoteImage, .image, .gallery:
                 return true
             default:
                 return false
@@ -1038,12 +1346,31 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
         var didRenderAttachments = !fileParts.isEmpty
         for part in presentation.parts {
             switch part {
+            case .remoteImage(let url):
+                let imageView = RemoteMessageImageView()
+                imageView.configure(
+                    url: url,
+                    maxWidth: maxImageWidth,
+                    maxHeight: maxImageHeight,
+                    cornerRadius: Self.mediaCornerRadius,
+                    onTap: { [weak self] image in
+                        self?.presentImageViewer(image: image)
+                    }
+                ) { [weak self] in
+                    self?.onRequestLayout?(message.id)
+                }
+                dynamicContentStack.addArrangedSubview(imageView)
+                dynamicContentViews.append(imageView)
+                didRenderAttachments = true
             case .image(let attachment):
                 if let imageView = Self.makeImageView(
                     attachment: attachment,
                     maxWidth: maxImageWidth,
                     maxHeight: maxImageHeight,
-                    cornerRadius: Self.mediaCornerRadius
+                    cornerRadius: Self.mediaCornerRadius,
+                    onTap: { [weak self] image in
+                        self?.presentImageViewer(image: image)
+                    }
                 ) {
                     dynamicContentStack.addArrangedSubview(imageView)
                     dynamicContentViews.append(imageView)
@@ -1055,7 +1382,10 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
                         attachment: attachment,
                         maxWidth: maxImageWidth,
                         maxHeight: maxImageHeight,
-                        cornerRadius: Self.mediaCornerRadius
+                        cornerRadius: Self.mediaCornerRadius,
+                        onTap: { [weak self] image in
+                            self?.presentImageViewer(image: image)
+                        }
                     ) {
                         dynamicContentStack.addArrangedSubview(imageView)
                         dynamicContentViews.append(imageView)
@@ -1743,7 +2073,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
                 return "Table (\(model.rows.count) rows)"
             case .linkPreview:
                 return ""
-            case .image, .gallery, .file, .terminalSession, .interactiveHTML:
+            case .remoteImage, .image, .gallery, .file, .terminalSession, .interactiveHTML:
                 return ""
             }
         }
@@ -1754,23 +2084,31 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
     private static func makeImageView(attachment: Attachment,
                                       maxWidth: CGFloat,
                                       maxHeight: CGFloat,
-                                      cornerRadius: CGFloat) -> UIImageView? {
+                                      cornerRadius: CGFloat,
+                                      onTap: @escaping (UIImage) -> Void) -> UIImageView? {
         guard let data = attachment.data,
               let image = UIImage(data: data) else {
             return nil
         }
 
-        let imageView = UIImageView(image: image)
+        let imageView = MessageImageThumbnailView(image: image)
         imageView.contentMode = .scaleAspectFit
         imageView.clipsToBounds = true
         imageView.layer.cornerRadius = cornerRadius
         imageView.translatesAutoresizingMaskIntoConstraints = false
+        imageView.onImageTap = onTap
+        imageView.accessibilityLabel = "Image attachment"
 
         let aspectRatio = image.size.height / max(image.size.width, 1)
         let height = min(maxHeight, maxWidth * aspectRatio)
         imageView.heightAnchor.constraint(equalToConstant: height).isActive = true
         imageView.widthAnchor.constraint(lessThanOrEqualToConstant: maxWidth).isActive = true
         return imageView
+    }
+
+    private func presentImageViewer(image: UIImage) {
+        guard let presenter = nearestViewController() else { return }
+        presenter.present(ImagePopupViewerController(image: image), animated: true)
     }
 
     private func makeFilePreviewView(attachment: Attachment,
@@ -2353,6 +2691,29 @@ final class TruncationFadeView: UIView {
         } else {
             gradientLayer.locations = nil
         }
+    }
+}
+
+private extension UIView {
+    func nearestViewController() -> UIViewController? {
+        var responder: UIResponder? = self
+        while let current = responder {
+            if let controller = current as? UIViewController {
+                return controller.topPresentedController()
+            }
+            responder = current.next
+        }
+        return nil
+    }
+}
+
+private extension UIViewController {
+    func topPresentedController() -> UIViewController {
+        var current = self
+        while let presented = current.presentedViewController {
+            current = presented
+        }
+        return current
     }
 }
 

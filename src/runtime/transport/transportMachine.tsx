@@ -99,6 +99,7 @@ export function createTransportMachine({
   let replayFlushTimer: number | null = null;
   let connectionGeneration = 0;
   let replayMessagesRemaining = 0;
+  let shouldResetChatBeforeNextAuth = !authSessionStore.getState().session;
   let queuedReplayMessages: Array<{
     generation: number;
     payload: Parameters<ChatDomainStore["applyIncomingMessage"]>[0];
@@ -154,7 +155,13 @@ export function createTransportMachine({
         });
       }
       chatDomainStore.reset();
+      shouldResetChatBeforeNextAuth = true;
       return;
+    }
+
+    if (shouldResetChatBeforeNextAuth) {
+      chatDomainStore.reset();
+      shouldResetChatBeforeNextAuth = false;
     }
 
     if (baseStore.getState().phase === "idle") {

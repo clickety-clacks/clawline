@@ -884,6 +884,234 @@ struct ProviderServiceTests {
         #expect(!streams[1].adopted)
     }
 
+    @Test("Fetch session status uses provider status endpoint and decodes capabilities")
+    func fetchSessionStatusUsesProviderEndpoint() async throws {
+        let mockSocket = MockWebSocketClient()
+        let connector = MockWebSocketConnector(client: mockSocket)
+        let baseURL = URL(string: "https://example.com")!
+        let sessionKey = "agent:main:clawline:user:s_status"
+        defer { HTTPStubURLProtocol.requestHandler = nil }
+        HTTPStubURLProtocol.requestHandler = { request in
+            #expect(request.url?.path == "/api/session-status")
+            let queryItems = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems
+            #expect(queryItems?.first(where: { $0.name == "sessionKey" })?.value == sessionKey)
+            #expect(request.httpMethod == "GET")
+            #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer jwt")
+            let data = #"""
+            {
+              "sessionKey": "agent:main:clawline:user:s_status",
+              "display": {
+                "model": "claude-sonnet-4.6",
+                "fallbackModels": null,
+                "provider": "anthropic",
+                "harness": null,
+                "reasoningLevel": null,
+                "thinkingLevel": "high",
+                "fastMode": true,
+                "mode": null,
+                "verbosity": null
+              },
+              "run": {
+                "state": "running",
+                "runId": "run_1",
+                "messageId": "c_1",
+                "startedAt": 1700000000000,
+                "queueDepth": 2
+              },
+              "context": {
+                "available": false,
+                "compaction": null
+              },
+              "approval": {
+                "state": null
+              },
+              "capabilities": {
+                "cancelCurrentRun": { "supported": false, "reason": "provider_control_not_available" },
+                "setModel": { "supported": false, "reason": "provider_control_not_available" },
+                "setReasoning": { "supported": false, "reason": "provider_control_not_available" },
+                "setMode": { "supported": false, "reason": "provider_control_not_available" },
+                "setVerbosity": { "supported": false, "reason": "provider_control_not_available" }
+              }
+            }
+            """#.data(using: .utf8) ?? Data()
+            return (
+                HTTPURLResponse(
+                    url: request.url ?? baseURL,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                data
+            )
+        }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [HTTPStubURLProtocol.self]
+        let urlSession = URLSession(configuration: configuration)
+        let streamAPIClient = StreamAPIClient(baseURLProvider: { baseURL }, session: urlSession)
+        let service = ProviderChatService(
+            connector: connector,
+            deviceId: "device_123",
+            baseURLProvider: { baseURL },
+            authTokenProvider: { "jwt" },
+            streamAPIClient: streamAPIClient
+        )
+
+        let status = try await service.fetchSessionStatus(sessionKey: sessionKey)
+
+        #expect(status.sessionKey == sessionKey)
+        #expect(status.display.provider == "anthropic")
+        #expect(status.display.model == "claude-sonnet-4.6")
+        #expect(status.display.thinkingLevel == "high")
+        #expect(status.display.fastMode == true)
+        #expect(status.run.state == .running)
+        #expect(status.run.queueDepth == 2)
+        #expect(status.capabilities.cancelCurrentRun?.supported == false)
+    }
+
+    @Test("Session control posts typed provider actions")
+    func sessionControlPostsTypedProviderActions() async throws {
+        let mockSocket = MockWebSocketClient()
+        let connector = MockWebSocketConnector(client: mockSocket)
+        let baseURL = URL(string: "https://example.com")!
+        let sessionKey = "agent:main:clawline:user:s_status"
+        defer { HTTPStubURLProtocol.requestHandler = nil }
+        var requestBodies: [[String: Any]] = []
+        HTTPStubURLProtocol.requestHandler = { request in
+            #expect(request.url?.path == "/api/session-control")
+            #expect(request.httpMethod == "POST")
+            #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer jwt")
+            let body = try? JSONSerialization.jsonObject(with: request.httpBody ?? Data()) as? [String: Any]
+            requestBodies.append(body ?? [:])
+            let action = body?["action"] as? String
+            let data: Data
+            if action == "cancel_current_run" {
+                #expect(body?["sessionKey"] as? String == sessionKey)
+                #expect(body?["content"] == nil)
+                data = #"""
+                {
+                  "ok": false,
+                  "sessionKey": "agent:main:clawline:user:s_status",
+                  "action": "cancel_current_run",
+                  "code": "unsupported",
+                  "message": "The current Clawline provider dispatch path does not expose a per-session abort seam.",
+                  "capabilities": {
+                    "cancelCurrentRun": { "supported": false, "reason": "provider_abort_seam_not_available" },
+                    "setModel": { "supported": false, "reason": "model_catalog_control_not_available" },
+                    "setReasoning": { "supported": true, "reason": null },
+                    "setMode": { "supported": true, "reason": null },
+                    "setVerbosity": { "supported": true, "reason": null }
+                  }
+                }
+                """#.data(using: .utf8) ?? Data()
+            } else {
+                #expect(action == "set_fast_mode")
+                #expect(body?["sessionKey"] as? String == sessionKey)
+                #expect(body?["fastMode"] as? Bool == true)
+                #expect(body?["content"] == nil)
+                data = #"""
+                {
+                  "ok": true,
+                  "sessionKey": "agent:main:clawline:user:s_status",
+                  "action": "set_fast_mode",
+                  "status": {
+                    "sessionKey": "agent:main:clawline:user:s_status",
+                    "display": {
+                      "model": "gpt-5.5",
+                      "fallbackModels": null,
+                      "provider": "openai",
+                      "harness": null,
+                      "reasoningLevel": null,
+                      "thinkingLevel": "high",
+                      "fastMode": true,
+                      "mode": "fast",
+                      "verbosity": null
+                    },
+                    "run": {
+                      "state": "idle",
+                      "runId": null,
+                      "messageId": null,
+                      "startedAt": null,
+                      "queueDepth": 0
+                    },
+                    "context": {
+                      "available": false,
+                      "compaction": null
+                    },
+                    "approval": {
+                      "state": null
+                    },
+                    "capabilities": {
+                      "cancelCurrentRun": { "supported": false, "reason": "provider_abort_seam_not_available" },
+                      "setModel": { "supported": false, "reason": "model_catalog_control_not_available" },
+                      "setThinking": { "supported": true },
+                      "setReasoning": { "supported": true },
+                      "setFastMode": { "supported": true },
+                      "setMode": { "supported": true },
+                      "setVerbosity": { "supported": true }
+                    }
+                  },
+                  "capabilities": {
+                    "cancelCurrentRun": { "supported": false, "reason": "provider_abort_seam_not_available" },
+                    "setModel": { "supported": false, "reason": "model_catalog_control_not_available" },
+                    "setThinking": { "supported": true },
+                    "setReasoning": { "supported": true },
+                    "setFastMode": { "supported": true },
+                    "setMode": { "supported": true },
+                    "setVerbosity": { "supported": true }
+                  }
+                }
+                """#.data(using: .utf8) ?? Data()
+            }
+            return (
+                HTTPURLResponse(
+                    url: request.url ?? baseURL,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                data
+            )
+        }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [HTTPStubURLProtocol.self]
+        let urlSession = URLSession(configuration: configuration)
+        let streamAPIClient = StreamAPIClient(baseURLProvider: { baseURL }, session: urlSession)
+        let service = ProviderChatService(
+            connector: connector,
+            deviceId: "device_123",
+            baseURLProvider: { baseURL },
+            authTokenProvider: { "jwt" },
+            streamAPIClient: streamAPIClient
+        )
+
+        let cancelResponse = try await service.applySessionControl(
+            sessionKey: sessionKey,
+            action: .cancelCurrentRun,
+            value: nil,
+            enabled: nil
+        )
+        let fastModeResponse = try await service.applySessionControl(
+            sessionKey: sessionKey,
+            action: .setFastMode,
+            value: nil,
+            enabled: true
+        )
+
+        #expect(requestBodies.count == 2)
+        #expect(requestBodies.first?["action"] as? String == "cancel_current_run")
+        #expect(requestBodies.first?["fastMode"] == nil)
+        #expect(requestBodies.last?["action"] as? String == "set_fast_mode")
+        #expect(requestBodies.last?["fastMode"] as? Bool == true)
+        #expect(cancelResponse.ok == false)
+        #expect(cancelResponse.sessionKey == sessionKey)
+        #expect(cancelResponse.action == "cancel_current_run")
+        #expect(cancelResponse.code == "unsupported")
+        #expect(cancelResponse.capabilities?.cancelCurrentRun?.supported == false)
+        #expect(fastModeResponse.ok)
+        #expect(fastModeResponse.status?.display.fastMode == true)
+        #expect(fastModeResponse.capabilities?.setModel?.reason == "model_catalog_control_not_available")
+    }
+
     @Test("Adopt stream request posts session key to provider")
     func adoptStreamPostsSessionKeyToProvider() async throws {
         let mockSocket = MockWebSocketClient()

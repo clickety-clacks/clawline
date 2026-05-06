@@ -214,6 +214,25 @@ private final class VerificationChatService: ChatServicing {
     }
 
     func fetchStreams() async throws -> [StreamSession] { [] }
+    func fetchTrackableSessions() async throws -> [TrackableSession] { [] }
+    func fetchSessionStatus(sessionKey: String) async throws -> SessionStatus {
+        let _ = sessionKey
+        throw ProviderChatService.Error.notConnected
+    }
+
+    func applySessionControl(
+        sessionKey: String,
+        action: SessionControlAction,
+        value: String?,
+        enabled: Bool?
+    ) async throws -> SessionControlResponse {
+        let _ = sessionKey
+        let _ = action
+        let _ = value
+        let _ = enabled
+        throw ProviderChatService.Error.notConnected
+    }
+
     func createStream(displayName: String, idempotencyKey: String) async throws -> StreamSession {
         let _ = displayName
         let _ = idempotencyKey
@@ -231,8 +250,6 @@ private final class VerificationChatService: ChatServicing {
         let _ = idempotencyKey
         throw ProviderChatService.Error.notConnected
     }
-
-    func fetchTrackableSessions() async throws -> [TrackableSession] { [] }
 
     func adoptStream(sessionKey: String) async throws -> StreamSession {
         let _ = sessionKey

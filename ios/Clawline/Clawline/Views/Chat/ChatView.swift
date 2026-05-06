@@ -222,6 +222,8 @@ struct ChatView: View {
     @State private var streamPopupRouteController = StreamPopupRouteController()
     @State private var isPhotosPickerPresented = false
     @State private var isFileImporterPresented = false
+    @State private var isCancelCurrentPromptDialogPresented = false
+    @State private var cancelCurrentPromptSessionKey: String?
     @State private var photoPickerItems: [PhotosPickerItem] = []
     @State private var focusRequestID = 0
     @State private var dismissRequestID = 0
@@ -806,8 +808,10 @@ struct ChatView: View {
         )
         .handleKeyboardScrollCommands(
             isEnabled: keyboardScrollShortcutEnabled,
-            onScrollDown: { scrollActiveSessionByPage(.down) },
-            onScrollUp: { scrollActiveSessionByPage(.up) }
+            onScrollDown: { scrollVisibleBubbleContents(.down) },
+            onScrollUp: { scrollVisibleBubbleContents(.up) },
+            onScrollChatDown: { scrollChatSurface(.down) },
+            onScrollChatUp: { scrollChatSurface(.up) }
         )
 #if DEBUG
         .onChange(of: viewModel.lifecycleDebugSequence) { _, _ in
@@ -891,20 +895,7 @@ struct ChatView: View {
                              toastManager: ToastManager) -> some View {
         @Bindable var viewModel = viewModel
         let statusBarTopInset: CGFloat = geometry.safeAreaInsets.top
-        let messageListTopInset: CGFloat = {
-#if os(visionOS)
-            return geometry.safeAreaInsets.top + (geometry.size.height * 0.25)
-#else
-            return geometry.safeAreaInsets.top
-#endif
-        }()
-        let spatialAdditionalBottomInset: CGFloat = {
-#if os(visionOS)
-            return geometry.size.height * 0.25
-#else
-            return 0
-#endif
-        }()
+        let messageListTopInset = geometry.safeAreaInsets.top
         let isCompactLayout = horizontalSizeClass == .compact
         let metrics = ChatFlowTheme.Metrics(isCompact: isCompactLayout)
         let resolvedInputHeight = runtimeInsetFallbackBarHeight(
@@ -925,7 +916,7 @@ struct ChatView: View {
         let bottomFlowGap: CGFloat = isCompactLayout
             ? metrics.flowGap
             : ChatFlowTheme.Metrics(isCompact: false).flowGap
-        let bottomInsetFlowGap = bottomFlowGap + spatialAdditionalBottomInset
+        let bottomInsetFlowGap = bottomFlowGap
         // Keep the bar gap continuous through the final keyboard-dismiss frames.
         let keyboardInsetProgress = min(1, max(0, keyboardVisibleHeight / 24))
         let belowBarGap: CGFloat = 24 - (12 * keyboardInsetProgress)
@@ -995,6 +986,9 @@ struct ChatView: View {
             && activeSheet == nil
             && !isPhotosPickerPresented
             && !isFileImporterPresented
+        let cancelCurrentPromptDialogCanCancel = cancelCurrentPromptSessionKey.map { sessionKey in
+            viewModel.canCancelCurrentPrompt(in: sessionKey)
+        } ?? viewModel.canCancelCurrentPrompt
 
         let messageLayer: AnyView = AnyView(
             pagedStreamView(
@@ -1166,6 +1160,21 @@ struct ChatView: View {
                 },
                 onFocusRequested: {
                     focusRequestID &+= 1
+                },
+                onTextInserted: { text in
+                    insertPromptTextFromNoTextOwner(text)
+                }
+            )
+        )
+        .modifier(
+            CancelCurrentPromptConfirmationModifier(
+                isPresented: $isCancelCurrentPromptDialogPresented,
+                canCancel: cancelCurrentPromptDialogCanCancel,
+                canPresentCommand: viewModel.canCancelCurrentPrompt,
+                onPresentCommand: { presentCancelCurrentPromptDialog() },
+                onConfirm: {
+                    viewModel.requestCurrentPromptCancellation(sessionKey: cancelCurrentPromptSessionKey)
+                    cancelCurrentPromptSessionKey = nil
                 }
             )
         )
@@ -1759,9 +1768,19 @@ struct ChatView: View {
             onRequestKeyboardDismiss: listKeyboardDismissRequest,
             layoutCoordinator: layoutCoordinator,
             sessionKey: sessionKey,
+            sessionStatus: viewModel.sessionStatus(for: sessionKey),
             forceReReadGeneration: viewModel.forceReReadGeneration(for: sessionKey),
             fontScaleChangeSequence: fontScaleChangeSequence,
-            onScrollEvent: handleDeferredMessageFlowScrollEvent
+            onScrollEvent: handleDeferredMessageFlowScrollEvent,
+            onTypingIndicatorTap: { presentCancelCurrentPromptDialog(sessionKey: sessionKey) },
+            onSessionControlSelected: { sessionKey, action, value, enabled in
+                viewModel.applySessionControl(
+                    sessionKey: sessionKey,
+                    action: action,
+                    value: value,
+                    enabled: enabled
+                )
+            }
         )
         // We manage keyboard avoidance manually inside the collection view.
         // Prevent SwiftUI from shrinking the view and double-applying the keyboard height.
@@ -1909,10 +1928,13 @@ struct ChatView: View {
                 // Do not register prewarm shells as live session list views.
                 shouldRegisterWithLayoutCoordinator: false,
                 sessionKey: sessionKey,
+                sessionStatus: viewModel.sessionStatus(for: sessionKey),
                 forceReReadGeneration: viewModel.forceReReadGeneration(for: sessionKey),
                 fontScaleChangeSequence: fontScaleChangeSequence,
                 onScrollEvent: nil,
-                onKeyboardDismissModeChanged: nil
+                onKeyboardDismissModeChanged: nil,
+                onTypingIndicatorTap: nil,
+                onSessionControlSelected: nil
             )
             .hidden()
         }
@@ -2039,7 +2061,12 @@ struct ChatView: View {
         return sessionKeys.first
     }
 
-    private func scrollActiveSessionByPage(_ direction: ChatScrollPageDirection) {
+    private func scrollVisibleBubbleContents(_ direction: ChatScrollPageDirection) {
+        guard let sessionKey = keyboardNavigationSessionKey else { return }
+        layoutCoordinator.scrollVisibleBubbleContents(sessionKey: sessionKey, direction: direction, animated: true)
+    }
+
+    private func scrollChatSurface(_ direction: ChatScrollPageDirection) {
         guard let sessionKey = keyboardNavigationSessionKey else { return }
         layoutCoordinator.scrollByPage(sessionKey: sessionKey, direction: direction, animated: true)
     }
@@ -2092,6 +2119,45 @@ struct ChatView: View {
         typingActivityResetTask?.cancel()
         typingActivityResetTask = nil
         isTypingActive = false
+    }
+
+    private func presentCancelCurrentPromptDialog(sessionKey: String? = nil) {
+        if let sessionKey {
+            guard viewModel.canCancelCurrentPrompt(in: sessionKey) else {
+                cancelCurrentPromptSessionKey = nil
+                isCancelCurrentPromptDialogPresented = false
+                return
+            }
+            cancelCurrentPromptSessionKey = sessionKey
+        } else {
+            guard viewModel.canCancelCurrentPrompt else {
+                cancelCurrentPromptSessionKey = nil
+                isCancelCurrentPromptDialogPresented = false
+                return
+            }
+            cancelCurrentPromptSessionKey = nil
+        }
+        isCancelCurrentPromptDialogPresented = true
+    }
+
+    private func insertPromptTextFromNoTextOwner(_ text: String) {
+        guard let insertedText = PromptFocusTypingActivation.promptInsertionText(from: text) else { return }
+        let mutable = NSMutableAttributedString(attributedString: viewModel.inputContent)
+        let insertionRange = clampedPromptSelectionRange(length: mutable.length)
+        mutable.replaceCharacters(in: insertionRange, with: NSAttributedString(string: insertedText))
+        viewModel.inputContent = mutable
+        selectionRange = NSRange(location: insertionRange.location + (insertedText as NSString).length, length: 0)
+        recordTypingActivity()
+        focusRequestID &+= 1
+    }
+
+    private func clampedPromptSelectionRange(length: Int) -> NSRange {
+        guard selectionRange.location != NSNotFound else {
+            return NSRange(location: length, length: 0)
+        }
+        let safeLocation = min(max(selectionRange.location, 0), length)
+        let safeLength = max(0, min(selectionRange.length, length - safeLocation))
+        return NSRange(location: safeLocation, length: safeLength)
     }
 
     private func scheduleInputFocusChange(_ focused: Bool) {
@@ -2581,13 +2647,17 @@ private extension View {
     func handleKeyboardScrollCommands(
         isEnabled: Bool,
         onScrollDown: @escaping () -> Void,
-        onScrollUp: @escaping () -> Void
+        onScrollUp: @escaping () -> Void,
+        onScrollChatDown: @escaping () -> Void,
+        onScrollChatUp: @escaping () -> Void
     ) -> some View {
         modifier(
             KeyboardScrollCommandModifier(
                 isEnabled: isEnabled,
                 onScrollDown: onScrollDown,
-                onScrollUp: onScrollUp
+                onScrollUp: onScrollUp,
+                onScrollChatDown: onScrollChatDown,
+                onScrollChatUp: onScrollChatUp
             )
         )
     }
@@ -2637,6 +2707,8 @@ private struct KeyboardScrollCommandModifier: ViewModifier {
     let isEnabled: Bool
     let onScrollDown: () -> Void
     let onScrollUp: () -> Void
+    let onScrollChatDown: () -> Void
+    let onScrollChatUp: () -> Void
 
     func body(content: Content) -> some View {
         content
@@ -2648,6 +2720,49 @@ private struct KeyboardScrollCommandModifier: ViewModifier {
                 guard isEnabled, !UIWindow.clawlineCurrentFirstResponderOwnsEmbeddedScroll else { return }
                 onScrollUp()
             }
+            .onReceive(NotificationCenter.default.publisher(for: .clawlineScrollChatDownCommand)) { _ in
+                guard isEnabled, !UIWindow.clawlineCurrentFirstResponderOwnsEmbeddedScroll else { return }
+                onScrollChatDown()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .clawlineScrollChatUpCommand)) { _ in
+                guard isEnabled, !UIWindow.clawlineCurrentFirstResponderOwnsEmbeddedScroll else { return }
+                onScrollChatUp()
+            }
+    }
+}
+
+private struct CancelCurrentPromptConfirmationModifier: ViewModifier {
+    @Binding var isPresented: Bool
+    let canCancel: Bool
+    let canPresentCommand: Bool
+    let onPresentCommand: () -> Void
+    let onConfirm: () -> Void
+
+    private var command: CancelCurrentPromptCommand? {
+        guard canPresentCommand else { return nil }
+        return CancelCurrentPromptCommand {
+            onPresentCommand()
+        }
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .onChange(of: canCancel) { _, newValue in
+                if !newValue {
+                    isPresented = false
+                }
+            }
+            .focusedSceneValue(\.cancelCurrentPromptCommand, command)
+            .alert("Cancel current prompt?", isPresented: $isPresented) {
+                Button("Cancel Prompt", role: .destructive) {
+                    onConfirm()
+                }
+                .keyboardShortcut(.defaultAction)
+                Button("Keep Running", role: .cancel) {}
+                    .keyboardShortcut(.cancelAction)
+            } message: {
+                Text("Stop the current in-flight prompt?")
+            }
     }
 }
 
@@ -2656,6 +2771,7 @@ private struct PromptFocusShortcutModifier: ViewModifier {
     let hasStreams: Bool
     let onOpenStreamPopup: () -> Void
     let onFocusRequested: () -> Void
+    let onTextInserted: (String) -> Void
 
     func body(content: Content) -> some View {
         content.background {
@@ -2663,7 +2779,8 @@ private struct PromptFocusShortcutModifier: ViewModifier {
                 isEnabled: isEnabled,
                 hasStreams: hasStreams,
                 onOpenStreamPopup: onOpenStreamPopup,
-                onFocusRequested: onFocusRequested
+                onFocusRequested: onFocusRequested,
+                onTextInserted: onTextInserted
             )
             .frame(width: 0, height: 0)
             .allowsHitTesting(false)
@@ -2676,11 +2793,13 @@ private struct PromptFocusShortcutHost: UIViewRepresentable {
     let hasStreams: Bool
     let onOpenStreamPopup: () -> Void
     let onFocusRequested: () -> Void
+    let onTextInserted: (String) -> Void
 
     func makeUIView(context: Context) -> PromptFocusShortcutView {
         let view = PromptFocusShortcutView()
         view.onOpenStreamPopup = onOpenStreamPopup
         view.onFocusRequested = onFocusRequested
+        view.onTextInserted = onTextInserted
         view.isShortcutEnabled = isEnabled
         view.hasStreams = hasStreams
         return view
@@ -2689,6 +2808,7 @@ private struct PromptFocusShortcutHost: UIViewRepresentable {
     func updateUIView(_ view: PromptFocusShortcutView, context: Context) {
         view.onOpenStreamPopup = onOpenStreamPopup
         view.onFocusRequested = onFocusRequested
+        view.onTextInserted = onTextInserted
         view.isShortcutEnabled = isEnabled
         view.hasStreams = hasStreams
         if isEnabled {
@@ -2702,12 +2822,22 @@ private struct PromptFocusShortcutHost: UIViewRepresentable {
 private final class PromptFocusShortcutView: UIView {
     var onOpenStreamPopup: (() -> Void)?
     var onFocusRequested: (() -> Void)?
+    var onTextInserted: ((String) -> Void)?
     var isShortcutEnabled = false
     var hasStreams = false
     private var hasPendingActivationRetry = false
+    private static let keyboardSuppressingInputView = PromptFocusShortcutSuppressedInputView()
 
+    // T221: This hidden responder is the no-text-owner input-intent router. The chat
+    // surface owns scroll/selection/content interaction, and Prompt Input owns real
+    // editing; this view only bridges ordinary typing from "nothing owns text input"
+    // to "Prompt Input should take over."
     override var canBecomeFirstResponder: Bool {
         isShortcutEnabled
+    }
+
+    override var inputView: UIView? {
+        Self.keyboardSuppressingInputView
     }
 
     override var keyCommands: [UIKeyCommand]? {
@@ -2783,6 +2913,29 @@ private final class PromptFocusShortcutView: UIView {
     }
 }
 
+// The catcher must stay side-effect-free: no visible UI, no software keyboard, and
+// no lasting editing ownership. Hardware/composed text may reach `insertText(_:)`,
+// but the responder immediately hands the intent to Prompt Input.
+private final class PromptFocusShortcutSuppressedInputView: UIView {
+    override var intrinsicContentSize: CGSize {
+        CGSize(width: UIView.noIntrinsicMetric, height: 0)
+    }
+}
+
+extension PromptFocusShortcutView: UIKeyInput {
+    var hasText: Bool {
+        false
+    }
+
+    func insertText(_ text: String) {
+        guard isShortcutEnabled else { return }
+        // Product invariant: when nothing else owns text input, typing intent reaches Prompt Input.
+        onTextInserted?(text)
+    }
+
+    func deleteBackward() {}
+}
+
 enum PromptFocusShortcutConfiguration {
     enum Action: Equatable {
         case focusPromptInput
@@ -2797,6 +2950,7 @@ enum PromptFocusShortcutConfiguration {
 
     static let keyCommandSpecs: [KeyCommandSpec] = [
         KeyCommandSpec(input: "/", modifierFlags: [], action: .openStreamPopup),
+        KeyCommandSpec(input: ";", modifierFlags: [], action: .openStreamPopup),
         KeyCommandSpec(input: " ", modifierFlags: [], action: .focusPromptInput),
         KeyCommandSpec(input: "\r", modifierFlags: [], action: .focusPromptInput)
     ]
@@ -2810,6 +2964,8 @@ enum ChatAppCommandShortcut {
         case navigateNextStream
         case scrollDown
         case scrollUp
+        case scrollChatDown
+        case scrollChatUp
 
         var selector: Selector {
             switch self {
@@ -2825,6 +2981,10 @@ enum ChatAppCommandShortcut {
                 return #selector(UIResponder.clawlineScrollDownCommand(_:))
             case .scrollUp:
                 return #selector(UIResponder.clawlineScrollUpCommand(_:))
+            case .scrollChatDown:
+                return #selector(UIResponder.clawlineScrollChatDownCommand(_:))
+            case .scrollChatUp:
+                return #selector(UIResponder.clawlineScrollChatUpCommand(_:))
             }
         }
     }
@@ -2840,8 +3000,10 @@ enum ChatAppCommandShortcut {
         KeyCommandSpec(input: ";", modifierFlags: [.command], action: .openStreamPopup),
         KeyCommandSpec(input: "h", modifierFlags: [.command, .shift], action: .navigatePreviousStream),
         KeyCommandSpec(input: "l", modifierFlags: [.command, .shift], action: .navigateNextStream),
-        KeyCommandSpec(input: "j", modifierFlags: [.command, .shift], action: .scrollDown),
-        KeyCommandSpec(input: "k", modifierFlags: [.command, .shift], action: .scrollUp)
+        KeyCommandSpec(input: "j", modifierFlags: [.command], action: .scrollDown),
+        KeyCommandSpec(input: "k", modifierFlags: [.command], action: .scrollUp),
+        KeyCommandSpec(input: "j", modifierFlags: [.command, .shift], action: .scrollChatDown),
+        KeyCommandSpec(input: "k", modifierFlags: [.command, .shift], action: .scrollChatUp)
     ]
 }
 
@@ -2860,13 +3022,28 @@ enum ChatShortcutRouting {
         if modifierFlags == [.command], normalizedInput == "l" {
             return .appCommand
         }
-        if modifierFlags == [.command, .shift], ["h", "j", "k", "l"].contains(normalizedInput) {
+        if modifierFlags == [.command, .shift], ["h", "l"].contains(normalizedInput) {
+            return .appCommand
+        }
+        if modifierFlags == [.command], ["j", "k"].contains(normalizedInput) {
+            return .appCommand
+        }
+        if modifierFlags == [.command, .shift], ["j", "k"].contains(normalizedInput) {
             return .appCommand
         }
         if modifierFlags.contains(.command) {
             return .textInput
         }
-        return ["/", " ", "\r"].contains(input) ? .noTextResponder : .textInput
+        return ["/", ";", " ", "\r"].contains(input) ? .noTextResponder : .textInput
+    }
+}
+
+enum PromptFocusTypingActivation {
+    static func promptInsertionText(from insertedText: String) -> String? {
+        guard !insertedText.isEmpty else { return nil }
+        guard !["/", ";", " ", "\r", "\n"].contains(insertedText) else { return nil }
+        guard insertedText.rangeOfCharacter(from: .controlCharacters) == nil else { return nil }
+        return insertedText
     }
 }
 
@@ -2909,6 +3086,14 @@ extension UIResponder {
 
     @objc func clawlineScrollUpCommand(_ sender: UIKeyCommand) {
         NotificationCenter.default.post(name: .clawlineScrollUpCommand, object: nil)
+    }
+
+    @objc func clawlineScrollChatDownCommand(_ sender: UIKeyCommand) {
+        NotificationCenter.default.post(name: .clawlineScrollChatDownCommand, object: nil)
+    }
+
+    @objc func clawlineScrollChatUpCommand(_ sender: UIKeyCommand) {
+        NotificationCenter.default.post(name: .clawlineScrollChatUpCommand, object: nil)
     }
 }
 
@@ -3946,6 +4131,17 @@ private final class PreviewChatService: ChatServicing, DirectChatConnecting {
     func publishReadState(sessionKey: String, lastReadMessageId: String) async throws {}
     func fetchStreams() async throws -> [StreamSession] { [] }
     func fetchTrackableSessions() async throws -> [TrackableSession] { [] }
+    func fetchSessionStatus(sessionKey: String) async throws -> SessionStatus {
+        throw ProviderChatService.Error.notConnected
+    }
+    func applySessionControl(
+        sessionKey: String,
+        action: SessionControlAction,
+        value: String?,
+        enabled: Bool?
+    ) async throws -> SessionControlResponse {
+        throw ProviderChatService.Error.notConnected
+    }
     func adoptStream(sessionKey: String) async throws -> StreamSession {
         StreamSession(
             sessionKey: sessionKey,

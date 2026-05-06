@@ -192,7 +192,7 @@ struct ExpandedMessageSheet: View {
     private var mediaParts: [MessagePart] {
         presentation.parts.filter { part in
             switch part {
-            case .image, .gallery:
+            case .remoteImage, .image, .gallery:
                 return true
             default:
                 return false
@@ -203,6 +203,25 @@ struct ExpandedMessageSheet: View {
     @ViewBuilder
     private func mediaPartView(_ part: MessagePart) -> some View {
         switch part {
+        case .remoteImage(let url):
+            AsyncImage(url: url) { phase in
+                switch phase {
+                case .success(let image):
+                    image
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxHeight: 300)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                case .empty:
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(Color(uiColor: .secondarySystemFill))
+                        .frame(height: 180)
+                case .failure:
+                    EmptyView()
+                @unknown default:
+                    EmptyView()
+                }
+            }
         case .image(let attachment):
             if let data = attachment.data, let uiImage = UIImage(data: data) {
                 Image(uiImage: uiImage)

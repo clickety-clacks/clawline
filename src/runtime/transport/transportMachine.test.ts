@@ -696,6 +696,159 @@ describe("transportMachine", () => {
     });
   });
 
+  it("starts re-pair auth from an empty replay context after in-session logout", async () => {
+    const authStore = seedSession();
+    const chatStore = createChatDomainStore({
+      persistence: createMemoryChatPersistence()
+    });
+    chatStore.applyIncomingMessage({
+      localDeviceId: "browser-device-1",
+      message: {
+        type: "message",
+        id: "s_before_logout",
+        role: "assistant",
+        content: "Before logout",
+        timestamp: 100,
+        streaming: false,
+        sessionKey: "agent:main:clawline:user_1:main",
+        attachments: []
+      },
+      selectedSessionKey: "agent:main:clawline:user_1:main",
+      source: "live"
+    });
+    const factory = new FakeWebSocketFactory();
+    createTransportMachine({
+      authSessionStore: authStore,
+      chatDomainStore: chatStore,
+      webSocketFactory: factory.create
+    });
+
+    await waitForSocket(factory);
+    factory.sockets[0].emitOpen();
+    expect(JSON.parse(factory.sockets[0].sentTexts[0])).toMatchObject({
+      lastMessageId: "s_before_logout",
+      replayCursorsBySessionKey: {
+        "agent:main:clawline:user_1:main": "s_before_logout"
+      }
+    });
+
+    authStore.logout();
+    chatStore.applyIncomingMessage({
+      localDeviceId: "browser-device-1",
+      message: {
+        type: "message",
+        id: "s_late_stale_cursor",
+        role: "assistant",
+        content: "Late stale cursor",
+        timestamp: 101,
+        streaming: false,
+        sessionKey: "agent:main:clawline:user_1:main",
+        attachments: []
+      },
+      selectedSessionKey: "agent:main:clawline:user_1:main",
+      source: "live"
+    });
+
+    authStore.storePairingSession({
+      claimedName: "Desk Browser",
+      deviceId: "browser-device-1",
+      serverUrl: "ws://127.0.0.1:18800/ws",
+      token: "jwt-token-2",
+      userId: "user_1"
+    });
+
+    await waitForSocket(factory, 2);
+    factory.sockets[1].emitOpen();
+    const reauthPayload = JSON.parse(factory.sockets[1].sentTexts[0]);
+    expect(reauthPayload).toMatchObject({
+      type: "auth",
+      token: "jwt-token-2"
+    });
+    expect(reauthPayload.lastMessageId).toBeNull();
+    expect(reauthPayload.replayCursorsBySessionKey).toBeUndefined();
+  });
+
+  it("does not let delayed hydrate restore stale replay cursors after logout re-pair", async () => {
+    const authStore = seedSession();
+    let resolveLoad: ((snapshot: typeof phase1TranscriptFixture | null) => void) | null =
+      null;
+    const chatStore = createChatDomainStore({
+      persistence: {
+        clear: async () => undefined,
+        load: () =>
+          new Promise((resolve) => {
+            resolveLoad = resolve;
+          }),
+        save: async () => undefined
+      }
+    });
+    const factory = new FakeWebSocketFactory();
+    createTransportMachine({
+      authSessionStore: authStore,
+      chatDomainStore: chatStore,
+      webSocketFactory: factory.create
+    });
+
+    expect(factory.sockets).toHaveLength(0);
+    expect(chatStore.getState().hydrated).toBe(false);
+
+    authStore.logout();
+    authStore.storePairingSession({
+      claimedName: "Desk Browser",
+      deviceId: "browser-device-1",
+      serverUrl: "ws://127.0.0.1:18800/ws",
+      token: "jwt-token-2",
+      userId: "user_1"
+    });
+
+    await waitForSocket(factory);
+    const hydrateResolver = resolveLoad;
+    if (!hydrateResolver) {
+      throw new Error("Expected hydrate resolver to be captured");
+    }
+    (
+      hydrateResolver as (snapshot: typeof phase1TranscriptFixture | null) => void
+    )(phase1TranscriptFixture);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    factory.sockets[0].emitOpen();
+    const reauthPayload = JSON.parse(factory.sockets[0].sentTexts[0]);
+    expect(reauthPayload.lastMessageId).toBeNull();
+    expect(reauthPayload.replayCursorsBySessionKey).toBeUndefined();
+  });
+
+  it("starts cold fresh pairing from an empty replay context when stale chat persists", async () => {
+    const authStore = createAuthSessionStore();
+    const chatStore = createChatDomainStore({
+      persistence: createMemoryChatPersistence(phase1TranscriptFixture)
+    });
+    await waitForHydration(chatStore);
+    const factory = new FakeWebSocketFactory();
+    createTransportMachine({
+      authSessionStore: authStore,
+      chatDomainStore: chatStore,
+      webSocketFactory: factory.create
+    });
+
+    expect(factory.sockets).toHaveLength(0);
+    expect(chatStore.getState().lastServerEventId).toBe("s_101");
+
+    authStore.storePairingSession({
+      claimedName: "Desk Browser",
+      deviceId: "browser-device-1",
+      serverUrl: "ws://127.0.0.1:18800/ws",
+      token: "jwt-token",
+      userId: "user_1"
+    });
+
+    await waitForSocket(factory);
+    factory.sockets[0].emitOpen();
+    const authPayload = JSON.parse(factory.sockets[0].sentTexts[0]);
+    expect(authPayload.lastMessageId).toBeNull();
+    expect(authPayload.replayCursorsBySessionKey).toBeUndefined();
+  });
+
   it("applies incremental stream mutation events through the transport owner", async () => {
     const authStore = seedSession();
     const chatStore = createChatDomainStore({

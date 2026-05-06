@@ -9,11 +9,11 @@ When at bottom, receiving a new message auto-scrolls — UNLESS `wasUserInteract
 ## Initial load / backfill / stream reset must NOT generate unread count
 Only messages that appear after a previously-known last message ID (that is still present in the new list) count as unread. This guards against counting the entire message history as unread on first visit or after stream switch. The "previously-known ID is still present" check prevents backfill/reset scenarios from incorrectly triggering the unread path.
 
-## `firstUnreadMessageId` is set ONCE — kept stable until cleared
-On first unread, `firstUnreadMessageId` is captured and held stable even as more unread messages arrive. It is cleared only when user returns to bottom, taps in unread mode, OR the bubble's top edge crosses the viewport vertical center. Do not overwrite `firstUnreadMessageId` as each new unread arrives.
+## The unread boundary anchor is set ONCE — kept stable until cleared
+On first unread, capture a stable unread boundary anchor and hold it stable even as more unread messages arrive. The implementation has migrated away from a `firstUnreadMessageId`-owned contract, so invariants should refer to the boundary/anchor concept rather than requiring that specific property name. The anchor is cleared only when user returns to bottom, taps in unread mode, OR the anchored bubble's top edge crosses the viewport vertical center. Do not overwrite the boundary anchor as each new unread arrives.
 
-## Crossing the viewport center while scrolled up: the bubble flashes AND unread clears
-When the user manually scrolls and the top edge of `firstUnreadMessageId` crosses the viewport vertical center, two things happen simultaneously: the bubble flashes/highlights, and the unread state clears. The flash is the signal to the user that "this was the boundary." Clearing without flashing, or flashing without clearing, breaks the UX contract.
+## Crossing the viewport center while scrolled up: the boundary bubble flashes AND unread clears
+When the user manually scrolls and the anchored unread-boundary bubble's top edge crosses the viewport vertical center, two things happen simultaneously: the bubble flashes/highlights, and the unread state clears. The flash is the signal to the user that "this was the boundary." Clearing without flashing, or flashing without clearing, breaks the UX contract.
 
 ## Positioning: indicator is anchored to the input bar / keyboard-pinned container
 The indicator must track keyboard show/hide and input bar movement. It must NOT float mid-screen after keyboard dismiss. Implementation that anchors to the collection view or screen coordinates will drift during keyboard transitions.

@@ -22,11 +22,13 @@ final class TypingIndicatorCell: UICollectionViewCell {
     private var currentMetrics = ChatFlowTheme.Metrics(isCompact: true)
     private let showsHeader = false
     private let paddingScale: CGFloat = bubblePaddingScale
+    private var onTap: (() -> Void)?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
         contentView.backgroundColor = .clear
         backgroundColor = .clear
+        contentView.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(handleTap)))
 
         containerView.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(containerView)
@@ -46,7 +48,9 @@ final class TypingIndicatorCell: UICollectionViewCell {
                    presentation: MessagePresentation,
                    isCompact: Bool,
                    maxWidth: CGFloat,
-                   isDark: Bool? = nil) {
+                   isDark: Bool? = nil,
+                   onTap: (() -> Void)? = nil) {
+        self.onTap = onTap
         currentMetrics = ChatFlowTheme.Metrics(isCompact: isCompact)
         let effectiveIsDark = isDark ?? (traitCollection.userInterfaceStyle == .dark)
         dotsView.updateColor(ChatFlowUIKitTheme.palette(isDark: effectiveIsDark).ink)
@@ -74,6 +78,11 @@ final class TypingIndicatorCell: UICollectionViewCell {
         super.prepareForReuse()
         stopAnimating()
         containerView.setCenteredOverlayView(nil)
+        onTap = nil
+    }
+
+    @objc private func handleTap() {
+        onTap?()
     }
 
     func startAnimating() {

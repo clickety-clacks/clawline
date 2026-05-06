@@ -103,6 +103,39 @@ struct BubbleScrollTests {
         #expect(measurementDetectors.allSatisfy { $0.isEmpty })
     }
 
+    @Test("T233: Popup viewer keeps smaller images at 1:1 scale")
+    func imagePopupInitialScaleKeepsSmallImagesAtActualSize() {
+        let scale = ImagePopupViewerLayout.initialZoomScale(
+            imageSize: CGSize(width: 320, height: 200),
+            viewportSize: CGSize(width: 700, height: 500)
+        )
+
+        #expect(scale == 1)
+    }
+
+    @Test("T233: Popup viewer fits oversized images inside viewport")
+    func imagePopupInitialScaleFitsOversizedImages() {
+        let scale = ImagePopupViewerLayout.initialZoomScale(
+            imageSize: CGSize(width: 1200, height: 900),
+            viewportSize: CGSize(width: 600, height: 500)
+        )
+
+        #expect(scale == 0.5)
+    }
+
+    @Test("T233: Popup viewer centers content that is smaller than viewport")
+    func imagePopupCentersSmallerScaledContent() {
+        let insets = ImagePopupViewerLayout.centeredContentInset(
+            contentSize: CGSize(width: 400, height: 250),
+            viewportSize: CGSize(width: 700, height: 500)
+        )
+
+        #expect(insets.left == 150)
+        #expect(insets.right == 150)
+        #expect(insets.top == 125)
+        #expect(insets.bottom == 125)
+    }
+
     @Test("T047/T046: Overflow-to-fit transition clears stale inner offset and fade state")
     @MainActor
     func overflowTransitionResetsOffsetAndFade() {

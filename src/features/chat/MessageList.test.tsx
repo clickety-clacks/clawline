@@ -12,8 +12,13 @@ import {
   createChatDomainStore
 } from "../../runtime/chat/chatDomainStore";
 import { createMemoryChatPersistence } from "../../runtime/persistence/indexedDbChatPersistence";
+import {
+  SettingsStoreProvider,
+  createSettingsStore
+} from "../../runtime/settings/settingsStore";
 import type { TransportMachine } from "../../runtime/transport/transportMachine";
 import { TransportMachineProvider } from "../../runtime/transport/transportMachine";
+import { INTERACTIVE_HTML_ATTACHMENT_MIME } from "../../protocol/interactive-html-wire";
 
 const RICH_MESSAGE: ChatMessageRecord = {
   id: "s_rich",
@@ -132,7 +137,7 @@ function renderMessageList(messages: ChatMessageRecord[]) {
     },
     async publishReadState() {},
     retryNow() {},
-    setSelectedSessionKey() {},
+    async sendInteractiveCallback() {},
     async sendMessage() {},
     subscribe() {
       return () => {};
@@ -145,15 +150,18 @@ function renderMessageList(messages: ChatMessageRecord[]) {
     token: "jwt-token",
     userId: "user_1"
   });
+  const settingsStore = createSettingsStore();
 
   const renderResult = render(
-    <AuthSessionStoreProvider value={authStore}>
-      <ChatDomainStoreProvider value={chatStore}>
-        <TransportMachineProvider value={transportStore}>
-          <MessageList messages={messages} />
-        </TransportMachineProvider>
-      </ChatDomainStoreProvider>
-    </AuthSessionStoreProvider>
+    <SettingsStoreProvider value={settingsStore}>
+      <AuthSessionStoreProvider value={authStore}>
+        <ChatDomainStoreProvider value={chatStore}>
+          <TransportMachineProvider value={transportStore}>
+            <MessageList messages={messages} />
+          </TransportMachineProvider>
+        </ChatDomainStoreProvider>
+      </AuthSessionStoreProvider>
+    </SettingsStoreProvider>
   );
 
   return {
@@ -188,7 +196,7 @@ function renderMessageListWithProps(input: {
     },
     async publishReadState() {},
     retryNow() {},
-    setSelectedSessionKey() {},
+    async sendInteractiveCallback() {},
     async sendMessage() {},
     subscribe() {
       return () => {};
@@ -201,20 +209,23 @@ function renderMessageListWithProps(input: {
     token: "jwt-token",
     userId: "user_1"
   });
+  const settingsStore = createSettingsStore();
 
   const renderResult = render(
-    <AuthSessionStoreProvider value={authStore}>
-      <ChatDomainStoreProvider value={chatStore}>
-        <TransportMachineProvider value={transportStore}>
-          <MessageList
-            messages={input.messages}
-            rememberedScrollState={input.rememberedScrollState}
-            sessionKey={input.sessionKey}
-            unreadAnchorMessageId={input.unreadAnchorMessageId}
-          />
-        </TransportMachineProvider>
-      </ChatDomainStoreProvider>
-    </AuthSessionStoreProvider>
+    <SettingsStoreProvider value={settingsStore}>
+      <AuthSessionStoreProvider value={authStore}>
+        <ChatDomainStoreProvider value={chatStore}>
+          <TransportMachineProvider value={transportStore}>
+            <MessageList
+              messages={input.messages}
+              rememberedScrollState={input.rememberedScrollState}
+              sessionKey={input.sessionKey}
+              unreadAnchorMessageId={input.unreadAnchorMessageId}
+            />
+          </TransportMachineProvider>
+        </ChatDomainStoreProvider>
+      </AuthSessionStoreProvider>
+    </SettingsStoreProvider>
   );
 
   return {
@@ -525,7 +536,7 @@ describe("MessageList rich rendering", () => {
       },
       async publishReadState() {},
       retryNow,
-      setSelectedSessionKey() {},
+      async sendInteractiveCallback() {},
       sendMessage,
       subscribe() {
         return () => {};
@@ -538,6 +549,10 @@ describe("MessageList rich rendering", () => {
       serverUrl: "ws://127.0.0.1:18800/ws",
       token: "jwt-token",
       userId: "user_1"
+    });
+    chatStore.applySessionInfo({
+      type: "session_info",
+      sessionKeys: ["agent:main:clawline:flynn:main"]
     });
 
     chatStore.enqueueOptimisticMessage({
@@ -577,6 +592,76 @@ describe("MessageList rich rendering", () => {
     ).toBe("pending");
   });
 
+  it("does not resend a failed optimistic send for an unprovisioned session", async () => {
+    const authStore = createAuthSessionStore();
+    const chatStore = createChatDomainStore({
+      persistence: createMemoryChatPersistence()
+    });
+    const sendMessage = vi.fn().mockResolvedValue(undefined);
+    const retryNow = vi.fn();
+    const transportState = {
+      failureReason: null,
+      isBrowserOnline: true,
+      phase: "live" as const,
+      retryAttempt: 0
+    };
+    const transportStore: TransportMachine = {
+      getState() {
+        return transportState;
+      },
+      async publishReadState() {},
+      retryNow,
+      async sendInteractiveCallback() {},
+      sendMessage,
+      subscribe() {
+        return () => {};
+      }
+    };
+
+    authStore.storePairingSession({
+      claimedName: "Desk Browser",
+      deviceId: "browser-device-1",
+      serverUrl: "ws://127.0.0.1:18800/ws",
+      token: "jwt-token",
+      userId: "user_1"
+    });
+    chatStore.applySessionInfo({
+      type: "session_info",
+      sessionKeys: ["agent:main:clawline:flynn:main"]
+    });
+
+    chatStore.enqueueOptimisticMessage({
+      attachments: [],
+      content: "Do not retry me",
+      deviceId: "browser-device-1",
+      id: "c_failed_unprovisioned",
+      sessionKey: "agent:main:clawline:flynn:side",
+      timestamp: 1_764_201_200_075,
+      wireAttachments: []
+    });
+    chatStore.markMessageFailed("c_failed_unprovisioned");
+
+    render(
+      <AuthSessionStoreProvider value={authStore}>
+        <ChatDomainStoreProvider value={chatStore}>
+          <TransportMachineProvider value={transportStore}>
+            <MessageList
+              messages={chatStore.getState().messagesBySessionKey["agent:main:clawline:flynn:side"]}
+            />
+          </TransportMachineProvider>
+        </ChatDomainStoreProvider>
+      </AuthSessionStoreProvider>
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+
+    expect(retryNow).not.toHaveBeenCalled();
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(
+      chatStore.getState().messagesBySessionKey["agent:main:clawline:flynn:side"][0].delivery
+    ).toBe("failed");
+  });
+
   it("routes failed-send retry through reconnect when transport is not live", async () => {
     const authStore = createAuthSessionStore();
     const chatStore = createChatDomainStore({
@@ -596,7 +681,7 @@ describe("MessageList rich rendering", () => {
       },
       async publishReadState() {},
       retryNow,
-      setSelectedSessionKey() {},
+      async sendInteractiveCallback() {},
       sendMessage,
       subscribe() {
         return () => {};
@@ -609,6 +694,10 @@ describe("MessageList rich rendering", () => {
       serverUrl: "ws://127.0.0.1:18800/ws",
       token: "jwt-token",
       userId: "user_1"
+    });
+    chatStore.applySessionInfo({
+      type: "session_info",
+      sessionKeys: ["agent:main:clawline:flynn:main"]
     });
 
     chatStore.enqueueOptimisticMessage({
@@ -640,6 +729,72 @@ describe("MessageList rich rendering", () => {
     expect(sendMessage).not.toHaveBeenCalled();
     expect(
       chatStore.getState().messagesBySessionKey["agent:main:clawline:flynn:main"][0].delivery
+    ).toBe("failed");
+  });
+
+  it("does not reconnect for a failed optimistic send in an unprovisioned session", async () => {
+    const authStore = createAuthSessionStore();
+    const chatStore = createChatDomainStore({
+      persistence: createMemoryChatPersistence()
+    });
+    const sendMessage = vi.fn().mockResolvedValue(undefined);
+    const retryNow = vi.fn();
+    const transportState = {
+      failureReason: null,
+      isBrowserOnline: true,
+      phase: "recovering" as const,
+      retryAttempt: 0
+    };
+    const transportStore: TransportMachine = {
+      getState() {
+        return transportState;
+      },
+      async publishReadState() {},
+      retryNow,
+      async sendInteractiveCallback() {},
+      sendMessage,
+      subscribe() {
+        return () => {};
+      }
+    };
+
+    authStore.storePairingSession({
+      claimedName: "Desk Browser",
+      deviceId: "browser-device-1",
+      serverUrl: "ws://127.0.0.1:18800/ws",
+      token: "jwt-token",
+      userId: "user_1"
+    });
+
+    chatStore.enqueueOptimisticMessage({
+      attachments: [],
+      content: "Do not reconnect me",
+      deviceId: "browser-device-1",
+      id: "c_failed_unprovisioned_recovering",
+      sessionKey: "agent:main:clawline:flynn:side",
+      timestamp: 1_764_201_200_085,
+      wireAttachments: []
+    });
+    chatStore.markMessageFailed("c_failed_unprovisioned_recovering");
+
+    render(
+      <AuthSessionStoreProvider value={authStore}>
+        <ChatDomainStoreProvider value={chatStore}>
+          <TransportMachineProvider value={transportStore}>
+            <MessageList
+              messages={chatStore.getState().messagesBySessionKey["agent:main:clawline:flynn:side"]}
+            />
+          </TransportMachineProvider>
+        </ChatDomainStoreProvider>
+      </AuthSessionStoreProvider>
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+
+    expect(retryNow).not.toHaveBeenCalled();
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(
+      chatStore.getState().messagesBySessionKey["agent:main:clawline:flynn:side"][0].delivery
     ).toBe("failed");
   });
 
@@ -794,6 +949,42 @@ describe("MessageList rich rendering", () => {
     expect(screen.queryByRole("dialog", { name: "Expanded message" })).not.toBeInTheDocument();
   });
 
+  it("renders interactive HTML attachments in both the bubble and expanded overlay", () => {
+    renderMessageList([
+      {
+        ...RICH_MESSAGE,
+        id: "s_html_overlay",
+        content: `${RICH_MESSAGE.content}\n\n${"More detail. ".repeat(90)}`,
+        attachments: [
+          {
+            type: "document",
+            mimeType: INTERACTIVE_HTML_ATTACHMENT_MIME,
+            data: btoa(
+              JSON.stringify({
+                version: 1,
+                html: "<body><p>Interactive overlay</p></body>",
+                metadata: {
+                  title: "Interactive Demo",
+                  height: "auto",
+                  maxHeight: 360
+                }
+              })
+            )
+          }
+        ]
+      }
+    ]);
+
+    const inlineFrame = screen.getByTestId("interactive-html-frame-s_html_overlay");
+    expect(inlineFrame).toHaveAttribute("sandbox", "allow-scripts");
+
+    fireEvent.click(screen.getByTestId("message-s_html_overlay"));
+
+    const dialog = screen.getByRole("dialog", { name: "Expanded message" });
+    const expandedFrame = within(dialog).getByTestId("interactive-html-frame-s_html_overlay");
+    expect(expandedFrame).toHaveAttribute("sandbox", "allow-scripts");
+  });
+
   it("renders image, audio, video, and file attachments", async () => {
     renderMessageList([ATTACHMENT_MESSAGE]);
 
@@ -922,7 +1113,7 @@ describe("MessageList rich rendering", () => {
       },
       async publishReadState() {},
       retryNow() {},
-      setSelectedSessionKey() {},
+      async sendInteractiveCallback() {},
       async sendMessage() {},
       subscribe() {
         return () => {};
@@ -939,33 +1130,37 @@ describe("MessageList rich rendering", () => {
     const messages = Array.from({ length: 240 }, (_, index) => makeMessage(index + 1));
 
     const view = render(
-      <AuthSessionStoreProvider value={authStore}>
-        <ChatDomainStoreProvider value={chatStore}>
-          <TransportMachineProvider value={transportStore}>
-            <MessageList
-              messages={messages}
-              onUnreadAnchorConsumed={onUnreadAnchorConsumed}
-              sessionKey="agent:main:clawline:flynn:main"
-              unreadAnchorMessageId={null}
-            />
-          </TransportMachineProvider>
-        </ChatDomainStoreProvider>
-      </AuthSessionStoreProvider>
+      <SettingsStoreProvider value={createSettingsStore()}>
+        <AuthSessionStoreProvider value={authStore}>
+          <ChatDomainStoreProvider value={chatStore}>
+            <TransportMachineProvider value={transportStore}>
+              <MessageList
+                messages={messages}
+                onUnreadAnchorConsumed={onUnreadAnchorConsumed}
+                sessionKey="agent:main:clawline:flynn:main"
+                unreadAnchorMessageId={null}
+              />
+            </TransportMachineProvider>
+          </ChatDomainStoreProvider>
+        </AuthSessionStoreProvider>
+      </SettingsStoreProvider>
     );
 
     view.rerender(
-      <AuthSessionStoreProvider value={authStore}>
-        <ChatDomainStoreProvider value={chatStore}>
-          <TransportMachineProvider value={transportStore}>
-            <MessageList
-              messages={messages}
-              onUnreadAnchorConsumed={onUnreadAnchorConsumed}
-              sessionKey="agent:main:clawline:flynn:main"
-              unreadAnchorMessageId="s_bulk_200"
-            />
-          </TransportMachineProvider>
-        </ChatDomainStoreProvider>
-      </AuthSessionStoreProvider>
+      <SettingsStoreProvider value={createSettingsStore()}>
+        <AuthSessionStoreProvider value={authStore}>
+          <ChatDomainStoreProvider value={chatStore}>
+            <TransportMachineProvider value={transportStore}>
+              <MessageList
+                messages={messages}
+                onUnreadAnchorConsumed={onUnreadAnchorConsumed}
+                sessionKey="agent:main:clawline:flynn:main"
+                unreadAnchorMessageId="s_bulk_200"
+              />
+            </TransportMachineProvider>
+          </ChatDomainStoreProvider>
+        </AuthSessionStoreProvider>
+      </SettingsStoreProvider>
     );
 
     expect(await screen.findByTestId("message-s_bulk_200")).toBeInTheDocument();
@@ -979,8 +1174,26 @@ describe("MessageList rich rendering", () => {
     });
 
     const list = screen.getByTestId("message-list");
+    Object.defineProperty(list, "scrollHeight", { configurable: true, value: 24_000 });
+    Object.defineProperty(list, "clientHeight", { configurable: true, value: 800 });
     fireEvent.scroll(list, { target: { scrollTop: 20_000 } });
 
     expect(await screen.findByTestId("scroll-to-bottom-button")).toBeInTheDocument();
+  });
+
+  it("keeps short transcripts at bottom during overscroll attempts", async () => {
+    renderMessageListWithProps({
+      messages: [makeMessage(1), makeMessage(2)],
+      sessionKey: "agent:main:clawline:flynn:main"
+    });
+
+    const list = screen.getByTestId("message-list");
+    Object.defineProperty(list, "scrollHeight", { configurable: true, value: 420 });
+    Object.defineProperty(list, "clientHeight", { configurable: true, value: 800 });
+
+    fireEvent.scroll(list, { target: { scrollTop: -80 } });
+
+    expect(list.scrollTop).toBe(0);
+    expect(screen.queryByTestId("scroll-to-bottom-button")).not.toBeInTheDocument();
   });
 });

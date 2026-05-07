@@ -86,6 +86,54 @@ struct InteractiveHTMLBubbleUIKitViewTests {
         )
         #expect(textSizeAdjust.contains("100"))
     }
+
+    @Test("Interactive bubble renders visible error for empty HTML after descriptor gates")
+    func interactiveBubbleShowsErrorForEmptyHTML() async throws {
+        guard let windowScene = UIApplication.shared.connectedScenes
+            .compactMap({ $0 as? UIWindowScene })
+            .first
+        else {
+            Issue.record("No UIWindowScene available for interactive bubble test")
+            return
+        }
+
+        let bubble = InteractiveHTMLBubbleUIKitView()
+        bubble.configure(
+            descriptor: InteractiveHTMLDescriptor(version: 1, html: "   \n", metadata: nil),
+            messageId: "msg-empty-html",
+            isDark: false
+        )
+
+        #expect(visibleLabelText(in: bubble)?.contains("Interactive content could not be displayed") == true)
+        #expect(bubble.systemLayoutSizeFitting(CGSize(width: 320, height: 0)).height >= 44)
+
+        let window = UIWindow(windowScene: windowScene)
+        window.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
+        let host = UIViewController()
+        host.view.frame = window.bounds
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+        }
+
+        let stack = UIStackView()
+        stack.axis = .vertical
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        host.view.addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: host.view.leadingAnchor, constant: 16),
+            stack.topAnchor.constraint(equalTo: host.view.topAnchor, constant: 16),
+            stack.widthAnchor.constraint(equalToConstant: 320)
+        ])
+        stack.addArrangedSubview(bubble)
+        host.view.layoutIfNeeded()
+        try await Task.sleep(forDuration: .milliseconds(150))
+
+        #expect(visibleLabelText(in: bubble)?.contains("Interactive content could not be displayed") == true)
+        #expect(bubble.bounds.height >= 44)
+        #expect(firstWebView(in: bubble) == nil)
+    }
 }
 
 @MainActor
@@ -147,6 +195,19 @@ private func firstWebView(in view: UIView) -> WKWebView? {
     for child in view.subviews {
         if let webView = firstWebView(in: child) {
             return webView
+        }
+    }
+    return nil
+}
+
+@MainActor
+private func visibleLabelText(in view: UIView) -> String? {
+    if let label = view as? UILabel, !label.isHidden, let text = label.text, !text.isEmpty {
+        return text
+    }
+    for child in view.subviews {
+        if let text = visibleLabelText(in: child) {
+            return text
         }
     }
     return nil

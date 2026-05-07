@@ -64,6 +64,10 @@ export function attachmentMimeType(attachment: ServerAttachmentPayload) {
   return attachment.mimeType ?? attachment.metadata?.mimeType;
 }
 
+export function normalizedAttachmentMimeType(attachment: ServerAttachmentPayload) {
+  return attachmentMimeType(attachment)?.split(";", 1)[0]?.trim().toLowerCase();
+}
+
 export function attachmentFilename(attachment: ServerAttachmentPayload) {
   return attachment.metadata?.filename ?? attachment.assetId ?? attachment.id ?? "attachment";
 }

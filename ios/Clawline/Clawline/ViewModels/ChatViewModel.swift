@@ -2957,7 +2957,8 @@ final class ChatViewModel: ChatViewModelHosting {
             run: incoming.run,
             context: incoming.context,
             approval: incoming.approval,
-            capabilities: incoming.capabilities
+            capabilities: incoming.capabilities,
+            modelCatalog: incoming.modelCatalog ?? cached.modelCatalog
         )
     }
 

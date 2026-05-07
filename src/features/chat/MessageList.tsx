@@ -1,4 +1,11 @@
-import { useEffect, useRef, useState, type PointerEvent, type ReactNode } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type PointerEvent,
+  type ReactNode
+} from "react";
 import { useAuthSessionStore } from "../../runtime/auth/authSessionStore";
 import { useChatDomainStore } from "../../runtime/chat/chatDomainStore";
 import type {
@@ -23,6 +30,7 @@ import { useVirtualMessageWindow } from "./useVirtualMessageWindow";
 const TYPING_INDICATOR_HEIGHT = 90;
 const TYPING_INDICATOR_GAP = 14;
 const TYPING_ACTIVITY_SETTLE_MS = 180;
+const BOTTOM_RESTORE_SETTLE_FRAMES = 8;
 
 export function MessageList({
   messages,
@@ -66,7 +74,8 @@ export function MessageList({
   const [isTypingIndicatorVisible, setIsTypingIndicatorVisible] = useState(
     shouldShowTypingIndicator
   );
-  const restoredSessionKeyRef = useRef<string | null>(null);
+  const restoredScrollStateKeyRef = useRef<string | null>(null);
+  const isRestoringScrollRef = useRef(false);
   const consumedUnreadAnchorRef = useRef<string | null>(null);
   const touchScrollActiveRef = useRef(false);
   const touchScrollReleaseTimeoutRef = useRef<number | null>(null);
@@ -99,45 +108,90 @@ export function MessageList({
     };
   }, [shouldShowTypingIndicator]);
 
-  useEffect(() => {
-    if (!sessionKey || !onRememberScrollState) {
+  useLayoutEffect(() => {
+    if (!sessionKey || !onRememberScrollState || isRestoringScrollRef.current) {
       return;
     }
 
-    if (restoredSessionKeyRef.current !== sessionKey) {
+    if (!restoredScrollStateKeyRef.current?.startsWith(`${sessionKey}:`)) {
       return;
     }
 
     onRememberScrollState({
       offsetTop: scrollTop,
       sessionKey,
-      stickToBottom: isAtBottom
+      stickToBottom: isAtBottom || isAtBottomRef.current
     });
-  }, [isAtBottom, onRememberScrollState, scrollTop, sessionKey]);
+  }, [isAtBottom, isAtBottomRef, onRememberScrollState, scrollTop, sessionKey]);
 
   useEffect(() => {
     if (!sessionKey) {
       return;
     }
 
-    if (restoredSessionKeyRef.current === sessionKey) {
+    const restoreKey = `${sessionKey}:${rememberedScrollState?.stickToBottom ? "bottom" : rememberedScrollState ? rememberedScrollState.offsetTop : "none"}`;
+
+    if (restoredScrollStateKeyRef.current === restoreKey) {
       return;
     }
 
-    restoredSessionKeyRef.current = sessionKey;
+    restoredScrollStateKeyRef.current = restoreKey;
+    const activeSessionKey = sessionKey;
+
+    function rememberBottomIfSettled(offsetTop: number) {
+      if (isAtBottomRef.current) {
+        onRememberScrollState?.({
+          offsetTop,
+          sessionKey: activeSessionKey,
+          stickToBottom: true
+        });
+      }
+    }
 
     if (rememberedScrollState?.stickToBottom) {
+      isRestoringScrollRef.current = true;
       scrollToBottom();
-      return;
+      let frame = 0;
+      let remainingFrames = BOTTOM_RESTORE_SETTLE_FRAMES;
+      const settleBottom = () => {
+        scrollToBottom();
+        onRememberScrollState?.({
+          offsetTop: Number.MAX_SAFE_INTEGER,
+          sessionKey: activeSessionKey,
+          stickToBottom: true
+        });
+        remainingFrames -= 1;
+        if (remainingFrames > 0) {
+          frame = window.requestAnimationFrame(settleBottom);
+          return;
+        }
+        isRestoringScrollRef.current = false;
+      };
+      frame = window.requestAnimationFrame(settleBottom);
+      return () => {
+        isRestoringScrollRef.current = false;
+        if (frame !== 0) {
+          window.cancelAnimationFrame(frame);
+        }
+      };
     }
 
     if (rememberedScrollState) {
       scrollToOffset(rememberedScrollState.offsetTop);
-      return;
+      const frame = window.requestAnimationFrame(() => {
+        rememberBottomIfSettled(rememberedScrollState.offsetTop);
+      });
+      return () => window.cancelAnimationFrame(frame);
     }
 
     scrollToOffset(0);
+    const frame = window.requestAnimationFrame(() => {
+      rememberBottomIfSettled(0);
+    });
+    return () => window.cancelAnimationFrame(frame);
   }, [
+    isAtBottomRef,
+    onRememberScrollState,
     rememberedScrollState,
     scrollToBottom,
     scrollToOffset,
@@ -159,9 +213,39 @@ export function MessageList({
       return;
     }
 
-    consumedUnreadAnchorRef.current = unreadAnchorKey;
-    onUnreadAnchorConsumed?.(unreadAnchorMessageId);
+    const consumeTimer = window.setTimeout(() => {
+      if (scrollToMessage(unreadAnchorMessageId, "center")) {
+        consumedUnreadAnchorRef.current = unreadAnchorKey;
+        onUnreadAnchorConsumed?.(unreadAnchorMessageId);
+      }
+    }, 0);
+
+    return () => window.clearTimeout(consumeTimer);
   }, [onUnreadAnchorConsumed, scrollToMessage, sessionKey, unreadAnchorMessageId]);
+
+  useEffect(() => {
+    if (!sessionKey || !rememberedScrollState?.stickToBottom) {
+      return;
+    }
+
+    let frame = 0;
+    let remainingFrames = BOTTOM_RESTORE_SETTLE_FRAMES;
+    const settleBottom = () => {
+      scrollToBottom();
+      remainingFrames -= 1;
+      if (remainingFrames > 0) {
+        frame = window.requestAnimationFrame(settleBottom);
+      }
+    };
+
+    frame = window.requestAnimationFrame(settleBottom);
+
+    return () => {
+      if (frame !== 0) {
+        window.cancelAnimationFrame(frame);
+      }
+    };
+  }, [rememberedScrollState?.stickToBottom, scrollToBottom, sessionKey, totalHeight]);
 
   useEffect(() => {
     if (viewportInsetBottom <= 0) {
@@ -210,6 +294,12 @@ export function MessageList({
     });
 
     if (!retryState.canRetry || !pendingMessage) {
+      return;
+    }
+
+    if (
+      !chatStore.getState().provisionedSessionKeys.includes(pendingMessage.sessionKey)
+    ) {
       return;
     }
 
@@ -287,6 +377,7 @@ export function MessageList({
               width={width}
             >
               <MessageBubble
+                deviceId={authState.session?.deviceId}
                 message={message}
                 onExpand={() => setExpandedMessageId(message.id)}
                 onRetry={() => void handleRetryMessage(message.id)}
@@ -307,12 +398,21 @@ export function MessageList({
           ) : null}
         </div>
       </section>
-      {!isAtBottom ? (
+      {!isAtBottom && !isAtBottomRef.current ? (
         <div className="message-list-affordance-bar">
           <button
             className="button-secondary message-list-jump-button"
             data-testid="scroll-to-bottom-button"
-            onClick={() => scrollToBottom()}
+            onClick={() => {
+              scrollToBottom();
+              if (sessionKey && onRememberScrollState) {
+                onRememberScrollState({
+                  offsetTop: Number.MAX_SAFE_INTEGER,
+                  sessionKey,
+                  stickToBottom: true
+                });
+              }
+            }}
             type="button"
           >
             Jump to latest
@@ -413,6 +513,7 @@ function MeasuredMessageRow({
 }
 
 function MessageBubble({
+  deviceId,
   message,
   onExpand,
   onRetry,
@@ -421,6 +522,7 @@ function MessageBubble({
   transportPhase,
   token
 }: {
+  deviceId?: string;
   message: ChatMessageRecord;
   onExpand: () => void;
   onRetry: () => void;
@@ -504,6 +606,8 @@ function MessageBubble({
       <MessageLinkCards content={message.content} contentRef={contentRef} />
       <MessageAttachments
         attachments={message.attachments}
+        deviceId={deviceId}
+        messageId={message.id}
         serverUrl={serverUrl}
         token={token}
       />

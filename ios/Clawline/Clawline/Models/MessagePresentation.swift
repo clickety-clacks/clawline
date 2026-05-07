@@ -563,7 +563,8 @@ enum MessagePresentationBuilder {
                     )
                     continue
                 }
-                if let descriptor = decodeInteractiveHTMLDescriptor(from: attachment) {
+                if isInteractiveHTMLAttachment(attachment),
+                   let descriptor = decodeInteractiveHTMLDescriptor(from: attachment) {
                     richParts.append(
                         RichAttachmentPart(
                             part: .interactiveHTML(descriptor)
@@ -589,9 +590,13 @@ enum MessagePresentationBuilder {
 
     private static func interactiveHTMLAttachments(from attachments: [Attachment]) -> [Attachment] {
         attachments.filter { attachment in
-            guard attachment.type == .document else { return false }
-            return mimeTypeEquals(attachment.mimeType, expected: InteractiveHTMLDescriptor.mimeType)
+            isInteractiveHTMLAttachment(attachment)
         }
+    }
+
+    private static func isInteractiveHTMLAttachment(_ attachment: Attachment) -> Bool {
+        guard attachment.type == .document else { return false }
+        return mimeTypeEquals(attachment.mimeType, expected: InteractiveHTMLDescriptor.mimeType)
     }
 
     private static func decodeTerminalSessionDescriptor(from attachment: Attachment) -> TerminalSessionDescriptor? {
@@ -611,8 +616,7 @@ enum MessagePresentationBuilder {
     }
 
     private static func decodeInteractiveHTMLDescriptor(from attachment: Attachment) -> InteractiveHTMLDescriptor? {
-        guard attachment.type == .document,
-              mimeTypeEquals(attachment.mimeType, expected: InteractiveHTMLDescriptor.mimeType),
+        guard isInteractiveHTMLAttachment(attachment),
               let data = attachment.data,
               !data.isEmpty else {
             return nil
@@ -623,8 +627,27 @@ enum MessagePresentationBuilder {
             logger.error(
                 "interactive_html_descriptor_decode_failed id=\(attachment.id, privacy: .public) error=\(error.localizedDescription, privacy: .public)"
             )
-            return nil
+            return invalidInteractiveHTMLDescriptor()
         }
+    }
+
+    private static func invalidInteractiveHTMLDescriptor() -> InteractiveHTMLDescriptor {
+        InteractiveHTMLDescriptor(
+            version: 1,
+            html: """
+            <!doctype html>
+            <html>
+              <head>
+                <meta charset="utf-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1">
+              </head>
+              <body style="margin:0;padding:12px;font:15px -apple-system,system-ui,sans-serif;color:var(--clawline-fg);background:var(--clawline-bubble-bg);">
+                Interactive content could not be displayed because its attachment data is invalid.
+              </body>
+            </html>
+            """,
+            metadata: .init(title: nil, height: .auto, maxHeight: 160, backgroundColor: nil)
+        )
     }
 
 

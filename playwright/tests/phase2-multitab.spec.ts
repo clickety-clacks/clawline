@@ -385,7 +385,7 @@ test("reload resumes multi-session state with per-stream replay cursors", async 
     await page.reload();
 
     await expect(page).toHaveURL(
-      new RegExp(`/chat/${escapeForRegExp(mainSessionKey)}$`)
+      new RegExp(`/chat/${escapeForRegExp(sideSessionKey)}$`)
     );
     await page.getByRole("button", { name: "Manage streams" }).click();
     await expect(page.getByRole("button", { name: /Main/ })).toBeVisible();

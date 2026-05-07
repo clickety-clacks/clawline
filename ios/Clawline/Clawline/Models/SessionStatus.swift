@@ -14,6 +14,7 @@ struct SessionStatus: Decodable, Equatable {
     let context: Context?
     let approval: Approval?
     let capabilities: Capabilities
+    let modelCatalog: ModelCatalog?
 
     struct Display: Decodable, Equatable {
         let model: String?
@@ -76,6 +77,33 @@ struct SessionStatus: Decodable, Equatable {
     struct Capability: Decodable, Equatable {
         let supported: Bool
         let reason: String?
+    }
+
+    struct ModelCatalog: Decodable, Equatable {
+        let available: Bool
+        let reason: String?
+        let models: [Model]
+
+        enum CodingKeys: String, CodingKey {
+            case available
+            case reason
+            case models
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            available = try container.decodeIfPresent(Bool.self, forKey: .available) ?? false
+            reason = try container.decodeIfPresent(String.self, forKey: .reason)
+            models = try container.decodeIfPresent([Model].self, forKey: .models) ?? []
+        }
+
+        struct Model: Decodable, Equatable {
+            let id: String
+            let provider: String
+            let ref: String
+            let name: String?
+            let alias: String?
+        }
     }
 }
 

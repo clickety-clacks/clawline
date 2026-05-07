@@ -5,9 +5,11 @@ import { getSessionProvisioningState } from "../streams/provisioning";
 import { useAuthSessionStore } from "../../runtime/auth/authSessionStore";
 import {
   resolveStreamDotStateMap,
+  type StreamDotState,
   useChatDomainStore
 } from "../../runtime/chat/chatDomainStore";
 import { useTransportMachine } from "../../runtime/transport/transportMachine";
+import { createStreamApiClient } from "../../protocol/stream-api";
 import { ChatShell } from "./ChatShell";
 import {
   type ChatSessionSwitchSource,
@@ -21,6 +23,9 @@ export function ChatRoute() {
   const { state: authState } = useAuthSessionStore();
   const { state: chatState, store: chatStore } = useChatDomainStore();
   const { state: transportState, store: transportStore } = useTransportMachine();
+  const [networkRunStateBySessionKey, setNetworkRunStateBySessionKey] = useState<
+    Record<string, string>
+  >({});
   const [selectedUnreadAnchor, setSelectedUnreadAnchor] = useState<{
     messageId: string;
     sessionKey: string;
@@ -31,38 +36,141 @@ export function ChatRoute() {
     streams: chatState.streams,
     transportPhase: transportState.phase
   });
-  const engineActiveSessionKey = coordinator.engineActiveSessionKey;
-  const uiSelectedSessionKey =
-    coordinator.uiSelectedSessionKey ?? coordinator.engineActiveSessionKey;
+  const activeSessionKey = coordinator.activeSessionKey;
   const activeStream = chatState.streams.find(
-    (stream) => stream.sessionKey === engineActiveSessionKey
+    (stream) => stream.sessionKey === activeSessionKey
   );
   const provisioningState = getSessionProvisioningState({
     hasStream: Boolean(activeStream),
     provisionedSessionKeys: chatState.provisionedSessionKeys,
-    sessionKey: engineActiveSessionKey,
+    sessionKey: activeSessionKey,
     transportPhase: transportState.phase
   });
 
   const selectedMessages = useMemo(
     () =>
-      engineActiveSessionKey
-        ? chatState.messagesBySessionKey[engineActiveSessionKey] ?? []
+      activeSessionKey
+        ? chatState.messagesBySessionKey[activeSessionKey] ?? []
         : [],
-    [chatState.messagesBySessionKey, engineActiveSessionKey]
+    [chatState.messagesBySessionKey, activeSessionKey]
+  );
+  const streamSessionKeySignature = useMemo(
+    () => chatState.streams.map((stream) => stream.sessionKey).join("\u0000"),
+    [chatState.streams]
   );
   const streamDotStateBySessionKey = useMemo(
-    () =>
-      resolveStreamDotStateMap(
+    () => {
+      const dotStates = resolveStreamDotStateMap(
         chatState.streamReadStateBySessionKey,
         chatState.streamTailStateBySessionKey
-      ),
-    [chatState.streamReadStateBySessionKey, chatState.streamTailStateBySessionKey]
+      );
+
+      return applyNetworkStatusDotStates(
+        dotStates,
+        networkRunStateBySessionKey,
+        chatState.streams.map((stream) => stream.sessionKey)
+      );
+    },
+    [
+      chatState.streamReadStateBySessionKey,
+      chatState.streamTailStateBySessionKey,
+      chatState.streams,
+      networkRunStateBySessionKey
+    ]
   );
 
   useEffect(() => {
-    transportStore.setSelectedSessionKey(engineActiveSessionKey);
-  }, [engineActiveSessionKey, transportStore]);
+    const token = authState.session?.token;
+    const serverUrl = authState.session?.serverUrl;
+    if (!token || !serverUrl || transportState.phase !== "live") {
+      return;
+    }
+    const statusServerUrl = serverUrl;
+    const statusToken = token;
+
+    const sessionKeys = streamSessionKeySignature.split("\u0000").filter(Boolean);
+    if (sessionKeys.length === 0) {
+      return;
+    }
+
+    let cancelled = false;
+    const timers: number[] = [];
+    const abortControllers = new Set<AbortController>();
+    const streamApiClient = createStreamApiClient();
+    const liveSessionKeys = new Set(sessionKeys);
+
+    setNetworkRunStateBySessionKey((current) =>
+      Object.fromEntries(
+        Object.entries(current).filter(([sessionKey]) => liveSessionKeys.has(sessionKey))
+      )
+    );
+
+    async function refreshSessionStatus(sessionKey: string) {
+      const abortController = new AbortController();
+      abortControllers.add(abortController);
+      const timeoutId = window.setTimeout(() => abortController.abort(), 2_000);
+      try {
+        const status = await streamApiClient.fetchSessionStatus({
+          serverUrl: statusServerUrl,
+          sessionKey,
+          signal: abortController.signal,
+          token: statusToken
+        });
+        if (cancelled) {
+          return;
+        }
+
+        const runState = status.run?.state ?? "unknown";
+        setNetworkRunStateBySessionKey((current) =>
+          current[sessionKey] === runState
+            ? current
+            : {
+                ...current,
+                [sessionKey]: runState
+              }
+        );
+
+        if (runState === "running" || runState === "queued") {
+          timers.push(window.setTimeout(() => void refreshSessionStatus(sessionKey), 5_000));
+        }
+      } catch {
+        if (cancelled) {
+          return;
+        }
+
+        setNetworkRunStateBySessionKey((current) => {
+          if (!(sessionKey in current)) {
+            return current;
+          }
+          const next = { ...current };
+          delete next[sessionKey];
+          return next;
+        });
+      } finally {
+        window.clearTimeout(timeoutId);
+        abortControllers.delete(abortController);
+      }
+    }
+
+    for (const sessionKey of sessionKeys) {
+      void refreshSessionStatus(sessionKey);
+    }
+
+    return () => {
+      cancelled = true;
+      for (const timer of timers) {
+        window.clearTimeout(timer);
+      }
+      for (const abortController of abortControllers) {
+        abortController.abort();
+      }
+    };
+  }, [
+    authState.session?.serverUrl,
+    authState.session?.token,
+    streamSessionKeySignature,
+    transportState.phase
+  ]);
 
   const handleSelectSession = (sessionKey: string, source: ChatSessionSwitchSource) => {
     coordinator.requestSessionSwitch(sessionKey, source);
@@ -70,41 +178,45 @@ export function ChatRoute() {
   };
 
   const interactionCoordinator = useChatSessionInteractionCoordinator({
-    activeSessionKey: engineActiveSessionKey,
+    activeSessionKey,
     onSelectSession: handleSelectSession,
     orderedSessionKeys: chatState.streams.map((stream) => stream.sessionKey)
   });
 
   useEffect(() => {
-    if (!engineActiveSessionKey) {
+    if (!activeSessionKey) {
       return;
     }
 
     const unreadAnchor =
-      chatState.firstUnreadMessageIdBySessionKey[engineActiveSessionKey] ?? null;
+      chatState.firstUnreadMessageIdBySessionKey[activeSessionKey] ?? null;
 
     setSelectedUnreadAnchor((current) => {
       if (unreadAnchor) {
-        return current?.sessionKey === engineActiveSessionKey &&
+        return current?.sessionKey === activeSessionKey &&
           current.messageId === unreadAnchor
           ? current
           : {
               messageId: unreadAnchor,
-              sessionKey: engineActiveSessionKey
+              sessionKey: activeSessionKey
             };
       }
 
-      return current?.sessionKey === engineActiveSessionKey ? current : null;
+      return current?.sessionKey === activeSessionKey ? current : null;
     });
 
-    const lastReadMessageId = chatStore.markSessionRead(engineActiveSessionKey);
-    if (lastReadMessageId) {
-      void transportStore.publishReadState(engineActiveSessionKey, lastReadMessageId);
+    const lastReadMessageId = chatStore.markSessionRead(activeSessionKey);
+    if (
+      lastReadMessageId &&
+      chatState.provisionedSessionKeys.includes(activeSessionKey)
+    ) {
+      void transportStore.publishReadState(activeSessionKey, lastReadMessageId);
     }
   }, [
+    activeSessionKey,
     chatState.firstUnreadMessageIdBySessionKey,
+    chatState.provisionedSessionKeys,
     chatStore,
-    engineActiveSessionKey,
     transportStore
   ]);
 
@@ -114,20 +226,6 @@ export function ChatRoute() {
 
   if (!params.sessionKey && coordinator.firstProviderValidSessionKey) {
     return <Navigate replace to={`/chat/${coordinator.firstProviderValidSessionKey}`} />;
-  }
-
-  if (
-    coordinator.transition.bootRequestedSessionKey &&
-    params.sessionKey === coordinator.transition.bootRequestedSessionKey &&
-    transportState.phase === "live" &&
-    chatState.provisionedSessionKeys.length > 0 &&
-    !chatState.provisionedSessionKeys.includes(coordinator.transition.bootRequestedSessionKey)
-  ) {
-    return coordinator.firstProviderValidSessionKey ? (
-      <Navigate replace to={`/chat/${coordinator.firstProviderValidSessionKey}`} />
-    ) : (
-      <Navigate replace to="/chat" />
-    );
   }
 
   if (params.sessionKey && chatState.streams.length > 0 && !coordinator.routeSessionExists) {
@@ -141,7 +239,6 @@ export function ChatRoute() {
   return (
     <>
       <ChatShell
-        activeSessionKey={engineActiveSessionKey}
         chatLayoutStyle={interactionCoordinator.layoutStyle}
         keyboardInset={interactionCoordinator.keyboardInset}
         isSessionListOpen={coordinator.isSessionListOpen}
@@ -156,8 +253,8 @@ export function ChatRoute() {
         provisioningState={provisioningState}
         onUnreadAnchorConsumed={(messageId) => {
           if (
-            !engineActiveSessionKey ||
-            selectedUnreadAnchor?.sessionKey !== engineActiveSessionKey ||
+            !activeSessionKey ||
+            selectedUnreadAnchor?.sessionKey !== activeSessionKey ||
             selectedUnreadAnchor.messageId !== messageId
           ) {
             return;
@@ -166,25 +263,25 @@ export function ChatRoute() {
           setSelectedUnreadAnchor(null);
         }}
         rememberedScrollState={
-          engineActiveSessionKey
-            ? chatState.scrollStateBySessionKey[engineActiveSessionKey]
+          activeSessionKey
+            ? chatState.scrollStateBySessionKey[activeSessionKey]
             : undefined
         }
         selectedMessages={selectedMessages}
-        selectedSessionKey={engineActiveSessionKey}
-        uiSelectedSessionKey={uiSelectedSessionKey}
+        selectedSessionKey={activeSessionKey}
         selectedUnreadAnchorMessageId={
-          selectedUnreadAnchor?.sessionKey === engineActiveSessionKey
+          selectedUnreadAnchor?.sessionKey === activeSessionKey
             ? selectedUnreadAnchor?.messageId ?? null
             : null
         }
         provisionedSessionKeys={chatState.provisionedSessionKeys}
         streamDotStateBySessionKey={streamDotStateBySessionKey}
+        unreadBySessionKey={chatState.unreadBySessionKey}
         streams={chatState.streams}
         transportPhase={transportState.phase}
       />
       <StreamManagerDrawer
-        activeSessionKey={uiSelectedSessionKey}
+        activeSessionKey={activeSessionKey}
         isOpen={coordinator.isStreamManagerOpen}
         onClose={coordinator.closeStreamManager}
         onSelectSession={(sessionKey) => {
@@ -198,4 +295,24 @@ export function ChatRoute() {
       />
     </>
   );
+}
+
+function applyNetworkStatusDotStates(
+  dotStates: Record<string, StreamDotState>,
+  networkRunStateBySessionKey: Record<string, string>,
+  sessionKeys: string[]
+) {
+  const next = { ...dotStates };
+  for (const sessionKey of sessionKeys) {
+    const runState = networkRunStateBySessionKey[sessionKey];
+    if (runState !== "running" && runState !== "queued") {
+      continue;
+    }
+
+    if (next[sessionKey] !== "unread") {
+      next[sessionKey] = "userTail";
+    }
+  }
+
+  return next;
 }

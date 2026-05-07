@@ -5,7 +5,9 @@ import {
   parseServerPayload,
   serializeAuthPayload,
   serializeClientMessage,
-  serializeClientStreamRead
+  serializeClientStreamRead,
+  serializeInteractiveCallback,
+  type JsonValue
 } from "../../protocol/chat-wire";
 import type { ClientAttachmentPayload } from "../../protocol/chat-wire";
 import type { AuthSessionStore } from "../auth/authSessionStore";
@@ -18,6 +20,7 @@ import {
   type SocketLike,
   type WebSocketFactory
 } from "./wsClient";
+import { getWebClientFeatures } from "../terminal/terminalCapabilities";
 
 export type TransportPhase =
   | "idle"
@@ -44,10 +47,14 @@ export interface SendMessageInput {
 
 export interface TransportMachine {
   getState(): TransportState;
+  sendInteractiveCallback(input: {
+    action: string;
+    data?: JsonValue;
+    messageId: string;
+  }): Promise<void>;
   subscribe(listener: () => void): () => void;
   publishReadState(sessionKey: string, lastReadMessageId: string): Promise<void>;
   retryNow(): void;
-  setSelectedSessionKey(sessionKey: string | undefined): void;
   sendMessage(input: SendMessageInput): Promise<void>;
 }
 
@@ -55,7 +62,10 @@ interface CreateTransportMachineOptions {
   authSessionStore: AuthSessionStore;
   chatDomainStore: ChatDomainStore;
   browserRuntime?: BrowserRuntime;
-  selectedSessionKeySource?: () => string | undefined;
+  clientFeatures?: string[];
+  selectedSessionKeySource?: (
+    chatState: ReturnType<ChatDomainStore["getState"]>
+  ) => string | undefined;
   webSocketFactory?: WebSocketFactory;
 }
 
@@ -79,21 +89,53 @@ const MAX_SYNC_REPLAY_MESSAGES = 24;
 const REPLAY_MESSAGE_BATCH_SIZE = 24;
 const SHOULD_WARN_ON_STREAM_SNAPSHOT =
   typeof process === "undefined" || process.env.NODE_ENV !== "production";
-const WEB_CLIENT_FEATURES = ["terminal_bubbles_v1"];
 const WEB_CLIENT_ID = "clawline-web";
+
+function readSelectedSessionKeyFromCurrentUrl(
+  chatState: ReturnType<ChatDomainStore["getState"]>
+) {
+  if (typeof window === "undefined") {
+    return undefined;
+  }
+
+  const path = window.location.protocol === "file:" && window.location.hash.startsWith("#/")
+    ? window.location.hash.slice(1)
+    : window.location.pathname;
+  const match = /^\/chat\/([^/?#]+)/.exec(path);
+  if (!match) {
+    return undefined;
+  }
+
+  let routeSessionKey = match[1];
+  try {
+    routeSessionKey = decodeURIComponent(routeSessionKey);
+  } catch {
+    // Keep the raw route segment if the browser exposes a malformed escape.
+  }
+
+  const routeSessionExists = chatState.streams.some(
+    (stream) => stream.sessionKey === routeSessionKey
+  );
+  if (chatState.streams.length > 0 && !routeSessionExists) {
+    return undefined;
+  }
+
+  return routeSessionKey;
+}
 
 export function createTransportMachine({
   authSessionStore,
   chatDomainStore,
   browserRuntime = createBrowserRuntime(),
-  selectedSessionKeySource,
+  clientFeatures,
+  selectedSessionKeySource = readSelectedSessionKeyFromCurrentUrl,
   webSocketFactory = createBrowserWebSocketFactory()
 }: CreateTransportMachineOptions): TransportMachine {
+  const resolvedClientFeatures = clientFeatures ?? getWebClientFeatures();
   const baseStore = createStore<TransportState>({
     ...INITIAL_STATE,
     isBrowserOnline: browserRuntime.isOnline()
   });
-  let selectedSessionKey: string | undefined;
   let socket: SocketLike | null = null;
   let reconnectTimer: number | null = null;
   let replayFlushTimer: number | null = null;
@@ -234,21 +276,25 @@ export function createTransportMachine({
         phase: "authenticating"
       }));
 
+      const chatState = chatDomainStore.getState();
+      const selectedReplaySessionKey = selectedSessionKeySource(chatState);
+
       nextSocket.send(
         serializeAuthPayload({
           type: "auth",
           protocolVersion: 1,
           token: session.token,
           deviceId: session.deviceId,
-          lastMessageId: chatDomainStore.getState().lastServerEventId,
-          clientFeatures: WEB_CLIENT_FEATURES,
+          lastMessageId: legacyReplayCursorForSession(
+            chatState.replayCursorsBySessionKey,
+            selectedReplaySessionKey
+          ),
+          clientFeatures: resolvedClientFeatures,
           client: {
             id: WEB_CLIENT_ID,
-            features: WEB_CLIENT_FEATURES
+            features: resolvedClientFeatures
           },
-          replayCursorsBySessionKey: toReplayCursorPayload(
-            chatDomainStore.getState().replayCursorsBySessionKey
-          )
+          replayCursorsBySessionKey: toReplayCursorPayload(chatState.replayCursorsBySessionKey)
         })
       );
     };
@@ -309,7 +355,7 @@ export function createTransportMachine({
             const messageInput = {
               localDeviceId: authSessionStore.getState().session?.deviceId ?? "",
               message: payload,
-              selectedSessionKey: selectedSessionKeySource?.() ?? selectedSessionKey,
+              selectedSessionKey: selectedSessionKeySource(chatDomainStore.getState()),
               source
             };
             if (
@@ -518,9 +564,6 @@ export function createTransportMachine({
     retryNow() {
       void connect("retry");
     },
-    setSelectedSessionKey(sessionKey) {
-      selectedSessionKey = sessionKey;
-    },
     async sendMessage(input) {
       if (baseStore.getState().phase !== "live" || !socket) {
         throw new Error("Transport is not live");
@@ -533,6 +576,22 @@ export function createTransportMachine({
           content: input.content,
           attachments: input.attachments,
           sessionKey: input.sessionKey
+        })
+      );
+    },
+    async sendInteractiveCallback(input) {
+      if (baseStore.getState().phase !== "live" || !socket) {
+        throw new Error("Transport is not live");
+      }
+
+      socket.send(
+        serializeInteractiveCallback({
+          type: "interactive-callback",
+          messageId: input.messageId,
+          payload: {
+            action: input.action,
+            data: input.data
+          }
         })
       );
     }
@@ -585,6 +644,22 @@ function toReplayCursorPayload(
   );
 
   return entries.length > 0 ? Object.fromEntries(entries) : undefined;
+}
+
+function legacyReplayCursorForSession(
+  replayCursorsBySessionKey: ChatDomainStore["getState"] extends () => infer State
+    ? State extends { replayCursorsBySessionKey: infer ReplayCursors }
+      ? ReplayCursors
+      : never
+    : never,
+  sessionKey: string | undefined
+) {
+  if (!sessionKey) {
+    return null;
+  }
+
+  const cursor = replayCursorsBySessionKey[sessionKey]?.lastServerEventId;
+  return typeof cursor === "string" && cursor.length > 0 ? cursor : null;
 }
 
 export function TransportMachineProvider({

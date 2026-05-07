@@ -103,7 +103,9 @@ async function waitForHydration(store: ReturnType<typeof createChatDomainStore>)
 
 describe("transportMachine", () => {
   afterEach(() => {
+    window.history.replaceState({}, "", "/");
     vi.useRealTimers();
+    vi.unstubAllGlobals();
   });
 
   it("transitions idle -> connecting -> authenticating -> live on auth success", async () => {
@@ -115,6 +117,7 @@ describe("transportMachine", () => {
     const transport = createTransportMachine({
       authSessionStore: authStore,
       chatDomainStore: chatStore,
+      clientFeatures: ["terminal_bubbles_v1"],
       webSocketFactory: factory.create
     });
 
@@ -153,8 +156,35 @@ describe("transportMachine", () => {
     });
   });
 
-  it("does not infer selected session from window.location when no explicit selection is injected", async () => {
-    window.history.replaceState({}, "", "/chat/agent:main:clawline:user_1:main");
+  it("does not advertise terminal bubble support when WebSocket is unavailable", async () => {
+    vi.stubGlobal("WebSocket", undefined);
+
+    const authStore = seedSession();
+    const chatStore = createChatDomainStore({
+      persistence: createMemoryChatPersistence()
+    });
+    const factory = new FakeWebSocketFactory();
+    createTransportMachine({
+      authSessionStore: authStore,
+      chatDomainStore: chatStore,
+      webSocketFactory: factory.create
+    });
+
+    await waitForSocket(factory);
+    factory.sockets[0].emitOpen();
+
+    expect(JSON.parse(factory.sockets[0].sentTexts[0])).toMatchObject({
+      type: "auth",
+      clientFeatures: [],
+      client: {
+        id: "clawline-web",
+        features: []
+      }
+    });
+  });
+
+  it("uses the URL-selected session when classifying incoming unread state", async () => {
+    window.history.replaceState({}, "", "/chat/agent:main:clawline:user_1:side");
 
     const authStore = seedSession();
     const chatStore = createChatDomainStore({
@@ -194,23 +224,24 @@ describe("transportMachine", () => {
       })
     );
 
-    expect(chatStore.getState().unreadBySessionKey["agent:main:clawline:user_1:side"]).toBe(1);
+    expect(
+      chatStore.getState().unreadBySessionKey["agent:main:clawline:user_1:side"]
+    ).toBeUndefined();
   });
 
-  it("uses the explicitly injected selected session instead of the URL", async () => {
-    window.history.replaceState({}, "", "/chat/agent:main:clawline:user_1:main");
+  it("re-reads URL-selected session for each incoming message", async () => {
+    window.history.replaceState({}, "", "/chat/agent:main:clawline:user_1:side");
 
     const authStore = seedSession();
     const chatStore = createChatDomainStore({
       persistence: createMemoryChatPersistence()
     });
     const factory = new FakeWebSocketFactory();
-    const transport = createTransportMachine({
+    createTransportMachine({
       authSessionStore: authStore,
       chatDomainStore: chatStore,
       webSocketFactory: factory.create
     });
-    transport.setSelectedSessionKey("agent:main:clawline:user_1:side");
 
     await waitForSocket(factory);
     factory.sockets[0].emitOpen();
@@ -242,6 +273,114 @@ describe("transportMachine", () => {
     expect(
       chatStore.getState().unreadBySessionKey["agent:main:clawline:user_1:side"]
     ).toBeUndefined();
+
+    window.history.replaceState({}, "", "/chat/agent:main:clawline:user_1:main");
+    factory.sockets[0].emitMessage(
+      JSON.stringify({
+        type: "message",
+        id: "s_side_103",
+        role: "assistant",
+        content: "Side message after switch",
+        timestamp: 103,
+        streaming: false,
+        sessionKey: "agent:main:clawline:user_1:side",
+        attachments: []
+      })
+    );
+
+    expect(chatStore.getState().unreadBySessionKey["agent:main:clawline:user_1:side"]).toBe(1);
+  });
+
+  it("does not treat a missing URL stream as the selected session", async () => {
+    window.history.replaceState({}, "", "/chat/agent:main:clawline:user_1:missing");
+
+    const authStore = seedSession();
+    const chatStore = createChatDomainStore({
+      persistence: createMemoryChatPersistence()
+    });
+    const factory = new FakeWebSocketFactory();
+    createTransportMachine({
+      authSessionStore: authStore,
+      chatDomainStore: chatStore,
+      webSocketFactory: factory.create
+    });
+
+    await waitForSocket(factory);
+    factory.sockets[0].emitOpen();
+    factory.sockets[0].emitMessage(
+      JSON.stringify({
+        type: "auth_result",
+        success: true,
+        userId: "user_1",
+        sessionKeys: [
+          "agent:main:clawline:user_1:main",
+          "agent:main:clawline:user_1:side"
+        ]
+      })
+    );
+
+    factory.sockets[0].emitMessage(
+      JSON.stringify({
+        type: "message",
+        id: "s_side_104",
+        role: "assistant",
+        content: "Side message for missing URL",
+        timestamp: 104,
+        streaming: false,
+        sessionKey: "agent:main:clawline:user_1:side",
+        attachments: []
+      })
+    );
+
+    expect(chatStore.getState().unreadBySessionKey["agent:main:clawline:user_1:side"]).toBe(1);
+  });
+
+  it("ignores stale hash-router fragments when the browser router owns the path", async () => {
+    window.history.replaceState(
+      {},
+      "",
+      "/chat/agent:main:clawline:user_1:main#/chat/agent:main:clawline:user_1:side"
+    );
+
+    const authStore = seedSession();
+    const chatStore = createChatDomainStore({
+      persistence: createMemoryChatPersistence()
+    });
+    const factory = new FakeWebSocketFactory();
+    createTransportMachine({
+      authSessionStore: authStore,
+      chatDomainStore: chatStore,
+      webSocketFactory: factory.create
+    });
+
+    await waitForSocket(factory);
+    factory.sockets[0].emitOpen();
+    factory.sockets[0].emitMessage(
+      JSON.stringify({
+        type: "auth_result",
+        success: true,
+        userId: "user_1",
+        sessionKeys: [
+          "agent:main:clawline:user_1:main",
+          "agent:main:clawline:user_1:side"
+        ]
+      })
+    );
+
+    factory.sockets[0].emitMessage(
+      JSON.stringify({
+        type: "message",
+        id: "s_side_hash_ignored",
+        role: "assistant",
+        content: "Side message while main path is active",
+        timestamp: 105,
+        streaming: false,
+        sessionKey: "agent:main:clawline:user_1:side",
+        attachments: []
+      })
+    );
+
+    expect(chatStore.getState().unreadBySessionKey["agent:main:clawline:user_1:side"]).toBe(1);
   });
 
   it("stays replaying until replay messages complete even after auth succeeds", async () => {
@@ -680,6 +819,7 @@ describe("transportMachine", () => {
     createTransportMachine({
       authSessionStore: authStore,
       chatDomainStore: chatStore,
+      selectedSessionKeySource: () => "agent:main:clawline:user_1:main",
       webSocketFactory: factory.create
     });
 
@@ -688,12 +828,53 @@ describe("transportMachine", () => {
 
     expect(JSON.parse(factory.sockets[0].sentTexts[0])).toMatchObject({
       type: "auth",
-      lastMessageId: "s_side_1",
+      lastMessageId: "s_main_1",
       replayCursorsBySessionKey: {
         "agent:main:clawline:user_1:main": "s_main_1",
         "agent:main:clawline:user_1:side": "s_side_1"
       }
     });
+  });
+
+  it("does not send a global legacy replay cursor for streams without their own cursor", async () => {
+    const authStore = seedSession();
+    const chatStore = createChatDomainStore({
+      persistence: createMemoryChatPersistence()
+    });
+    chatStore.applyIncomingMessage({
+      localDeviceId: "browser-device-1",
+      message: {
+        type: "message",
+        id: "s_main_1",
+        role: "assistant",
+        content: "Main",
+        timestamp: 100,
+        streaming: false,
+        sessionKey: "agent:main:clawline:user_1:main",
+        attachments: []
+      },
+      selectedSessionKey: "agent:main:clawline:user_1:main",
+      source: "replay"
+    });
+    const factory = new FakeWebSocketFactory();
+    createTransportMachine({
+      authSessionStore: authStore,
+      chatDomainStore: chatStore,
+      selectedSessionKeySource: () => "agent:main:clawline:user_1:side",
+      webSocketFactory: factory.create
+    });
+
+    await waitForSocket(factory);
+    factory.sockets[0].emitOpen();
+
+    const payload = JSON.parse(factory.sockets[0].sentTexts[0]);
+    expect(payload).toMatchObject({
+      type: "auth",
+      replayCursorsBySessionKey: {
+        "agent:main:clawline:user_1:main": "s_main_1"
+      }
+    });
+    expect(payload.lastMessageId).toBeNull();
   });
 
   it("starts re-pair auth from an empty replay context after in-session logout", async () => {
@@ -726,7 +907,7 @@ describe("transportMachine", () => {
     await waitForSocket(factory);
     factory.sockets[0].emitOpen();
     expect(JSON.parse(factory.sockets[0].sentTexts[0])).toMatchObject({
-      lastMessageId: "s_before_logout",
+      lastMessageId: null,
       replayCursorsBySessionKey: {
         "agent:main:clawline:user_1:main": "s_before_logout"
       }
@@ -1098,6 +1279,48 @@ describe("transportMachine", () => {
     });
   });
 
+  it("serializes interactive callbacks through the live socket send path", async () => {
+    const authStore = seedSession();
+    const chatStore = createChatDomainStore({
+      persistence: createMemoryChatPersistence()
+    });
+    const factory = new FakeWebSocketFactory();
+    const transport = createTransportMachine({
+      authSessionStore: authStore,
+      chatDomainStore: chatStore,
+      webSocketFactory: factory.create
+    });
+
+    await waitForSocket(factory);
+    factory.sockets[0].emitOpen();
+    factory.sockets[0].emitMessage(
+      JSON.stringify({
+        type: "auth_result",
+        success: true,
+        sessionKeys: ["agent:main:clawline:user_1:main"]
+      })
+    );
+
+    await transport.sendInteractiveCallback({
+      messageId: "s_html_101",
+      action: "ping",
+      data: {
+        count: 7
+      }
+    });
+
+    expect(JSON.parse(factory.sockets[0].sentTexts.at(-1) ?? "{}")).toEqual({
+      type: "interactive-callback",
+      messageId: "s_html_101",
+      payload: {
+        action: "ping",
+        data: {
+          count: 7
+        }
+      }
+    });
+  });
+
   it("transitions to failed and clears auth on auth failure", async () => {
     const authStore = seedSession();
     const chatStore = createChatDomainStore({
@@ -1274,7 +1497,7 @@ describe("transportMachine", () => {
 
     factory.sockets[0].emitOpen();
     expect(JSON.parse(factory.sockets[0].sentTexts[0])).toMatchObject({
-      lastMessageId: "s_101"
+      lastMessageId: null
     });
   });
 });

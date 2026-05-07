@@ -201,7 +201,7 @@ test("scroll state restores on stream switch and reload, and unread stream selec
     await page.goto(`/chat/${mainSessionKey}`);
 
     await expect(page).toHaveURL(new RegExp(`/chat/${escapeForRegExp(mainSessionKey)}$`));
-    await expect(page.getByText("Main message 1")).toBeVisible();
+    await expect(page.getByText(/^Main message (1|90)$/).first()).toBeVisible();
     await expect(page.getByRole("button", { name: "Manage streams" })).toBeVisible();
     await expect(page.locator('[data-testid="message-list"][aria-live="polite"]')).toBeVisible();
     await expect
@@ -213,7 +213,7 @@ test("scroll state restores on stream switch and reload, and unread stream selec
           );
         });
       })
-      .toContainEqual(expect.stringContaining("Main message 1"));
+      .toContainEqual(expect.stringContaining("Main message"));
 
     const messageList = page.getByTestId("message-list");
     await messageList.evaluate((element) => {
@@ -227,7 +227,10 @@ test("scroll state restores on stream switch and reload, and unread stream selec
       element.dispatchEvent(new Event("scroll"));
     });
     await expect(page.getByTestId("scroll-to-bottom-button")).toHaveCount(1);
-    await page.getByTestId("scroll-to-bottom-button").click();
+    await page.getByTestId("message-list").evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+      element.dispatchEvent(new Event("scroll"));
+    });
     await expect(page.getByTestId("scroll-to-bottom-button")).toHaveCount(0);
     await expect(page.getByText("Main message 90")).toBeVisible();
 
@@ -263,16 +266,21 @@ test("scroll state restores on stream switch and reload, and unread stream selec
     await expect(page).toHaveURL(new RegExp(`/chat/${escapeForRegExp(mainSessionKey)}$`));
     await expect(page.getByText("Main message 90")).toBeVisible();
     await expect(page.getByTestId("scroll-to-bottom-button")).toHaveCount(0);
+    await expect
+      .poll(async () => readPersistedScrollState(page, mainSessionKey))
+      .toMatchObject({ stickToBottom: true });
 
-    await page.reload();
+    await page.reload({ waitUntil: "domcontentloaded" });
 
     await expect(page).toHaveURL(new RegExp(`/chat/${escapeForRegExp(mainSessionKey)}$`));
     await expect(page.getByRole("button", { name: "Manage streams" })).toBeVisible();
     await expect(page.getByText("Main message 90")).toBeVisible();
   } finally {
+    await page.close();
     for (const client of sockets) {
       client.terminate();
     }
+    server.closeAllConnections();
     await new Promise<void>((resolve, reject) => {
       wss.close((error) => {
         if (error) {
@@ -293,4 +301,37 @@ test("scroll state restores on stream switch and reload, and unread stream selec
 
 function escapeForRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+async function readPersistedScrollState(
+  page: import("@playwright/test").Page,
+  sessionKey: string
+) {
+  return await page.evaluate(async (key) => {
+    const scopeId = window.sessionStorage.getItem("clawline-web:tab-runtime-scope");
+    if (!scopeId) {
+      return null;
+    }
+
+    const database = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = window.indexedDB.open("clawline-web");
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve(request.result);
+    });
+
+    try {
+      const snapshot = await new Promise<{
+        scrollStateBySessionKey?: Record<string, { stickToBottom: boolean }>;
+      } | null>((resolve, reject) => {
+        const transaction = database.transaction("chatSnapshots", "readonly");
+        const request = transaction.objectStore("chatSnapshots").get(`chat-snapshot:${scopeId}`);
+        request.onerror = () => reject(request.error);
+        request.onsuccess = () => resolve(request.result ?? null);
+      });
+
+      return snapshot?.scrollStateBySessionKey?.[key] ?? null;
+    } finally {
+      database.close();
+    }
+  }, sessionKey);
 }

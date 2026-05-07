@@ -12,14 +12,13 @@ export type ChatSessionSwitchSource =
 
 export interface ChatSessionTransition {
   bootRequestedSessionKey: string | null;
-  pendingSessionKey: string | null;
   source: ChatSessionSwitchSource | null;
 }
 
 export interface ChatSessionCoordinator {
+  activeSessionKey?: string;
   closeSessionList: () => void;
   closeStreamManager: () => void;
-  engineActiveSessionKey?: string;
   firstProviderValidSessionKey?: string;
   isSessionListOpen: boolean;
   isStreamManagerOpen: boolean;
@@ -28,7 +27,6 @@ export interface ChatSessionCoordinator {
   routeSessionExists: boolean;
   requestSessionSwitch: (sessionKey: string, source: ChatSessionSwitchSource) => void;
   transition: ChatSessionTransition;
-  uiSelectedSessionKey?: string;
 }
 
 export interface ChatSessionInteractionCoordinator {
@@ -59,12 +57,8 @@ export function useChatSessionCoordinator({
 }): ChatSessionCoordinator {
   const [isSessionListOpen, setSessionListOpen] = useState(false);
   const [isStreamManagerOpen, setStreamManagerOpen] = useState(false);
-  const [uiSelectedSessionKey, setUiSelectedSessionKey] = useState<string | undefined>(
-    routeSessionKey
-  );
   const [transition, setTransition] = useState<ChatSessionTransition>({
     bootRequestedSessionKey: routeSessionKey ?? null,
-    pendingSessionKey: null,
     source: routeSessionKey ? "boot" : null
   });
 
@@ -83,26 +77,10 @@ export function useChatSessionCoordinator({
     [routeSessionKey, streams]
   );
 
-  const engineActiveSessionKey = routeSessionKey ?? firstProviderValidSessionKey;
-
-  useEffect(() => {
-    setUiSelectedSessionKey(routeSessionKey ?? firstProviderValidSessionKey);
-  }, [firstProviderValidSessionKey, routeSessionKey]);
-
-  useEffect(() => {
-    if (!transition.pendingSessionKey) {
-      return;
-    }
-
-    if (routeSessionKey !== transition.pendingSessionKey) {
-      return;
-    }
-
-    setTransition((current) => ({
-      ...current,
-      pendingSessionKey: null
-    }));
-  }, [routeSessionKey, transition.pendingSessionKey]);
+  const shouldUseRouteSessionKey =
+    routeSessionKey != null &&
+    (streams.length === 0 || routeSessionExists);
+  const activeSessionKey = shouldUseRouteSessionKey ? routeSessionKey : undefined;
 
   useEffect(() => {
     const bootRequestedSessionKey = transition.bootRequestedSessionKey;
@@ -114,7 +92,8 @@ export function useChatSessionCoordinator({
     if (routeSessionKey !== bootRequestedSessionKey) {
       setTransition((current) => ({
         ...current,
-        bootRequestedSessionKey: null
+        bootRequestedSessionKey: null,
+        source: null
       }));
       return;
     }
@@ -125,19 +104,20 @@ export function useChatSessionCoordinator({
     ) {
       setTransition((current) => ({
         ...current,
-        bootRequestedSessionKey: null
+        bootRequestedSessionKey: null,
+        source: null
       }));
     }
   }, [provisionedSessionKeys, routeSessionKey, transition.bootRequestedSessionKey, transportPhase]);
 
   return {
+    activeSessionKey,
     closeSessionList() {
       setSessionListOpen(false);
     },
     closeStreamManager() {
       setStreamManagerOpen(false);
     },
-    engineActiveSessionKey,
     firstProviderValidSessionKey,
     isSessionListOpen,
     isStreamManagerOpen,
@@ -149,18 +129,15 @@ export function useChatSessionCoordinator({
       setStreamManagerOpen(true);
     },
     requestSessionSwitch(sessionKey, source) {
-      setUiSelectedSessionKey(sessionKey);
       setSessionListOpen(false);
       setStreamManagerOpen(false);
       setTransition((current) => ({
         ...current,
-        pendingSessionKey: sessionKey,
         source
       }));
     },
     routeSessionExists,
-    transition,
-    uiSelectedSessionKey
+    transition
   };
 }
 

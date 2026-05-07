@@ -1,5 +1,9 @@
 import { X } from "lucide-react";
+import { useRef } from "react";
 import type { ChatMessageRecord } from "../../runtime/chat/chatDomainStore";
+import { useAuthSessionStore } from "../../runtime/auth/authSessionStore";
+import { MessageAttachments } from "./MessageAttachments";
+import { MessageLinkCards } from "./MessageLinkCards";
 import { RichMessageBody } from "./RichMessageBody";
 
 export function ExpandedMessageOverlay({
@@ -9,6 +13,9 @@ export function ExpandedMessageOverlay({
   message: ChatMessageRecord;
   onClose: () => void;
 }) {
+  const { state: authState } = useAuthSessionStore();
+  const contentRef = useRef<HTMLDivElement | null>(null);
+
   return (
     <div className="message-overlay-backdrop" onClick={onClose} role="presentation">
       <aside
@@ -35,7 +42,16 @@ export function ExpandedMessageOverlay({
           <span>{message.role === "user" ? "You" : message.sender ?? "Assistant"}</span>
           <span>{new Date(message.timestamp).toLocaleTimeString()}</span>
         </header>
-        <RichMessageBody content={message.content} expanded />
+        <RichMessageBody content={message.content} contentRef={contentRef} expanded />
+        <MessageLinkCards content={message.content} contentRef={contentRef} />
+        <MessageAttachments
+          attachments={message.attachments}
+          deviceId={authState.session?.deviceId}
+          expanded
+          messageId={message.id}
+          serverUrl={authState.session?.serverUrl}
+          token={authState.session?.token}
+        />
       </aside>
     </div>
   );

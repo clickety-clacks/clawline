@@ -74,7 +74,9 @@ clawline/
 │   │   ├── DesignSystem/   # Theme, components, flow layout
 │   │   └── Protocols/      # Service protocols for DI
 │   └── ClawlineTests/      # Unit tests
-├── docs/                   # Protocol docs, design notes
+├── src/                    # Standalone React/Vite web client
+├── dist/                   # Built web client output after npm run build
+├── docs/                   # Protocol docs, design notes, SOPs
 └── shared/                 # Assets, icons, API specs
 ```
 
@@ -82,10 +84,10 @@ clawline/
 
 ### Design Principles
 
-- **Native-first**: Pure Swift/SwiftUI, no cross-platform frameworks
-- **Protocol-oriented**: Dependency injection via protocols for testability
-- **Reactive**: SwiftUI's `@Observable` for state management
-- **Offline-resilient**: Automatic reconnection with exponential backoff
+- **Client-specific implementations**: iOS stays native Swift/SwiftUI; the browser client is a standalone React/Vite app, not a cross-platform shell.
+- **Protocol-oriented**: Shared provider contracts keep clients aligned while each platform owns its UI/runtime shape.
+- **Reactive**: SwiftUI observation on iOS; React state/store ownership on web.
+- **Offline-resilient**: Automatic reconnection with exponential backoff.
 
 ### Key Components
 
@@ -108,6 +110,18 @@ Clawline uses a WebSocket-based protocol with JSON messages:
 - `error` — Error responses
 
 See [docs/architecture.md](docs/architecture.md) and [docs/ios-provider-connection.md](docs/ios-provider-connection.md) for the current protocol details.
+
+## Web Client
+
+This repository also contains the standalone React/Vite web client in `src/` with its build output in `dist/`.
+
+```bash
+npm install
+npm run build
+npm run preview -- --host 0.0.0.0 --port 4173
+```
+
+The web client is a separate browser app service. It should not be installed under OpenClaw or served from the Clawline provider `/www` route on port `18800`; it connects to the provider API/WebSocket instead. See [docs/sop/clawline-web-hosting.md](docs/sop/clawline-web-hosting.md).
 
 ## Development
 

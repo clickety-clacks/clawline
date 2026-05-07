@@ -384,7 +384,9 @@ export function createChatDomainStore(options?: {
       baseStore.setState((current) => {
         const currentScrollState = current.scrollStateBySessionKey[input.sessionKey];
         const nextScrollState = {
-          offsetTop: Math.max(0, Math.round(input.offsetTop)),
+          offsetTop: input.stickToBottom
+            ? Number.MAX_SAFE_INTEGER
+            : Math.max(0, Math.round(input.offsetTop)),
           stickToBottom: input.stickToBottom
         };
 

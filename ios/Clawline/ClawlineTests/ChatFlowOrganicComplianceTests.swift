@@ -751,6 +751,62 @@ struct ChatFlowOrganicComplianceTests {
         }))
     }
 
+    @Test("Interactive HTML: malformed descriptor renders visible inline error")
+    func messagePresentationInteractiveHTMLMalformedDescriptorRendersErrorPart() throws {
+        let attachment = Clawline.Attachment(
+            id: "html-bad-json",
+            type: .document,
+            mimeType: InteractiveHTMLDescriptor.mimeType,
+            data: Data(#"{"version":1,"html":"bad \u201\V"}"#.utf8),
+            assetId: nil
+        )
+        let presentation = buildPresentation(sampleMessage(content: "", attachments: [attachment]))
+
+        #expect(presentation.parts.contains(where: { part in
+            if case .interactiveHTML(let decoded) = part {
+                return decoded.version == 1
+                    && decoded.html.contains("Interactive content could not be displayed")
+            }
+            return false
+        }))
+        #expect(!presentation.parts.contains(where: { part in
+            if case .file(let fileAttachment) = part {
+                return fileAttachment.id == "html-bad-json"
+            }
+            return false
+        }))
+    }
+
+    @Test("Interactive HTML: empty descriptor renders visible inline error")
+    func messagePresentationInteractiveHTMLEmptyDescriptorRendersErrorPart() throws {
+        let descriptor = InteractiveHTMLDescriptor(
+            version: 1,
+            html: "",
+            metadata: nil
+        )
+        let attachment = Clawline.Attachment(
+            id: "html-empty",
+            type: .document,
+            mimeType: InteractiveHTMLDescriptor.mimeType,
+            data: try JSONEncoder().encode(descriptor),
+            assetId: nil
+        )
+        let presentation = buildPresentation(sampleMessage(content: "", attachments: [attachment]))
+
+        #expect(presentation.parts.contains(where: { part in
+            if case .interactiveHTML(let decoded) = part {
+                return decoded.version == 1 && decoded.html.isEmpty
+            }
+            return false
+        }))
+        #expect(!presentation.parts.contains(where: { part in
+            if case .file(let fileAttachment) = part {
+                return fileAttachment.id == "html-empty"
+            }
+            return false
+        }))
+    }
+
     @Test("Rich attachment routing: shared MIME dispatch handles terminal + interactive docs in one pass")
     func messagePresentationRichAttachmentSharedDispatch() throws {
         let terminalDescriptor = TerminalSessionDescriptor(

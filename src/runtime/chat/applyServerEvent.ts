@@ -22,6 +22,17 @@ export function applyServerMessage(
   const { localDeviceId, message, selectedSessionKey, source } = input;
   const sessionKey = message.sessionKey ?? state.streams[0]?.sessionKey ?? "unassigned";
   const currentMessages = state.messagesBySessionKey[sessionKey] ?? [];
+  const nextStreamTailStateBySessionKey =
+    message.id.startsWith("s_")
+      ? {
+          ...state.streamTailStateBySessionKey,
+          [sessionKey]: {
+            lastMessageId: message.id,
+            lastMessageRole: message.role
+          }
+        }
+      : state.streamTailStateBySessionKey;
+
 
   const existingIndex = currentMessages.findIndex(
     (entry) => entry.id === message.id
@@ -53,6 +64,7 @@ export function applyServerMessage(
           lastServerEventId: message.id
         }
       },
+      streamTailStateBySessionKey: nextStreamTailStateBySessionKey,
       messagesBySessionKey: {
         ...state.messagesBySessionKey,
         [sessionKey]: replaceAtIndex(currentMessages, existingIndex, updated)
@@ -98,7 +110,8 @@ export function applyServerMessage(
             lastServerEventId: message.id
           }
         },
-        messagesBySessionKey: {
+        streamTailStateBySessionKey: nextStreamTailStateBySessionKey,
+      messagesBySessionKey: {
           ...state.messagesBySessionKey,
           [sessionKey]: replaceAtIndex(currentMessages, optimisticIndex, replacement)
         }
@@ -139,6 +152,7 @@ export function applyServerMessage(
               state.firstUnreadMessageIdBySessionKey[sessionKey] ?? message.id
           }
         : state.firstUnreadMessageIdBySessionKey,
+    streamTailStateBySessionKey: nextStreamTailStateBySessionKey,
     messagesBySessionKey: {
       ...state.messagesBySessionKey,
       [sessionKey]: [...currentMessages, nextMessage].sort(sortMessages)

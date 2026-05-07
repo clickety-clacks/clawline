@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 import type { ChatMessageRecord } from "../../runtime/chat/chatDomainStore";
 import { analyzeMessagePresentation, getMessageSenderLabel } from "./messagePresentation";
 import { shouldOfferExpandedMessage } from "./RichMessageBody";
@@ -7,6 +7,22 @@ const BOTTOM_THRESHOLD_PX = 32;
 const DEFAULT_CONTAINER_WIDTH = 820;
 const DEFAULT_MESSAGE_HEIGHT = 96;
 const DEFAULT_VIEWPORT_HEIGHT = 720;
+function getInitialContainerWidth() {
+  if (typeof window === "undefined") {
+    return DEFAULT_CONTAINER_WIDTH;
+  }
+
+  const estimatedInlinePadding = window.innerWidth <= 720 ? 28 : 0;
+  return Math.max(BUBBLE_MIN_WIDTH, window.innerWidth - estimatedInlinePadding);
+}
+
+function getInitialViewportHeight() {
+  if (typeof window === "undefined") {
+    return DEFAULT_VIEWPORT_HEIGHT;
+  }
+
+  return window.innerHeight || DEFAULT_VIEWPORT_HEIGHT;
+}
 const OVERSCAN_PX = 1_000;
 const BUBBLE_MIN_WIDTH = 120;
 const BUBBLE_PADDING_HORIZONTAL = 40;
@@ -45,11 +61,11 @@ export function useVirtualMessageWindow(messages: ChatMessageRecord[]): VirtualM
   const shouldStickToBottomRef = useRef(false);
   const isAtBottomRef = useRef(true);
   const [scrollTop, setScrollTop] = useState(0);
-  const [containerWidth, setContainerWidth] = useState(DEFAULT_CONTAINER_WIDTH);
-  const [viewportHeight, setViewportHeight] = useState(DEFAULT_VIEWPORT_HEIGHT);
+  const [containerWidth, setContainerWidth] = useState(getInitialContainerWidth);
+  const [viewportHeight, setViewportHeight] = useState(getInitialViewportHeight);
   const [measuredSizes, setMeasuredSizes] = useState<Record<string, { height: number; width: number }>>({});
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const container = containerRef.current;
     if (!container) {
       return;
@@ -97,15 +113,16 @@ export function useVirtualMessageWindow(messages: ChatMessageRecord[]): VirtualM
   );
 
   function handleScroll() {
-    if (!containerRef.current) {
+    const container = containerRef.current;
+    if (!container) {
       return;
     }
 
-    const nextScrollTop = containerRef.current.scrollTop;
-    const maxScrollTop = Math.max(
-      0,
-      containerRef.current.scrollHeight - containerRef.current.clientHeight
-    );
+    const nextScrollTop = clampContainerScrollTop(container, container.scrollTop);
+    if (container.scrollTop !== nextScrollTop) {
+      container.scrollTop = nextScrollTop;
+    }
+    const maxScrollTop = maxContainerScrollTop(container);
     isAtBottomRef.current = maxScrollTop - nextScrollTop <= BOTTOM_THRESHOLD_PX;
     shouldStickToBottomRef.current = isAtBottomRef.current;
     setScrollTop(nextScrollTop);
@@ -117,8 +134,10 @@ export function useVirtualMessageWindow(messages: ChatMessageRecord[]): VirtualM
       return;
     }
 
-    container.scrollTop = container.scrollHeight;
-    setScrollTop(container.scrollTop);
+    const maxScrollTop = maxContainerScrollTop(container);
+    const nextScrollTop = Number.isFinite(maxScrollTop) ? maxScrollTop : container.scrollHeight;
+    container.scrollTop = nextScrollTop;
+    setScrollTop(nextScrollTop);
   }, [layout.totalHeight]);
 
   return {
@@ -150,9 +169,11 @@ export function useVirtualMessageWindow(messages: ChatMessageRecord[]): VirtualM
       }
 
       shouldStickToBottomRef.current = true;
-      container.scrollTop = container.scrollHeight;
+      const maxScrollTop = maxContainerScrollTop(container);
+      const nextScrollTop = Number.isFinite(maxScrollTop) ? maxScrollTop : container.scrollHeight;
+      container.scrollTop = nextScrollTop;
       isAtBottomRef.current = true;
-      setScrollTop(container.scrollTop);
+      setScrollTop(nextScrollTop);
     },
     scrollToMessage(messageId, alignment = "start") {
       const container = containerRef.current;
@@ -172,10 +193,12 @@ export function useVirtualMessageWindow(messages: ChatMessageRecord[]): VirtualM
             )
           : messageLayout.offsetTop;
 
-      shouldStickToBottomRef.current = false;
-      container.scrollTop = nextOffset;
-      isAtBottomRef.current = false;
-      setScrollTop(container.scrollTop);
+      const clampedOffset = clampContainerScrollTop(container, nextOffset);
+      const isAtBottom = maxContainerScrollTop(container) - clampedOffset <= BOTTOM_THRESHOLD_PX;
+      shouldStickToBottomRef.current = isAtBottom;
+      container.scrollTop = clampedOffset;
+      isAtBottomRef.current = isAtBottom;
+      setScrollTop(clampedOffset);
       return true;
     },
     scrollToOffset(offsetTop) {
@@ -184,13 +207,27 @@ export function useVirtualMessageWindow(messages: ChatMessageRecord[]): VirtualM
         return;
       }
 
-      shouldStickToBottomRef.current = false;
-      container.scrollTop = Math.max(0, offsetTop);
-      isAtBottomRef.current = false;
-      setScrollTop(container.scrollTop);
+      const clampedOffset = clampContainerScrollTop(container, offsetTop);
+      const isAtBottom = maxContainerScrollTop(container) - clampedOffset <= BOTTOM_THRESHOLD_PX;
+      shouldStickToBottomRef.current = isAtBottom;
+      container.scrollTop = clampedOffset;
+      isAtBottomRef.current = isAtBottom;
+      setScrollTop(clampedOffset);
     },
     totalHeight: layout.totalHeight
   };
+}
+
+function maxContainerScrollTop(container: HTMLElement) {
+  if (container.scrollHeight <= 0 && container.clientHeight <= 0) {
+    return Number.POSITIVE_INFINITY;
+  }
+
+  return Math.max(0, container.scrollHeight - container.clientHeight);
+}
+
+function clampContainerScrollTop(container: HTMLElement, scrollTop: number) {
+  return Math.min(maxContainerScrollTop(container), Math.max(0, scrollTop));
 }
 
 function buildVirtualLayout(
@@ -208,14 +245,19 @@ function buildVirtualLayout(
   const messageLayouts = messages.map((message, index) => {
     const measuredSize = measuredSizes[message.id];
     const presentation = analyzeMessagePresentation(message, shouldOfferExpandedMessage);
-    const width =
-      measuredSize?.width ??
-      estimateBubbleWidth(message, presentation, availableWidth);
+    const estimatedWidth = estimateBubbleWidth(message, presentation, availableWidth);
+    const shouldUseEstimatedWidth =
+      availableWidth <= 500
+      && !presentation.isWide
+      && !presentation.isTruncated
+      && (presentation.sizeClass === "short" || presentation.sizeClass === "medium");
+    const width = shouldUseEstimatedWidth ? estimatedWidth : measuredSize?.width ?? estimatedWidth;
     const height = measuredSize?.height ?? DEFAULT_MESSAGE_HEIGHT;
     const shouldForceOwnRow =
       presentation.isWide
       || presentation.isTruncated
-      || presentation.sizeClass === "long";
+      || presentation.sizeClass === "long"
+      || (availableWidth <= 500 && presentation.sizeClass === "medium");
 
     if (shouldForceOwnRow && offsetLeft > 0) {
       offsetTop += currentRowHeight + gapPx;
@@ -319,8 +361,12 @@ function estimateBubbleWidth(
   } else if (presentation.sizeClass === "long") {
     width = maxAllowedWidth;
   } else if (presentation.sizeClass === "short") {
+    const shortMinimumWidth =
+      containerWidth <= 500
+        ? Math.min(BUBBLE_MIN_WIDTH, maxAllowedWidth)
+        : minimumChromeWidth;
     width = clamp(
-      minimumChromeWidth,
+      shortMinimumWidth,
       measureSingleLineWidth(message.content, 22, 600) + BUBBLE_PADDING_HORIZONTAL,
       maxAllowedWidth
     );

@@ -63,8 +63,11 @@ final class InteractiveHTMLBubbleUIKitView: UIView {
         errorLabel.isHidden = true
         addSubview(errorLabel)
         NSLayoutConstraint.activate([
+            heightAnchor.constraint(greaterThanOrEqualToConstant: 44),
             errorLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
             errorLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            errorLabel.topAnchor.constraint(greaterThanOrEqualTo: topAnchor, constant: 12),
+            errorLabel.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -12),
             errorLabel.centerYAnchor.constraint(equalTo: centerYAnchor)
         ])
 
@@ -126,6 +129,11 @@ final class InteractiveHTMLBubbleUIKitView: UIView {
         let htmlBytes = descriptor.html.lengthOfBytes(using: .utf8)
         if htmlBytes > 256 * 1024 {
             showError("Interactive content too large to render.")
+            return
+        }
+
+        if descriptor.html.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            showError("Interactive content could not be displayed because its attachment data is invalid.")
             return
         }
 
@@ -199,6 +207,8 @@ final class InteractiveHTMLBubbleUIKitView: UIView {
     }
 
     private func showError(_ message: String) {
+        pendingStart = false
+        isInitialLoadInProgress = false
         placeholder.stopAnimating()
         errorLabel.isHidden = false
         errorLabel.text = message

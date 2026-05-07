@@ -1314,6 +1314,7 @@ struct ChatView: View {
 
 #if os(visionOS)
         let pinnedScrollButtonView: AnyView? = nil
+        let pinnedScrollButtonIsVisible = false
         let pinnedScrollButtonGap: CGFloat = 0
         let pinnedScrollButtonHorizontalOffset: CGFloat = 0
         let pinnedScrollButtonMaxHorizontalOffset: CGFloat = 0
@@ -1324,6 +1325,7 @@ struct ChatView: View {
         let pinnedPageDotsGap: CGFloat = 0
 #else
         let pinnedScrollButtonView: AnyView? = scrollButtonView
+        let pinnedScrollButtonIsVisible = state.isVisible
         let pinnedScrollButtonGap: CGFloat = floatingScrollButtonBottomGap
         let pinnedScrollButtonHorizontalOffset = scrollButtonHorizontalOffset(
             for: scrollButtonDetent,
@@ -1351,9 +1353,9 @@ struct ChatView: View {
             measuredHeight: $inputBarHeight,
             versionText: appVersionLabel,
             layoutCoordinator: layoutCoordinator,
-            layoutKey: layoutKey
-            ,
+            layoutKey: layoutKey,
             scrollButtonView: pinnedScrollButtonView,
+            scrollButtonIsVisible: pinnedScrollButtonIsVisible,
             scrollButtonGap: pinnedScrollButtonGap,
             scrollButtonHorizontalOffset: pinnedScrollButtonHorizontalOffset,
             scrollButtonMaxHorizontalOffset: pinnedScrollButtonMaxHorizontalOffset,
@@ -3036,6 +3038,7 @@ private struct KeyboardPinnedContainer<Content: View>: UIViewRepresentable {
     let layoutCoordinator: ChatLayoutCoordinator
     let layoutKey: ChatLayoutKey
     let scrollButtonView: AnyView?
+    let scrollButtonIsVisible: Bool
     let scrollButtonGap: CGFloat
     let scrollButtonHorizontalOffset: CGFloat
     let scrollButtonMaxHorizontalOffset: CGFloat
@@ -3054,6 +3057,7 @@ private struct KeyboardPinnedContainer<Content: View>: UIViewRepresentable {
         layoutCoordinator: ChatLayoutCoordinator,
         layoutKey: ChatLayoutKey,
         scrollButtonView: AnyView? = nil,
+        scrollButtonIsVisible: Bool = false,
         scrollButtonGap: CGFloat = 0,
         scrollButtonHorizontalOffset: CGFloat = 0,
         scrollButtonMaxHorizontalOffset: CGFloat = 0,
@@ -3071,6 +3075,7 @@ private struct KeyboardPinnedContainer<Content: View>: UIViewRepresentable {
         self.layoutCoordinator = layoutCoordinator
         self.layoutKey = layoutKey
         self.scrollButtonView = scrollButtonView
+        self.scrollButtonIsVisible = scrollButtonIsVisible
         self.scrollButtonGap = scrollButtonGap
         self.scrollButtonHorizontalOffset = scrollButtonHorizontalOffset
         self.scrollButtonMaxHorizontalOffset = scrollButtonMaxHorizontalOffset
@@ -3092,6 +3097,7 @@ private struct KeyboardPinnedContainer<Content: View>: UIViewRepresentable {
         uiView.updateVersionText(versionText)
         uiView.updateScrollButton(
             scrollButtonView,
+            isVisible: scrollButtonIsVisible,
             gap: scrollButtonGap,
             horizontalOffset: scrollButtonHorizontalOffset,
             maxHorizontalOffset: scrollButtonMaxHorizontalOffset,
@@ -3147,6 +3153,12 @@ enum KeyboardPinnedHitTesting {
             return true
         }
         return false
+    }
+}
+
+enum KeyboardPinnedChromeEventRouting {
+    static func scrollButtonHostReceivesEvents(hasView: Bool, isVisible: Bool) -> Bool {
+        hasView && isVisible
     }
 }
 
@@ -3230,6 +3242,7 @@ private final class KeyboardPinnedContainerView<Content: View>: UIView, Keyboard
 
     func updateScrollButton(
         _ view: AnyView?,
+        isVisible: Bool,
         gap: CGFloat,
         horizontalOffset: CGFloat,
         maxHorizontalOffset: CGFloat,
@@ -3238,6 +3251,7 @@ private final class KeyboardPinnedContainerView<Content: View>: UIView, Keyboard
     ) {
 #if os(visionOS)
         _ = view
+        _ = isVisible
         _ = gap
         _ = horizontalOffset
         _ = maxHorizontalOffset
@@ -3277,8 +3291,13 @@ private final class KeyboardPinnedContainerView<Content: View>: UIView, Keyboard
         scrollButtonBaseHorizontalOffset = horizontalOffset
         scrollButtonMaxHorizontalOffset = maxHorizontalOffset
         scrollButtonHost?.rootView = view ?? AnyView(EmptyView())
+        let scrollButtonReceivesEvents = KeyboardPinnedChromeEventRouting.scrollButtonHostReceivesEvents(
+            hasView: view != nil,
+            isVisible: isVisible
+        )
         scrollButtonHost?.view.isHidden = (view == nil)
-        scrollButtonHost?.view.isUserInteractionEnabled = (view != nil)
+        scrollButtonHost?.view.isUserInteractionEnabled = scrollButtonReceivesEvents
+        scrollButtonPanGestureRecognizer?.isEnabled = scrollButtonReceivesEvents
         scrollButtonBottomToBarTop?.constant = -gap
         if scrollButtonIsPanning {
             scrollButtonCenterX?.constant = horizontalOffset

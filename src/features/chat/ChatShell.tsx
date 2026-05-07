@@ -13,7 +13,6 @@ import { StreamPageDots } from "./StreamPageDots";
 import type { SessionProvisioningState } from "../streams/provisioning";
 
 export function ChatShell({
-  activeSessionKey,
   chatLayoutStyle,
   keyboardInset,
   isSessionListOpen,
@@ -31,13 +30,12 @@ export function ChatShell({
   rememberedScrollState,
   selectedMessages,
   selectedSessionKey,
-  uiSelectedSessionKey,
   selectedUnreadAnchorMessageId,
   streamDotStateBySessionKey,
+  unreadBySessionKey,
   streams,
   transportPhase
 }: {
-  activeSessionKey?: string;
   chatLayoutStyle: CSSProperties;
   keyboardInset: number;
   isSessionListOpen: boolean;
@@ -64,9 +62,9 @@ export function ChatShell({
   rememberedScrollState?: SessionScrollState;
   selectedMessages: ChatMessageRecord[];
   selectedSessionKey?: string;
-  uiSelectedSessionKey?: string;
   selectedUnreadAnchorMessageId?: string | null;
   streamDotStateBySessionKey: Record<string, StreamDotState>;
+  unreadBySessionKey: Record<string, number>;
   streams: StreamRecord[];
   transportPhase: TransportPhase;
 }) {
@@ -125,7 +123,7 @@ export function ChatShell({
           {streams.length > 0 ? (
             <div className="chat-dots-dock">
               <StreamPageDots
-                activeSessionKey={uiSelectedSessionKey}
+                activeSessionKey={selectedSessionKey}
                 onClick={onOpenSessionList}
                 sessionKeys={streams.map((stream) => stream.sessionKey)}
                 streamDotStateBySessionKey={streamDotStateBySessionKey}
@@ -133,20 +131,21 @@ export function ChatShell({
             </div>
           ) : null}
           <Composer
-            activeStreamDisplayName={streams.find((s) => s.sessionKey === activeSessionKey)?.displayName}
+            activeStreamDisplayName={streams.find((s) => s.sessionKey === selectedSessionKey)?.displayName}
             provisioningState={provisioningState}
-            sessionKey={activeSessionKey}
+            sessionKey={selectedSessionKey}
           />
         </div>
       </main>
       <SessionListSheet
-        activeSessionKey={uiSelectedSessionKey}
+        activeSessionKey={selectedSessionKey}
         isOpen={isSessionListOpen}
         onClose={onCloseSessionList}
         onOpenStreamManager={onOpenStreamManager}
         onSelectSession={onPopupSessionSelect}
         provisionedSessionKeys={provisionedSessionKeys}
         streamDotStateBySessionKey={streamDotStateBySessionKey}
+        unreadBySessionKey={unreadBySessionKey}
         streams={streams}
         transportPhase={transportPhase}
       />

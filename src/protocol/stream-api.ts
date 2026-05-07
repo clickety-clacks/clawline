@@ -27,6 +27,31 @@ export interface FetchTrackableSessionsResponse {
   sessions: TrackableSessionPayload[];
 }
 
+export interface SessionStatusPayload {
+  sessionKey: string;
+  display?: {
+    model?: string | null;
+    fallbackModels?: string[] | null;
+    provider?: string | null;
+    harness?: string | null;
+    reasoningLevel?: string | null;
+    thinkingLevel?: string | null;
+    fastMode?: boolean | null;
+    mode?: string | null;
+    verbosity?: string | null;
+  };
+  run?: {
+    state?: string | null;
+    runId?: string | null;
+    messageId?: string | null;
+    startedAt?: number | null;
+    queueDepth?: number | null;
+  };
+  context?: unknown;
+  approval?: unknown;
+  capabilities?: unknown;
+}
+
 export interface CreateStreamRequest {
   idempotencyKey: string;
   displayName: string;
@@ -85,6 +110,24 @@ export function createStreamApiClient(options?: StreamApiClientOptions) {
         fetchFn,
         method: "GET",
         path: "/api/trackable-sessions",
+        serverUrl: input.serverUrl,
+        token: input.token
+      });
+    },
+    fetchSessionStatus(input: {
+      serverUrl: string;
+      sessionKey: string;
+      signal?: AbortSignal;
+      token: string;
+    }) {
+      return sendRequest<void, SessionStatusPayload>({
+        fetchFn,
+        method: "GET",
+        path: "/api/session-status",
+        query: {
+          sessionKey: input.sessionKey
+        },
+        signal: input.signal,
         serverUrl: input.serverUrl,
         token: input.token
       });
@@ -186,10 +229,16 @@ async function sendRequest<Body, Response>(input: {
   fetchFn: typeof fetch;
   method: string;
   path: string;
+  query?: Record<string, string>;
+  signal?: AbortSignal;
   serverUrl: string;
   token: string;
 }) {
   const endpoint = new URL(input.path, providerHttpBaseUrlFromServerUrl(input.serverUrl));
+  for (const [name, value] of Object.entries(input.query ?? {})) {
+    endpoint.searchParams.set(name, value);
+  }
+
   const headers = new Headers({
     Accept: "application/json",
     Authorization: `Bearer ${input.token}`
@@ -204,7 +253,8 @@ async function sendRequest<Body, Response>(input: {
   const response = await input.fetchFn(endpoint, {
     method: input.method,
     headers,
-    body
+    body,
+    signal: input.signal
   });
 
   if (!response.ok) {

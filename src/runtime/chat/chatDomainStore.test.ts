@@ -699,7 +699,7 @@ describe("chatDomainStore", () => {
         stickToBottom: false
       },
       "agent:main:clawline:user_1:side": {
-        offsetTop: 0,
+        offsetTop: Number.MAX_SAFE_INTEGER,
         stickToBottom: true
       }
     });
@@ -715,8 +715,32 @@ describe("chatDomainStore", () => {
         stickToBottom: false
       },
       "agent:main:clawline:user_1:side": {
-        offsetTop: 0,
+        offsetTop: Number.MAX_SAFE_INTEGER,
         stickToBottom: true
+      }
+    });
+  });
+
+  it("lets a session leave bottom-pinned scroll state", () => {
+    const store = createChatDomainStore({
+      persistence: createMemoryChatPersistence()
+    });
+
+    store.rememberSessionScrollState({
+      offsetTop: 0,
+      sessionKey: "agent:main:clawline:user_1:main",
+      stickToBottom: true
+    });
+    store.rememberSessionScrollState({
+      offsetTop: 520.6,
+      sessionKey: "agent:main:clawline:user_1:main",
+      stickToBottom: false
+    });
+
+    expect(store.getState().scrollStateBySessionKey).toEqual({
+      "agent:main:clawline:user_1:main": {
+        offsetTop: 521,
+        stickToBottom: false
       }
     });
   });

@@ -3443,9 +3443,11 @@ struct ChatViewModelTests {
         }
 
         #expect(!viewModel.canDeleteStream(sessionKey: adoptedKey))
+        #expect(chatService.replayCursorSnapshot()[adoptedKey] == "s_adopted_1")
         #expect(await viewModel.deleteStream(sessionKey: adoptedKey))
         #expect(viewModel.stream(for: adoptedKey) == nil)
         #expect(viewModel.messages(for: adoptedKey).last?.content == "Preserve me")
+        #expect(chatService.replayCursorSnapshot()[adoptedKey] == nil)
         #expect(toastManager.toast?.message == "Session untracked.")
         #expect(toastManager.toast?.actionTitle == "Undo")
         #expect(chatService.deleteStreamCallCount == 1)

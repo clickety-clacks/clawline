@@ -3467,6 +3467,7 @@ final class ChatViewModel: ChatViewModelHosting {
         syntheticSessionKeys.remove(sessionKey)
         sessionStatusBySessionKey.removeValue(forKey: sessionKey)
         sessionStatusRefreshTasks.removeValue(forKey: sessionKey)?.cancel()
+        clearCursor(for: sessionKey)
         recalculateOrderedSessionKeys()
 
         if typingSessionKey == sessionKey {

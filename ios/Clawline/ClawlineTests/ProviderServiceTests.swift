@@ -879,6 +879,25 @@ struct ProviderServiceTests {
                 "setReasoning": { "supported": false, "reason": "provider_control_not_available" },
                 "setMode": { "supported": false, "reason": "provider_control_not_available" },
                 "setVerbosity": { "supported": false, "reason": "provider_control_not_available" }
+              },
+              "modelCatalog": {
+                "available": true,
+                "models": [
+                  {
+                    "id": "gpt-5.5",
+                    "provider": "openai",
+                    "ref": "openai/gpt-5.5",
+                    "name": "GPT-5.5",
+                    "alias": null
+                  },
+                  {
+                    "id": "claude-sonnet-4-6",
+                    "provider": "anthropic",
+                    "ref": "anthropic/claude-sonnet-4-6",
+                    "name": "Claude Sonnet 4.6",
+                    "alias": "Sonnet"
+                  }
+                ]
               }
             }
             """#.data(using: .utf8) ?? Data()
@@ -914,6 +933,12 @@ struct ProviderServiceTests {
         #expect(status.run.state == .running)
         #expect(status.run.queueDepth == 2)
         #expect(status.capabilities.cancelCurrentRun?.supported == false)
+        #expect(status.modelCatalog?.available == true)
+        #expect(status.modelCatalog?.models.map(\.ref) == [
+            "openai/gpt-5.5",
+            "anthropic/claude-sonnet-4-6"
+        ])
+        #expect(status.modelCatalog?.models[1].alias == "Sonnet")
     }
 
     @Test("Session control posts typed provider actions")

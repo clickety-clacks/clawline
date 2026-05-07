@@ -4514,7 +4514,8 @@ private func makeSessionStatus(
             canChangeFastMode: nil,
             canChangeVerbosity: nil,
             readOnlyStatus: nil
-        )
+        ),
+        modelCatalog: nil
     )
 }
 

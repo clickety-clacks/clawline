@@ -5191,12 +5191,13 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     }
 }
 
-private final class SessionMetadataFooterCell: UICollectionViewCell {
+final class SessionMetadataFooterCell: UICollectionViewCell {
     static let reuseIdentifier = "SessionMetadataFooterCell"
     static let itemId = "__session_metadata_footer__"
-    static let topPadding: CGFloat = 8
-    static let bottomPadding: CGFloat = 18
+    static let topPadding: CGFloat = 4
+    static let bottomPadding: CGFloat = 4
     static let horizontalPadding: CGFloat = 12
+    static let actionRegionHeight: CGFloat = 44
 
     private let stackView = UIStackView()
 
@@ -5213,7 +5214,14 @@ private final class SessionMetadataFooterCell: UICollectionViewCell {
         let enabled: Bool?
     }
 
+    private static let footerFont = UIFont.clawline(.timestamp)
+
     private final class FooterButton: UIButton {
+        override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+            guard self.point(inside: point, with: event) else { return nil }
+            return self
+        }
+
         override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
             let minimumSide: CGFloat = 44
             let horizontalInset = max(0, (minimumSide - bounds.width) / 2)
@@ -5229,22 +5237,29 @@ private final class SessionMetadataFooterCell: UICollectionViewCell {
 
         stackView.translatesAutoresizingMaskIntoConstraints = false
         stackView.axis = .horizontal
-        stackView.alignment = .center
-        stackView.distribution = .equalCentering
-        stackView.spacing = 6
+        stackView.alignment = .fill
+        stackView.distribution = .fillEqually
+        stackView.spacing = 4
         contentView.addSubview(stackView)
 
         NSLayoutConstraint.activate([
-            stackView.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
-            stackView.leadingAnchor.constraint(greaterThanOrEqualTo: contentView.leadingAnchor, constant: Self.horizontalPadding),
-            stackView.trailingAnchor.constraint(lessThanOrEqualTo: contentView.trailingAnchor, constant: -Self.horizontalPadding),
-            stackView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: Self.topPadding),
-            stackView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -Self.bottomPadding)
+            stackView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: Self.horizontalPadding),
+            stackView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -Self.horizontalPadding),
+            stackView.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
+            stackView.heightAnchor.constraint(equalToConstant: Self.actionRegionHeight)
         ])
     }
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        let actionButtons = stackView.arrangedSubviews.compactMap { $0 as? FooterButton }
+        if let button = FooterActionHitTesting.hitView(at: point, in: self, candidates: actionButtons, event: event) {
+            return button
+        }
+        return super.hitTest(point, with: event)
     }
 
     func configure(
@@ -5259,10 +5274,7 @@ private final class SessionMetadataFooterCell: UICollectionViewCell {
             view.removeFromSuperview()
         }
         let items = Self.footerItems(for: status)
-        for (index, item) in items.enumerated() {
-            if index > 0 {
-                stackView.addArrangedSubview(separatorLabel(color: textColor))
-            }
+        for item in items {
             stackView.addArrangedSubview(button(for: item, status: status, color: textColor, onSelect: onSelect))
         }
         accessibilityLabel = Self.footerText(for: status)
@@ -5271,7 +5283,7 @@ private final class SessionMetadataFooterCell: UICollectionViewCell {
 
     static func height(for status: SessionStatus?) -> CGFloat {
         guard footerText(for: status) != nil else { return 0 }
-        return ceil(UIFont.clawline(.timestamp).lineHeight + topPadding + bottomPadding)
+        return ceil(actionRegionHeight + topPadding + bottomPadding)
     }
 
     static func footerText(for status: SessionStatus?) -> String? {
@@ -5300,7 +5312,7 @@ private final class SessionMetadataFooterCell: UICollectionViewCell {
             FooterItem(
                 text: normalized(display.model) ?? "Unknown model",
                 action: modelCapability.isSupported ? .setModel : nil,
-                options: modelOptions(display: display),
+                options: modelOptions(display: display, catalog: status.modelCatalog),
                 unsupportedReason: modelCapability.reason ?? "model_catalog_control_not_available"
             ),
             FooterItem(
@@ -5334,12 +5346,17 @@ private final class SessionMetadataFooterCell: UICollectionViewCell {
     ) -> UIButton {
         let button = FooterButton(type: .system)
         var configuration = UIButton.Configuration.plain()
-        configuration.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 2, bottom: 0, trailing: 2)
-        configuration.title = item.text
+        configuration.contentInsets = NSDirectionalEdgeInsets(top: 2, leading: 4, bottom: 2, trailing: 4)
+        configuration.attributedTitle = AttributedString(
+            item.text,
+            attributes: AttributeContainer([.font: Self.footerFont])
+        )
         configuration.baseForegroundColor = color
+        configuration.background.strokeWidth = 0
         button.configuration = configuration
-        button.titleLabel?.font = UIFont.clawline(.timestamp)
+        button.titleLabel?.font = Self.footerFont
         button.titleLabel?.adjustsFontForContentSizeCategory = true
+        button.titleLabel?.lineBreakMode = .byTruncatingTail
         button.tintColor = color
         button.isEnabled = item.action != nil && !item.options.isEmpty
         button.showsMenuAsPrimaryAction = button.isEnabled
@@ -5360,22 +5377,27 @@ private final class SessionMetadataFooterCell: UICollectionViewCell {
         return button
     }
 
-    private func separatorLabel(color: UIColor) -> UILabel {
-        let label = UILabel()
-        label.text = "·"
-        label.textColor = color.withAlphaComponent(0.7)
-        label.font = UIFont.clawline(.timestamp)
-        label.adjustsFontForContentSizeCategory = true
-        return label
-    }
-
-    private static func modelOptions(display: SessionStatus.Display) -> [FooterOption] {
+    private static func modelOptions(display: SessionStatus.Display,
+                                     catalog: SessionStatus.ModelCatalog?) -> [FooterOption] {
         let current = normalized(display.model)
-        let models = ([current] + (display.fallbackModels ?? []).map { normalized($0) }).compactMap { $0 }
-        let uniqueModels = Array(NSOrderedSet(array: models)) as? [String] ?? models
+        if catalog?.available == true {
+            return catalog?.models.map { model in
+                let title = modelCatalogOptionTitle(model, current: current)
+                return FooterOption(title: title, value: model.ref, enabled: nil)
+            } ?? []
+        }
+        let fallbackModels = ([current] + (display.fallbackModels ?? []).map { normalized($0) }).compactMap { $0 }
+        let uniqueModels = Array(NSOrderedSet(array: fallbackModels)) as? [String] ?? fallbackModels
         return uniqueModels.map { model in
             FooterOption(title: model == current ? "\(model) (Current)" : model, value: model, enabled: nil)
         }
+    }
+
+    private static func modelCatalogOptionTitle(_ model: SessionStatus.ModelCatalog.Model,
+                                                current: String?) -> String {
+        let title = normalized(model.alias) ?? normalized(model.name) ?? normalized(model.ref) ?? model.ref
+        let isCurrent = current == normalized(model.id) || current == normalized(model.ref)
+        return isCurrent ? "\(title) (Current)" : title
     }
 
     private static func levelOptions(current: String?, action: SessionControlAction?) -> [FooterOption] {
@@ -5462,6 +5484,77 @@ private final class SessionMetadataFooterCell: UICollectionViewCell {
         return trimmed.isEmpty ? nil : trimmed
     }
 
+}
+
+enum FooterActionHitTesting {
+    @MainActor
+    static func hitView(
+        at point: CGPoint,
+        in container: UIView,
+        candidates: [UIView],
+        event: UIEvent?
+    ) -> UIView? {
+        let eligibleCandidates = candidates.filter { candidate in
+            guard !candidate.isHidden,
+                  candidate.isUserInteractionEnabled,
+                  candidate.alpha > 0.01
+            else { return false }
+            if let control = candidate as? UIControl, !control.isEnabled {
+                return false
+            }
+            return true
+        }
+        for candidate in eligibleCandidates.reversed() {
+            let pointInCandidate = container.convert(point, to: candidate)
+            if candidate.point(inside: pointInCandidate, with: event) {
+                return candidate
+            }
+        }
+
+        let orderedRegions = actionRegions(for: eligibleCandidates, in: container)
+        return orderedRegions.first { region in
+            region.rect.contains(point)
+        }?.view
+    }
+
+    @MainActor
+    static func actionRegions(for candidates: [UIView], in container: UIView) -> [(view: UIView, rect: CGRect)] {
+        let ordered = candidates
+            .filter { candidate in
+                guard !candidate.isHidden,
+                      candidate.isUserInteractionEnabled,
+                      candidate.alpha > 0.01
+                else { return false }
+                if let control = candidate as? UIControl, !control.isEnabled {
+                    return false
+                }
+                return true
+            }
+            .map { candidate in
+                (view: candidate, frame: candidate.convert(candidate.bounds, to: container))
+            }
+            .sorted { $0.frame.midX < $1.frame.midX }
+        guard !ordered.isEmpty else { return [] }
+
+        return ordered.enumerated().map { index, entry in
+            let previousFrame = index > 0 ? ordered[index - 1].frame : nil
+            let nextFrame = index < ordered.count - 1 ? ordered[index + 1].frame : nil
+            let horizontalPadding = max(0, (44 - entry.frame.width) / 2)
+            let minX = previousFrame.map { ($0.midX + entry.frame.midX) / 2 }
+                ?? max(container.bounds.minX, entry.frame.minX - horizontalPadding)
+            let maxX = nextFrame.map { (entry.frame.midX + $0.midX) / 2 }
+                ?? min(container.bounds.maxX, entry.frame.maxX + horizontalPadding)
+            return (
+                view: entry.view,
+                rect: CGRect(
+                    x: minX,
+                    y: container.bounds.minY,
+                    width: max(0, maxX - minX),
+                    height: container.bounds.height
+                )
+            )
+        }
+    }
 }
 
 private final class MessageFlowLayout: UICollectionViewFlowLayout {

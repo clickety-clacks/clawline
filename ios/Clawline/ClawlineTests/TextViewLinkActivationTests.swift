@@ -4,41 +4,44 @@ import UIKit
 @testable import Clawline
 
 struct TextViewLinkActivationTests {
-    @Test("Text-view link activation uses shared release-triggered handler")
+    @Test("Rendered links keep URL attributes for UITextView activation")
     @MainActor
-    func sharedReleaseTriggeredHandlerCancelsDefaultAction() {
+    func renderedLinksKeepURLAttributesForTextViewActivation() {
         let url = URL(string: "https://example.com/release-triggered-link")!
-        var openedURLs: [URL] = []
+        let rendered = UnifiedMarkdownRenderer.renderNSAttributedString(
+            markdown: "Open \(url.absoluteString)",
+            baseFont: .systemFont(ofSize: 15),
+            inkColor: .label,
+            lineSpacing: 0
+        )
 
-        let shouldAllowDefaultAction = UnifiedMarkdownRenderer.handleReleaseTriggeredLinkActivation(url) { openedURL in
-            openedURLs.append(openedURL)
-        }
-
-        #expect(openedURLs == [url])
-        #expect(shouldAllowDefaultAction == false)
+        let link = rendered?.attribute(.link, at: "Open ".count, effectiveRange: nil) as? URL
+        #expect(link == url)
     }
 
-    @Test("Non-default text-item interactions do not eagerly open links")
+    @Test("Text views are configured for delegate-driven link activation")
     @MainActor
-    func nonDefaultInteractionsRemainAvailableToUIKit() {
-        let url = URL(string: "https://example.com/release-triggered-link")!
-        var openedURLs: [URL] = []
+    func textViewsAreConfiguredForDelegateDrivenLinkActivation() {
+        let delegate = TextViewDelegateProbe()
+        let textView = UITextView()
+        let linkTextAttributes: [NSAttributedString.Key: Any] = [
+            .foregroundColor: UIColor.systemBlue
+        ]
 
-        let shouldAllowPreview = UnifiedMarkdownRenderer.handleReleaseTriggeredLinkActivation(
-            url,
-            interaction: .preview
-        ) { openedURL in
-            openedURLs.append(openedURL)
-        }
-        let shouldAllowActions = UnifiedMarkdownRenderer.handleReleaseTriggeredLinkActivation(
-            url,
-            interaction: .presentActions
-        ) { openedURL in
-            openedURLs.append(openedURL)
-        }
+        UnifiedMarkdownRenderer.configureTextView(
+            textView,
+            delegate: delegate,
+            linkTextAttributes: linkTextAttributes
+        )
 
-        #expect(openedURLs.isEmpty)
-        #expect(shouldAllowPreview)
-        #expect(shouldAllowActions)
+        #expect(textView.delegate === delegate)
+        #expect(textView.isUserInteractionEnabled)
+        #expect(!textView.isEditable)
+        #expect(textView.isSelectable)
+        #expect(!textView.isScrollEnabled)
+        #expect(textView.dataDetectorTypes.isEmpty)
+        #expect(textView.linkTextAttributes[.foregroundColor] as? UIColor == .systemBlue)
     }
 }
+
+private final class TextViewDelegateProbe: NSObject, UITextViewDelegate {}

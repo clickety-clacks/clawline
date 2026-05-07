@@ -1676,6 +1676,14 @@ final class ChatViewModel: ChatViewModelHosting {
             "incoming id=\(message.id, privacy: .public) sessionKey=\(message.sessionKey, privacy: .public) stream=\(message.stream.rawValue, privacy: .public) role=\(String(describing: message.role), privacy: .public) streaming=\(message.streaming, privacy: .public) deviceId=\(message.deviceId ?? "nil", privacy: .public) snippet=\"\(snippet, privacy: .public)\""
         )
 
+        guard !isPrunedSessionKey(message.sessionKey) else {
+            logger.info(
+                "incoming suppressed pruned_session id=\(message.id, privacy: .public) sessionKey=\(message.sessionKey, privacy: .public)"
+            )
+            clearCursor(for: message.sessionKey)
+            return
+        }
+
         if shouldSuppressInteractiveCallbackEcho(message) {
             logger.info(
                 "incoming suppressed interactive_callback_echo id=\(message.id, privacy: .public) sessionKey=\(message.sessionKey, privacy: .public)"
@@ -1701,14 +1709,6 @@ final class ChatViewModel: ChatViewModelHosting {
                 replyToMessageId: message.replyToMessageId,
                 replyToClientMessageId: message.replyToClientMessageId
             )
-        }
-
-        guard !isPrunedSessionKey(message.sessionKey) else {
-            logger.info(
-                "incoming suppressed pruned_session id=\(message.id, privacy: .public) sessionKey=\(message.sessionKey, privacy: .public)"
-            )
-            clearCursor(for: message.sessionKey)
-            return
         }
 
         // Check if this is an assistant message arriving while typing indicator is visible.

@@ -2154,6 +2154,23 @@ struct ChatViewModelTests {
         #expect(secondViewModel.stream(for: staleKey) == nil)
         #expect(secondViewModel.messages(for: staleKey).isEmpty)
         #expect(secondViewModel.orderedSessionKeys == [personalSessionKey])
+        #expect(secondService.replayCursorSnapshot()[staleKey] == nil)
+
+        secondService.emit(
+            Message(
+                id: "s_stale_callback",
+                role: .user,
+                content: "[Interactive: button] action=approve",
+                timestamp: Date(),
+                streaming: false,
+                attachments: [],
+                deviceId: nil,
+                sessionKey: staleKey
+            )
+        )
+        try await Task.sleep(for: .milliseconds(40))
+
+        #expect(secondService.replayCursorSnapshot()[staleKey] == nil)
 
         secondService.emitServiceEvent(
             .streamCreated(

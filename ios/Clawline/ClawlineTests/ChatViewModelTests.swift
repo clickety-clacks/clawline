@@ -1158,6 +1158,10 @@ struct ChatViewModelTests {
 
         #expect(uploadService.uploadedPayloads.count == 1)
         #expect(chatService.lastSentAttachments.count == 2)
+        guard chatService.lastSentAttachments.count == 2 else {
+            Issue.record("Expected send to produce two wire attachments")
+            return
+        }
 
         let first = chatService.lastSentAttachments[0]
         let second = chatService.lastSentAttachments[1]
@@ -1176,6 +1180,40 @@ struct ChatViewModelTests {
 
         #expect(viewModel.attachmentData.isEmpty)
         #expect(viewModel.inputContent.string.isEmpty)
+    }
+
+    @Test("two immediate sends dispatch one outbound message")
+    @MainActor
+    func immediateDoubleSendDispatchesOnce() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let uploadService = TestUploadService()
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: uploadService,
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        viewModel.inputContent = NSAttributedString(string: "Send once")
+
+        await viewModel.onAppear()
+        try await setReadyToSend(chatService: chatService, viewModel: viewModel)
+        viewModel.send()
+        let firstSendTask = viewModel.sendTask
+        viewModel.send()
+        let secondSendTask = viewModel.sendTask
+        try await firstSendTask?.value
+        try await secondSendTask?.value
+
+        #expect(chatService.sendCallCount == 1)
+        #expect(chatService.lastSentContent == "Send once")
     }
 
     @Test("send during attachment staging gap does not prune and retries cleanly after token insertion")
@@ -4056,6 +4094,7 @@ private final class TestChatService: ChatServicing {
     private(set) var lastSentId: String?
     private(set) var lastSentContent: String?
     private(set) var lastSessionKey: String?
+    private(set) var sendCallCount: Int = 0
     var lastPublishedReadState: (sessionKey: String, lastReadMessageId: String)?
     private(set) var connectCallCount: Int = 0
     var isTransportReadyForSend: Bool = false
@@ -4182,6 +4221,7 @@ private final class TestChatService: ChatServicing {
     }
 
     func send(id: String, content: String, attachments: [WireAttachment], sessionKey: String?) async throws {
+        sendCallCount += 1
         if let sendError {
             throw sendError
         }

@@ -743,7 +743,6 @@ struct ChatView: View {
                              viewModel: ChatViewModel,
                              toastManager: ToastManager) -> some View {
         @Bindable var viewModel = viewModel
-        let statusBarTopInset: CGFloat = geometry.safeAreaInsets.top
         let messageListTopInset = geometry.safeAreaInsets.top
         let isCompactLayout = horizontalSizeClass == .compact
         let metrics = ChatFlowTheme.Metrics(isCompact: isCompactLayout)
@@ -844,13 +843,11 @@ struct ChatView: View {
             )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .ignoresSafeArea(.container, edges: [.top, .bottom])
+                .softTopScrollEdgeEffect()
         )
 
         ZStack(alignment: .top) {
             messageLayer
-                // #31: fade out message content behind the system status bar (mask, not overlay tint).
-                .compositingGroup()
-                .mask(statusBarFadeMask(topInset: statusBarTopInset))
 
             streamToastView(
                 inputBarTopFromScreenBottom: inputBarTopFromScreenBottom
@@ -1421,32 +1418,6 @@ struct ChatView: View {
         .visionOSInputBarDepthOffset()
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         .ignoresSafeArea(.container, edges: .bottom)
-    }
-
-    @ViewBuilder
-    private func statusBarFadeMask(topInset: CGFloat) -> some View {
-        // #31 follow-up: reduce strength + height. This is a mask (not an overlay), so lower alpha
-        // means content remains partially visible behind the status bar instead of fully hidden.
-        if topInset <= 0 {
-            Rectangle().fill(Color.white)
-        } else {
-            let topAlpha: CGFloat = 0.25
-            let fullyHiddenHeight = topInset + 9
-            let fadeHeight: CGFloat = 23
-            VStack(spacing: 0) {
-                Rectangle()
-                    .fill(Color.white.opacity(topAlpha))
-                    .frame(height: fullyHiddenHeight)
-                LinearGradient(
-                    colors: [Color.white.opacity(topAlpha), Color.white],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-                .frame(height: fadeHeight)
-                Rectangle().fill(Color.white)
-            }
-            .ignoresSafeArea(.container, edges: .top)
-        }
     }
 
     private func inputFieldWidthCap(containerWidth: CGFloat, bottomSafeAreaInset: CGFloat) -> CGFloat {
@@ -2199,6 +2170,21 @@ struct ChatView: View {
         }
     }
 
+}
+
+private extension View {
+    @ViewBuilder
+    func softTopScrollEdgeEffect() -> some View {
+#if os(visionOS)
+        self
+#else
+        if #available(iOS 26.0, macOS 26.0, *) {
+            self.scrollEdgeEffectStyle(.soft, for: .top)
+        } else {
+            self
+        }
+#endif
+    }
 }
 
 private struct VisionOSInputBarDepthOffset: ViewModifier {

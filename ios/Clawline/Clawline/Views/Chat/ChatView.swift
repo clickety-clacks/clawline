@@ -849,6 +849,8 @@ struct ChatView: View {
         ZStack(alignment: .top) {
             messageLayer
 
+            topChatSoftFade(topInset: geometry.safeAreaInsets.top)
+
             streamToastView(
                 inputBarTopFromScreenBottom: inputBarTopFromScreenBottom
             )
@@ -1418,6 +1420,37 @@ struct ChatView: View {
         .visionOSInputBarDepthOffset()
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         .ignoresSafeArea(.container, edges: .bottom)
+    }
+
+    @ViewBuilder
+    private func topChatSoftFade(topInset: CGFloat) -> some View {
+#if os(visionOS)
+        EmptyView()
+#else
+        // The visible chat scroller is UIKit-hosted, so SwiftUI's scrollEdgeEffectStyle
+        // has no rendered scroll edge here. Keep a minimal visual fallback at the screen top.
+        let topColor = ChatFlowTheme.pageBackgroundTopColor(colorScheme)
+        let solidHeight = max(0, topInset + 8)
+        let fadeHeight: CGFloat = 34
+        VStack(spacing: 0) {
+            Rectangle()
+                .fill(topColor.opacity(0.92))
+                .frame(height: solidHeight)
+            LinearGradient(
+                colors: [
+                    topColor.opacity(0.92),
+                    topColor.opacity(0.0)
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .frame(height: fadeHeight)
+            Spacer(minLength: 0)
+        }
+        .ignoresSafeArea(.container, edges: .top)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+#endif
     }
 
     private func inputFieldWidthCap(containerWidth: CGFloat, bottomSafeAreaInset: CGFloat) -> CGFloat {

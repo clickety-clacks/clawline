@@ -77,8 +77,8 @@ struct WatchMainView: View {
             let showsChannelRow = transport.transportState != .disconnected
 
             VStack(spacing: WatchShellMetrics.shellSpacing) {
-                historyRevealArea(for: stream?.sessionKey)
-                    .frame(maxHeight: .infinity)
+                historyRevealArea(for: stream?.sessionKey, availableSize: availableSize)
+                    .frame(maxWidth: .infinity)
 
                 if let shellMessage {
                     shellMessageView(shellMessage)
@@ -97,29 +97,43 @@ struct WatchMainView: View {
     }
 
     @ViewBuilder
-    private func historyRevealArea(for sessionKey: String?) -> some View {
+    private func historyRevealArea(for sessionKey: String?, availableSize: CGSize) -> some View {
         let entries = conversationStore.visibleEntries(for: sessionKey)
 
         if !entries.isEmpty {
-            GeometryReader { proxy in
-                ScrollView {
+            ScrollViewReader { proxy in
+                ScrollView(.vertical) {
                     VStack(spacing: 6) {
                         ForEach(entries) { entry in
                             historyBubble(entry)
+                                .id(entry.id)
                         }
-
-                        Color.clear
-                            .frame(height: max(proxy.size.height, 1))
-                            .accessibilityHidden(true)
                     }
                     .frame(maxWidth: .infinity)
+                    .padding(.horizontal, 2)
+                    .padding(.vertical, 2)
                 }
                 .defaultScrollAnchor(.bottom)
                 .scrollIndicators(.hidden)
+                .frame(minHeight: WatchShellMetrics.historyMinHeight, maxHeight: WatchShellMetrics.historyHeight(for: availableSize), alignment: .bottom)
+                .background(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .fill(Color.white.opacity(0.06))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                        .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                )
+                .task(id: entries.last?.id) {
+                    guard let lastId = entries.last?.id else { return }
+                    withAnimation(.easeOut(duration: 0.18)) {
+                        proxy.scrollTo(lastId, anchor: .bottom)
+                    }
+                }
+                .accessibilityLabel("Recent conversation")
             }
         } else {
-            Color.clear
-                .accessibilityHidden(true)
+            EmptyView()
         }
     }
 
@@ -285,6 +299,8 @@ struct WatchMainView: View {
     private func shellMessage(for stream: StreamSession?) -> String? {
         Self.shellMessage(
             hasProviderCredentials: presentationState.hasProviderCredentials,
+            transportState: transport.transportState,
+            statusText: presentationState.statusText,
             streamLoadState: channelManager.streamLoadState,
             streams: channelManager.streams,
             stream: stream
@@ -293,12 +309,21 @@ struct WatchMainView: View {
 
     nonisolated static func shellMessage(
         hasProviderCredentials: Bool,
+        transportState: WatchProviderTransportState,
+        statusText: String,
         streamLoadState: WatchChannelManager.StreamLoadState,
         streams: [StreamSession],
         stream: StreamSession?
     ) -> String? {
         if !hasProviderCredentials {
             return "Open Clawline on iPhone to pair"
+        }
+
+        switch transportState {
+        case .probing, .disconnected:
+            return statusText
+        case .direct, .relay:
+            break
         }
 
         switch streamLoadState {

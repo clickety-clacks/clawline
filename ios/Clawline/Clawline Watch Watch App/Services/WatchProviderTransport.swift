@@ -228,6 +228,7 @@ final class WatchProviderTransport: ChatServicing {
                 )
                 eventBroadcaster.send(.messageAcked(id: id))
             } catch {
+                enterProbing(reason: "relay send failed")
                 buffer(message)
                 throw error
             }
@@ -956,6 +957,7 @@ final class WatchProviderTransport: ChatServicing {
     ) async throws -> [String: Any] {
         let session = WCSession.default
         guard session.activationState == .activated, session.isReachable else {
+            enterProbing(reason: "relay unavailable")
             throw TransportError.notConnected
         }
 
@@ -971,12 +973,18 @@ final class WatchProviderTransport: ChatServicing {
             return [:]
         }
 
-        let response: [String: Any] = try await withCheckedThrowingContinuation { continuation in
-            session.sendMessage(message) { reply in
-                continuation.resume(returning: reply)
-            } errorHandler: { error in
-                continuation.resume(throwing: error)
+        let response: [String: Any]
+        do {
+            response = try await withCheckedThrowingContinuation { continuation in
+                session.sendMessage(message) { reply in
+                    continuation.resume(returning: reply)
+                } errorHandler: { error in
+                    continuation.resume(throwing: error)
+                }
             }
+        } catch {
+            enterProbing(reason: "relay request failed")
+            throw error
         }
 
         if let errorPayload = response["error"] as? [String: Any],

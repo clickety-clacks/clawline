@@ -176,10 +176,36 @@ struct WatchConnectionPresentationStateTests {
         #expect(
             WatchMainView.shellMessage(
                 hasProviderCredentials: true,
+                transportState: .relay,
+                statusText: "Tap or hold to talk",
                 streamLoadState: .failed("No transport available"),
                 streams: [],
                 stream: nil
             ) == "No transport available"
+        )
+    }
+
+    @Test("transport outages are surfaced in shell copy")
+    func shellMessageSurfacesTransportOutages() {
+        #expect(
+            WatchMainView.shellMessage(
+                hasProviderCredentials: true,
+                transportState: .probing,
+                statusText: "Reconnecting...",
+                streamLoadState: .loaded,
+                streams: [],
+                stream: nil
+            ) == "Reconnecting..."
+        )
+        #expect(
+            WatchMainView.shellMessage(
+                hasProviderCredentials: true,
+                transportState: .disconnected,
+                statusText: "No Connection",
+                streamLoadState: .loaded,
+                streams: [],
+                stream: nil
+            ) == "No Connection"
         )
     }
 

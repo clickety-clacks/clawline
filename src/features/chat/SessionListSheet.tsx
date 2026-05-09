@@ -36,6 +36,7 @@ export function SessionListSheet({
   onSelectSession,
   provisionedSessionKeys,
   streamDotStateBySessionKey,
+  unreadBySessionKey,
   streams,
   transportPhase
 }: {
@@ -46,6 +47,7 @@ export function SessionListSheet({
   onSelectSession: (sessionKey: string) => void;
   provisionedSessionKeys: string[];
   streamDotStateBySessionKey: Record<string, StreamDotState>;
+  unreadBySessionKey: Record<string, number>;
   streams: StreamRecord[];
   transportPhase: TransportPhase;
 }) {
@@ -87,6 +89,7 @@ export function SessionListSheet({
               const isActive = stream.sessionKey === activeSessionKey;
               const dotState =
                 streamDotStateBySessionKey[stream.sessionKey] ?? "inactive";
+              const unreadCount = Math.max(0, unreadBySessionKey[stream.sessionKey] ?? 0);
               const provisioningState = getSessionProvisioningState({
                 hasStream: true,
                 provisionedSessionKeys,
@@ -117,7 +120,7 @@ export function SessionListSheet({
                         className={
                           isActive
                             ? "session-sheet-card-indicator session-sheet-card-indicator--active"
-                            : dotState === "unread"
+                            : unreadCount > 0 || dotState === "unread"
                               ? "session-sheet-card-indicator session-sheet-card-indicator--unread"
                               : dotState === "userTail"
                                 ? "session-sheet-card-indicator session-sheet-card-indicator--user-tail"
@@ -125,6 +128,11 @@ export function SessionListSheet({
                         }
                       />
                       <span className="session-sheet-card-title">{displayName}</span>
+                      {unreadCount > 0 ? (
+                        <span aria-label={`${unreadCount} unread messages`} className="session-sheet-card-unread-count">
+                          {unreadCount}
+                        </span>
+                      ) : null}
                     </span>
                   </span>
                 </button>

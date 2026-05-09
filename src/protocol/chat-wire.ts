@@ -66,6 +66,23 @@ export interface ClientMessagePayload {
   sessionKey?: string;
 }
 
+export type JsonValue =
+  | null
+  | boolean
+  | number
+  | string
+  | JsonValue[]
+  | { [key: string]: JsonValue };
+
+export interface InteractiveCallbackPayload {
+  type: "interactive-callback";
+  messageId: string;
+  payload: {
+    action: string;
+    data?: JsonValue;
+  };
+}
+
 export interface ClientInlineImageAttachmentPayload {
   type: "image";
   mimeType: string;
@@ -188,6 +205,10 @@ export interface EventPayload {
   payload?: Record<string, unknown> | null;
 }
 
+export interface SyncCompletePayload {
+  type: "sync_complete";
+}
+
 export type PhaseOneServerPayload =
   | AckPayload
   | AuthResultPayload
@@ -199,7 +220,8 @@ export type PhaseOneServerPayload =
   | StreamReadStatePayload
   | StreamMutationPayload
   | StreamSnapshotPayload
-  | StreamTailStatePayload;
+  | StreamTailStatePayload
+  | SyncCompletePayload;
 
 export function serializePairRequest(payload: PairRequestPayload) {
   return JSON.stringify(payload);
@@ -210,6 +232,10 @@ export function serializeAuthPayload(payload: AuthPayload) {
 }
 
 export function serializeClientMessage(payload: ClientMessagePayload) {
+  return JSON.stringify(payload);
+}
+
+export function serializeInteractiveCallback(payload: InteractiveCallbackPayload) {
   return JSON.stringify(payload);
 }
 
@@ -286,6 +312,8 @@ export function parseServerPayload(raw: string): PhaseOneServerPayload {
       return parseSessionInfoFromRecord(value);
     case "event":
       return parseEventFromRecord(value);
+    case "sync_complete":
+      return parseSyncCompleteFromRecord(value);
     case "auth_result":
       return parseAuthResultPayload(raw);
     case "error":
@@ -293,6 +321,11 @@ export function parseServerPayload(raw: string): PhaseOneServerPayload {
     default:
       throw new Error(`Unsupported server payload type: ${type}`);
   }
+}
+
+function parseSyncCompleteFromRecord(value: JsonRecord): SyncCompletePayload {
+  assertLiteral(value.type, "sync_complete", "sync_complete.type");
+  return { type: "sync_complete" };
 }
 
 function parseAckFromRecord(value: JsonRecord): AckPayload {

@@ -196,6 +196,10 @@ final class StreamPopupRouteController {
 }
 
 struct ChatView: View {
+    private static var t217DiagnosticBuild: String {
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"
+        return "T217-typing-cancel-\(build)"
+    }
 
     @Bindable var viewModel: ChatViewModel
     let toastManager: ToastManager
@@ -219,6 +223,7 @@ struct ChatView: View {
     @State private var pendingInputInsertions: [PendingAttachment] = []
     @State private var inputBarSendButtonConnectionState = SendButtonConnectionStateStore()
     @State private var activeSheet: ChatSheet?
+    @State private var isAttachmentMenuPresented = false
     @State private var streamPopupRouteController = StreamPopupRouteController()
     @State private var isPhotosPickerPresented = false
     @State private var isFileImporterPresented = false
@@ -322,14 +327,11 @@ struct ChatView: View {
     }
 
     private enum ChatSheet: Identifiable {
-        case attachmentMenu
         case expandedMessage(Message)
         case camera
 
         var id: String {
             switch self {
-            case .attachmentMenu:
-                return "attachmentMenu"
             case .expandedMessage(let message):
                 return "expandedMessage-\(message.id)"
             case .camera:
@@ -984,6 +986,7 @@ struct ChatView: View {
         let promptFocusShortcutEnabled = !isInputFocused
             && streamPopupRouteController.route == .closed
             && activeSheet == nil
+            && !isAttachmentMenuPresented
             && !isPhotosPickerPresented
             && !isFileImporterPresented
         let cancelCurrentPromptDialogCanCancel = cancelCurrentPromptSessionKey.map { sessionKey in
@@ -1605,6 +1608,7 @@ struct ChatView: View {
 
 #if os(visionOS)
         let pinnedScrollButtonView: AnyView? = nil
+        let pinnedScrollButtonIsVisible = false
         let pinnedScrollButtonGap: CGFloat = 0
         let pinnedScrollButtonHorizontalOffset: CGFloat = 0
         let pinnedScrollButtonMaxHorizontalOffset: CGFloat = 0
@@ -1615,6 +1619,7 @@ struct ChatView: View {
         let pinnedPageDotsGap: CGFloat = 0
 #else
         let pinnedScrollButtonView: AnyView? = scrollButtonView
+        let pinnedScrollButtonIsVisible = state.isVisible
         let pinnedScrollButtonGap: CGFloat = floatingScrollButtonBottomGap
         let pinnedScrollButtonHorizontalOffset = scrollButtonHorizontalOffset(
             for: scrollButtonDetent,
@@ -1644,9 +1649,9 @@ struct ChatView: View {
             freezeBarHeightUpdates: dictationMotion.shouldFreezeLayout,
             versionText: appVersionLabel,
             layoutCoordinator: layoutCoordinator,
-            layoutKey: layoutKey
-            ,
+            layoutKey: layoutKey,
             scrollButtonView: pinnedScrollButtonView,
+            scrollButtonIsVisible: pinnedScrollButtonIsVisible,
             scrollButtonGap: pinnedScrollButtonGap,
             scrollButtonHorizontalOffset: pinnedScrollButtonHorizontalOffset,
             scrollButtonMaxHorizontalOffset: pinnedScrollButtonMaxHorizontalOffset,
@@ -1674,6 +1679,7 @@ struct ChatView: View {
                 isTextFieldFocused: isInputFocused,
                 bottomSafeAreaInset: geometry.safeAreaInsets.bottom,
                 isKeyboardVisible: isKeyboardVisible,
+                isAttachmentMenuPresented: $isAttachmentMenuPresented,
                 onSend: {
                     clearTypingActivity()
                     dictationCoordinator.handleSendTapped(sendAction: sendCommandPort.sendCommand)
@@ -1681,7 +1687,25 @@ struct ChatView: View {
                 onCancel: { viewModel.cancelSend() },
                 onReconnect: { viewModel.reconnect() },
                 onAdd: {
-                    activeSheet = .attachmentMenu
+                    isAttachmentMenuPresented = true
+                },
+                attachmentMenuContent: {
+                    AnyView(
+                        AttachmentSourceSheet(
+                            onCamera: {
+                                isAttachmentMenuPresented = false
+                                presentCamera()
+                            },
+                            onPhotos: {
+                                isAttachmentMenuPresented = false
+                                presentPhotoPicker()
+                            },
+                            onFiles: {
+                                isAttachmentMenuPresented = false
+                                presentFileImporter()
+                            }
+                        )
+                    )
                 },
                 // ⚠️ This callback is how focus state survives view recreation.
                 // DO NOT replace with @Binding or try to use @FocusState directly.
@@ -1791,19 +1815,6 @@ struct ChatView: View {
     @ViewBuilder
     private func sheetView(_ sheet: ChatSheet) -> some View {
         switch sheet {
-        case .attachmentMenu:
-            AttachmentSourceSheet(
-                onCamera: {
-                    presentCamera()
-                },
-                onPhotos: {
-                    presentPhotoPicker()
-                },
-                onFiles: {
-                    presentFileImporter()
-                }
-            )
-            .presentationDetents([.medium, .large])
         case .expandedMessage(let message):
             let metrics = ChatFlowTheme.Metrics(isCompact: horizontalSizeClass == .compact)
             let presentation = viewModel.presentation(for: message, metrics: metrics)
@@ -2013,6 +2024,15 @@ struct ChatView: View {
             onSelectStream: { sessionKey in
                 selectStream(sessionKey, source: .programmatic)
             },
+            onPreviewScrubStream: { sessionKey in
+                previewScrubStream(sessionKey, viewModel: viewModel)
+            },
+            onCommitScrubStream: { sessionKey in
+                selectStream(sessionKey, source: .programmatic)
+            },
+            onCancelScrub: {
+                streamToastManager.hide()
+            },
             onPrepareForTrackPicker: {
                 prepareForAttachmentPicker()
             },
@@ -2025,6 +2045,21 @@ struct ChatView: View {
     private func selectStream(_ sessionKey: String, source: ChatViewModel.StreamSwitchSource) {
         StreamSwitchTiming.log("selectStream_called", sessionKey: sessionKey)
         viewModel.requestStreamSwitch(to: sessionKey, source: source)
+    }
+
+    private func previewScrubStream(_ sessionKey: String, viewModel: ChatViewModel) {
+        let streamDisplayName = viewModel.stream(for: sessionKey)?.displayName ?? sessionKey
+        withAnimation(.spring(response: 0.24, dampingFraction: 0.82)) {
+            streamToastManager.show(
+                displayName: streamDisplayName,
+                sessionKey: sessionKey,
+                isBusy: false,
+                autoDismiss: false
+            )
+        }
+        streamToastBusySince = nil
+        streamToastBusyClearTask?.cancel()
+        streamToastBusyClearTask = nil
     }
 
     private var supportsKeyboardNavigationShortcuts: Bool {
@@ -2043,7 +2078,7 @@ struct ChatView: View {
         ChatKeyboardScrollRouting.isEnabled(
             platformSupportsKeyboardNavigation: supportsKeyboardNavigationShortcuts,
             streamPopupRoute: streamPopupRouteController.route,
-            activeSheetPresented: activeSheet != nil,
+            activeSheetPresented: activeSheet != nil || isAttachmentMenuPresented,
             photosPickerPresented: isPhotosPickerPresented,
             fileImporterPresented: isFileImporterPresented
         )
@@ -2123,14 +2158,30 @@ struct ChatView: View {
 
     private func presentCancelCurrentPromptDialog(sessionKey: String? = nil) {
         if let sessionKey {
+            print("T217DIAG present_request build=\(Self.t217DiagnosticBuild) explicitSession=\(sessionKey) canCancelExplicit=\(viewModel.canCancelCurrentPrompt(in: sessionKey)) canCancelAny=\(viewModel.canCancelCurrentPrompt)")
+            logger.notice(
+                "T217DIAG present_request build=\(Self.t217DiagnosticBuild, privacy: .public) explicitSession=\(sessionKey, privacy: .public) canCancelExplicit=\(viewModel.canCancelCurrentPrompt(in: sessionKey), privacy: .public) canCancelAny=\(viewModel.canCancelCurrentPrompt, privacy: .public)"
+            )
             guard viewModel.canCancelCurrentPrompt(in: sessionKey) else {
+                print("T217DIAG present_result build=\(Self.t217DiagnosticBuild) result=suppressed explicitSession=\(sessionKey)")
+                logger.notice(
+                    "T217DIAG present_result build=\(Self.t217DiagnosticBuild, privacy: .public) result=suppressed explicitSession=\(sessionKey, privacy: .public)"
+                )
                 cancelCurrentPromptSessionKey = nil
                 isCancelCurrentPromptDialogPresented = false
                 return
             }
             cancelCurrentPromptSessionKey = sessionKey
         } else {
+            print("T217DIAG present_request build=\(Self.t217DiagnosticBuild) explicitSession=nil canCancelAny=\(viewModel.canCancelCurrentPrompt)")
+            logger.notice(
+                "T217DIAG present_request build=\(Self.t217DiagnosticBuild, privacy: .public) explicitSession=nil canCancelAny=\(viewModel.canCancelCurrentPrompt, privacy: .public)"
+            )
             guard viewModel.canCancelCurrentPrompt else {
+                print("T217DIAG present_result build=\(Self.t217DiagnosticBuild) result=suppressed explicitSession=nil")
+                logger.notice(
+                    "T217DIAG present_result build=\(Self.t217DiagnosticBuild, privacy: .public) result=suppressed explicitSession=nil"
+                )
                 cancelCurrentPromptSessionKey = nil
                 isCancelCurrentPromptDialogPresented = false
                 return
@@ -2138,6 +2189,10 @@ struct ChatView: View {
             cancelCurrentPromptSessionKey = nil
         }
         isCancelCurrentPromptDialogPresented = true
+        print("T217DIAG present_result build=\(Self.t217DiagnosticBuild) result=presented storedSession=\(cancelCurrentPromptSessionKey ?? "nil")")
+        logger.notice(
+            "T217DIAG present_result build=\(Self.t217DiagnosticBuild, privacy: .public) result=presented storedSession=\(cancelCurrentPromptSessionKey ?? "nil", privacy: .public)"
+        )
     }
 
     private func insertPromptTextFromNoTextOwner(_ text: String) {
@@ -2510,6 +2565,9 @@ private struct StreamPopupTrigger: View {
     let maxAvailableHeight: CGFloat
     let maxAvailableWidth: CGFloat
     let onSelectStream: (String) -> Void
+    let onPreviewScrubStream: (String) -> Void
+    let onCommitScrubStream: (String) -> Void
+    let onCancelScrub: () -> Void
     let onPrepareForTrackPicker: () -> Void
     let onTrackPickerDismiss: () -> Void
 
@@ -2521,6 +2579,22 @@ private struct StreamPopupTrigger: View {
             maxWidth: maxWidth,
             onTap: {
                 routeController.openPopup(focusSearch: false)
+            },
+            onScrubPreview: onPreviewScrubStream,
+            onScrubCommit: onCommitScrubStream,
+            onScrubCancel: onCancelScrub,
+            onScrubCandidateHaptic: { style in
+                #if !os(visionOS)
+                let feedbackStyle: UIImpactFeedbackGenerator.FeedbackStyle
+                switch style {
+                case .light:
+                    feedbackStyle = .light
+                case .strong:
+                    feedbackStyle = .rigid
+                }
+                let generator = UIImpactFeedbackGenerator(style: feedbackStyle)
+                generator.impactOccurred()
+                #endif
             }
         )
         .popover(
@@ -3355,6 +3429,7 @@ private struct KeyboardPinnedContainer<Content: View>: UIViewRepresentable {
     let layoutCoordinator: ChatLayoutCoordinator
     let layoutKey: ChatLayoutKey
     let scrollButtonView: AnyView?
+    let scrollButtonIsVisible: Bool
     let scrollButtonGap: CGFloat
     let scrollButtonHorizontalOffset: CGFloat
     let scrollButtonMaxHorizontalOffset: CGFloat
@@ -3375,6 +3450,7 @@ private struct KeyboardPinnedContainer<Content: View>: UIViewRepresentable {
         layoutCoordinator: ChatLayoutCoordinator,
         layoutKey: ChatLayoutKey,
         scrollButtonView: AnyView? = nil,
+        scrollButtonIsVisible: Bool = false,
         scrollButtonGap: CGFloat = 0,
         scrollButtonHorizontalOffset: CGFloat = 0,
         scrollButtonMaxHorizontalOffset: CGFloat = 0,
@@ -3394,6 +3470,7 @@ private struct KeyboardPinnedContainer<Content: View>: UIViewRepresentable {
         self.layoutCoordinator = layoutCoordinator
         self.layoutKey = layoutKey
         self.scrollButtonView = scrollButtonView
+        self.scrollButtonIsVisible = scrollButtonIsVisible
         self.scrollButtonGap = scrollButtonGap
         self.scrollButtonHorizontalOffset = scrollButtonHorizontalOffset
         self.scrollButtonMaxHorizontalOffset = scrollButtonMaxHorizontalOffset
@@ -3415,6 +3492,7 @@ private struct KeyboardPinnedContainer<Content: View>: UIViewRepresentable {
         uiView.updateVersionText(versionText)
         uiView.updateScrollButton(
             scrollButtonView,
+            isVisible: scrollButtonIsVisible,
             gap: scrollButtonGap,
             horizontalOffset: scrollButtonHorizontalOffset,
             maxHorizontalOffset: scrollButtonMaxHorizontalOffset,
@@ -3489,6 +3567,12 @@ enum KeyboardPinnedHitTesting {
             return true
         }
         return false
+    }
+}
+
+enum KeyboardPinnedChromeEventRouting {
+    static func scrollButtonHostReceivesEvents(hasView: Bool, isVisible: Bool) -> Bool {
+        hasView && isVisible
     }
 }
 
@@ -3573,6 +3657,7 @@ private final class KeyboardPinnedContainerView<Content: View>: UIView, Keyboard
 
     func updateScrollButton(
         _ view: AnyView?,
+        isVisible: Bool,
         gap: CGFloat,
         horizontalOffset: CGFloat,
         maxHorizontalOffset: CGFloat,
@@ -3581,6 +3666,7 @@ private final class KeyboardPinnedContainerView<Content: View>: UIView, Keyboard
     ) {
 #if os(visionOS)
         _ = view
+        _ = isVisible
         _ = gap
         _ = horizontalOffset
         _ = maxHorizontalOffset
@@ -3620,8 +3706,13 @@ private final class KeyboardPinnedContainerView<Content: View>: UIView, Keyboard
         scrollButtonBaseHorizontalOffset = horizontalOffset
         scrollButtonMaxHorizontalOffset = maxHorizontalOffset
         scrollButtonHost?.rootView = view ?? AnyView(EmptyView())
+        let scrollButtonReceivesEvents = KeyboardPinnedChromeEventRouting.scrollButtonHostReceivesEvents(
+            hasView: view != nil,
+            isVisible: isVisible
+        )
         scrollButtonHost?.view.isHidden = (view == nil)
-        scrollButtonHost?.view.isUserInteractionEnabled = (view != nil)
+        scrollButtonHost?.view.isUserInteractionEnabled = scrollButtonReceivesEvents
+        scrollButtonPanGestureRecognizer?.isEnabled = scrollButtonReceivesEvents
         scrollButtonBottomToBarTop?.constant = -gap
         if scrollButtonIsPanning {
             scrollButtonCenterX?.constant = horizontalOffset
@@ -4189,9 +4280,32 @@ private struct AttachmentSourceSheet: View {
     @Environment(\.dismiss) private var dismiss
 #endif
 
+    private let rowHeight: CGFloat = 52
+    private let rowSpacing: CGFloat = 2
+    private let rowHorizontalInset: CGFloat = 12
+    private let outerVerticalPadding: CGFloat = 20
+    private let popupCornerRadius: CGFloat = 20
+    private let minimumPopoverWidth: CGFloat = 280
+    private let idealPopoverWidth: CGFloat = 320
+    private let maximumPopoverWidth: CGFloat = 360
+
+    private var rowCount: Int {
+#if os(visionOS)
+        3
+#else
+        3
+#endif
+    }
+
+    private var popoverHeight: CGFloat {
+        (CGFloat(rowCount) * rowHeight)
+            + (CGFloat(max(0, rowCount - 1)) * rowSpacing)
+            + (outerVerticalPadding * 2)
+    }
+
     private var effectiveColorScheme: ColorScheme { colorScheme }
     var body: some View {
-        VStack(spacing: 24) {
+        VStack(spacing: rowSpacing) {
 #if os(visionOS)
             HStack {
                 Spacer()
@@ -4201,48 +4315,49 @@ private struct AttachmentSourceSheet: View {
                 .font(.clawline(.uiLabel).weight(.semibold))
                 .foregroundStyle(.secondary)
             }
-            .padding(.top, 8)
-            .padding(.horizontal, 16)
+            .frame(height: rowHeight, alignment: .center)
+            .padding(.horizontal, rowHorizontalInset)
 #endif
-            Capsule()
-                .fill(.secondary.opacity(0.4))
-                .frame(width: 40, height: 4)
-                .padding(.top, 12)
-
-            Text("Add Attachment")
-                .font(.clawline(.subsectionHeader))
-                .foregroundStyle(ChatFlowTheme.warmBrown(effectiveColorScheme))
-
-            VStack(spacing: 12) {
 #if !os(visionOS)
-                AttachmentActionButton(
-                    title: "Camera",
-                    icon: "camera.fill",
-                    action: onCamera
-                )
+            AttachmentActionButton(
+                title: "Camera",
+                icon: "camera.fill",
+                action: onCamera,
+                rowHeight: rowHeight,
+                horizontalInset: rowHorizontalInset
+            )
 #endif
 
-                AttachmentActionButton(
-                    title: "Photos",
-                    icon: "photo.on.rectangle",
-                    action: onPhotos
-                )
+            AttachmentActionButton(
+                title: "Photos",
+                icon: "photo.on.rectangle",
+                action: onPhotos,
+                rowHeight: rowHeight,
+                horizontalInset: rowHorizontalInset
+            )
 
-                AttachmentActionButton(
-                    title: "Files",
-                    icon: "doc.fill",
-                    action: onFiles
-                )
-            }
-            .padding(.horizontal, 24)
-
-            Spacer(minLength: 0)
+            AttachmentActionButton(
+                title: "Files",
+                icon: "doc.fill",
+                action: onFiles,
+                rowHeight: rowHeight,
+                horizontalInset: rowHorizontalInset
+            )
         }
-        .background {
-            ChatFlowTheme.pageBackground(effectiveColorScheme)
-                .ignoresSafeArea()
-        }
-        .presentationDragIndicator(.visible)
+        .padding(.vertical, outerVerticalPadding)
+        .frame(
+            minWidth: minimumPopoverWidth,
+            idealWidth: idealPopoverWidth,
+            maxWidth: maximumPopoverWidth
+        )
+        .frame(height: popoverHeight, alignment: .top)
+        .background(Color.clear)
+        .clipShape(RoundedRectangle(cornerRadius: popupCornerRadius, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: popupCornerRadius, style: .continuous)
+                .stroke(Color.white.opacity(0.10), lineWidth: 0.5)
+                .allowsHitTesting(false)
+        )
     }
 }
 
@@ -4250,6 +4365,8 @@ private struct AttachmentActionButton: View {
     let title: String
     let icon: String
     let action: () -> Void
+    let rowHeight: CGFloat
+    let horizontalInset: CGFloat
 
     @Environment(\.colorScheme) private var colorScheme
     @State private var isPressed = false
@@ -4260,12 +4377,12 @@ private struct AttachmentActionButton: View {
         Button(action: action) {
             HStack(spacing: 14) {
                 Image(systemName: icon)
-                    .font(.clawline(.subsectionHeader))
+                    .font(.clawline(.uiLabel).weight(.semibold))
                     .foregroundStyle(ChatFlowTheme.sage(effectiveColorScheme))
-                    .frame(width: 28)
+                    .frame(width: 24)
 
                 Text(title)
-                    .font(.clawline(.mediumMessage).weight(.semibold))
+                    .font(.clawline(.subsectionHeader).weight(.regular))
                     .foregroundStyle(ChatFlowTheme.warmBrown(effectiveColorScheme))
 
                 Spacer()
@@ -4274,20 +4391,9 @@ private struct AttachmentActionButton: View {
                     .font(.clawline(.uiLabel).weight(.semibold))
                     .foregroundStyle(ChatFlowTheme.warmBrown(effectiveColorScheme).opacity(0.4))
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 16)
-            .background {
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(.ultraThinMaterial)
-            }
-#if os(visionOS)
-            .background(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .fill(Color.white.opacity(effectiveColorScheme == .dark ? 0.08 : 0.3))
-            )
-#else
-            .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-#endif
+            .padding(.horizontal, horizontalInset)
+            .frame(height: rowHeight, alignment: .center)
+            .background(rowBackground)
             .scaleEffect(isPressed ? 0.97 : 1)
             .animation(.easeOut(duration: 0.15), value: isPressed)
         }
@@ -4297,6 +4403,11 @@ private struct AttachmentActionButton: View {
                 .onChanged { _ in isPressed = true }
                 .onEnded { _ in isPressed = false }
         )
+    }
+
+    private var rowBackground: some View {
+        RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .fill(Color.primary.opacity(isPressed ? (effectiveColorScheme == .dark ? 0.10 : 0.06) : 0))
     }
 }
 

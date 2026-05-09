@@ -5,13 +5,23 @@ import {
   attachmentMimeType,
   fetchAuthenticatedAttachmentBlob
 } from "../../protocol/attachment-api";
+import { isInteractiveHtmlAttachment } from "../../protocol/interactive-html-wire";
+import { isTerminalAttachment } from "../../protocol/terminal-wire";
+import { InteractiveHtmlAttachmentCard } from "./InteractiveHtmlAttachmentCard";
+import { TerminalAttachmentCard } from "./TerminalAttachmentCard";
 
 export function MessageAttachments({
   attachments,
+  deviceId,
+  expanded = false,
+  messageId,
   serverUrl,
   token
 }: {
   attachments: ServerAttachmentPayload[];
+  deviceId?: string;
+  expanded?: boolean;
+  messageId: string;
   serverUrl?: string;
   token?: string;
 }) {
@@ -24,7 +34,10 @@ export function MessageAttachments({
       {attachments.map((attachment, index) => (
         <AttachmentCard
           attachment={attachment}
+          deviceId={deviceId}
+          expanded={expanded}
           key={attachment.id ?? attachment.assetId ?? `${attachment.type}:${index}`}
+          messageId={messageId}
           serverUrl={serverUrl}
           token={token}
         />
@@ -35,14 +48,45 @@ export function MessageAttachments({
 
 function AttachmentCard({
   attachment,
+  deviceId,
+  expanded,
+  messageId,
   serverUrl,
   token
 }: {
   attachment: ServerAttachmentPayload;
+  deviceId?: string;
+  expanded?: boolean;
+  messageId: string;
   serverUrl?: string;
   token?: string;
 }) {
   const kind = classifyAttachment(attachment);
+
+  if (kind === "interactive-html") {
+    return (
+      <InteractiveHtmlAttachmentCard
+        attachment={attachment}
+        expanded={expanded}
+        messageId={messageId}
+      />
+    );
+  }
+
+  if (kind === "terminal") {
+    if (expanded) {
+      return <TerminalAttachmentPlaceholder attachment={attachment} />;
+    }
+
+    return (
+      <TerminalAttachmentCard
+        attachment={attachment}
+        deviceId={deviceId}
+        serverUrl={serverUrl}
+        token={token}
+      />
+    );
+  }
 
   if (kind === "image") {
     return (
@@ -197,6 +241,21 @@ function FileAttachmentCard({
   );
 }
 
+function TerminalAttachmentPlaceholder({
+  attachment
+}: {
+  attachment: ServerAttachmentPayload;
+}) {
+  return (
+    <div className="message-attachment-card message-attachment-card--file">
+      <div className="message-attachment-copy">
+        <strong>{attachmentFilename(attachment)}</strong>
+        <span>Terminal session remains active in the message bubble.</span>
+      </div>
+    </div>
+  );
+}
+
 function AttachmentPendingCard({
   attachment
 }: {
@@ -304,6 +363,14 @@ function useAttachmentObjectUrl(input: {
 }
 
 function classifyAttachment(attachment: ServerAttachmentPayload) {
+  if (isInteractiveHtmlAttachment(attachment)) {
+    return "interactive-html";
+  }
+
+  if (isTerminalAttachment(attachment)) {
+    return "terminal";
+  }
+
   const mimeType = attachmentMimeType(attachment) ?? "";
   if (attachment.type === "image" || mimeType.startsWith("image/")) {
     return "image";

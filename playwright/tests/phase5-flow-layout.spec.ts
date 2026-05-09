@@ -201,6 +201,7 @@ test("messages use the wrapping flow layout without blank bubbles", async ({ pag
     for (const client of wss.clients) {
       client.terminate();
     }
+    server.closeAllConnections?.();
     await new Promise<void>((resolve, reject) => {
       wss.close((error) => {
         if (error) {
@@ -365,6 +366,7 @@ test("tablet-width medium messages pair naturally without oversized row gaps", a
     for (const client of wss.clients) {
       client.terminate();
     }
+    server.closeAllConnections?.();
     await new Promise<void>((resolve, reject) => {
       wss.close((error) => {
         if (error) {
@@ -522,6 +524,7 @@ test("medium bubbles wrap on 375px viewports instead of overflowing", async ({ p
     for (const client of wss.clients) {
       client.terminate();
     }
+    server.closeAllConnections?.();
     await new Promise<void>((resolve, reject) => {
       wss.close((error) => {
         if (error) {
@@ -675,6 +678,7 @@ test("short bubbles still share a row on 375px viewports when they fit", async (
     for (const client of wss.clients) {
       client.terminate();
     }
+    server.closeAllConnections?.();
     await new Promise<void>((resolve, reject) => {
       wss.close((error) => {
         if (error) {

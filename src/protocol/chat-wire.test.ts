@@ -330,6 +330,10 @@ describe("chat-wire protocol fixtures", () => {
         sessionKey: "agent:main:clawline:flynn:main"
       }
     });
+
+    expect(parseServerPayload(JSON.stringify({ type: "sync_complete" }))).toEqual({
+      type: "sync_complete"
+    });
   });
 
   it("parses error fixtures", () => {

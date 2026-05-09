@@ -780,10 +780,12 @@ struct MessageInputBar: View {
     let bottomSafeAreaInset: CGFloat
     /// Keyboard visibility state owned by parent view to survive geometry changes.
     let isKeyboardVisible: Bool
+    @Binding var isAttachmentMenuPresented: Bool
     let onSend: () -> Void
     let onCancel: () -> Void
     let onReconnect: () -> Void
     let onAdd: () -> Void
+    let attachmentMenuContent: () -> AnyView
     let onFocusChange: (Bool) -> Void
     let onRequestFocus: () -> Void
     var onRequestDirectFocus: (() -> Void)?
@@ -1150,6 +1152,14 @@ struct MessageInputBar: View {
 #endif
     }
 
+    static func disabledSendButtonBackingColor(colorScheme: ColorScheme) -> Color? {
+        colorScheme == .light
+            ? Color(red: 0.925, green: 0.922, blue: 0.890)
+            : nil
+    }
+
+    static let sendButtonColoredBackingBlurRadius: CGFloat = 7
+
     private func handleEditorSubmitIntent() {
         guard Self.shouldDispatchEditorSubmitIntent(
             isSending: isSending,
@@ -1341,6 +1351,15 @@ struct MessageInputBar: View {
 #endif
             .accessibilityLabel("Add attachment")
             .disabled(isSending)
+            .popover(
+                isPresented: $isAttachmentMenuPresented,
+                attachmentAnchor: .rect(.bounds),
+                arrowEdge: .bottom
+            ) {
+                attachmentMenuContent()
+                    .presentationCompactAdaptation(.popover)
+                    .presentationBackground(.clear)
+            }
 
             // Text field - glass capsule/rounded rect
             ZStack(alignment: .leading) {
@@ -1608,11 +1627,19 @@ struct MessageInputBar: View {
             }
             .frame(width: sendButtonSize, height: sendButtonSize)
             .background {
+                if bubbleVisualState == .ghost,
+                   let backingColor = MessageInputBar.disabledSendButtonBackingColor(colorScheme: uiColorScheme) {
+                    Circle()
+                        .fill(backingColor)
+                        .frame(width: sendButtonSize, height: sendButtonSize)
+                        .blur(radius: MessageInputBar.sendButtonColoredBackingBlurRadius)
+                }
                 TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !isReconnecting)) { context in
                     Circle()
                         .fill(bubbleColor)
                         .frame(width: sendButtonSize, height: sendButtonSize)
                         .scaleEffect(bubbleScale(at: context.date))
+                        .blur(radius: MessageInputBar.sendButtonColoredBackingBlurRadius)
                 }
             }
 #if os(visionOS)
@@ -2178,10 +2205,12 @@ struct DictationMicAffordanceAnimationPlan {
                 isTextFieldFocused: false,
                 bottomSafeAreaInset: 34,
                 isKeyboardVisible: false,
+                isAttachmentMenuPresented: .constant(false),
                 onSend: {},
                 onCancel: {},
                 onReconnect: {},
                 onAdd: {},
+                attachmentMenuContent: { AnyView(EmptyView()) },
                 onFocusChange: { _ in },
                 onRequestFocus: {},
                 onPasteImages: nil,

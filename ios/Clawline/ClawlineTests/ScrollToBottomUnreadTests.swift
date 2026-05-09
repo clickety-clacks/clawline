@@ -1,4 +1,5 @@
 import Testing
+import CoreGraphics
 @testable import Clawline
 
 struct ScrollToBottomUnreadTests {
@@ -110,5 +111,94 @@ struct ScrollToBottomUnreadTests {
             hasAuthoritativeRestoreTarget: true
         )
         #expect(shouldCompensate == false)
+    }
+
+    @Test("SBB resting bottom excludes footer reveal range")
+    func sbbRestingBottomExcludesFooterRevealRange() {
+        let contentHeight: CGFloat = 1_200
+        let boundsHeight: CGFloat = 700
+        let topInset: CGFloat = 40
+        let bottomInset: CGFloat = 180
+        let footerHeight = SessionMetadataFooterCell.topPadding
+            + SessionMetadataFooterCell.actionRegionHeight
+            + SessionMetadataFooterCell.bottomPadding
+        let restingContentHeight = MessageFlowCollectionViewController.restingBottomContentHeight(
+            contentSizeHeight: contentHeight,
+            footerHeight: footerHeight,
+            hasFooter: true
+        )
+        let restingBottom = MessageFlowCollectionViewController.bottomOffsetMaxY(
+            contentHeight: restingContentHeight,
+            boundsHeight: boundsHeight,
+            topInset: topInset,
+            bottomInset: bottomInset
+        )
+        let trueBottom = MessageFlowCollectionViewController.bottomOffsetMaxY(
+            contentHeight: contentHeight,
+            boundsHeight: boundsHeight,
+            topInset: topInset,
+            bottomInset: bottomInset
+        )
+
+        #expect(trueBottom - restingBottom == footerHeight)
+        #expect(MessageFlowCollectionViewController.footerRevealAlpha(
+            contentOffsetY: restingBottom,
+            restingBottomOffsetY: restingBottom,
+            trueBottomOffsetY: trueBottom,
+        ) == 0)
+        #expect(MessageFlowCollectionViewController.footerRevealAlpha(
+            contentOffsetY: restingBottom - 1,
+            restingBottomOffsetY: restingBottom,
+            trueBottomOffsetY: trueBottom
+        ) == 0)
+    }
+
+    @Test("User scroll past SBB resting bottom reveals footer")
+    func userScrollPastSBBRestingBottomRevealsFooter() {
+        let restingBottom: CGFloat = 440
+        let trueBottom: CGFloat = 500
+
+        #expect(MessageFlowCollectionViewController.footerRevealAlpha(
+            contentOffsetY: restingBottom,
+            restingBottomOffsetY: restingBottom,
+            trueBottomOffsetY: trueBottom,
+        ) == 0)
+        #expect(MessageFlowCollectionViewController.footerRevealAlpha(
+            contentOffsetY: restingBottom + 1,
+            restingBottomOffsetY: restingBottom,
+            trueBottomOffsetY: trueBottom
+        ) > 0)
+        #expect(MessageFlowCollectionViewController.footerRevealAlpha(
+            contentOffsetY: (restingBottom + trueBottom) / 2,
+            restingBottomOffsetY: restingBottom,
+            trueBottomOffsetY: trueBottom,
+        ) == 0.5)
+        #expect(MessageFlowCollectionViewController.footerRevealAlpha(
+            contentOffsetY: trueBottom,
+            restingBottomOffsetY: restingBottom,
+            trueBottomOffsetY: trueBottom
+        ) == 1)
+    }
+
+    @Test("Initial footer cell alpha is resolved without waiting for scroll")
+    func initialFooterCellAlphaIsResolvedWithoutWaitingForScroll() {
+        let restingBottom: CGFloat = 440
+        let trueBottom: CGFloat = 500
+
+        #expect(MessageFlowCollectionViewController.initialFooterCellAlpha(
+            contentOffsetY: restingBottom,
+            restingBottomOffsetY: restingBottom,
+            trueBottomOffsetY: trueBottom
+        ) == 0)
+        #expect(MessageFlowCollectionViewController.initialFooterCellAlpha(
+            contentOffsetY: (restingBottom + trueBottom) / 2,
+            restingBottomOffsetY: restingBottom,
+            trueBottomOffsetY: trueBottom
+        ) == 0.5)
+        #expect(MessageFlowCollectionViewController.initialFooterCellAlpha(
+            contentOffsetY: trueBottom,
+            restingBottomOffsetY: restingBottom,
+            trueBottomOffsetY: trueBottom
+        ) == 1)
     }
 }

@@ -158,9 +158,14 @@ After the refactor, these invariants are mandatory:
 3. Activation selection and preferred selection are machine-owned.
 - UI may report selection observations.
 - Only the machine decides which one becomes the insertion anchor.
+- During active dictation, every user-authored caret movement or text selection reported by the compose adapter becomes the authoritative insertion/replacement anchor for subsequent dictated text in that transcript session.
+- Dictation may preserve committed/provisional ownership prefix internally, but it must not continue inserting at a stale activation anchor after a valid user selection observation.
+- If the reported selection has nonzero length, the next machine-authored dictation application must replace that selected range with the newly dictated suffix or segment; it must not append elsewhere or clear the selection before consuming it as the replacement anchor.
 
 4. User edits during active dictation are machine-handled.
 - Suppression-after-edit behavior is domain state and may not live in a helper object.
+- While dictation is paused but the dictation interaction remains active, compose selection changes and user edits are still domain observations.
+- Paused-state observations must update coordinator-owned transcript ownership exactly as active observations do unless the interaction has explicitly ended.
 
 5. Endpoint commits and provisional revisions flow through one mutation seam.
 - Token buffering, coalescing, suppression, and text replacement planning all originate in the machine.
@@ -240,8 +245,11 @@ Inputs:
 - `userEdited(editedRangeUTF16, replacementUTF16Length)`
 
 Behavior:
+- applies during both `listening` and `paused` while transcript ownership is active
 - machine updates transcript ownership directly
 - machine adjusts suppression and insertion anchor directly
+- a valid caret movement becomes the next dictated insertion anchor
+- a valid nonempty selection becomes the next dictated replacement range
 - helper does not make independent policy decisions
 
 ### Stop / Pause / Dismiss / Send / Error
@@ -500,6 +508,8 @@ The implementation is correct only if all of the following are true:
 13. `originSessionKey` remains machine-owned and stream-switch cleanup remains machine-owned.
 14. Walkie-origin routing remains machine-owned and preserved across the new transcript session model.
 15. Attachment state and prefix-mismatch compose recovery still work under transcript replacement.
+16. During active dictation, moving the caret or selecting a substring changes where the next dictated suffix or segment is inserted or replaced.
+17. During paused dictation, moving the caret or selecting a substring before resume preserves transcript ownership and keeps subsequent resumed tokens applying to the input field at that updated anchor.
 
 ## Open Questions
 

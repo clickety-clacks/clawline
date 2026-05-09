@@ -21,7 +21,22 @@ export function applyServerMessage(
 ) {
   const { localDeviceId, message, selectedSessionKey, source } = input;
   const sessionKey = message.sessionKey ?? state.streams[0]?.sessionKey ?? "unassigned";
-  const currentMessages = state.messagesBySessionKey[sessionKey] ?? [];
+  const currentMessages = shouldReplacePreservedServerRowsOnReplay(state, sessionKey, source)
+    ? (state.messagesBySessionKey[sessionKey] ?? []).filter(
+        (entry) => entry.delivery !== "server"
+      )
+    : state.messagesBySessionKey[sessionKey] ?? [];
+  const nextStreamTailStateBySessionKey =
+    message.id.startsWith("s_")
+      ? {
+          ...state.streamTailStateBySessionKey,
+          [sessionKey]: {
+            lastMessageId: message.id,
+            lastMessageRole: message.role
+          }
+        }
+      : state.streamTailStateBySessionKey;
+
 
   const existingIndex = currentMessages.findIndex(
     (entry) => entry.id === message.id
@@ -53,6 +68,7 @@ export function applyServerMessage(
           lastServerEventId: message.id
         }
       },
+      streamTailStateBySessionKey: nextStreamTailStateBySessionKey,
       messagesBySessionKey: {
         ...state.messagesBySessionKey,
         [sessionKey]: replaceAtIndex(currentMessages, existingIndex, updated)
@@ -98,7 +114,8 @@ export function applyServerMessage(
             lastServerEventId: message.id
           }
         },
-        messagesBySessionKey: {
+        streamTailStateBySessionKey: nextStreamTailStateBySessionKey,
+      messagesBySessionKey: {
           ...state.messagesBySessionKey,
           [sessionKey]: replaceAtIndex(currentMessages, optimisticIndex, replacement)
         }
@@ -139,6 +156,7 @@ export function applyServerMessage(
               state.firstUnreadMessageIdBySessionKey[sessionKey] ?? message.id
           }
         : state.firstUnreadMessageIdBySessionKey,
+    streamTailStateBySessionKey: nextStreamTailStateBySessionKey,
     messagesBySessionKey: {
       ...state.messagesBySessionKey,
       [sessionKey]: [...currentMessages, nextMessage].sort(sortMessages)
@@ -151,6 +169,29 @@ export function applyServerMessage(
           }
         : state.unreadBySessionKey
   };
+}
+
+function shouldReplacePreservedServerRowsOnReplay(
+  state: ChatDomainState,
+  sessionKey: string,
+  source: IncomingMessageSource
+) {
+  if (source !== "replay") {
+    return false;
+  }
+
+  if (state.lastServerEventId !== null) {
+    return false;
+  }
+
+  const cursor = state.replayCursorsBySessionKey[sessionKey];
+  if (cursor?.lastServerEventId) {
+    return false;
+  }
+
+  return (state.messagesBySessionKey[sessionKey] ?? []).some(
+    (entry) => entry.delivery === "server"
+  );
 }
 
 function shouldMarkUnread(
@@ -235,8 +276,15 @@ export function applyStreamUpdate(
   stream: StreamSessionPayload
 ) {
   const mergedStreams = mergeStreams(state.streams, [toStreamRecord(stream)]);
+  const provisionedSessionKeys = state.provisionedSessionKeys.includes(
+    stream.sessionKey
+  )
+    ? state.provisionedSessionKeys
+    : [...state.provisionedSessionKeys, stream.sessionKey];
+
   return {
     ...state,
+    provisionedSessionKeys,
     streams: mergedStreams
   };
 }

@@ -84,6 +84,7 @@ final class StreamToastManager {
     private let dismissDelay: Duration
     private var shownAt: ContinuousClock.Instant?
     private var dismissTask: Task<Void, Never>?
+    private(set) var isAutoDismissEnabled = true
 
     init(dismissDelay: Duration = .seconds(2)) {
         self.dismissDelay = dismissDelay
@@ -91,7 +92,7 @@ final class StreamToastManager {
 
     /// Shows or updates the toast with stream display metadata.
     /// If already visible, just updates the name without dismissing.
-    func show(displayName: String, sessionKey: String, isBusy: Bool = false) {
+    func show(displayName: String, sessionKey: String, isBusy: Bool = false, autoDismiss: Bool = true) {
         // Cancel any pending dismiss
         dismissTask?.cancel()
         dismissTask = nil
@@ -100,6 +101,7 @@ final class StreamToastManager {
         self.displayName = displayName
         self.sessionKey = sessionKey
         self.isBusy = isBusy
+        isAutoDismissEnabled = autoDismiss
         shownAt = clock.now
         isVisible = true
 
@@ -115,7 +117,7 @@ final class StreamToastManager {
     }
 
     private func scheduleDismissIfIdle() {
-        guard isVisible, !isBusy else { return }
+        guard isVisible, !isBusy, isAutoDismissEnabled else { return }
         let remaining = remainingDismissDelay()
         guard remaining > .zero else {
             hide()
@@ -146,6 +148,7 @@ final class StreamToastManager {
         dismissTask?.cancel()
         dismissTask = nil
         isBusy = false
+        isAutoDismissEnabled = true
         isVisible = false
         shownAt = nil
     }

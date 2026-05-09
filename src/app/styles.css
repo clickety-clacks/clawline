@@ -1053,6 +1053,151 @@ html[data-appearance="light"] body::before {
   width: 100%;
 }
 
+.terminal-attachment-card {
+  gap: 0.75rem;
+  padding: 0.85rem;
+}
+
+.terminal-attachment-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.terminal-attachment-copy {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.terminal-attachment-copy span {
+  color: var(--color-text-dim);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+}
+
+.terminal-attachment-badge {
+  flex: none;
+  padding: 0.22rem 0.46rem;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--color-border-strong) 78%, transparent);
+  background: color-mix(in srgb, var(--color-panel-soft-strong) 72%, transparent);
+  color: var(--color-text-dim);
+  font-size: 0.76rem;
+}
+
+.terminal-attachment-stage {
+  position: relative;
+  min-height: 15rem;
+  border-radius:
+    var(--surface-radius-card-inner)
+    var(--surface-radius-card-inner)
+    calc(var(--surface-radius-card-inner) - 2px)
+    calc(var(--surface-radius-card-inner) - 2px)
+    /
+    calc(var(--surface-radius-card-inner) + 1px)
+    calc(var(--surface-radius-card-inner) + 1px)
+    calc(var(--surface-radius-card-inner) - 3px)
+    calc(var(--surface-radius-card-inner) - 3px);
+  border: 1px solid color-mix(in srgb, var(--color-border-strong) 76%, transparent);
+  background: #1e1e2e;
+  overflow: clip;
+}
+
+.terminal-attachment-surface {
+  width: 100%;
+  min-height: 15rem;
+  padding: 0.45rem 0.55rem;
+}
+
+.terminal-attachment-surface .xterm {
+  height: 100%;
+}
+
+.terminal-attachment-surface .xterm-viewport {
+  overscroll-behavior: contain;
+}
+
+.terminal-attachment-overlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 0.7rem;
+  padding: 1rem;
+  text-align: center;
+  background: color-mix(in srgb, #11111b 80%, transparent);
+  color: #cdd6f4;
+}
+
+.terminal-attachment-overlay p,
+.terminal-attachment-error {
+  margin: 0;
+}
+
+.interactive-html-attachment-card {
+  gap: 0.75rem;
+}
+
+.interactive-html-attachment-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.interactive-html-attachment-copy {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.interactive-html-attachment-copy span {
+  color: var(--color-text-dim);
+  font-size: 0.78rem;
+}
+
+.interactive-html-attachment-stage {
+  position: relative;
+  min-height: 10rem;
+  border-radius:
+    var(--surface-radius-card-inner)
+    var(--surface-radius-card-inner)
+    calc(var(--surface-radius-card-inner) - 2px)
+    calc(var(--surface-radius-card-inner) - 2px)
+    /
+    calc(var(--surface-radius-card-inner) + 1px)
+    calc(var(--surface-radius-card-inner) + 1px)
+    calc(var(--surface-radius-card-inner) - 3px)
+    calc(var(--surface-radius-card-inner) - 3px);
+  border: 1px solid color-mix(in srgb, var(--color-border-strong) 76%, transparent);
+  background: color-mix(in srgb, var(--color-panel-soft-strong) 94%, transparent);
+  overflow: clip;
+}
+
+.interactive-html-attachment-frame {
+  width: 100%;
+  border: 0;
+  display: block;
+  background: transparent;
+}
+
+.interactive-html-attachment-overlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  text-align: center;
+  background: color-mix(in srgb, var(--color-panel-soft) 88%, transparent);
+  color: var(--color-text-dim);
+}
+
+.interactive-html-summary {
+  margin: 0;
+}
+
 .chat-floating-stack {
   position: absolute;
   left: 0;

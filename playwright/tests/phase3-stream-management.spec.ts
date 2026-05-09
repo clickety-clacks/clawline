@@ -8,10 +8,10 @@ test("stream manager handles create, rename, delete, track, untrack, provisionin
   page
 }) => {
   const port = 20_901 + Math.floor(Math.random() * 1_000);
-  const mainSessionKey = "agent:main:clawline:flynn:main";
-  const sideSessionKey = "agent:main:clawline:flynn:side";
-  const createdSessionKey = "agent:main:clawline:flynn:s_created";
-  const trackableSessionKey = "agent:main:openclaw:flynn:s_trackable";
+  const mainSessionKey = "agent:main:clawline:clawline_web_test:main";
+  const sideSessionKey = "agent:main:clawline:clawline_web_test:side";
+  const createdSessionKey = "agent:main:clawline:clawline_web_test:s_created";
+  const trackableSessionKey = "agent:main:openclaw:clawline_web_test:s_trackable";
 
   const streams = [
     {
@@ -195,7 +195,7 @@ test("stream manager handles create, rename, delete, track, untrack, provisionin
             type: "pair_result",
             success: true,
             token: "jwt-test-token",
-            userId: "user_flynn"
+            userId: "user_clawline_web_test"
           })
         );
         return;
@@ -215,7 +215,7 @@ test("stream manager handles create, rename, delete, track, untrack, provisionin
           JSON.stringify({
             type: "auth_result",
             success: true,
-            userId: "user_flynn",
+            userId: "user_clawline_web_test",
             isAdmin: true,
             replayCount: 0,
             sessionKeys: [...provisionedSessionKeys]
@@ -224,7 +224,7 @@ test("stream manager handles create, rename, delete, track, untrack, provisionin
         socket.send(
           JSON.stringify({
             type: "session_info",
-            userId: "user_flynn",
+            userId: "user_clawline_web_test",
             isAdmin: true,
             sessionKeys: [...provisionedSessionKeys]
           })
@@ -245,7 +245,7 @@ test("stream manager handles create, rename, delete, track, untrack, provisionin
 
   try {
     await page.goto("/pair");
-    await page.getByLabel("Name").fill("Flynn Browser");
+    await page.getByLabel("Name").fill("Test User Browser");
     await page.getByLabel("Provider address").fill(`ws://127.0.0.1:${port}/ws`);
     await page.getByRole("button", { name: "Pair browser" }).click();
 
@@ -257,17 +257,20 @@ test("stream manager handles create, rename, delete, track, untrack, provisionin
     await page.getByRole("button", { name: "Create" }).click();
 
     await expect(page).toHaveURL(new RegExp(`/chat/${escapeForRegExp(createdSessionKey)}$`));
-    await expect(
-      page.getByText("This session is unavailable for sending. Switch streams and try again.")
-    ).toBeVisible();
-    await expect(page.getByRole("button", { name: "Send" })).toBeDisabled();
+    await expect(page.locator("#composer-input")).toHaveAttribute(
+      "placeholder",
+      `Research — ${createdSessionKey}`
+    );
+    await page.getByLabel("Message").fill("created stream can send");
+    await expect(page.getByRole("button", { name: "Send" })).toBeEnabled();
+    await page.getByLabel("Message").fill("");
 
     await page.getByRole("button", { name: "Manage streams" }).click();
     await page.getByTestId("session-popover").getByRole("button", { name: "Add stream" }).click();
     const createdCard = page.locator(".stream-manager-card").filter({
       hasText: createdSessionKey
     });
-    await expect(createdCard.getByText("unavailable")).toBeVisible();
+    await expect(createdCard.getByText("ready")).toBeVisible();
     await createdCard.getByRole("button", { name: "Rename" }).click();
     await createdCard.getByLabel("Rename Research").fill("Research v2");
     await createdCard.getByRole("button", { name: "Save" }).click();
@@ -281,10 +284,11 @@ test("stream manager handles create, rename, delete, track, untrack, provisionin
       socket.close();
     }
 
-    await expect(
-      page.getByText("This session is waiting for provisioning before send becomes available.")
-    ).toBeVisible();
-    await expect(page.getByRole("button", { name: "Send" })).toBeDisabled();
+    await expect(page.locator("#composer-input")).toHaveAttribute(
+      "placeholder",
+      "Waiting for connection"
+    );
+    await expect(page.getByRole("button", { name: "Reconnecting" })).toBeDisabled();
 
     await delayedAuthRequested;
     provisionedSessionKeys.add(createdSessionKey);
@@ -311,9 +315,13 @@ test("stream manager handles create, rename, delete, track, untrack, provisionin
     await expect(page).toHaveURL(
       new RegExp(`/chat/${escapeForRegExp(trackableSessionKey)}$`)
     );
-    await expect(
-      page.getByText("This session is unavailable for sending. Switch streams and try again.")
-    ).toBeVisible();
+    await expect(page.locator("#composer-input")).toHaveAttribute(
+      "placeholder",
+      `External Session — ${trackableSessionKey}`
+    );
+    await page.getByLabel("Message").fill("tracked stream can send");
+    await expect(page.getByRole("button", { name: "Send" })).toBeEnabled();
+    await page.getByLabel("Message").fill("");
 
     await page.getByRole("button", { name: "Manage streams" }).click();
     await page.getByTestId("session-popover").getByRole("button", { name: "Add stream" }).click();
@@ -392,7 +400,7 @@ test("stream manager handles create, rename, delete, track, untrack, provisionin
     });
     broadcast({
       type: "session_info",
-      userId: "user_flynn",
+      userId: "user_clawline_web_test",
       isAdmin: true,
       sessionKeys: [...provisionedSessionKeys]
     });

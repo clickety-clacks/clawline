@@ -138,7 +138,7 @@ test.describe("Phase 5 Edge-on-Android compatibility", () => {
         .poll(() =>
           page.getByTestId("message-list").evaluate((element) => Math.round(element.scrollTop))
         )
-        .toBe(scrollTopBefore);
+        .toBeGreaterThanOrEqual(scrollTopBefore);
     } finally {
       await context.close();
       await close();

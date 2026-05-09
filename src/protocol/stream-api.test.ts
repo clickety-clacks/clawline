@@ -127,6 +127,46 @@ describe("stream-api", () => {
     expect(requests[1].method).toBe("GET");
   });
 
+  it("fetches session status through the provider control-plane route", async () => {
+    const requests: Request[] = [];
+    const client = createStreamApiClient({
+      fetchFn: async (input, init) => {
+        requests.push(new Request(input, init));
+        return jsonResponse({
+          sessionKey: "agent:main:clawline:user_1:side",
+          display: {
+            model: "gpt-5.5",
+            provider: "openai",
+            thinkingLevel: "medium",
+            fastMode: true
+          },
+          run: {
+            state: "running",
+            queueDepth: 1
+          },
+          capabilities: {
+            cancelCurrentRun: { supported: true }
+          }
+        });
+      }
+    });
+
+    const status = await client.fetchSessionStatus({
+      serverUrl: "ws://127.0.0.1:18800/ws",
+      sessionKey: "agent:main:clawline:user_1:side",
+      token: "jwt-token"
+    });
+
+    expect(status.run?.state).toBe("running");
+    expect(status.display?.model).toBe("gpt-5.5");
+    expect(requests).toHaveLength(1);
+    expect(requests[0].url).toBe(
+      "http://127.0.0.1:18800/api/session-status?sessionKey=agent%3Amain%3Aclawline%3Auser_1%3Aside"
+    );
+    expect(requests[0].method).toBe("GET");
+    expect(requests[0].headers.get("Authorization")).toBe("Bearer jwt-token");
+  });
+
   it("sends documented adopt and delete payloads", async () => {
     const requests: Request[] = [];
     const responses = [

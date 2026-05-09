@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import { RouterProvider } from "react-router-dom";
 import { createAppRouter } from "./routes";
 import { AppProviders } from "./AppProviders";
+import "@xterm/xterm/css/xterm.css";
 import "./styles.css";
 
 const rootElement = document.getElementById("root");

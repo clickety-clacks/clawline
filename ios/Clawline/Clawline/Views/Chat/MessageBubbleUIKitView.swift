@@ -11,6 +11,26 @@ import SwiftUI
 import UIKit
 import UniformTypeIdentifiers
 
+enum MessageBubbleShadowStyle {
+    static let radius: CGFloat = 12
+    static let offset = CGSize(width: 0, height: 5)
+
+    static func opacity(isDark: Bool) -> Float {
+        isDark ? 0.25 : 0.24
+    }
+}
+
+struct MessageBubbleMetadataDebugState {
+    let senderText: String?
+    let senderLineBreakMode: NSLineBreakMode
+    let senderCompressionResistance: UILayoutPriority
+    let timestampCompressionResistance: UILayoutPriority
+    let timestampHidden: Bool
+    let timestampAlpha: CGFloat
+    let headerWidth: CGFloat
+    let metadataNeededWidth: CGFloat
+}
+
 private final class BubbleSafeAreaNeutralScrollView: UIScrollView {
     override var safeAreaInsets: UIEdgeInsets { .zero }
 
@@ -480,6 +500,10 @@ final class MessageBubbleUIKitContainerView: UIView {
 
 final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
     private static let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "BubbleTheme")
+    static func timestampTextAlpha(isDark: Bool) -> CGFloat {
+        isDark ? 0.76 : 0.68
+    }
+
     override var safeAreaInsets: UIEdgeInsets { .zero }
     private let enableDataDetectors: Bool
     private var terminalConnectionPool: TerminalSessionConnectionPool?
@@ -678,6 +702,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
         headerStack.setContentCompressionResistancePriority(.required, for: .vertical)
 
         senderLabel.numberOfLines = 1
+        senderLabel.lineBreakMode = .byClipping
         senderLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
         senderLabel.setContentHuggingPriority(.defaultHigh, for: .horizontal)
 
@@ -685,8 +710,8 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
         senderTimestampSpacer.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         timestampLabel.numberOfLines = 1
-        timestampLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
-        timestampLabel.setContentHuggingPriority(.required, for: .horizontal)
+        timestampLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        timestampLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
 
         headerStack.addArrangedSubview(avatarView)
         headerStack.addArrangedSubview(senderLabel)
@@ -830,6 +855,9 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
 
     override func layoutSubviews() {
         super.layoutSubviews()
+        bubbleBackgroundView.layoutIfNeeded()
+        contentStack.layoutIfNeeded()
+        headerStack.layoutIfNeeded()
 
         // Hide timestamp if it would compress the sender name
         if !headerStack.isHidden, let timestampText = timestampLabel.attributedText, !timestampText.string.isEmpty {
@@ -839,7 +867,11 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
             let timestampSize = timestampLabel.intrinsicContentSize.width
             let availableWidth = headerStack.bounds.width
             let needed = avatarWidth + senderSize + spacerMin + timestampSize
-            timestampLabel.isHidden = needed > availableWidth
+            if needed > availableWidth {
+                timestampLabel.isHidden = true
+            } else {
+                timestampLabel.isHidden = false
+            }
         }
         gradientLayer.frame = bubbleBackgroundView.bounds
         maskLayer.frame = bubbleBackgroundView.bounds
@@ -973,7 +1005,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
         senderLabel.text = message.displayName
         timestampLabel.font = UIFont.clawline(.timestamp)
         timestampLabel.adjustsFontForContentSizeCategory = true
-        timestampLabel.textColor = palette.textMuted.withAlphaComponent(0.4)
+        timestampLabel.textColor = palette.textMuted.withAlphaComponent(Self.timestampTextAlpha(isDark: palette.isDark))
         timestampLabel.textAlignment = message.role == .user ? .right : .left
         timestampDate = message.timestamp
         refreshTimestampDisplay()
@@ -1457,9 +1489,9 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
 
         // Soft shadow
         shadowContainerView.layer.shadowColor = UIColor.black.cgColor
-        shadowContainerView.layer.shadowRadius = 12
-        shadowContainerView.layer.shadowOffset = CGSize(width: 0, height: 5)
-        let shadowOpacity: Float = palette.isDark ? 0.25 : 0.32
+        shadowContainerView.layer.shadowRadius = MessageBubbleShadowStyle.radius
+        shadowContainerView.layer.shadowOffset = MessageBubbleShadowStyle.offset
+        let shadowOpacity = MessageBubbleShadowStyle.opacity(isDark: palette.isDark)
         shadowContainerView.layer.shadowOpacity = shadowOpacity
 
         // Chromeless mode: hide bubble chrome but keep padding
@@ -1684,7 +1716,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
         // Update sender label color
         let senderColor = (currentStream == .admin) ? palette.adminAccent : palette.warmBrown
         senderLabel.textColor = senderColor.withAlphaComponent(currentStream == .admin ? 1.0 : 0.7)
-        timestampLabel.textColor = palette.textMuted.withAlphaComponent(0.4)
+        timestampLabel.textColor = palette.textMuted.withAlphaComponent(Self.timestampTextAlpha(isDark: palette.isDark))
 
         // Update body text color - must update attributed string since textColor is ignored for attributed text
         if let attributedText = bodyLabel.attributedText, attributedText.length > 0 {
@@ -1708,9 +1740,11 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
 
         // Update shadow (on separate shadow container view)
         shadowContainerView.layer.shadowColor = UIColor.black.cgColor
-        shadowContainerView.layer.shadowRadius = 12
-        let shadowOpacity: Float = palette.isDark ? 0.25 : 0.32
+        shadowContainerView.layer.shadowRadius = MessageBubbleShadowStyle.radius
+        shadowContainerView.layer.shadowOffset = MessageBubbleShadowStyle.offset
+        let shadowOpacity = MessageBubbleShadowStyle.opacity(isDark: palette.isDark)
         shadowContainerView.layer.shadowOpacity = isChromeless ? 0 : shadowOpacity
+        shadowContainerView.isHidden = isChromeless
 
         // Update border colors for light/dark mode
         updateBorderColors(isDark: palette.isDark)
@@ -1877,7 +1911,34 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
             timestampLabel.isHidden = true
             return
         }
+        if !headerStack.isHidden, headerStack.bounds.width > 0 {
+            if metadataNeededWidth() > headerStack.bounds.width {
+                timestampLabel.isHidden = true
+                return
+            }
+        }
         timestampLabel.isHidden = false
+    }
+
+    func debugMetadataStateForTests() -> MessageBubbleMetadataDebugState {
+        MessageBubbleMetadataDebugState(
+            senderText: senderLabel.text,
+            senderLineBreakMode: senderLabel.lineBreakMode,
+            senderCompressionResistance: senderLabel.contentCompressionResistancePriority(for: .horizontal),
+            timestampCompressionResistance: timestampLabel.contentCompressionResistancePriority(for: .horizontal),
+            timestampHidden: timestampLabel.isHidden,
+            timestampAlpha: timestampLabel.textColor.cgColor.alpha,
+            headerWidth: headerStack.bounds.width,
+            metadataNeededWidth: metadataNeededWidth()
+        )
+    }
+
+    private func metadataNeededWidth() -> CGFloat {
+        avatarView.bounds.width
+            + headerStack.spacing
+            + senderLabel.intrinsicContentSize.width
+            + 8
+            + timestampLabel.intrinsicContentSize.width
     }
 
     private func scheduleTimestampRefreshIfNeeded(now: Date) {
@@ -2594,8 +2655,8 @@ enum ChatFlowUIKitTheme {
                 adminAccent: UIColor(red: 0.549, green: 0.756, blue: 0.996, alpha: 1),
                 ink: UIColor(red: 0.910, green: 0.894, blue: 0.878, alpha: 1),
                 bubbleSelfGradient: [
-                    UIColor(red: 0.176, green: 0.231, blue: 0.165, alpha: 1),
-                    UIColor(red: 0.141, green: 0.200, blue: 0.133, alpha: 1)
+                    UIColor(red: 0.161, green: 0.214, blue: 0.149, alpha: 1),
+                    UIColor(red: 0.125, green: 0.182, blue: 0.117, alpha: 1)
                 ],
                 bubbleOtherGradient: [
                     UIColor(red: 0.161, green: 0.145, blue: 0.141, alpha: 1),
@@ -2622,8 +2683,8 @@ enum ChatFlowUIKitTheme {
             adminAccent: UIColor(red: 0.141, green: 0.420, blue: 0.831, alpha: 1),
             ink: UIColor(red: 0.239, green: 0.204, blue: 0.161, alpha: 1),
             bubbleSelfGradient: [
-                UIColor(red: 0.722, green: 0.808, blue: 0.686, alpha: 1),
-                UIColor(red: 0.784, green: 0.851, blue: 0.753, alpha: 1)
+                UIColor(red: 0.834, green: 0.930, blue: 0.789, alpha: 1),
+                UIColor(red: 0.834, green: 0.930, blue: 0.789, alpha: 1)
             ],
             bubbleOtherGradient: [
                 UIColor(red: 1.0, green: 0.992, blue: 0.976, alpha: 1),

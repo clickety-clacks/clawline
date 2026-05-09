@@ -643,7 +643,7 @@ struct ChatViewModelTests {
         )
         chatService.sessionStatusBySessionKey[researchSessionKey] = makeSessionStatus(
             sessionKey: researchSessionKey,
-            state: .running,
+            state: .idle,
             provider: "openai",
             model: "gpt-5.5",
             thinkingLevel: "high",
@@ -740,9 +740,9 @@ struct ChatViewModelTests {
         #expect(toastManager.debugMessages.contains("The current Clawline provider dispatch path does not expose a per-session abort seam."))
     }
 
-    @Test("Current prompt cancellation is disabled when session status marks cancel unsupported")
+    @Test("Current prompt cancellation remains available while typing when provider reports cancel unsupported")
     @MainActor
-    func currentPromptCancellationDisabledWhenStatusMarksCancelUnsupported() async throws {
+    func currentPromptCancellationRemainsAvailableWhileTypingWhenProviderReportsCancelUnsupported() async throws {
         resetChatPersistence()
         let auth = TestAuthManager()
         auth.storeCredentials(token: "jwt", userId: "user")
@@ -750,6 +750,15 @@ struct ChatViewModelTests {
         chatService.streams = [
             makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
         ]
+        chatService.sessionControlResponse = SessionControlResponse(
+            ok: false,
+            sessionKey: personalSessionKey,
+            action: "cancel_current_run",
+            code: "unsupported",
+            message: "The current Clawline provider dispatch path does not expose a per-session abort seam.",
+            status: nil,
+            capabilities: nil
+        )
         chatService.sessionStatusBySessionKey[personalSessionKey] = makeSessionStatus(
             sessionKey: personalSessionKey,
             state: .running,
@@ -781,10 +790,15 @@ struct ChatViewModelTests {
             try await Task.sleep(forDuration: .milliseconds(20))
         }
 
-        #expect(viewModel.canCancelCurrentPrompt == false)
+        #expect(viewModel.canCancelCurrentPrompt == true)
+        #expect(viewModel.canCancelCurrentPrompt(in: personalSessionKey) == true)
         viewModel.requestCurrentPromptCancellation()
-        try await Task.sleep(forDuration: .milliseconds(20))
-        #expect(chatService.cancelCurrentRunCallCount == 0)
+        for _ in 0..<50 {
+            if chatService.cancelCurrentRunCallCount == 1 { break }
+            try await Task.sleep(forDuration: .milliseconds(20))
+        }
+        #expect(chatService.cancelCurrentRunCallCount == 1)
+        #expect(chatService.lastCancelledSessionKey == personalSessionKey)
     }
 
     @Test("Connection interruptions update send button state without passive toast")
@@ -4932,7 +4946,8 @@ private func makeSessionStatus(
             canChangeFastMode: nil,
             canChangeVerbosity: nil,
             readOnlyStatus: nil
-        )
+        ),
+        modelCatalog: nil
     )
 }
 

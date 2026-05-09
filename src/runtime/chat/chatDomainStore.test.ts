@@ -378,6 +378,10 @@ describe("chatDomainStore", () => {
       adopted: true,
       orderIndex: 3
     });
+    expect(store.getState().provisionedSessionKeys).toEqual([
+      "agent:main:clawline:user_1:main",
+      "agent:main:clawline:user_1:side"
+    ]);
   });
 
   it("hydrates snapshots without generating unread state or replay duplicates", async () => {
@@ -699,7 +703,7 @@ describe("chatDomainStore", () => {
         stickToBottom: false
       },
       "agent:main:clawline:user_1:side": {
-        offsetTop: 0,
+        offsetTop: Number.MAX_SAFE_INTEGER,
         stickToBottom: true
       }
     });
@@ -715,13 +719,37 @@ describe("chatDomainStore", () => {
         stickToBottom: false
       },
       "agent:main:clawline:user_1:side": {
-        offsetTop: 0,
+        offsetTop: Number.MAX_SAFE_INTEGER,
         stickToBottom: true
       }
     });
   });
 
-  it("drops persisted/local transcript state on authoritative replay reset", async () => {
+  it("lets a session leave bottom-pinned scroll state", () => {
+    const store = createChatDomainStore({
+      persistence: createMemoryChatPersistence()
+    });
+
+    store.rememberSessionScrollState({
+      offsetTop: 0,
+      sessionKey: "agent:main:clawline:user_1:main",
+      stickToBottom: true
+    });
+    store.rememberSessionScrollState({
+      offsetTop: 520.6,
+      sessionKey: "agent:main:clawline:user_1:main",
+      stickToBottom: false
+    });
+
+    expect(store.getState().scrollStateBySessionKey).toEqual({
+      "agent:main:clawline:user_1:main": {
+        offsetTop: 521,
+        stickToBottom: false
+      }
+    });
+  });
+
+  it("preserves authoritative transcript rows and drops stale local state on replay reset", async () => {
     const store = createChatDomainStore({
       persistence: createMemoryChatPersistence({
         ...phase1TranscriptFixture,
@@ -752,12 +780,99 @@ describe("chatDomainStore", () => {
     expect(store.getState()).toMatchObject({
       hydrated: true,
       lastServerEventId: null,
-      messagesBySessionKey: {},
+      messagesBySessionKey: phase1TranscriptFixture.messagesBySessionKey,
       pendingMessages: {},
       provisionedSessionKeys: [],
       replayCursorsBySessionKey: {},
       streams: [],
       unreadBySessionKey: {}
     });
+  });
+
+  it("preserves accepted local user sends and server rows across authoritative replay reset until server echo", () => {
+    const store = createChatDomainStore({
+      persistence: createMemoryChatPersistence()
+    });
+
+    store.applyIncomingMessage({
+      localDeviceId: "browser-device-1",
+      message: {
+        type: "message",
+        id: "s_old",
+        role: "assistant",
+        content: "Stale history",
+        timestamp: 90,
+        streaming: false,
+        sessionKey: "agent:main:clawline:user_1:main",
+        attachments: []
+      },
+      selectedSessionKey: "agent:main:clawline:user_1:main",
+      source: "live"
+    });
+    store.enqueueOptimisticMessage({
+      attachments: [],
+      content: "Accepted but not echoed",
+      deviceId: "browser-device-1",
+      id: "c_accepted",
+      sessionKey: "agent:main:clawline:user_1:main",
+      timestamp: 100,
+      wireAttachments: []
+    });
+    store.markMessageAcked("c_accepted");
+    store.enqueueOptimisticMessage({
+      attachments: [],
+      content: "Still pending",
+      deviceId: "browser-device-1",
+      id: "c_pending",
+      sessionKey: "agent:main:clawline:user_1:main",
+      timestamp: 101,
+      wireAttachments: []
+    });
+
+    store.resetForAuthoritativeReplay();
+
+    expect(
+      store.getState().messagesBySessionKey["agent:main:clawline:user_1:main"]
+    ).toEqual([
+      expect.objectContaining({
+        content: "Stale history",
+        delivery: "server",
+        id: "s_old"
+      }),
+      expect.objectContaining({
+        content: "Accepted but not echoed",
+        delivery: "acked",
+        id: "c_accepted"
+      })
+    ]);
+    expect(Object.keys(store.getState().pendingMessages)).toEqual(["c_accepted"]);
+
+    store.applyIncomingMessage({
+      localDeviceId: "browser-device-1",
+      message: {
+        type: "message",
+        id: "s_accepted",
+        role: "user",
+        content: "Accepted but not echoed",
+        timestamp: 102,
+        streaming: false,
+        deviceId: "browser-device-1",
+        sessionKey: "agent:main:clawline:user_1:main",
+        attachments: []
+      },
+      selectedSessionKey: "agent:main:clawline:user_1:main",
+      source: "replay"
+    });
+
+    expect(
+      store.getState().messagesBySessionKey["agent:main:clawline:user_1:main"]
+    ).toEqual([
+      expect.objectContaining({
+        content: "Accepted but not echoed",
+        delivery: "server",
+        id: "s_accepted"
+      })
+    ]);
+    expect(store.getState().pendingMessages).toEqual({});
   });
 });

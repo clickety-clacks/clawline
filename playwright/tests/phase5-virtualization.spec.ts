@@ -84,13 +84,13 @@ test("large transcripts keep a bounded DOM window in the browser", async ({
     await page.getByRole("button", { name: "Pair browser" }).click();
 
     await expect(page).toHaveURL(new RegExp(`/chat/${escapeForRegExp(sessionKey)}$`));
-    await expect(page.getByText("Virtualized message 1")).toBeVisible();
+    await expect(page.getByText("Virtualized message 60")).toBeVisible();
 
-    const renderedCountNearTop = await page
+    const renderedCountNearBottom = await page
       .locator('[data-testid^="message-s_bulk_"]')
       .count();
-    expect(renderedCountNearTop).toBeLessThan(40);
-    await expect(page.getByText("Virtualized message 60")).toHaveCount(0);
+    expect(renderedCountNearBottom).toBeLessThan(40);
+    await expect(page.getByText("Virtualized message 1")).toHaveCount(0);
   } finally {
     for (const client of wss.clients) {
       client.terminate();

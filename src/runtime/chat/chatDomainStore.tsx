@@ -298,9 +298,15 @@ export function createChatDomainStore(options?: {
     resetForAuthoritativeReplay() {
       baseStore.setState((current) => {
         hydrationEpoch += 1;
+        const preservedMessagesBySessionKey = replayResetPreservedMessagesFrom(current);
         const nextState = {
           ...EMPTY_STATE,
-          hydrated: current.hydrated
+          hydrated: current.hydrated,
+          messagesBySessionKey: preservedMessagesBySessionKey,
+          pendingMessages: acceptedPendingMessagesFrom(
+            current,
+            preservedMessagesBySessionKey
+          )
         };
 
         persist(nextState);
@@ -384,7 +390,9 @@ export function createChatDomainStore(options?: {
       baseStore.setState((current) => {
         const currentScrollState = current.scrollStateBySessionKey[input.sessionKey];
         const nextScrollState = {
-          offsetTop: Math.max(0, Math.round(input.offsetTop)),
+          offsetTop: input.stickToBottom
+            ? Number.MAX_SAFE_INTEGER
+            : Math.max(0, Math.round(input.offsetTop)),
           stickToBottom: input.stickToBottom
         };
 
@@ -519,6 +527,36 @@ function mergeHydratedState(
       ...liveState.unreadBySessionKey
     }
   };
+}
+
+function replayResetPreservedMessagesFrom(state: ChatDomainState) {
+  return Object.fromEntries(
+    Object.entries(state.messagesBySessionKey).flatMap(([sessionKey, messages]) => {
+      const preservedMessages = messages.filter(
+        (message) =>
+          message.delivery === "server" ||
+          (message.role === "user" &&
+            message.delivery === "acked" &&
+            message.id.startsWith("c_"))
+      );
+      return preservedMessages.length > 0 ? [[sessionKey, preservedMessages] as const] : [];
+    })
+  );
+}
+
+function acceptedPendingMessagesFrom(
+  state: ChatDomainState,
+  acceptedLocalMessagesBySessionKey: Record<string, ChatMessageRecord[]>
+) {
+  const acceptedIds = new Set(
+    Object.values(acceptedLocalMessagesBySessionKey)
+      .flat()
+      .map((message) => message.id)
+  );
+
+  return Object.fromEntries(
+    Object.entries(state.pendingMessages).filter(([messageId]) => acceptedIds.has(messageId))
+  );
 }
 
 export function resolveStreamDotStateMap(

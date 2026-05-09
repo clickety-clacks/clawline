@@ -43,10 +43,10 @@ describe("useChatSessionCoordinator", () => {
     );
 
     await waitFor(() => {
-      expect(result.current.uiSelectedSessionKey).toBe("agent:main:clawline:user_1:side");
+      expect(result.current.activeSessionKey).toBe("agent:main:clawline:user_1:side");
     });
 
-    expect(result.current.engineActiveSessionKey).toBe("agent:main:clawline:user_1:side");
+    expect(result.current.activeSessionKey).toBe("agent:main:clawline:user_1:side");
     expect(result.current.firstProviderValidSessionKey).toBe("agent:main:clawline:user_1:main");
     expect(result.current.transition.bootRequestedSessionKey).toBeNull();
   });
@@ -62,14 +62,14 @@ describe("useChatSessionCoordinator", () => {
     );
 
     await waitFor(() => {
-      expect(result.current.uiSelectedSessionKey).toBe("agent:main:clawline:user_1:side");
+      expect(result.current.activeSessionKey).toBe("agent:main:clawline:user_1:side");
     });
 
-    expect(result.current.engineActiveSessionKey).toBe("agent:main:clawline:user_1:side");
+    expect(result.current.activeSessionKey).toBe("agent:main:clawline:user_1:side");
     expect(result.current.routeSessionExists).toBe(false);
   });
 
-  it("falls back to the first provider-valid session when no route selection exists", async () => {
+  it("does not activate a fallback before router navigation commits it", async () => {
     const { result } = renderHook(() =>
       useChatSessionCoordinator({
         provisionedSessionKeys: ["agent:main:clawline:user_1:main"],
@@ -80,14 +80,14 @@ describe("useChatSessionCoordinator", () => {
     );
 
     await waitFor(() => {
-      expect(result.current.uiSelectedSessionKey).toBe("agent:main:clawline:user_1:main");
+      expect(result.current.firstProviderValidSessionKey).toBe("agent:main:clawline:user_1:main");
     });
 
-    expect(result.current.engineActiveSessionKey).toBe("agent:main:clawline:user_1:main");
+    expect(result.current.activeSessionKey).toBeUndefined();
     expect(result.current.transition.bootRequestedSessionKey).toBeNull();
   });
 
-  it("keeps the requested route engine-active until route reconciliation handles an unavailable session", async () => {
+  it("leaves a missing route inactive until route reconciliation commits a valid URL", async () => {
     const { result } = renderHook(() =>
       useChatSessionCoordinator({
         provisionedSessionKeys: ["agent:main:clawline:user_1:main"],
@@ -98,14 +98,32 @@ describe("useChatSessionCoordinator", () => {
     );
 
     await waitFor(() => {
-      expect(result.current.uiSelectedSessionKey).toBe("agent:main:clawline:user_1:missing");
+      expect(result.current.firstProviderValidSessionKey).toBe("agent:main:clawline:user_1:main");
     });
 
-    expect(result.current.engineActiveSessionKey).toBe("agent:main:clawline:user_1:missing");
+    expect(result.current.activeSessionKey).toBeUndefined();
     expect(result.current.routeSessionExists).toBe(false);
   });
 
-  it("tracks pending chat-switch metadata while keeping the current engine-active session", async () => {
+  it("keeps existing unprovisioned route sessions active for unavailable-shell rendering", async () => {
+    const { result } = renderHook(() =>
+      useChatSessionCoordinator({
+        provisionedSessionKeys: [],
+        routeSessionKey: "agent:main:clawline:user_1:side",
+        streams: STREAMS,
+        transportPhase: "live"
+      })
+    );
+
+    await waitFor(() => {
+      expect(result.current.firstProviderValidSessionKey).toBe("agent:main:clawline:user_1:main");
+    });
+
+    expect(result.current.activeSessionKey).toBe("agent:main:clawline:user_1:side");
+    expect(result.current.routeSessionExists).toBe(true);
+  });
+
+  it("keeps the current active session until router navigation commits the switch", async () => {
     const { result, rerender } = renderHook(
       ({ routeSessionKey, transportPhase }: CoordinatorHookProps) =>
         useChatSessionCoordinator({
@@ -130,9 +148,7 @@ describe("useChatSessionCoordinator", () => {
 
     expect(result.current.isSessionListOpen).toBe(false);
     expect(result.current.isStreamManagerOpen).toBe(false);
-    expect(result.current.uiSelectedSessionKey).toBe("agent:main:clawline:user_1:side");
-    expect(result.current.engineActiveSessionKey).toBe("agent:main:clawline:user_1:main");
-    expect(result.current.transition.pendingSessionKey).toBe("agent:main:clawline:user_1:side");
+    expect(result.current.activeSessionKey).toBe("agent:main:clawline:user_1:main");
     expect(result.current.transition.source).toBe("popup");
 
     const rerenderCoordinator = rerender as (props: CoordinatorHookProps) => void;
@@ -142,11 +158,7 @@ describe("useChatSessionCoordinator", () => {
       transportPhase: "live"
     });
 
-    await waitFor(() => {
-      expect(result.current.transition.pendingSessionKey).toBeNull();
-    });
-
-    expect(result.current.engineActiveSessionKey).toBe("agent:main:clawline:user_1:side");
+    expect(result.current.activeSessionKey).toBe("agent:main:clawline:user_1:side");
   });
 
   it("owns popup and stream-manager visibility state directly", () => {

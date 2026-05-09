@@ -17,7 +17,8 @@ import {
 } from "../../runtime/settings/settingsStore";
 import {
   TransportMachineProvider,
-  createTransportMachine
+  createTransportMachine,
+  type TransportMachine
 } from "../../runtime/transport/transportMachine";
 import { FakeWebSocketFactory } from "../../test/support/fakeWebSocket";
 
@@ -80,7 +81,8 @@ function renderChatRoute(
     ],
     sessionKeys = ["agent:main:clawline:user_1:main", "agent:main:main"],
     streamReadStates,
-    streamTailStates
+    streamTailStates,
+    configureTransportMachine
   }: {
     initialMessages?: Array<{
       content: string;
@@ -98,6 +100,10 @@ function renderChatRoute(
         lastMessageRole: "user" | "assistant";
       }
     >;
+    configureTransportMachine?: (input: {
+      chatStore: ReturnType<typeof createChatDomainStore>;
+      transportMachine: TransportMachine;
+    }) => void;
   } = {}
 ) {
   const authStore = createAuthSessionStore();
@@ -153,6 +159,10 @@ function renderChatRoute(
       streamTailStates
     })
   );
+  configureTransportMachine?.({
+    chatStore,
+    transportMachine
+  });
 
   const view = render(
     <SettingsStoreProvider value={settingsStore}>
@@ -232,14 +242,40 @@ describe("ChatRoute", () => {
     expect(screen.queryByText("Main thread")).not.toBeInTheDocument();
   });
 
-  it("reconciles a boot-selected stream back to provider-visible inventory when it is no longer available", () => {
-    renderChatRoute("/chat/agent:main:clawline:user_1:side");
+  it("reconciles a boot-selected stream back to provider-visible inventory when the stream is missing", () => {
+    renderChatRoute("/chat/agent:main:clawline:user_1:missing");
 
     expect(screen.getByTestId("location")).toHaveTextContent(
       "/chat/agent:main:clawline:user_1:main"
     );
     expect(screen.getByText("Main thread")).toBeInTheDocument();
-    expect(screen.queryByText("Side thread")).not.toBeInTheDocument();
+  });
+
+  it("renders an unprovisioned URL-selected stream without provider read publish", () => {
+    const publishedReadSessionKeys: string[] = [];
+
+    renderChatRoute("/chat/agent:main:clawline:user_1:side", {
+      sessionKeys: [],
+      configureTransportMachine({ transportMachine }) {
+        const publishReadState = transportMachine.publishReadState.bind(transportMachine);
+        vi.spyOn(transportMachine, "publishReadState").mockImplementation(
+          async (sessionKey, lastReadMessageId) => {
+            publishedReadSessionKeys.push(sessionKey);
+            await publishReadState(sessionKey, lastReadMessageId);
+          }
+        );
+      }
+    });
+
+    expect(screen.getByTestId("location")).toHaveTextContent(
+      "/chat/agent:main:clawline:user_1:side"
+    );
+    expect(screen.getByText("Side thread")).toBeInTheDocument();
+    expect(
+      screen.getByText("This session is unavailable for sending. Switch streams and try again.")
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
+    expect(publishedReadSessionKeys).toEqual([]);
   });
 
   it("does not expose web-only footer controls in the session popup", () => {
@@ -423,6 +459,41 @@ describe("ChatRoute", () => {
       screen.getByText("This session is unavailable for sending. Switch streams and try again.")
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
+  });
+
+  it("sends through the committed URL-selected session after a popup switch", async () => {
+    const { webSocketFactory } = renderChatRoute("/chat/agent:main:clawline:user_1:main", {
+      sessionKeys: [
+        "agent:main:clawline:user_1:main",
+        "agent:main:main",
+        "agent:main:clawline:user_1:side"
+      ]
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Manage streams" }));
+    fireEvent.click(screen.getByRole("button", { name: /Side Thread/i }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("location")).toHaveTextContent(
+        "/chat/agent:main:clawline:user_1:side"
+      );
+    });
+
+    fireEvent.change(screen.getByPlaceholderText(/Side Thread/), {
+      target: { value: "Route-selected side send" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    await waitFor(() => {
+      const sentMessages = webSocketFactory.sockets[0].sentTexts
+        .map((text) => JSON.parse(text))
+        .filter((message) => message.type === "message");
+      expect(sentMessages.at(-1)).toMatchObject({
+        content: "Route-selected side send",
+        sessionKey: "agent:main:clawline:user_1:side",
+        type: "message"
+      });
+    });
   });
 
   it("swipes horizontally between adjacent streams on the chat panel", () => {

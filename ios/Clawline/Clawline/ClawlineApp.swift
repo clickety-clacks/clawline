@@ -15,9 +15,6 @@ import Observation
 struct ClawlineApp: App {
     @State private var authManager: AuthManager
     @State private var settingsManager: SettingsManager
-    @State private var sonioxKeyStore: SonioxKeyStore
-    @State private var cartesiaKeyStore: CartesiaKeyStore
-    @State private var watchConnectivityService: WatchConnectivityService
 
     private let deviceIdentifier: any DeviceIdentifying
     private let connectionService: any ConnectionServicing
@@ -48,20 +45,6 @@ struct ClawlineApp: App {
         let chatService = coreServices.chatService
         self.chatService = chatService
         self.uploadService = coreServices.uploadService
-
-        let sharedKeychain = KeychainSecureStore(accessGroup: "group.co.clicketyclacks.Clawline")
-        let sonioxKeyStore = SonioxKeyStore(keychain: sharedKeychain)
-        let cartesiaKeyStore = CartesiaKeyStore(keychain: sharedKeychain)
-        let watchService = WatchConnectivityService(
-            authManager: authManager,
-            sonioxKeyStore: sonioxKeyStore,
-            cartesiaKeyStore: cartesiaKeyStore,
-            chatService: chatService
-        )
-        _sonioxKeyStore = State(initialValue: sonioxKeyStore)
-        _cartesiaKeyStore = State(initialValue: cartesiaKeyStore)
-        _watchConnectivityService = State(initialValue: watchService)
-        watchService.activate()
     }
 
     var body: some Scene {
@@ -73,9 +56,6 @@ struct ClawlineApp: App {
                 .environment(\.deviceIdentifier, deviceIdentifier)
                 .environment(\.chatService, chatService)
                 .environment(\.settingsManager, settingsManager)
-                .environment(sonioxKeyStore)
-                .environment(cartesiaKeyStore)
-                .environment(\.watchConnectivityService, watchConnectivityService)
                 .sheet(isPresented: $settingsManager.isSettingsPresented) {
                     SettingsView(settings: settingsManager)
                 }
@@ -95,47 +75,7 @@ struct ClawlineApp: App {
 
         }
         .commands {
-            CommandGroup(replacing: .appSettings) {
-                Button("Settings...") {
-                    settingsManager.toggleSettings()
-                }
-                .keyboardShortcut(",", modifiers: .command)
-            }
-            CommandMenu("View") {
-                Button("Increase Font Size") {
-                    settingsManager.increaseFontScale()
-                }
-                .keyboardShortcut("=", modifiers: .command)
-
-                Button("Decrease Font Size") {
-                    settingsManager.decreaseFontScale()
-                }
-                .keyboardShortcut("-", modifiers: .command)
-
-                Button("Reset Font Size") {
-                    settingsManager.resetFontScale()
-                }
-                .keyboardShortcut("0", modifiers: .command)
-
-                Divider()
-
-                Button("Open Streams") {
-                    NotificationCenter.default.post(name: .clawlineOpenStreamPopupCommand, object: nil)
-                }
-                .keyboardShortcut("/", modifiers: .command)
-
-                Divider()
-
-                Button("Scroll to Bottom") {
-                    NotificationCenter.default.post(name: .clawlineScrollToBottomCommand, object: nil)
-                }
-                .keyboardShortcut("j", modifiers: .command)
-
-                Button("Scroll to Top") {
-                    NotificationCenter.default.post(name: .clawlineScrollToTopCommand, object: nil)
-                }
-                .keyboardShortcut("k", modifiers: .command)
-            }
+            ClawlineAppCommands(settingsManager: settingsManager)
         }
     }
 }

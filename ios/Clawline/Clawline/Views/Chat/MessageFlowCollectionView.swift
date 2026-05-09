@@ -17,6 +17,94 @@ enum MessageFlowScrollEvent: Equatable {
     case didInvalidateFirstUnreadAnchor(sessionKey: String)
 }
 
+enum ChatVisibleBubbleContentScroll {
+    static var lineIncrement: CGFloat {
+        ceil(UIFont.clawline(.bodyText).lineHeight + 4)
+    }
+
+    @discardableResult
+    static func scrollVisibleScrollableContent(
+        in root: UIView,
+        visibleIn viewport: UIView,
+        direction: ChatScrollPageDirection,
+        animated: Bool
+    ) -> Int {
+        root.layoutIfNeeded()
+        let scrollViews = topLevelVisibleVerticalScrollViews(in: root, visibleIn: viewport)
+        var scrolledCount = 0
+        for scrollView in scrollViews {
+            if scroll(scrollView, direction: direction, animated: animated) {
+                scrolledCount += 1
+            }
+        }
+        return scrolledCount
+    }
+
+    static func topLevelVisibleVerticalScrollViews(in root: UIView, visibleIn viewport: UIView) -> [UIScrollView] {
+        root.layoutIfNeeded()
+        return topLevelVisibleVerticalScrollViews(in: root, visibleIn: viewport, ancestorScrollAccepted: false)
+    }
+
+    private static func topLevelVisibleVerticalScrollViews(
+        in view: UIView,
+        visibleIn viewport: UIView,
+        ancestorScrollAccepted: Bool
+    ) -> [UIScrollView] {
+        guard !view.isHidden, view.alpha > 0.01 else { return [] }
+
+        let viewIsAcceptedScroll = (view as? UIScrollView).map { scrollView in
+            isVisible(scrollView, in: viewport) && isVerticallyScrollable(scrollView)
+        } ?? false
+
+        if !ancestorScrollAccepted, viewIsAcceptedScroll, let scrollView = view as? UIScrollView {
+            return [scrollView]
+        }
+
+        return view.subviews.flatMap { child in
+            topLevelVisibleVerticalScrollViews(
+                in: child,
+                visibleIn: viewport,
+                ancestorScrollAccepted: ancestorScrollAccepted || viewIsAcceptedScroll
+            )
+        }
+    }
+
+    private static func scroll(
+        _ scrollView: UIScrollView,
+        direction: ChatScrollPageDirection,
+        animated: Bool
+    ) -> Bool {
+        let inset = scrollView.contentInset
+        let minY = -inset.top
+        let maxY = max(minY, scrollView.contentSize.height - scrollView.bounds.height + inset.bottom)
+        let visibleHeight = scrollView.bounds.height - inset.top - inset.bottom
+        guard visibleHeight > 1, maxY > minY else { return false }
+
+        let increment = lineIncrement
+        let delta = direction == .down ? increment : -increment
+        let targetY = min(max(scrollView.contentOffset.y + delta, minY), maxY)
+        guard abs(targetY - scrollView.contentOffset.y) > 0.5 else { return false }
+
+        scrollView.setContentOffset(CGPoint(x: scrollView.contentOffset.x, y: targetY), animated: animated)
+        return true
+    }
+
+    private static func isVerticallyScrollable(_ scrollView: UIScrollView) -> Bool {
+        guard scrollView.isScrollEnabled else { return false }
+        guard scrollView.bounds.height > 1 else { return false }
+        let inset = scrollView.contentInset
+        let minY = -inset.top
+        let maxY = max(minY, scrollView.contentSize.height - scrollView.bounds.height + inset.bottom)
+        return maxY > minY + 0.5
+    }
+
+    private static func isVisible(_ view: UIView, in viewport: UIView) -> Bool {
+        guard view.window != nil || viewport.window == nil else { return false }
+        let rect = view.convert(view.bounds, to: viewport)
+        return rect.width > 1 && rect.height > 1 && viewport.bounds.intersects(rect)
+    }
+}
+
 @MainActor
 struct MessageFlowCollectionView: UIViewControllerRepresentable {
     var viewModel: ChatViewModel
@@ -34,20 +122,19 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
     var shouldRegisterWithLayoutCoordinator: Bool = true
     /// Optional session override - if provided, shows messages for this session instead of activeSessionKey
     var sessionKey: String?
+    var sessionStatus: SessionStatus?
     var forceReReadGeneration: Int = 0
     var fontScaleChangeSequence: Int = 0
     var onScrollEvent: (@MainActor (MessageFlowScrollEvent) -> Void)?
+    var onTypingIndicatorTap: (@MainActor (CGRect) -> Void)?
+    var onTypingIndicatorAnchorFrameChanged: (@MainActor (CGRect?) -> Void)? = nil
+    var onSessionControlSelected: (@MainActor (String, SessionControlAction, String?, Bool?) -> Void)?
     @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.settingsManager) private var settings
 
     func makeUIViewController(context: Context) -> MessageFlowCollectionViewController {
         let controller = MessageFlowCollectionViewController()
         controller.loadViewIfNeeded()
-#if os(visionOS)
-        let isDark = settings.appearanceMode == .dark
-#else
         let isDark = colorScheme == .dark
-#endif
         controller.update(
             viewModel: viewModel,
             isCompact: isCompact,
@@ -61,9 +148,13 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
             unreadCount: unreadCount,
             onExpand: onExpand,
             sessionKey: sessionKey,
+            sessionStatus: sessionStatus,
             forceReReadGeneration: forceReReadGeneration,
             fontScaleChangeSequence: fontScaleChangeSequence,
             onScrollEvent: onScrollEvent,
+            onTypingIndicatorTap: onTypingIndicatorTap,
+            onTypingIndicatorAnchorFrameChanged: onTypingIndicatorAnchorFrameChanged,
+            onSessionControlSelected: onSessionControlSelected,
             isDark: isDark
         )
         if shouldRegisterWithLayoutCoordinator, let sessionKey {
@@ -73,11 +164,7 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
     }
 
     func updateUIViewController(_ uiViewController: MessageFlowCollectionViewController, context: Context) {
-#if os(visionOS)
-        let isDark = settings.appearanceMode == .dark
-#else
         let isDark = colorScheme == .dark
-#endif
         uiViewController.update(
             viewModel: viewModel,
             isCompact: isCompact,
@@ -91,9 +178,13 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
             unreadCount: unreadCount,
             onExpand: onExpand,
             sessionKey: sessionKey,
+            sessionStatus: sessionStatus,
             forceReReadGeneration: forceReReadGeneration,
             fontScaleChangeSequence: fontScaleChangeSequence,
             onScrollEvent: onScrollEvent,
+            onTypingIndicatorTap: onTypingIndicatorTap,
+            onTypingIndicatorAnchorFrameChanged: onTypingIndicatorAnchorFrameChanged,
+            onSessionControlSelected: onSessionControlSelected,
             isDark: isDark
         )
         if shouldRegisterWithLayoutCoordinator, let sessionKey {
@@ -116,19 +207,28 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         let unreadCount: Int
         let onExpand: ((Message) -> Void)?
         let sessionKey: String?
+        let sessionStatus: SessionStatus?
         let forceReReadGeneration: Int
         let fontScaleChangeSequence: Int
         let onScrollEvent: (@MainActor (MessageFlowScrollEvent) -> Void)?
+        let onTypingIndicatorTap: (@MainActor (CGRect) -> Void)?
+        let onTypingIndicatorAnchorFrameChanged: (@MainActor (CGRect?) -> Void)?
+        let onSessionControlSelected: (@MainActor (String, SessionControlAction, String?, Bool?) -> Void)?
         let isDark: Bool?
     }
 
     private let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "MessagePipeline")
+    private let typingCancelDiagnosticLogger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "T217TypingCancel")
+    private static var t217DiagnosticBuild: String {
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"
+        return "T217-typing-cancel-\(build)"
+    }
     private var collectionView: UICollectionView!
     private var channelOverride: String?
     private var dataSource: UICollectionViewDiffableDataSource<Int, String>!
     private var flowLayout: MessageFlowLayout!
     private let uiKitBubbleSizer = MessageBubbleUIKitView(enableDataDetectors: false)
-    private var currentIsDark: Bool = false
+    private var currentIsDark: Bool = true
     private let bubbleSizingV2Enabled = BubbleSizingV2.isEnabled
     private let bubbleSizingV2MeasurementCache = BubbleSizingV2.LRUCache<BubbleSizingV2.CacheKey, BubbleSizingV2.Measurement>(maxEntries: 800)
     private let bubbleSizingV2LinkPreviewHeightCache = BubbleSizingV2.LinkPreviewHeightCache()
@@ -151,6 +251,12 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     private static let previewRemeasureRestPollSeconds: TimeInterval = 0.06
     private static let bottomInsetHeightCapInvalidationDebounceSeconds: TimeInterval = 0.20
     private static let restoreMaxConfirmationRetries: Int = 3
+    private static let typingIndicatorTapTargetLeadingOutset: CGFloat = 8
+    private static let typingIndicatorTapTargetTrailingOutset: CGFloat = 44
+
+    static func chatPageBackgroundColor(isDark: Bool) -> UIColor {
+        isDark ? .clear : UIColor(ChatFlowTheme.pageBackgroundTopColor(.light))
+    }
 
     private var messagesById: [String: Message] = [:]
     private var dateSeparatorTextByItemId: [String: String] = [:]
@@ -208,7 +314,6 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
 
         var deferredBottomInsetRemeasureIds: Set<String> = []
         var bottomInsetRemeasureTimer: Timer?
-        var bottomInsetRemeasureBypassInputGates = false
         var pendingBottomInsetHeightCapInvalidation: DispatchWorkItem?
     }
 
@@ -224,6 +329,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     private var isRenderPolicyFrozen: Bool = false
     private var isInputActive: Bool = false
     private var isTypingActive: Bool = false
+    private var sessionStatus: SessionStatus?
     private var topInset: CGFloat = 0
     private var truncationBottomInset: CGFloat = 0
     private var lastBoundsSize: CGSize = .zero
@@ -234,6 +340,13 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     private var currentFontScaleChangeSequence: Int = 0
     private var onExpand: ((Message) -> Void)?
     private var onScrollEvent: (@MainActor (MessageFlowScrollEvent) -> Void)?
+    private var onTypingIndicatorTap: (@MainActor (CGRect) -> Void)?
+    private var onTypingIndicatorAnchorFrameChanged: (@MainActor (CGRect?) -> Void)?
+    private var lastReportedTypingIndicatorAnchorFrame: CGRect?
+    private var onSessionControlSelected: (@MainActor (String, SessionControlAction, String?, Bool?) -> Void)?
+    private let webBubbleCoordinator = WebBubbleCoordinator()
+    private var lastMessages: [Message] = []
+    private var lastEffectiveStream: ChatStream?
     // Staged stream materialization (approved spec: tail window -> full history).
     // WHY N=50: device measurements showed 500-item first apply taking 1.4-2.7s.
     // A 50-item first paint targets ~10% of that cost while still showing meaningful recent context.
@@ -539,6 +652,15 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         get { activeStateKey().flatMap { readState(for: $0).pendingScrollRestoreState } }
         set {
             guard let key = activeStateKey() else { return }
+            let previous = readState(for: key).pendingScrollRestoreState
+            if previous != newValue {
+                logPendingScrollRestoreStateChange(
+                    sessionKey: key,
+                    from: previous,
+                    to: newValue,
+                    reason: "activeStateSetter"
+                )
+            }
             mutateState(for: key) { $0.pendingScrollRestoreState = newValue }
         }
     }
@@ -563,6 +685,10 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         get { activeStateKey().map { readState(for: $0).restorePhase } ?? .none }
         set {
             guard let key = activeStateKey() else { return }
+            let previous = readState(for: key).restorePhase
+            if previous != newValue {
+                logRestorePhaseChange(sessionKey: key, from: previous, to: newValue, reason: "activeStateSetter")
+            }
             mutateState(for: key) { $0.restorePhase = newValue }
         }
     }
@@ -711,14 +837,6 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         }
     }
 
-    private var bottomInsetRemeasureBypassInputGates: Bool {
-        get { activeStateKey().map { readState(for: $0).bottomInsetRemeasureBypassInputGates } ?? false }
-        set {
-            guard let key = activeStateKey() else { return }
-            mutateState(for: key) { $0.bottomInsetRemeasureBypassInputGates = newValue }
-        }
-    }
-
     func scheduleScrollToBottom(animated: Bool, attempts: Int = 2) {
         guard let sessionKey = callbackSessionKey() else { return }
         scheduleScrollToBottom(sessionKey: sessionKey, animated: animated, attempts: attempts)
@@ -730,11 +848,20 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = .clear
-        view.isOpaque = false
+        applyChatPageBackground(isDark: currentIsDark)
         view.clipsToBounds = false
         configureCollectionView()
+        applyChatPageBackground(isDark: currentIsDark)
         configureDataSource()
+        webBubbleCoordinator.onItemsChanged = { [weak self] in
+            self?.applySnapshotForWebBubbles()
+        }
+        webBubbleCoordinator.onReconfigureItem = { [weak self] id in
+            self?.reconfigureItem(id: id)
+        }
+        webBubbleCoordinator.onScrollToItem = { [weak self] id in
+            self?.scrollToItem(id: id)
+        }
 
         // currentIsDark will be set by the first update() call from SwiftUI
         // which passes the colorScheme environment value
@@ -955,6 +1082,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         // Handle bounds size changes
         let size = collectionView.bounds.size
         guard size != .zero, size != lastBoundsSize else {
+            notifyTypingIndicatorAnchorFrameIfNeeded()
             return
         }
         lastBoundsSize = size
@@ -974,51 +1102,21 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 unreadCount: self.unreadCount,
                 onExpand: onExpand,
                 sessionKey: channelOverride,
+                sessionStatus: sessionStatus,
                 forceReReadGeneration: 0,
                 onScrollEvent: onScrollEvent,
+                onTypingIndicatorTap: onTypingIndicatorTap,
+                onTypingIndicatorAnchorFrameChanged: onTypingIndicatorAnchorFrameChanged,
+                onSessionControlSelected: onSessionControlSelected,
                 isDark: currentIsDark
             )
         }
-#if os(visionOS)
-        updateVisibleCellOpacity()
-#endif
+        notifyTypingIndicatorAnchorFrameIfNeeded()
     }
-
-#if os(visionOS)
-    private func updateVisibleCellOpacity() {
-        guard collectionView.bounds.height > 1 else { return }
-        let visibleRect = collectionView.bounds
-        let fadeStartY = visibleRect.minY + (visibleRect.height * 0.08)
-        let fadeStartBottomY = visibleRect.maxY - (visibleRect.height * 0.08)
-        let topDenom = max(fadeStartY - visibleRect.minY, 1)
-        let bottomDenom = max(visibleRect.maxY - fadeStartBottomY, 1)
-        for cell in collectionView.visibleCells {
-            let cellMinY = cell.frame.minY
-            let cellMaxY = cell.frame.maxY
-            let topAlpha: CGFloat
-            if cellMinY >= fadeStartY {
-                topAlpha = 1
-            } else {
-                topAlpha = max(0, min(1, (cellMinY - visibleRect.minY) / topDenom))
-            }
-
-            let bottomAlpha: CGFloat
-            if cellMaxY <= fadeStartBottomY {
-                bottomAlpha = 1
-            } else {
-                bottomAlpha = max(0, min(1, (visibleRect.maxY - cellMaxY) / bottomDenom))
-            }
-
-            cell.alpha = min(topAlpha, bottomAlpha)
-        }
-    }
-#endif
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
         bubbleSizingV2LastScrollActivityTime = CFAbsoluteTimeGetCurrent()
-#if os(visionOS)
-        updateVisibleCellOpacity()
-#endif
+        updateVisibleFooterAlpha()
         guard let sessionKey = callbackSessionKey() else { return }
         handleUserScrolled(sessionKey: sessionKey)
         checkFirstUnreadCrossingIfNeeded(sessionKey: sessionKey)
@@ -1029,11 +1127,6 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     }
 
     func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
-#if os(visionOS)
-        if !decelerate {
-            updateVisibleCellOpacity()
-        }
-#endif
         if !decelerate {
             setSalientHighlightIsScrolling(false)
         }
@@ -1047,13 +1140,11 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             schedulePersistScrollState(sessionKey: sessionKey)
             flushDeferredBubbleSizingV2RemeasureIfNeeded()
             scheduleDeferredBottomInsetRemeasure()
+            notifyTypingIndicatorAnchorFrameIfNeeded()
         }
     }
 
     func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
-#if os(visionOS)
-        updateVisibleCellOpacity()
-#endif
         flushDeferredPreviewRemeasuresIfPossible()
         setSalientHighlightIsScrolling(false)
         guard let sessionKey = callbackSessionKey() else { return }
@@ -1064,6 +1155,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         schedulePersistScrollState(sessionKey: sessionKey)
         flushDeferredBubbleSizingV2RemeasureIfNeeded()
         scheduleDeferredBottomInsetRemeasure()
+        notifyTypingIndicatorAnchorFrameIfNeeded()
     }
 
     func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
@@ -1076,6 +1168,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         schedulePersistScrollState(sessionKey: sessionKey)
         flushDeferredBubbleSizingV2RemeasureIfNeeded()
         scheduleDeferredBottomInsetRemeasure()
+        notifyTypingIndicatorAnchorFrameIfNeeded()
     }
 
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
@@ -1103,13 +1196,15 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     }
 
     func collectionView(_ collectionView: UICollectionView, willDisplay cell: UICollectionViewCell, forItemAt indexPath: IndexPath) {
-#if os(visionOS)
-        updateVisibleCellOpacity()
-#else
         guard let id = dataSource.itemIdentifier(for: indexPath) else { return }
         // During morph, we intentionally drive the target cell's alpha from 0->1 in our own
         // `UIView.animate`. Don't let willDisplay stomp it back to 1 early.
         if id == morphTargetMessageId {
+            return
+        }
+        if id == SessionMetadataFooterCell.itemId {
+            cell.alpha = footerRevealAlpha()
+            cell.transform = .identity
             return
         }
         guard pendingEntranceAnimationIds.contains(id) else {
@@ -1131,21 +1226,99 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             cell.alpha = 1
             cell.transform = .identity
         }
-#endif
         scheduleDeferredBottomInsetRemeasure()
     }
 
     var currentBottomInset: CGFloat = 0
+
+    private func logScrollRestore(_ message: String) {
+        print("[ScrollRestore] \(message)")
+    }
+
+    private func formatScrollRestore(_ value: CGFloat) -> String {
+        guard value.isFinite else { return "nonfinite" }
+        return String(format: "%.1f", value)
+    }
+
+    private func describePersistedScrollState(_ state: PersistedScrollState?) -> String {
+        guard let state else { return "nil" }
+        return "atBottom=\(state.atBottom) distanceFromBottom=\(formatScrollRestore(CGFloat(state.distanceFromBottom))) savedAt=\(String(format: "%.3f", state.savedAtEpochSeconds))"
+    }
+
+    private func describeMaterializationState(_ state: MaterializationState?) -> String {
+        guard let state else { return "nil" }
+        return "stage=\(state.stage.rawValue) bounds=\(state.windowBounds.lowerBound)..<\(state.windowBounds.upperBound) expansion=\(state.expansionState.rawValue) unreadOutsideTail=\(state.unreadOutsideTailWindow)"
+    }
+
+    private func describeMaterializationEvent(_ event: MaterializationEvent) -> String {
+        switch event {
+        case .messagesUpdated(let totalCount, let firstUnreadMessageId, let fullMessageIds, let allowTailStage):
+            return "messagesUpdated total=\(totalCount) firstUnread=\(firstUnreadMessageId ?? "nil") ids=\(fullMessageIds.count) allowTailStage=\(allowTailStage)"
+        case .tailRendered(let totalCount, let firstUnreadMessageId, let fullMessageIds):
+            return "tailRendered total=\(totalCount) firstUnread=\(firstUnreadMessageId ?? "nil") ids=\(fullMessageIds.count)"
+        }
+    }
+
+    private func logRestorePhaseChange(sessionKey: String,
+                                       from oldPhase: RestorePhase,
+                                       to newPhase: RestorePhase,
+                                       reason: String) {
+        logScrollRestore(
+            "restorePhase sessionKey=\(sessionKey) from=\(String(describing: oldPhase)) to=\(String(describing: newPhase)) reason=\(reason)"
+        )
+    }
+
+    private func logPendingScrollRestoreStateChange(sessionKey: String,
+                                                    from oldState: PersistedScrollState?,
+                                                    to newState: PersistedScrollState?,
+                                                    reason: String) {
+        logScrollRestore(
+            "pendingScrollRestoreState sessionKey=\(sessionKey) from={\(describePersistedScrollState(oldState))} to={\(describePersistedScrollState(newState))} reason=\(reason)"
+        )
+    }
+
+    private func logMaterializationStateChange(sessionKey: String,
+                                               from oldState: MaterializationState?,
+                                               to newState: MaterializationState?,
+                                               reason: String) {
+        logScrollRestore(
+            "materializationState sessionKey=\(sessionKey) from={\(describeMaterializationState(oldState))} to={\(describeMaterializationState(newState))} reason=\(reason)"
+        )
+    }
+
+    private func logScrollCall(_ name: String,
+                               sessionKey: String?,
+                               currentY: CGFloat,
+                               targetY: CGFloat,
+                               animated: Bool,
+                               reason: String) {
+        logScrollRestore(
+            "\(name) sessionKey=\(sessionKey ?? "nil") currentOffsetY=\(formatScrollRestore(currentY)) targetOffsetY=\(formatScrollRestore(targetY)) animated=\(animated) reason=\(reason)"
+        )
+    }
 
     /// Single source of truth for setting bottom content inset (driven by coordinator).
     func setBottomInset(_ totalBottomInset: CGFloat,
                         animatedDuration: TimeInterval? = nil,
                         animationOptions: UIView.AnimationOptions = []) {
         let previousBottomInset = collectionView.contentInset.bottom
+        logScrollRestore(
+            "setBottomInset old=\(formatScrollRestore(previousBottomInset)) new=\(formatScrollRestore(totalBottomInset))"
+        )
         let delta = totalBottomInset - previousBottomInset
         // Keep keyboard/inset anchoring tied to active finger interaction only.
         // Deceleration must not disable this pinning path.
-        let shouldPinToBottom = sbbState.isPinnedToBottomIntent && !isActivelyDraggingOrTracking
+        let hasAuthoritativeRestoreTarget = callbackSessionKey().map(hasAuthoritativePersistedRestoreTarget(sessionKey:)) ?? false
+        let shouldPinToBottom = Self.shouldAdjustForBottomInsetPinnedPosition(
+            hasAuthoritativeRestoreTarget: hasAuthoritativeRestoreTarget,
+            isPinnedToBottomIntent: sbbState.isPinnedToBottomIntent,
+            isActivelyDraggingOrTracking: isActivelyDraggingOrTracking
+        )
+        if hasAuthoritativeRestoreTarget && sbbState.isPinnedToBottomIntent && !isActivelyDraggingOrTracking {
+            logScrollRestore(
+                "setBottomInset.skipOffsetAdjustment sessionKey=\(callbackSessionKey() ?? "nil") reason=savedRestoreTargetIsAuthoritative"
+            )
+        }
         currentBottomInset = totalBottomInset
         // Avoid re-applying the same inset; on visionOS we can get frequent relayout ticks and
         // touching `contentInset` even with the same value can kick the scroll view.
@@ -1176,14 +1349,15 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     }
 
     private func handleBottomInsetHeightCapChange(previousBottomInset: CGFloat, newBottomInset: CGFloat) {
-        guard abs(newBottomInset - previousBottomInset) > 0.5 else { return }
-        scheduleBottomInsetHeightCapInvalidation(
+        guard Self.shouldScheduleBottomInsetHeightCapInvalidation(
             previousBottomInset: previousBottomInset,
-            newBottomInset: newBottomInset
-        )
+            newBottomInset: newBottomInset,
+            isInputActive: isInputActive
+        ) else { return }
+        scheduleBottomInsetHeightCapInvalidation()
     }
 
-    private func scheduleBottomInsetHeightCapInvalidation(previousBottomInset: CGFloat, newBottomInset: CGFloat) {
+    private func scheduleBottomInsetHeightCapInvalidation() {
         guard let token = activeSessionGenerationToken() else { return }
         pendingBottomInsetHeightCapInvalidation?.cancel()
         let workItem = DispatchWorkItem { [weak self] in
@@ -1191,10 +1365,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             guard self.readState(for: token.sessionKey).restoreGeneration == token.generation else { return }
             self.withBoundSessionKey(token.sessionKey) {
                 self.pendingBottomInsetHeightCapInvalidation = nil
-                self.applyBottomInsetHeightCapInvalidation(
-                    previousBottomInset: previousBottomInset,
-                    newBottomInset: newBottomInset
-                )
+                self.applyBottomInsetHeightCapInvalidation()
             }
         }
         pendingBottomInsetHeightCapInvalidation = workItem
@@ -1204,7 +1375,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         )
     }
 
-    private func applyBottomInsetHeightCapInvalidation(previousBottomInset: CGFloat, newBottomInset: CGFloat) {
+    private func applyBottomInsetHeightCapInvalidation() {
         guard let viewModel else { return }
         let metrics = ChatFlowTheme.Metrics(isCompact: isCompact)
         let affectedIds = messagesById.values.compactMap { message -> String? in
@@ -1213,20 +1384,16 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         }
         guard !affectedIds.isEmpty else { return }
         deferredBottomInsetRemeasureIds.formUnion(affectedIds)
-        // Keyboard dismiss is a discrete geometry transition, not active typing churn.
-        // When inset collapses significantly, visible capped bubbles must remeasure promptly
-        // even if focus/content gates still report "active input".
-        if isLikelyKeyboardDismissInsetChange(previousBottomInset: previousBottomInset, newBottomInset: newBottomInset) {
-            bottomInsetRemeasureBypassInputGates = true
-        }
         scheduleDeferredBottomInsetRemeasure()
     }
 
-    private func isLikelyKeyboardDismissInsetChange(previousBottomInset: CGFloat, newBottomInset: CGFloat) -> Bool {
-        let collapsedBy = previousBottomInset - newBottomInset
-        // Keyboard transitions are large inset drops (hundreds of points), unlike line-wrap
-        // or small chrome adjustments. Keep this threshold conservative to avoid broadening scope.
-        return collapsedBy > 80
+    static func shouldScheduleBottomInsetHeightCapInvalidation(
+        previousBottomInset: CGFloat,
+        newBottomInset: CGFloat,
+        isInputActive: Bool
+    ) -> Bool {
+        guard abs(newBottomInset - previousBottomInset) > 0.5 else { return false }
+        return !isInputActive
     }
 
     private func scheduleDeferredBottomInsetRemeasure() {
@@ -1248,17 +1415,9 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
 
     private func flushDeferredBottomInsetRemeasureIfNeeded() {
         guard !deferredBottomInsetRemeasureIds.isEmpty else { return }
-        guard isBubbleSizingV2ScrollAtRest() else {
-            // If we intentionally bypass input gates for keyboard-dismiss, keep trying until rest.
-            if bottomInsetRemeasureBypassInputGates {
-                scheduleDeferredBottomInsetRemeasure()
-            }
-            return
-        }
-        if !bottomInsetRemeasureBypassInputGates {
-            guard !isInputActive else { return }
-            guard viewModel?.inputContent.isEffectivelyEmpty != false else { return }
-        }
+        guard isBubbleSizingV2ScrollAtRest() else { return }
+        guard !isInputActive else { return }
+        guard viewModel?.inputContent.isEffectivelyEmpty != false else { return }
 
         let visibleIds: Set<String> = Set(collectionView.indexPathsForVisibleItems.compactMap { indexPath in
             guard let id = dataSource.itemIdentifier(for: indexPath), !isNonMessageItemID(id) else {
@@ -1267,12 +1426,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             return id
         })
         let idsToRemeasure = Array(deferredBottomInsetRemeasureIds.intersection(visibleIds))
-        guard !idsToRemeasure.isEmpty else {
-            // Bypass applies to currently visible bubbles only.
-            // Keep non-visible ids queued for normal scroll-into-view handling.
-            bottomInsetRemeasureBypassInputGates = false
-            return
-        }
+        guard !idsToRemeasure.isEmpty else { return }
 
         if bubbleSizingV2Enabled {
             idsToRemeasure.forEach { invalidateBubbleSizingV2Cache(for: $0) }
@@ -1286,14 +1440,21 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             executeInvalidationPlan(plan)
         }
         deferredBottomInsetRemeasureIds.subtract(idsToRemeasure)
-        bottomInsetRemeasureBypassInputGates = false
     }
 
     func scheduleScrollToBottom(sessionKey: String, animated: Bool, attempts: Int = 2) {
+        let stateBefore = readState(for: sessionKey)
+        logScrollRestore(
+            "scheduleScrollToBottom.request sessionKey=\(sessionKey) animated=\(animated) attempts=\(attempts) existingAttempts=\(stateBefore.pendingScrollToBottomAttempts) existingAnimated=\(stateBefore.pendingScrollToBottomAnimated)"
+        )
         mutateState(for: sessionKey) { state in
             state.pendingScrollToBottomAttempts = max(state.pendingScrollToBottomAttempts, attempts)
             state.pendingScrollToBottomAnimated = state.pendingScrollToBottomAnimated || animated
         }
+        let stateAfter = readState(for: sessionKey)
+        logScrollRestore(
+            "scheduleScrollToBottom.enqueued sessionKey=\(sessionKey) pendingAttempts=\(stateAfter.pendingScrollToBottomAttempts) pendingAnimated=\(stateAfter.pendingScrollToBottomAnimated)"
+        )
         performPendingScrollToBottomIfNeeded(sessionKey: sessionKey)
     }
 
@@ -1308,6 +1469,9 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             }
         }
         guard remainingAttempts > 0 else { return }
+        logScrollRestore(
+            "scheduleScrollToBottom.perform sessionKey=\(sessionKey) remainingAttempts=\(remainingAttempts) animated=\(animated)"
+        )
         collectionView.layoutIfNeeded()
         scrollToBottom(animated: animated)
         var shouldContinue = false
@@ -1327,6 +1491,9 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 self.performPendingScrollToBottomIfNeeded(sessionKey: sessionKey)
             }
             guard let workItem else { return }
+            logScrollRestore(
+                "scheduleScrollToBottom.reschedule sessionKey=\(sessionKey) nextExpectedGeneration=\(expectedGeneration)"
+            )
             mutateState(for: sessionKey) { state in
                 state.pendingScrollToBottomWorkItem?.cancel()
                 state.pendingScrollToBottomWorkItem = workItem
@@ -1345,9 +1512,12 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
 
     private func enqueueMaterializationEvent(sessionKey: String,
                                              event: MaterializationEvent) -> MaterializationPlan {
+        logScrollRestore(
+            "materializationEvent.enqueue sessionKey=\(sessionKey) event=\(describeMaterializationEvent(event)) queueDepthBefore=\(materializationEventQueue.count)"
+        )
         materializationEventQueue.append(MaterializationEventEnvelope(sessionKey: sessionKey, event: event))
         processMaterializationEventQueue()
-        return lastMaterializationPlanBySessionKey[sessionKey]
+        let plan = lastMaterializationPlanBySessionKey[sessionKey]
             ?? MaterializationPlan(
                 stage: .full,
                 windowBounds: .empty,
@@ -1355,6 +1525,10 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 scheduleTailToFullPromotion: false,
                 isTailToFullExpansionApply: false
             )
+        logScrollRestore(
+            "materializationEvent.plan sessionKey=\(sessionKey) stage=\(plan.stage.rawValue) bounds=\(plan.windowBounds.lowerBound)..<\(plan.windowBounds.upperBound) unreadOutsideTail=\(plan.unreadOutsideTailWindow) scheduleTailToFullPromotion=\(plan.scheduleTailToFullPromotion) isTailToFullExpansionApply=\(plan.isTailToFullExpansionApply)"
+        )
+        return plan
     }
 
     private func pruneMaterializationState(validSessionKeys: Set<String>) {
@@ -1403,6 +1577,17 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
 
     private func prepareIncomingStateOnSwitch(sessionKey: String, allowTailStage: Bool) {
         let persistedState = loadPersistedScrollState(for: sessionKey)
+        if let persistedState {
+            logScrollRestore(
+                "prepareIncomingStateOnSwitch sessionKey=\(sessionKey) persistedAtBottom=\(persistedState.atBottom) persistedDistanceFromBottom=\(formatScrollRestore(CGFloat(persistedState.distanceFromBottom)))"
+            )
+        } else {
+            logScrollRestore(
+                "prepareIncomingStateOnSwitch sessionKey=\(sessionKey) persistedAtBottom=nil persistedDistanceFromBottom=nil"
+            )
+        }
+        let previousPendingState = readState(for: sessionKey).pendingScrollRestoreState
+        let previousRestorePhase = readState(for: sessionKey).restorePhase
         mutateState(for: sessionKey) { state in
             state.pendingScrollRestoreState = persistedState
             state.restoreConfirmationRetries = 0
@@ -1418,9 +1603,28 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 state.restorePhase = .none
             }
         }
+        let newState = readState(for: sessionKey)
+        if previousPendingState != newState.pendingScrollRestoreState {
+            logPendingScrollRestoreStateChange(
+                sessionKey: sessionKey,
+                from: previousPendingState,
+                to: newState.pendingScrollRestoreState,
+                reason: "prepareIncomingStateOnSwitch"
+            )
+        }
+        if previousRestorePhase != newState.restorePhase {
+            logRestorePhaseChange(
+                sessionKey: sessionKey,
+                from: previousRestorePhase,
+                to: newState.restorePhase,
+                reason: "prepareIncomingStateOnSwitch"
+            )
+        }
     }
 
     private func prepareSameKeyReread(sessionKey: String) {
+        let previousPendingState = readState(for: sessionKey).pendingScrollRestoreState
+        let previousRestorePhase = readState(for: sessionKey).restorePhase
         mutateState(for: sessionKey) { state in
             state.scrollStateWriteDebounceTimer?.invalidate()
             state.scrollStateWriteDebounceTimer = nil
@@ -1429,6 +1633,23 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             state.restorePhase = .pendingTail
             state.restoreConfirmationRetries = 0
             state.suspendScrollPersistenceUntilRestoreConfirmed = true
+        }
+        let newState = readState(for: sessionKey)
+        if previousPendingState != newState.pendingScrollRestoreState {
+            logPendingScrollRestoreStateChange(
+                sessionKey: sessionKey,
+                from: previousPendingState,
+                to: newState.pendingScrollRestoreState,
+                reason: "prepareSameKeyReread"
+            )
+        }
+        if previousRestorePhase != newState.restorePhase {
+            logRestorePhaseChange(
+                sessionKey: sessionKey,
+                from: previousRestorePhase,
+                to: newState.restorePhase,
+                reason: "prepareSameKeyReread"
+            )
         }
     }
 
@@ -1440,13 +1661,22 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         // FIFO command processing keeps expansion and append events deterministic.
         while !materializationEventQueue.isEmpty {
             let envelope = materializationEventQueue.removeFirst()
+            logScrollRestore(
+                "materializationEvent.process sessionKey=\(envelope.sessionKey) event=\(describeMaterializationEvent(envelope.event)) queueDepthAfterPop=\(materializationEventQueue.count)"
+            )
             let plan = advanceMaterialization(sessionKey: envelope.sessionKey, event: envelope.event)
             lastMaterializationPlanBySessionKey[envelope.sessionKey] = plan
         }
     }
 
+    private func hasAuthoritativePersistedRestoreTarget(sessionKey: String) -> Bool {
+        guard let persistedState = readState(for: sessionKey).pendingScrollRestoreState else { return false }
+        return !persistedState.atBottom
+    }
+
     private func advanceMaterialization(sessionKey: String,
                                         event: MaterializationEvent) -> MaterializationPlan {
+        let previousMaterializationState = materializationStateBySessionKey[sessionKey]
         let totalCount: Int
         let firstUnreadId: String?
         let fullMessageIds: [String]
@@ -1471,6 +1701,12 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 expansionState: .idle,
                 unreadOutsideTailWindow: false
             )
+            logMaterializationStateChange(
+                sessionKey: sessionKey,
+                from: previousMaterializationState,
+                to: materializationStateBySessionKey[sessionKey],
+                reason: "advanceMaterialization totalCount<=0 event=\(describeMaterializationEvent(event))"
+            )
             return MaterializationPlan(
                 stage: .full,
                 windowBounds: .empty,
@@ -1489,6 +1725,12 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 windowBounds: fullBounds,
                 expansionState: .idle,
                 unreadOutsideTailWindow: false
+            )
+            logMaterializationStateChange(
+                sessionKey: sessionKey,
+                from: previousMaterializationState,
+                to: materializationStateBySessionKey[sessionKey],
+                reason: "advanceMaterialization smallStreamFull event=\(describeMaterializationEvent(event))"
             )
             return MaterializationPlan(
                 stage: .full,
@@ -1553,6 +1795,12 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                     state.expansionState = .idle
                 }
                 materializationStateBySessionKey[sessionKey] = state
+                logMaterializationStateChange(
+                    sessionKey: sessionKey,
+                    from: previousMaterializationState,
+                    to: state,
+                    reason: "advanceMaterialization messagesUpdated.tail event=\(describeMaterializationEvent(event))"
+                )
                 return MaterializationPlan(
                     stage: .tail,
                     windowBounds: tailBounds,
@@ -1568,6 +1816,12 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             state.expansionState = .idle
             state.unreadOutsideTailWindow = false
             materializationStateBySessionKey[sessionKey] = state
+            logMaterializationStateChange(
+                sessionKey: sessionKey,
+                from: previousMaterializationState,
+                to: state,
+                reason: "advanceMaterialization messagesUpdated.full event=\(describeMaterializationEvent(event))"
+            )
             return MaterializationPlan(
                 stage: .full,
                 windowBounds: fullBounds,
@@ -1584,6 +1838,12 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 state.expansionState = .idle
                 state.unreadOutsideTailWindow = false
                 materializationStateBySessionKey[sessionKey] = state
+                logMaterializationStateChange(
+                    sessionKey: sessionKey,
+                    from: previousMaterializationState,
+                    to: state,
+                    reason: "advanceMaterialization tailRendered.promote event=\(describeMaterializationEvent(event))"
+                )
                 return MaterializationPlan(
                     stage: .full,
                     windowBounds: fullBounds,
@@ -1599,6 +1859,12 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             state.expansionState = .idle
             state.unreadOutsideTailWindow = false
             materializationStateBySessionKey[sessionKey] = state
+            logMaterializationStateChange(
+                sessionKey: sessionKey,
+                from: previousMaterializationState,
+                to: state,
+                reason: "advanceMaterialization tailRendered.full event=\(describeMaterializationEvent(event))"
+            )
             return MaterializationPlan(
                 stage: .full,
                 windowBounds: fullBounds,
@@ -1634,10 +1900,12 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
 
     private func scheduleTailToFullPromotionIfNeeded(sessionKey: String) {
         // Promotion is queued on next runloop turn so tail stage can render first.
+        logScrollRestore("materializationPromotion.schedule sessionKey=\(sessionKey)")
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             let sessionMatches = (self.channelOverride ?? self.viewModel?.engineActiveSessionKey) == sessionKey
             guard self.isActiveSession, sessionMatches else { return }
+            self.logScrollRestore("materializationPromotion.execute sessionKey=\(sessionKey)")
             let fullMessages = self.viewModel?.messages(for: sessionKey) ?? []
             let fullMessageIds = fullMessages.map(\.id)
 
@@ -1650,6 +1918,9 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 )
             )
             guard plan.isTailToFullExpansionApply else { return }
+            self.logScrollRestore(
+                "materializationPromotion.apply sessionKey=\(sessionKey) stage=\(plan.stage.rawValue) bounds=\(plan.windowBounds.lowerBound)..<\(plan.windowBounds.upperBound)"
+            )
             self.runMaterializationRefreshPass()
         }
     }
@@ -1669,8 +1940,12 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             unreadCount: unreadCount,
             onExpand: onExpand,
             sessionKey: channelOverride,
+            sessionStatus: sessionStatus,
             forceReReadGeneration: 0,
             onScrollEvent: onScrollEvent,
+            onTypingIndicatorTap: onTypingIndicatorTap,
+            onTypingIndicatorAnchorFrameChanged: onTypingIndicatorAnchorFrameChanged,
+            onSessionControlSelected: onSessionControlSelected,
             isDark: currentIsDark
         )
     }
@@ -1694,8 +1969,12 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 unreadCount: request.unreadCount,
                 onExpand: request.onExpand,
                 sessionKey: request.sessionKey,
+                sessionStatus: request.sessionStatus,
                 forceReReadGeneration: request.forceReReadGeneration,
                 onScrollEvent: request.onScrollEvent,
+                onTypingIndicatorTap: request.onTypingIndicatorTap,
+                onTypingIndicatorAnchorFrameChanged: request.onTypingIndicatorAnchorFrameChanged,
+                onSessionControlSelected: request.onSessionControlSelected,
                 isDark: request.isDark
             )
         }
@@ -1717,11 +1996,13 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
               self.isRenderPolicyFrozen == request.isRenderPolicyFrozen,
               self.isInputActive == request.isInputActive,
               abs(self.topInset - request.topInset) <= 0.5,
-              abs(self.truncationBottomInset - request.truncationBottomInset) <= 0.5,
               self.firstUnreadMessageId == request.firstUnreadMessageId,
               self.unreadCount == request.unreadCount else {
             return false
         }
+        // Multiline composer growth changes truncationBottomInset while typing.
+        // Deferring the active-session update until typing settles keeps those height changes
+        // from forcing a full list update on each line-wrap tick.  (#148)
         if let isDark = request.isDark, currentIsDark != isDark {
             return false
         }
@@ -1741,9 +2022,13 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         unreadCount: Int,
         onExpand: ((Message) -> Void)? = nil,
         sessionKey: String? = nil,
+        sessionStatus: SessionStatus? = nil,
         forceReReadGeneration: Int = 0,
         fontScaleChangeSequence: Int = 0,
         onScrollEvent: (@MainActor (MessageFlowScrollEvent) -> Void)? = nil,
+        onTypingIndicatorTap: (@MainActor (CGRect) -> Void)? = nil,
+        onTypingIndicatorAnchorFrameChanged: (@MainActor (CGRect?) -> Void)? = nil,
+        onSessionControlSelected: (@MainActor (String, SessionControlAction, String?, Bool?) -> Void)? = nil,
         isDark: Bool? = nil
     ) {
         let request = UpdateRequest(
@@ -1759,9 +2044,13 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             unreadCount: unreadCount,
             onExpand: onExpand,
             sessionKey: sessionKey,
+            sessionStatus: sessionStatus,
             forceReReadGeneration: forceReReadGeneration,
             fontScaleChangeSequence: fontScaleChangeSequence,
             onScrollEvent: onScrollEvent,
+            onTypingIndicatorTap: onTypingIndicatorTap,
+            onTypingIndicatorAnchorFrameChanged: onTypingIndicatorAnchorFrameChanged,
+            onSessionControlSelected: onSessionControlSelected,
             isDark: isDark
         )
         if isUpdatePassInFlight || isSnapshotApplyInFlight {
@@ -1783,6 +2072,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
 
         loadViewIfNeeded()
         let previousLastMessageId = lastMessageId
+        let previousSessionStatus = self.sessionStatus
         let wasUserInteracting = isUserInteracting
         let wasPinnedToBottomIntent = sbbState.isPinnedToBottomIntent
         let previousSessionKey = self.channelOverride
@@ -1792,15 +2082,18 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         self.isRenderPolicyFrozen = isRenderPolicyFrozen
         self.isInputActive = isInputActive
         self.isTypingActive = isTypingActive
+        self.sessionStatus = sessionStatus
         self.onExpand = onExpand
         self.truncationBottomInset = truncationBottomInset
         self.onScrollEvent = onScrollEvent
+        self.onTypingIndicatorTap = onTypingIndicatorTap
+        self.onTypingIndicatorAnchorFrameChanged = onTypingIndicatorAnchorFrameChanged
+        self.onSessionControlSelected = onSessionControlSelected
 
         // Handle appearance change from SwiftUI colorScheme
         if let isDark = isDark, currentIsDark != isDark {
             logger.info("update: appearance changed isDark=\(isDark, privacy: .public)")
             currentIsDark = isDark
-            clearAllSizeState()
             forceReconfigureAll = true
         }
         let didFontScaleChange = currentFontScaleChangeSequence != request.fontScaleChangeSequence
@@ -1809,15 +2102,14 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             executeInvalidationPlan(invalidateFor(reason: .envChanged))
             forceReconfigureAll = true
         }
-#if os(visionOS)
         if let isDark = isDark {
             let desiredStyle: UIUserInterfaceStyle = isDark ? .dark : .light
             if view.overrideUserInterfaceStyle != desiredStyle {
                 view.overrideUserInterfaceStyle = desiredStyle
                 collectionView?.overrideUserInterfaceStyle = desiredStyle
             }
+            applyChatPageBackground(isDark: isDark)
         }
-#endif
 
         collectionView.accessibilityIdentifier = effectiveSessionKey
         StreamSwitchTiming.log("messageFlow_update_enter", sessionKey: effectiveSessionKey)
@@ -1900,8 +2192,18 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         case .full:
             snapshotMessages = messages
         }
+        lastMessages = messages
+        let effectiveStream = SessionKey.stream(for: effectiveSessionKey)
+        lastEffectiveStream = effectiveStream
+        webBubbleCoordinator.currentStream = effectiveStream
         let snapshotMessageIds = snapshotMessages.map(\.id)
-        let snapshotItemIds = snapshotItemsWithDateSeparators(from: snapshotMessages)
+        let snapshotItemIds = snapshotItemsWithWebBubbles(
+            from: snapshotItemsWithDateSeparators(from: snapshotMessages),
+            stream: effectiveStream
+        )
+        logScrollRestore(
+            "materializationStage.start sessionKey=\(effectiveSessionKey) stage=\(materializationPlan.stage.rawValue) firstActivation=\(isFirstActivationForSession) snapshotMessages=\(snapshotMessageIds.count) totalMessages=\(messageCount) pendingRestore={\(describePersistedScrollState(readState(for: effectiveSessionKey).pendingScrollRestoreState))}"
+        )
         StreamSwitchTiming.log(
             "materialization_plan stage=\(materializationPlan.stage.rawValue) items=\(snapshotItemIds.count) total=\(messageCount)",
             sessionKey: effectiveSessionKey
@@ -1923,6 +2225,9 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         wasShowingTypingIndicator = showTypingIndicator
         if showTypingIndicator {
             snapshot.appendItems([TypingIndicatorCell.itemId])
+        }
+        if !snapshotMessageIds.isEmpty, SessionMetadataFooterCell.footerText(for: sessionStatus) != nil {
+            snapshot.appendItems([SessionMetadataFooterCell.itemId])
         }
         StreamSwitchTiming.log("snapshot_build_end", sessionKey: effectiveSessionKey)
 
@@ -1955,6 +2260,11 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             changedIds.forEach { invalidateBubbleSizingV2Cache(for: $0) }
             removeBubbleV2PreviewVersions(for: changedIds)
         }
+        if previousSessionStatus != sessionStatus,
+           snapshot.indexOfItem(SessionMetadataFooterCell.itemId) != nil,
+           oldItemIds.contains(SessionMetadataFooterCell.itemId) {
+            snapshot.reconfigureItems([SessionMetadataFooterCell.itemId])
+        }
         forceReconfigureAll = false
 
         let didLastMessageChange = (previousLastMessageId != newestMessageId)
@@ -1969,26 +2279,34 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             guard let self else { return }
             guard self.callbackSessionKey() == effectiveSessionKey else { return }
             let runtimeState = self.readState(for: effectiveSessionKey)
+            let hasAuthoritativeRestoreTarget = runtimeState.pendingScrollRestoreState.map { !$0.atBottom } ?? false
             if Self.shouldScheduleBottomFallbackAfterApply(
-                hasPendingRestoreState: runtimeState.pendingScrollRestoreState != nil,
+                hasAuthoritativeRestoreTarget: hasAuthoritativeRestoreTarget,
                 restorePhaseIsNone: runtimeState.restorePhase == .none,
                 isIncrementalAppend: isIncrementalAppend,
                 previousLastMessageId: previousLastMessageId
             ) {
+                self.logScrollRestore("afterSnapshotApplied.bottomFallback sessionKey=\(effectiveSessionKey) stage=\(materializationPlan.stage.rawValue)")
                 self.scheduleScrollToBottom(sessionKey: effectiveSessionKey, animated: false, attempts: 1)
             }
+            self.logScrollRestore("afterSnapshotApplied.restoreAttemptRegister sessionKey=\(effectiveSessionKey) stage=\(materializationPlan.stage.rawValue)")
             self.scheduleRestoreAttemptOnMessageAppearance(
                 sessionKey: effectiveSessionKey,
                 stage: materializationPlan.stage,
                 snapshotMessageIds: snapshotMessageIds
             )
             if materializationPlan.scheduleTailToFullPromotion {
+                self.logScrollRestore("afterSnapshotApplied.tailToFullPromotion sessionKey=\(effectiveSessionKey)")
                 self.scheduleTailToFullPromotionIfNeeded(sessionKey: effectiveSessionKey)
             }
-            if shouldAutoScrollToBottomAfterApply {
+            if shouldAutoScrollToBottomAfterApply,
+               Self.shouldScheduleAutomatedBottomScroll(hasAuthoritativeRestoreTarget: hasAuthoritativeRestoreTarget) {
                 // Race-sensitive: the contentSize can change again after diffable applies.
                 // A few post-apply attempts preserves the historical “always end up at the bottom” behavior.
+                self.logScrollRestore("afterSnapshotApplied.autoScrollToBottom sessionKey=\(effectiveSessionKey) stage=\(materializationPlan.stage.rawValue)")
                 self.scheduleScrollToBottom(sessionKey: effectiveSessionKey, animated: true, attempts: 3)
+            } else if shouldAutoScrollToBottomAfterApply {
+                self.logScrollRestore("afterSnapshotApplied.autoScrollToBottom.disqualified sessionKey=\(effectiveSessionKey) stage=\(materializationPlan.stage.rawValue) reason=savedRestoreTargetIsAuthoritative")
             }
             self.fireRegisteredMessageLoadCallbacksIfMaterialized(
                 for: effectiveSessionKey,
@@ -2000,6 +2318,8 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             if self.isActiveSession {
                 viewModel.markEngineActivationRenderedIfNeeded(for: effectiveSessionKey)
             }
+            self.updateVisibleFooterAlpha()
+            self.notifyTypingIndicatorAnchorFrameIfNeeded()
         }
         // Spec requires explicit contentOffset compensation for tail->full prepend.
         // This anchor path captures (messageId, oldFrameMinY, oldContentOffsetY), then applies:
@@ -2010,17 +2330,6 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
 
         if shouldMorph {
             isSnapshotApplyInFlight = true
-#if os(visionOS)
-            StreamSwitchTiming.log("dataSource_apply_start", sessionKey: effectiveSessionKey)
-            applySnapshotWithTypingMorphIfPossible(snapshot: snapshot, targetMessageId: newestMessageId) { [weak self] in
-                afterSnapshotApplied()
-                self?.scheduleBubbleSizingV2ViewportAnchorCompensation(expansionAnchor)
-                self?.updateVisibleCellOpacity()
-                StreamSwitchTiming.log("dataSource_apply_end", sessionKey: effectiveSessionKey)
-                self?.isSnapshotApplyInFlight = false
-                self?.drainQueuedUpdateIfPossible()
-            }
-#else
             StreamSwitchTiming.log("dataSource_apply_start", sessionKey: effectiveSessionKey)
             applySnapshotWithTypingMorphIfPossible(snapshot: snapshot, targetMessageId: newestMessageId) { [weak self] in
                 afterSnapshotApplied()
@@ -2029,20 +2338,8 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 self?.isSnapshotApplyInFlight = false
                 self?.drainQueuedUpdateIfPossible()
             }
-#endif
         } else {
             isSnapshotApplyInFlight = true
-#if os(visionOS)
-            StreamSwitchTiming.log("dataSource_apply_start", sessionKey: effectiveSessionKey)
-            dataSource.apply(snapshot, animatingDifferences: false) { [weak self] in
-                afterSnapshotApplied()
-                self?.scheduleBubbleSizingV2ViewportAnchorCompensation(expansionAnchor)
-                self?.updateVisibleCellOpacity()
-                StreamSwitchTiming.log("dataSource_apply_end", sessionKey: effectiveSessionKey)
-                self?.isSnapshotApplyInFlight = false
-                self?.drainQueuedUpdateIfPossible()
-            }
-#else
             StreamSwitchTiming.log("dataSource_apply_start", sessionKey: effectiveSessionKey)
             dataSource.apply(snapshot, animatingDifferences: false) { [weak self] in
                 afterSnapshotApplied()
@@ -2051,7 +2348,6 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 self?.isSnapshotApplyInFlight = false
                 self?.drainQueuedUpdateIfPossible()
             }
-#endif
         }
         logger.info(
             "diffing apply snapshot count=\(messageCount, privacy: .public) changed=\(changedIds.count, privacy: .public) needsLayout=\(needsFullLayout, privacy: .public) morph=\(shouldMorph, privacy: .public)"
@@ -2062,15 +2358,28 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             lastMessageId = newestMessageId
             if shouldMorph {
                 // Only defer the post-morph scroll if we would have auto-scrolled (user was pinned to bottom).
-                deferScrollToBottomUntilMorphCompletes = isIncrementalAppend && wasPinnedToBottomIntent && !wasUserInteracting
+                let shouldDeferBottomScroll = isIncrementalAppend
+                    && wasPinnedToBottomIntent
+                    && !wasUserInteracting
+                    && Self.shouldScheduleAutomatedBottomScroll(hasAuthoritativeRestoreTarget: pendingScrollRestoreState.map { !$0.atBottom } ?? false)
+                if isIncrementalAppend && wasPinnedToBottomIntent && !wasUserInteracting && !shouldDeferBottomScroll {
+                    logScrollRestore("postMorph.scrollToBottom.disqualified sessionKey=\(effectiveSessionKey) reason=savedRestoreTargetIsAuthoritative")
+                }
+                deferScrollToBottomUntilMorphCompletes = shouldDeferBottomScroll
             } else if isIncrementalAppend {
                 if wasPinnedToBottomIntent {
                     // ContentAppended while pinned: never enter unread mode.
                     // Auto-scroll now, or defer until drag ends.
                     if wasUserInteracting {
-                        pendingScrollToBottomAfterInteractionEnd = true
-                    } else {
+                        if Self.shouldScheduleAutomatedBottomScroll(hasAuthoritativeRestoreTarget: pendingScrollRestoreState.map { !$0.atBottom } ?? false) {
+                            pendingScrollToBottomAfterInteractionEnd = true
+                        } else {
+                            logScrollRestore("incrementalAppend.deferScroll.disqualified sessionKey=\(effectiveSessionKey) reason=savedRestoreTargetIsAuthoritative")
+                        }
+                    } else if Self.shouldScheduleAutomatedBottomScroll(hasAuthoritativeRestoreTarget: pendingScrollRestoreState.map { !$0.atBottom } ?? false) {
                         scheduleScrollToBottom(sessionKey: effectiveSessionKey, animated: true, attempts: 3)
+                    } else {
+                        logScrollRestore("incrementalAppend.scrollToBottom.disqualified sessionKey=\(effectiveSessionKey) reason=savedRestoreTargetIsAuthoritative")
                     }
                 } else {
                     emit(.didReceiveNewMessagesWhileScrolledUp(sessionKey: effectiveSessionKey, newMessageIDs: appendedMessageIDs))
@@ -2080,21 +2389,30 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 // For actual stream swaps/resets without a persisted anchor, default to bottom.
                 if let pendingScrollRestoreState {
                     if pendingScrollRestoreState.atBottom {
-                        scheduleScrollToBottom(sessionKey: effectiveSessionKey, animated: true)
+                        logScrollRestore("postApply.pendingAtBottomState sessionKey=\(effectiveSessionKey) reason=restoreStateAlreadyAtBottom")
                     }
                 } else if previousLastMessageId != nil {
                     // Preserve prior behavior on resets/stream swaps: default to bottom when the last id changes
                     // but we can't reliably classify it as an incremental append.
+                    logScrollRestore("postApply.defaultStreamSwapScroll sessionKey=\(effectiveSessionKey)")
                     scheduleScrollToBottom(sessionKey: effectiveSessionKey, animated: true)
                 }
             }
         } else if typingIndicatorJustAppeared {
             // Only keep the typing indicator visible if the user is already pinned near the bottom.
-            if wasPinnedToBottomIntent && !wasUserInteracting {
+            if wasPinnedToBottomIntent && !wasUserInteracting
+                && Self.shouldScheduleAutomatedBottomScroll(hasAuthoritativeRestoreTarget: pendingScrollRestoreState.map { !$0.atBottom } ?? false) {
+                logScrollRestore("typingIndicator.scrollToBottom sessionKey=\(effectiveSessionKey)")
                 scheduleScrollToBottom(sessionKey: effectiveSessionKey, animated: true)
+            } else if wasPinnedToBottomIntent && !wasUserInteracting {
+                logScrollRestore("typingIndicator.scrollToBottom.disqualified sessionKey=\(effectiveSessionKey) reason=savedRestoreTargetIsAuthoritative")
             } else if wasPinnedToBottomIntent && wasUserInteracting {
                 // Defer the scroll; never show the SBB while within the at-bottom threshold.
-                pendingScrollToBottomAfterInteractionEnd = true
+                if Self.shouldScheduleAutomatedBottomScroll(hasAuthoritativeRestoreTarget: pendingScrollRestoreState.map { !$0.atBottom } ?? false) {
+                    pendingScrollToBottomAfterInteractionEnd = true
+                } else {
+                    logScrollRestore("typingIndicator.deferScroll.disqualified sessionKey=\(effectiveSessionKey) reason=savedRestoreTargetIsAuthoritative")
+                }
             }
         }
         withBoundSessionKey(effectiveSessionKey) {
@@ -2112,12 +2430,12 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     }
 
     static func shouldScheduleBottomFallbackAfterApply(
-        hasPendingRestoreState: Bool,
+        hasAuthoritativeRestoreTarget: Bool,
         restorePhaseIsNone: Bool,
         isIncrementalAppend: Bool,
         previousLastMessageId: String?
     ) -> Bool {
-        guard !hasPendingRestoreState, restorePhaseIsNone else { return false }
+        guard !hasAuthoritativeRestoreTarget, restorePhaseIsNone else { return false }
         // Guardrail: a plain append must not force-jump to bottom while reading history.
         guard !isIncrementalAppend else { return false }
         // Keep the one-time initial bottom placement behavior for first population only.
@@ -2129,8 +2447,69 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         return !hasMessageAnchor
     }
 
+    static func shouldScheduleAutomatedBottomScroll(hasAuthoritativeRestoreTarget: Bool) -> Bool {
+        !hasAuthoritativeRestoreTarget
+    }
+
+    static func shouldAdjustForBottomInsetPinnedPosition(
+        hasAuthoritativeRestoreTarget: Bool,
+        isPinnedToBottomIntent: Bool,
+        isActivelyDraggingOrTracking: Bool
+    ) -> Bool {
+        isPinnedToBottomIntent && !isActivelyDraggingOrTracking && !hasAuthoritativeRestoreTarget
+    }
+
+    static func shouldApplyViewportAnchorCompensation(hasAuthoritativeRestoreTarget: Bool) -> Bool {
+        !hasAuthoritativeRestoreTarget
+    }
+
+    static func restingBottomContentHeight(
+        contentSizeHeight: CGFloat,
+        footerHeight: CGFloat,
+        hasFooter: Bool
+    ) -> CGFloat {
+        guard hasFooter else { return contentSizeHeight }
+        return max(0, contentSizeHeight - footerHeight)
+    }
+
+    static func bottomOffsetMaxY(
+        contentHeight: CGFloat,
+        boundsHeight: CGFloat,
+        topInset: CGFloat,
+        bottomInset: CGFloat
+    ) -> CGFloat {
+        let minY = -topInset
+        return max(minY, contentHeight - boundsHeight + bottomInset)
+    }
+
+    static func footerRevealAlpha(
+        contentOffsetY: CGFloat,
+        restingBottomOffsetY: CGFloat,
+        trueBottomOffsetY: CGFloat,
+    ) -> CGFloat {
+        guard restingBottomOffsetY.isFinite, trueBottomOffsetY.isFinite else { return 0 }
+        let revealDistance = trueBottomOffsetY - restingBottomOffsetY
+        guard revealDistance > 0 else { return 0 }
+        let revealedDistance = contentOffsetY - restingBottomOffsetY
+        return min(1, max(0, revealedDistance / revealDistance))
+    }
+
+    static func initialFooterCellAlpha(
+        contentOffsetY: CGFloat,
+        restingBottomOffsetY: CGFloat,
+        trueBottomOffsetY: CGFloat
+    ) -> CGFloat {
+        footerRevealAlpha(
+            contentOffsetY: contentOffsetY,
+            restingBottomOffsetY: restingBottomOffsetY,
+            trueBottomOffsetY: trueBottomOffsetY
+        )
+    }
+
     private func isNonMessageItemID(_ id: String) -> Bool {
-        id == TypingIndicatorCell.itemId || DateSeparatorCell.isDateSeparatorItemID(id)
+        id == TypingIndicatorCell.itemId
+            || id == SessionMetadataFooterCell.itemId
+            || DateSeparatorCell.isDateSeparatorItemID(id)
     }
 
     private func snapshotItemsWithDateSeparators(from messages: [Message]) -> [String] {
@@ -2236,15 +2615,58 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         }
     }
 
+    private func restingBottomContentHeight() -> CGFloat {
+        Self.restingBottomContentHeight(
+            contentSizeHeight: collectionView.contentSize.height,
+            footerHeight: SessionMetadataFooterCell.height(for: sessionStatus),
+            hasFooter: dataSource.indexPath(for: SessionMetadataFooterCell.itemId) != nil
+        )
+    }
+
+    private func restingBottomOffsetMaxY(bottomInset: CGFloat) -> CGFloat {
+        Self.bottomOffsetMaxY(
+            contentHeight: restingBottomContentHeight(),
+            boundsHeight: collectionView.bounds.height,
+            topInset: collectionView.contentInset.top,
+            bottomInset: bottomInset
+        )
+    }
+
+    private func trueBottomOffsetMaxY(bottomInset: CGFloat) -> CGFloat {
+        Self.bottomOffsetMaxY(
+            contentHeight: collectionView.contentSize.height,
+            boundsHeight: collectionView.bounds.height,
+            topInset: collectionView.contentInset.top,
+            bottomInset: bottomInset
+        )
+    }
+
     private func distanceFromBottomClamped() -> CGFloat {
         let contentInset = collectionView.contentInset
         let minY = -contentInset.top
-        let maxY = max(minY, collectionView.contentSize.height - collectionView.bounds.height + currentBottomInset)
+        let maxY = restingBottomOffsetMaxY(bottomInset: currentBottomInset)
         guard maxY.isFinite, minY.isFinite else { return .greatestFiniteMagnitude }
         let offsetY = collectionView.contentOffset.y
         let clampedOffsetY = min(max(offsetY, minY), maxY)
         let distance = max(0, maxY - clampedOffsetY)
         return distance.isFinite ? distance : .greatestFiniteMagnitude
+    }
+
+    private func footerRevealAlpha() -> CGFloat {
+        guard dataSource.indexPath(for: SessionMetadataFooterCell.itemId) != nil else { return 1 }
+        return Self.footerRevealAlpha(
+            contentOffsetY: collectionView.contentOffset.y,
+            restingBottomOffsetY: restingBottomOffsetMaxY(bottomInset: currentBottomInset),
+            trueBottomOffsetY: trueBottomOffsetMaxY(bottomInset: currentBottomInset)
+        )
+    }
+
+    private func updateVisibleFooterAlpha() {
+        guard let indexPath = dataSource.indexPath(for: SessionMetadataFooterCell.itemId),
+              let cell = collectionView.cellForItem(at: indexPath) else {
+            return
+        }
+        cell.alpha = footerRevealAlpha()
     }
 
     private func handleUserScrolled() {
@@ -2437,11 +2859,26 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         guard pendingScrollToBottomAfterInteractionEnd else { return }
         guard !isUserInteracting else { return }
         pendingScrollToBottomAfterInteractionEnd = false
+        if !Self.shouldScheduleAutomatedBottomScroll(hasAuthoritativeRestoreTarget: hasAuthoritativePersistedRestoreTarget(sessionKey: sessionKey)) {
+            logScrollRestore("deferredInteractionEnd.scrollToBottom.disqualified sessionKey=\(sessionKey) reason=savedRestoreTargetIsAuthoritative")
+            return
+        }
         scheduleScrollToBottom(sessionKey: sessionKey, animated: true, attempts: 3)
     }
 
     private func runStreamContextSwitchSeam(incomingSessionKey: String, forceReReadGeneration: Int) {
         guard !incomingSessionKey.isEmpty else { return }
+
+        let isMaterialized = materializationStateBySessionKey[incomingSessionKey] != nil
+        let currentOffsetY: String
+        if let collectionView {
+            currentOffsetY = formatScrollRestore(collectionView.contentOffset.y)
+        } else {
+            currentOffsetY = "unavailable"
+        }
+        logScrollRestore(
+            "runStreamContextSwitchSeam sessionKey=\(incomingSessionKey) materialized=\(isMaterialized) streamState=\(isMaterialized ? "revisit" : "fresh") currentOffsetY=\(currentOffsetY)"
+        )
 
         let outgoingSessionKey = lastAppliedEffectiveSessionKey
         let incomingState = readState(for: incomingSessionKey)
@@ -2479,10 +2916,29 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         if materializationStateBySessionKey[incomingSessionKey] == nil {
             prepareIncomingStateOnSwitch(sessionKey: incomingSessionKey, allowTailStage: true)
         } else {
+            let previousPendingState = readState(for: incomingSessionKey).pendingScrollRestoreState
+            let previousRestorePhase = readState(for: incomingSessionKey).restorePhase
             mutateState(for: incomingSessionKey) { state in
                 state.pendingScrollRestoreState = nil
                 state.restorePhase = .none
                 state.suspendScrollPersistenceUntilRestoreConfirmed = false
+            }
+            let newState = readState(for: incomingSessionKey)
+            if previousPendingState != newState.pendingScrollRestoreState {
+                logPendingScrollRestoreStateChange(
+                    sessionKey: incomingSessionKey,
+                    from: previousPendingState,
+                    to: newState.pendingScrollRestoreState,
+                    reason: "runStreamContextSwitchSeam materializedRevisitReset"
+                )
+            }
+            if previousRestorePhase != newState.restorePhase {
+                logRestorePhaseChange(
+                    sessionKey: incomingSessionKey,
+                    from: previousRestorePhase,
+                    to: newState.restorePhase,
+                    reason: "runStreamContextSwitchSeam materializedRevisitReset"
+                )
             }
         }
         mutateState(for: incomingSessionKey) { state in
@@ -2519,7 +2975,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         guard collectionView.contentSize.height > 0 else { return nil }
         let contentInset = collectionView.contentInset
         let minY = -contentInset.top
-        let maxY = max(minY, collectionView.contentSize.height - collectionView.bounds.height + currentBottomInset)
+        let maxY = restingBottomOffsetMaxY(bottomInset: currentBottomInset)
         guard maxY.isFinite, minY.isFinite else { return nil }
         let offsetY = collectionView.contentOffset.y
         let clampedOffsetY = min(max(offsetY, minY), maxY)
@@ -2572,7 +3028,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         if collectionView != nil {
             let contentInset = collectionView.contentInset
             let minY = -contentInset.top
-            let maxY = max(minY, collectionView.contentSize.height - collectionView.bounds.height + currentBottomInset)
+            let maxY = restingBottomOffsetMaxY(bottomInset: currentBottomInset)
             let rawOffsetY = collectionView.contentOffset.y
             let clampedOffsetY = min(max(rawOffsetY, minY), maxY)
             let computedDistance = max(0, maxY - clampedOffsetY)
@@ -2681,6 +3137,9 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         guard !state.restoredScrollGenerations.contains(state.restoreGeneration) else { return }
         guard state.pendingScrollRestoreState != nil else { return }
         guard state.restorePhase != .none, state.restorePhase != .confirmed else { return }
+        logScrollRestore(
+            "scheduleRestoreAttemptOnMessageAppearance sessionKey=\(sessionKey) stage=\(stage.rawValue) restorePhase=\(String(describing: state.restorePhase)) pendingRestore={\(describePersistedScrollState(state.pendingScrollRestoreState))}"
+        )
 
         let token = RestoreAttemptToken(sessionKey: sessionKey, generation: state.restoreGeneration, stage: stage)
         let triggerMessageId = state.lastMessageId ?? snapshotMessageIds.last
@@ -2722,17 +3181,26 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         collectionView.layoutIfNeeded()
         let contentInset = collectionView.contentInset
         let minY = -contentInset.top
-        let maxY = max(minY, collectionView.contentSize.height - collectionView.bounds.height + currentBottomInset)
+        let maxY = restingBottomOffsetMaxY(bottomInset: currentBottomInset)
         guard maxY.isFinite, minY.isFinite else { return }
 
         let desiredDistance = persistedState.atBottom ? 0 : CGFloat(persistedState.distanceFromBottom)
         let targetY = maxY - desiredDistance
         let clampedTargetY = min(max(targetY, minY), maxY)
+        logScrollRestore(
+            "attemptRestoreScrollIfNeeded.before sessionKey=\(token.sessionKey) stage=\(token.stage.rawValue) targetOffsetY=\(formatScrollRestore(clampedTargetY)) currentOffsetY=\(formatScrollRestore(collectionView.contentOffset.y)) currentBottomInset=\(formatScrollRestore(currentBottomInset)) contentInsetBottom=\(formatScrollRestore(contentInset.bottom))"
+        )
         StreamSwitchTiming.log(
             "scroll_restore_attempt phase=\(String(describing: runtimeState.restorePhase)) stage=\(token.stage.rawValue) generation=\(token.generation) targetY=\(String(format: "%.1f", clampedTargetY)) desiredDistance=\(String(format: "%.1f", desiredDistance)) atBottomTarget=\(persistedState.atBottom)",
             sessionKey: token.sessionKey
         )
+        logScrollRestore(
+            "setContentOffset.restore sessionKey=\(token.sessionKey) offsetY=\(formatScrollRestore(clampedTargetY)) animated=false"
+        )
         collectionView.setContentOffset(CGPoint(x: 0, y: clampedTargetY), animated: false)
+        logScrollRestore(
+            "attemptRestoreScrollIfNeeded.after sessionKey=\(token.sessionKey) stage=\(token.stage.rawValue) targetOffsetY=\(formatScrollRestore(clampedTargetY)) currentOffsetY=\(formatScrollRestore(collectionView.contentOffset.y)) currentBottomInset=\(formatScrollRestore(currentBottomInset)) contentInsetBottom=\(formatScrollRestore(collectionView.contentInset.bottom))"
+        )
         refreshLastKnownScrollSnapshot(sessionKey: token.sessionKey)
 
         let actualDistance = distanceFromBottomClamped()
@@ -2745,15 +3213,27 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         }()
 
         if restoreConfirmed, token.stage == .tail {
+            let previousRestorePhase = readState(for: token.sessionKey).restorePhase
             mutateState(for: token.sessionKey) { state in
                 state.restorePhase = .pendingFullConfirmation
                 state.restoreConfirmationRetries = 0
+            }
+            let newRestorePhase = readState(for: token.sessionKey).restorePhase
+            if previousRestorePhase != newRestorePhase {
+                logRestorePhaseChange(
+                    sessionKey: token.sessionKey,
+                    from: previousRestorePhase,
+                    to: newRestorePhase,
+                    reason: "attemptRestoreScrollIfNeeded tailConfirmedAwaitFull"
+                )
             }
             return
         }
 
         if restoreConfirmed {
             let unread = runtimeState.unreadCount
+            let previousRestorePhase = runtimeState.restorePhase
+            let previousPendingState = runtimeState.pendingScrollRestoreState
             mutateState(for: token.sessionKey) { state in
                 state.restoredScrollGenerations.insert(token.generation)
                 state.restorePhase = .confirmed
@@ -2761,6 +3241,23 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 state.suspendScrollPersistenceUntilRestoreConfirmed = false
                 state.pendingScrollRestoreState = nil
                 state.sbbState = isAtBottomNow ? .atBottom : (unread > 0 ? .scrolledUpUnread : .scrolledUp)
+            }
+            let newState = readState(for: token.sessionKey)
+            if previousRestorePhase != newState.restorePhase {
+                logRestorePhaseChange(
+                    sessionKey: token.sessionKey,
+                    from: previousRestorePhase,
+                    to: newState.restorePhase,
+                    reason: "attemptRestoreScrollIfNeeded confirmed"
+                )
+            }
+            if previousPendingState != newState.pendingScrollRestoreState {
+                logPendingScrollRestoreStateChange(
+                    sessionKey: token.sessionKey,
+                    from: previousPendingState,
+                    to: newState.pendingScrollRestoreState,
+                    reason: "attemptRestoreScrollIfNeeded confirmed"
+                )
             }
             StreamSwitchTiming.log(
                 "scroll_restore_confirmed stage=\(token.stage.rawValue) generation=\(token.generation) actualDistance=\(String(format: "%.1f", actualDistance)) atBottomNow=\(isAtBottomNow)",
@@ -2771,13 +3268,25 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         }
 
         if token.stage == .tail {
+            let previousRestorePhase = readState(for: token.sessionKey).restorePhase
             mutateState(for: token.sessionKey) { state in
                 state.restorePhase = .pendingFullConfirmation
+            }
+            let newRestorePhase = readState(for: token.sessionKey).restorePhase
+            if previousRestorePhase != newRestorePhase {
+                logRestorePhaseChange(
+                    sessionKey: token.sessionKey,
+                    from: previousRestorePhase,
+                    to: newRestorePhase,
+                    reason: "attemptRestoreScrollIfNeeded tailNotConfirmedAwaitFull"
+                )
             }
             return
         }
 
         var shouldFallbackToBottom = false
+        let previousRestorePhase = readState(for: token.sessionKey).restorePhase
+        let previousPendingState = readState(for: token.sessionKey).pendingScrollRestoreState
         mutateState(for: token.sessionKey) { state in
             state.restorePhase = .pendingFullConfirmation
             state.restoreConfirmationRetries += 1
@@ -2791,9 +3300,32 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 state.sbbState = .atBottom
             }
         }
+        let newStateAfterRetry = readState(for: token.sessionKey)
+        if previousRestorePhase != newStateAfterRetry.restorePhase {
+            logRestorePhaseChange(
+                sessionKey: token.sessionKey,
+                from: previousRestorePhase,
+                to: newStateAfterRetry.restorePhase,
+                reason: shouldFallbackToBottom ? "attemptRestoreScrollIfNeeded fallbackToBottom" : "attemptRestoreScrollIfNeeded retryFull"
+            )
+        }
+        if previousPendingState != newStateAfterRetry.pendingScrollRestoreState {
+            logPendingScrollRestoreStateChange(
+                sessionKey: token.sessionKey,
+                from: previousPendingState,
+                to: newStateAfterRetry.pendingScrollRestoreState,
+                reason: shouldFallbackToBottom ? "attemptRestoreScrollIfNeeded fallbackToBottom" : "attemptRestoreScrollIfNeeded retryFull"
+            )
+        }
 
         if shouldFallbackToBottom {
+            logScrollRestore(
+                "setContentOffset.restoreFallback sessionKey=\(token.sessionKey) offsetY=\(formatScrollRestore(maxY)) animated=false"
+            )
             collectionView.setContentOffset(CGPoint(x: 0, y: maxY), animated: false)
+            logScrollRestore(
+                "attemptRestoreScrollIfNeeded.afterFallback sessionKey=\(token.sessionKey) stage=\(token.stage.rawValue) targetOffsetY=\(formatScrollRestore(maxY)) currentOffsetY=\(formatScrollRestore(collectionView.contentOffset.y)) currentBottomInset=\(formatScrollRestore(currentBottomInset)) contentInsetBottom=\(formatScrollRestore(collectionView.contentInset.bottom))"
+            )
             refreshLastKnownScrollSnapshot(sessionKey: token.sessionKey)
             StreamSwitchTiming.log(
                 "scroll_restore_fallback_to_bottom stage=\(token.stage.rawValue) generation=\(token.generation) retries=\(Self.restoreMaxConfirmationRetries)",
@@ -2814,7 +3346,8 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         collectionView = UICollectionView(frame: view.bounds, collectionViewLayout: flowLayout)
         collectionView.translatesAutoresizingMaskIntoConstraints = true
         collectionView.autoresizingMask = []
-        collectionView.backgroundColor = .clear
+        collectionView.backgroundColor = Self.chatPageBackgroundColor(isDark: currentIsDark)
+        collectionView.isOpaque = !currentIsDark
         collectionView.contentInsetAdjustmentBehavior = .never
         collectionView.alwaysBounceVertical = true
 #if !os(visionOS)
@@ -2824,12 +3357,109 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         collectionView.allowsMultipleSelection = false
         collectionView.clipsToBounds = false  // Allow content to render past bounds during scroll
         collectionView.delegate = self
+        let typingIndicatorTap = UITapGestureRecognizer(target: self, action: #selector(handleCollectionViewTap(_:)))
+        typingIndicatorTap.cancelsTouchesInView = false
+        typingIndicatorTap.delaysTouchesBegan = false
+        typingIndicatorTap.delaysTouchesEnded = false
+        collectionView.addGestureRecognizer(typingIndicatorTap)
+        let diagnosticMessage = "T217DIAG collection_recognizer_installed build=\(Self.t217DiagnosticBuild) recognizerCount=\(self.collectionView.gestureRecognizers?.count ?? 0)"
+        print(diagnosticMessage)
+        typingCancelDiagnosticLogger.notice(
+            "T217DIAG collection_recognizer_installed build=\(Self.t217DiagnosticBuild, privacy: .public) recognizerCount=\(self.collectionView.gestureRecognizers?.count ?? 0, privacy: .public)"
+        )
         collectionView.register(MessageBubbleUIKitCell.self, forCellWithReuseIdentifier: MessageBubbleUIKitCell.reuseIdentifier)
+        collectionView.register(WebBubbleUIKitCell.self, forCellWithReuseIdentifier: WebBubbleUIKitCell.reuseIdentifier)
         collectionView.register(TypingIndicatorCell.self, forCellWithReuseIdentifier: TypingIndicatorCell.reuseIdentifier)
         collectionView.register(DateSeparatorCell.self, forCellWithReuseIdentifier: DateSeparatorCell.reuseIdentifier)
+        collectionView.register(SessionMetadataFooterCell.self, forCellWithReuseIdentifier: SessionMetadataFooterCell.reuseIdentifier)
 
         view.addSubview(collectionView)
         // Frame will be set in viewDidLayoutSubviews to extend to window bounds
+    }
+
+    private func applyChatPageBackground(isDark: Bool) {
+        let color = Self.chatPageBackgroundColor(isDark: isDark)
+        view.backgroundColor = color
+        view.isOpaque = !isDark
+        collectionView?.backgroundColor = color
+        collectionView?.isOpaque = !isDark
+    }
+
+    @objc private func handleCollectionViewTap(_ recognizer: UITapGestureRecognizer) {
+        let point = recognizer.location(in: collectionView)
+        let hasCallback = onTypingIndicatorTap != nil
+        let typingIndexPath = dataSource.indexPath(for: TypingIndicatorCell.itemId)
+        let attributes = typingIndexPath.flatMap { collectionView.layoutAttributesForItem(at: $0) }
+        let frame = if let typingIndexPath, let attributes {
+            typingIndicatorTapTargetFrame(for: typingIndexPath, layoutAttributes: attributes)
+        } else {
+            CGRect.null
+        }
+        let didHit = frame.contains(point)
+        let diagnosticMessage = "T217DIAG collection_tap build=\(Self.t217DiagnosticBuild) state=\(recognizer.state.rawValue) point=\(String(describing: point)) hasCallback=\(hasCallback) hasTypingIndexPath=\(typingIndexPath != nil) typingFrame=\(String(describing: frame)) didHit=\(didHit) contentOffset=\(String(describing: self.collectionView.contentOffset)) contentInset=\(String(describing: self.collectionView.contentInset))"
+        print(diagnosticMessage)
+        typingCancelDiagnosticLogger.notice(
+            "T217DIAG collection_tap build=\(Self.t217DiagnosticBuild, privacy: .public) state=\(recognizer.state.rawValue, privacy: .public) point=\(String(describing: point), privacy: .public) hasCallback=\(hasCallback, privacy: .public) hasTypingIndexPath=\(typingIndexPath != nil, privacy: .public) typingFrame=\(String(describing: frame), privacy: .public) didHit=\(didHit, privacy: .public) contentOffset=\(String(describing: self.collectionView.contentOffset), privacy: .public) contentInset=\(String(describing: self.collectionView.contentInset), privacy: .public)"
+        )
+        guard recognizer.state == .ended,
+              let onTypingIndicatorTap,
+              let typingIndexPath,
+              didHit else { return }
+        print("T217DIAG collection_tap_invoking_callback build=\(Self.t217DiagnosticBuild) point=\(String(describing: point))")
+        typingCancelDiagnosticLogger.notice(
+            "T217DIAG collection_tap_invoking_callback build=\(Self.t217DiagnosticBuild, privacy: .public) point=\(String(describing: point), privacy: .public)"
+        )
+        onTypingIndicatorTap(typingIndicatorAnchorFrame(for: typingIndexPath))
+    }
+
+    private func typingIndicatorTapTargetFrame(
+        for indexPath: IndexPath,
+        layoutAttributes: UICollectionViewLayoutAttributes
+    ) -> CGRect {
+        let visibleFrame: CGRect
+        if let cell = collectionView.cellForItem(at: indexPath) as? TypingIndicatorCell {
+            visibleFrame = cell.convert(cell.bounds, to: collectionView)
+        } else {
+            visibleFrame = layoutAttributes.frame
+        }
+        let expandedFrame = CGRect(
+            x: visibleFrame.minX - Self.typingIndicatorTapTargetLeadingOutset,
+            y: visibleFrame.minY,
+            width: visibleFrame.width + Self.typingIndicatorTapTargetLeadingOutset + Self.typingIndicatorTapTargetTrailingOutset,
+            height: visibleFrame.height
+        )
+        return expandedFrame.intersection(collectionViewContentFrame())
+    }
+
+    private func typingIndicatorAnchorFrame(for indexPath: IndexPath) -> CGRect {
+        guard let cell = collectionView.cellForItem(at: indexPath) as? TypingIndicatorCell else {
+            return collectionView.convert(collectionView.layoutAttributesForItem(at: indexPath)?.frame ?? .null, to: nil)
+        }
+        return cell.renderedBubbleFrame(in: nil)
+    }
+
+    private func notifyTypingIndicatorAnchorFrameIfNeeded() {
+        let anchorFrame: CGRect?
+        if let indexPath = dataSource.indexPath(for: TypingIndicatorCell.itemId),
+           let cell = collectionView.cellForItem(at: indexPath) as? TypingIndicatorCell {
+            anchorFrame = cell.renderedBubbleFrame(in: nil)
+        } else {
+            anchorFrame = nil
+        }
+        guard anchorFrame != lastReportedTypingIndicatorAnchorFrame else { return }
+        lastReportedTypingIndicatorAnchorFrame = anchorFrame
+        onTypingIndicatorAnchorFrameChanged?(anchorFrame)
+    }
+
+    private func collectionViewContentFrame() -> CGRect {
+        CGRect(
+            x: 0,
+            y: -collectionView.adjustedContentInset.top,
+            width: collectionView.bounds.width,
+            height: collectionView.contentSize.height
+                + collectionView.adjustedContentInset.top
+                + collectionView.adjustedContentInset.bottom
+        )
     }
 
     private func configureDataSource() {
@@ -2845,6 +3475,16 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 ) as? DateSeparatorCell
                 let text = self.dateSeparatorTextByItemId[id] ?? ""
                 cell?.configure(text: text, isDark: self.currentIsDark)
+                return cell
+            }
+
+            if id.hasPrefix("web_") {
+                let cell = collectionView.dequeueReusableCell(
+                    withReuseIdentifier: WebBubbleUIKitCell.reuseIdentifier,
+                    for: indexPath
+                ) as? WebBubbleUIKitCell
+                guard let item = self.webBubbleCoordinator.webBubbleItem(for: id) else { return cell }
+                cell?.configure(item: item, coordinator: self.webBubbleCoordinator, isDark: self.currentIsDark)
                 return cell
             }
 
@@ -2872,9 +3512,31 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                     presentation: presentation,
                     isCompact: self.isCompact,
                     maxWidth: maxWidth,
-                    isDark: self.currentIsDark
+                    isDark: self.currentIsDark,
+                    onTap: { [weak self, weak cell] in
+                        guard let self else { return }
+                        let anchorFrame = cell?.renderedBubbleFrame(in: nil) ?? .null
+                        self.onTypingIndicatorTap?(anchorFrame)
+                    }
                 )
                 cell?.startAnimating()
+                DispatchQueue.main.async { [weak self] in
+                    self?.notifyTypingIndicatorAnchorFrameIfNeeded()
+                }
+                return cell
+            }
+
+            if id == SessionMetadataFooterCell.itemId {
+                let cell = collectionView.dequeueReusableCell(
+                    withReuseIdentifier: SessionMetadataFooterCell.reuseIdentifier,
+                    for: indexPath
+                ) as? SessionMetadataFooterCell
+                cell?.configure(
+                    status: self.sessionStatus,
+                    isDark: self.currentIsDark,
+                    onSelect: self.onSessionControlSelected
+                )
+                cell?.alpha = self.footerRevealAlpha()
                 return cell
             }
 
@@ -2947,6 +3609,8 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 bubbleSizingV2: layoutStateV2,
                 showsHeader: !hideHeader,
                 isDark: self.currentIsDark,
+                terminalConnectionPool: viewModel.terminalConnectionPool,
+                webBubbleCoordinator: self.webBubbleCoordinator,
                 salientHighlightService: viewModel.salientHighlightService,
                 onRequestExpand: { [weak self] in
                     guard let self else { return }
@@ -3075,7 +3739,11 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                         self.deferScrollToBottomUntilMorphCompletes = false
                         // Multiple attempts preserves the historical “always end up at the bottom” invariant.
                         if let sessionKey = self.callbackSessionKey() {
-                            self.scheduleScrollToBottom(sessionKey: sessionKey, animated: false, attempts: 3)
+                            if Self.shouldScheduleAutomatedBottomScroll(hasAuthoritativeRestoreTarget: self.hasAuthoritativePersistedRestoreTarget(sessionKey: sessionKey)) {
+                                self.scheduleScrollToBottom(sessionKey: sessionKey, animated: false, attempts: 3)
+                            } else {
+                                self.logScrollRestore("morphCompletion.scrollToBottom.disqualified sessionKey=\(sessionKey) reason=savedRestoreTargetIsAuthoritative")
+                            }
                         }
                     }
                 }
@@ -3100,6 +3768,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         collectionView.contentInset.top = topInset
         collectionView.verticalScrollIndicatorInsets.top = topInset
         setBottomInset(currentBottomInset)
+        updateVisibleFooterAlpha()
 
         let contentWidth = effectiveContentWidth(metrics: metrics)
         let metricsFp = BubbleSizingV2.metricsFingerprint(
@@ -3171,7 +3840,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         guard !presentation.hasMediaOnly else { return false }
         return presentation.parts.contains { part in
             switch part {
-            case .image, .gallery:
+            case .remoteImage, .image, .gallery:
                 return true
             default:
                 return false
@@ -3244,7 +3913,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
 
         if presentation.parts.contains(where: { part in
             switch part {
-            case .image, .gallery, .linkPreview, .terminalSession:
+            case .remoteImage, .image, .gallery, .linkPreview, .terminalSession:
                 return true
             default:
                 return false
@@ -3288,7 +3957,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
 
         if presentation.parts.contains(where: { part in
             switch part {
-            case .image, .gallery, .terminalSession:
+            case .remoteImage, .image, .gallery, .terminalSession:
                 return true
             default:
                 return false
@@ -3370,6 +4039,20 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 maxWidthOverride: TypingIndicatorCell.bubbleWidth,
                 minHeightOverride: TypingIndicatorCell.bubbleHeight
             )
+        }
+
+        if id == SessionMetadataFooterCell.itemId {
+            let rowWidth = availableContentWidth()
+            let height = SessionMetadataFooterCell.height(for: sessionStatus)
+            return CGSize(width: rowWidth, height: height)
+        }
+
+        if id.hasPrefix("web_") {
+            let metrics = ChatFlowTheme.Metrics(isCompact: isCompact)
+            let availableWidth = effectiveContentWidth(metrics: metrics)
+            let heightCap = metrics.truncationHeight
+            let height = max(240, min(heightCap, 520))
+            return CGSize(width: availableWidth, height: height)
         }
 
         guard let message = messagesById[id] else {
@@ -3693,7 +4376,13 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         let contentWidth = max(1, measurement.measuredBubbleWidth - (paddingHorizontal * 2))
         let cacheKey = "\(url.absoluteString)|w=\(Int(contentWidth.rounded()))|m=\(env.metricsFingerprint)"
         let previewMaxHeight = linkPreviewViewportMaxHeight(plan: plan)
-        let fixedPreviewHeight: CGFloat? = plan.isSingleLinkPreview ? previewMaxHeight : nil
+        let fixedPreviewHeight: CGFloat? = {
+            guard plan.isSingleLinkPreview else { return nil }
+            if LinkPreviewView.isDirectMediaPreviewURL(url) {
+                return LinkPreviewView.preferredDirectMediaHeight(for: contentWidth, maxHeight: previewMaxHeight)
+            }
+            return previewMaxHeight
+        }()
         let estimated = fixedPreviewHeight
             ?? cachedPreviewHeight(cacheKey: cacheKey)
             ?? 120
@@ -3746,7 +4435,13 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             "\(url.absoluteString)|w=\(Int(contentWidth.rounded()))|m=\(env.metricsFingerprint)"
         }
         let linkPreviewMaxHeight = linkPreviewViewportMaxHeight(plan: plan)
-        let fixedPreviewHeight: CGFloat? = plan.isSingleLinkPreview ? linkPreviewMaxHeight : nil
+        let fixedPreviewHeight: CGFloat? = {
+            guard plan.isSingleLinkPreview, let url = plan.linkPreviewURL else { return nil }
+            if LinkPreviewView.isDirectMediaPreviewURL(url) {
+                return LinkPreviewView.preferredDirectMediaHeight(for: contentWidth, maxHeight: linkPreviewMaxHeight)
+            }
+            return linkPreviewMaxHeight
+        }()
         let linkPreviewEstimatedHeight: CGFloat? = fixedPreviewHeight
             ?? linkPreviewCacheKey.flatMap { cachedPreviewHeight(cacheKey: $0) }
         let previewInitialHeight = linkPreviewEstimatedHeight ?? 120
@@ -4013,10 +4708,18 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         let contentInset = collectionView.contentInset
         // Scroll to the bottom of the content (includes section insets/padding).
         // Using contentSize avoids under-scrolling when sectionInset.bottom is non-zero.
-        let targetY = collectionView.contentSize.height - collectionView.bounds.height + contentInset.bottom
+        let targetY = restingBottomContentHeight() - collectionView.bounds.height + contentInset.bottom
         let minY = -contentInset.top
-        let maxY = collectionView.contentSize.height - collectionView.bounds.height + contentInset.bottom
+        let maxY = restingBottomOffsetMaxY(bottomInset: contentInset.bottom)
         let clampedY = max(minY, min(targetY, maxY))
+        logScrollCall(
+            "scrollToBottom",
+            sessionKey: callbackSessionKey(),
+            currentY: collectionView.contentOffset.y,
+            targetY: clampedY,
+            animated: animated,
+            reason: "restingContentHeight=\(formatScrollRestore(restingBottomContentHeight())) insetBottom=\(formatScrollRestore(contentInset.bottom))"
+        )
         // If we're already at (or extremely near) the bottom, don't re-set contentOffset.
         if abs(collectionView.contentOffset.y - clampedY) <= 0.5 {
             if let sessionKey = callbackSessionKey() {
@@ -4040,6 +4743,52 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         if !animated, let sessionKey = callbackSessionKey() {
             refreshLastKnownScrollSnapshot(sessionKey: sessionKey)
         }
+    }
+
+    func scrollByPage(direction: ChatScrollPageDirection, animated: Bool) {
+        collectionView.layoutIfNeeded()
+        let contentInset = collectionView.contentInset
+        let minY = -contentInset.top
+        let maxY = max(minY, collectionView.contentSize.height - collectionView.bounds.height + contentInset.bottom)
+        let visibleHeight = collectionView.bounds.height - contentInset.top - contentInset.bottom
+        guard visibleHeight > 0, maxY > minY else { return }
+
+        let pageIncrement = max(120, visibleHeight * 0.82)
+        let delta = direction == .down ? pageIncrement : -pageIncrement
+        let targetY = collectionView.contentOffset.y + delta
+        let clampedY = max(minY, min(targetY, maxY))
+        guard abs(collectionView.contentOffset.y - clampedY) > 0.5 else { return }
+
+        logScrollCall(
+            "scrollByPage",
+            sessionKey: callbackSessionKey(),
+            currentY: collectionView.contentOffset.y,
+            targetY: clampedY,
+            animated: animated,
+            reason: "direction=\(direction) increment=\(formatScrollRestore(pageIncrement))"
+        )
+        collectionView.setContentOffset(CGPoint(x: 0, y: clampedY), animated: animated)
+        if !animated, let sessionKey = callbackSessionKey() {
+            refreshLastKnownScrollSnapshot(sessionKey: sessionKey)
+        }
+    }
+
+    @discardableResult
+    func scrollVisibleBubbleContents(direction: ChatScrollPageDirection, animated: Bool) -> Int {
+        collectionView.layoutIfNeeded()
+
+        var scrolledCount = 0
+        for cell in collectionView.visibleCells {
+            guard cell is MessageBubbleUIKitCell || cell is WebBubbleUIKitCell else { continue }
+            guard collectionView.bounds.intersects(cell.frame) else { continue }
+            scrolledCount += ChatVisibleBubbleContentScroll.scrollVisibleScrollableContent(
+                in: cell.contentView,
+                visibleIn: collectionView,
+                direction: direction,
+                animated: animated
+            )
+        }
+        return scrolledCount
     }
 
     func scrollToMessageCentered(messageId: String, animated: Bool) {
@@ -4080,7 +4829,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         // even when fully scrolled to the bottom. That prevents "at bottom" from ever becoming true.
         let inset = collectionView.contentInset
         let viewportBottomY = collectionView.contentOffset.y + collectionView.bounds.height - inset.bottom
-        let distanceFromBottom = collectionView.contentSize.height - viewportBottomY
+        let distanceFromBottom = restingBottomContentHeight() - viewportBottomY
         return distanceFromBottom <= extraMargin
     }
 
@@ -4091,6 +4840,14 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         let maxY = collectionView.contentSize.height - collectionView.bounds.height + contentInset.bottom
         let targetY = collectionView.contentOffset.y + delta
         let clampedY = max(minY, min(targetY, maxY))
+        logScrollCall(
+            "adjustContentOffsetForBottomInsetChange",
+            sessionKey: callbackSessionKey(),
+            currentY: collectionView.contentOffset.y,
+            targetY: clampedY,
+            animated: false,
+            reason: "delta=\(formatScrollRestore(delta)) insetBottom=\(formatScrollRestore(contentInset.bottom))"
+        )
         collectionView.setContentOffset(CGPoint(x: 0, y: clampedY), animated: false)
         if let sessionKey = callbackSessionKey() {
             refreshLastKnownScrollSnapshot(sessionKey: sessionKey)
@@ -4437,6 +5194,14 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             guard let self else { return }
             guard self.callbackSessionKey() == token.sessionKey else { return }
             guard self.readState(for: token.sessionKey).restoreGeneration == token.generation else { return }
+            if !Self.shouldApplyViewportAnchorCompensation(
+                hasAuthoritativeRestoreTarget: self.hasAuthoritativePersistedRestoreTarget(sessionKey: token.sessionKey)
+            ) {
+                self.logScrollRestore(
+                    "tailToFullViewportCompensation.disqualified sessionKey=\(token.sessionKey) reason=savedRestoreTargetIsAuthoritative"
+                )
+                return
+            }
             self.collectionView.layoutIfNeeded()
             guard let indexPath = self.dataSource.indexPath(for: anchor.messageId),
                   let attrs = self.collectionView.layoutAttributesForItem(at: indexPath) else {
@@ -4449,6 +5214,14 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             let maxY = max(minY, self.collectionView.contentSize.height - self.collectionView.bounds.height + inset.bottom)
             let targetY = max(minY, min(anchor.contentOffsetY + delta, maxY))
             guard targetY.isFinite else { return }
+            self.logScrollCall(
+                "tailToFullViewportCompensation",
+                sessionKey: token.sessionKey,
+                currentY: self.collectionView.contentOffset.y,
+                targetY: targetY,
+                animated: false,
+                reason: "anchorMessageId=\(anchor.messageId) anchorOffsetY=\(self.formatScrollRestore(anchor.contentOffsetY)) delta=\(self.formatScrollRestore(delta))"
+            )
             self.collectionView.setContentOffset(CGPoint(x: self.collectionView.contentOffset.x, y: targetY), animated: false)
             self.refreshLastKnownScrollSnapshot(sessionKey: token.sessionKey)
         }
@@ -4473,6 +5246,70 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             guard !existing.isEmpty else { return }
             snapshot.reconfigureItems(existing)
             self.dataSource.apply(snapshot, animatingDifferences: false)
+        }
+    }
+
+    private func reconfigureItem(id: String) {
+        scheduleReconfigure(for: id)
+    }
+
+    private func scrollToItem(id: String) {
+        scrollToMessageCentered(messageId: id, animated: true)
+    }
+
+    private func snapshotItemsWithWebBubbles(from itemIds: [String], stream: ChatStream) -> [String] {
+        var merged = itemIds
+        for item in webBubbleCoordinator.items(for: stream) {
+            if let parentItemId = item.parentItemId,
+               let parentIndex = merged.lastIndex(of: parentItemId) {
+                merged.insert(item.id, at: parentIndex + 1)
+            } else {
+                merged.append(item.id)
+            }
+        }
+        return merged
+    }
+
+    private func applySnapshotForWebBubbles() {
+        guard let viewModel,
+              let effectiveSessionKey = callbackSessionKey(),
+              let stream = lastEffectiveStream else { return }
+
+        var snapshot = dataSource.snapshot()
+        let snapshotMessages = materializeMessagesForActiveStage(
+            allMessages: lastMessages,
+            sessionKey: effectiveSessionKey
+        )
+        let desiredItemIds = snapshotItemsWithWebBubbles(
+            from: snapshotItemsWithDateSeparators(from: snapshotMessages),
+            stream: stream
+        )
+        snapshot.deleteAllItems()
+        snapshot.appendSections([0])
+        snapshot.appendItems(desiredItemIds)
+        if viewModel.isAssistantTyping && viewModel.typingSessionKey == effectiveSessionKey {
+            snapshot.appendItems([TypingIndicatorCell.itemId])
+        }
+        if !snapshotMessages.isEmpty, SessionMetadataFooterCell.footerText(for: sessionStatus) != nil {
+            snapshot.appendItems([SessionMetadataFooterCell.itemId])
+        }
+        dataSource.apply(snapshot, animatingDifferences: false) { [weak self] in
+            self?.updateVisibleFooterAlpha()
+            self?.notifyTypingIndicatorAnchorFrameIfNeeded()
+        }
+    }
+
+    private func materializeMessagesForActiveStage(allMessages: [Message], sessionKey: String) -> [Message] {
+        guard let materializationState = materializationStateBySessionKey[sessionKey] else {
+            return allMessages
+        }
+        switch materializationState.stage {
+        case .tail:
+            let lower = max(0, min(materializationState.windowBounds.lowerBound, allMessages.count))
+            let upper = max(lower, min(materializationState.windowBounds.upperBound, allMessages.count))
+            return Array(allMessages[lower..<upper])
+        case .full:
+            return allMessages
         }
     }
 
@@ -4531,7 +5368,11 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             scheduleBubbleSizingV2ViewportAnchorCompensation(viewportAnchor)
         }
         if messageId == lastMessageId, let sessionKey = callbackSessionKey() {
-            scheduleScrollToBottom(sessionKey: sessionKey, animated: false, attempts: 1)
+            if Self.shouldScheduleAutomatedBottomScroll(hasAuthoritativeRestoreTarget: hasAuthoritativePersistedRestoreTarget(sessionKey: sessionKey)) {
+                scheduleScrollToBottom(sessionKey: sessionKey, animated: false, attempts: 1)
+            } else {
+                logScrollRestore("bubbleSizing.lastMessageScrollToBottom.disqualified sessionKey=\(sessionKey) reason=savedRestoreTargetIsAuthoritative")
+            }
         }
     }
 
@@ -4565,6 +5406,388 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                         layout collectionViewLayout: UICollectionViewLayout,
                         sizeForItemAt indexPath: IndexPath) -> CGSize {
         sizeForItem(at: indexPath)
+    }
+}
+
+final class SessionMetadataFooterCell: UICollectionViewCell {
+    static let reuseIdentifier = "SessionMetadataFooterCell"
+    static let itemId = "__session_metadata_footer__"
+    static let topPadding: CGFloat = 12
+    static let bottomPadding: CGFloat = 4
+    static let horizontalPadding: CGFloat = 12
+    static let actionRegionHeight: CGFloat = 44
+    static let fadeRevealRange: CGFloat = topPadding + actionRegionHeight
+
+    private let stackView = UIStackView()
+
+    private struct FooterItem {
+        let text: String
+        let action: SessionControlAction?
+        let options: [FooterOption]
+        let unsupportedReason: String?
+    }
+
+    private struct FooterOption {
+        let title: String
+        let value: String?
+        let enabled: Bool?
+        let isCurrent: Bool
+    }
+
+    private static let footerFont = UIFont.clawline(.timestamp)
+    static func textAlpha(isDark: Bool) -> CGFloat {
+        isDark ? 0.90 : 0.84
+    }
+
+    private final class FooterButton: UIButton {
+        override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+            guard self.point(inside: point, with: event) else { return nil }
+            return self
+        }
+
+        override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+            let minimumSide: CGFloat = 44
+            let horizontalInset = max(0, (minimumSide - bounds.width) / 2)
+            return bounds.insetBy(dx: -horizontalInset, dy: 0).contains(point)
+        }
+    }
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        contentView.backgroundColor = .clear
+        backgroundColor = .clear
+
+        stackView.translatesAutoresizingMaskIntoConstraints = false
+        stackView.axis = .horizontal
+        stackView.alignment = .center
+        stackView.distribution = .fill
+        stackView.spacing = 2
+        stackView.setContentHuggingPriority(.required, for: .horizontal)
+        stackView.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+        contentView.addSubview(stackView)
+
+        NSLayoutConstraint.activate([
+            stackView.leadingAnchor.constraint(greaterThanOrEqualTo: contentView.leadingAnchor, constant: Self.horizontalPadding),
+            stackView.trailingAnchor.constraint(lessThanOrEqualTo: contentView.trailingAnchor, constant: -Self.horizontalPadding),
+            stackView.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
+            stackView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: Self.topPadding),
+            stackView.heightAnchor.constraint(equalToConstant: Self.actionRegionHeight)
+        ])
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        let actionButtons = stackView.arrangedSubviews.compactMap { $0 as? FooterButton }
+        if let button = FooterActionHitTesting.hitView(at: point, in: self, candidates: actionButtons, event: event) {
+            return button
+        }
+        return super.hitTest(point, with: event)
+    }
+
+    func configure(
+        status: SessionStatus?,
+        isDark: Bool,
+        onSelect: (@MainActor (String, SessionControlAction, String?, Bool?) -> Void)?
+    ) {
+        let palette = ChatFlowUIKitTheme.palette(isDark: isDark)
+        let textColor = palette.textMuted.withAlphaComponent(Self.textAlpha(isDark: isDark))
+        stackView.arrangedSubviews.forEach { view in
+            stackView.removeArrangedSubview(view)
+            view.removeFromSuperview()
+        }
+        let items = Self.footerItems(for: status)
+        for item in items {
+            stackView.addArrangedSubview(button(for: item, status: status, color: textColor, onSelect: onSelect))
+        }
+        accessibilityLabel = Self.footerText(for: status)
+        accessibilityTraits = items.contains { $0.action != nil && !$0.options.isEmpty } ? .button : .staticText
+    }
+
+    static func height(for status: SessionStatus?) -> CGFloat {
+        guard footerText(for: status) != nil else { return 0 }
+        return ceil(actionRegionHeight + topPadding + bottomPadding)
+    }
+
+    static func footerText(for status: SessionStatus?) -> String? {
+        let parts = footerItems(for: status).map(\.text)
+        guard !parts.isEmpty else { return nil }
+        return parts.joined(separator: "  ·  ")
+    }
+
+    private static func footerItems(for status: SessionStatus?) -> [FooterItem] {
+        guard let status else { return [] }
+        let display = status.display
+        let capabilities = status.capabilities
+        let modelCapability = capability(
+            capabilities.setModel,
+            legacySupported: capabilities.canChangeModel == true
+        )
+        let thinkingValue = normalized(display.thinkingLevel)
+        let reasoningValue = normalized(display.reasoningLevel)
+        let levelControl = levelControlAction(
+            capabilities: capabilities,
+            hasThinkingValue: thinkingValue != nil,
+            hasReasoningValue: reasoningValue != nil
+        )
+        let fastControl = fastModeControlAction(capabilities: capabilities)
+        return [
+            FooterItem(
+                text: normalized(display.model) ?? "Unknown model",
+                action: modelCapability.isSupported ? .setModel : nil,
+                options: modelOptions(display: display, catalog: status.modelCatalog),
+                unsupportedReason: modelCapability.reason ?? "model_catalog_control_not_available"
+            ),
+            FooterItem(
+                text: "Thinking \(thinkingValue ?? reasoningValue ?? "Unknown")",
+                action: levelControl.action,
+                options: levelOptions(current: thinkingValue ?? reasoningValue, action: levelControl.action),
+                unsupportedReason: levelControl.reason
+            ),
+            FooterItem(
+                text: fastModeText(display.fastMode),
+                action: fastControl.action,
+                options: fastModeOptions(current: display.fastMode, action: fastControl.action),
+                unsupportedReason: fastControl.reason
+            )
+        ]
+    }
+
+    private static func capability(_ capability: SessionStatus.Capability?,
+                                   legacySupported: Bool) -> (isSupported: Bool, reason: String?) {
+        if let capability {
+            return (capability.supported, capability.reason)
+        }
+        return (legacySupported, nil)
+    }
+
+    private func button(
+        for item: FooterItem,
+        status: SessionStatus?,
+        color: UIColor,
+        onSelect: (@MainActor (String, SessionControlAction, String?, Bool?) -> Void)?
+    ) -> UIButton {
+        let button = FooterButton(type: .system)
+        var configuration = UIButton.Configuration.plain()
+        configuration.contentInsets = NSDirectionalEdgeInsets(top: 2, leading: 4, bottom: 2, trailing: 4)
+        configuration.attributedTitle = AttributedString(
+            item.text,
+            attributes: AttributeContainer([.font: Self.footerFont])
+        )
+        configuration.baseForegroundColor = color
+        configuration.background.strokeWidth = 0
+        button.configuration = configuration
+        button.setContentHuggingPriority(.required, for: .horizontal)
+        button.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+        let titleWidth = ceil((item.text as NSString).size(withAttributes: [.font: Self.footerFont]).width)
+        button.widthAnchor.constraint(greaterThanOrEqualToConstant: max(44, titleWidth + 8)).isActive = true
+        button.titleLabel?.font = Self.footerFont
+        button.titleLabel?.adjustsFontForContentSizeCategory = true
+        button.titleLabel?.lineBreakMode = .byTruncatingTail
+        button.tintColor = color
+        button.isEnabled = item.action != nil && !item.options.isEmpty
+        button.showsMenuAsPrimaryAction = button.isEnabled
+        button.accessibilityLabel = item.text
+        if !button.isEnabled, let reason = item.unsupportedReason {
+            button.accessibilityHint = reason
+        }
+        guard let sessionKey = status?.sessionKey, let action = item.action, button.isEnabled else {
+            return button
+        }
+        button.menu = UIMenu(children: item.options.map { option in
+            UIAction(
+                title: option.title,
+                image: option.isCurrent ? UIImage(systemName: "checkmark") : nil,
+                discoverabilityTitle: option.isCurrent ? "\(option.title), Current" : option.title
+            ) { _ in
+                Task { @MainActor in
+                    onSelect?(sessionKey, action, option.value, option.enabled)
+                }
+            }
+        })
+        return button
+    }
+
+    private static func modelOptions(display: SessionStatus.Display,
+                                     catalog: SessionStatus.ModelCatalog?) -> [FooterOption] {
+        let current = normalized(display.model)
+        if catalog?.available == true {
+            return catalog?.models.map { model in
+                let option = modelCatalogOption(model, current: current)
+                return FooterOption(title: option.title, value: model.ref, enabled: nil, isCurrent: option.isCurrent)
+            } ?? []
+        }
+        let fallbackModels = ([current] + (display.fallbackModels ?? []).map { normalized($0) }).compactMap { $0 }
+        let uniqueModels = Array(NSOrderedSet(array: fallbackModels)) as? [String] ?? fallbackModels
+        return uniqueModels.map { model in
+            FooterOption(title: model, value: model, enabled: nil, isCurrent: model == current)
+        }
+    }
+
+    private static func modelCatalogOption(_ model: SessionStatus.ModelCatalog.Model,
+                                           current: String?) -> (title: String, isCurrent: Bool) {
+        let title = normalized(model.alias) ?? normalized(model.name) ?? normalized(model.ref) ?? model.ref
+        let isCurrent = current == normalized(model.id) || current == normalized(model.ref)
+        return (title, isCurrent)
+    }
+
+    private static func levelOptions(current: String?, action: SessionControlAction?) -> [FooterOption] {
+        let levels: [String]
+        switch action {
+        case .setThinking:
+            levels = ["off", "minimal", "low", "medium", "high", "xhigh", "adaptive", "max"]
+        case .setReasoning:
+            levels = ["off", "on", "stream"]
+        default:
+            return []
+        }
+        return levels.map { level in
+            FooterOption(
+                title: level,
+                value: level,
+                enabled: nil,
+                isCurrent: level == current
+            )
+        }
+    }
+
+    private static func fastModeOptions(current: Bool?, action: SessionControlAction?) -> [FooterOption] {
+        guard action != .setMode else {
+            return [
+                FooterOption(title: "On", value: "fast", enabled: nil, isCurrent: current == true),
+                FooterOption(title: "Off", value: "normal", enabled: nil, isCurrent: current == false)
+            ]
+        }
+        return [
+            FooterOption(title: "On", value: nil, enabled: true, isCurrent: current == true),
+            FooterOption(title: "Off", value: nil, enabled: false, isCurrent: current == false)
+        ]
+    }
+
+    private static func levelControlAction(
+        capabilities: SessionStatus.Capabilities,
+        hasThinkingValue: Bool,
+        hasReasoningValue: Bool
+    ) -> (action: SessionControlAction?, reason: String?) {
+        let thinkingCapability = capability(capabilities.setThinking, legacySupported: false)
+        let reasoningCapability = capability(
+            capabilities.setReasoning,
+            legacySupported: capabilities.canChangeReasoning == true
+        )
+        if hasThinkingValue, thinkingCapability.isSupported {
+            return (.setThinking, nil)
+        }
+        if hasReasoningValue, reasoningCapability.isSupported {
+            return (.setReasoning, nil)
+        }
+        if thinkingCapability.isSupported {
+            return (.setThinking, nil)
+        }
+        if reasoningCapability.isSupported {
+            return (.setReasoning, nil)
+        }
+        return (nil, thinkingCapability.reason ?? reasoningCapability.reason)
+    }
+
+    private static func fastModeControlAction(
+        capabilities: SessionStatus.Capabilities
+    ) -> (action: SessionControlAction?, reason: String?) {
+        let fastModeCapability = capability(
+            capabilities.setFastMode,
+            legacySupported: capabilities.canChangeFastMode == true
+        )
+        let modeCapability = capability(capabilities.setMode, legacySupported: false)
+        if fastModeCapability.isSupported {
+            return (.setFastMode, nil)
+        }
+        if modeCapability.isSupported {
+            return (.setMode, nil)
+        }
+        return (nil, fastModeCapability.reason ?? modeCapability.reason)
+    }
+
+    private static func fastModeText(_ fastMode: Bool?) -> String {
+        guard let fastMode else { return "Fast Unknown" }
+        return fastMode ? "Fast on" : "Fast off"
+    }
+
+    private static func normalized(_ value: String?) -> String? {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+}
+
+enum FooterActionHitTesting {
+    @MainActor
+    static func hitView(
+        at point: CGPoint,
+        in container: UIView,
+        candidates: [UIView],
+        event: UIEvent?
+    ) -> UIView? {
+        let eligibleCandidates = candidates.filter { candidate in
+            guard !candidate.isHidden,
+                  candidate.isUserInteractionEnabled,
+                  candidate.alpha > 0.01
+            else { return false }
+            if let control = candidate as? UIControl, !control.isEnabled {
+                return false
+            }
+            return true
+        }
+        for candidate in eligibleCandidates.reversed() {
+            let pointInCandidate = container.convert(point, to: candidate)
+            if candidate.point(inside: pointInCandidate, with: event) {
+                return candidate
+            }
+        }
+
+        let orderedRegions = actionRegions(for: eligibleCandidates, in: container)
+        return orderedRegions.first { region in
+            region.rect.contains(point)
+        }?.view
+    }
+
+    @MainActor
+    static func actionRegions(for candidates: [UIView], in container: UIView) -> [(view: UIView, rect: CGRect)] {
+        let ordered = candidates
+            .filter { candidate in
+                guard !candidate.isHidden,
+                      candidate.isUserInteractionEnabled,
+                      candidate.alpha > 0.01
+                else { return false }
+                if let control = candidate as? UIControl, !control.isEnabled {
+                    return false
+                }
+                return true
+            }
+            .map { candidate in
+                (view: candidate, frame: candidate.convert(candidate.bounds, to: container))
+            }
+            .sorted { $0.frame.midX < $1.frame.midX }
+        guard !ordered.isEmpty else { return [] }
+
+        return ordered.enumerated().map { index, entry in
+            let previousFrame = index > 0 ? ordered[index - 1].frame : nil
+            let nextFrame = index < ordered.count - 1 ? ordered[index + 1].frame : nil
+            let horizontalPadding = max(0, (44 - entry.frame.width) / 2)
+            let minX = previousFrame.map { ($0.midX + entry.frame.midX) / 2 }
+                ?? max(container.bounds.minX, entry.frame.minX - horizontalPadding)
+            let maxX = nextFrame.map { (entry.frame.midX + $0.midX) / 2 }
+                ?? min(container.bounds.maxX, entry.frame.maxX + horizontalPadding)
+            return (
+                view: entry.view,
+                rect: CGRect(
+                    x: minX,
+                    y: entry.frame.minY,
+                    width: max(0, maxX - minX),
+                    height: entry.frame.height
+                )
+            )
+        }
     }
 }
 

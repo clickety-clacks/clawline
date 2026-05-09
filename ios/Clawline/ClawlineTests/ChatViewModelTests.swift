@@ -136,6 +136,154 @@ struct ChatViewModelTests {
         #expect(finalState.first?.streaming == false)
     }
 
+    @Test("Lifecycle replay advances service-owned per-stream cursor after apply")
+    @MainActor
+    func lifecycleReplayAdvancesServiceReplayCursor() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        chatService.startReplayCount = 1
+        chatService.emitSyncCompleteOnStart = false
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.prepareForReplacement() }
+
+        await viewModel.activate(origin: "test.lifecycleReplayCursor")
+
+        for _ in 0..<50 {
+            if viewModel.debugObservationStartupCount() > 0, chatService.connectCallCount > 0 { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+
+        let payload = #"{"type":"message","id":"s_replay_final","role":"assistant","content":"Replay final","timestamp":1700000000000,"streaming":false,"sessionKey":"\#(personalSessionKey)","attachments":[]}"#
+        chatService.emitLifecycleEvent(.init(epoch: 1, payload: .serverMessage(data: Data(payload.utf8))))
+
+        var cursor: String?
+        for _ in 0..<50 {
+            cursor = chatService.replayCursorSnapshot()[personalSessionKey]
+            if cursor == "s_replay_final" { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+
+        #expect(cursor == "s_replay_final")
+    }
+
+    @Test("History reset preserves cursor-backed active stream with empty replay window")
+    @MainActor
+    func historyResetPreservesCursorBackedActiveStreamWithEmptyReplayWindow() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let customKey = "agent:main:clawline:user:s_reset_side"
+        let streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: customKey, displayName: "Side", kind: "custom", orderIndex: 1, isBuiltIn: false),
+        ]
+        chatService.streams = streams
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.prepareForReplacement() }
+
+        await viewModel.activate(origin: "test.historyResetPreservesCursorBackedActiveStream")
+        chatService.emitServiceEvent(.streamSnapshot(streams))
+        for _ in 0..<50 {
+            if viewModel.activeSessionKey == personalSessionKey,
+               viewModel.orderedSessionKeys.contains(customKey) {
+                break
+            }
+            try await Task.sleep(forDuration: .milliseconds(20))
+        }
+
+        let activePayload = #"{"type":"message","id":"s_active_before_sleep","role":"assistant","content":"Still here","timestamp":1700000000000,"streaming":false,"sessionKey":"\#(personalSessionKey)","attachments":[]}"#
+        let staleSidePayload = #"{"type":"message","id":"s_side_stale","role":"assistant","content":"Old side","timestamp":1700000000001,"streaming":false,"sessionKey":"\#(customKey)","attachments":[]}"#
+        chatService.emitLifecycleEvent(.init(epoch: 1, payload: .serverMessage(data: Data(activePayload.utf8))))
+        chatService.emitLifecycleEvent(.init(epoch: 1, payload: .serverMessage(data: Data(staleSidePayload.utf8))))
+        for _ in 0..<50 {
+            if viewModel.messages.contains(where: { $0.id == "s_active_before_sleep" }),
+               chatService.replayCursorSnapshot()[personalSessionKey] == "s_active_before_sleep" {
+                break
+            }
+            try await Task.sleep(forDuration: .milliseconds(20))
+        }
+        #expect(viewModel.messages.map(\.id).contains("s_active_before_sleep"))
+        #expect(chatService.replayCursorSnapshot()[personalSessionKey] == "s_active_before_sleep")
+        chatService.setReplayCursor(nil, for: customKey)
+
+        chatService.startHistoryReset = true
+        chatService.startReplayCount = 1
+        chatService.emitSyncCompleteOnStart = false
+        NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
+        try await Task.sleep(forDuration: .milliseconds(2100))
+        viewModel.handleSceneActiveStateChanged(isActive: true)
+
+        for _ in 0..<50 {
+            if chatService.connectCallCount >= 2 { break }
+            try await Task.sleep(forDuration: .milliseconds(20))
+        }
+        let replaySidePayload = #"{"type":"message","id":"s_side_replay","role":"assistant","content":"Side replay","timestamp":1700000000002,"streaming":false,"sessionKey":"\#(customKey)","attachments":[]}"#
+        chatService.emitLifecycleEvent(.init(epoch: 2, payload: .serverMessage(data: Data(replaySidePayload.utf8))))
+        chatService.emitLifecycleEvent(.init(epoch: 2, payload: .syncComplete))
+
+        for _ in 0..<50 {
+            if viewModel.messages.map(\.id).contains("s_active_before_sleep"),
+               viewModel.messages(for: customKey).map(\.id) == ["s_side_replay"] {
+                break
+            }
+            try await Task.sleep(forDuration: .milliseconds(20))
+        }
+
+        #expect(viewModel.activeSessionKey == personalSessionKey)
+        #expect(viewModel.messages.map(\.id).contains("s_active_before_sleep"))
+        #expect(viewModel.messages(for: customKey).map(\.id) == ["s_side_replay"])
+        #expect(chatService.replayCursorSnapshot()[personalSessionKey] == nil)
+        #expect(chatService.replayCursorSnapshot()[customKey] == "s_side_replay")
+    }
+
+    @Test("Cache restore seeds missing cursor without replacing a live cursor")
+    @MainActor
+    func cacheRestoreSeedsMissingCursorOnly() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        chatService.setReplayCursor("s_live_final", for: personalSessionKey)
+        await viewModel.onAppear()
+
+        for _ in 0..<50 {
+            if chatService.replayCursorSnapshot()[personalSessionKey] == "s_live_final" { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+
+        #expect(chatService.replayCursorSnapshot()[personalSessionKey] == "s_live_final")
+    }
+
     @Test("Server echoes with matching device id replace placeholder")
     @MainActor
     func userEchoWithoutDeviceIdDoesNotDuplicate() async throws {
@@ -161,8 +309,8 @@ struct ChatViewModelTests {
         viewModel.send()
 
         try await Task.sleep(forDuration: .milliseconds(10))
-        let placeholderId = await MainActor.run { viewModel.messages.first?.id }
-        #expect(placeholderId?.hasPrefix("c_") == true)
+        let placeholderId = try #require(await MainActor.run { viewModel.messages.first?.id })
+        #expect(placeholderId.hasPrefix("c_"))
 
         chatService.emit(
             Message(
@@ -174,7 +322,8 @@ struct ChatViewModelTests {
                 attachments: [],
                 deviceId: "device",
                 sessionKey: personalSessionKey,
-                )
+                clientMessageId: placeholderId
+            )
         )
 
         try await Task.sleep(forDuration: .milliseconds(10))
@@ -347,6 +496,360 @@ struct ChatViewModelTests {
         #expect(viewModel.inputContent.string == oversized)
         let messages = await MainActor.run { toastManager.debugMessages }
         #expect(messages.contains("That message is too large to send."))
+    }
+
+    @Test("Current prompt cancellation calls typed control API for active cancellable run")
+    @MainActor
+    func currentPromptCancellationCallsTypedControlAPIForActiveCancellableRun() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        chatService.sessionStatusBySessionKey[personalSessionKey] = makeSessionStatus(
+            sessionKey: personalSessionKey,
+            state: .running,
+            provider: "openai",
+            model: "gpt-5.5",
+            thinkingLevel: "high",
+            queueDepth: 0,
+            canCancelCurrentRun: true
+        )
+        let toastManager = ToastManager()
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: toastManager,
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        try await setReadyToSend(chatService: chatService, viewModel: viewModel)
+        for _ in 0..<50 {
+            if viewModel.sessionStatus(for: personalSessionKey) != nil { break }
+            try await Task.sleep(forDuration: .milliseconds(20))
+        }
+
+        viewModel.inputContent = NSAttributedString(string: "draft")
+        for _ in 0..<50 {
+            if viewModel.canCancelCurrentPrompt { break }
+            try await Task.sleep(forDuration: .milliseconds(20))
+        }
+
+        viewModel.requestCurrentPromptCancellation()
+        for _ in 0..<50 {
+            if chatService.cancelCurrentRunCallCount == 1 { break }
+            try await Task.sleep(forDuration: .milliseconds(20))
+        }
+
+        #expect(chatService.cancelCurrentRunCallCount == 1)
+        #expect(chatService.lastCancelledSessionKey == personalSessionKey)
+        #expect(chatService.lastSentId == nil)
+        #expect(chatService.lastSentContent == nil)
+        #expect(viewModel.inputContent.string == "draft")
+        #expect(toastManager.debugMessages.contains("Prompt cancellation requested."))
+    }
+
+    @Test("Visible typing prompt cancellation requires active typing state")
+    @MainActor
+    func visibleTypingPromptCancellationRequiresActiveTypingState() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        chatService.sessionStatusBySessionKey[personalSessionKey] = makeSessionStatus(
+            sessionKey: personalSessionKey,
+            state: .running,
+            provider: "openai",
+            model: "gpt-5.5",
+            thinkingLevel: "high",
+            queueDepth: 0,
+            canCancelCurrentRun: true
+        )
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        try await setReadyToSend(chatService: chatService, viewModel: viewModel)
+        for _ in 0..<50 {
+            if viewModel.sessionStatus(for: personalSessionKey) != nil { break }
+            try await Task.sleep(forDuration: .milliseconds(20))
+        }
+
+        #expect(viewModel.canCancelCurrentPrompt == true)
+        #expect(viewModel.canCancelCurrentPrompt(in: personalSessionKey) == true)
+        #expect(viewModel.canCancelVisibleTypingPrompt(in: personalSessionKey) == false)
+
+        chatService.emitServiceEvent(.typingStateChanged(isTyping: true, sessionKey: personalSessionKey))
+        for _ in 0..<50 {
+            if viewModel.canCancelVisibleTypingPrompt(in: personalSessionKey) { break }
+            try await Task.sleep(forDuration: .milliseconds(20))
+        }
+        #expect(viewModel.canCancelVisibleTypingPrompt(in: personalSessionKey) == true)
+
+        chatService.emitServiceEvent(.typingStateChanged(isTyping: false, sessionKey: personalSessionKey))
+        for _ in 0..<50 {
+            if !viewModel.canCancelVisibleTypingPrompt(in: personalSessionKey) { break }
+            try await Task.sleep(forDuration: .milliseconds(20))
+        }
+        #expect(viewModel.canCancelCurrentPrompt(in: personalSessionKey) == true)
+        #expect(viewModel.canCancelVisibleTypingPrompt(in: personalSessionKey) == false)
+    }
+
+    @Test("Current prompt cancellation targets visible stream during pager switch debounce")
+    @MainActor
+    func currentPromptCancellationTargetsVisibleStreamDuringPagerSwitchDebounce() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let researchSessionKey = "agent:main:clawline:user:s_research"
+        chatService.streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: researchSessionKey, displayName: "Research", kind: "custom", orderIndex: 1, isBuiltIn: false),
+        ]
+        chatService.sessionStatusBySessionKey[personalSessionKey] = makeSessionStatus(
+            sessionKey: personalSessionKey,
+            state: .running,
+            provider: "openai",
+            model: "gpt-5.5",
+            thinkingLevel: "high",
+            queueDepth: 0,
+            canCancelCurrentRun: true
+        )
+        chatService.sessionStatusBySessionKey[researchSessionKey] = makeSessionStatus(
+            sessionKey: researchSessionKey,
+            state: .running,
+            provider: "openai",
+            model: "gpt-5.5",
+            thinkingLevel: "high",
+            queueDepth: 0,
+            canCancelCurrentRun: true
+        )
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        try await setReadyToSend(chatService: chatService, viewModel: viewModel)
+        chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
+        for _ in 0..<50 {
+            if viewModel.sessionStatus(for: personalSessionKey) != nil,
+               viewModel.sessionStatus(for: researchSessionKey) != nil {
+                break
+            }
+            try await Task.sleep(forDuration: .milliseconds(20))
+        }
+        viewModel.setActiveSessionKeyForTesting(personalSessionKey)
+        viewModel.requestStreamSwitch(to: researchSessionKey, source: .pager)
+
+        viewModel.requestCurrentPromptCancellation()
+        for _ in 0..<50 {
+            if chatService.cancelCurrentRunCallCount == 1 { break }
+            try await Task.sleep(forDuration: .milliseconds(20))
+        }
+
+        #expect(chatService.cancelCurrentRunCallCount == 1)
+        #expect(chatService.lastCancelledSessionKey == researchSessionKey)
+    }
+
+    @Test("Current prompt cancellation with explicit session does not fall back to another stream")
+    @MainActor
+    func currentPromptCancellationWithExplicitSessionDoesNotFallBackToAnotherStream() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let researchSessionKey = "agent:main:clawline:user:s_research"
+        chatService.streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: researchSessionKey, displayName: "Research", kind: "custom", orderIndex: 1, isBuiltIn: false),
+        ]
+        chatService.sessionStatusBySessionKey[personalSessionKey] = makeSessionStatus(
+            sessionKey: personalSessionKey,
+            state: .running,
+            provider: "openai",
+            model: "gpt-5.5",
+            thinkingLevel: "high",
+            queueDepth: 0,
+            canCancelCurrentRun: true
+        )
+        chatService.sessionStatusBySessionKey[researchSessionKey] = makeSessionStatus(
+            sessionKey: researchSessionKey,
+            state: .idle,
+            provider: "openai",
+            model: "gpt-5.5",
+            thinkingLevel: "high",
+            queueDepth: 0
+        )
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        try await setReadyToSend(chatService: chatService, viewModel: viewModel)
+        chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
+        for _ in 0..<50 {
+            if viewModel.sessionStatus(for: personalSessionKey) != nil,
+               viewModel.sessionStatus(for: researchSessionKey) != nil {
+                break
+            }
+            try await Task.sleep(forDuration: .milliseconds(20))
+        }
+
+        #expect(viewModel.canCancelCurrentPrompt == true)
+        #expect(viewModel.canCancelCurrentPrompt(in: researchSessionKey) == false)
+        viewModel.requestCurrentPromptCancellation(sessionKey: researchSessionKey)
+        try await Task.sleep(forDuration: .milliseconds(20))
+
+        #expect(chatService.cancelCurrentRunCallCount == 0)
+    }
+
+    @Test("Current prompt cancellation reports unsupported typed control response")
+    @MainActor
+    func currentPromptCancellationReportsUnsupportedTypedControlResponse() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let toastManager = ToastManager()
+        chatService.sessionStatusBySessionKey[personalSessionKey] = makeSessionStatus(
+            sessionKey: personalSessionKey,
+            state: .running,
+            provider: "openai",
+            model: "gpt-5.5",
+            thinkingLevel: "high",
+            queueDepth: 0,
+            canCancelCurrentRun: true
+        )
+        chatService.sessionControlResponse = SessionControlResponse(
+            ok: false,
+            sessionKey: personalSessionKey,
+            action: "cancel_current_run",
+            code: "unsupported",
+            message: "The current Clawline provider dispatch path does not expose a per-session abort seam.",
+            status: nil,
+            capabilities: nil
+        )
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: toastManager,
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        try await setReadyToSend(chatService: chatService, viewModel: viewModel)
+        for _ in 0..<50 {
+            if viewModel.sessionStatus(for: personalSessionKey) != nil { break }
+            try await Task.sleep(forDuration: .milliseconds(20))
+        }
+        chatService.emitServiceEvent(.typingStateChanged(isTyping: true, sessionKey: personalSessionKey))
+        for _ in 0..<50 {
+            if viewModel.canCancelCurrentPrompt { break }
+            try await Task.sleep(forDuration: .milliseconds(20))
+        }
+
+        viewModel.requestCurrentPromptCancellation()
+        for _ in 0..<50 {
+            if toastManager.debugMessages.contains("The current Clawline provider dispatch path does not expose a per-session abort seam.") {
+                break
+            }
+            try await Task.sleep(forDuration: .milliseconds(20))
+        }
+
+        #expect(chatService.cancelCurrentRunCallCount == 1)
+        #expect(toastManager.debugMessages.contains("The current Clawline provider dispatch path does not expose a per-session abort seam."))
+    }
+
+    @Test("Current prompt cancellation remains available while typing when provider reports cancel unsupported")
+    @MainActor
+    func currentPromptCancellationRemainsAvailableWhileTypingWhenProviderReportsCancelUnsupported() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        chatService.streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+        ]
+        chatService.sessionControlResponse = SessionControlResponse(
+            ok: false,
+            sessionKey: personalSessionKey,
+            action: "cancel_current_run",
+            code: "unsupported",
+            message: "The current Clawline provider dispatch path does not expose a per-session abort seam.",
+            status: nil,
+            capabilities: nil
+        )
+        chatService.sessionStatusBySessionKey[personalSessionKey] = makeSessionStatus(
+            sessionKey: personalSessionKey,
+            state: .running,
+            provider: "openai",
+            model: "gpt-5.5",
+            thinkingLevel: "high",
+            queueDepth: 0
+        )
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
+        for _ in 0..<50 {
+            if viewModel.sessionStatus(for: personalSessionKey) != nil { break }
+            try await Task.sleep(forDuration: .milliseconds(20))
+        }
+        chatService.emitServiceEvent(.typingStateChanged(isTyping: true, sessionKey: personalSessionKey))
+        for _ in 0..<50 {
+            if viewModel.sessionStatus(for: personalSessionKey) != nil { break }
+            try await Task.sleep(forDuration: .milliseconds(20))
+        }
+
+        #expect(viewModel.canCancelCurrentPrompt == true)
+        #expect(viewModel.canCancelCurrentPrompt(in: personalSessionKey) == true)
+        viewModel.requestCurrentPromptCancellation()
+        for _ in 0..<50 {
+            if chatService.cancelCurrentRunCallCount == 1 { break }
+            try await Task.sleep(forDuration: .milliseconds(20))
+        }
+        #expect(chatService.cancelCurrentRunCallCount == 1)
+        #expect(chatService.lastCancelledSessionKey == personalSessionKey)
     }
 
     @Test("Connection interruptions update send button state without passive toast")
@@ -1772,6 +2275,361 @@ struct ChatViewModelTests {
         #expect(displayName == "Research v2")
     }
 
+    @Test("Provider tail plus read state produce user-tail classification in one place")
+    @MainActor
+    func streamTailStateAndReadStateProduceUserTail() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let customKey = "agent:main:clawline:user:s_deadbeef"
+        chatService.streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: customKey, displayName: "Research", kind: "custom", orderIndex: 1, isBuiltIn: false),
+        ]
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
+        try await Task.sleep(for: .milliseconds(30))
+
+        chatService.emitServiceEvent(
+            .streamTailStateUpdated(
+                sessionKey: customKey,
+                tailState: StreamTailState(lastMessageId: "s_remote_tail", lastMessageRole: .user)
+            )
+        )
+        chatService.emitServiceEvent(
+            .streamReadStateUpdated(sessionKey: customKey, lastReadMessageId: "s_remote_tail")
+        )
+        for _ in 0..<50 {
+            if viewModel.streamDotState(for: customKey) == .userTail { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(viewModel.streamDotState(for: customKey) == .userTail)
+    }
+
+    @Test("User-tail classification does not require a matching read cursor")
+    @MainActor
+    func streamTailStateWithoutReadCursorStillProducesUserTail() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let customKey = "agent:main:clawline:user:s_user_tail"
+        chatService.streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: customKey, displayName: "Research", kind: "custom", orderIndex: 1, isBuiltIn: false),
+        ]
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
+        try await Task.sleep(for: .milliseconds(30))
+
+        chatService.emitServiceEvent(
+            .streamTailStateUpdated(
+                sessionKey: customKey,
+                tailState: StreamTailState(lastMessageId: "s_remote_tail", lastMessageRole: .user)
+            )
+        )
+
+        for _ in 0..<50 {
+            if viewModel.streamDotState(for: customKey) == .userTail { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(viewModel.streamDotState(for: customKey) == .userTail)
+    }
+
+    @Test("Tail snapshot clears yellow classification when the server removes that stream state")
+    @MainActor
+    func streamTailStateSnapshotClearsMissingStreams() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let customKey = "agent:main:clawline:user:s_snapshot_clear"
+        chatService.streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: customKey, displayName: "Research", kind: "custom", orderIndex: 1, isBuiltIn: false),
+        ]
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
+        try await Task.sleep(for: .milliseconds(30))
+
+        chatService.emitServiceEvent(
+            .streamTailStateUpdated(
+                sessionKey: customKey,
+                tailState: StreamTailState(lastMessageId: "s_remote_tail", lastMessageRole: .user)
+            )
+        )
+        chatService.emitServiceEvent(.streamReadStateUpdated(sessionKey: customKey, lastReadMessageId: "s_remote_tail"))
+        for _ in 0..<50 {
+            if viewModel.streamDotState(for: customKey) == .userTail { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(viewModel.streamDotState(for: customKey) == .userTail)
+
+        chatService.emitServiceEvent(.streamTailStateSnapshot([:]))
+        for _ in 0..<50 {
+            if viewModel.streamDotStateBySession[customKey] == nil { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(viewModel.streamDotStateBySession[customKey] == nil)
+        #expect(viewModel.streamDotState(for: customKey) == .inactive)
+    }
+
+    @Test("Activating a stream publishes provider read-state for its latest server message")
+    @MainActor
+    func activatingStreamPublishesReadState() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let customKey = "agent:main:clawline:user:s_c0ffee"
+        chatService.streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: customKey, displayName: "Research", kind: "custom", orderIndex: 1, isBuiltIn: false),
+        ]
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
+        try await Task.sleep(for: .milliseconds(30))
+
+        chatService.emit(
+            Message(
+                id: "s_publish_read_target",
+                role: .assistant,
+                content: "hello",
+                timestamp: Date(),
+                streaming: false,
+                attachments: [],
+                deviceId: nil,
+                sessionKey: customKey
+            )
+        )
+        try await Task.sleep(for: .milliseconds(30))
+
+        viewModel.setActiveSessionKeyForTesting(customKey)
+        for _ in 0..<50 {
+            if chatService.lastPublishedReadState?.lastReadMessageId == "s_publish_read_target" { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(chatService.lastPublishedReadState?.sessionKey == customKey)
+        #expect(chatService.lastPublishedReadState?.lastReadMessageId == "s_publish_read_target")
+        #expect(viewModel.lastReadMessageIdBySession[customKey] == "s_publish_read_target")
+    }
+
+    @Test("Activating stream prefers provider tail over stale local transcript")
+    @MainActor
+    func activatingStreamPrefersProviderTailOverStaleLocalTranscript() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let customKey = "agent:main:clawline:user:s_stale_cache"
+        chatService.streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: customKey, displayName: "Research", kind: "custom", orderIndex: 1, isBuiltIn: false),
+        ]
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
+        try await Task.sleep(for: .milliseconds(30))
+
+        chatService.emit(
+            Message(
+                id: "s_stale_cached_tail",
+                role: .assistant,
+                content: "cached",
+                timestamp: Date(),
+                streaming: false,
+                attachments: [],
+                deviceId: nil,
+                sessionKey: customKey
+            )
+        )
+        chatService.emitServiceEvent(
+            .streamTailStateUpdated(
+                sessionKey: customKey,
+                tailState: StreamTailState(lastMessageId: "s_provider_tail", lastMessageRole: .assistant)
+            )
+        )
+        try await Task.sleep(for: .milliseconds(30))
+
+        chatService.lastPublishedReadState = nil
+        viewModel.setActiveSessionKeyForTesting(customKey)
+
+        for _ in 0..<50 {
+            if chatService.lastPublishedReadState?.lastReadMessageId == "s_provider_tail" { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(chatService.lastPublishedReadState?.sessionKey == customKey)
+        #expect(chatService.lastPublishedReadState?.lastReadMessageId == "s_provider_tail")
+        #expect(viewModel.lastReadMessageIdBySession[customKey] == "s_provider_tail")
+    }
+
+    @Test("Active stream assistant arrivals publish updated read-state immediately")
+    @MainActor
+    func activeStreamIncomingAssistantPublishesReadState() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let customKey = "agent:main:clawline:user:s_active_publish"
+        chatService.streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: customKey, displayName: "Research", kind: "custom", orderIndex: 1, isBuiltIn: false),
+        ]
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
+        try await Task.sleep(for: .milliseconds(30))
+
+        viewModel.setActiveSessionKeyForTesting(customKey)
+        chatService.lastPublishedReadState = nil
+
+        chatService.emit(
+            Message(
+                id: "s_active_publish_target",
+                role: .assistant,
+                content: "hello",
+                timestamp: Date(),
+                streaming: false,
+                attachments: [],
+                deviceId: nil,
+                sessionKey: customKey
+            )
+        )
+
+        for _ in 0..<50 {
+            if chatService.lastPublishedReadState?.lastReadMessageId == "s_active_publish_target" { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(chatService.lastPublishedReadState?.sessionKey == customKey)
+        #expect(chatService.lastPublishedReadState?.lastReadMessageId == "s_active_publish_target")
+        #expect(viewModel.lastReadMessageIdBySession[customKey] == "s_active_publish_target")
+    }
+
+    @Test("Activating unread stream uses server tail state when local transcript is not loaded")
+    @MainActor
+    func activatingUnreadStreamWithoutLocalTranscriptPublishesTailReadState() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let customKey = "agent:main:clawline:user:s_tail_fallback"
+        chatService.streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: customKey, displayName: "Research", kind: "custom", orderIndex: 1, isBuiltIn: false),
+        ]
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
+        try await Task.sleep(for: .milliseconds(30))
+
+        chatService.emitServiceEvent(
+            .streamTailStateUpdated(
+                sessionKey: customKey,
+                tailState: StreamTailState(lastMessageId: "s_server_tail", lastMessageRole: .assistant)
+            )
+        )
+        chatService.emitServiceEvent(.streamReadStateUpdated(sessionKey: customKey, lastReadMessageId: "s_old_read"))
+        for _ in 0..<50 {
+            if viewModel.streamDotState(for: customKey) == .unread { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(viewModel.streamDotState(for: customKey) == .unread)
+
+        chatService.lastPublishedReadState = nil
+        viewModel.setActiveSessionKeyForTesting(customKey)
+
+        for _ in 0..<50 {
+            if chatService.lastPublishedReadState?.lastReadMessageId == "s_server_tail" { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(chatService.lastPublishedReadState?.sessionKey == customKey)
+        #expect(chatService.lastPublishedReadState?.lastReadMessageId == "s_server_tail")
+        #expect(viewModel.lastReadMessageIdBySession[customKey] == "s_server_tail")
+        #expect(viewModel.streamDotState(for: customKey) == .inactive)
+    }
+
     @Test("Track adopts untracked session and preserves it across snapshots")
     @MainActor
     func trackAdoptsUntrackedSessionAcrossSnapshots() async throws {
@@ -1977,6 +2835,483 @@ struct ChatViewModelTests {
         #expect(viewModel.canTrackSession(sessionKey: agentSessionKey))
         #expect(await viewModel.trackSession(sessionKey: agentSessionKey))
         #expect(viewModel.isAdoptedStream(sessionKey: agentSessionKey))
+    }
+
+    @Test("Session status is fetched for the visible stream")
+    @MainActor
+    func sessionStatusFetchedForVisibleStream() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        chatService.streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+        ]
+        chatService.sessionStatusBySessionKey[personalSessionKey] = makeSessionStatus(
+            sessionKey: personalSessionKey,
+            state: .running,
+            provider: "anthropic",
+            model: "claude-sonnet-4.6",
+            thinkingLevel: "high",
+            queueDepth: 1
+        )
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
+
+        for _ in 0..<50 {
+            if viewModel.sessionStatus(for: personalSessionKey) != nil {
+                break
+            }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        let status = viewModel.sessionStatus(for: personalSessionKey)
+        #expect(chatService.fetchSessionStatusCallCount > 0)
+        #expect(status?.run.state == .running)
+        #expect(status?.run.queueDepth == 1)
+        #expect(status?.display.provider == "anthropic")
+        #expect(status?.display.model == "claude-sonnet-4.6")
+        #expect(status?.display.thinkingLevel == "high")
+    }
+
+    @Test("Session control applies typed provider response without chat text")
+    @MainActor
+    func sessionControlAppliesTypedProviderResponse() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let updatedStatus = makeSessionStatus(
+            sessionKey: personalSessionKey,
+            state: .idle,
+            provider: "openai",
+            model: "gpt-5.5",
+            thinkingLevel: "low",
+            fastMode: true,
+            queueDepth: 0
+        )
+        chatService.sessionControlResponse = SessionControlResponse(
+            ok: true,
+            sessionKey: personalSessionKey,
+            action: SessionControlAction.setFastMode.rawValue,
+            code: nil,
+            message: nil,
+            status: updatedStatus,
+            capabilities: updatedStatus.capabilities
+        )
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        viewModel.applySessionControl(
+            sessionKey: personalSessionKey,
+            action: .setFastMode,
+            enabled: true
+        )
+
+        for _ in 0..<50 {
+            if viewModel.sessionStatus(for: personalSessionKey)?.display.fastMode == true {
+                break
+            }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(chatService.lastSessionControl?.sessionKey == personalSessionKey)
+        #expect(chatService.lastSessionControl?.action == .setFastMode)
+        #expect(chatService.lastSessionControl?.enabled == true)
+        #expect(chatService.lastSentId == nil)
+        #expect(viewModel.sessionStatus(for: personalSessionKey)?.display.fastMode == true)
+    }
+
+    @Test("Session control treats ok response without status as success and refreshes")
+    @MainActor
+    func sessionControlTreatsOkResponseWithoutStatusAsSuccessAndRefreshes() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let toastManager = ToastManager()
+        chatService.sessionControlResponse = SessionControlResponse(
+            ok: true,
+            sessionKey: personalSessionKey,
+            action: SessionControlAction.setFastMode.rawValue,
+            code: nil,
+            message: nil,
+            status: nil,
+            capabilities: nil
+        )
+        chatService.sessionStatusBySessionKey[personalSessionKey] = makeSessionStatus(
+            sessionKey: personalSessionKey,
+            state: .idle,
+            provider: "openai",
+            model: "gpt-5.5",
+            thinkingLevel: "medium",
+            fastMode: true,
+            queueDepth: 0
+        )
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: toastManager,
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        viewModel.applySessionControl(
+            sessionKey: personalSessionKey,
+            action: .setFastMode,
+            enabled: true
+        )
+
+        for _ in 0..<50 {
+            if viewModel.sessionStatus(for: personalSessionKey)?.display.fastMode == true {
+                break
+            }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(chatService.lastSessionControl?.action == .setFastMode)
+        #expect(chatService.fetchSessionStatusCallCount > 0)
+        #expect(viewModel.sessionStatus(for: personalSessionKey)?.display.fastMode == true)
+        #expect(toastManager.debugMessages.isEmpty)
+    }
+
+    @Test("Session status keeps sticky display metadata until real values arrive")
+    @MainActor
+    func sessionStatusKeepsStickyDisplayMetadataUntilRealValuesArrive() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        chatService.streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+        ]
+        chatService.sessionStatusBySessionKey[personalSessionKey] = makeSessionStatus(
+            sessionKey: personalSessionKey,
+            state: .running,
+            provider: "openai",
+            model: "gpt-5.5",
+            thinkingLevel: "low",
+            fastMode: true,
+            queueDepth: 1
+        )
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.prepareForReplacement() }
+
+        await viewModel.activate(origin: "test.sessionStatusLatestPartial")
+        chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
+
+        for _ in 0..<50 {
+            if viewModel.sessionStatus(for: personalSessionKey)?.display.model == "gpt-5.5" {
+                break
+            }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        let firstFetchCount = chatService.fetchSessionStatusCallCount
+        chatService.sessionStatusBySessionKey[personalSessionKey] = makeSessionStatus(
+            sessionKey: personalSessionKey,
+            state: .idle,
+            provider: nil,
+            model: nil,
+            thinkingLevel: nil,
+            fastMode: nil,
+            queueDepth: 0
+        )
+        let assistantPayload = #"{"type":"message","id":"s_assistant_final","role":"assistant","content":"done","timestamp":1700000000000,"streaming":false,"sessionKey":"\#(personalSessionKey)","attachments":[]}"#
+        chatService.emitLifecycleEvent(.init(epoch: 1, payload: .serverMessage(data: Data(assistantPayload.utf8))))
+
+        for _ in 0..<50 {
+            if chatService.fetchSessionStatusCallCount > firstFetchCount,
+               viewModel.sessionStatus(for: personalSessionKey)?.run.state == .idle {
+                break
+            }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        let status = viewModel.sessionStatus(for: personalSessionKey)
+        #expect(status?.run.state == .idle)
+        #expect(status?.run.queueDepth == 0)
+        #expect(status?.display.provider == nil)
+        #expect(status?.display.model == "gpt-5.5")
+        #expect(status?.display.thinkingLevel == "low")
+        #expect(status?.display.fastMode == true)
+
+        let secondFetchCount = chatService.fetchSessionStatusCallCount
+        chatService.sessionStatusBySessionKey[personalSessionKey] = makeSessionStatus(
+            sessionKey: personalSessionKey,
+            state: .idle,
+            provider: nil,
+            model: "gpt-5.4",
+            thinkingLevel: "high",
+            fastMode: false,
+            queueDepth: 0
+        )
+        let updatedAssistantPayload = #"{"type":"message","id":"s_assistant_final_2","role":"assistant","content":"done again","timestamp":1700000000001,"streaming":false,"sessionKey":"\#(personalSessionKey)","attachments":[]}"#
+        chatService.emitLifecycleEvent(.init(epoch: 1, payload: .serverMessage(data: Data(updatedAssistantPayload.utf8))))
+
+        for _ in 0..<50 {
+            if chatService.fetchSessionStatusCallCount > secondFetchCount,
+               viewModel.sessionStatus(for: personalSessionKey)?.display.model == "gpt-5.4" {
+                break
+            }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        let updatedStatus = viewModel.sessionStatus(for: personalSessionKey)
+        #expect(updatedStatus?.display.model == "gpt-5.4")
+        #expect(updatedStatus?.display.thinkingLevel == "high")
+        #expect(updatedStatus?.display.fastMode == false)
+
+        let reasoningFetchCount = chatService.fetchSessionStatusCallCount
+        chatService.sessionStatusBySessionKey[personalSessionKey] = makeSessionStatus(
+            sessionKey: personalSessionKey,
+            state: .idle,
+            provider: nil,
+            model: nil,
+            reasoningLevel: "medium",
+            thinkingLevel: nil,
+            fastMode: nil,
+            queueDepth: 0
+        )
+        let reasoningAssistantPayload = #"{"type":"message","id":"s_assistant_final_3","role":"assistant","content":"done three","timestamp":1700000000002,"streaming":false,"sessionKey":"\#(personalSessionKey)","attachments":[]}"#
+        chatService.emitLifecycleEvent(.init(epoch: 1, payload: .serverMessage(data: Data(reasoningAssistantPayload.utf8))))
+
+        for _ in 0..<50 {
+            if chatService.fetchSessionStatusCallCount > reasoningFetchCount,
+               viewModel.sessionStatus(for: personalSessionKey)?.display.reasoningLevel == "medium" {
+                break
+            }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        let reasoningStatus = viewModel.sessionStatus(for: personalSessionKey)
+        #expect(reasoningStatus?.display.model == "gpt-5.4")
+        #expect(reasoningStatus?.display.thinkingLevel == nil)
+        #expect(reasoningStatus?.display.reasoningLevel == "medium")
+        #expect(reasoningStatus?.display.fastMode == false)
+    }
+
+    @Test("Session status sticky display metadata is keyed per stream")
+    @MainActor
+    func sessionStatusStickyDisplayMetadataIsKeyedPerStream() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let researchSessionKey = "agent:main:clawline:user:s_research"
+        chatService.streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: researchSessionKey, displayName: "Research", kind: "custom", orderIndex: 1, isBuiltIn: false),
+        ]
+        chatService.sessionStatusBySessionKey[personalSessionKey] = makeSessionStatus(
+            sessionKey: personalSessionKey,
+            state: .running,
+            provider: "openai",
+            model: "gpt-5.5",
+            thinkingLevel: "low",
+            fastMode: true,
+            queueDepth: 1
+        )
+        chatService.sessionStatusBySessionKey[researchSessionKey] = makeSessionStatus(
+            sessionKey: researchSessionKey,
+            state: .running,
+            provider: "openai",
+            model: "gpt-5.4",
+            thinkingLevel: "high",
+            fastMode: false,
+            queueDepth: 1
+        )
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.prepareForReplacement() }
+
+        await viewModel.activate(origin: "test.sessionStatusPerStreamSticky")
+        chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
+
+        for _ in 0..<50 {
+            if viewModel.sessionStatus(for: personalSessionKey)?.display.model == "gpt-5.5" {
+                break
+            }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        let researchSeedFetchCount = chatService.fetchSessionStatusCallCount
+        let researchSeedPayload = #"{"type":"message","id":"s_research_seed","role":"assistant","content":"seed","timestamp":1700000000000,"streaming":false,"sessionKey":"\#(researchSessionKey)","attachments":[]}"#
+        chatService.emitLifecycleEvent(.init(epoch: 1, payload: .serverMessage(data: Data(researchSeedPayload.utf8))))
+
+        for _ in 0..<50 {
+            if chatService.fetchSessionStatusCallCount > researchSeedFetchCount,
+               viewModel.sessionStatus(for: researchSessionKey)?.display.model == "gpt-5.4" {
+                break
+            }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        chatService.sessionStatusBySessionKey[personalSessionKey] = makeSessionStatus(
+            sessionKey: personalSessionKey,
+            state: .idle,
+            provider: nil,
+            model: nil,
+            thinkingLevel: nil,
+            fastMode: nil,
+            queueDepth: 0
+        )
+        let personalMissingFetchCount = chatService.fetchSessionStatusCallCount
+        let personalMissingPayload = #"{"type":"message","id":"s_personal_missing","role":"assistant","content":"done","timestamp":1700000000001,"streaming":false,"sessionKey":"\#(personalSessionKey)","attachments":[]}"#
+        chatService.emitLifecycleEvent(.init(epoch: 1, payload: .serverMessage(data: Data(personalMissingPayload.utf8))))
+
+        for _ in 0..<50 {
+            if chatService.fetchSessionStatusCallCount > personalMissingFetchCount,
+               viewModel.sessionStatus(for: personalSessionKey)?.run.state == .idle {
+                break
+            }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        let personalStatus = viewModel.sessionStatus(for: personalSessionKey)
+        let researchStatusAfterPersonalRefresh = viewModel.sessionStatus(for: researchSessionKey)
+        #expect(personalStatus?.display.model == "gpt-5.5")
+        #expect(personalStatus?.display.thinkingLevel == "low")
+        #expect(personalStatus?.display.fastMode == true)
+        #expect(researchStatusAfterPersonalRefresh?.display.model == "gpt-5.4")
+        #expect(researchStatusAfterPersonalRefresh?.display.thinkingLevel == "high")
+        #expect(researchStatusAfterPersonalRefresh?.display.fastMode == false)
+
+        chatService.sessionStatusBySessionKey[researchSessionKey] = makeSessionStatus(
+            sessionKey: researchSessionKey,
+            state: .idle,
+            provider: nil,
+            model: "gpt-5.3",
+            reasoningLevel: "medium",
+            thinkingLevel: nil,
+            fastMode: true,
+            queueDepth: 0
+        )
+        let researchUpdateFetchCount = chatService.fetchSessionStatusCallCount
+        let researchUpdatePayload = #"{"type":"message","id":"s_research_update","role":"assistant","content":"updated","timestamp":1700000000002,"streaming":false,"sessionKey":"\#(researchSessionKey)","attachments":[]}"#
+        chatService.emitLifecycleEvent(.init(epoch: 1, payload: .serverMessage(data: Data(researchUpdatePayload.utf8))))
+
+        for _ in 0..<50 {
+            if chatService.fetchSessionStatusCallCount > researchUpdateFetchCount,
+               viewModel.sessionStatus(for: researchSessionKey)?.display.model == "gpt-5.3" {
+                break
+            }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        let personalStatusAfterResearchUpdate = viewModel.sessionStatus(for: personalSessionKey)
+        let researchUpdatedStatus = viewModel.sessionStatus(for: researchSessionKey)
+        #expect(personalStatusAfterResearchUpdate?.display.model == "gpt-5.5")
+        #expect(personalStatusAfterResearchUpdate?.display.thinkingLevel == "low")
+        #expect(personalStatusAfterResearchUpdate?.display.fastMode == true)
+        #expect(researchUpdatedStatus?.display.model == "gpt-5.3")
+        #expect(researchUpdatedStatus?.display.thinkingLevel == nil)
+        #expect(researchUpdatedStatus?.display.reasoningLevel == "medium")
+        #expect(researchUpdatedStatus?.display.fastMode == true)
+    }
+
+    @Test("Session status refreshes after terminal message error")
+    @MainActor
+    func sessionStatusRefreshesAfterTerminalMessageError() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        chatService.streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+        ]
+        chatService.sessionStatusBySessionKey[personalSessionKey] = makeSessionStatus(
+            sessionKey: personalSessionKey,
+            state: .running,
+            provider: "openai",
+            model: "gpt-5.5",
+            thinkingLevel: "high",
+            fastMode: true,
+            queueDepth: 1
+        )
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.prepareForReplacement() }
+
+        await viewModel.activate(origin: "test.sessionStatusTerminalError")
+        chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
+
+        for _ in 0..<50 {
+            if viewModel.sessionStatus(for: personalSessionKey)?.run.state == .running {
+                break
+            }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        let firstFetchCount = chatService.fetchSessionStatusCallCount
+        chatService.sessionStatusBySessionKey[personalSessionKey] = makeSessionStatus(
+            sessionKey: personalSessionKey,
+            state: .idle,
+            provider: nil,
+            model: nil,
+            thinkingLevel: nil,
+            fastMode: nil,
+            queueDepth: 0
+        )
+        chatService.emitServiceEvent(.messageError(messageId: nil, code: "connection_lost", message: nil))
+
+        for _ in 0..<50 {
+            if chatService.fetchSessionStatusCallCount > firstFetchCount,
+               viewModel.sessionStatus(for: personalSessionKey)?.run.state == .idle {
+                break
+            }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        let status = viewModel.sessionStatus(for: personalSessionKey)
+        #expect(status?.run.state == .idle)
+        #expect(status?.display.model == "gpt-5.5")
+        #expect(status?.display.thinkingLevel == "high")
+        #expect(status?.display.fastMode == true)
     }
 
     @Test("Track candidates can be refreshed on demand")
@@ -2789,7 +4124,9 @@ private final class TestChatService: ChatServicing {
     private var replayCursorBySessionKey: [String: String] = [:]
     private(set) var lastSentAttachments: [WireAttachment] = []
     private(set) var lastSentId: String?
+    private(set) var lastSentContent: String?
     private(set) var lastSessionKey: String?
+    var lastPublishedReadState: (sessionKey: String, lastReadMessageId: String)?
     private(set) var connectCallCount: Int = 0
     var isTransportReadyForSend: Bool = false
     var sendError: Swift.Error?
@@ -2799,8 +4136,22 @@ private final class TestChatService: ChatServicing {
     var fetchTrackableSessionsError: Error?
     var streams: [StreamSession] = []
     var trackableSessions: [TrackableSession] = []
+    var sessionStatusBySessionKey: [String: SessionStatus] = [:]
+    var sessionControlResponse: SessionControlResponse? = SessionControlResponse(
+        ok: true,
+        sessionKey: personalSessionKey,
+        action: SessionControlAction.cancelCurrentRun.rawValue,
+        code: nil,
+        message: nil,
+        status: nil,
+        capabilities: nil
+    )
+    private(set) var lastSessionControl: (sessionKey: String, action: SessionControlAction, value: String?, enabled: Bool?)?
     private(set) var fetchStreamsCallCount: Int = 0
     private(set) var fetchTrackableSessionsCallCount: Int = 0
+    private(set) var fetchSessionStatusCallCount: Int = 0
+    private(set) var cancelCurrentRunCallCount: Int = 0
+    private(set) var lastCancelledSessionKey: String?
     private(set) var deleteStreamCallCount: Int = 0
     private(set) var lastDeletedSessionKey: String?
     private(set) var renameStreamCallCount: Int = 0
@@ -2808,6 +4159,9 @@ private final class TestChatService: ChatServicing {
     private(set) var lastAdoptedSessionKey: String?
     var adoptStreamReturnedTrackingMode: StreamSession.TrackingMode = .adopted
     var renameReturnedTrackingMode: StreamSession.TrackingMode?
+    var startReplayCount: Int = 0
+    var startHistoryReset = false
+    var emitSyncCompleteOnStart: Bool = true
 
     private(set) lazy var incomingMessages: AsyncStream<Message> = {
         AsyncStream { continuation in
@@ -2855,13 +4209,16 @@ private final class TestChatService: ChatServicing {
                 epoch: epoch,
                 payload: .authResult(
                     success: true,
-                    replayCount: 0,
+                    replayCount: startReplayCount,
                     replayTruncated: false,
-                    historyReset: false,
+                    historyReset: startHistoryReset,
                     failureReason: nil
                 )
             )
         )
+        if emitSyncCompleteOnStart {
+            lifecycleContinuation?.yield(.init(epoch: epoch, payload: .syncComplete))
+        }
     }
 
     func stopConnectionAttempt() {}
@@ -2883,6 +4240,13 @@ private final class TestChatService: ChatServicing {
         }
     }
 
+    func seedReplayCursorIfMissing(_ cursor: String?, for sessionKey: String) {
+        guard replayCursorBySessionKey[sessionKey] == nil else { return }
+        if let cursor, !cursor.isEmpty {
+            replayCursorBySessionKey[sessionKey] = cursor
+        }
+    }
+
     func clearReplayCursors() {
         replayCursorBySessionKey.removeAll()
     }
@@ -2892,6 +4256,7 @@ private final class TestChatService: ChatServicing {
             throw sendError
         }
         lastSentId = id
+        lastSentContent = content
         lastSentAttachments = attachments
         lastSessionKey = sessionKey
     }
@@ -2900,12 +4265,23 @@ private final class TestChatService: ChatServicing {
         // No-op for tests.
     }
 
+    func publishReadState(sessionKey: String, lastReadMessageId: String) async throws {
+        lastPublishedReadState = (sessionKey, lastReadMessageId)
+    }
+
     func emit(_ message: Message) {
+        if message.id.hasPrefix("s_"), !message.streaming {
+            replayCursorBySessionKey[message.sessionKey] = message.id
+        }
         if let continuation = messageContinuation {
             continuation.yield(message)
         } else {
             bufferedMessages.append(message)
         }
+    }
+
+    func emitLifecycleEvent(_ event: LifecycleTransportEvent) {
+        lifecycleContinuation?.yield(event)
     }
 
     func emitConnectionState(_ state: ConnectionState) {
@@ -2926,6 +4302,7 @@ private final class TestChatService: ChatServicing {
                     )
                 )
             )
+            lifecycleContinuation?.yield(.init(epoch: 1, payload: .syncComplete))
         case .disconnected:
             lifecycleContinuation?.yield(.init(epoch: 1, payload: .transportClosed(reason: .error)))
         default:
@@ -2950,6 +4327,29 @@ private final class TestChatService: ChatServicing {
         fetchTrackableSessionsCallCount += 1
         if let fetchTrackableSessionsError { throw fetchTrackableSessionsError }
         return trackableSessions
+    }
+
+    func fetchSessionStatus(sessionKey: String) async throws -> SessionStatus {
+        fetchSessionStatusCallCount += 1
+        if let status = sessionStatusBySessionKey[sessionKey] {
+            return status
+        }
+        throw StreamAPIError(code: "stream_not_found", message: "not found", statusCode: 404)
+    }
+
+    func applySessionControl(
+        sessionKey: String,
+        action: SessionControlAction,
+        value: String?,
+        enabled: Bool?
+    ) async throws -> SessionControlResponse {
+        cancelCurrentRunCallCount += action == .cancelCurrentRun ? 1 : 0
+        lastCancelledSessionKey = action == .cancelCurrentRun ? sessionKey : lastCancelledSessionKey
+        lastSessionControl = (sessionKey, action, value, enabled)
+        if let sessionControlResponse {
+            return sessionControlResponse
+        }
+        throw StreamAPIError(code: "unsupported", message: "unsupported", statusCode: 400)
     }
 
     func createStream(displayName: String, idempotencyKey: String) async throws -> StreamSession {
@@ -3047,6 +4447,8 @@ private func resetChatPersistence() {
     let defaults = UserDefaults.standard
     for key in defaults.dictionaryRepresentation().keys {
         if key.hasPrefix("clawline.lastServerMessageId.")
+            || key.hasPrefix("clawline.lastReadMessageId.")
+            || key.hasPrefix("clawline.replayCursorBySession.v1.")
             || key.hasPrefix("clawline.lastStream")
             || key.hasPrefix("clawline.lastSessionKey")
             || key.hasPrefix("clawline.scrollState.v1.") {
@@ -3129,6 +4531,61 @@ private func makeStreamSession(
         isBuiltIn: isBuiltIn,
         createdAt: Date(),
         updatedAt: Date()
+    )
+}
+
+private func makeSessionStatus(
+    sessionKey: String,
+    state: SessionStatus.Run.State,
+    provider: String?,
+    model: String?,
+    reasoningLevel: String? = nil,
+    thinkingLevel: String?,
+    fastMode: Bool? = nil,
+    queueDepth: Int,
+    canCancelCurrentRun: Bool = false
+) -> SessionStatus {
+    SessionStatus(
+        sessionKey: sessionKey,
+        display: .init(
+            model: model,
+            fallbackModels: nil,
+            provider: provider,
+            harness: nil,
+            reasoningLevel: reasoningLevel,
+            thinkingLevel: thinkingLevel,
+            fastMode: fastMode,
+            mode: nil,
+            verbosity: nil
+        ),
+        run: .init(
+            state: state,
+            runId: state == .running ? "run_1" : nil,
+            messageId: state == .running ? "c_1" : nil,
+            startedAt: state == .running ? 1_700_000_000_000 : nil,
+            queueDepth: queueDepth
+        ),
+        context: .init(available: false, compaction: nil),
+        approval: .init(state: nil),
+        capabilities: .init(
+            cancelCurrentRun: .init(
+                supported: canCancelCurrentRun,
+                reason: canCancelCurrentRun ? nil : "provider_control_not_available"
+            ),
+            setModel: .init(supported: false, reason: "provider_control_not_available"),
+            setThinking: .init(supported: true, reason: nil),
+            setReasoning: .init(supported: false, reason: "provider_control_not_available"),
+            setFastMode: .init(supported: true, reason: nil),
+            setMode: .init(supported: false, reason: "provider_control_not_available"),
+            setVerbosity: .init(supported: false, reason: "provider_control_not_available"),
+            canCancelCurrentRun: nil,
+            canChangeModel: nil,
+            canChangeReasoning: nil,
+            canChangeFastMode: nil,
+            canChangeVerbosity: nil,
+            readOnlyStatus: nil
+        ),
+        modelCatalog: nil
     )
 }
 

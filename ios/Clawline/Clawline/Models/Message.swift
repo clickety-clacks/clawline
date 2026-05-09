@@ -36,6 +36,9 @@ struct Message: Identifiable, Equatable, Codable {
     let deviceId: String?
     let sessionKey: String
     let sender: String?
+    let clientMessageId: String?
+    let replyToMessageId: String?
+    let replyToClientMessageId: String?
 
     init(id: String,
          role: Role,
@@ -45,7 +48,10 @@ struct Message: Identifiable, Equatable, Codable {
          attachments: [Attachment],
          deviceId: String?,
          sessionKey: String,
-         sender: String? = nil) {
+         sender: String? = nil,
+         clientMessageId: String? = nil,
+         replyToMessageId: String? = nil,
+         replyToClientMessageId: String? = nil) {
         self.id = id
         self.role = role
         self.content = content
@@ -55,6 +61,9 @@ struct Message: Identifiable, Equatable, Codable {
         self.deviceId = deviceId
         self.sessionKey = sessionKey
         self.sender = sender
+        self.clientMessageId = clientMessageId
+        self.replyToMessageId = replyToMessageId
+        self.replyToClientMessageId = replyToClientMessageId
     }
 
     var stream: ChatStream {

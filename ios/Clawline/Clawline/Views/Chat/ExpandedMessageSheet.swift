@@ -13,9 +13,9 @@ struct ExpandedMessageSheet: View {
     let message: Message
     let presentation: MessagePresentation
     let fontScaleChangeSequence: Int
+    let terminalConnectionPool: TerminalSessionConnectionPool
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.settingsManager) private var settings
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     @State private var dragOffset: CGFloat = 0
@@ -23,13 +23,7 @@ struct ExpandedMessageSheet: View {
 
     private var isCompact: Bool { horizontalSizeClass == .compact }
     private var metrics: ChatFlowTheme.Metrics { ChatFlowTheme.Metrics(isCompact: isCompact) }
-    private var effectiveColorScheme: ColorScheme {
-#if os(visionOS)
-        return settings.appearanceMode == .dark ? .dark : .light
-#else
-        return colorScheme
-#endif
-    }
+    private var effectiveColorScheme: ColorScheme { colorScheme }
 
     var body: some View {
         let _ = fontScaleChangeSequence
@@ -141,7 +135,10 @@ struct ExpandedMessageSheet: View {
             ForEach(Array(terminalSessions.enumerated()), id: \.offset) { item in
                 TerminalBubbleExpandedRepresentable(
                     descriptor: item.element,
-                    fontScaleChangeSequence: fontScaleChangeSequence
+                    fontScaleChangeSequence: fontScaleChangeSequence,
+                    connectionPool: terminalConnectionPool,
+                    messageId: message.id,
+                    slotIndex: item.offset
                 )
                     .frame(maxWidth: .infinity)
             }
@@ -195,7 +192,7 @@ struct ExpandedMessageSheet: View {
     private var mediaParts: [MessagePart] {
         presentation.parts.filter { part in
             switch part {
-            case .image, .gallery:
+            case .remoteImage, .image, .gallery:
                 return true
             default:
                 return false
@@ -206,6 +203,25 @@ struct ExpandedMessageSheet: View {
     @ViewBuilder
     private func mediaPartView(_ part: MessagePart) -> some View {
         switch part {
+        case .remoteImage(let url):
+            AsyncImage(url: url) { phase in
+                switch phase {
+                case .success(let image):
+                    image
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxHeight: 300)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                case .empty:
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(Color(uiColor: .secondarySystemFill))
+                        .frame(height: 180)
+                case .failure:
+                    EmptyView()
+                @unknown default:
+                    EmptyView()
+                }
+            }
         case .image(let attachment):
             if let data = attachment.data, let uiImage = UIImage(data: data) {
                 Image(uiImage: uiImage)
@@ -246,6 +262,9 @@ struct ExpandedMessageSheet: View {
 private struct TerminalBubbleExpandedRepresentable: UIViewRepresentable {
     let descriptor: TerminalSessionDescriptor
     let fontScaleChangeSequence: Int
+    let connectionPool: TerminalSessionConnectionPool
+    let messageId: String
+    let slotIndex: Int
 
     final class Coordinator {
         var lastTerminalSessionId: String?
@@ -257,8 +276,12 @@ private struct TerminalBubbleExpandedRepresentable: UIViewRepresentable {
     }
 
     func makeUIView(context: Context) -> TerminalBubbleUIKitView {
-        let view = TerminalBubbleUIKitView()
-        view.configure(descriptor: descriptor, style: .expanded(height: 520))
+        let view = TerminalBubbleUIKitView(connectionPool: connectionPool)
+        view.configure(
+            descriptor: descriptor,
+            style: .expanded(height: 520),
+            context: .init(messageId: messageId, slotIndex: slotIndex, source: .expanded)
+        )
         context.coordinator.lastTerminalSessionId = descriptor.terminalSessionId
         context.coordinator.lastFontScaleChangeSequence = fontScaleChangeSequence
         return view
@@ -268,7 +291,11 @@ private struct TerminalBubbleExpandedRepresentable: UIViewRepresentable {
         // Avoid reconfiguring during unrelated SwiftUI updates (can cause flicker/reconnect churn).
         if context.coordinator.lastTerminalSessionId != descriptor.terminalSessionId
             || context.coordinator.lastFontScaleChangeSequence != fontScaleChangeSequence {
-            uiView.configure(descriptor: descriptor, style: .expanded(height: 520))
+            uiView.configure(
+                descriptor: descriptor,
+                style: .expanded(height: 520),
+                context: .init(messageId: messageId, slotIndex: slotIndex, source: .expanded)
+            )
             context.coordinator.lastTerminalSessionId = descriptor.terminalSessionId
             context.coordinator.lastFontScaleChangeSequence = fontScaleChangeSequence
         }

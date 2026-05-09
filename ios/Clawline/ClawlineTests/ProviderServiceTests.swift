@@ -154,9 +154,91 @@ struct ProviderServiceTests {
         let message = await iterator.next()
 
         #expect(connector.connectedURL?.absoluteString == "wss://example.com/ws")
-        #expect(mockSocket.sentTexts.contains { $0.contains("\"type\":\"auth\"") && $0.contains("\"lastMessageId\":\"s_0\"") })
+        #expect(mockSocket.sentTexts.contains { $0.contains("\"type\":\"auth\"") })
+        #expect(mockSocket.sentTexts.allSatisfy { !$0.contains("\"lastMessageId\"") })
         #expect(mockSocket.sentTexts.contains { $0.contains("\"clientFeatures\":[\"terminal_bubbles_v1\"]") })
         #expect(message?.content == "Hi")
+    }
+
+    @Test("Chat auth sends per-stream replay cursors without legacy cursor")
+    func chatAuthSendsReplayCursorMap() async throws {
+        let mockSocket = MockWebSocketClient()
+        let connector = MockWebSocketConnector(client: mockSocket)
+        let baseURL = URL(string: "https://example.com")!
+        let service = ProviderChatService(
+            connector: connector,
+            deviceId: "device_replay_map",
+            baseURLProvider: { baseURL }
+        )
+        defer { service.clearReplayCursors() }
+
+        let mainKey = "agent:main:clawline:user:main"
+        let sideKey = "agent:main:clawline:user:side"
+        service.setReplayCursor("s_main_final", for: mainKey)
+        service.setReplayCursor("s_side_final", for: sideKey)
+
+        Task {
+            try await Task.sleep(forDuration: .milliseconds(20))
+            mockSocket.enqueue(text: #"{ "type": "auth_result", "success": true }"#)
+        }
+
+        try await service.connect(token: "jwt", lastMessageId: "s_main_final")
+
+        let auth = try #require(mockSocket.sentTexts.first(where: { $0.contains("\"type\":\"auth\"") }))
+        let payload = try jsonObject(auth)
+        #expect(payload["lastMessageId"] == nil)
+        let replayCursors = try #require(payload["replayCursorsBySessionKey"] as? [String: Any])
+        #expect(replayCursors[mainKey] as? String == "s_main_final")
+        #expect(replayCursors[sideKey] as? String == "s_side_final")
+    }
+
+    @Test("Streaming partials do not advance replay cursors but finals do")
+    func streamingPartialsDoNotAdvanceReplayCursors() async throws {
+        let mockSocket = MockWebSocketClient()
+        let connector = MockWebSocketConnector(client: mockSocket)
+        let baseURL = URL(string: "https://example.com")!
+        let service = ProviderChatService(
+            connector: connector,
+            deviceId: "device_stream_cursor",
+            baseURLProvider: { baseURL }
+        )
+        defer { service.clearReplayCursors() }
+
+        let sessionKey = "agent:main:clawline:user:main"
+        var iterator = service.incomingMessages.makeAsyncIterator()
+        Task {
+            try await Task.sleep(forDuration: .milliseconds(20))
+            mockSocket.enqueue(text: #"{ "type": "auth_result", "success": true }"#)
+        }
+
+        try await service.connect(token: "jwt", lastMessageId: nil)
+
+        mockSocket.enqueue(text: #"{ "type": "message", "id": "s_shared_reply", "role": "assistant", "content": "Partial", "timestamp": 1700000000000, "streaming": true, "sessionKey": "agent:main:clawline:user:main", "attachments": [] }"#)
+        _ = await iterator.next()
+        #expect(service.replayCursorSnapshot()[sessionKey] == nil)
+
+        mockSocket.enqueue(text: #"{ "type": "message", "id": "s_shared_reply", "role": "assistant", "content": "Final", "timestamp": 1700000001000, "streaming": false, "sessionKey": "agent:main:clawline:user:main", "attachments": [] }"#)
+        _ = await iterator.next()
+        #expect(service.replayCursorSnapshot()[sessionKey] == "s_shared_reply")
+    }
+
+    @Test("Cache restore seeding cannot overwrite an advanced replay cursor")
+    func cacheSeedDoesNotOverwriteAdvancedCursor() {
+        let service = ProviderChatService(
+            connector: MockWebSocketConnector(client: MockWebSocketClient()),
+            deviceId: "device_seed_cursor",
+            baseURLProvider: { URL(string: "https://example.com")! }
+        )
+        defer { service.clearReplayCursors() }
+
+        let mainKey = "agent:main:clawline:user:main"
+        let sideKey = "agent:main:clawline:user:side"
+        service.setReplayCursor("s_live_final", for: mainKey)
+        service.seedReplayCursorIfMissing("s_cache_old", for: mainKey)
+        service.seedReplayCursorIfMissing("s_side_cache", for: sideKey)
+
+        #expect(service.replayCursorSnapshot()[mainKey] == "s_live_final")
+        #expect(service.replayCursorSnapshot()[sideKey] == "s_side_cache")
     }
 
     @Test("Chat connect reports adopted session keys during auth")
@@ -267,6 +349,83 @@ struct ProviderServiceTests {
             $0.contains("\"type\":\"message\"")
             && $0.contains("\"content\":\"Hello\"")
         })
+    }
+
+    @Test("Publish read state serializes payload")
+    func publishReadStateSerializesPayload() async throws {
+        let mockSocket = MockWebSocketClient()
+        let connector = MockWebSocketConnector(client: mockSocket)
+        let baseURL = URL(string: "https://example.com")!
+        let service = ProviderChatService(
+            connector: connector,
+            deviceId: "device_123",
+            baseURLProvider: { baseURL }
+        )
+
+        Task {
+            try await Task.sleep(forDuration: .milliseconds(10))
+            mockSocket.enqueue(text: #"{ "type": "auth_result", "success": true }"#)
+        }
+
+        try await service.connect(token: "jwt", lastMessageId: nil)
+        try await service.publishReadState(
+            sessionKey: "agent:main:clawline:user:main",
+            lastReadMessageId: "s_read_1"
+        )
+
+        #expect(mockSocket.sentTexts.contains {
+            $0.contains("\"type\":\"stream_read\"")
+                && $0.contains("\"sessionKey\":\"agent:main:clawline:user:main\"")
+                && $0.contains("\"lastReadMessageId\":\"s_read_1\"")
+        })
+    }
+
+    @Test("Unknown read-state cursor rejection does not fail pending messages")
+    func unknownReadStateCursorRejectionDoesNotFailPendingMessages() async throws {
+        let mockSocket = MockWebSocketClient()
+        let connector = MockWebSocketConnector(client: mockSocket)
+        let baseURL = URL(string: "https://example.com")!
+        let service = ProviderChatService(
+            connector: connector,
+            deviceId: "device_123",
+            baseURLProvider: { baseURL }
+        )
+        var eventIterator = service.serviceEvents.makeAsyncIterator()
+
+        Task {
+            try await Task.sleep(forDuration: .milliseconds(10))
+            mockSocket.enqueue(text: #"{ "type": "auth_result", "success": true }"#)
+        }
+
+        try await service.connect(token: "jwt", lastMessageId: nil)
+        try await service.send(
+            id: "c_pending",
+            content: "Hello",
+            attachments: [],
+            sessionKey: nil
+        )
+
+        Task {
+            try await Task.sleep(forDuration: .milliseconds(20))
+            mockSocket.enqueue(text: #"{ "type": "error", "code": "invalid_message", "message": "Unknown lastReadMessageId" }"#)
+            try await Task.sleep(forDuration: .milliseconds(20))
+            mockSocket.enqueue(text: #"{ "type": "ack", "id": "c_pending" }"#)
+        }
+
+        for _ in 0..<20 {
+            guard let event = await eventIterator.next() else { continue }
+            switch event {
+            case .messageError(_, let code, let message):
+                Issue.record("Unexpected message error from read-state rejection: \(code) \(message ?? "")")
+                return
+            case .messageAcked(let id) where id == "c_pending":
+                return
+            default:
+                continue
+            }
+        }
+
+        Issue.record("Expected pending message ack")
     }
 
     @Test("Chat send does not automatically retry an unacked message")
@@ -447,6 +606,72 @@ struct ProviderServiceTests {
         #expect(acked)
     }
 
+    @Test("Chat service emits read-state snapshot from auth result")
+    func chatReadStateSnapshotEvent() async throws {
+        let mockSocket = MockWebSocketClient()
+        let connector = MockWebSocketConnector(client: mockSocket)
+        let baseURL = URL(string: "https://example.com")!
+        let service = ProviderChatService(
+            connector: connector,
+            deviceId: "device_123",
+            baseURLProvider: { baseURL }
+        )
+
+        var eventIterator = service.serviceEvents.makeAsyncIterator()
+        Task {
+            try await Task.sleep(forDuration: .milliseconds(20))
+            mockSocket.enqueue(
+                text: #"{ "type": "auth_result", "success": true, "streamReadStates": { "agent:main:clawline:user:main": "s_read_1" } }"#
+            )
+        }
+
+        try await service.connect(token: "jwt", lastMessageId: nil)
+
+        var snapshot: [String: String] = [:]
+        for _ in 0..<20 {
+            guard let event = await eventIterator.next() else { continue }
+            if case .streamReadStateSnapshot(let states) = event {
+                snapshot = states
+                break
+            }
+        }
+
+        #expect(snapshot["agent:main:clawline:user:main"] == "s_read_1")
+    }
+
+    @Test("Chat service emits tail-state snapshot from auth result")
+    func chatTailStateSnapshotEvent() async throws {
+        let mockSocket = MockWebSocketClient()
+        let connector = MockWebSocketConnector(client: mockSocket)
+        let baseURL = URL(string: "https://example.com")!
+        let service = ProviderChatService(
+            connector: connector,
+            deviceId: "device_123",
+            baseURLProvider: { baseURL }
+        )
+
+        var eventIterator = service.serviceEvents.makeAsyncIterator()
+        Task {
+            try await Task.sleep(forDuration: .milliseconds(20))
+            mockSocket.enqueue(
+                text: #"{ "type": "auth_result", "success": true, "streamTailStates": { "agent:main:clawline:user:main": { "lastMessageId": "s_tail_1", "lastMessageRole": "user" } } }"#
+            )
+        }
+
+        try await service.connect(token: "jwt", lastMessageId: nil)
+
+        var snapshot: [String: StreamTailState] = [:]
+        for _ in 0..<20 {
+            guard let event = await eventIterator.next() else { continue }
+            if case .streamTailStateSnapshot(let states) = event {
+                snapshot = states
+                break
+            }
+        }
+
+        #expect(snapshot["agent:main:clawline:user:main"] == StreamTailState(lastMessageId: "s_tail_1", lastMessageRole: .user))
+    }
+
     @Test("Chat service emits stream snapshot events")
     func chatStreamSnapshotEvent() async throws {
         let mockSocket = MockWebSocketClient()
@@ -607,6 +832,259 @@ struct ProviderServiceTests {
         #expect(!streams[1].adopted)
     }
 
+    @Test("Fetch session status uses provider status endpoint and decodes capabilities")
+    func fetchSessionStatusUsesProviderEndpoint() async throws {
+        let mockSocket = MockWebSocketClient()
+        let connector = MockWebSocketConnector(client: mockSocket)
+        let baseURL = URL(string: "https://example.com")!
+        let sessionKey = "agent:main:clawline:user:s_status"
+        defer { HTTPStubURLProtocol.requestHandler = nil }
+        HTTPStubURLProtocol.requestHandler = { request in
+            #expect(request.url?.path == "/api/session-status")
+            let queryItems = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems
+            #expect(queryItems?.first(where: { $0.name == "sessionKey" })?.value == sessionKey)
+            #expect(request.httpMethod == "GET")
+            #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer jwt")
+            let data = #"""
+            {
+              "sessionKey": "agent:main:clawline:user:s_status",
+              "display": {
+                "model": "claude-sonnet-4.6",
+                "fallbackModels": null,
+                "provider": "anthropic",
+                "harness": null,
+                "reasoningLevel": null,
+                "thinkingLevel": "high",
+                "fastMode": true,
+                "mode": null,
+                "verbosity": null
+              },
+              "run": {
+                "state": "running",
+                "runId": "run_1",
+                "messageId": "c_1",
+                "startedAt": 1700000000000,
+                "queueDepth": 2
+              },
+              "context": {
+                "available": false,
+                "compaction": null
+              },
+              "approval": {
+                "state": null
+              },
+              "capabilities": {
+                "cancelCurrentRun": { "supported": false, "reason": "provider_control_not_available" },
+                "setModel": { "supported": false, "reason": "provider_control_not_available" },
+                "setReasoning": { "supported": false, "reason": "provider_control_not_available" },
+                "setMode": { "supported": false, "reason": "provider_control_not_available" },
+                "setVerbosity": { "supported": false, "reason": "provider_control_not_available" }
+              },
+              "modelCatalog": {
+                "available": true,
+                "models": [
+                  {
+                    "id": "gpt-5.5",
+                    "provider": "openai",
+                    "ref": "openai/gpt-5.5",
+                    "name": "GPT-5.5",
+                    "alias": null
+                  },
+                  {
+                    "id": "claude-sonnet-4-6",
+                    "provider": "anthropic",
+                    "ref": "anthropic/claude-sonnet-4-6",
+                    "name": "Claude Sonnet 4.6",
+                    "alias": "Sonnet"
+                  }
+                ]
+              }
+            }
+            """#.data(using: .utf8) ?? Data()
+            return (
+                HTTPURLResponse(
+                    url: request.url ?? baseURL,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                data
+            )
+        }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [HTTPStubURLProtocol.self]
+        let urlSession = URLSession(configuration: configuration)
+        let streamAPIClient = StreamAPIClient(baseURLProvider: { baseURL }, session: urlSession)
+        let service = ProviderChatService(
+            connector: connector,
+            deviceId: "device_123",
+            baseURLProvider: { baseURL },
+            authTokenProvider: { "jwt" },
+            streamAPIClient: streamAPIClient
+        )
+
+        let status = try await service.fetchSessionStatus(sessionKey: sessionKey)
+
+        #expect(status.sessionKey == sessionKey)
+        #expect(status.display.provider == "anthropic")
+        #expect(status.display.model == "claude-sonnet-4.6")
+        #expect(status.display.thinkingLevel == "high")
+        #expect(status.display.fastMode == true)
+        #expect(status.run.state == .running)
+        #expect(status.run.queueDepth == 2)
+        #expect(status.capabilities.cancelCurrentRun?.supported == false)
+        #expect(status.modelCatalog?.available == true)
+        #expect(status.modelCatalog?.models.map(\.ref) == [
+            "openai/gpt-5.5",
+            "anthropic/claude-sonnet-4-6"
+        ])
+        #expect(status.modelCatalog?.models[1].alias == "Sonnet")
+    }
+
+    @Test("Session control posts typed provider actions")
+    func sessionControlPostsTypedProviderActions() async throws {
+        let mockSocket = MockWebSocketClient()
+        let connector = MockWebSocketConnector(client: mockSocket)
+        let baseURL = URL(string: "https://example.com")!
+        let sessionKey = "agent:main:clawline:user:s_status"
+        defer { HTTPStubURLProtocol.requestHandler = nil }
+        var requestBodies: [[String: Any]] = []
+        HTTPStubURLProtocol.requestHandler = { request in
+            #expect(request.url?.path == "/api/session-control")
+            #expect(request.httpMethod == "POST")
+            #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer jwt")
+            let body = try? JSONSerialization.jsonObject(with: request.httpBody ?? Data()) as? [String: Any]
+            requestBodies.append(body ?? [:])
+            let action = body?["action"] as? String
+            let data: Data
+            if action == "cancel_current_run" {
+                #expect(body?["sessionKey"] as? String == sessionKey)
+                #expect(body?["content"] == nil)
+                data = #"""
+                {
+                  "ok": false,
+                  "sessionKey": "agent:main:clawline:user:s_status",
+                  "action": "cancel_current_run",
+                  "code": "unsupported",
+                  "message": "The current Clawline provider dispatch path does not expose a per-session abort seam.",
+                  "capabilities": {
+                    "cancelCurrentRun": { "supported": false, "reason": "provider_abort_seam_not_available" },
+                    "setModel": { "supported": false, "reason": "model_catalog_control_not_available" },
+                    "setReasoning": { "supported": true, "reason": null },
+                    "setMode": { "supported": true, "reason": null },
+                    "setVerbosity": { "supported": true, "reason": null }
+                  }
+                }
+                """#.data(using: .utf8) ?? Data()
+            } else {
+                #expect(action == "set_fast_mode")
+                #expect(body?["sessionKey"] as? String == sessionKey)
+                #expect(body?["fastMode"] as? Bool == true)
+                #expect(body?["content"] == nil)
+                data = #"""
+                {
+                  "ok": true,
+                  "sessionKey": "agent:main:clawline:user:s_status",
+                  "action": "set_fast_mode",
+                  "status": {
+                    "sessionKey": "agent:main:clawline:user:s_status",
+                    "display": {
+                      "model": "gpt-5.5",
+                      "fallbackModels": null,
+                      "provider": "openai",
+                      "harness": null,
+                      "reasoningLevel": null,
+                      "thinkingLevel": "high",
+                      "fastMode": true,
+                      "mode": "fast",
+                      "verbosity": null
+                    },
+                    "run": {
+                      "state": "idle",
+                      "runId": null,
+                      "messageId": null,
+                      "startedAt": null,
+                      "queueDepth": 0
+                    },
+                    "context": {
+                      "available": false,
+                      "compaction": null
+                    },
+                    "approval": {
+                      "state": null
+                    },
+                    "capabilities": {
+                      "cancelCurrentRun": { "supported": false, "reason": "provider_abort_seam_not_available" },
+                      "setModel": { "supported": false, "reason": "model_catalog_control_not_available" },
+                      "setThinking": { "supported": true },
+                      "setReasoning": { "supported": true },
+                      "setFastMode": { "supported": true },
+                      "setMode": { "supported": true },
+                      "setVerbosity": { "supported": true }
+                    }
+                  },
+                  "capabilities": {
+                    "cancelCurrentRun": { "supported": false, "reason": "provider_abort_seam_not_available" },
+                    "setModel": { "supported": false, "reason": "model_catalog_control_not_available" },
+                    "setThinking": { "supported": true },
+                    "setReasoning": { "supported": true },
+                    "setFastMode": { "supported": true },
+                    "setMode": { "supported": true },
+                    "setVerbosity": { "supported": true }
+                  }
+                }
+                """#.data(using: .utf8) ?? Data()
+            }
+            return (
+                HTTPURLResponse(
+                    url: request.url ?? baseURL,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                data
+            )
+        }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [HTTPStubURLProtocol.self]
+        let urlSession = URLSession(configuration: configuration)
+        let streamAPIClient = StreamAPIClient(baseURLProvider: { baseURL }, session: urlSession)
+        let service = ProviderChatService(
+            connector: connector,
+            deviceId: "device_123",
+            baseURLProvider: { baseURL },
+            authTokenProvider: { "jwt" },
+            streamAPIClient: streamAPIClient
+        )
+
+        let cancelResponse = try await service.applySessionControl(
+            sessionKey: sessionKey,
+            action: .cancelCurrentRun,
+            value: nil,
+            enabled: nil
+        )
+        let fastModeResponse = try await service.applySessionControl(
+            sessionKey: sessionKey,
+            action: .setFastMode,
+            value: nil,
+            enabled: true
+        )
+
+        #expect(requestBodies.count == 2)
+        #expect(requestBodies.first?["action"] as? String == "cancel_current_run")
+        #expect(requestBodies.first?["fastMode"] == nil)
+        #expect(requestBodies.last?["action"] as? String == "set_fast_mode")
+        #expect(requestBodies.last?["fastMode"] as? Bool == true)
+        #expect(cancelResponse.ok == false)
+        #expect(cancelResponse.sessionKey == sessionKey)
+        #expect(cancelResponse.action == "cancel_current_run")
+        #expect(cancelResponse.code == "unsupported")
+        #expect(cancelResponse.capabilities?.cancelCurrentRun?.supported == false)
+        #expect(fastModeResponse.ok)
+        #expect(fastModeResponse.status?.display.fastMode == true)
+        #expect(fastModeResponse.capabilities?.setModel?.reason == "model_catalog_control_not_available")
+    }
+
     @Test("Adopt stream request posts session key to provider")
     func adoptStreamPostsSessionKeyToProvider() async throws {
         let mockSocket = MockWebSocketClient()
@@ -660,6 +1138,184 @@ struct ProviderServiceTests {
         #expect(stream.sessionKey == "agent:main:openclaw:user:s_trackable")
         #expect(stream.displayName == "Trackable Session")
         #expect(stream.adopted)
+    }
+
+    @Test("Adopt stream emits streamCreated service event")
+    func adoptStreamEmitsCreatedEvent() async throws {
+        let mockSocket = MockWebSocketClient()
+        let connector = MockWebSocketConnector(client: mockSocket)
+        let baseURL = URL(string: "https://example.com")!
+        defer { HTTPStubURLProtocol.requestHandler = nil }
+        HTTPStubURLProtocol.requestHandler = { request in
+            let data = #"""
+            {
+              "stream": {
+                "sessionKey": "agent:main:openclaw:user:s_trackable",
+                "displayName": "Trackable Session",
+                "kind": "custom",
+                "orderIndex": 3,
+                "isBuiltIn": false,
+                "createdAt": 1700000000000,
+                "updatedAt": 1700000000000,
+                "adopted": true
+              }
+            }
+            """#.data(using: .utf8) ?? Data()
+            return (
+                HTTPURLResponse(
+                    url: request.url ?? baseURL,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                data
+            )
+        }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [HTTPStubURLProtocol.self]
+        let urlSession = URLSession(configuration: configuration)
+        let streamAPIClient = StreamAPIClient(baseURLProvider: { baseURL }, session: urlSession)
+        let service = ProviderChatService(
+            connector: connector,
+            deviceId: "device_123",
+            baseURLProvider: { baseURL },
+            authTokenProvider: { "jwt" },
+            streamAPIClient: streamAPIClient
+        )
+
+        var eventIterator = service.serviceEvents.makeAsyncIterator()
+        let stream = try await service.adoptStream(sessionKey: "agent:main:openclaw:user:s_trackable")
+        let event = await eventIterator.next()
+
+        guard case .streamCreated(let createdStream)? = event else {
+            Issue.record("Expected streamCreated event after adopt")
+            return
+        }
+
+        #expect(createdStream.sessionKey == stream.sessionKey)
+        #expect(createdStream.displayName == stream.displayName)
+        #expect(createdStream.adopted)
+    }
+
+    @Test("Delete stream emits streamDeleted service event")
+    func deleteStreamEmitsDeletedEvent() async throws {
+        let mockSocket = MockWebSocketClient()
+        let connector = MockWebSocketConnector(client: mockSocket)
+        let baseURL = URL(string: "https://example.com")!
+        defer { HTTPStubURLProtocol.requestHandler = nil }
+        HTTPStubURLProtocol.requestHandler = { request in
+            let data = #"""
+            {
+              "sessionKey": "agent:main:openclaw:user:s_trackable"
+            }
+            """#.data(using: .utf8) ?? Data()
+            return (
+                HTTPURLResponse(
+                    url: request.url ?? baseURL,
+                    statusCode: 200,
+                    httpVersion: nil,
+                    headerFields: ["Content-Type": "application/json"]
+                )!,
+                data
+            )
+        }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [HTTPStubURLProtocol.self]
+        let urlSession = URLSession(configuration: configuration)
+        let streamAPIClient = StreamAPIClient(baseURLProvider: { baseURL }, session: urlSession)
+        let service = ProviderChatService(
+            connector: connector,
+            deviceId: "device_123",
+            baseURLProvider: { baseURL },
+            authTokenProvider: { "jwt" },
+            streamAPIClient: streamAPIClient
+        )
+
+        var eventIterator = service.serviceEvents.makeAsyncIterator()
+        let deletedKey = try await service.deleteStream(
+            sessionKey: "agent:main:openclaw:user:s_trackable",
+            idempotencyKey: nil
+        )
+        let event = await eventIterator.next()
+
+        guard case .streamDeleted(let emittedKey)? = event else {
+            Issue.record("Expected streamDeleted event after delete")
+            return
+        }
+
+        #expect(emittedKey == deletedKey)
+    }
+
+    @Test("Chat service emits incremental read-state updates")
+    func chatIncrementalReadStateEvents() async throws {
+        let mockSocket = MockWebSocketClient()
+        let connector = MockWebSocketConnector(client: mockSocket)
+        let baseURL = URL(string: "https://example.com")!
+        let service = ProviderChatService(
+            connector: connector,
+            deviceId: "device_123",
+            baseURLProvider: { baseURL }
+        )
+
+        var eventIterator = service.serviceEvents.makeAsyncIterator()
+        Task {
+            try await Task.sleep(forDuration: .milliseconds(20))
+            mockSocket.enqueue(text: #"{ "type": "auth_result", "success": true }"#)
+            try await Task.sleep(forDuration: .milliseconds(20))
+            mockSocket.enqueue(
+                text: #"{ "type": "stream_read_state", "sessionKey": "agent:main:clawline:user:s_abcd1234", "lastReadMessageId": "s_read_2" }"#
+            )
+        }
+
+        try await service.connect(token: "jwt", lastMessageId: nil)
+
+        var emitted: (String, String)?
+        for _ in 0..<20 {
+            guard let event = await eventIterator.next() else { continue }
+            if case .streamReadStateUpdated(let sessionKey, let lastReadMessageId) = event {
+                emitted = (sessionKey, lastReadMessageId)
+                break
+            }
+        }
+
+        #expect(emitted?.0 == "agent:main:clawline:user:s_abcd1234")
+        #expect(emitted?.1 == "s_read_2")
+    }
+
+    @Test("Chat service emits incremental tail-state updates")
+    func chatIncrementalTailStateEvents() async throws {
+        let mockSocket = MockWebSocketClient()
+        let connector = MockWebSocketConnector(client: mockSocket)
+        let baseURL = URL(string: "https://example.com")!
+        let service = ProviderChatService(
+            connector: connector,
+            deviceId: "device_123",
+            baseURLProvider: { baseURL }
+        )
+
+        var eventIterator = service.serviceEvents.makeAsyncIterator()
+        Task {
+            try await Task.sleep(forDuration: .milliseconds(20))
+            mockSocket.enqueue(text: #"{ "type": "auth_result", "success": true }"#)
+            try await Task.sleep(forDuration: .milliseconds(20))
+            mockSocket.enqueue(
+                text: #"{ "type": "stream_tail_state", "sessionKey": "agent:main:clawline:user:s_abcd1234", "lastMessageId": "s_tail_2", "lastMessageRole": "user" }"#
+            )
+        }
+
+        try await service.connect(token: "jwt", lastMessageId: nil)
+
+        var emitted: (String, StreamTailState)?
+        for _ in 0..<20 {
+            guard let event = await eventIterator.next() else { continue }
+            if case .streamTailStateUpdated(let sessionKey, let tailState) = event {
+                emitted = (sessionKey, tailState)
+                break
+            }
+        }
+
+        #expect(emitted?.0 == "agent:main:clawline:user:s_abcd1234")
+        #expect(emitted?.1 == StreamTailState(lastMessageId: "s_tail_2", lastMessageRole: .user))
     }
 
     @Test("Chat service emits incremental stream events")
@@ -836,4 +1492,20 @@ private final class HangingWebSocketClient: WebSocketClient {
     }
 
     func close(with code: URLSessionWebSocketTask.CloseCode?) {}
+}
+
+private func jsonObject(_ text: String) throws -> [String: Any] {
+    guard let data = text.data(using: .utf8) else {
+        throw JSONParseError.invalidUTF8
+    }
+    let object = try JSONSerialization.jsonObject(with: data)
+    guard let dictionary = object as? [String: Any] else {
+        throw JSONParseError.notDictionary
+    }
+    return dictionary
+}
+
+private enum JSONParseError: Error {
+    case invalidUTF8
+    case notDictionary
 }

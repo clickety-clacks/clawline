@@ -8,6 +8,19 @@
 import SwiftUI
 import UIKit
 import Foundation
+import Observation
+
+// The input bar is hosted in a pinned UIKit container, so parent value changes do not always
+// rebuild its content closure. Keep the send button state in a stable observable store.
+@Observable
+@MainActor
+final class SendButtonConnectionStateStore {
+    var value: SendButtonConnectionState
+
+    init(value: SendButtonConnectionState = .disconnected) {
+        self.value = value
+    }
+}
 
 // MARK: - ⚠️⚠️⚠️ CRITICAL: READ ChatView.swift HEADER BEFORE MODIFYING ⚠️⚠️⚠️
 //
@@ -47,16 +60,18 @@ struct MessageInputBar: View {
     let canSend: Bool
     let isSending: Bool
     let isStagingAttachments: Bool
-    let connectionState: SendButtonConnectionState
+    let connectionStateStore: SendButtonConnectionStateStore
     let focusTrigger: Int
     /// Pass geometry.safeAreaInsets.bottom directly - DO NOT pass a computed Bool.
     let bottomSafeAreaInset: CGFloat
     /// Keyboard visibility state owned by parent view to survive geometry changes.
     let isKeyboardVisible: Bool
+    @Binding var isAttachmentMenuPresented: Bool
     let onSend: () -> Void
     let onCancel: () -> Void
     let onReconnect: () -> Void
     let onAdd: () -> Void
+    let attachmentMenuContent: () -> AnyView
     let onFocusChange: (Bool) -> Void
     let onTextEditActivity: () -> Void
     var onPasteImages: (([UIImage]) -> Void)?
@@ -106,20 +121,69 @@ struct MessageInputBar: View {
         ChatFlowTheme.Metrics(isCompact: isCompact).inputBarPaddingHorizontal
     }
 
-    private func refreshMaxBarWidth() {
-        guard !isCompact else {
-            cachedMaxBarWidth = nil
-            return
-        }
-
+    static func chromeWidth(
+        isCompact: Bool,
+        bottomSafeAreaInset: CGFloat,
+        isFieldFocused: Bool
+    ) -> CGFloat {
         let themeMetrics = ChatFlowTheme.Metrics(isCompact: isCompact)
-        let bodyFont = UIFont.clawline(.bodyText)
-        let textWidth = ChatFlowTheme.maxLineWidth(bodyFont: bodyFont)
-        let chromeWidth = (themeMetrics.inputBarPaddingHorizontal * 2)
+        let metrics = MessageInputBarMetrics(
+            horizontalSizeClass: isCompact ? .compact : .regular,
+            bottomSafeAreaInset: bottomSafeAreaInset,
+            deviceCornerRadius: 0,
+            isFieldFocused: isFieldFocused
+        )
+        return (themeMetrics.inputBarPaddingHorizontal * 2)
             + metrics.inputBarHeight
             + metrics.inputBarHeight
             + (MessageInputBarMetrics.elementSpacing * 2)
-        cachedMaxBarWidth = textWidth + chromeWidth
+    }
+
+    static func maxBarWidth(
+        isCompact: Bool,
+        bottomSafeAreaInset: CGFloat,
+        isFieldFocused: Bool
+    ) -> CGFloat? {
+        guard !isCompact else { return nil }
+        let bodyFont = UIFont.clawline(.bodyText)
+        let textWidth = ChatFlowTheme.maxLineWidth(bodyFont: bodyFont)
+        return textWidth + chromeWidth(
+            isCompact: isCompact,
+            bottomSafeAreaInset: bottomSafeAreaInset,
+            isFieldFocused: isFieldFocused
+        )
+    }
+
+    static func renderedInputFieldWidthCap(
+        containerWidth: CGFloat,
+        isCompact: Bool,
+        bottomSafeAreaInset: CGFloat,
+        isFieldFocused: Bool
+    ) -> CGFloat {
+        let resolvedBarWidth = min(
+            containerWidth,
+            maxBarWidth(
+                isCompact: isCompact,
+                bottomSafeAreaInset: bottomSafeAreaInset,
+                isFieldFocused: isFieldFocused
+            ) ?? containerWidth
+        )
+        return max(
+            0,
+            resolvedBarWidth - chromeWidth(
+                isCompact: isCompact,
+                bottomSafeAreaInset: bottomSafeAreaInset,
+                isFieldFocused: isFieldFocused
+            )
+        )
+    }
+
+    private func refreshMaxBarWidth() {
+        cachedMaxBarWidth = Self.maxBarWidth(
+            isCompact: isCompact,
+            bottomSafeAreaInset: bottomSafeAreaInset,
+            isFieldFocused: isKeyboardVisible
+        )
     }
 
     // #61: On visionOS, keep the input bar in dark mode regardless of the global theme toggle.
@@ -128,8 +192,12 @@ struct MessageInputBar: View {
 #if os(visionOS)
         return false
 #else
-        return settings.appearanceMode == .light
+        return colorScheme == .light
 #endif
+    }
+
+    private var connectionState: SendButtonConnectionState {
+        connectionStateStore.value
     }
 
     private var inputBarColorScheme: ColorScheme {
@@ -179,6 +247,14 @@ struct MessageInputBar: View {
         let clampedPhase = min(1, max(0, phase))
         return 0.75 + (0.25 * clampedPhase)
     }
+
+    static func disabledSendButtonBackingColor(colorScheme: ColorScheme) -> Color? {
+        colorScheme == .light
+            ? Color(red: 0.925, green: 0.922, blue: 0.890)
+            : nil
+    }
+
+    static let sendButtonColoredBackingBlurRadius: CGFloat = 7
 
     private func handleEditorSubmitIntent() {
         guard Self.shouldDispatchEditorSubmitIntent(
@@ -245,6 +321,15 @@ struct MessageInputBar: View {
 #endif
             .accessibilityLabel("Add attachment")
             .disabled(isSending)
+            .popover(
+                isPresented: $isAttachmentMenuPresented,
+                attachmentAnchor: .rect(.bounds),
+                arrowEdge: .bottom
+            ) {
+                attachmentMenuContent()
+                    .presentationCompactAdaptation(.popover)
+                    .presentationBackground(.clear)
+            }
 
             MessageEditorChrome(
                 content: $content,
@@ -502,11 +587,19 @@ private struct MessageSendControl: View {
         }
         .frame(width: sendButtonSize, height: sendButtonSize)
         .background {
+            if bubbleVisualState == .ghost,
+               let backingColor = MessageInputBar.disabledSendButtonBackingColor(colorScheme: uiColorScheme) {
+                Circle()
+                    .fill(backingColor)
+                    .frame(width: sendButtonSize, height: sendButtonSize)
+                    .blur(radius: MessageInputBar.sendButtonColoredBackingBlurRadius)
+            }
             TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !isReconnecting)) { context in
                 Circle()
                     .fill(bubbleColor)
                     .frame(width: sendButtonSize, height: sendButtonSize)
                     .scaleEffect(bubbleScale(at: context.date))
+                    .blur(radius: MessageInputBar.sendButtonColoredBackingBlurRadius)
             }
         }
 #if os(visionOS)
@@ -533,6 +626,7 @@ private struct MessageSendControl: View {
 #Preview("Message Input") {
     @Previewable @State var content = NSAttributedString(string: "Hello")
     @Previewable @State var selection = NSRange(location: 5, length: 0)
+    @Previewable @State var connectionStateStore = SendButtonConnectionStateStore(value: .connected)
     Color.clear
         .safeAreaInset(edge: .bottom) {
             MessageInputBar(
@@ -544,14 +638,16 @@ private struct MessageSendControl: View {
                 canSend: true,
                 isSending: false,
                 isStagingAttachments: false,
-                connectionState: .connected,
+                connectionStateStore: connectionStateStore,
                 focusTrigger: 0,
                 bottomSafeAreaInset: 34,
                 isKeyboardVisible: false,
+                isAttachmentMenuPresented: .constant(false),
                 onSend: {},
                 onCancel: {},
                 onReconnect: {},
                 onAdd: {},
+                attachmentMenuContent: { AnyView(EmptyView()) },
                 onFocusChange: { _ in },
                 onTextEditActivity: {},
                 onPasteImages: nil,

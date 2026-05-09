@@ -51,6 +51,7 @@ struct LifecycleTransportEvent: Equatable, Sendable {
             failureReason: AuthFailureReason?
         )
         case serverMessage(data: Data)
+        case syncComplete
         case transportClosed(reason: TransportCloseReason)
         case transportTimeout
     }
@@ -165,6 +166,7 @@ actor ConnectionLifecycleCoordinator {
     private var replayRemainingCount: Int = 0
     private var replayTruncated: Bool = false
     private var replayStartAt: Date?
+    private var replayCountDrained = false
     private var replayOvershotEpoch: Int?
     private var consecutiveReplayOvershoots: Int = 0
     private var recoveringAttemptCount: Int = 0
@@ -381,6 +383,8 @@ actor ConnectionLifecycleCoordinator {
             )
         case .serverMessage(let data):
             handleServerMessage(epoch: event.epoch, data: data)
+        case .syncComplete:
+            handleSyncComplete(epoch: event.epoch)
         case .transportClosed:
             handleTransportInterrupted(epoch: event.epoch)
         case .transportTimeout:
@@ -477,6 +481,7 @@ actor ConnectionLifecycleCoordinator {
 
         replayExpectedCount = replayCount
         replayRemainingCount = replayCount
+        replayCountDrained = false
         self.replayTruncated = replayTruncated ?? false
 
         let shouldResetHistory = historyReset ?? false
@@ -516,7 +521,7 @@ actor ConnectionLifecycleCoordinator {
         )
 
         if replayExpectedCount == 0 {
-            completeReplay(epoch: epoch)
+            replayCountDrained = true
             return
         }
 
@@ -584,6 +589,11 @@ actor ConnectionLifecycleCoordinator {
             return
         }
 
+        if replayCountDrained {
+            emit(.serverMessage(epoch: epoch, payload: data))
+            return
+        }
+
         guard let replayDisposition = replayMessageDisposition(data: data) else {
             // Non-message envelopes are forwarded but do not decrement replay counters.
             emit(.serverMessage(epoch: epoch, payload: data))
@@ -613,9 +623,15 @@ actor ConnectionLifecycleCoordinator {
             if replayRemainingCount > 0 {
                 resetReplayProgressTimeout(epoch: epoch)
             } else {
-                completeReplay(epoch: epoch)
+                replayCountDrained = true
             }
         }
+    }
+
+    private func handleSyncComplete(epoch: Int) {
+        guard currentEpoch == epoch, phase == .replaying else { return }
+        guard replayCountDrained else { return }
+        completeReplay(epoch: epoch)
     }
 
     private enum ReplayMessageDisposition {
@@ -665,6 +681,7 @@ actor ConnectionLifecycleCoordinator {
         )
         consecutiveReplayOvershoots = 0
         replayOvershotEpoch = nil
+        replayCountDrained = false
         resetRecoveringState()
     }
 
@@ -869,5 +886,6 @@ actor ConnectionLifecycleCoordinator {
         recoveringAttemptCount = 0
         reconnectBackoff = .seconds(1)
         retriedInvalidLastMessageId = false
+        replayCountDrained = false
     }
 }

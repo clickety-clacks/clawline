@@ -1,0 +1,6 @@
+{
+  "type": "pair_result",
+  "success": true,
+  "token": "jwt-token",
+  "userId": "user_1"
+}

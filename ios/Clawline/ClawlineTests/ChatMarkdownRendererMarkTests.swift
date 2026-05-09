@@ -162,6 +162,143 @@ struct UnifiedMarkdownRendererMarkTests {
         #expect(rgb(renderedText, at: focusRange.location) == RGB(red: 158, green: 62, blue: 28))
     }
 
+    @Test("Link spans stop before trailing backticks in assistant markdown rendering")
+    func assistantMarkdownRenderingTrimsBacktickLinkSpan() {
+        let rust = SalientHighlightApplier.highlightColor(isDark: false)
+        let rendered = UnifiedMarkdownRenderer.renderNSAttributedString(
+            markdown: "http://tars:18800/www/tracker-dashboard.html`",
+            baseFont: UIFont.systemFont(ofSize: 15, weight: .regular),
+            inkColor: .black,
+            lineSpacing: 4,
+            markHighlightColor: rust
+        )
+
+        guard let rendered else {
+            Issue.record("Expected markdown render result")
+            return
+        }
+
+        let text = rendered.string as NSString
+        let urlRange = text.range(of: "http://tars:18800/www/tracker-dashboard.html")
+        let backtickRange = text.range(of: "`")
+        #expect(urlRange.location != NSNotFound)
+        #expect(backtickRange.location != NSNotFound)
+        #expect(rendered.attribute(.link, at: urlRange.location, effectiveRange: nil) != nil)
+        #expect(rendered.attribute(.link, at: urlRange.location + urlRange.length - 1, effectiveRange: nil) != nil)
+        #expect(rendered.attribute(.link, at: backtickRange.location, effectiveRange: nil) == nil)
+    }
+
+    @Test("Inline-code URLs remain tappable in assistant markdown rendering")
+    func assistantMarkdownRenderingKeepsInlineCodeURLsTappable() {
+        let rust = SalientHighlightApplier.highlightColor(isDark: false)
+        let rendered = UnifiedMarkdownRenderer.renderNSAttributedString(
+            markdown: "Visit `https://example.com/path` now",
+            baseFont: UIFont.systemFont(ofSize: 15, weight: .regular),
+            inkColor: .black,
+            lineSpacing: 4,
+            markHighlightColor: rust
+        )
+
+        guard let rendered else {
+            Issue.record("Expected markdown render result")
+            return
+        }
+
+        let text = rendered.string as NSString
+        let urlRange = text.range(of: "https://example.com/path")
+        #expect(urlRange.location != NSNotFound)
+        var effectiveRange = NSRange(location: NSNotFound, length: 0)
+        #expect(rendered.attribute(.link, at: urlRange.location, effectiveRange: &effectiveRange) != nil)
+        #expect(effectiveRange == urlRange)
+        #expect(rendered.attribute(.link, at: urlRange.location + urlRange.length - 1, effectiveRange: nil) != nil)
+    }
+
+    @Test("Link spans stop before assistant mark delimiters")
+    func assistantMarkdownRenderingStopsLinkSpanAtMarkDelimiter() {
+        let rust = SalientHighlightApplier.highlightColor(isDark: false)
+        let rendered = UnifiedMarkdownRenderer.renderNSAttributedString(
+            markdown: "http://example.com==nice==",
+            baseFont: UIFont.systemFont(ofSize: 15, weight: .regular),
+            inkColor: .black,
+            lineSpacing: 4,
+            markHighlightColor: rust
+        )
+
+        guard let rendered else {
+            Issue.record("Expected markdown render result")
+            return
+        }
+
+        #expect(rendered.string == "http://example.comnice")
+        let text = rendered.string as NSString
+        let urlRange = text.range(of: "http://example.com")
+        let highlightRange = text.range(of: "nice")
+        #expect(urlRange.location != NSNotFound)
+        #expect(highlightRange.location != NSNotFound)
+        var effectiveRange = NSRange(location: NSNotFound, length: 0)
+        #expect(rendered.attribute(.link, at: urlRange.location, effectiveRange: &effectiveRange) != nil)
+        #expect(effectiveRange == urlRange)
+        #expect(rendered.attribute(.link, at: urlRange.location + urlRange.length - 1, effectiveRange: nil) != nil)
+        #expect(rendered.attribute(.link, at: highlightRange.location, effectiveRange: nil) == nil)
+        #expect((rendered.attribute(.underlineStyle, at: highlightRange.location, effectiveRange: nil) as? Int ?? 0) == 0)
+    }
+
+    @Test("Link spans stop before adjacent assistant mark delimiters without whitespace")
+    func assistantMarkdownRenderingStopsLinkSpanAtAdjacentMarkDelimiter() {
+        let rust = SalientHighlightApplier.highlightColor(isDark: false)
+        let rendered = UnifiedMarkdownRenderer.renderNSAttributedString(
+            markdown: "http://example.com==text==",
+            baseFont: UIFont.systemFont(ofSize: 15, weight: .regular),
+            inkColor: .black,
+            lineSpacing: 4,
+            markHighlightColor: rust
+        )
+
+        guard let rendered else {
+            Issue.record("Expected markdown render result")
+            return
+        }
+
+        #expect(rendered.string == "http://example.comtext")
+        let text = rendered.string as NSString
+        let urlRange = text.range(of: "http://example.com")
+        let highlightRange = text.range(of: "text")
+        #expect(urlRange.location != NSNotFound)
+        #expect(highlightRange.location != NSNotFound)
+        var effectiveRange = NSRange(location: NSNotFound, length: 0)
+        #expect(rendered.attribute(.link, at: urlRange.location, effectiveRange: &effectiveRange) != nil)
+        #expect(effectiveRange == urlRange)
+        #expect(rendered.attribute(.link, at: urlRange.location + urlRange.length - 1, effectiveRange: nil) != nil)
+        #expect(rendered.attribute(.link, at: highlightRange.location, effectiveRange: nil) == nil)
+        #expect((rendered.attribute(.underlineStyle, at: highlightRange.location, effectiveRange: nil) as? Int ?? 0) == 0)
+    }
+
+    @Test("Legitimate URLs containing double equals remain fully linked")
+    func assistantMarkdownRenderingPreservesURLsContainingDoubleEquals() {
+        let rust = SalientHighlightApplier.highlightColor(isDark: false)
+        let url = "https://example.com/path?token=YWJjZA=="
+        let rendered = UnifiedMarkdownRenderer.renderNSAttributedString(
+            markdown: url,
+            baseFont: UIFont.systemFont(ofSize: 15, weight: .regular),
+            inkColor: .black,
+            lineSpacing: 4,
+            markHighlightColor: rust
+        )
+
+        guard let rendered else {
+            Issue.record("Expected markdown render result")
+            return
+        }
+
+        let text = rendered.string as NSString
+        let urlRange = text.range(of: url)
+        #expect(urlRange.location != NSNotFound)
+        var effectiveRange = NSRange(location: NSNotFound, length: 0)
+        #expect(rendered.attribute(.link, at: urlRange.location, effectiveRange: &effectiveRange) != nil)
+        #expect(effectiveRange == urlRange)
+        #expect(rendered.attribute(.link, at: urlRange.location + urlRange.length - 1, effectiveRange: nil) != nil)
+    }
+
     private func rustColor(isDark: Bool) -> UIColor {
         SalientHighlightApplier.highlightColor(isDark: isDark)
     }

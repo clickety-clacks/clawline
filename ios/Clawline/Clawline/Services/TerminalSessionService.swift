@@ -20,8 +20,8 @@ final class TerminalSessionService {
 
     private let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "TerminalSession")
     private let descriptor: TerminalSessionDescriptor
-    private let auth: AuthManager
-    private let deviceId: DeviceIdentifier
+    private let auth: any AuthManaging
+    private let deviceId: any DeviceIdentifying
 
     // Use our own URLSession so we can set timeouts and headers consistently with the main chat socket.
     private let session: URLSession
@@ -42,13 +42,9 @@ final class TerminalSessionService {
     private let stateContinuation: AsyncStream<State>.Continuation
     let state: AsyncStream<State>
 
-    convenience init(descriptor: TerminalSessionDescriptor) {
-        self.init(descriptor: descriptor, auth: AuthManager(), deviceId: DeviceIdentifier())
-    }
-
     init(descriptor: TerminalSessionDescriptor,
-         auth: AuthManager,
-         deviceId: DeviceIdentifier) {
+         auth: any AuthManaging,
+         deviceId: any DeviceIdentifying) {
         self.descriptor = descriptor
         self.auth = auth
         self.deviceId = deviceId

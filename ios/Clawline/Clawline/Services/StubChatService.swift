@@ -86,6 +86,7 @@ final class StubChatService: ChatServicing {
                     epoch: epoch,
                     payload: .authResult(success: true, replayCount: 0, replayTruncated: false, historyReset: false, failureReason: nil)
                 ))
+                lifecycleContinuation?.yield(.init(epoch: epoch, payload: .syncComplete))
             } catch {
                 lifecycleContinuation?.yield(.init(epoch: epoch, payload: .transportClosed(reason: .error)))
             }
@@ -110,6 +111,13 @@ final class StubChatService: ChatServicing {
             replayCursorBySessionKey[sessionKey] = cursor
         } else {
             replayCursorBySessionKey.removeValue(forKey: sessionKey)
+        }
+    }
+
+    func seedReplayCursorIfMissing(_ cursor: String?, for sessionKey: String) {
+        guard replayCursorBySessionKey[sessionKey] == nil else { return }
+        if let cursor, !cursor.isEmpty {
+            replayCursorBySessionKey[sessionKey] = cursor
         }
     }
 
@@ -145,12 +153,29 @@ final class StubChatService: ChatServicing {
         // No-op for stub.
     }
 
+    func publishReadState(sessionKey: String, lastReadMessageId: String) async throws {
+        // No-op for stub.
+    }
+
     func fetchStreams() async throws -> [StreamSession] {
         streams
     }
 
     func fetchTrackableSessions() async throws -> [TrackableSession] {
         []
+    }
+
+    func fetchSessionStatus(sessionKey: String) async throws -> SessionStatus {
+        throw ProviderChatService.Error.notConnected
+    }
+
+    func applySessionControl(
+        sessionKey: String,
+        action: SessionControlAction,
+        value: String?,
+        enabled: Bool?
+    ) async throws -> SessionControlResponse {
+        throw ProviderChatService.Error.notConnected
     }
 
     func createStream(displayName: String, idempotencyKey: String) async throws -> StreamSession {

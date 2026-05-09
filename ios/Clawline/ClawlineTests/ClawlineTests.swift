@@ -50,18 +50,22 @@ struct ClawlineTests {
             } else {
                 defaults.removeObject(forKey: AppFontScale.storageKey)
             }
+            AppFontScale.useActiveValue(AppFontScale.persistedValue())
         }
         defaults.removeObject(forKey: AppFontScale.storageKey)
 
         let settings = SettingsManager()
         #expect(settings.fontScale == AppFontScale.defaultValue)
+        #expect(AppFontScale.currentValue() == settings.fontScale)
 
         settings.increaseFontScale()
         #expect(settings.fontScale == AppFontScale.defaultValue + AppFontScale.step)
+        #expect(AppFontScale.currentValue() == settings.fontScale)
         #expect(settings.consumePendingFontScaleToastMessage() == "Font scale 110%")
 
         settings.decreaseFontScale()
         #expect(settings.fontScale == AppFontScale.defaultValue)
+        #expect(AppFontScale.currentValue() == settings.fontScale)
         #expect(settings.consumePendingFontScaleToastMessage() == "Font scale 100%")
     }
 
@@ -76,6 +80,7 @@ struct ClawlineTests {
             } else {
                 defaults.removeObject(forKey: AppFontScale.storageKey)
             }
+            AppFontScale.useActiveValue(AppFontScale.persistedValue())
         }
         defaults.removeObject(forKey: AppFontScale.storageKey)
 
@@ -85,11 +90,13 @@ struct ClawlineTests {
             settings.increaseFontScale()
         }
         #expect(settings.fontScale == AppFontScale.maximum)
+        #expect(AppFontScale.currentValue() == AppFontScale.maximum)
 
         for _ in 0..<60 {
             settings.decreaseFontScale()
         }
         #expect(settings.fontScale == AppFontScale.minimum)
+        #expect(AppFontScale.currentValue() == AppFontScale.minimum)
     }
 
     @Test("T180: placeholder text includes channel name and session key")
@@ -101,5 +108,56 @@ struct ClawlineTests {
             ) == "Main — agent:main:clawline:flynn:main"
         )
         #expect(ChatViewModel.placeholderText(displayName: "Main", sessionKey: "") == "Main")
+    }
+
+    @Test("T001: Clawline personal terminal streams allow built-in and custom suffixes")
+    func sessionKeyAllowsPersonalTerminalStreamSuffixes() {
+        #expect(SessionKey.isClawlinePersonalDM("agent:main:clawline:flynn:main"))
+        #expect(SessionKey.isClawlinePersonalDM("agent:main:clawline:flynn:dm"))
+        #expect(SessionKey.isClawlinePersonalDM("agent:main:clawline:flynn:s_abcd1234"))
+        #expect(SessionKey.isClawlinePersonalDM("agent:aux:clawline:flynn:s_abcd1234"))
+    }
+
+    @Test("T001: Clawline personal terminal streams reject invalid suffixes")
+    func sessionKeyRejectsInvalidPersonalTerminalStreamSuffixes() {
+        #expect(!SessionKey.isClawlinePersonalDM("agent:main:clawline:flynn:global_dm"))
+        #expect(!SessionKey.isClawlinePersonalDM("agent:main:clawline:flynn:s_deadbee"))
+        #expect(!SessionKey.isClawlinePersonalDM("agent:main:clawline:flynn:s_deadbeez"))
+        #expect(!SessionKey.isClawlinePersonalDM("agent:main:clawline::main"))
+        #expect(!SessionKey.isClawlinePersonalDM("server:main"))
+    }
+
+    @Test("T201: RootView keeps iOS system-follow by scoping preferredColorScheme to visionOS")
+    func rootViewScopesPreferredColorSchemeToVisionOS() throws {
+        let rootViewPath = URL(filePath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appending(path: "Clawline/Views/RootView.swift")
+        let source = try String(contentsOf: rootViewPath, encoding: .utf8)
+        let pattern = #"#if os\(visionOS\)[\s\S]*?\.preferredColorScheme\(settings\.preferredColorScheme\)[\s\S]*?#endif"#
+        let range = NSRange(source.startIndex..<source.endIndex, in: source)
+        let regex = try NSRegularExpression(pattern: pattern)
+
+        #expect(regex.firstMatch(in: source, range: range) != nil)
+    }
+
+    @Test("T219: pairing shader is active only while pairing route is visible")
+    func rootBackgroundShaderLifecycleFollowsPairingRoute() {
+        #expect(RootBackgroundShaderLifecycle.isShaderActive(
+            isAuthenticated: false,
+            isProviderConfigured: false
+        ))
+        #expect(RootBackgroundShaderLifecycle.isShaderActive(
+            isAuthenticated: false,
+            isProviderConfigured: true
+        ))
+        #expect(RootBackgroundShaderLifecycle.isShaderActive(
+            isAuthenticated: true,
+            isProviderConfigured: false
+        ))
+        #expect(!RootBackgroundShaderLifecycle.isShaderActive(
+            isAuthenticated: true,
+            isProviderConfigured: true
+        ))
     }
 }

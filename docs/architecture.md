@@ -37,10 +37,20 @@ On auth, provider sends stream/session provisioning (`auth_result` fields, `stre
 Implemented provider surfaces include:
 
 - WS: `/ws`, `/ws/terminal`
-- HTTP: `/version`, `/upload`, `/download/:assetId`, `/api/streams`, `/alert`, `/surf-ace/events/*`, `/www/*`
+- HTTP: `/version`, `/upload`, `/download/:assetId`, `/api/streams`, `/api/session-status`, `/api/session-control`, `/alert`, `/surf-ace/events/*`, `/www/*`
 - Local state: allowlist/pending/denylist JSON + SQLite event/message/asset/stream tables (`server.ts`)
+
+## Session status and control API
+
+The provider exposes a typed control-plane foundation for client-visible session mode/status and future controls:
+
+- `GET /api/session-status?sessionKey=...` returns best-effort status such as busy/queued/running state, queue depth, model/provider/thinking metadata when available, and capability flags.
+- `POST /api/session-control` accepts typed control actions. Unsupported mutations return structured unsupported responses; clients should not send slash-command text such as `/stop` or `/model` as normal chat messages.
+
+See `specs/clawline-session-status-control-api.md` for requirements, capability model, safety constraints, and client integration guidance.
 
 ## Detailed docs
 
 - `provider-architecture.md` — provider internals and request flow
 - `ios-architecture.md` — iOS app/service/view model architecture
+- `specs/clawline-session-status-control-api.md` — session status/control API requirements

@@ -7,6 +7,7 @@
 
 import Foundation
 import CryptoKit
+import Markdown
 import OSLog
 import UIKit
 
@@ -146,6 +147,7 @@ enum MessagePart: Equatable {
     case table(TableModel)
     case code(language: String?, code: String)
     case linkPreview(URL)
+    case remoteImage(URL)
     case image(Attachment)
     case gallery([Attachment])
     case file(Attachment)
@@ -210,7 +212,7 @@ extension MessagePart {
             return true
         case .linkPreview:
             return true
-        case .image, .gallery, .file, .terminalSession, .interactiveHTML:
+        case .remoteImage, .image, .gallery, .file, .terminalSession, .interactiveHTML:
             return false
         }
     }
@@ -233,6 +235,8 @@ extension MessagePresentation {
         guard chromelessCandidates.count == 1, let candidate = chromelessCandidates.first else { return nil }
 
         switch candidate {
+        case .remoteImage:
+            return .image
         case .image:
             return .image
         case .gallery:
@@ -270,12 +274,17 @@ enum MessagePresentationBuilder {
         let fileAttachments: [Attachment]
     }
 
+    private struct RemoteImageExtraction {
+        let markdownSource: String
+        let urls: [URL]
+    }
+
     static func build(
         from message: Message,
         metrics: ChatFlowTheme.Metrics,
         streamingState: inout StreamingTableParseState
     ) -> MessagePresentation {
-        let markdownPlan = UnifiedMarkdownParser.parse(
+        let parsedMarkdownPlan = UnifiedMarkdownParser.parse(
             markdown: message.content,
             messageID: message.id,
             metrics: metrics
@@ -290,8 +299,10 @@ enum MessagePresentationBuilder {
         let hasAttachments = !attachmentBuckets.richParts.isEmpty || !imageAttachments.isEmpty || !fileAttachments.isEmpty
         var parts: [MessagePart] = []
         var markdownParts: [MessagePart] = []
-        let hasTextual = markdownPlan.containsTextualContent
-        var emojiOnly = markdownPlan.isEmojiOnly
+        var effectiveBlocks: [MarkdownRenderBlock] = []
+        var plainTextForMetricsParts: [String] = []
+        var remoteImageURLs: [URL] = []
+        var emojiOnly = parsedMarkdownPlan.isEmojiOnly
         var hasBlockedParts = hasAttachments
         var detectedURLOccurrences: [URL] = []
         let suppressTextForFiles = shouldSuppressTextForFileAttachments(
@@ -306,25 +317,33 @@ enum MessagePresentationBuilder {
         }
 
         if !suppressTextForFiles {
-            for block in markdownPlan.blocks {
+            for block in parsedMarkdownPlan.blocks {
                 switch block {
                 case .richText(let source):
-                    detectedURLOccurrences.append(contentsOf: extractURLs(from: source))
-                    let trimmed = source.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let extraction = extractRemoteImageURLs(from: source)
+                    remoteImageURLs.append(contentsOf: extraction.urls)
+                    detectedURLOccurrences.append(contentsOf: extractMarkdownURLs(from: extraction.markdownSource))
+                    let trimmed = extraction.markdownSource.trimmingCharacters(in: .whitespacesAndNewlines)
                     guard !trimmed.isEmpty else { continue }
                     if hasAttachments, isAttachmentSummaryLine(trimmed) {
                         continue
                     }
+                    effectiveBlocks.append(.richText(markdownSource: trimmed))
+                    plainTextForMetricsParts.append(markdownPlainText(from: trimmed))
                     if EmojiOnlyClassifier.isEmojiOnly(trimmed) {
                         markdownParts.append(.inlineEmoji(trimmed))
                     } else {
                         markdownParts.append(.markdown(trimmed))
                     }
                 case .code(let language, let code):
+                    effectiveBlocks.append(block)
+                    plainTextForMetricsParts.append(code.trimmingCharacters(in: .whitespacesAndNewlines))
                     markdownParts.append(.code(language: language, code: code))
                     hasBlockedParts = true
                     emojiOnly = false
                 case .table(let model):
+                    effectiveBlocks.append(block)
+                    plainTextForMetricsParts.append(tablePlainText(from: model))
                     markdownParts.append(.table(model))
                     hasBlockedParts = true
                     emojiOnly = false
@@ -332,6 +351,28 @@ enum MessagePresentationBuilder {
             }
         }
         parts.append(contentsOf: markdownParts)
+        if !remoteImageURLs.isEmpty {
+            hasBlockedParts = true
+        }
+
+        let effectivePlainTextForMetrics = plainTextForMetricsParts
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let markdownPlan = suppressTextForFiles ? .empty : MarkdownRenderPlan(
+            blocks: effectiveBlocks,
+            plainTextForMetrics: effectivePlainTextForMetrics,
+            containsTextualContent: !effectivePlainTextForMetrics.isEmpty,
+            isEmojiOnly: !effectivePlainTextForMetrics.isEmpty
+                && effectiveBlocks.allSatisfy { block in
+                    if case .richText(let source) = block {
+                        return EmojiOnlyClassifier.isEmojiOnly(markdownPlainText(from: source))
+                    }
+                    return false
+                }
+        )
+        let hasTextual = markdownPlan.containsTextualContent
+        emojiOnly = markdownPlan.isEmojiOnly
 
         // Preserve first-seen order for UI, but provide a stable unique list for sizing/cards.
         var uniqueURLs: [URL] = []
@@ -359,6 +400,12 @@ enum MessagePresentationBuilder {
                 parts.append(.image(imageAttachments[0]))
             } else {
                 parts.append(.gallery(imageAttachments))
+            }
+        }
+        if !remoteImageURLs.isEmpty {
+            hasMedia = true
+            for url in remoteImageURLs {
+                parts.append(.remoteImage(url))
             }
         }
         if !fileAttachments.isEmpty {
@@ -393,6 +440,87 @@ enum MessagePresentationBuilder {
 
     private static func isImageMime(_ mime: String?) -> Bool {
         mime?.lowercased().hasPrefix("image/") == true
+    }
+
+    private static func extractRemoteImageURLs(from source: String) -> RemoteImageExtraction {
+        var matches: [(range: Range<String.Index>, url: URL)] = []
+        matches.append(contentsOf: markdownImageMatches(in: source))
+        let markdownImageRanges = matches.map(\.range)
+        for match in detectedURLMatches(in: source) where !markdownImageRanges.contains(where: { $0.overlaps(match.range) }) {
+            matches.append(match)
+        }
+        guard !matches.isEmpty else {
+            return RemoteImageExtraction(markdownSource: source, urls: [])
+        }
+
+        matches.sort { $0.range.lowerBound < $1.range.lowerBound }
+        var strippedSource = source
+        for match in matches.reversed() {
+            strippedSource.removeSubrange(match.range)
+        }
+        return RemoteImageExtraction(
+            markdownSource: normalizeMarkdownAfterRemovingImageURLs(strippedSource),
+            urls: matches.map(\.url)
+        )
+    }
+
+    private static func markdownImageMatches(in source: String) -> [(range: Range<String.Index>, url: URL)] {
+        guard let regex = try? NSRegularExpression(pattern: #"!\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)"#) else {
+            return []
+        }
+        let nsRange = NSRange(source.startIndex..<source.endIndex, in: source)
+        return regex.matches(in: source, range: nsRange).compactMap { match in
+            guard match.numberOfRanges >= 2,
+                  let fullRange = Range(match.range(at: 0), in: source),
+                  let urlRange = Range(match.range(at: 1), in: source),
+                  let url = validatedDetectedURL(from: String(source[urlRange])),
+                  isDirectImageURL(url) else {
+                return nil
+            }
+            return (fullRange, url)
+        }
+    }
+
+    private static func detectedURLMatches(in source: String) -> [(range: Range<String.Index>, url: URL)] {
+        guard let detector = linkDetector else { return [] }
+        let nsRange = NSRange(source.startIndex..<source.endIndex, in: source)
+        return detector.matches(in: source, range: nsRange).compactMap { match in
+            guard let url = match.url,
+                  let range = Range(match.range, in: source),
+                  let validated = sanitizedDetectedURL(from: url.absoluteString) ?? validatedDetectedURL(from: url.absoluteString),
+                  isDirectImageURL(validated) else {
+                return nil
+            }
+            return (range, validated)
+        }
+    }
+
+    private static func isDirectImageURL(_ url: URL) -> Bool {
+        guard let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https" else {
+            return false
+        }
+        let imageExtensions: Set<String> = ["png", "jpg", "jpeg", "gif", "webp", "heic", "heif"]
+        return imageExtensions.contains(url.pathExtension.lowercased())
+    }
+
+    private static func normalizeMarkdownAfterRemovingImageURLs(_ source: String) -> String {
+        source
+            .components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private static func tablePlainText(from model: TableModel) -> String {
+        var components: [String] = []
+        if let header = model.header {
+            components.append(contentsOf: header.map(\.plainText))
+        }
+        for row in model.rows {
+            components.append(contentsOf: row.cells.map(\.plainText))
+        }
+        return components.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private static func partitionAttachments(
@@ -435,7 +563,8 @@ enum MessagePresentationBuilder {
                     )
                     continue
                 }
-                if let descriptor = decodeInteractiveHTMLDescriptor(from: attachment) {
+                if isInteractiveHTMLAttachment(attachment),
+                   let descriptor = decodeInteractiveHTMLDescriptor(from: attachment) {
                     richParts.append(
                         RichAttachmentPart(
                             part: .interactiveHTML(descriptor)
@@ -461,9 +590,13 @@ enum MessagePresentationBuilder {
 
     private static func interactiveHTMLAttachments(from attachments: [Attachment]) -> [Attachment] {
         attachments.filter { attachment in
-            guard attachment.type == .document else { return false }
-            return mimeTypeEquals(attachment.mimeType, expected: InteractiveHTMLDescriptor.mimeType)
+            isInteractiveHTMLAttachment(attachment)
         }
+    }
+
+    private static func isInteractiveHTMLAttachment(_ attachment: Attachment) -> Bool {
+        guard attachment.type == .document else { return false }
+        return mimeTypeEquals(attachment.mimeType, expected: InteractiveHTMLDescriptor.mimeType)
     }
 
     private static func decodeTerminalSessionDescriptor(from attachment: Attachment) -> TerminalSessionDescriptor? {
@@ -483,8 +616,7 @@ enum MessagePresentationBuilder {
     }
 
     private static func decodeInteractiveHTMLDescriptor(from attachment: Attachment) -> InteractiveHTMLDescriptor? {
-        guard attachment.type == .document,
-              mimeTypeEquals(attachment.mimeType, expected: InteractiveHTMLDescriptor.mimeType),
+        guard isInteractiveHTMLAttachment(attachment),
               let data = attachment.data,
               !data.isEmpty else {
             return nil
@@ -495,8 +627,27 @@ enum MessagePresentationBuilder {
             logger.error(
                 "interactive_html_descriptor_decode_failed id=\(attachment.id, privacy: .public) error=\(error.localizedDescription, privacy: .public)"
             )
-            return nil
+            return invalidInteractiveHTMLDescriptor()
         }
+    }
+
+    private static func invalidInteractiveHTMLDescriptor() -> InteractiveHTMLDescriptor {
+        InteractiveHTMLDescriptor(
+            version: 1,
+            html: """
+            <!doctype html>
+            <html>
+              <head>
+                <meta charset="utf-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1">
+              </head>
+              <body style="margin:0;padding:12px;font:15px -apple-system,system-ui,sans-serif;color:var(--clawline-fg);background:var(--clawline-bubble-bg);">
+                Interactive content could not be displayed because its attachment data is invalid.
+              </body>
+            </html>
+            """,
+            metadata: .init(title: nil, height: .auto, maxHeight: 160, backgroundColor: nil)
+        )
     }
 
 
@@ -545,15 +696,104 @@ enum MessagePresentationBuilder {
         let range = NSRange(text.startIndex..<text.endIndex, in: text)
         var urls: [URL] = []
         detector.enumerateMatches(in: text, options: [], range: range) { match, _, _ in
-            guard let match, let url = match.url else { return }
-            guard let scheme = url.scheme?.lowercased(),
-                  scheme == "http" || scheme == "https" else { return }
-            guard url.host != nil else { return }
-            guard url.user == nil, url.password == nil else { return }
-            if url.absoluteString.count > 2048 { return }
+            guard let match,
+                  let matchRange = Range(match.range, in: text) else { return }
+            let rawMatch = String(text[matchRange])
+            let validatedURL = wrappedMarkTrimmedURL(
+                displayedText: rawMatch,
+                href: rawMatch,
+                previousRunText: wrappedMarkPrefix(in: text, matchRange: match.range)
+            ) ?? sanitizedDetectedURL(from: rawMatch)
+            guard let url = validatedURL else { return }
             urls.append(url)
         }
         return urls
+    }
+
+    private static func extractMarkdownURLs(from source: String) -> [URL] {
+        guard let attributed = try? AttributedString(
+            markdown: source,
+            options: .init(interpretedSyntax: .full)
+        ) else {
+            return extractURLs(from: markdownPlainText(from: source))
+        }
+
+        let runs = attributed.runs.map { run in
+            (
+                text: String(attributed[run.range].characters),
+                link: run.link
+            )
+        }
+        var urls: [URL] = []
+        for index in runs.indices {
+            guard let url = runs[index].link else { continue }
+            let displayedText = runs[index].text
+            let previousRunText = index > 0 ? runs[index - 1].text : nil
+            let validatedURL = wrappedMarkTrimmedURL(
+                    displayedText: displayedText,
+                    href: url.absoluteString,
+                    previousRunText: previousRunText
+                )
+                ?? sanitizedDetectedURL(from: displayedText)
+                ?? sanitizedDetectedURL(from: url.absoluteString)
+                ?? validatedDetectedURL(from: url.absoluteString)
+            guard let validatedURL else { continue }
+            urls.append(validatedURL)
+        }
+
+        // Bare URLs (e.g. `http://host:port`) are not recognized as links by the
+        // CommonMark parser, but NSDataDetector *does* detect them—matching
+        // UITextView's `.link` data-detector behavior.  Supplement the markdown-
+        // extracted set so these URLs also produce link cards.
+        let plainText = NSAttributedString(attributed).string
+        let detectedBareURLs = extractURLs(from: plainText)
+        let seen = Set(urls.map(\.absoluteString))
+        for url in detectedBareURLs where !seen.contains(url.absoluteString) {
+            urls.append(url)
+        }
+
+        return urls
+    }
+
+    private static func sanitizedDetectedURL(from rawMatch: String) -> URL? {
+        MarkdownURLBoundarySanitizer.sanitizedURL(from: rawMatch)
+    }
+
+    private static func validatedDetectedURL(from candidate: String) -> URL? {
+        guard let url = MarkdownURLBoundarySanitizer.validatedHTTPURL(from: candidate) else { return nil }
+        if url.absoluteString.count > 2048 { return nil }
+        return url
+    }
+
+    private static func wrappedMarkTrimmedURL(
+        displayedText: String,
+        href: String,
+        previousRunText: String?
+    ) -> URL? {
+        guard previousRunText == "==" else { return nil }
+        for candidate in [displayedText, href] where candidate.hasSuffix("==") {
+            let trimmed = String(candidate.dropLast(2))
+            if let url = validatedDetectedURL(from: trimmed) {
+                return url
+            }
+        }
+        return nil
+    }
+
+    private static func wrappedMarkPrefix(in text: String, matchRange: NSRange) -> String? {
+        guard matchRange.location >= 2 else { return nil }
+        let nsText = text as NSString
+        return nsText.substring(with: NSRange(location: matchRange.location - 2, length: 2))
+    }
+
+    private static func markdownPlainText(from source: String) -> String {
+        if let attributed = try? AttributedString(
+            markdown: source,
+            options: .init(interpretedSyntax: .full)
+        ) {
+            return NSAttributedString(attributed).string.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return source.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private static func stripMarkdownMarkers(from text: String) -> String {

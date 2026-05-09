@@ -57,6 +57,11 @@ enum ScrollAction: Equatable {
     case adjustOffset(delta: CGFloat)
 }
 
+enum ChatScrollPageDirection: Equatable {
+    case down
+    case up
+}
+
 struct ChatLayoutKey: Equatable {
     let revision: Int
     let keyboardHeightBucket: Int
@@ -159,6 +164,16 @@ final class ChatLayoutCoordinator {
     func scrollToTop(sessionKey: String, animated: Bool) {
         dispatchPrecondition(condition: .onQueue(.main))
         listViews[sessionKey]?.value?.scrollToTop(animated: animated)
+    }
+
+    func scrollByPage(sessionKey: String, direction: ChatScrollPageDirection, animated: Bool) {
+        dispatchPrecondition(condition: .onQueue(.main))
+        listViews[sessionKey]?.value?.scrollByPage(direction: direction, animated: animated)
+    }
+
+    func scrollVisibleBubbleContents(sessionKey: String, direction: ChatScrollPageDirection, animated: Bool) {
+        dispatchPrecondition(condition: .onQueue(.main))
+        listViews[sessionKey]?.value?.scrollVisibleBubbleContents(direction: direction, animated: animated)
     }
 
     func scrollToMessageCentered(messageId: String, sessionKey: String, animated: Bool) {
@@ -323,7 +338,12 @@ final class ChatLayoutCoordinator {
             scrollAction = .scrollToBottom(animated: false)
         } else if !isInsetDecreasing {
             if wasNearBottom {
-                scrollAction = .scrollToBottom(animated: false)
+                // Pinned lists already self-correct inset growth inside `setBottomInset`.
+                // Scheduling an extra scroll-to-bottom here adds redundant layout/scroll work on
+                // multiline composer growth keystrokes.
+                scrollAction = (isPinnedToBottomIntent && barHeightChanged && !keyboardChanged)
+                    ? .none
+                    : .scrollToBottom(animated: false)
             } else if abs(insetDelta) > 0.5 {
                 scrollAction = .adjustOffset(delta: insetDelta)
             } else {

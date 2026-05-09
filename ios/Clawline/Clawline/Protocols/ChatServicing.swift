@@ -39,6 +39,10 @@ enum ChatServiceEvent: Equatable {
     case streamCreated(StreamSession)
     case streamUpdated(StreamSession)
     case streamDeleted(sessionKey: String)
+    case streamReadStateSnapshot([String: String])
+    case streamReadStateUpdated(sessionKey: String, lastReadMessageId: String)
+    case streamTailStateSnapshot([String: StreamTailState])
+    case streamTailStateUpdated(sessionKey: String, tailState: StreamTailState)
     case sessionProvisioningAvailable(Bool)
     /// Server-authoritative session provisioning manifest.
     /// Session keys are the only routing identifiers on the wire (Clawline invariants N3/N7).
@@ -65,6 +69,7 @@ protocol ChatServicing: AnyObject {
     func disconnect()
     func replayCursorSnapshot() -> [String: String]
     func setReplayCursor(_ cursor: String?, for sessionKey: String)
+    func seedReplayCursorIfMissing(_ cursor: String?, for sessionKey: String)
     func clearReplayCursors()
     func send(
         id: String,
@@ -78,9 +83,17 @@ protocol ChatServicing: AnyObject {
         action: String,
         data: JSONValue?
     ) async throws
+    func publishReadState(sessionKey: String, lastReadMessageId: String) async throws
 
     func fetchStreams() async throws -> [StreamSession]
     func fetchTrackableSessions() async throws -> [TrackableSession]
+    func fetchSessionStatus(sessionKey: String) async throws -> SessionStatus
+    func applySessionControl(
+        sessionKey: String,
+        action: SessionControlAction,
+        value: String?,
+        enabled: Bool?
+    ) async throws -> SessionControlResponse
     func adoptStream(sessionKey: String) async throws -> StreamSession
     func createStream(displayName: String, idempotencyKey: String) async throws -> StreamSession
     func renameStream(sessionKey: String, displayName: String) async throws -> StreamSession

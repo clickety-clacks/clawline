@@ -64,4 +64,28 @@ struct StreamToastManagerTests {
         }
         #expect(!manager.isVisible)
     }
+
+    @Test("T257: scrub preview toast remains pinned until release updates it")
+    func scrubPreviewToastRemainsPinnedUntilReleaseUpdate() {
+        let manager = StreamToastManager(dismissDelay: .milliseconds(80))
+
+        manager.show(
+            displayName: "Preview",
+            sessionKey: "agent:main:clawline:flynn:preview",
+            autoDismiss: false
+        )
+
+        #expect(manager.isVisible)
+        #expect(manager.displayName == "Preview")
+        #expect(manager.isAutoDismissEnabled == false)
+
+        manager.show(
+            displayName: "Released",
+            sessionKey: "agent:main:clawline:flynn:released"
+        )
+
+        #expect(manager.isVisible)
+        #expect(manager.displayName == "Released")
+        #expect(manager.isAutoDismissEnabled)
+    }
 }

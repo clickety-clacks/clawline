@@ -66,15 +66,23 @@ enum ChatFlowTheme {
     }
 
     // MARK: - Gradients
-    static func pageBackground(_ scheme: ColorScheme) -> LinearGradient {
-        // --bg-surface-gradient from design system: #1C1917 to #141210
+    static func pageBackgroundTopColor(_ scheme: ColorScheme) -> Color {
         scheme == .dark
-            ? LinearGradient(colors: [Color(red: 0.110, green: 0.098, blue: 0.090),  // #1C1917
-                                      Color(red: 0.078, green: 0.071, blue: 0.063)], // #141210
-                             startPoint: .top, endPoint: .bottom)
-            : LinearGradient(colors: [Color(red: 0.941, green: 0.918, blue: 0.878),  // #F0EAE0
-                                      Color(red: 0.910, green: 0.878, blue: 0.831)], // #E8E0D4
-                             startPoint: .top, endPoint: .bottom)
+            ? Color(red: 0.110, green: 0.098, blue: 0.090)  // #1C1917
+            : Color(red: 0.941, green: 0.918, blue: 0.878)  // #F0EAE0
+    }
+
+    static func pageBackgroundBottomColor(_ scheme: ColorScheme) -> Color {
+        scheme == .dark
+            ? Color(red: 0.078, green: 0.071, blue: 0.063)  // #141210
+            : Color(red: 0.910, green: 0.878, blue: 0.831)  // #E8E0D4
+    }
+
+    static func pageBackground(_ scheme: ColorScheme) -> LinearGradient {
+        // --bg-surface-gradient from design system.
+        LinearGradient(colors: [pageBackgroundTopColor(scheme),
+                                pageBackgroundBottomColor(scheme)],
+                       startPoint: .top, endPoint: .bottom)
     }
 
     static func surfaceGradient(_ scheme: ColorScheme) -> LinearGradient {
@@ -89,11 +97,11 @@ enum ChatFlowTheme {
 
     static func bubbleSelfGradient(_ scheme: ColorScheme) -> LinearGradient {
         scheme == .dark
-            ? LinearGradient(colors: [Color(red: 0.176, green: 0.231, blue: 0.165),
-                                      Color(red: 0.141, green: 0.200, blue: 0.133)],
+            ? LinearGradient(colors: [Color(red: 0.161, green: 0.214, blue: 0.149),
+                                      Color(red: 0.125, green: 0.182, blue: 0.117)],
                              startPoint: .topLeading, endPoint: .bottomTrailing)
-            : LinearGradient(colors: [Color(red: 0.722, green: 0.808, blue: 0.686),
-                                      Color(red: 0.784, green: 0.851, blue: 0.753)],
+            : LinearGradient(colors: [Color(red: 0.834, green: 0.930, blue: 0.789),
+                                      Color(red: 0.834, green: 0.930, blue: 0.789)],
                              startPoint: .topLeading, endPoint: .bottomTrailing)
     }
 

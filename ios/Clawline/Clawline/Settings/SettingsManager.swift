@@ -67,8 +67,10 @@ final class SettingsManager {
 
         self.trustSelfSignedCertificates = ProviderTLSSettingsStore.trustSelfSignedCertificates
         self.pinnedLeafCertificateSHA256 = ProviderTLSSettingsStore.pinnedLeafCertificateSHA256 ?? ""
-        self.fontScale = AppFontScale.persistedValue()
+        let initialFontScale = AppFontScale.persistedValue()
+        self.fontScale = initialFontScale
         self.isLifecycleDebugOverlayEnabled = UserDefaults.standard.bool(forKey: Self.lifecycleDebugOverlayEnabledKey)
+        AppFontScale.useActiveValue(initialFontScale)
     }
 
     private func save() {
@@ -145,6 +147,7 @@ final class SettingsManager {
     private func applyFontScale(_ value: CGFloat) {
         let next = AppFontScale.clamp(value)
         if next != fontScale {
+            AppFontScale.useActiveValue(next)
             fontScale = next
             fontScaleChangeSequence &+= 1
         }

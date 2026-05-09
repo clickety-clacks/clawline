@@ -1,0 +1,10 @@
+{
+  "type": "message",
+  "id": "s_101",
+  "role": "assistant",
+  "content": "Hello from the provider",
+  "timestamp": 1704672000000,
+  "streaming": false,
+  "sessionKey": "agent:main:clawline:user_1:main",
+  "attachments": []
+}

@@ -1,0 +1,172 @@
+      784 +  │     ↑ reads: WatchProviderTransport (stream snapshots, CRUD responses)
+      785 +  │     ↓ writes: WatchConnectionPresentationState (currentStream, streamListLoaded)
+      786 +  │
+      787 +  └── WatchConnectionPresentationState (unified presentation model)
+      788 +        ↑ reads: transport state, credential state, channel state, network reachability
+      789 +        ↓ provides: routeChipText/Color/Icon, idleStatusText, voiceAvailability, channelDisplayName
+      790 +        All UI views read from this model exclusively for presentation state.
+      791  ```
+      792
+      793  ### Environment Injection Pattern
+
+⏺ Now update the WatchMainView environment injection to include the new presentation state.
+
+⏺ Update(watch-app.md)
+  ⎿  Added 1 line
+      745                  .environment(providerTransport)
+      746                  .environment(voiceSession)
+      747                  .environment(channelManager)
+      748 +                .environment(presentationState)
+      749          }
+      750      }
+      751  }
+
+⏺ Now let me also update the canUseVoice reference in the WatchVoiceSession external UI contract to reference the presentation model.
+
+⏺ Update(watch-app.md)
+  ⎿  Added 1 line, removed 1 line
+      1173  var transcript: String = ""         // accumulated transcript text (partial + final tokens)
+      1174  var errorMessage: String?           // current error, nil if none
+      1175  var mode: VoiceMode?                // .tap | .hold | nil (nil when idle)
+      1176 -var canUseVoice: Bool               // derived: Soniox key present AND direct internet available
+      1176 +var canUseVoice: Bool               // DEPRECATED — use WatchConnectionPresentationState.voiceInputAvailable instead. Kept for migration only.
+      1177
+      1178  enum VoiceState {
+      1179      case idle
+
+⏺ Now update the transport contracts section to reflect that the route indicator reads from the presentation model.
+
+⏺ Update(watch-app.md)
+  ⎿  Added 2 lines, removed 2 lines
+      1374  **T1. Route indicator is always visible.**
+      1375  `WatchProviderTransport.transportState` is always readable. The route indicator view derives display from this state. No screen, state, or transition hides it.
+      1376
+      1377 -**T2. Transport state transitions are the single source for route indicator.**
+      1378 -The route indicator view reads `transportState` and nothing else. No duplicate transport-state tracking in the view or other components.
+      1377 +**T2. Transport state transitions flow through the presentation model.**
+      1378 +`WatchProviderTransport` writes `transportState` to `WatchConnectionPresentationState`. The route indicator view reads from `WatchConnectionPresentationState` — never from `WatchProvi
+           +derTransport` directly. No duplicate transport-state tracking in the view or other components.
+      1379
+      1380  **T3. Probing buffer is bounded.**
+      1381  Max 20 messages, max 60s age. On transition out of probing: flush to new transport or drop expired entries with error callback.
+
+⏺ Let me do a final verification pass to make sure the edits are coherent. Let me check the key sections.
+
+⏺ Searched for 3 patterns, read 1 file (ctrl+o to expand)
+
+⏺ Good — "general" now only appears in the context of "this is forbidden" or explaining what went wrong. Let me verify the old layout diagram with "general" is gone.
+
+⏺ Searched for 2 patterns (ctrl+o to expand)
+
+⏺ Good. The old ASCII diagram with "general" label is gone, replaced with #design and the note about stream state. Let me also verify that the safe area policy, adaptive ring sizing, device targets,
+  gesture coordination, presentation model, and no-hardcoded-fallbacks sections all have proper markdown anchors that cross-references can find.
+
+⏺ Searched for 1 pattern (ctrl+o to expand)
+
+⏺ All six new sections are present. Now let me send the notification.
+
+⏺ Bash(~/.local/libexec/clu/hosts/eezo/notify --session agent:main:main -- 'watch-spec: revised watch-app.md with 6 new/updated sections: (1) watchOS safe-area layout…)
+  ⎿  ✅ Alert delivered
+
+⏺ Revision complete. Here's a summary of what changed in watch-app.md:
+
+  6 new/updated sections:
+
+  1. watchOS Safe-Area Layout Policy (line ~810) — Mandates safeAreaInset or default safe area behavior for route chip placement. Forbids raw .padding(.top, N) to approximate clock clearance. Calls out
+  40mm as minimum target.
+  2. Adaptive Ring Sizing (line ~856) — Ring diameter derived from GeometryReader available geometry using formula min(availableWidth, contentHeight) * 0.65, capped at 145 pt. Per-device guidance:
+  ~100-110 pt on 40mm, ~120-130 pt on 45mm, ~135-145 pt on 49mm.
+  3. WatchConnectionPresentationState (line ~241) — New @Observable presentation model that maps transport + network + voice + channel state into one coherent user-facing state. Route chip, status text,
+   and channel name all read from this single source. Replaces split-path checks that caused contradictory copy.
+  4. Gesture Coordination (line ~928) — Explicit arbitration: horizontal swipe preempts hold at 10 pt displacement; hold suppresses swipe at 200ms; tap is fallback. Digital Crown reserved for system
+  use.
+  5. No Hardcoded Channel Fallbacks (line ~1089) — Forbids phantom names like "general". Loading state when streams pending, empty state when no streams, displayName only when loaded.
+  6. Device Size Targets (line ~889) — 40/41mm, 45/46mm, 49mm Ultra as explicit test targets with layout differences noted.
+
+  3 pushback items flagged for Flynn (P1-P3):
+  - P1: Ring size vs. 40mm content budget — tight but workable, need Flynn's call on tradeoff
+  - P2: Page dots + channel name redundancy on 40mm — could drop channel name on smallest devices
+  - P3: Swipe gesture conflict surface on 40mm where ring fills more of the screen
+
+✻ Sautéed for 6m 37s
+
+❯ Flynn decision on 40mm pushback: ring scales down on 40mm — keep all elements (route chip, ring, status text, page dots, channel label). Do not drop any element. The GeometryReader-driven ring
+  sizing handles the constraint. Update the spec to resolve the open question with this decision: ring adapts to available space, all elements present on all device sizes. No further open questions
+   needed on this point.
+
+  When done, run ONE of these exactly (do not remove spaces):
+  1) ~/.local/libexec/clu/hosts/eezo/notify --session agent:main:main -- 'watch-spec: 40mm decision applied'
+  2) ~/.local/libexec/clu/hosts/eezo/notify --session agent:main:main --b64
+
+⏺ Searched for 2 patterns, read 1 file (ctrl+o to expand)
+
+⏺ Three edits: remove the inline pushback question, resolve P1 and P2, update spec status.
+
+⏺ Update(watch-app.md)
+  ⎿  Added 1 line, removed 1 line
+      884
+      885  **Mic button:** The mic/stop icon within the ring should be ~40% of ring diameter, with a minimum of 44×44 pt tap target per Apple HIG.
+      886
+      887 -> **PUSHBACK — Open Question for Flynn:** The 40mm display has ~330 pt of usable vertical content height after safe area insets. With route chip + status text + page dots + channel nam
+          -e consuming ~120 pt, only ~210 pt remain. A ring at ~105 pt leaves ~105 pt of breathing room — tight but workable. However, if we need to show longer status text (multi-line transcript
+          - preview) or add any additional elements, 40mm will not fit. **Should we consider dropping the channel name label on 40mm and showing it only in the page dots tooltip, or is 40mm a "fi
+          -ts but tight" acceptable tradeoff?**
+      887 +**40mm policy (Flynn-resolved, 2026-03-05):** All UI elements (route chip, ring, status text, page dots, channel name) are present on ALL device sizes including 40mm. The GeometryReade
+          +r-driven ring sizing adapts to the available space — no elements are dropped or hidden on smaller screens. The ring scales down to fit; this is the intended behavior.
+      888
+      889  #### Device Size Targets
+      890
+
+⏺ Update(watch-app.md)
+  ⎿  Added 2 lines, removed 2 lines
+      1520
+      1521  These items flag potential incompatibilities between Flynn's UI design and good watchOS UX on certain device sizes. They are not blockers — they are decision points that need Flynn's
+            call.
+      1522
+      1523 -**P1. Ring size vs. 40mm content budget.** The 40mm display has ~330 pt usable vertical height after safe area insets. Route chip + status text + page dots + channel name + spacing co
+           -nsume ~120 pt, leaving ~210 pt for the ring and breathing room. An adaptive ring at ~105 pt works, but it's tight. If we ever need multi-line status text (e.g., scrolling transcript p
+           -review) or additional UI elements, 40mm will not fit without removing something. **Options:** (a) Accept "tight but works" on 40mm, (b) drop channel name label on 40mm (show only in p
+           -age dots), (c) designate 40mm as "supported but degraded" and optimize for 45mm+.
+      1523 +~~**P1. Ring size vs. 40mm content budget.**~~ **RESOLVED (Flynn, 2026-03-05):** Ring scales down on 40mm via GeometryReader. All elements present on all device sizes. No elements dro
+           +pped.
+      1524
+      1525 -**P2. Page dots + channel name redundancy on small screens.** The current design shows both page dots AND a channel name label. On 40mm, these together consume ~34 pt of scarce vertic
+           -al space. The page dots alone communicate position; the channel name adds context but costs space. **Option:** On 40mm, show only page dots. On 45mm+, show both. This is a device-size
+           --adaptive layout choice.
+      1525 +~~**P2. Page dots + channel name redundancy on small screens.**~~ **RESOLVED (Flynn, 2026-03-05):** Keep both page dots and channel name on all sizes including 40mm. GeometryReader-dr
+           +iven ring sizing absorbs the constraint.
+      1526
+      1527  **P3. Swipe gesture conflict surface.** The full-screen horizontal swipe for channel switching conflicts with the hold gesture on the waveform ring. The spec now defines explicit arbi
+            tration (10 pt horizontal threshold vs. 200ms hold threshold), but the swipe target overlaps the ring. On 40mm where the ring fills more of the screen, accidental swipes during press-
+            and-hold are more likely. **Mitigation options:** (a) Limit swipe recognition to the area *below* the ring (status text / page dots region), (b) increase horizontal threshold to 15 pt
+             on 40mm, (c) accept the current arbitration and tune thresholds based on real-device testing.
+      1528
+
+⏺ Update(watch-app.md)
+  ⎿  Added 1 line, removed 1 line
+      1  # Clawline Watch App — Voice Terminal
+      2
+      3 -**Status:** Revised — Pending Flynn review of pushback items (P1–P3)
+      3 +**Status:** Revised — P1/P2 resolved, P3 (swipe gesture conflict on 40mm) pending
+      4  **Date:** 2026-03-05 (revised from 2026-02-27)
+      5  **Owner:** Clawline Apple Watch
+      6
+
+⏺ Bash(~/.local/libexec/clu/hosts/eezo/notify --session agent:main:main -- 'watch-spec: 40mm decision applied')
+  ⎿  ✅ Alert delivered
+
+⏺ Done. Applied Flynn's 40mm decision:
+
+  - Removed the inline pushback question from the Adaptive Ring Sizing section, replaced with a resolved-decision note: all elements present on all sizes, ring adapts via GeometryReader.
+  - Marked P1 and P2 as resolved in the pushback section.
+  - P3 (swipe gesture conflict surface on 40mm) remains open — it's a separate concern from the ring sizing decision.
+  - Updated spec status line accordingly.
+
+✻ Cogitated for 44s
+
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Opus 4.6 in specs ➜
+  ⏵⏵ bypass permissions on (shift+tab to cycle)
+

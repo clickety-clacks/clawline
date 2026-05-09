@@ -51,6 +51,8 @@ enum MessageAccessibilityFormatter {
         var terminalCount = 0
         for part in presentation.parts {
             switch part {
+            case .remoteImage:
+                imageCount += 1
             case .image:
                 imageCount += 1
             case .gallery(let attachments):

@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import OSLog
 import UIKit
 
 final class TypingIndicatorCell: UICollectionViewCell {
@@ -22,13 +23,17 @@ final class TypingIndicatorCell: UICollectionViewCell {
     private var currentMetrics = ChatFlowTheme.Metrics(isCompact: true)
     private let showsHeader = false
     private let paddingScale: CGFloat = bubblePaddingScale
+    private var onTap: (() -> Void)?
+    private let diagnosticLogger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "T217TypingCancel")
 
     override init(frame: CGRect) {
         super.init(frame: frame)
         contentView.backgroundColor = .clear
         backgroundColor = .clear
+        contentView.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(handleTap)))
 
         containerView.translatesAutoresizingMaskIntoConstraints = false
+        containerView.isUserInteractionEnabled = false
         contentView.addSubview(containerView)
         NSLayoutConstraint.activate([
             containerView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
@@ -46,7 +51,14 @@ final class TypingIndicatorCell: UICollectionViewCell {
                    presentation: MessagePresentation,
                    isCompact: Bool,
                    maxWidth: CGFloat,
-                   isDark: Bool? = nil) {
+                   isDark: Bool? = nil,
+                   onTap: (() -> Void)? = nil) {
+        self.onTap = onTap
+        let diagnosticMessage = "T217DIAG cell_configure build=\(Self.diagnosticBuild) session=\(message.sessionKey) hasCallback=\(onTap != nil) bounds=\(String(describing: self.bounds)) frame=\(String(describing: self.frame)) maxWidth=\(maxWidth)"
+        print(diagnosticMessage)
+        diagnosticLogger.notice(
+            "T217DIAG cell_configure build=\(Self.diagnosticBuild, privacy: .public) session=\(message.sessionKey, privacy: .public) hasCallback=\(onTap != nil, privacy: .public) bounds=\(String(describing: self.bounds), privacy: .public) frame=\(String(describing: self.frame), privacy: .public) maxWidth=\(maxWidth, privacy: .public)"
+        )
         currentMetrics = ChatFlowTheme.Metrics(isCompact: isCompact)
         let effectiveIsDark = isDark ?? (traitCollection.userInterfaceStyle == .dark)
         dotsView.updateColor(ChatFlowUIKitTheme.palette(isDark: effectiveIsDark).ink)
@@ -74,6 +86,16 @@ final class TypingIndicatorCell: UICollectionViewCell {
         super.prepareForReuse()
         stopAnimating()
         containerView.setCenteredOverlayView(nil)
+        onTap = nil
+    }
+
+    @objc private func handleTap() {
+        let diagnosticMessage = "T217DIAG cell_tap build=\(Self.diagnosticBuild) hasCallback=\(self.onTap != nil) bounds=\(String(describing: self.bounds)) frame=\(String(describing: self.frame))"
+        print(diagnosticMessage)
+        diagnosticLogger.notice(
+            "T217DIAG cell_tap build=\(Self.diagnosticBuild, privacy: .public) hasCallback=\(self.onTap != nil, privacy: .public) bounds=\(String(describing: self.bounds), privacy: .public) frame=\(String(describing: self.frame), privacy: .public)"
+        )
+        onTap?()
     }
 
     func startAnimating() {
@@ -82,6 +104,15 @@ final class TypingIndicatorCell: UICollectionViewCell {
 
     func stopAnimating() {
         dotsView.stopAnimating()
+    }
+
+    func renderedBubbleFrame(in coordinateSpace: UICoordinateSpace?) -> CGRect {
+        layoutIfNeeded()
+        let bubbleFrame = containerView.bubbleFrameInContainer()
+        if let coordinateSpace {
+            return containerView.convert(bubbleFrame, to: coordinateSpace)
+        }
+        return containerView.convert(bubbleFrame, to: nil)
     }
 
     static func makeMessage(sessionKey: String) -> Message {
@@ -108,6 +139,13 @@ final class TypingIndicatorCell: UICollectionViewCell {
             detectedURLCount: 0,
             hasSingleURL: false
         )
+    }
+}
+
+private extension TypingIndicatorCell {
+    static var diagnosticBuild: String {
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"
+        return "T217-typing-cancel-\(build)"
     }
 }
 

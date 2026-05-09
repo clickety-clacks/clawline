@@ -58,3 +58,15 @@ Fallback if gpt-5.2-codex unavailable:
 ```bash
 codex exec -m gpt-5.1-codex-max -c model_reasoning_effort="xhigh" "..."
 ```
+
+## visionOS Platform Forks — Mandatory Reference
+
+Before writing any `#if os(visionOS)` block in the shared `ios/Clawline/Clawline/` target, read:
+
+**[`docs/visionos-platform-invariants.md`](./docs/visionos-platform-invariants.md)**
+
+That document defines the **complete list** of valid platform differences. It is authoritative.
+
+**Default rule: share the code.**
+
+If your change adds a new platform fork that is not on the list, or removes/modifies an existing one — stop and raise it with Flynn before committing. Do not make a judgment call.

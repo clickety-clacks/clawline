@@ -236,12 +236,18 @@ final class LinkPreviewView: UIView, WKNavigationDelegate, WKUIDelegate, UIGestu
 
     private var canLockHeight = false
     private var isHeightLocked = false
+    private var fullscreenStateObservation: NSKeyValueObservation?
+    private var isDirectMediaPreview = false
 
     var onHeightChange: (() -> Void)?
+
+    private(set) var mediaPlaybackSuspendedForPreview = false
 
     private var loadStartedAt: CFTimeInterval?
     private var lastFailureReason: FailureReason?
     private var didShowEmptyBodyWarning = false
+    private weak var webBubbleCoordinator: (any WebBubbleCoordinating)?
+    private var ownerItemId: String?
 
     // Invariant (#40): never cancel a preview load that is currently visible (in-window and onscreen)
     // due to memory pressure. Evict queued/offscreen loads first.
@@ -249,11 +255,14 @@ final class LinkPreviewView: UIView, WKNavigationDelegate, WKUIDelegate, UIGestu
 
     override init(frame: CGRect) {
         let configuration = WKWebViewConfiguration()
-        configuration.websiteDataStore = WKWebsiteDataStore.nonPersistent()
+        configuration.websiteDataStore = WebSessionSharedResources.shared.websiteDataStore
         configuration.defaultWebpagePreferences.allowsContentJavaScript = true
-        configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
+        configuration.preferences.javaScriptCanOpenWindowsAutomatically = true
+        configuration.preferences.isElementFullscreenEnabled = false
         configuration.mediaTypesRequiringUserActionForPlayback = .all
         configuration.allowsInlineMediaPlayback = true
+        configuration.allowsAirPlayForMediaPlayback = false
+        configuration.allowsPictureInPictureMediaPlayback = false
 
         let webView = BubbleSafeAreaNeutralWebView(frame: .zero, configuration: configuration)
         self.webView = webView
@@ -261,6 +270,8 @@ final class LinkPreviewView: UIView, WKNavigationDelegate, WKUIDelegate, UIGestu
         super.init(frame: frame)
 
         setupViews()
+        suspendMediaPlaybackForPreview()
+        observeFullscreenState()
 
         memoryWarningObserver = NotificationCenter.default.addObserver(
             forName: UIApplication.didReceiveMemoryWarningNotification,
@@ -288,8 +299,14 @@ final class LinkPreviewView: UIView, WKNavigationDelegate, WKUIDelegate, UIGestu
 
     deinit {
         logCancel(.deinitCancel)
+        fullscreenStateObservation?.invalidate()
         if let memoryWarningObserver {
             NotificationCenter.default.removeObserver(memoryWarningObserver)
+        }
+        let coordinator = webBubbleCoordinator
+        let webView = webView
+        Task { @MainActor in
+            coordinator?.unregister(webView: webView)
         }
         cancelLoad()
     }
@@ -321,12 +338,14 @@ final class LinkPreviewView: UIView, WKNavigationDelegate, WKUIDelegate, UIGestu
         // While loading we don't yet know the page height; report at least `maxHeight` so the
         // bubble can decide to enable its inner scroll when constrained by a height cap.
         let baseWebHeight: CGFloat
-        if state == .idle || state == .loading {
+        if isDirectMediaPreview {
+            baseWebHeight = Self.preferredDirectMediaHeight(for: width, maxHeight: maxHeight)
+        } else if state == .idle || state == .loading {
             baseWebHeight = maxHeight
         } else {
             baseWebHeight = webViewHeightConstraint?.constant ?? minHeight
         }
-        var totalHeight = max(minHeight, baseWebHeight)
+        var totalHeight = isDirectMediaPreview ? baseWebHeight : max(minHeight, baseWebHeight)
 
         if !statusLabel.isHidden {
             let labelHeight = statusLabel.sizeThatFits(
@@ -352,13 +371,18 @@ final class LinkPreviewView: UIView, WKNavigationDelegate, WKUIDelegate, UIGestu
         configuredURLKey
     }
 
-    func configure(url: URL, maxHeight: CGFloat? = nil) {
+    func configure(url: URL,
+                   maxHeight: CGFloat? = nil,
+                   ownerItemId: String? = nil,
+                   webBubbleCoordinator: (any WebBubbleCoordinating)? = nil) {
         configure(
             url: url,
             maxHeight: maxHeight,
             minHeight: nil,
             cacheKey: nil,
-            initialHeight: nil
+            initialHeight: nil,
+            ownerItemId: ownerItemId,
+            webBubbleCoordinator: webBubbleCoordinator
         )
     }
 
@@ -366,7 +390,9 @@ final class LinkPreviewView: UIView, WKNavigationDelegate, WKUIDelegate, UIGestu
                    maxHeight: CGFloat?,
                    minHeight: CGFloat? = nil,
                    cacheKey: String? = nil,
-                   initialHeight: CGFloat? = nil) {
+                   initialHeight: CGFloat? = nil,
+                   ownerItemId: String? = nil,
+                   webBubbleCoordinator: (any WebBubbleCoordinating)? = nil) {
         let desiredMinHeight = max(1, minHeight ?? Constants.defaultMinHeight)
         let desiredMaxHeight = max(desiredMinHeight, maxHeight ?? Constants.defaultMaxHeight)
         let desiredKey = cacheKey ?? url.absoluteString
@@ -377,10 +403,20 @@ final class LinkPreviewView: UIView, WKNavigationDelegate, WKUIDelegate, UIGestu
            abs(self.maxHeight - desiredMaxHeight) <= 1 {
             return
         }
+        if self.webBubbleCoordinator != nil {
+            self.webBubbleCoordinator?.unregister(webView: webView)
+        }
         resetState()
+        self.ownerItemId = ownerItemId
+        self.webBubbleCoordinator = webBubbleCoordinator
+        if let ownerItemId, let webBubbleCoordinator {
+            webBubbleCoordinator.register(webView: webView, ownerItemId: ownerItemId)
+        }
         self.minHeight = desiredMinHeight
         self.maxHeight = desiredMaxHeight
         configuredURLKey = desiredKey
+        isDirectMediaPreview = Self.isDirectMediaPreviewURL(url)
+        updateScrollBehaviorForPreviewContent()
         // Flynn directive: keep link preview height stable once determined. Use cached height
         // on scroll-back; only re-measure after explicit reload.
         if let cachedKey = configuredURLKey,
@@ -391,7 +427,10 @@ final class LinkPreviewView: UIView, WKNavigationDelegate, WKUIDelegate, UIGestu
             invalidateIntrinsicContentSize()
             onHeightChange?()
         } else {
-            let target = initialHeight ?? self.minHeight
+            let target = initialHeight
+                ?? (isDirectMediaPreview
+                    ? Self.preferredDirectMediaHeight(for: max(bounds.width, 320), maxHeight: self.maxHeight)
+                    : self.minHeight)
             if abs(webViewHeightConstraint.constant - target) > 1 {
                 webViewHeightConstraint.constant = target
                 invalidateIntrinsicContentSize()
@@ -410,6 +449,9 @@ final class LinkPreviewView: UIView, WKNavigationDelegate, WKUIDelegate, UIGestu
     func prepareForReuse() {
         logCancel(.reuse)
         cancelLoad()
+        webBubbleCoordinator?.unregister(webView: webView)
+        webBubbleCoordinator = nil
+        ownerItemId = nil
         currentURL = nil
         configuredURLKey = nil
         currentHost = nil
@@ -417,6 +459,8 @@ final class LinkPreviewView: UIView, WKNavigationDelegate, WKUIDelegate, UIGestu
         state = .idle
         canLockHeight = false
         isHeightLocked = false
+        isDirectMediaPreview = false
+        updateScrollBehaviorForPreviewContent()
     }
 
     func reloadPreview() {
@@ -432,6 +476,7 @@ final class LinkPreviewView: UIView, WKNavigationDelegate, WKUIDelegate, UIGestu
     override func layoutSubviews() {
         super.layoutSubviews()
         // MaskedWebContainerView keeps its own mask synced to its bounds.
+        syncDirectMediaPreviewHeightIfNeeded(notifyOnChange: false)
     }
 
     private func setupViews() {
@@ -527,6 +572,7 @@ final class LinkPreviewView: UIView, WKNavigationDelegate, WKUIDelegate, UIGestu
         stackView.addArrangedSubview(reloadButton)
 
         applyChrome()
+        updateScrollBehaviorForPreviewContent()
     }
 
     // Mask path computation now lives in MaskedWebContainerView.
@@ -567,7 +613,9 @@ final class LinkPreviewView: UIView, WKNavigationDelegate, WKUIDelegate, UIGestu
         lastFailureReason = nil
         canLockHeight = false
 
-        if !isHeightLocked {
+        if isDirectMediaPreview {
+            syncDirectMediaPreviewHeightIfNeeded(notifyOnChange: false)
+        } else if !isHeightLocked {
             configureHeightObserver()
         }
         scheduleLoadTimeout()
@@ -623,6 +671,12 @@ final class LinkPreviewView: UIView, WKNavigationDelegate, WKUIDelegate, UIGestu
         }
         currentHost = nil
         redirectCount = 0
+        if keepURL, let currentURL {
+            isDirectMediaPreview = Self.isDirectMediaPreviewURL(currentURL)
+        } else {
+            isDirectMediaPreview = false
+        }
+        updateScrollBehaviorForPreviewContent()
     }
 
     private func cancelLoad() {
@@ -630,9 +684,28 @@ final class LinkPreviewView: UIView, WKNavigationDelegate, WKUIDelegate, UIGestu
         fallbackTimer?.invalidate()
         loadTimeoutTimer = nil
         fallbackTimer = nil
+        closeUnexpectedMediaPresentationsIfNeeded()
         webView.stopLoading()
         spinner.stopAnimating()
         removeHeightObserver()
+    }
+
+    private func suspendMediaPlaybackForPreview() {
+        guard !mediaPlaybackSuspendedForPreview else { return }
+        mediaPlaybackSuspendedForPreview = true
+        webView.setAllMediaPlaybackSuspended(true, completionHandler: nil)
+    }
+
+    private func observeFullscreenState() {
+        fullscreenStateObservation = webView.observe(\.fullscreenState, options: [.initial, .new]) { [weak self] _, _ in
+            self?.closeUnexpectedMediaPresentationsIfNeeded()
+        }
+    }
+
+    private func closeUnexpectedMediaPresentationsIfNeeded() {
+        guard webView.fullscreenState != .notInFullscreen else { return }
+        logger.warning("closing unexpected media presentation url=\(self.currentURL?.absoluteString ?? "nil", privacy: .public) fullscreenState=\(self.webView.fullscreenState.rawValue, privacy: .public)")
+        webView.closeAllMediaPresentations(completionHandler: nil)
     }
 
     private func scheduleLoadTimeout() {
@@ -643,6 +716,7 @@ final class LinkPreviewView: UIView, WKNavigationDelegate, WKUIDelegate, UIGestu
     }
 
     private func scheduleFallbackMeasurement() {
+        guard !isDirectMediaPreview else { return }
         fallbackTimer?.invalidate()
         fallbackTimer = Timer.scheduledTimer(withTimeInterval: Constants.emptyBodyDelay, repeats: false) { [weak self] _ in
             if self?.heightUpdates == 0 {
@@ -726,6 +800,10 @@ final class LinkPreviewView: UIView, WKNavigationDelegate, WKUIDelegate, UIGestu
     }
 
     private func applyMeasuredHeight(_ rawHeight: Double) {
+        guard !isDirectMediaPreview else {
+            syncDirectMediaPreviewHeightIfNeeded()
+            return
+        }
         guard rawHeight.isFinite else { return }
         markLoadedIfNeeded()
         let clamped = max(minHeight, min(maxHeight, CGFloat(rawHeight)))
@@ -834,6 +912,10 @@ final class LinkPreviewView: UIView, WKNavigationDelegate, WKUIDelegate, UIGestu
 
     func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
         markLoadedIfNeeded()
+        if isDirectMediaPreview {
+            syncDirectMediaPreviewHeightIfNeeded()
+            return
+        }
         scheduleFallbackMeasurement()
     }
 
@@ -912,12 +994,21 @@ final class LinkPreviewView: UIView, WKNavigationDelegate, WKUIDelegate, UIGestu
             handleFailure(.blockedIPAddressHost, detail: "navResponse")
             return
         }
+        if Self.isDirectMediaMimeType(navigationResponse.response.mimeType) {
+            isDirectMediaPreview = true
+            updateScrollBehaviorForPreviewContent()
+            syncDirectMediaPreviewHeightIfNeeded(notifyOnChange: false)
+        }
         decisionHandler(.allow)
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         guard state == .loading else { return }
         markLoadedIfNeeded()
+        if isDirectMediaPreview {
+            syncDirectMediaPreviewHeightIfNeeded()
+            return
+        }
         canLockHeight = !isHeightLocked
         if heightUpdates == 0 {
             evaluateHeightFallback()
@@ -926,6 +1017,15 @@ final class LinkPreviewView: UIView, WKNavigationDelegate, WKUIDelegate, UIGestu
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        if shouldSuppressDirectMediaNavigationFailure(error) {
+            logger.info("didFail navigation suppressed direct-media handoff error=\(error.localizedDescription, privacy: .public)")
+            markLoadedIfNeeded()
+            statusLabel.isHidden = true
+            reloadButton.isHidden = true
+            webContainer.isHidden = false
+            syncDirectMediaPreviewHeightIfNeeded()
+            return
+        }
         if isIgnorableNavigationError(error) {
             // #36: No silent failures. Even "ignorable" navigation errors must surface to the user,
             // but keep the preview visible so WebKit can continue if this was a transient cancel.
@@ -940,6 +1040,15 @@ final class LinkPreviewView: UIView, WKNavigationDelegate, WKUIDelegate, UIGestu
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        if shouldSuppressDirectMediaNavigationFailure(error) {
+            logger.info("didFailProvisionalNavigation suppressed direct-media handoff error=\(error.localizedDescription, privacy: .public)")
+            markLoadedIfNeeded()
+            statusLabel.isHidden = true
+            reloadButton.isHidden = true
+            webContainer.isHidden = false
+            syncDirectMediaPreviewHeightIfNeeded()
+            return
+        }
         if isIgnorableNavigationError(error) {
             // #36: No silent failures. Even "ignorable" provisional errors must surface.
             logger.info("didFailProvisionalNavigation (non-fatal) error=\(error.localizedDescription, privacy: .public)")
@@ -960,6 +1069,26 @@ final class LinkPreviewView: UIView, WKNavigationDelegate, WKUIDelegate, UIGestu
                  type: WKMediaCaptureType,
                  decisionHandler: @escaping (WKPermissionDecision) -> Void) {
         decisionHandler(.deny)
+    }
+
+    func webView(_ webView: WKWebView,
+                 createWebViewWith configuration: WKWebViewConfiguration,
+                 for navigationAction: WKNavigationAction,
+                 windowFeatures: WKWindowFeatures) -> WKWebView? {
+        guard let webBubbleCoordinator else { return nil }
+        if let ownerItemId {
+            webBubbleCoordinator.register(webView: webView, ownerItemId: ownerItemId)
+        }
+        return webBubbleCoordinator.createPopupWebView(
+            originatingWebView: webView,
+            configuration: configuration,
+            navigationAction: navigationAction,
+            windowFeatures: windowFeatures
+        )
+    }
+
+    func webViewDidClose(_ webView: WKWebView) {
+        webBubbleCoordinator?.dismissBubble(for: webView)
     }
 
     // MARK: - UIGestureRecognizerDelegate
@@ -1098,6 +1227,62 @@ final class LinkPreviewView: UIView, WKNavigationDelegate, WKUIDelegate, UIGestu
     private func isAllowedScheme(_ url: URL) -> Bool {
         guard let scheme = url.scheme?.lowercased() else { return false }
         return scheme == "http" || scheme == "https"
+    }
+
+    static func isDirectMediaPreviewURL(_ url: URL) -> Bool {
+        let supportedExtensions: Set<String> = ["mp4", "m4v", "mov", "m3u8", "webm"]
+        return supportedExtensions.contains(url.pathExtension.lowercased())
+    }
+
+    static func isDirectMediaMimeType(_ mimeType: String?) -> Bool {
+        guard let mimeType else { return false }
+        let normalized = mimeType.lowercased()
+        return normalized.hasPrefix("video/")
+            || normalized == "application/vnd.apple.mpegurl"
+            || normalized == "application/x-mpegurl"
+    }
+
+    static func preferredDirectMediaHeight(for width: CGFloat, maxHeight: CGFloat) -> CGFloat {
+        guard width > 1 else { return max(44, maxHeight) }
+        let aspectHeight = floor(width * 9 / 16)
+        return max(120, min(maxHeight, aspectHeight))
+    }
+
+    static func isPluginHandledLoadNavigationError(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        return (nsError.domain == WKErrorDomain || nsError.domain == "WebKitErrorDomain")
+            && nsError.code == 204
+    }
+
+    private func updateScrollBehaviorForPreviewContent() {
+        if isDirectMediaPreview {
+            webView.scrollView.isScrollEnabled = false
+            webView.scrollView.showsVerticalScrollIndicator = false
+            webView.scrollView.alwaysBounceVertical = false
+            return
+        }
+        webView.scrollView.isScrollEnabled = true
+    }
+
+    private func syncDirectMediaPreviewHeightIfNeeded(notifyOnChange: Bool = true) {
+        guard isDirectMediaPreview else { return }
+        let width = max(bounds.width, webContainer.bounds.width)
+        guard width > 1 else { return }
+        let desiredHeight = Self.preferredDirectMediaHeight(for: width, maxHeight: maxHeight)
+        if abs(webViewHeightConstraint.constant - desiredHeight) > 1 {
+            webViewHeightConstraint.constant = desiredHeight
+            invalidateIntrinsicContentSize()
+            if notifyOnChange {
+                onHeightChange?()
+            }
+        }
+        if let configuredURLKey {
+            Self.heightCache.setObject(NSNumber(value: Double(desiredHeight)), forKey: configuredURLKey as NSString)
+        }
+    }
+
+    private func shouldSuppressDirectMediaNavigationFailure(_ error: Error) -> Bool {
+        isDirectMediaPreview && Self.isPluginHandledLoadNavigationError(error)
     }
 
     private func isBlockedIPAddressHost(_ host: String?) -> Bool {

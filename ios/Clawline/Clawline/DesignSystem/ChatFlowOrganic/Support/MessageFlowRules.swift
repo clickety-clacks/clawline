@@ -47,7 +47,7 @@ extension MessagePresentation {
     var hasBlockContent: Bool {
         parts.contains { part in
             switch part {
-            case .code, .table, .linkPreview, .image, .gallery, .file, .terminalSession, .interactiveHTML:
+            case .code, .table, .linkPreview, .remoteImage, .image, .gallery, .file, .terminalSession, .interactiveHTML:
                 return true
             case .text, .markdown, .inlineEmoji:
                 return false

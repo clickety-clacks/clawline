@@ -98,8 +98,9 @@ final class ChatViewModel: ChatViewModelHosting {
     private(set) var messages: [Message] = []
     private(set) var streamsBySessionKey: [String: StreamSession] = [:]
     private(set) var orderedSessionKeys: [String] = []
+    private(set) var streamDotStateBySession: [String: StreamDotState] = [:]
     private(set) var lastReadMessageIdBySession: [String: String] = [:]
-    private(set) var hasUnreadBySession: [String: Bool] = [:]
+    private(set) var streamTailStateBySession: [String: StreamTailState] = [:]
     private var syntheticSessionKeys: Set<String> = []
     private var didRestoreActiveSessionKey = false
 
@@ -150,6 +151,10 @@ final class ChatViewModel: ChatViewModelHosting {
 
     func messages(for sessionKey: String) -> [Message] {
         sessionMessages[sessionKey] ?? []
+    }
+
+    func streamDotState(for sessionKey: String) -> StreamDotState {
+        streamDotStateBySession[sessionKey] ?? .inactive
     }
 
     func stream(for sessionKey: String) -> StreamSession? {
@@ -262,7 +267,7 @@ final class ChatViewModel: ChatViewModelHosting {
         guard orderedSessionKeys.contains(sessionKey) else { return }
         guard engineActiveSessionKey != sessionKey else { return }
         applyActiveSessionKey(sessionKey)
-        markSessionRead(sessionKey)
+        markSessionRead(sessionKey, preferServerTail: true)
         // Keep intent selection coherent for non-switch engine mutations (bootstrap/deletion fallback).
         // Stream-switch path still writes uiSelectedSessionKey explicitly before this runs.
         if uiSelectedSessionKey != sessionKey {
@@ -274,6 +279,7 @@ final class ChatViewModel: ChatViewModelHosting {
     private func setUISelectedSessionKey(_ sessionKey: String) {
         uiSelectedSessionKey = sessionKey
         StreamSwitchTiming.log("uiSelectedSessionKey_set", sessionKey: sessionKey)
+        scheduleSessionStatusRefresh(for: sessionKey, reason: "uiSelectedSession")
     }
 
 #if DEBUG
@@ -375,6 +381,51 @@ final class ChatViewModel: ChatViewModelHosting {
         )
     }
 
+    func sessionStatus(for sessionKey: String) -> SessionStatus? {
+        sessionStatusBySessionKey[sessionKey]
+    }
+
+    func applySessionControl(
+        sessionKey: String,
+        action: SessionControlAction,
+        value: String? = nil,
+        enabled: Bool? = nil
+    ) {
+        let normalizedSessionKey = sessionKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedSessionKey.isEmpty else { return }
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                let response = try await self.chatService.applySessionControl(
+                    sessionKey: normalizedSessionKey,
+                    action: action,
+                    value: value,
+                    enabled: enabled
+                )
+                if response.ok {
+                    if let status = response.status {
+                        let displayStatus = self.sessionStatusByKeepingStickyDisplayFields(
+                            from: status,
+                            requestedSessionKey: normalizedSessionKey
+                        )
+                        self.sessionStatusBySessionKey[normalizedSessionKey] = displayStatus
+                        if displayStatus.sessionKey != normalizedSessionKey {
+                            self.sessionStatusBySessionKey[displayStatus.sessionKey] = displayStatus
+                        }
+                    } else {
+                        self.scheduleSessionStatusRefresh(for: normalizedSessionKey, reason: "sessionControlApplied")
+                    }
+                } else {
+                    self.toastManager.show(response.message ?? "This session control is not supported.")
+                    self.scheduleSessionStatusRefresh(for: normalizedSessionKey, reason: "sessionControlRejected")
+                }
+            } catch {
+                self.toastManager.show(error.localizedDescription)
+                self.scheduleSessionStatusRefresh(for: normalizedSessionKey, reason: "sessionControlFailed")
+            }
+        }
+    }
+
     nonisolated static func placeholderText(displayName: String, sessionKey: String) -> String {
         guard !sessionKey.isEmpty else { return displayName }
         return "\(displayName) — \(sessionKey)"
@@ -391,6 +442,7 @@ final class ChatViewModel: ChatViewModelHosting {
     private(set) var isAssistantTyping: Bool = false
     private(set) var typingSessionKey: String?
     private(set) var connectionState: ConnectionState = .disconnected
+    private(set) var sendButtonConnectionState: SendButtonConnectionState = .disconnected
     private(set) var inputResetToken: Int = 0
     private(set) var sendTask: Task<Void, Never>?
     /// Tracks if typing indicator was visible when a message arrives (for morph transition).
@@ -418,10 +470,6 @@ final class ChatViewModel: ChatViewModelHosting {
             && !inputContent.isEffectivelyEmpty
     }
 
-    var sendButtonConnectionState: SendButtonConnectionState {
-        return temporarySendButtonOverride ?? transportSendButtonConnectionState
-    }
-
     let toastManager: ToastManager
 
     private let auth: any AuthManaging
@@ -429,6 +477,7 @@ final class ChatViewModel: ChatViewModelHosting {
     private let uploadService: any UploadServicing
     private let settings: SettingsManager
     private let deviceId: String
+    let terminalConnectionPool: TerminalSessionConnectionPool
     let salientHighlightService: any SalientHighlightServicing
     private var observationTask: Task<Void, Never>?
     private var observationStartupTask: Task<Void, Never>?
@@ -465,6 +514,7 @@ final class ChatViewModel: ChatViewModelHosting {
     private var restoreTaskBySessionKey: [String: Task<Void, Never>] = [:]
     private var writerCurrentEpoch: Int?
     private var firstReplayAppliedEpoch: Int?
+    private var pendingHistoryResetReplay: PendingHistoryResetReplay?
 #if DEBUG
     private var observationStartupCount: Int = 0
     private(set) var lifecycleDebugPhase: ConnectionLifecyclePhase = .idle
@@ -489,6 +539,8 @@ final class ChatViewModel: ChatViewModelHosting {
     private var trackableSessionKeyOrder: [String] = []
     private var refreshStreamsTask: Task<Void, Never>?
     private var refreshTrackableSessionsTask: Task<Void, Never>?
+    private(set) var sessionStatusBySessionKey: [String: SessionStatus] = [:]
+    private var sessionStatusRefreshTasks: [String: Task<Void, Never>] = [:]
     private var pendingUntrackRecovery: StreamSession?
     private var hasLoadedTrackableSessionsOnce = false
     private var hasSurfacedInitialTrackableSessionsFailure = false
@@ -512,6 +564,12 @@ final class ChatViewModel: ChatViewModelHosting {
         let content: String
         let attachments: [PendingAttachment]
         let sessionKey: String
+    }
+
+    private struct PendingHistoryResetReplay {
+        let epoch: Int
+        let cursorBackedSessionKeys: Set<String>
+        var messagesBySessionKey: [String: [Message]] = [:]
     }
 
 #if DEBUG
@@ -653,6 +711,9 @@ final class ChatViewModel: ChatViewModelHosting {
         self.settings = settings
         self.deviceId = device.deviceId
         self.uploadService = uploadService
+        self.terminalConnectionPool = TerminalSessionConnectionPool { descriptor in
+            TerminalSessionService(descriptor: descriptor, auth: auth, deviceId: device)
+        }
         self.toastManager = toastManager
         self.salientHighlightService = salientHighlightService
         self.lifecycleCoordinator = ConnectionLifecycleCoordinator(
@@ -768,6 +829,7 @@ final class ChatViewModel: ChatViewModelHosting {
         guard sendButtonConnectionState == .disconnected else { return }
         Task {
             await startObservingIfNeeded(origin: "reconnect")
+            await lifecycleCoordinator.updateCanonicalCursor(legacyReplayCursorForActiveStream())
             await lifecycleCoordinator.manualRetry()
         }
     }
@@ -794,7 +856,10 @@ final class ChatViewModel: ChatViewModelHosting {
         }
         coordinatorDiag("handleAuthStateChange enter tokenPresent=\(auth.token != nil)")
         if auth.token != nil {
-            let seededCursor = chatService.replayCursorSnapshot().values.max()
+            restoreStreamMetadataIfNeeded()
+            restoreActiveSessionKeyIfNeeded()
+            ensureDefaultActiveSessionIfNeeded()
+            let seededCursor = legacyReplayCursorForActiveStream()
             coordinatorDiag("handleAuthStateChange auth-path seededCursor=\(seededCursor ?? "nil")")
             Task {
                 self.coordinatorDiag("handleAuthStateChange task before startObservingIfNeeded")
@@ -808,13 +873,12 @@ final class ChatViewModel: ChatViewModelHosting {
                 await lifecycleCoordinator.authChanged(token: auth.token)
                 self.coordinatorDiag("handleAuthStateChange task after authChanged signal")
             }
-            restoreStreamMetadataIfNeeded()
-            restoreActiveSessionKeyIfNeeded()
-            ensureDefaultActiveSessionIfNeeded()
             refreshStreamsFromProvider(reason: "authChanged")
+            scheduleSessionStatusRefresh(for: uiSelectedSessionKey, reason: "authChanged")
         } else {
             coordinatorDiag("handleAuthStateChange logout-path")
             didRestoreActiveSessionKey = false
+            clearSessionStatusRefreshes()
             stopObservingLifecycle(origin: "handleAuthStateChange.logoutPath")
 #if DEBUG
             recordLifecycleDebugSignal(.authChangedNil)
@@ -835,6 +899,7 @@ final class ChatViewModel: ChatViewModelHosting {
         guard auth.token != nil else { return }
         logger.info("ChatViewModel sceneDidBecomeActive id=\(self.instanceId, privacy: .public) state=\(String(describing: self.connectionState), privacy: .public)")
         coordinatorDiag("sceneDidBecomeActive tokenPresent=true observationTaskNil=\(observationTask == nil)")
+        scheduleSessionStatusRefresh(for: uiSelectedSessionKey, reason: "sceneDidBecomeActive")
         Task {
             self.coordinatorDiag("sceneDidBecomeActive task before startObservingIfNeeded")
             await startObservingIfNeeded(origin: "sceneDidBecomeActive")
@@ -956,6 +1021,7 @@ final class ChatViewModel: ChatViewModelHosting {
         guard !isRetired else { return }
         isRetired = true
         hasActivatedLifecycleOwnership = false
+        clearSessionStatusRefreshes()
         stopObservingLifecycle(origin: "prepareForReplacement")
         cancelSend()
         guard isConnectionOwner else { return }
@@ -1050,6 +1116,97 @@ final class ChatViewModel: ChatViewModelHosting {
         return true
     }
 
+    var canCancelCurrentPrompt: Bool {
+        currentInFlightPromptSessionKey != nil
+    }
+
+    func canCancelVisibleTypingPrompt(in sessionKey: String) -> Bool {
+        let normalizedSessionKey = sessionKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedSessionKey.isEmpty else { return false }
+        return isAssistantTyping && typingSessionKey == normalizedSessionKey
+    }
+
+    func canCancelCurrentPrompt(in sessionKey: String) -> Bool {
+        let normalizedSessionKey = sessionKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        return promptIsInFlight(in: normalizedSessionKey)
+    }
+
+    private var currentInFlightPromptSessionKey: String? {
+        let candidates = [
+            uiSelectedSessionKey,
+            typingSessionKey,
+            engineActiveSessionKey
+        ]
+        var seen: Set<String> = []
+        for candidate in candidates {
+            let sessionKey = candidate?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            guard !sessionKey.isEmpty, seen.insert(sessionKey).inserted else { continue }
+            if promptIsInFlight(in: sessionKey) {
+                return sessionKey
+            }
+        }
+        return nil
+    }
+
+    private func promptIsInFlight(in sessionKey: String) -> Bool {
+        guard !sessionKey.isEmpty else { return false }
+        if isAssistantTyping, typingSessionKey == sessionKey {
+            return true
+        }
+        guard let status = sessionStatusBySessionKey[sessionKey] else { return false }
+        switch status.run.state {
+        case .running, .queued:
+            return true
+        case .idle, .unknown:
+            return false
+        }
+    }
+
+    func requestCurrentPromptCancellation(sessionKey requestedSessionKey: String? = nil) {
+        let sessionKey: String?
+        if let requestedSessionKey {
+            let normalizedSessionKey = requestedSessionKey.trimmingCharacters(in: .whitespacesAndNewlines)
+            sessionKey = canCancelCurrentPrompt(in: normalizedSessionKey) ? normalizedSessionKey : nil
+        } else {
+            sessionKey = currentInFlightPromptSessionKey
+        }
+        guard let sessionKey else { return }
+        Task { [weak self] in
+            await self?.performCurrentPromptCancellation(sessionKey: sessionKey)
+        }
+    }
+
+    private func performCurrentPromptCancellation(sessionKey: String) async {
+        do {
+            let response = try await chatService.applySessionControl(
+                sessionKey: sessionKey,
+                action: .cancelCurrentRun,
+                value: nil,
+                enabled: nil
+            )
+            if response.ok {
+                toastManager.show(response.message ?? "Prompt cancellation requested.")
+                scheduleSessionStatusRefresh(for: sessionKey, reason: "cancelCurrentPrompt")
+                return
+            }
+            let fallback = response.code == "unsupported"
+                ? "Prompt cancellation is not supported by this provider."
+                : "Could not cancel current prompt."
+            toastManager.show(response.message ?? fallback)
+            if let status = response.status {
+                sessionStatusBySessionKey[sessionKey] = status
+                if status.sessionKey != sessionKey {
+                    sessionStatusBySessionKey[status.sessionKey] = status
+                }
+            } else {
+                scheduleSessionStatusRefresh(for: sessionKey, reason: "cancelCurrentPromptUnsupported")
+            }
+        } catch {
+            toastManager.show(error.localizedDescription)
+            scheduleSessionStatusRefresh(for: sessionKey, reason: "cancelCurrentPromptFailed")
+        }
+    }
+
     func send() {
         guard !isSending else { return }
         let referencedIds = Set(inputContent.pendingAttachmentIds())
@@ -1139,7 +1296,8 @@ final class ChatViewModel: ChatViewModelHosting {
 
     private func beginSend(content: String,
                            pendingAttachments: [PendingAttachment],
-                           sessionKey: String) {
+                           sessionKey: String,
+                           clearInputOnSuccess: Bool = true) {
         let clientId = "c_\(UUID().uuidString)"
         activeClientMessageId = clientId
 #if DEBUG
@@ -1168,7 +1326,8 @@ final class ChatViewModel: ChatViewModelHosting {
                 clientId: clientId,
                 content: content,
                 pendingAttachments: pendingAttachments,
-                sessionKey: sessionKey
+                sessionKey: sessionKey,
+                clearInputOnSuccess: clearInputOnSuccess
             )
         }
     }
@@ -1283,6 +1442,7 @@ final class ChatViewModel: ChatViewModelHosting {
         activationTask = nil
         hasActivatedLifecycleOwnership = false
         clearTemporarySendButtonOverride()
+        clearSessionStatusRefreshes()
         observationTask?.cancel()
         observationTask = nil
         lifecycleTransportEventsSubscription = nil
@@ -1304,7 +1464,8 @@ final class ChatViewModel: ChatViewModelHosting {
             persistLastReadMessageId(nil, for: key)
         }
         lastReadMessageIdBySession.removeAll()
-        hasUnreadBySession.removeAll()
+        streamTailStateBySession.removeAll()
+        streamDotStateBySession.removeAll()
         auth.clearCredentials()
         messageFailures.removeAll()
         clearInput()
@@ -1501,7 +1662,7 @@ final class ChatViewModel: ChatViewModelHosting {
         guard let token = auth.token else {
             throw ProviderChatService.Error.notConnected
         }
-        let lastMessageId = chatService.replayCursorSnapshot().values.max()
+        let lastMessageId = legacyReplayCursorForActiveStream()
         try await chatService.connect(token: token, lastMessageId: lastMessageId)
     }
 
@@ -1534,7 +1695,11 @@ final class ChatViewModel: ChatViewModelHosting {
                 streaming: false,
                 attachments: [],
                 deviceId: message.deviceId,
-                sessionKey: message.sessionKey
+                sessionKey: message.sessionKey,
+                sender: message.sender,
+                clientMessageId: message.clientMessageId,
+                replyToMessageId: message.replyToMessageId,
+                replyToClientMessageId: message.replyToClientMessageId
             )
         }
 
@@ -1554,9 +1719,13 @@ final class ChatViewModel: ChatViewModelHosting {
 
         if replacePendingMessageIfNeeded(with: resolvedMessage) {
             logger.info("incoming replacePending id=\(resolvedMessage.id, privacy: .public)")
-            markUnreadIfNeeded(for: resolvedMessage)
             resolveAssetAttachmentsIfNeeded(for: resolvedMessage)
             return
+        }
+        if resolvedMessage.role == .assistant,
+           !resolvedMessage.streaming,
+           let replyToMessageId = normalizedServerEventID(resolvedMessage.replyToMessageId) {
+            messageFailures.removeValue(forKey: replyToMessageId)
         }
 
         ensureSessionStorage(for: resolvedMessage.sessionKey)
@@ -1571,9 +1740,15 @@ final class ChatViewModel: ChatViewModelHosting {
             didAppendNewMessage = true
         }
         setMessages(messageList, for: resolvedMessage.sessionKey)
+        if resolvedMessage.role == .assistant, !resolvedMessage.streaming {
+            scheduleSessionStatusRefresh(for: resolvedMessage.sessionKey, reason: "assistantResponseCommitted")
+        }
+        if resolvedMessage.sessionKey == engineActiveSessionKey,
+           resolvedMessage.id.hasPrefix("s_") {
+            markSessionRead(resolvedMessage.sessionKey)
+        }
         maybeTriggerAssistantIncomingHaptic(for: resolvedMessage, didAppendNewMessage: didAppendNewMessage)
 
-        markUnreadIfNeeded(for: resolvedMessage)
         resolveAssetAttachmentsIfNeeded(for: resolvedMessage)
     }
 
@@ -1598,8 +1773,13 @@ final class ChatViewModel: ChatViewModelHosting {
             return
         }
         let message = Message(payload: serverPayload, sessionKey: sessionKey)
+        if pendingHistoryResetReplay?.epoch == epoch {
+            pendingHistoryResetReplay?.messagesBySessionKey[sessionKey, default: []].append(message)
+            return
+        }
         handleIncoming(message)
-        if message.id.hasPrefix("s_") {
+        if isReplayCursorEvent(message) {
+            chatService.setReplayCursor(message.id, for: sessionKey)
             Task { await lifecycleCoordinator.updateCanonicalCursor(message.id) }
         }
     }
@@ -1609,18 +1789,78 @@ final class ChatViewModel: ChatViewModelHosting {
     }
 
     private func handleHistoryResetRequired(epoch: Int) {
-        sessionMessages.removeAll()
-        messages.removeAll()
+        restoreTaskBySessionKey.values.forEach { $0.cancel() }
+        restoreTaskBySessionKey.removeAll()
         pendingLocalMessages.removeAll()
         ackedPendingLocalMessageIDs.removeAll()
         messageFailures.removeAll()
+        let cursorBackedSessionKeys = Set(chatService.replayCursorSnapshot().keys)
         chatService.clearReplayCursors()
         clearMessageCache()
+        pendingHistoryResetReplay = PendingHistoryResetReplay(
+            epoch: epoch,
+            cursorBackedSessionKeys: cursorBackedSessionKeys
+        )
         makeStreamSwitchCoordinator().reset()
         Task {
             await lifecycleCoordinator.updateCanonicalCursor(nil)
             await lifecycleCoordinator.acknowledgeHistoryReset(epoch: epoch)
         }
+    }
+
+    private func applyPendingHistoryResetReplayIfNeeded() {
+        guard let pending = pendingHistoryResetReplay else { return }
+        pendingHistoryResetReplay = nil
+
+        let allSessionKeys = Set(sessionMessages.keys)
+            .union(streamsBySessionKey.keys)
+            .union(pending.messagesBySessionKey.keys)
+        for sessionKey in allSessionKeys {
+            let replayMessages = pending.messagesBySessionKey[sessionKey] ?? []
+            if pending.cursorBackedSessionKeys.contains(sessionKey) {
+                guard !replayMessages.isEmpty else { continue }
+                let merged = mergedMessagesPreservingOrder(
+                    existing: sessionMessages[sessionKey] ?? [],
+                    incoming: replayMessages
+                )
+                setMessages(merged, for: sessionKey)
+            } else {
+                removeCachedMessages(for: sessionKey)
+                setMessages(replayMessages, for: sessionKey)
+            }
+            applyReplayMessageSideEffects(replayMessages, sessionKey: sessionKey)
+
+            if let replayCursor = lastServerMessageId(from: replayMessages) {
+                chatService.setReplayCursor(replayCursor, for: sessionKey)
+                Task { await lifecycleCoordinator.updateCanonicalCursor(replayCursor) }
+            } else if !pending.cursorBackedSessionKeys.contains(sessionKey) {
+                clearCursor(for: sessionKey)
+            }
+        }
+        restoredSessionKeys.formUnion(allSessionKeys)
+    }
+
+    private func applyReplayMessageSideEffects(_ replayMessages: [Message], sessionKey: String) {
+        guard !replayMessages.isEmpty else { return }
+        replayMessages.forEach { resolveAssetAttachmentsIfNeeded(for: $0) }
+        if sessionKey == engineActiveSessionKey,
+           replayMessages.contains(where: { $0.id.hasPrefix("s_") }) {
+            markSessionRead(sessionKey)
+        }
+    }
+
+    private func mergedMessagesPreservingOrder(existing: [Message], incoming: [Message]) -> [Message] {
+        guard !existing.isEmpty else { return incoming }
+        guard !incoming.isEmpty else { return existing }
+        var merged = existing
+        for message in incoming {
+            if let index = merged.firstIndex(where: { $0.id == message.id }) {
+                merged[index] = message
+            } else {
+                merged.append(message)
+            }
+        }
+        return merged
     }
 
     private func maybeTriggerAssistantIncomingHaptic(for message: Message, didAppendNewMessage: Bool) {
@@ -1673,7 +1913,9 @@ final class ChatViewModel: ChatViewModelHosting {
                 do {
                     logger.info("attachment download start id=\(attachment.id, privacy: .public) assetId=\(assetId, privacy: .public)")
                     let data = try await uploadService.download(assetId: assetId)
-                    guard !data.isEmpty else { continue }
+                    guard !data.isEmpty else {
+                        continue
+                    }
                     let isImageAttachment = attachment.type == .image
                         || attachment.type == .asset
                         || attachment.mimeType?.lowercased().hasPrefix("image/") == true
@@ -1712,7 +1954,11 @@ final class ChatViewModel: ChatViewModelHosting {
                 streaming: message.streaming,
                 attachments: updatedAttachments,
                 deviceId: message.deviceId,
-                sessionKey: message.sessionKey
+                sessionKey: message.sessionKey,
+                sender: message.sender,
+                clientMessageId: message.clientMessageId,
+                replyToMessageId: message.replyToMessageId,
+                replyToClientMessageId: message.replyToClientMessageId
             )
 
             await MainActor.run {
@@ -1747,7 +1993,11 @@ final class ChatViewModel: ChatViewModelHosting {
             return false
         }
 
-        let pendingIndex = pendingLocalMessages.firstIndex(where: { $0.sessionKey == message.sessionKey })
+        guard let clientMessageId = message.clientMessageId?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !clientMessageId.isEmpty else {
+            return false
+        }
+        let pendingIndex = pendingLocalMessages.firstIndex(where: { $0.id == clientMessageId })
         guard let pendingIndex else {
             return false
         }
@@ -1811,7 +2061,6 @@ final class ChatViewModel: ChatViewModelHosting {
             StreamSwitchTiming.log("stream_messages_reloaded oldCount=0 newCount=\(newCount)", sessionKey: sessionKey)
         }
         persistMessages(newMessages, for: sessionKey)
-        refreshUnreadState(for: sessionKey)
         if sessionKey == engineActiveSessionKey {
             messages = newMessages
             let total = newMessages.count
@@ -1847,12 +2096,15 @@ final class ChatViewModel: ChatViewModelHosting {
 
     private func handleLifecycleOutput(_ output: ConnectionLifecycleOutput) {
         switch output {
-        case .phaseTransition(_, let to, let epoch, _):
+        case .phaseTransition(_, let to, let epoch, let reason):
             if writerCurrentEpoch != epoch {
                 writerCurrentEpoch = epoch
                 firstReplayAppliedEpoch = nil
                 restoreTaskBySessionKey.values.forEach { $0.cancel() }
                 restoreTaskBySessionKey.removeAll()
+                if pendingHistoryResetReplay?.epoch != epoch {
+                    pendingHistoryResetReplay = nil
+                }
             }
             connectionLifecyclePhase = to
 #if DEBUG
@@ -1870,6 +2122,13 @@ final class ChatViewModel: ChatViewModelHosting {
                 mapped = .failed(ProviderChatService.Error.notConnected)
             }
             transitionConnectionState(mapped, source: .lifecycleCoordinator)
+            // Auth-invalid failures: clear credentials so RootView routes to pairing recovery.
+            // Transport/provider-down failures stay in failed state for manual retry.
+            if to == .failed, case .failure(let failureReason) = reason,
+               failureReason == .authRejected || failureReason == .tokenRevoked {
+                logger.info("auth-invalid failure reason=\(String(describing: failureReason), privacy: .public) — clearing credentials for pairing recovery")
+                auth.clearCredentials()
+            }
         case .restoreCacheRequested(let epoch):
             for sessionKey in orderedSessionKeys {
                 restoreCachedMessagesIfNeeded(for: sessionKey, epoch: epoch)
@@ -1881,7 +2140,8 @@ final class ChatViewModel: ChatViewModelHosting {
         case .serverMessage(let epoch, let payload):
             handleLifecycleServerMessage(epoch: epoch, payload: payload)
         case .replayCompleted:
-            break
+            applyPendingHistoryResetReplayIfNeeded()
+            markMissingFinalsAfterReplay()
         case .historyTruncated(let epoch):
             logger.info("history truncated for epoch=\(epoch, privacy: .public)")
         }
@@ -1923,7 +2183,8 @@ final class ChatViewModel: ChatViewModelHosting {
     private func performSend(clientId: String,
                              content: String,
                              pendingAttachments: [PendingAttachment],
-                             sessionKey: String?) async {
+                             sessionKey: String?,
+                             clearInputOnSuccess: Bool = true) async {
         defer { sendTask = nil }
         do {
             let wireAttachments = try await buildWireAttachments(from: pendingAttachments, content: content)
@@ -1938,7 +2199,9 @@ final class ChatViewModel: ChatViewModelHosting {
 #if DEBUG
                 self.recordImageSendDebugEvent(.sendResult, detail: "success localId=\(clientId)")
 #endif
-                clearInput()
+                if clearInputOnSuccess {
+                    clearInput()
+                }
                 isSending = false
                 activeClientMessageId = nil
             }
@@ -2328,6 +2591,10 @@ final class ChatViewModel: ChatViewModelHosting {
                 handleNoReplyAck(messageId: messageId)
                 return
             }
+            scheduleSessionStatusRefreshAfterTerminalMessageEvent(
+                messageId: messageId,
+                reason: "messageErrorTerminal"
+            )
             if shouldShowMessageErrorToast(code: code) {
                 let resolved = userFacingMessage(for: code, fallback: message)
                 toastManager.show(resolved)
@@ -2366,10 +2633,12 @@ final class ChatViewModel: ChatViewModelHosting {
             if isTyping {
                 self.isAssistantTyping = true
                 self.typingSessionKey = sessionKey
+                self.scheduleSessionStatusRefresh(for: sessionKey, reason: "typingStarted")
             } else if self.typingSessionKey == sessionKey {
                 // Only clear if the stop event is for the same session we're tracking
                 self.isAssistantTyping = false
                 self.typingSessionKey = nil
+                self.scheduleSessionStatusRefresh(for: sessionKey, reason: "typingStopped")
             }
         case .streamSnapshot(let streams):
             hasResolvedProvisioningCapability = true
@@ -2409,6 +2678,14 @@ final class ChatViewModel: ChatViewModelHosting {
             refreshStreamsFromProvider(reason: "streamDeleted")
             refreshTrackableSessions(reason: "streamDeleted")
             attemptPendingProvisionedSendIfPossible()
+        case .streamReadStateSnapshot(let snapshot):
+            applyStreamReadStateSnapshot(snapshot)
+        case .streamReadStateUpdated(let sessionKey, let lastReadMessageId):
+            applyStreamReadStateUpdate(sessionKey: sessionKey, lastReadMessageId: lastReadMessageId)
+        case .streamTailStateSnapshot(let snapshot):
+            applyStreamTailStateSnapshot(snapshot)
+        case .streamTailStateUpdated(let sessionKey, let tailState):
+            applyStreamTailStateUpdate(sessionKey: sessionKey, tailState: tailState)
         case .sessionProvisioningAvailable(let supported):
             hasResolvedProvisioningCapability = true
             supportsSessionProvisioning = supported
@@ -2467,6 +2744,7 @@ final class ChatViewModel: ChatViewModelHosting {
     private func transitionConnectionState(_ state: ConnectionState,
                                            source: ConnectionStateMutationSource) {
         connectionState = state
+        refreshSendButtonConnectionState()
         logger.info("connectionState transition id=\(self.instanceId, privacy: .public) source=\(source.rawValue, privacy: .public) state=\(String(describing: state), privacy: .public)")
         switch state {
         case .connected:
@@ -2581,6 +2859,126 @@ final class ChatViewModel: ChatViewModelHosting {
         }
     }
 
+    private func scheduleSessionStatusRefresh(
+        for sessionKey: String,
+        reason: String,
+        delay: Duration = .zero
+    ) {
+        let normalizedSessionKey = sessionKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedSessionKey.isEmpty else { return }
+        guard auth.token != nil else { return }
+
+        sessionStatusRefreshTasks[normalizedSessionKey]?.cancel()
+        sessionStatusRefreshTasks[normalizedSessionKey] = Task { [weak self] in
+            guard let self else { return }
+            if delay > .zero {
+                do {
+                    try await Task.sleep(for: delay)
+                } catch is CancellationError {
+                    return
+                } catch {
+                    return
+                }
+            }
+            guard !Task.isCancelled else { return }
+            do {
+                let status = try await self.chatService.fetchSessionStatus(sessionKey: normalizedSessionKey)
+                guard !Task.isCancelled else { return }
+                let displayStatus = self.sessionStatusByKeepingStickyDisplayFields(
+                    from: status,
+                    requestedSessionKey: normalizedSessionKey
+                )
+                self.sessionStatusRefreshTasks[normalizedSessionKey] = nil
+                self.sessionStatusBySessionKey[normalizedSessionKey] = displayStatus
+                if displayStatus.sessionKey != normalizedSessionKey {
+                    self.sessionStatusBySessionKey[displayStatus.sessionKey] = displayStatus
+                }
+                self.scheduleSessionStatusFollowUpIfNeeded(displayStatus, requestedSessionKey: normalizedSessionKey)
+            } catch {
+                guard !Task.isCancelled else { return }
+                self.sessionStatusRefreshTasks[normalizedSessionKey] = nil
+                self.logger.debug(
+                    "session status refresh failed reason=\(reason, privacy: .public) sessionKey=\(normalizedSessionKey, privacy: .public) error=\(error.localizedDescription, privacy: .public)"
+                )
+            }
+        }
+    }
+
+    private func sessionStatusByKeepingStickyDisplayFields(from incoming: SessionStatus,
+                                                           requestedSessionKey: String) -> SessionStatus {
+        let cached = sessionStatusBySessionKey[incoming.sessionKey] ?? sessionStatusBySessionKey[requestedSessionKey]
+        guard let cached else { return incoming }
+        let incomingThinkingLevel = realDisplayString(incoming.display.thinkingLevel)
+        let incomingReasoningLevel = realDisplayString(incoming.display.reasoningLevel)
+        let resolvedThinkingLevel: String?
+        let resolvedReasoningLevel: String?
+        switch (incomingThinkingLevel, incomingReasoningLevel) {
+        case (.some(let thinking), .some(let reasoning)):
+            resolvedThinkingLevel = thinking
+            resolvedReasoningLevel = reasoning
+        case (.some(let thinking), .none):
+            resolvedThinkingLevel = thinking
+            resolvedReasoningLevel = nil
+        case (.none, .some(let reasoning)):
+            resolvedThinkingLevel = nil
+            resolvedReasoningLevel = reasoning
+        case (.none, .none):
+            resolvedThinkingLevel = cached.display.thinkingLevel
+            resolvedReasoningLevel = cached.display.reasoningLevel
+        }
+
+        return SessionStatus(
+            sessionKey: incoming.sessionKey,
+            display: .init(
+                model: stickyDisplayString(incoming.display.model, cached: cached.display.model),
+                fallbackModels: incoming.display.fallbackModels,
+                provider: incoming.display.provider,
+                harness: incoming.display.harness,
+                reasoningLevel: resolvedReasoningLevel,
+                thinkingLevel: resolvedThinkingLevel,
+                fastMode: incoming.display.fastMode ?? cached.display.fastMode,
+                mode: incoming.display.mode,
+                verbosity: incoming.display.verbosity
+            ),
+            run: incoming.run,
+            context: incoming.context,
+            approval: incoming.approval,
+            capabilities: incoming.capabilities,
+            modelCatalog: incoming.modelCatalog ?? cached.modelCatalog
+        )
+    }
+
+    private func stickyDisplayString(_ incoming: String?, cached: String?) -> String? {
+        realDisplayString(incoming) ?? cached
+    }
+
+    private func realDisplayString(_ value: String?) -> String? {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? nil : value
+    }
+
+    private func scheduleSessionStatusFollowUpIfNeeded(_ status: SessionStatus, requestedSessionKey: String) {
+        guard uiSelectedSessionKey == requestedSessionKey || engineActiveSessionKey == requestedSessionKey else {
+            return
+        }
+        switch status.run.state {
+        case .running, .queued:
+            scheduleSessionStatusRefresh(
+                for: requestedSessionKey,
+                reason: "runStateFollowUp",
+                delay: .seconds(5)
+            )
+        case .idle, .unknown:
+            break
+        }
+    }
+
+    private func clearSessionStatusRefreshes() {
+        sessionStatusRefreshTasks.values.forEach { $0.cancel() }
+        sessionStatusRefreshTasks.removeAll()
+        sessionStatusBySessionKey.removeAll()
+    }
+
     private func normalizeSessionKeyList(_ sessionKeys: [String]) -> [String] {
         var seen: Set<String> = []
         var normalized: [String] = []
@@ -2609,6 +3007,25 @@ final class ChatViewModel: ChatViewModelHosting {
         }
         components.append(sessionKey)
         return components.joined(separator: ".")
+    }
+
+    private func lastReadMessageDefaultsPrefix() -> String {
+        var components = ["clawline.lastReadMessageId"]
+        if let userId = auth.currentUserId, !userId.isEmpty {
+            components.append(userId)
+        }
+        return components.joined(separator: ".") + "."
+    }
+
+    private func persistedLastReadSessionKeys() -> Set<String> {
+        let prefix = lastReadMessageDefaultsPrefix()
+        return Set(
+            streamDefaults.dictionaryRepresentation().keys.compactMap { key in
+                guard key.hasPrefix(prefix) else { return nil }
+                let sessionKey = String(key.dropFirst(prefix.count))
+                return sessionKey.isEmpty ? nil : sessionKey
+            }
+        )
     }
 
     private func persistLastReadMessageId(_ value: String?, for sessionKey: String) {
@@ -2672,9 +3089,6 @@ final class ChatViewModel: ChatViewModelHosting {
         let restoreTask = Task.detached { [weak self, sessionKey, url] in
             guard let self else { return }
             guard let data = try? Data(contentsOf: url) else {
-                await MainActor.run { [weak self] in
-                    self?.clearCursor(for: sessionKey)
-                }
                 return
             }
             await MainActor.run {
@@ -2686,21 +3100,21 @@ final class ChatViewModel: ChatViewModelHosting {
                 let decoded = try decoder.decode([Message].self, from: data)
                 let filtered = decoded.filter { $0.sessionKey == sessionKey }
                 guard !filtered.isEmpty else {
-                    await MainActor.run { [weak self] in
-                        self?.clearCursor(for: sessionKey)
-                    }
                     return
                 }
+                guard !Task.isCancelled else { return }
                 await MainActor.run { [weak self, filtered] in
                     guard let self else { return }
+                    guard self.restoreTaskBySessionKey[sessionKey] != nil else { return }
                     if let epoch {
                         guard self.writerCurrentEpoch == epoch else { return }
                         guard self.firstReplayAppliedEpoch != epoch else { return }
                     }
                     self.setMessages(filtered, for: sessionKey)
                     let cachedLast = self.lastServerMessageId(from: filtered)
-                    self.chatService.setReplayCursor(cachedLast, for: sessionKey)
-                    if let cachedLast {
+                    self.chatService.seedReplayCursorIfMissing(cachedLast, for: sessionKey)
+                    if let cachedLast,
+                       self.chatService.replayCursorSnapshot()[sessionKey] == cachedLast {
                         Task { await self.lifecycleCoordinator.updateCanonicalCursor(cachedLast) }
                     }
                     self.armForceReRead(for: sessionKey)
@@ -2719,7 +3133,14 @@ final class ChatViewModel: ChatViewModelHosting {
         self.chatService.setReplayCursor(nil, for: sessionKey)
         Task { await lifecycleCoordinator.updateCanonicalCursor(nil) }
         self.armForceReRead(for: sessionKey)
-        self.refreshUnreadState(for: sessionKey)
+    }
+
+    private func removeCachedMessages(for sessionKey: String) {
+        guard let url = messageCacheURL(for: sessionKey) else { return }
+        persistDebounceTasks[sessionKey]?.cancel()
+        persistDebounceTasks[sessionKey] = nil
+        pendingPersistPayloads.removeValue(forKey: sessionKey)
+        try? FileManager.default.removeItem(at: url)
     }
 
     private func persistMessages(_ messages: [Message], for sessionKey: String) {
@@ -2752,10 +3173,37 @@ final class ChatViewModel: ChatViewModelHosting {
     }
 
     private func lastServerMessageId(from messages: [Message]) -> String? {
-        for message in messages.reversed() where message.id.hasPrefix("s_") {
+        for message in messages.reversed() where isReplayCursorEvent(message) {
             return message.id
         }
         return nil
+    }
+
+    private func markMissingFinalsAfterReplay() {
+        for (sessionKey, streamMessages) in sessionMessages {
+            let detectionMessages = streamMessages.filter { message in
+                !(message.role == .assistant
+                  && message.streaming
+                  && normalizedServerEventID(message.replyToMessageId) != nil)
+            }
+            if detectionMessages.count != streamMessages.count {
+                setMessages(detectionMessages, for: sessionKey)
+            }
+            let assistantFinalReplyIds = Set(detectionMessages.compactMap { message -> String? in
+                guard message.role == .assistant, !message.streaming else { return nil }
+                return normalizedServerEventID(message.replyToMessageId)
+            })
+            for message in detectionMessages {
+                guard message.role == .user,
+                      normalizedServerEventID(message.id) != nil,
+                      let clientMessageId = message.clientMessageId?.trimmingCharacters(in: .whitespacesAndNewlines),
+                      !clientMessageId.isEmpty,
+                      !assistantFinalReplyIds.contains(message.id) else {
+                    continue
+                }
+                messageFailures[message.id] = MessageFailure(code: "missing_final", message: nil)
+            }
+        }
     }
 
     private func clearMessageCache() {
@@ -2879,7 +3327,10 @@ final class ChatViewModel: ChatViewModelHosting {
         for sessionKey in removedSessionKeys {
             sessionMessages.removeValue(forKey: sessionKey)
             lastReadMessageIdBySession.removeValue(forKey: sessionKey)
-            hasUnreadBySession.removeValue(forKey: sessionKey)
+            streamTailStateBySession.removeValue(forKey: sessionKey)
+            streamDotStateBySession.removeValue(forKey: sessionKey)
+            sessionStatusBySessionKey.removeValue(forKey: sessionKey)
+            sessionStatusRefreshTasks.removeValue(forKey: sessionKey)?.cancel()
             let removedIDs = Set(pendingLocalMessages.filter { $0.sessionKey == sessionKey }.map(\.id))
             pendingLocalMessages.removeAll { $0.sessionKey == sessionKey }
             ackedPendingLocalMessageIDs.subtract(removedIDs)
@@ -2892,7 +3343,6 @@ final class ChatViewModel: ChatViewModelHosting {
             ensureSessionStorage(for: sessionKey)
             restoreLastReadMessageIdIfNeeded(for: sessionKey)
             restoreCachedMessagesIfNeeded(for: sessionKey)
-            refreshUnreadState(for: sessionKey)
         }
         restoreActiveSessionKeyIfNeeded()
         ensureDefaultActiveSessionIfNeeded()
@@ -2912,7 +3362,6 @@ final class ChatViewModel: ChatViewModelHosting {
         ensureSessionStorage(for: stream.sessionKey)
         restoreLastReadMessageIdIfNeeded(for: stream.sessionKey)
         restoreCachedMessagesIfNeeded(for: stream.sessionKey)
-        refreshUnreadState(for: stream.sessionKey)
         ensureDefaultActiveSessionIfNeeded()
         SessionRegistry.shared.upsert(stream)
         persistStreamMetadata()
@@ -2924,7 +3373,10 @@ final class ChatViewModel: ChatViewModelHosting {
         recalculateOrderedSessionKeys()
         sessionMessages.removeValue(forKey: sessionKey)
         lastReadMessageIdBySession.removeValue(forKey: sessionKey)
-        hasUnreadBySession.removeValue(forKey: sessionKey)
+        streamTailStateBySession.removeValue(forKey: sessionKey)
+        streamDotStateBySession.removeValue(forKey: sessionKey)
+        sessionStatusBySessionKey.removeValue(forKey: sessionKey)
+        sessionStatusRefreshTasks.removeValue(forKey: sessionKey)?.cancel()
         chatService.setReplayCursor(nil, for: sessionKey)
         persistLastReadMessageId(nil, for: sessionKey)
         persistMessages([], for: sessionKey)
@@ -2983,6 +3435,8 @@ final class ChatViewModel: ChatViewModelHosting {
     private func unlinkTrackedSession(sessionKey: String) {
         streamsBySessionKey.removeValue(forKey: sessionKey)
         syntheticSessionKeys.remove(sessionKey)
+        sessionStatusBySessionKey.removeValue(forKey: sessionKey)
+        sessionStatusRefreshTasks.removeValue(forKey: sessionKey)?.cancel()
         recalculateOrderedSessionKeys()
 
         if typingSessionKey == sessionKey {
@@ -3165,6 +3619,8 @@ final class ChatViewModel: ChatViewModelHosting {
             return "Session is locked. Message not delivered."
         case "connection_lost":
             return "Message not delivered — connection lost."
+        case "missing_final":
+            return "Reply missing after reconnect. Try again."
         case "invalid_channel":
             return "Cannot send to this channel."
         default:
@@ -3237,6 +3693,29 @@ final class ChatViewModel: ChatViewModelHosting {
             sessionKey: sessionKey
         )
         appendMessage(ack)
+        scheduleSessionStatusRefresh(for: sessionKey, reason: "noReplyTerminal")
+    }
+
+    private func scheduleSessionStatusRefreshAfterTerminalMessageEvent(messageId: String?, reason: String) {
+        var sessionKeys = Set<String>()
+        if let messageId {
+            if let pending = pendingLocalMessages.first(where: { $0.id == messageId }) {
+                sessionKeys.insert(pending.sessionKey)
+            } else if let (_, sessionKey, _) = findMessage(id: messageId) {
+                sessionKeys.insert(sessionKey)
+            }
+        } else {
+            sessionKeys.formUnion(pendingLocalMessages.map(\.sessionKey))
+        }
+        if sessionKeys.isEmpty {
+            let activeSessionKey = engineActiveSessionKey.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !activeSessionKey.isEmpty {
+                sessionKeys.insert(activeSessionKey)
+            }
+        }
+        for sessionKey in sessionKeys {
+            scheduleSessionStatusRefresh(for: sessionKey, reason: reason)
+        }
     }
 
     private func trimPresentationCache() {
@@ -3314,6 +3793,7 @@ final class ChatViewModel: ChatViewModelHosting {
 
     private func setTemporarySendButtonOverride(_ state: SendButtonConnectionState) {
         temporarySendButtonOverride = state
+        refreshSendButtonConnectionState()
         temporarySendButtonOverrideTask?.cancel()
         let overrideDuration = temporarySendButtonOverrideDuration
         temporarySendButtonOverrideTask = Task { @MainActor [weak self] in
@@ -3330,40 +3810,145 @@ final class ChatViewModel: ChatViewModelHosting {
         temporarySendButtonOverrideTask?.cancel()
         temporarySendButtonOverrideTask = nil
         temporarySendButtonOverride = nil
+        refreshSendButtonConnectionState()
+    }
+
+    private func refreshSendButtonConnectionState() {
+        sendButtonConnectionState = temporarySendButtonOverride ?? transportSendButtonConnectionState
     }
 
     @MainActor
     private func connectionSnapshot() -> (token: String?, lastMessageId: String?) {
-        (auth.token, chatService.replayCursorSnapshot().values.max())
+        (auth.token, legacyReplayCursorForActiveStream())
     }
 
-    private func markUnreadIfNeeded(for message: Message) {
-        guard message.role == .assistant else { return }
-        guard message.sessionKey != engineActiveSessionKey else { return }
-        hasUnreadBySession[message.sessionKey] = true
+    private func legacyReplayCursorForActiveStream() -> String? {
+        let activeKey = uiSelectedSessionKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ? engineActiveSessionKey
+            : uiSelectedSessionKey
+        guard !activeKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        return chatService.replayCursorSnapshot()[activeKey]
     }
 
-    private func markSessionRead(_ sessionKey: String) {
-        let tailMessageId = sessionMessages[sessionKey]?.last?.id
+    private func isReplayCursorEvent(_ message: Message) -> Bool {
+        normalizedServerEventID(message.id) != nil && !message.streaming
+    }
+
+    private func normalizedServerEventID(_ raw: String?) -> String? {
+        guard let raw else { return nil }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("s_"), trimmed.count > 2 else { return nil }
+        guard !trimmed.hasPrefix("s_no_reply_") else { return nil }
+        return trimmed
+    }
+
+    private func markSessionRead(_ sessionKey: String, preferServerTail: Bool = false) {
+        let localTailMessageId = lastServerMessageId(from: sessionMessages[sessionKey] ?? [])
+        let serverTailMessageId = streamTailStateBySession[sessionKey]?.lastMessageId
+        let tailMessageId =
+            preferServerTail
+                ? (serverTailMessageId ?? localTailMessageId)
+                : (localTailMessageId ?? serverTailMessageId)
         if let tailMessageId {
             lastReadMessageIdBySession[sessionKey] = tailMessageId
             persistLastReadMessageId(tailMessageId, for: sessionKey)
+            publishReadStateIfPossible(sessionKey: sessionKey, lastReadMessageId: tailMessageId)
+            recomputeStreamDotState(for: sessionKey)
         }
-        hasUnreadBySession[sessionKey] = false
     }
 
-    private func refreshUnreadState(for sessionKey: String) {
-        if sessionKey == engineActiveSessionKey {
-            hasUnreadBySession[sessionKey] = false
+    private func applyStreamReadStateSnapshot(_ snapshot: [String: String]) {
+        var normalizedSnapshot: [String: String] = [:]
+        for (sessionKey, lastReadMessageId) in snapshot {
+            guard !sessionKey.isEmpty, !lastReadMessageId.isEmpty else { continue }
+            normalizedSnapshot[sessionKey] = lastReadMessageId
+        }
+        let snapshotSessionKeys = Set(normalizedSnapshot.keys)
+        let staleSessionKeys = lastReadMessageIdBySession.keys
+            .reduce(into: Set<String>()) { $0.insert($1) }
+            .union(persistedLastReadSessionKeys())
+            .subtracting(snapshotSessionKeys)
+
+        for sessionKey in staleSessionKeys {
+            lastReadMessageIdBySession.removeValue(forKey: sessionKey)
+            persistLastReadMessageId(nil, for: sessionKey)
+            recomputeStreamDotState(for: sessionKey)
+        }
+
+        for (sessionKey, lastReadMessageId) in normalizedSnapshot {
+            lastReadMessageIdBySession[sessionKey] = lastReadMessageId
+            persistLastReadMessageId(lastReadMessageId, for: sessionKey)
+            recomputeStreamDotState(for: sessionKey)
+        }
+    }
+
+    private func applyStreamReadStateUpdate(sessionKey: String, lastReadMessageId: String) {
+        guard !sessionKey.isEmpty, !lastReadMessageId.isEmpty else { return }
+        let current = lastReadMessageIdBySession[sessionKey]
+        if current == lastReadMessageId { return }
+        lastReadMessageIdBySession[sessionKey] = lastReadMessageId
+        persistLastReadMessageId(lastReadMessageId, for: sessionKey)
+        recomputeStreamDotState(for: sessionKey)
+    }
+
+    private func applyStreamTailStateSnapshot(_ snapshot: [String: StreamTailState]) {
+        var normalizedSnapshot: [String: StreamTailState] = [:]
+        for (sessionKey, tailState) in snapshot {
+            guard !sessionKey.isEmpty else { continue }
+            normalizedSnapshot[sessionKey] = tailState
+        }
+
+        let snapshotSessionKeys = Set(normalizedSnapshot.keys)
+        let staleSessionKeys = Set(streamTailStateBySession.keys).subtracting(snapshotSessionKeys)
+        for sessionKey in staleSessionKeys {
+            streamTailStateBySession.removeValue(forKey: sessionKey)
+            recomputeStreamDotState(for: sessionKey)
+        }
+
+        for (sessionKey, tailState) in normalizedSnapshot {
+            streamTailStateBySession[sessionKey] = tailState
+            recomputeStreamDotState(for: sessionKey)
+        }
+    }
+
+    private func applyStreamTailStateUpdate(sessionKey: String, tailState: StreamTailState) {
+        guard !sessionKey.isEmpty else { return }
+        if streamTailStateBySession[sessionKey] == tailState { return }
+        streamTailStateBySession[sessionKey] = tailState
+        recomputeStreamDotState(for: sessionKey)
+    }
+
+    private func publishReadStateIfPossible(sessionKey: String, lastReadMessageId: String) {
+        guard lastReadMessageId.hasPrefix("s_") else { return }
+        Task { [chatService, logger] in
+            do {
+                try await chatService.publishReadState(
+                    sessionKey: sessionKey,
+                    lastReadMessageId: lastReadMessageId
+                )
+            } catch {
+                logger.error(
+                    "stream_read_publish_failed sessionKey=\(sessionKey, privacy: .public) lastReadMessageId=\(lastReadMessageId, privacy: .public) error=\(error.localizedDescription, privacy: .public)"
+                )
+            }
+        }
+    }
+
+    private func recomputeStreamDotState(for sessionKey: String) {
+        guard !sessionKey.isEmpty else { return }
+        guard let tailState = streamTailStateBySession[sessionKey] else {
+            streamDotStateBySession.removeValue(forKey: sessionKey)
             return
         }
-        restoreLastReadMessageIdIfNeeded(for: sessionKey)
-        guard let tailMessageId = sessionMessages[sessionKey]?.last?.id else {
-            hasUnreadBySession[sessionKey] = false
-            return
+        let dotState: StreamDotState
+        if tailState.lastMessageRole == .user {
+            dotState = .userTail
+        } else if lastReadMessageIdBySession[sessionKey] != tailState.lastMessageId {
+            dotState = .unread
+        } else {
+            dotState = .inactive
         }
-        let lastReadMessageId = lastReadMessageIdBySession[sessionKey]
-        hasUnreadBySession[sessionKey] = (lastReadMessageId != tailMessageId)
+        streamDotStateBySession[sessionKey] = dotState
     }
 
 #if DEBUG

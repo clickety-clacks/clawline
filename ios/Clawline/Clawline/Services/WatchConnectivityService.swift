@@ -467,6 +467,20 @@ final class WatchConnectivityService: NSObject, WatchConnectivityServicing {
         case .streamDeleted(let sessionKey):
             dict["kind"] = "streamDeleted"
             dict["sessionKey"] = sessionKey
+        case .streamReadStateSnapshot(let snapshot):
+            dict["kind"] = "streamReadStateSnapshot"
+            dict["snapshot"] = snapshot
+        case .streamReadStateUpdated(let sessionKey, let lastReadMessageId):
+            dict["kind"] = "streamReadStateUpdated"
+            dict["sessionKey"] = sessionKey
+            dict["lastReadMessageId"] = lastReadMessageId
+        case .streamTailStateSnapshot(let snapshot):
+            dict["kind"] = "streamTailStateSnapshot"
+            if let any = encodeToAny(snapshot) { dict["snapshot"] = any }
+        case .streamTailStateUpdated(let sessionKey, let tailState):
+            dict["kind"] = "streamTailStateUpdated"
+            dict["sessionKey"] = sessionKey
+            if let any = encodeToAny(tailState) { dict["tailState"] = any }
         case .sessionProvisioningAvailable(let available):
             dict["kind"] = "sessionProvisioningAvailable"
             dict["available"] = available
@@ -520,6 +534,20 @@ final class WatchConnectivityService: NSObject, WatchConnectivityServicing {
         replyHandler(["error": ["code": code, "message": error.localizedDescription]])
     }
 }
+
+
+#if DEBUG
+extension WatchConnectivityService {
+    @MainActor
+    func handleTestMessage(_ message: [String: Any]) async -> [String: Any] {
+        await withCheckedContinuation { continuation in
+            handleMessage(message) { reply in
+                continuation.resume(returning: reply)
+            }
+        }
+    }
+}
+#endif
 
 // MARK: - WCSessionDelegate
 

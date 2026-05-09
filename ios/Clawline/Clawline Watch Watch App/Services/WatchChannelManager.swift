@@ -4,13 +4,22 @@ import Observation
 @MainActor
 @Observable
 final class WatchChannelManager {
+    enum StreamLoadState: Equatable {
+        case idle
+        case loading
+        case loaded
+        case failed(String)
+    }
+
     private(set) var streams: [StreamSession] = []
     private(set) var currentSessionKey: String?
     private(set) var unreadSessionKeys: Set<String> = []
-    private(set) var streamListLoaded = false
+    private(set) var streamLoadState: StreamLoadState = .idle
 
     private(set) var engineSessionKey: String?
     private var debounceTask: Task<Void, Never>?
+    private weak var transport: WatchProviderTransport?
+    private var didBind = false
 
     var currentStream: StreamSession? {
         guard let currentSessionKey else { return nil }
@@ -18,6 +27,10 @@ final class WatchChannelManager {
     }
 
     func bind(transport: WatchProviderTransport) {
+        guard !didBind else { return }
+        didBind = true
+        self.transport = transport
+
         Task { [weak self] in
             guard let self else { return }
             for await event in transport.serviceEvents {
@@ -39,34 +52,35 @@ final class WatchChannelManager {
         }
 
         Task {
-            if let fetched = try? await transport.fetchStreams() {
-                await MainActor.run {
-                    applyStreamSnapshot(fetched)
-                }
-            }
+            await reloadStreams()
         }
     }
 
-    func switchBy(delta: Int) {
-        guard !streams.isEmpty else { return }
+    func reloadStreams() async {
+        guard let transport else { return }
+        let previousState = streamLoadState
+        streamLoadState = .loading
 
-        let activeKey = currentSessionKey ?? streams.first?.sessionKey
-        guard let activeKey,
-              let currentIndex = streams.firstIndex(where: { $0.sessionKey == activeKey }) else {
-            return
-        }
-
-        let nextIndex = min(max(currentIndex + delta, 0), streams.count - 1)
-        let nextKey = streams[nextIndex].sessionKey
-        currentSessionKey = nextKey
-
-        debounceTask?.cancel()
-        debounceTask = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(500))
-            await MainActor.run {
-                self?.engineSessionKey = nextKey
-                self?.unreadSessionKeys.remove(nextKey)
+        do {
+            let fetched = try await transport.fetchStreams()
+            applyStreamSnapshot(fetched)
+        } catch {
+            if case .loaded = previousState {
+                streamLoadState = .loaded
+                return
             }
+            streamLoadState = .failed(error.localizedDescription)
+        }
+    }
+
+    func retryLoadingIfNeeded(for transportState: WatchProviderTransportState) {
+        guard transportState == .direct || transportState == .relay else { return }
+
+        switch streamLoadState {
+        case .idle, .failed:
+            Task { await reloadStreams() }
+        case .loading, .loaded:
+            break
         }
     }
 
@@ -74,7 +88,13 @@ final class WatchChannelManager {
         currentSessionKey = sessionKey
         debounceTask?.cancel()
         debounceTask = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(500))
+            do {
+                try await Task.sleep(for: .milliseconds(500))
+            } catch is CancellationError {
+                return
+            } catch {
+                return
+            }
             await MainActor.run {
                 self?.engineSessionKey = sessionKey
                 self?.unreadSessionKeys.remove(sessionKey)
@@ -106,7 +126,7 @@ final class WatchChannelManager {
     }
 
     private func applyStreamSnapshot(_ snapshot: [StreamSession]) {
-        streamListLoaded = true
+        streamLoadState = .loaded
         streams = snapshot.sorted { lhs, rhs in
             if lhs.orderIndex == rhs.orderIndex {
                 return lhs.displayName.localizedCaseInsensitiveCompare(rhs.displayName) == .orderedAscending

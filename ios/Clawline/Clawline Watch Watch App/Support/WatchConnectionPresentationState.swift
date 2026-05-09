@@ -23,7 +23,7 @@ final class WatchConnectionPresentationState {
         let transcript: String
         let voiceError: String?
         let voiceInputAvailable: Bool
-        let streamListLoaded: Bool
+        let streamLoadState: WatchChannelManager.StreamLoadState
         let streams: [StreamSession]
         let currentSessionKey: String?
     }
@@ -38,6 +38,7 @@ final class WatchConnectionPresentationState {
     private weak var transport: WatchProviderTransport?
     private weak var voiceSession: WatchVoiceSession?
     private weak var channelManager: WatchChannelManager?
+    private weak var conversationStore: WatchConversationStore?
 
     private var didBind = false
     private var connectionInterruptionReason: String?
@@ -54,7 +55,8 @@ final class WatchConnectionPresentationState {
         credentialStore: WatchCredentialStore,
         transport: WatchProviderTransport,
         voiceSession: WatchVoiceSession,
-        channelManager: WatchChannelManager
+        channelManager: WatchChannelManager,
+        conversationStore: WatchConversationStore
     ) {
         guard !didBind else { return }
         didBind = true
@@ -63,6 +65,7 @@ final class WatchConnectionPresentationState {
         self.transport = transport
         self.voiceSession = voiceSession
         self.channelManager = channelManager
+        self.conversationStore = conversationStore
 
         startObservationTracking()
         observeTransportEvents(transport: transport, voiceSession: voiceSession)
@@ -105,11 +108,19 @@ final class WatchConnectionPresentationState {
     }
 
     nonisolated static func channelDisplayName(
-        streamListLoaded: Bool,
+        streamLoadState: WatchChannelManager.StreamLoadState,
         streams: [StreamSession],
         currentSessionKey: String?
     ) -> String {
-        guard streamListLoaded else { return "Loading channels…" }
+        switch streamLoadState {
+        case .idle, .loading:
+            return "Loading channels…"
+        case .failed:
+            return "Loading channels…"
+        case .loaded:
+            break
+        }
+
         guard !streams.isEmpty else { return "No channels" }
 
         if let currentSessionKey,
@@ -142,6 +153,7 @@ final class WatchConnectionPresentationState {
                 attachments: [],
                 sessionKey: sessionKey
             )
+            conversationStore?.recordOutgoing(content: text, sessionKey: sessionKey)
         } catch {
             pendingSendOrigins.removeValue(forKey: messageId)
             handleImmediateSendFailure(error, origin: origin)
@@ -165,7 +177,7 @@ final class WatchConnectionPresentationState {
                     transcript: voiceSession.transcript,
                     voiceError: voiceSession.errorMessage,
                     voiceInputAvailable: voiceSession.canUseVoice,
-                    streamListLoaded: channelManager.streamListLoaded,
+                    streamLoadState: channelManager.streamLoadState,
                     streams: channelManager.streams,
                     currentSessionKey: channelManager.currentSessionKey
                 )
@@ -257,7 +269,7 @@ final class WatchConnectionPresentationState {
         voiceInputAvailable = latestSnapshot.voiceInputAvailable
         routeChip = Self.routeChip(for: latestSnapshot.transportState)
         channelDisplayName = Self.channelDisplayName(
-            streamListLoaded: latestSnapshot.streamListLoaded,
+            streamLoadState: latestSnapshot.streamLoadState,
             streams: latestSnapshot.streams,
             currentSessionKey: latestSnapshot.currentSessionKey
         )

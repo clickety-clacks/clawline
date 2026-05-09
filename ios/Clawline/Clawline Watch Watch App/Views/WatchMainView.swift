@@ -2,128 +2,229 @@ import SwiftUI
 import WatchKit
 
 struct WatchMainView: View {
+    @Environment(WatchCredentialStore.self) private var credentialStore
     @Environment(WatchProviderTransport.self) private var transport
     @Environment(WatchVoiceSession.self) private var voiceSession
     @Environment(WatchChannelManager.self) private var channelManager
+    @Environment(WatchConversationStore.self) private var conversationStore
     @Environment(WatchConnectionPresentationState.self) private var presentationState
+    @Environment(\.scenePhase) private var scenePhase
 
-    @State private var activeGesture = ActiveGesture()
-    @State private var holdTask: Task<Void, Never>?
+    @State private var holdVoiceActive = false
 
-    @State private var showTextInputSheet = false
-    @State private var textInput = ""
+    private let placeholderPageKey = "__watch_shell_placeholder__"
 
     var body: some View {
-        Group {
-            if presentationState.hasProviderCredentials {
-                content
-            } else {
-                pairingPrompt
+        content
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .task {
+                channelManager.bind(transport: transport)
+                conversationStore.bind(transport: transport)
+                presentationState.bind(
+                    credentialStore: credentialStore,
+                    transport: transport,
+                    voiceSession: voiceSession,
+                    channelManager: channelManager,
+                    conversationStore: conversationStore
+                )
+                channelManager.retryLoadingIfNeeded(for: transport.transportState)
+                observeIncomingResponses()
             }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(.horizontal, 8)
-        .padding(.bottom, 6)
-        .safeAreaInset(edge: .top, spacing: 4) {
-            HStack {
-                RouteIndicatorChip(presentation: presentationState.routeChip)
-                    .layoutPriority(1)
-                Spacer(minLength: 0)
+            .onChange(of: transport.transportState) { _, newValue in
+                channelManager.retryLoadingIfNeeded(for: newValue)
+                WKInterfaceDevice.current().play(.click)
             }
-            .padding(.horizontal, 8)
-            .padding(.top, 2)
-        }
-        .task { observeIncomingResponses() }
-        .onChange(of: transport.transportState) { _, newValue in
-            voiceSession.routeChanged(to: newValue)
-            WKInterfaceDevice.current().play(.click)
-        }
-        .sheet(isPresented: $showTextInputSheet) {
-            VStack(spacing: 10) {
-                Text("Text only")
-                    .font(.system(size: 14, weight: .semibold, design: .rounded))
-
-                TextField("Dictate or type", text: $textInput)
-
-                Button("Send") {
-                    let text = textInput.trimmingCharacters(in: .whitespacesAndNewlines)
-                    guard !text.isEmpty else { return }
-                    Task { await presentationState.sendTextMessage(text) }
-                    textInput = ""
-                    showTextInputSheet = false
-                }
-                .buttonStyle(.borderedProminent)
+            .onChange(of: scenePhase) { _, newPhase in
+                guard newPhase == .active else { return }
+                channelManager.retryLoadingIfNeeded(for: transport.transportState)
             }
-            .padding()
-        }
     }
 
     private var content: some View {
+        TabView(selection: selectedPageKey) {
+            if channelManager.streams.isEmpty {
+                channelPage(stream: nil)
+                    .tag(placeholderPageKey)
+            } else {
+                ForEach(channelManager.streams) { stream in
+                    channelPage(stream: stream)
+                        .tag(stream.sessionKey)
+                }
+            }
+        }
+        .tabViewStyle(.page(indexDisplayMode: .never))
+    }
+
+    private var selectedPageKey: Binding<String> {
+        Binding(
+            get: {
+                channelManager.currentSessionKey ??
+                channelManager.streams.first?.sessionKey ??
+                placeholderPageKey
+            },
+            set: { newValue in
+                guard newValue != placeholderPageKey else { return }
+                channelManager.setCurrentSessionKey(newValue)
+            }
+        )
+    }
+
+    private func channelPage(stream: StreamSession?) -> some View {
         GeometryReader { proxy in
             let availableSize = proxy.size
             let ringDiameter = WatchShellMetrics.ringDiameter(for: availableSize)
-            let ringFrame = CGRect(
-                x: (availableSize.width - ringDiameter) / 2,
-                y: 0,
-                width: ringDiameter,
-                height: ringDiameter
-            )
+            let shellMessage = shellMessage(for: stream)
+            let showsChannelRow = transport.transportState != .disconnected
 
-            VStack(spacing: 8) {
-                ZStack {
-                    WaveformRingView(audioLevel: voiceSession.audioLevel, isActive: isVoiceActive)
-                        .frame(width: ringDiameter, height: ringDiameter)
+            VStack(spacing: WatchShellMetrics.shellSpacing) {
+                historyRevealArea(for: stream?.sessionKey)
+                    .frame(maxHeight: .infinity)
 
-                    Image(systemName: centerIcon)
-                        .font(.system(size: ringDiameter * 0.34, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(
-                            width: max(44, ringDiameter * 0.4),
-                            height: max(44, ringDiameter * 0.4)
-                        )
+                if let shellMessage {
+                    shellMessageView(shellMessage)
                 }
 
-                Text(presentationState.statusText)
-                    .font(.system(size: 13, weight: .medium, design: .rounded))
-                    .lineLimit(2)
-                    .multilineTextAlignment(.center)
-                    .minimumScaleFactor(0.8)
+                ringControl(ringDiameter: ringDiameter)
 
-                WatchStreamDotsView(
-                    sessionKeys: channelManager.streams.map(\.sessionKey),
-                    activeSessionKey: channelManager.currentSessionKey,
-                    unreadSessionKeys: channelManager.unreadSessionKeys
-                )
-
-                Text(presentationState.channelDisplayName)
-                    .font(.system(size: 13, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
+                if showsChannelRow {
+                    channelRow(for: stream)
+                }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            .contentShape(Rectangle())
-            .gesture(interactionGesture(ringFrame: ringFrame))
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+            .padding(.horizontal, WatchShellMetrics.horizontalPadding)
+            .padding(.vertical, WatchShellMetrics.verticalPadding)
         }
     }
 
-    private var pairingPrompt: some View {
-        VStack(spacing: 8) {
-            Spacer(minLength: 0)
-            Text("Open Clawline")
-                .font(.system(size: 16, weight: .semibold, design: .rounded))
-            Text("on iPhone to pair")
-                .font(.system(size: 13, weight: .medium, design: .rounded))
-                .foregroundStyle(.secondary)
-            Spacer(minLength: 0)
+    @ViewBuilder
+    private func historyRevealArea(for sessionKey: String?) -> some View {
+        let entries = conversationStore.visibleEntries(for: sessionKey)
+
+        if !entries.isEmpty {
+            GeometryReader { proxy in
+                ScrollView {
+                    VStack(spacing: 6) {
+                        ForEach(entries) { entry in
+                            historyBubble(entry)
+                        }
+
+                        Color.clear
+                            .frame(height: max(proxy.size.height, 1))
+                            .accessibilityHidden(true)
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .defaultScrollAnchor(.bottom)
+                .scrollIndicators(.hidden)
+            }
+        } else {
+            Color.clear
+                .accessibilityHidden(true)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func historyBubble(_ entry: WatchConversationStore.Entry) -> some View {
+        HStack {
+            if entry.role == .assistant {
+                bubbleBody(
+                    entry.content,
+                    frameAlignment: .leading,
+                    textAlignment: .leading,
+                    fill: Color.secondary.opacity(0.16)
+                )
+                Spacer(minLength: 22)
+            } else {
+                Spacer(minLength: 22)
+                bubbleBody(
+                    entry.content,
+                    frameAlignment: .trailing,
+                    textAlignment: .trailing,
+                    fill: Color.accentColor.opacity(0.18)
+                )
+            }
+        }
+    }
+
+    private func bubbleBody(
+        _ text: String,
+        frameAlignment: Alignment,
+        textAlignment: TextAlignment,
+        fill: Color
+    ) -> some View {
+        Text(text)
+            .font(.system(size: 12, weight: .medium, design: .rounded))
+            .foregroundStyle(.primary)
+            .multilineTextAlignment(textAlignment)
+            .lineLimit(4)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(fill)
+            )
+            .frame(maxWidth: .infinity, alignment: frameAlignment)
+    }
+
+    private func ringControl(ringDiameter: CGFloat) -> some View {
+        ZStack {
+            WaveformRingView(audioLevel: voiceSession.audioLevel, state: ringVisualState)
+                .frame(width: ringDiameter, height: ringDiameter)
+
+            Image(systemName: centerIcon)
+                .font(.system(size: ringDiameter * 0.34, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(
+                    width: max(44, ringDiameter * 0.4),
+                    height: max(44, ringDiameter * 0.4)
+                )
+        }
+        .contentShape(Circle())
+        .onTapGesture {
+            handleTapAction()
+        }
+        .onLongPressGesture(minimumDuration: 0.35, maximumDistance: 30, pressing: { isPressing in
+            if !isPressing, holdVoiceActive {
+                holdVoiceActive = false
+                voiceSession.releaseHold()
+            }
+        }) {
+            beginLongPressAction()
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Microphone")
+        .accessibilityHint("Tap to talk or stop. Touch and hold for push to talk.")
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction {
+            handleTapAction()
+        }
+    }
+
+    @ViewBuilder
+    private func channelRow(for stream: StreamSession?) -> some View {
+        if transport.transportState != .disconnected {
+            HStack(spacing: 8) {
+                Text(channelRowTitle(for: stream))
+                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+
+                Spacer(minLength: 0)
+
+                if let routeIconName {
+                    Image(systemName: routeIconName)
+                        .font(.system(size: 12, weight: .semibold))
+                }
+            }
+            .foregroundStyle(.secondary)
+        }
     }
 
     private var centerIcon: String {
         switch voiceSession.voiceState {
-        case .listening, .finalizing, .speaking:
-            return "stop.fill"
+        case .listening, .finalizing:
+            return "waveform"
+        case .speaking:
+            return "speaker.wave.2.fill"
         case .sending:
             return "hourglass"
         case .idle, .error:
@@ -131,8 +232,31 @@ struct WatchMainView: View {
         }
     }
 
-    private var isVoiceActive: Bool {
-        switch voiceSession.voiceState {
+    private var ringVisualState: WatchRingVisualState {
+        Self.ringVisualState(
+            voiceState: voiceSession.voiceState,
+            transportState: transport.transportState
+        )
+    }
+
+    static func ringVisualState(
+        voiceState: WatchVoiceSession.VoiceState,
+        transportState: WatchProviderTransportState
+    ) -> WatchRingVisualState {
+        switch transportState {
+        case .direct:
+            return Self.isVoiceActive(voiceState) ? .activeDirect : .connectedDirect
+        case .relay:
+            return Self.isVoiceActive(voiceState) ? .activeRelay : .connectedRelay
+        case .probing:
+            return .connecting
+        case .disconnected:
+            return .disconnected
+        }
+    }
+
+    private static func isVoiceActive(_ state: WatchVoiceSession.VoiceState) -> Bool {
+        switch state {
         case .listening, .finalizing, .speaking:
             return true
         case .sending, .idle, .error:
@@ -140,44 +264,64 @@ struct WatchMainView: View {
         }
     }
 
-    private func interactionGesture(ringFrame: CGRect) -> some Gesture {
-        DragGesture(minimumDistance: 0)
-            .onChanged { value in
-                if !activeGesture.isActive {
-                    activeGesture = ActiveGesture(
-                        isActive: true,
-                        startedInRing: ringFrame.contains(value.startLocation)
-                    )
-                    armHoldIfNeeded()
-                }
+    private var routeIconName: String? {
+        switch transport.transportState {
+        case .direct:
+            return "wifi"
+        case .relay:
+            return "iphone"
+        case .probing, .disconnected:
+            return nil
+        }
+    }
 
-                guard !activeGesture.holdStarted,
-                      WatchGestureArbitration.shouldPreemptHold(translation: value.translation) else {
-                    return
-                }
+    private func channelRowTitle(for stream: StreamSession?) -> String {
+        if let stream {
+            return stream.displayName
+        }
+        return presentationState.channelDisplayName
+    }
 
-                activeGesture.swipePreemptedHold = true
-                cancelHold()
+    private func shellMessage(for stream: StreamSession?) -> String? {
+        Self.shellMessage(
+            hasProviderCredentials: presentationState.hasProviderCredentials,
+            streamLoadState: channelManager.streamLoadState,
+            streams: channelManager.streams,
+            stream: stream
+        )
+    }
+
+    nonisolated static func shellMessage(
+        hasProviderCredentials: Bool,
+        streamLoadState: WatchChannelManager.StreamLoadState,
+        streams: [StreamSession],
+        stream: StreamSession?
+    ) -> String? {
+        if !hasProviderCredentials {
+            return "Open Clawline on iPhone to pair"
+        }
+
+        switch streamLoadState {
+        case .idle, .loading:
+            return "Loading channels…"
+        case .failed(let message):
+            let trimmed = message.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? "Unable to load channels" : trimmed
+        case .loaded:
+            guard stream == nil else { return nil }
+            if streams.isEmpty {
+                return "No channels"
             }
-            .onEnded { value in
-                defer { resetGesture() }
+            return nil
+        }
+    }
 
-                if let delta = WatchGestureArbitration.swipeDelta(for: value.translation),
-                   activeGesture.swipePreemptedHold {
-                    channelManager.switchBy(delta: delta)
-                    WKInterfaceDevice.current().play(.click)
-                    return
-                }
-
-                if activeGesture.holdStarted {
-                    voiceSession.releaseHold()
-                    return
-                }
-
-                if activeGesture.startedInRing {
-                    handleTapAction()
-                }
-            }
+    private func shellMessageView(_ message: String) -> some View {
+        Text(message)
+            .font(.system(size: 13, weight: .medium, design: .rounded))
+            .multilineTextAlignment(.center)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 8)
     }
 
     private func handleTapAction() {
@@ -186,7 +330,7 @@ struct WatchMainView: View {
             voiceSession.bargeIn()
         case .idle, .error:
             if transport.transportState == .disconnected || !presentationState.voiceInputAvailable {
-                showTextInputSheet = true
+                Task { await requestTextInput() }
             } else {
                 voiceSession.startTap()
             }
@@ -202,7 +346,7 @@ struct WatchMainView: View {
             for await message in transport.incomingMessages {
                 guard message.role == .assistant else { continue }
 
-                if let activeSession = channelManager.engineSessionKey,
+                if let activeSession = channelManager.engineSessionKey ?? channelManager.currentSessionKey,
                    activeSession != message.sessionKey {
                     continue
                 }
@@ -214,43 +358,16 @@ struct WatchMainView: View {
         }
     }
 
-    private func armHoldIfNeeded() {
-        guard activeGesture.startedInRing else { return }
-        cancelHold()
-        holdTask = Task { [weak voiceSession] in
-            try? await Task.sleep(for: .seconds(WatchGestureArbitration.holdDelay))
-            guard !Task.isCancelled else { return }
-            await MainActor.run {
-                guard activeGesture.startedInRing,
-                      !activeGesture.swipePreemptedHold,
-                      !activeGesture.holdStarted else {
-                    return
-                }
-
-                activeGesture.holdStarted = true
-                if transport.transportState == .disconnected || !presentationState.voiceInputAvailable {
-                    showTextInputSheet = true
-                } else {
-                    voiceSession?.startHold()
-                }
-            }
-        }
+    private func beginLongPressAction() {
+        guard presentationState.voiceInputAvailable else { return }
+        holdVoiceActive = true
+        voiceSession.startHold()
     }
 
-    private func cancelHold() {
-        holdTask?.cancel()
-        holdTask = nil
+    @MainActor
+    private func requestTextInput() async {
+        guard let text = await WatchTextInputPresenter.requestPlainTextInput(),
+              !text.isEmpty else { return }
+        await presentationState.sendTextMessage(text)
     }
-
-    private func resetGesture() {
-        cancelHold()
-        activeGesture = ActiveGesture()
-    }
-}
-
-private struct ActiveGesture {
-    var isActive = false
-    var startedInRing = false
-    var swipePreemptedHold = false
-    var holdStarted = false
 }

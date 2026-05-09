@@ -16,7 +16,7 @@ struct WatchConnectionPresentationStateTests {
                 transcript: "",
                 voiceError: nil,
                 voiceInputAvailable: false,
-                streamListLoaded: true,
+                streamLoadState: .loaded,
                 streams: [],
                 currentSessionKey: nil
             )
@@ -31,21 +31,28 @@ struct WatchConnectionPresentationStateTests {
     func channelDisplayNameAvoidsPhantomFallback() {
         #expect(
             WatchConnectionPresentationState.channelDisplayName(
-                streamListLoaded: false,
+                streamLoadState: .loading,
                 streams: [],
                 currentSessionKey: nil
             ) == "Loading channels…"
         )
         #expect(
             WatchConnectionPresentationState.channelDisplayName(
-                streamListLoaded: true,
+                streamLoadState: .loaded,
                 streams: [],
                 currentSessionKey: nil
             ) == "No channels"
         )
         #expect(
             WatchConnectionPresentationState.channelDisplayName(
-                streamListLoaded: true,
+                streamLoadState: .failed("No transport available"),
+                streams: [],
+                currentSessionKey: nil
+            ) == "Loading channels…"
+        )
+        #expect(
+            WatchConnectionPresentationState.channelDisplayName(
+                streamLoadState: .loaded,
                 streams: [
                     StreamSession(
                         sessionKey: "agent:main:main",
@@ -68,11 +75,112 @@ struct WatchConnectionPresentationStateTests {
         #expect(WatchShellMetrics.ringDiameter(for: CGSize(width: 260, height: 280)) == 145)
     }
 
-    @Test("horizontal swipe arbitration preempts hold at 10pt")
-    func swipeArbitrationUsesSpecThreshold() {
-        #expect(WatchGestureArbitration.shouldPreemptHold(translation: CGSize(width: 9, height: 0)) == false)
-        #expect(WatchGestureArbitration.shouldPreemptHold(translation: CGSize(width: 10, height: 0)) == true)
-        #expect(WatchGestureArbitration.swipeDelta(for: CGSize(width: -12, height: 2)) == 1)
-        #expect(WatchGestureArbitration.swipeDelta(for: CGSize(width: 12, height: 1)) == -1)
+    @Test("voice-active ring state preserves non-direct transport routes")
+    func voiceActiveRingStatePreservesTransportRoute() {
+        #expect(
+            isSameRingState(
+                WatchMainView.ringVisualState(
+                    voiceState: .listening,
+                    transportState: .direct
+                ),
+                .activeDirect
+            )
+        )
+        #expect(
+            isSameRingState(
+                WatchMainView.ringVisualState(
+                    voiceState: .finalizing,
+                    transportState: .relay
+                ),
+                .activeRelay
+            )
+        )
+        #expect(
+            isSameRingState(
+                WatchMainView.ringVisualState(
+                    voiceState: .speaking,
+                    transportState: .probing
+                ),
+                .connecting
+            )
+        )
+        #expect(
+            isSameRingState(
+                WatchMainView.ringVisualState(
+                    voiceState: .listening,
+                    transportState: .disconnected
+                ),
+                .disconnected
+            )
+        )
     }
+
+    @Test("conversation preview keeps only the newest ten messages")
+    @MainActor
+    func conversationPreviewCapsAtTenMessages() {
+        let store = WatchConversationStore()
+
+        for index in 0..<12 {
+            store.recordOutgoing(content: "message \(index)", sessionKey: "session")
+        }
+
+        let visible = store.visibleEntries(for: "session")
+        #expect(visible.count == 10)
+        #expect(visible.first?.content == "message 2")
+        #expect(visible.last?.content == "message 11")
+    }
+
+    @Test("conversation preview also caps by total characters")
+    @MainActor
+    func conversationPreviewCapsAtFiveHundredCharacters() {
+        let store = WatchConversationStore()
+
+        store.recordOutgoing(content: String(repeating: "a", count: 240), sessionKey: "session")
+        store.recordOutgoing(content: String(repeating: "b", count: 240), sessionKey: "session")
+        store.recordOutgoing(content: String(repeating: "c", count: 240), sessionKey: "session")
+
+        let visible = store.visibleEntries(for: "session")
+        #expect(visible.count == 2)
+        #expect(visible.first?.content == String(repeating: "b", count: 240))
+        #expect(visible.last?.content == String(repeating: "c", count: 240))
+    }
+
+    @Test("conversation preview truncates a single newest oversized message")
+    @MainActor
+    func conversationPreviewCapsSingleNewestMessage() {
+        let store = WatchConversationStore()
+
+        store.recordOutgoing(content: String(repeating: "x", count: 720), sessionKey: "session")
+
+        let visible = store.visibleEntries(for: "session")
+        #expect(visible.count == 1)
+        #expect(visible.first?.content == String(repeating: "x", count: 500))
+    }
+
+    private func isSameRingState(_ lhs: WatchRingVisualState, _ rhs: WatchRingVisualState) -> Bool {
+        switch (lhs, rhs) {
+        case (.connectedDirect, .connectedDirect),
+             (.connectedRelay, .connectedRelay),
+             (.connecting, .connecting),
+             (.disconnected, .disconnected),
+             (.activeDirect, .activeDirect),
+             (.activeRelay, .activeRelay):
+            return true
+        default:
+            return false
+        }
+    }
+
+    @Test("channel load failures are surfaced instead of infinite loading")
+    func shellMessageSurfacesChannelFailures() {
+        #expect(
+            WatchMainView.shellMessage(
+                hasProviderCredentials: true,
+                streamLoadState: .failed("No transport available"),
+                streams: [],
+                stream: nil
+            ) == "No transport available"
+        )
+    }
+
 }

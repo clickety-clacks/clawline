@@ -160,4 +160,97 @@ struct ClawlineTests {
             isProviderConfigured: true
         ))
     }
+
+    @Test("watch relay chat.send is dispatched through the iPhone relay service")
+    @MainActor
+    func watchRelayChatSendDispatchesThroughPhoneService() async {
+        let suiteName = "ClawlineTests.watchRelayChatSend"
+        let defaults = UserDefaults(suiteName: suiteName) ?? .standard
+        defaults.removePersistentDomain(forName: suiteName)
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let chatService = SpyChatService()
+        let authManager = AuthManager(storage: defaults, secureStore: InMemorySecureStore())
+        let service = WatchConnectivityService(
+            authManager: authManager,
+            sonioxKeyStore: SonioxKeyStore(keychain: KeychainSecureStore()),
+            cartesiaKeyStore: CartesiaKeyStore(keychain: KeychainSecureStore()),
+            chatService: chatService
+        )
+
+        let reply = await service.handleTestMessage([
+            "type": "chat.send",
+            "requestId": "req-1",
+            "payload": [
+                "id": "msg-1",
+                "content": "hello from watch",
+                "sessionKey": "agent:main:clawline:flynn:main",
+                "attachments": []
+            ]
+        ])
+
+        #expect(reply["type"] as? String == "chat.send.ack")
+        #expect(chatService.sentMessages.count == 1)
+        #expect(chatService.sentMessages.first?.id == "msg-1")
+        #expect(chatService.sentMessages.first?.content == "hello from watch")
+        #expect(chatService.sentMessages.first?.sessionKey == "agent:main:clawline:flynn:main")
+    }
+
+    @Test("Clawline app retains and activates the watch connectivity service")
+    func clawlineAppRetainsAndActivatesWatchConnectivityService() throws {
+        let appPath = URL(filePath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appending(path: "Clawline/ClawlineApp.swift")
+        let source = try String(contentsOf: appPath, encoding: .utf8)
+        #expect(source.contains("@State private var watchConnectivityService: WatchConnectivityService"))
+        #expect(source.contains("watchConnectivityService.activate()"))
+    }
+
+}
+
+private final class SpyChatService: ChatServicing {
+    struct SentMessage {
+        let id: String
+        let content: String
+        let attachments: [WireAttachment]
+        let sessionKey: String?
+    }
+
+    private(set) var sentMessages: [SentMessage] = []
+
+    let incomingMessages = AsyncStream<Message> { _ in }
+    let connectionState = AsyncStream<ConnectionState> { continuation in continuation.yield(.connected) }
+    let serviceEvents = AsyncStream<ChatServiceEvent> { _ in }
+    let lifecycleTransportEvents = AsyncStream<LifecycleTransportEvent> { _ in }
+    let isTransportReadyForSend = true
+
+    func connect(token: String, lastMessageId: String?) async throws {}
+    func startConnectionAttempt(epoch: Int, lastMessageId: String?, token: String) {}
+    func stopConnectionAttempt() {}
+    func disconnect() {}
+    func replayCursorSnapshot() -> [String : String] { [:] }
+    func setReplayCursor(_ cursor: String?, for sessionKey: String) {}
+    func seedReplayCursorIfMissing(_ cursor: String?, for sessionKey: String) {}
+    func clearReplayCursors() {}
+    func send(id: String, content: String, attachments: [WireAttachment], sessionKey: String?) async throws {
+        sentMessages.append(SentMessage(id: id, content: content, attachments: attachments, sessionKey: sessionKey))
+    }
+    func sendInteractiveCallback(sourceMessageId: String, action: String, data: JSONValue?) async throws {}
+    func publishReadState(sessionKey: String, lastReadMessageId: String) async throws {}
+    func fetchStreams() async throws -> [StreamSession] { [] }
+    func fetchTrackableSessions() async throws -> [TrackableSession] { [] }
+    func fetchSessionStatus(sessionKey: String) async throws -> SessionStatus { fatalError() }
+    func applySessionControl(sessionKey: String, action: SessionControlAction, value: String?, enabled: Bool?) async throws -> SessionControlResponse { fatalError() }
+    func adoptStream(sessionKey: String) async throws -> StreamSession { fatalError() }
+    func createStream(displayName: String, idempotencyKey: String) async throws -> StreamSession { fatalError() }
+    func renameStream(sessionKey: String, displayName: String) async throws -> StreamSession { fatalError() }
+    func deleteStream(sessionKey: String, idempotencyKey: String?) async throws -> String { fatalError() }
+}
+
+private final class InMemorySecureStore: SecureStoring {
+    private var storage: [String: String] = [:]
+    func setString(_ value: String, forKey key: String) { storage[key] = value }
+    func getString(_ key: String) -> String? { storage[key] }
+    func removeValue(forKey key: String) { storage.removeValue(forKey: key) }
 }

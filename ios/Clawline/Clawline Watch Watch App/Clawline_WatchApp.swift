@@ -7,6 +7,7 @@ struct Clawline_Watch_Watch_AppApp: App {
     @State private var providerTransport: WatchProviderTransport
     @State private var voiceSession: WatchVoiceSession
     @State private var channelManager: WatchChannelManager
+    @State private var conversationStore: WatchConversationStore
     @State private var presentationState: WatchConnectionPresentationState
 
     private let wcSessionDelegate: WatchWCSessionDelegate?
@@ -23,16 +24,10 @@ struct Clawline_Watch_Watch_AppApp: App {
 
         let channelManager = WatchChannelManager()
         _channelManager = State(initialValue: channelManager)
+        let conversationStore = WatchConversationStore()
+        _conversationStore = State(initialValue: conversationStore)
         let presentationState = WatchConnectionPresentationState()
         _presentationState = State(initialValue: presentationState)
-
-        channelManager.bind(transport: transport)
-        presentationState.bind(
-            credentialStore: credentialStore,
-            transport: transport,
-            voiceSession: voiceSession,
-            channelManager: channelManager
-        )
 
         voiceSession.onTranscriptReady = { transcript in
             Task { @MainActor in
@@ -63,6 +58,7 @@ struct Clawline_Watch_Watch_AppApp: App {
             .environment(providerTransport)
             .environment(voiceSession)
             .environment(channelManager)
+            .environment(conversationStore)
             .environment(presentationState)
     }
 }

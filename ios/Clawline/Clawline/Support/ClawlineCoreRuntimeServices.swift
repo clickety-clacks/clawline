@@ -5,6 +5,7 @@ struct ClawlineCoreRuntimeServices {
     let connectionService: any ConnectionServicing
     let chatService: ProviderChatService
     let uploadService: UploadService
+    let watchConnectivityService: WatchConnectivityService
 }
 
 enum ClawlineCoreRuntimeServicesFactory {
@@ -24,11 +25,19 @@ enum ClawlineCoreRuntimeServicesFactory {
             auth: authManager,
             session: connector.tlsAwareURLSession
         )
+        let sharedKeychain = KeychainSecureStore()
+        let watchConnectivityService = WatchConnectivityService(
+            authManager: authManager,
+            sonioxKeyStore: SonioxKeyStore(keychain: sharedKeychain),
+            cartesiaKeyStore: CartesiaKeyStore(keychain: sharedKeychain),
+            chatService: chatService
+        )
         return ClawlineCoreRuntimeServices(
             deviceIdentifier: device,
             connectionService: connectionService,
             chatService: chatService,
-            uploadService: uploadService
+            uploadService: uploadService,
+            watchConnectivityService: watchConnectivityService
         )
     }
 }

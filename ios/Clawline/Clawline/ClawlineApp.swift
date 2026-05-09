@@ -15,6 +15,7 @@ import Observation
 struct ClawlineApp: App {
     @State private var authManager: AuthManager
     @State private var settingsManager: SettingsManager
+    @State private var watchConnectivityService: WatchConnectivityService
 
     private let deviceIdentifier: any DeviceIdentifying
     private let connectionService: any ConnectionServicing
@@ -45,6 +46,9 @@ struct ClawlineApp: App {
         let chatService = coreServices.chatService
         self.chatService = chatService
         self.uploadService = coreServices.uploadService
+        let watchConnectivityService = coreServices.watchConnectivityService
+        _watchConnectivityService = State(initialValue: watchConnectivityService)
+        watchConnectivityService.activate()
     }
 
     var body: some Scene {

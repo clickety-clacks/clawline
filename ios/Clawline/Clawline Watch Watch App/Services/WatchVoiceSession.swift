@@ -48,7 +48,6 @@ final class WatchVoiceSession {
     private var hasConfiguredAudioSession = false
 
     private var phase: Phase = .idle
-    private var currentRoute: WatchProviderTransportState = .disconnected
 
     private(set) var voiceState: VoiceState = .idle
     private(set) var audioLevel: Float = 0
@@ -159,36 +158,6 @@ final class WatchVoiceSession {
         guard case .speaking = phase else { return }
         cancelCurrentSpeech(clearQueue: true)
         transitionToListening(mode: .hold)
-    }
-
-    func routeChanged(to route: WatchProviderTransportState) {
-        let previousRoute = currentRoute
-        currentRoute = route
-
-        let shouldForceStop =
-            route == .disconnected ||
-            route == .relay ||
-            (previousRoute == .relay && route == .direct)
-
-        guard shouldForceStop else {
-            return
-        }
-
-        switch phase {
-        case .listening:
-            finalizeAndSend(forceIdleAfterSend: true)
-        case .finalizing:
-            // Let current finalization complete naturally, then transition to idle in finalize path.
-            break
-        case .sending:
-            // No-op: pending text response can still arrive via relay/disconnected recovery path.
-            break
-        case .speaking:
-            cancelCurrentSpeech(clearQueue: true)
-            transitionToIdle()
-        case .idle, .error:
-            break
-        }
     }
 
     func handleResponse(text: String) {
@@ -423,15 +392,16 @@ final class WatchVoiceSession {
                   let destination = buffer.int16ChannelData?.pointee else {
                 return
             }
-            destination.assign(from: source, count: Int(frameCount))
+            destination.update(from: source, count: Int(frameCount))
         }
 
         pendingBuffers += 1
-        playerNode.scheduleBuffer(buffer) { [weak self] in
-            Task { @MainActor in
-                guard let self else { return }
-                self.pendingBuffers = max(0, self.pendingBuffers - 1)
-                self.checkSpeechCompletion()
+        let session = self
+        playerNode.scheduleBuffer(buffer) { [weak session] in
+            Task { @MainActor [weak session] in
+                guard let session else { return }
+                session.pendingBuffers = max(0, session.pendingBuffers - 1)
+                session.checkSpeechCompletion()
             }
         }
 

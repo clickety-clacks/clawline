@@ -1215,6 +1215,12 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         currentInFlightPromptSessionKey != nil
     }
 
+    func canCancelVisibleTypingPrompt(in sessionKey: String) -> Bool {
+        let normalizedSessionKey = sessionKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedSessionKey.isEmpty else { return false }
+        return isAssistantTyping && typingSessionKey == normalizedSessionKey
+    }
+
     func canCancelCurrentPrompt(in sessionKey: String) -> Bool {
         let normalizedSessionKey = sessionKey.trimmingCharacters(in: .whitespacesAndNewlines)
         return promptIsInFlight(in: normalizedSessionKey)
@@ -1274,6 +1280,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
                 enabled: nil
             )
             if response.ok {
+                toastManager.show(response.message ?? "Prompt cancellation requested.")
                 scheduleSessionStatusRefresh(for: sessionKey, reason: "cancelCurrentPrompt")
                 return
             }

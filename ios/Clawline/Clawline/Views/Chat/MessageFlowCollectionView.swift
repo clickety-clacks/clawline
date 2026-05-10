@@ -130,7 +130,8 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
     var fontScaleChangeSequence: Int = 0
     var onScrollEvent: (@MainActor (MessageFlowScrollEvent) -> Void)?
     var onKeyboardDismissModeChanged: (@MainActor (String) -> Void)?
-    var onTypingIndicatorTap: (@MainActor () -> Void)?
+    var onTypingIndicatorTap: (@MainActor (CGRect) -> Void)?
+    var onTypingIndicatorAnchorFrameChanged: (@MainActor (CGRect?) -> Void)? = nil
     var onSessionControlSelected: (@MainActor (String, SessionControlAction, String?, Bool?) -> Void)?
     @Environment(\.colorScheme) private var colorScheme
 
@@ -170,6 +171,7 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
             onScrollEvent: onScrollEvent,
             onKeyboardDismissModeChanged: onKeyboardDismissModeChanged,
             onTypingIndicatorTap: onTypingIndicatorTap,
+            onTypingIndicatorAnchorFrameChanged: onTypingIndicatorAnchorFrameChanged,
             onSessionControlSelected: onSessionControlSelected,
             isDark: isDark
         )
@@ -203,6 +205,7 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
             onScrollEvent: onScrollEvent,
             onKeyboardDismissModeChanged: onKeyboardDismissModeChanged,
             onTypingIndicatorTap: onTypingIndicatorTap,
+            onTypingIndicatorAnchorFrameChanged: onTypingIndicatorAnchorFrameChanged,
             onSessionControlSelected: onSessionControlSelected,
             isDark: isDark
         )
@@ -236,7 +239,8 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         let fontScaleChangeSequence: Int
         let onScrollEvent: (@MainActor (MessageFlowScrollEvent) -> Void)?
         let onKeyboardDismissModeChanged: (@MainActor (String) -> Void)?
-        let onTypingIndicatorTap: (@MainActor () -> Void)?
+        let onTypingIndicatorTap: (@MainActor (CGRect) -> Void)?
+        let onTypingIndicatorAnchorFrameChanged: (@MainActor (CGRect?) -> Void)?
         let onSessionControlSelected: (@MainActor (String, SessionControlAction, String?, Bool?) -> Void)?
         let isDark: Bool?
     }
@@ -275,6 +279,8 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     private static let previewRemeasureRestPollSeconds: TimeInterval = 0.06
     private static let bottomInsetHeightCapInvalidationDebounceSeconds: TimeInterval = 0.20
     private static let restoreMaxConfirmationRetries: Int = 3
+    private static let typingIndicatorTapTargetLeadingOutset: CGFloat = 8
+    private static let typingIndicatorTapTargetTrailingOutset: CGFloat = 44
 
     static func chatPageBackgroundColor(isDark: Bool) -> UIColor {
         isDark ? .clear : UIColor(ChatFlowTheme.pageBackgroundTopColor(.light))
@@ -367,7 +373,9 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     private var onRequestKeyboardDismiss: (@MainActor () -> Void)?
     private var onScrollEvent: (@MainActor (MessageFlowScrollEvent) -> Void)?
     private var onKeyboardDismissModeChanged: (@MainActor (String) -> Void)?
-    private var onTypingIndicatorTap: (@MainActor () -> Void)?
+    private var onTypingIndicatorTap: (@MainActor (CGRect) -> Void)?
+    private var onTypingIndicatorAnchorFrameChanged: (@MainActor (CGRect?) -> Void)?
+    private var lastReportedTypingIndicatorAnchorFrame: CGRect?
     private var onSessionControlSelected: (@MainActor (String, SessionControlAction, String?, Bool?) -> Void)?
     private let webBubbleCoordinator = WebBubbleCoordinator()
     private var lastMessages: [Message] = []
@@ -1107,6 +1115,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         // Handle bounds size changes
         let size = collectionView.bounds.size
         guard size != .zero, size != lastBoundsSize else {
+            notifyTypingIndicatorAnchorFrameIfNeeded()
             return
         }
         lastBoundsSize = size
@@ -1134,10 +1143,12 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 onScrollEvent: onScrollEvent,
                 onKeyboardDismissModeChanged: onKeyboardDismissModeChanged,
                 onTypingIndicatorTap: onTypingIndicatorTap,
+                onTypingIndicatorAnchorFrameChanged: onTypingIndicatorAnchorFrameChanged,
                 onSessionControlSelected: onSessionControlSelected,
                 isDark: currentIsDark
             )
         }
+        notifyTypingIndicatorAnchorFrameIfNeeded()
     }
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
@@ -1166,6 +1177,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             schedulePersistScrollState(sessionKey: sessionKey)
             flushDeferredBubbleSizingV2RemeasureIfNeeded()
             scheduleDeferredBottomInsetRemeasure()
+            notifyTypingIndicatorAnchorFrameIfNeeded()
         }
     }
 
@@ -1180,6 +1192,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         schedulePersistScrollState(sessionKey: sessionKey)
         flushDeferredBubbleSizingV2RemeasureIfNeeded()
         scheduleDeferredBottomInsetRemeasure()
+        notifyTypingIndicatorAnchorFrameIfNeeded()
     }
 
     func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
@@ -1192,6 +1205,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         schedulePersistScrollState(sessionKey: sessionKey)
         flushDeferredBubbleSizingV2RemeasureIfNeeded()
         scheduleDeferredBottomInsetRemeasure()
+        notifyTypingIndicatorAnchorFrameIfNeeded()
     }
 
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
@@ -1972,6 +1986,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             onScrollEvent: onScrollEvent,
             onKeyboardDismissModeChanged: onKeyboardDismissModeChanged,
             onTypingIndicatorTap: onTypingIndicatorTap,
+            onTypingIndicatorAnchorFrameChanged: onTypingIndicatorAnchorFrameChanged,
             onSessionControlSelected: onSessionControlSelected,
             isDark: currentIsDark
         )
@@ -2004,6 +2019,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 onScrollEvent: request.onScrollEvent,
                 onKeyboardDismissModeChanged: request.onKeyboardDismissModeChanged,
                 onTypingIndicatorTap: request.onTypingIndicatorTap,
+                onTypingIndicatorAnchorFrameChanged: request.onTypingIndicatorAnchorFrameChanged,
                 onSessionControlSelected: request.onSessionControlSelected,
                 isDark: request.isDark
             )
@@ -2060,7 +2076,8 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         fontScaleChangeSequence: Int = 0,
         onScrollEvent: (@MainActor (MessageFlowScrollEvent) -> Void)? = nil,
         onKeyboardDismissModeChanged: (@MainActor (String) -> Void)? = nil,
-        onTypingIndicatorTap: (@MainActor () -> Void)? = nil,
+        onTypingIndicatorTap: (@MainActor (CGRect) -> Void)? = nil,
+        onTypingIndicatorAnchorFrameChanged: (@MainActor (CGRect?) -> Void)? = nil,
         onSessionControlSelected: (@MainActor (String, SessionControlAction, String?, Bool?) -> Void)? = nil,
         isDark: Bool? = nil
     ) {
@@ -2086,6 +2103,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             onScrollEvent: onScrollEvent,
             onKeyboardDismissModeChanged: onKeyboardDismissModeChanged,
             onTypingIndicatorTap: onTypingIndicatorTap,
+            onTypingIndicatorAnchorFrameChanged: onTypingIndicatorAnchorFrameChanged,
             onSessionControlSelected: onSessionControlSelected,
             isDark: isDark
         )
@@ -2137,6 +2155,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         self.onScrollEvent = onScrollEvent
         self.onKeyboardDismissModeChanged = onKeyboardDismissModeChanged
         self.onTypingIndicatorTap = onTypingIndicatorTap
+        self.onTypingIndicatorAnchorFrameChanged = onTypingIndicatorAnchorFrameChanged
         self.onSessionControlSelected = onSessionControlSelected
 
         // Handle appearance change from SwiftUI colorScheme
@@ -2368,6 +2387,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 viewModel.markEngineActivationRenderedIfNeeded(for: effectiveSessionKey)
             }
             self.updateVisibleFooterAlpha()
+            self.notifyTypingIndicatorAnchorFrameIfNeeded()
         }
         // Spec requires explicit contentOffset compensation for tail->full prepend.
         // This anchor path captures (messageId, oldFrameMinY, oldContentOffsetY), then applies:
@@ -3526,8 +3546,12 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         let hasCallback = onTypingIndicatorTap != nil
         let typingIndexPath = dataSource.indexPath(for: TypingIndicatorCell.itemId)
         let attributes = typingIndexPath.flatMap { collectionView.layoutAttributesForItem(at: $0) }
-        let frame = attributes?.frame ?? .null
-        let didHit = attributes?.frame.contains(point) == true
+        let frame = if let typingIndexPath, let attributes {
+            typingIndicatorTapTargetFrame(for: typingIndexPath, layoutAttributes: attributes)
+        } else {
+            CGRect.null
+        }
+        let didHit = frame.contains(point)
         let diagnosticMessage = "T217DIAG collection_tap build=\(Self.t217DiagnosticBuild) state=\(recognizer.state.rawValue) point=\(String(describing: point)) hasCallback=\(hasCallback) hasTypingIndexPath=\(typingIndexPath != nil) typingFrame=\(String(describing: frame)) didHit=\(didHit) contentOffset=\(String(describing: self.collectionView.contentOffset)) contentInset=\(String(describing: self.collectionView.contentInset))"
         print(diagnosticMessage)
         typingCancelDiagnosticLogger.notice(
@@ -3535,13 +3559,63 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         )
         guard recognizer.state == .ended,
               let onTypingIndicatorTap,
-              attributes != nil,
+              let typingIndexPath,
               didHit else { return }
         print("T217DIAG collection_tap_invoking_callback build=\(Self.t217DiagnosticBuild) point=\(String(describing: point))")
         typingCancelDiagnosticLogger.notice(
             "T217DIAG collection_tap_invoking_callback build=\(Self.t217DiagnosticBuild, privacy: .public) point=\(String(describing: point), privacy: .public)"
         )
-        onTypingIndicatorTap()
+        onTypingIndicatorTap(typingIndicatorAnchorFrame(for: typingIndexPath))
+    }
+
+    private func typingIndicatorTapTargetFrame(
+        for indexPath: IndexPath,
+        layoutAttributes: UICollectionViewLayoutAttributes
+    ) -> CGRect {
+        let visibleFrame: CGRect
+        if let cell = collectionView.cellForItem(at: indexPath) as? TypingIndicatorCell {
+            visibleFrame = cell.convert(cell.bounds, to: collectionView)
+        } else {
+            visibleFrame = layoutAttributes.frame
+        }
+        let expandedFrame = CGRect(
+            x: visibleFrame.minX - Self.typingIndicatorTapTargetLeadingOutset,
+            y: visibleFrame.minY,
+            width: visibleFrame.width + Self.typingIndicatorTapTargetLeadingOutset + Self.typingIndicatorTapTargetTrailingOutset,
+            height: visibleFrame.height
+        )
+        return expandedFrame.intersection(collectionViewContentFrame())
+    }
+
+    private func typingIndicatorAnchorFrame(for indexPath: IndexPath) -> CGRect {
+        guard let cell = collectionView.cellForItem(at: indexPath) as? TypingIndicatorCell else {
+            return collectionView.convert(collectionView.layoutAttributesForItem(at: indexPath)?.frame ?? .null, to: nil)
+        }
+        return cell.renderedBubbleFrame(in: nil)
+    }
+
+    private func notifyTypingIndicatorAnchorFrameIfNeeded() {
+        let anchorFrame: CGRect?
+        if let indexPath = dataSource.indexPath(for: TypingIndicatorCell.itemId),
+           let cell = collectionView.cellForItem(at: indexPath) as? TypingIndicatorCell {
+            anchorFrame = cell.renderedBubbleFrame(in: nil)
+        } else {
+            anchorFrame = nil
+        }
+        guard anchorFrame != lastReportedTypingIndicatorAnchorFrame else { return }
+        lastReportedTypingIndicatorAnchorFrame = anchorFrame
+        onTypingIndicatorAnchorFrameChanged?(anchorFrame)
+    }
+
+    private func collectionViewContentFrame() -> CGRect {
+        CGRect(
+            x: 0,
+            y: -collectionView.adjustedContentInset.top,
+            width: collectionView.bounds.width,
+            height: collectionView.contentSize.height
+                + collectionView.adjustedContentInset.top
+                + collectionView.adjustedContentInset.bottom
+        )
     }
 
     private func configureDataSource() {
@@ -3595,9 +3669,16 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                     isCompact: self.isCompact,
                     maxWidth: maxWidth,
                     isDark: self.currentIsDark,
-                    onTap: self.onTypingIndicatorTap
+                    onTap: { [weak self, weak cell] in
+                        guard let self else { return }
+                        let anchorFrame = cell?.renderedBubbleFrame(in: nil) ?? .null
+                        self.onTypingIndicatorTap?(anchorFrame)
+                    }
                 )
                 cell?.startAnimating()
+                DispatchQueue.main.async { [weak self] in
+                    self?.notifyTypingIndicatorAnchorFrameIfNeeded()
+                }
                 return cell
             }
 
@@ -5370,6 +5451,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         }
         dataSource.apply(snapshot, animatingDifferences: false) { [weak self] in
             self?.updateVisibleFooterAlpha()
+            self?.notifyTypingIndicatorAnchorFrameIfNeeded()
         }
     }
 

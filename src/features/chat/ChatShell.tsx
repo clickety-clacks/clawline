@@ -6,6 +6,10 @@ import type {
   StreamRecord
 } from "../../runtime/chat/chatDomainStore";
 import type { TransportPhase } from "../../runtime/transport/transportMachine";
+import type {
+  SessionControlAction,
+  SessionStatusPayload
+} from "../../protocol/stream-api";
 import { Composer } from "./Composer";
 import { MessageList } from "./MessageList";
 import { SessionListSheet } from "./SessionListSheet";
@@ -23,13 +27,16 @@ export function ChatShell({
   onOpenSessionList,
   onOpenStreamManager,
   onPopupSessionSelect,
+  onCancelCurrentPrompt,
   onRememberScrollState,
+  onSessionControlSelected,
   onUnreadAnchorConsumed,
   provisionedSessionKeys,
   provisioningState,
   rememberedScrollState,
   selectedMessages,
   selectedSessionKey,
+  selectedSessionStatus,
   selectedUnreadAnchorMessageId,
   streamDotStateBySessionKey,
   unreadBySessionKey,
@@ -51,17 +58,25 @@ export function ChatShell({
   onOpenSessionList: () => void;
   onOpenStreamManager: () => void;
   onPopupSessionSelect: (sessionKey: string) => void;
+  onCancelCurrentPrompt?: (sessionKey: string) => Promise<void> | void;
   onRememberScrollState: (input: {
     offsetTop: number;
     sessionKey: string;
     stickToBottom: boolean;
   }) => void;
+  onSessionControlSelected?: (
+    sessionKey: string,
+    action: SessionControlAction,
+    value?: string | null,
+    enabled?: boolean | null
+  ) => Promise<void> | void;
   onUnreadAnchorConsumed: (messageId: string) => void;
   provisionedSessionKeys: string[];
   provisioningState: SessionProvisioningState;
   rememberedScrollState?: SessionScrollState;
   selectedMessages: ChatMessageRecord[];
   selectedSessionKey?: string;
+  selectedSessionStatus?: SessionStatusPayload | null;
   selectedUnreadAnchorMessageId?: string | null;
   streamDotStateBySessionKey: Record<string, StreamDotState>;
   unreadBySessionKey: Record<string, number>;
@@ -102,11 +117,14 @@ export function ChatShell({
       >
         <MessageList
           messages={selectedMessages}
+          onCancelCurrentPrompt={onCancelCurrentPrompt}
           onRememberScrollState={onRememberScrollState}
+          onSessionControlSelected={onSessionControlSelected}
           onUnreadAnchorConsumed={onUnreadAnchorConsumed}
           viewportInsetBottom={keyboardInset}
           rememberedScrollState={rememberedScrollState}
           sessionKey={selectedSessionKey}
+          sessionStatus={selectedSessionStatus}
           unreadAnchorMessageId={selectedUnreadAnchorMessageId}
         />
         <div className="chat-floating-stack">

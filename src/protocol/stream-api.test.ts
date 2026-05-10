@@ -167,6 +167,83 @@ describe("stream-api", () => {
     expect(requests[0].headers.get("Authorization")).toBe("Bearer jwt-token");
   });
 
+  it("posts typed session-control actions through the provider control-plane route", async () => {
+    const requests: Request[] = [];
+    const client = createStreamApiClient({
+      fetchFn: async (input, init) => {
+        requests.push(new Request(input, init));
+        return jsonResponse({
+          ok: true,
+          sessionKey: "agent:main:clawline:user_1:main",
+          action: "cancel_current_run",
+          status: {
+            sessionKey: "agent:main:clawline:user_1:main",
+            run: {
+              state: "idle"
+            }
+          }
+        });
+      }
+    });
+
+    const response = await client.applySessionControl({
+      action: "cancel_current_run",
+      serverUrl: "ws://127.0.0.1:18800/ws",
+      sessionKey: "agent:main:clawline:user_1:main",
+      token: "jwt-token"
+    });
+
+    expect(response.ok).toBe(true);
+    expect(requests).toHaveLength(1);
+    expect(requests[0].url).toBe("http://127.0.0.1:18800/api/session-control");
+    expect(requests[0].method).toBe("POST");
+    expect(requests[0].headers.get("Authorization")).toBe("Bearer jwt-token");
+    expect(await requests[0].json()).toEqual({
+      sessionKey: "agent:main:clawline:user_1:main",
+      action: "cancel_current_run"
+    });
+  });
+
+  it("posts action-specific typed session-control payload fields", async () => {
+    const requests: Request[] = [];
+    const client = createStreamApiClient({
+      fetchFn: async (input, init) => {
+        requests.push(new Request(input, init));
+        return jsonResponse({
+          ok: true,
+          sessionKey: "agent:main:clawline:user_1:main",
+          action: "set_fast_mode"
+        });
+      }
+    });
+
+    await client.applySessionControl({
+      action: "set_model",
+      serverUrl: "ws://127.0.0.1:18800/ws",
+      sessionKey: "agent:main:clawline:user_1:main",
+      token: "jwt-token",
+      value: "gpt-5.5"
+    });
+    await client.applySessionControl({
+      action: "set_fast_mode",
+      enabled: true,
+      serverUrl: "ws://127.0.0.1:18800/ws",
+      sessionKey: "agent:main:clawline:user_1:main",
+      token: "jwt-token"
+    });
+
+    expect(await requests[0].json()).toEqual({
+      sessionKey: "agent:main:clawline:user_1:main",
+      action: "set_model",
+      model: "gpt-5.5"
+    });
+    expect(await requests[1].json()).toEqual({
+      sessionKey: "agent:main:clawline:user_1:main",
+      action: "set_fast_mode",
+      fastMode: true
+    });
+  });
+
   it("sends documented adopt and delete payloads", async () => {
     const requests: Request[] = [];
     const responses = [

@@ -13,6 +13,10 @@ import type {
   PendingMessageRecord,
   SessionScrollState
 } from "../../runtime/chat/chatDomainStore";
+import type {
+  SessionControlAction,
+  SessionStatusPayload
+} from "../../protocol/stream-api";
 import { useTransportMachine } from "../../runtime/transport/transportMachine";
 import { ExpandedMessageOverlay } from "./ExpandedMessageOverlay";
 import { MessageAttachments } from "./MessageAttachments";
@@ -25,6 +29,10 @@ import {
 } from "./messagePresentation";
 import { projectFailedMessageRetryState } from "./chatSendState";
 import { RichMessageBody, shouldOfferExpandedMessage } from "./RichMessageBody";
+import {
+  SESSION_STATUS_FOOTER_HEIGHT,
+  SessionStatusFooter
+} from "./SessionStatusFooter";
 import { useVirtualMessageWindow } from "./useVirtualMessageWindow";
 
 const TYPING_INDICATOR_HEIGHT = 90;
@@ -34,29 +42,64 @@ const BOTTOM_RESTORE_SETTLE_FRAMES = 8;
 
 export function MessageList({
   messages,
+  onCancelCurrentPrompt,
   onRememberScrollState,
+  onSessionControlSelected,
   onUnreadAnchorConsumed,
   rememberedScrollState,
   sessionKey,
+  sessionStatus,
   unreadAnchorMessageId,
   viewportInsetBottom = 0
 }: {
   messages: ChatMessageRecord[];
+  onCancelCurrentPrompt?: (sessionKey: string) => Promise<void> | void;
   onRememberScrollState?: (input: {
     offsetTop: number;
     sessionKey: string;
     stickToBottom: boolean;
   }) => void;
+  onSessionControlSelected?: (
+    sessionKey: string,
+    action: SessionControlAction,
+    value?: string | null,
+    enabled?: boolean | null
+  ) => Promise<void> | void;
   onUnreadAnchorConsumed?: (messageId: string) => void;
   rememberedScrollState?: SessionScrollState;
   sessionKey?: string;
+  sessionStatus?: SessionStatusPayload | null;
   unreadAnchorMessageId?: string | null;
   viewportInsetBottom?: number;
 }) {
   const { state: authState } = useAuthSessionStore();
-  const { store: chatStore } = useChatDomainStore();
+  const { state: chatState, store: chatStore } = useChatDomainStore();
   const { store: transportStore } = useTransportMachine();
   const [expandedMessageId, setExpandedMessageId] = useState<string | null>(null);
+  const [isCancelPromptOpen, setCancelPromptOpen] = useState(false);
+  const [cancelPromptAnchor, setCancelPromptAnchor] = useState<{
+    left: number;
+    top: number;
+  } | null>(null);
+  const statusRunState = sessionStatus?.run?.state ?? "unknown";
+  const hasInFlightRun = statusRunState === "running" || statusRunState === "queued";
+  const hasAssistantTyping = Boolean(
+    sessionKey && chatState.assistantTypingBySessionKey[sessionKey]
+  );
+  const canCancelCurrentPrompt = Boolean(
+    sessionKey &&
+    onCancelCurrentPrompt &&
+    (sessionStatus?.capabilities?.cancelCurrentRun?.supported ??
+      sessionStatus?.capabilities?.canCancelCurrentRun ??
+      true) &&
+    (hasAssistantTyping || hasInFlightRun)
+  );
+  const shouldShowTypingIndicator =
+    hasAssistantTyping || hasInFlightRun || hasStreamingAssistantMessage(messages);
+  const footerHeight = sessionStatus ? SESSION_STATUS_FOOTER_HEIGHT : 0;
+  const typingTrailingHeight = shouldShowTypingIndicator
+    ? TYPING_INDICATOR_HEIGHT + (messages.length > 0 ? TYPING_INDICATOR_GAP : 0)
+    : 0;
   const {
     containerRef,
     handleScroll,
@@ -69,22 +112,29 @@ export function MessageList({
     scrollToMessage,
     scrollToOffset,
     suspendBottomFollow,
+    trailingRevealAlpha,
     totalHeight
-  } = useVirtualMessageWindow(messages);
-  const shouldShowTypingIndicator = hasStreamingAssistantMessage(messages);
+  } = useVirtualMessageWindow(messages, {
+    restingTrailingHeight: typingTrailingHeight,
+    revealTrailingHeight: footerHeight
+  });
   const [isTypingIndicatorVisible, setIsTypingIndicatorVisible] = useState(
     shouldShowTypingIndicator
   );
   const restoredScrollStateKeyRef = useRef<string | null>(null);
   const isRestoringScrollRef = useRef(false);
   const consumedUnreadAnchorRef = useRef<string | null>(null);
+  const typingRowRef = useRef<HTMLDivElement | null>(null);
   const userScrollActiveRef = useRef(false);
   const userScrollReleaseTimeoutRef = useRef<number | null>(null);
   const expandedMessage = messages.find((message) => message.id === expandedMessageId) ?? null;
   const typingIndicatorOffsetTop = totalHeight + (messages.length > 0 ? TYPING_INDICATOR_GAP : 0);
+  const visibleTypingTrailingHeight = isTypingIndicatorVisible
+    ? TYPING_INDICATOR_HEIGHT + (messages.length > 0 ? TYPING_INDICATOR_GAP : 0)
+    : 0;
+  const footerOffsetTop = totalHeight + visibleTypingTrailingHeight;
   const virtualSurfaceHeight =
-    totalHeight
-    + (isTypingIndicatorVisible ? TYPING_INDICATOR_HEIGHT + (messages.length > 0 ? TYPING_INDICATOR_GAP : 0) : 0);
+    totalHeight + visibleTypingTrailingHeight + footerHeight;
 
   useEffect(() => {
     return () => {
@@ -113,6 +163,19 @@ export function MessageList({
     }, 180);
   }
 
+  function openCancelCurrentPrompt() {
+    const rect = typingRowRef.current?.getBoundingClientRect();
+    setCancelPromptAnchor(
+      rect
+        ? {
+            left: rect.left + 104,
+            top: rect.top + 16
+          }
+        : null
+    );
+    setCancelPromptOpen(true);
+  }
+
   useEffect(() => {
     if (shouldShowTypingIndicator) {
       setIsTypingIndicatorVisible(true);
@@ -127,6 +190,52 @@ export function MessageList({
       window.clearTimeout(timeoutId);
     };
   }, [shouldShowTypingIndicator]);
+
+  useEffect(() => {
+    if (!isCancelPromptOpen) {
+      return;
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setCancelPromptOpen(false);
+        return;
+      }
+
+      if (event.key === "Enter") {
+        event.preventDefault();
+        void confirmCancelCurrentPrompt();
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isCancelPromptOpen]);
+
+  useEffect(() => {
+    if (!canCancelCurrentPrompt && isCancelPromptOpen) {
+      setCancelPromptOpen(false);
+    }
+  }, [canCancelCurrentPrompt, isCancelPromptOpen]);
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (!canCancelCurrentPrompt || event.defaultPrevented) {
+        return;
+      }
+
+      if (event.key !== "." || (!event.metaKey && !event.ctrlKey) || event.altKey) {
+        return;
+      }
+
+      event.preventDefault();
+      openCancelCurrentPrompt();
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [canCancelCurrentPrompt]);
 
   useLayoutEffect(() => {
     if (!sessionKey || !onRememberScrollState || isRestoringScrollRef.current) {
@@ -349,7 +458,16 @@ export function MessageList({
     }
   }
 
-  if (messages.length === 0) {
+  async function confirmCancelCurrentPrompt() {
+    if (!sessionKey || !canCancelCurrentPrompt) {
+      return;
+    }
+
+    setCancelPromptOpen(false);
+    await onCancelCurrentPrompt?.(sessionKey);
+  }
+
+  if (messages.length === 0 && !isTypingIndicatorVisible) {
     return (
       <section className="message-list empty-state">
         <p className="eyebrow">No Messages Yet</p>
@@ -413,9 +531,39 @@ export function MessageList({
           {isTypingIndicatorVisible ? (
             <div
               className="message-list-row message-list-row--typing"
+              ref={typingRowRef}
               style={{ left: "0px", top: `${typingIndicatorOffsetTop}px` }}
             >
-              <TypingIndicator />
+              <TypingIndicator
+                canCancel={canCancelCurrentPrompt}
+                onClick={openCancelCurrentPrompt}
+              />
+              {isCancelPromptOpen ? (
+                <TypingCancelPrompt
+                  anchor={cancelPromptAnchor}
+                  onCancelPrompt={() => void confirmCancelCurrentPrompt()}
+                  onDismiss={() => setCancelPromptOpen(false)}
+                />
+              ) : null}
+            </div>
+          ) : null}
+          {sessionStatus ? (
+            <div
+              className="message-list-row message-list-row--footer"
+              style={{ left: "0px", top: `${footerOffsetTop}px`, width: "100%" }}
+            >
+              <SessionStatusFooter
+                onSelect={(selectedSessionKey, action, value, enabled) => {
+                  void onSessionControlSelected?.(
+                    selectedSessionKey,
+                    action,
+                    value,
+                    enabled
+                  );
+                }}
+                opacity={trailingRevealAlpha}
+                sessionStatus={sessionStatus}
+              />
             </div>
           ) : null}
         </div>
@@ -451,16 +599,76 @@ export function MessageList({
   );
 }
 
-function TypingIndicator() {
+function TypingIndicator({
+  canCancel,
+  onClick
+}: {
+  canCancel: boolean;
+  onClick: () => void;
+}) {
   return (
-    <div className="message-typing-indicator" data-testid="typing-indicator">
+    <button
+      aria-label={
+        canCancel
+          ? "Assistant is typing. Cancel current prompt"
+          : "Assistant is typing"
+      }
+      className="message-typing-indicator"
+      data-testid="typing-indicator"
+      disabled={!canCancel}
+      onClick={onClick}
+      type="button"
+    >
       <span className="sr-only">Assistant is typing</span>
       <span aria-hidden="true" className="message-typing-indicator-dots">
         <span className="message-typing-indicator-dot" />
         <span className="message-typing-indicator-dot" />
         <span className="message-typing-indicator-dot" />
       </span>
-    </div>
+    </button>
+  );
+}
+
+function TypingCancelPrompt({
+  anchor,
+  onCancelPrompt,
+  onDismiss
+}: {
+  anchor: { left: number; top: number } | null;
+  onCancelPrompt: () => void;
+  onDismiss: () => void;
+}) {
+  return (
+    <>
+      <button
+        aria-label="Dismiss cancel prompt"
+        className="message-typing-cancel-backdrop"
+        onClick={onDismiss}
+        type="button"
+      />
+      <div
+        aria-label="Cancel current prompt"
+        className="message-typing-cancel-popover"
+        data-testid="typing-cancel-popover"
+        role="dialog"
+        style={
+          anchor
+            ? {
+                left: `${anchor.left}px`,
+                top: `${anchor.top}px`
+              }
+            : undefined
+        }
+      >
+        <button
+          className="message-typing-cancel-action"
+          onClick={onCancelPrompt}
+          type="button"
+        >
+          Cancel
+        </button>
+      </div>
+    </>
   );
 }
 

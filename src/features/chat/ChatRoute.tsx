@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Navigate, useNavigate, useParams } from "react-router-dom";
 import { StreamManagerDrawer } from "../streams/StreamManagerDrawer";
 import { getSessionProvisioningState } from "../streams/provisioning";
@@ -9,13 +9,18 @@ import {
   useChatDomainStore
 } from "../../runtime/chat/chatDomainStore";
 import { useTransportMachine } from "../../runtime/transport/transportMachine";
-import { createStreamApiClient } from "../../protocol/stream-api";
+import {
+  createStreamApiClient,
+  type SessionControlAction,
+  type SessionStatusPayload
+} from "../../protocol/stream-api";
 import { ChatShell } from "./ChatShell";
 import {
   type ChatSessionSwitchSource,
   useChatSessionCoordinator,
   useChatSessionInteractionCoordinator
 } from "./useChatSessionCoordinator";
+import { useChatKeyboardShortcuts } from "./useChatKeyboardShortcuts";
 
 export function ChatRoute() {
   const navigate = useNavigate();
@@ -23,8 +28,8 @@ export function ChatRoute() {
   const { state: authState } = useAuthSessionStore();
   const { state: chatState, store: chatStore } = useChatDomainStore();
   const { state: transportState, store: transportStore } = useTransportMachine();
-  const [networkRunStateBySessionKey, setNetworkRunStateBySessionKey] = useState<
-    Record<string, string>
+  const [sessionStatusBySessionKey, setSessionStatusBySessionKey] = useState<
+    Record<string, SessionStatusPayload>
   >({});
   const [selectedUnreadAnchor, setSelectedUnreadAnchor] = useState<{
     messageId: string;
@@ -67,7 +72,7 @@ export function ChatRoute() {
 
       return applyNetworkStatusDotStates(
         dotStates,
-        networkRunStateBySessionKey,
+        sessionStatusBySessionKey,
         chatState.streams.map((stream) => stream.sessionKey)
       );
     },
@@ -75,7 +80,7 @@ export function ChatRoute() {
       chatState.streamReadStateBySessionKey,
       chatState.streamTailStateBySessionKey,
       chatState.streams,
-      networkRunStateBySessionKey
+      sessionStatusBySessionKey
     ]
   );
 
@@ -99,7 +104,7 @@ export function ChatRoute() {
     const streamApiClient = createStreamApiClient();
     const liveSessionKeys = new Set(sessionKeys);
 
-    setNetworkRunStateBySessionKey((current) =>
+    setSessionStatusBySessionKey((current) =>
       Object.fromEntries(
         Object.entries(current).filter(([sessionKey]) => liveSessionKeys.has(sessionKey))
       )
@@ -121,12 +126,12 @@ export function ChatRoute() {
         }
 
         const runState = status.run?.state ?? "unknown";
-        setNetworkRunStateBySessionKey((current) =>
-          current[sessionKey] === runState
+        setSessionStatusBySessionKey((current) =>
+          current[sessionKey] === status
             ? current
             : {
                 ...current,
-                [sessionKey]: runState
+                [sessionKey]: status
               }
         );
 
@@ -138,7 +143,7 @@ export function ChatRoute() {
           return;
         }
 
-        setNetworkRunStateBySessionKey((current) => {
+        setSessionStatusBySessionKey((current) => {
           if (!(sessionKey in current)) {
             return current;
           }
@@ -176,12 +181,61 @@ export function ChatRoute() {
     coordinator.requestSessionSwitch(sessionKey, source);
     navigate(`/chat/${sessionKey}`);
   };
+  const focusPromptInput = useCallback(() => {
+    document.getElementById("composer-input")?.focus({ preventScroll: true });
+  }, []);
+  const openSessionListFromShortcut = useCallback(() => {
+    coordinator.openSessionList();
+  }, [coordinator]);
 
   const interactionCoordinator = useChatSessionInteractionCoordinator({
     activeSessionKey,
     onSelectSession: handleSelectSession,
     orderedSessionKeys: chatState.streams.map((stream) => stream.sessionKey)
   });
+  useChatKeyboardShortcuts({
+    canOpenSessionList: chatState.streams.length > 0,
+    isShortcutSurfaceBlocked: coordinator.isSessionListOpen || coordinator.isStreamManagerOpen,
+    onFocusPromptInput: focusPromptInput,
+    onOpenSessionList: openSessionListFromShortcut
+  });
+
+  const applySessionControl = useCallback(
+    async (
+      sessionKey: string,
+      action: SessionControlAction,
+      value?: string | null,
+      enabled?: boolean | null
+    ) => {
+      const token = authState.session?.token;
+      const serverUrl = authState.session?.serverUrl;
+      if (!token || !serverUrl) {
+        return;
+      }
+
+      const streamApiClient = createStreamApiClient();
+      try {
+        const response = await streamApiClient.applySessionControl({
+          action,
+          enabled,
+          serverUrl,
+          sessionKey,
+          token,
+          value
+        });
+        if (response.status) {
+          const nextStatus = response.status;
+          setSessionStatusBySessionKey((current) => ({
+            ...current,
+            [nextStatus.sessionKey]: nextStatus
+          }));
+        }
+      } catch (error) {
+        console.warn("Session control request failed", error);
+      }
+    },
+    [authState.session?.serverUrl, authState.session?.token]
+  );
 
   useEffect(() => {
     if (!activeSessionKey) {
@@ -249,7 +303,11 @@ export function ChatRoute() {
         onOpenSessionList={coordinator.openSessionList}
         onOpenStreamManager={coordinator.openStreamManager}
         onPopupSessionSelect={interactionCoordinator.handlePopupSessionSelect}
+        onCancelCurrentPrompt={(sessionKey) =>
+          applySessionControl(sessionKey, "cancel_current_run")
+        }
         onRememberScrollState={(input) => chatStore.rememberSessionScrollState(input)}
+        onSessionControlSelected={applySessionControl}
         provisioningState={provisioningState}
         onUnreadAnchorConsumed={(messageId) => {
           if (
@@ -269,6 +327,9 @@ export function ChatRoute() {
         }
         selectedMessages={selectedMessages}
         selectedSessionKey={activeSessionKey}
+        selectedSessionStatus={
+          activeSessionKey ? sessionStatusBySessionKey[activeSessionKey] ?? null : null
+        }
         selectedUnreadAnchorMessageId={
           selectedUnreadAnchor?.sessionKey === activeSessionKey
             ? selectedUnreadAnchor?.messageId ?? null
@@ -299,12 +360,12 @@ export function ChatRoute() {
 
 function applyNetworkStatusDotStates(
   dotStates: Record<string, StreamDotState>,
-  networkRunStateBySessionKey: Record<string, string>,
+  sessionStatusBySessionKey: Record<string, SessionStatusPayload>,
   sessionKeys: string[]
 ) {
   const next = { ...dotStates };
   for (const sessionKey of sessionKeys) {
-    const runState = networkRunStateBySessionKey[sessionKey];
+    const runState = sessionStatusBySessionKey[sessionKey]?.run?.state;
     if (runState !== "running" && runState !== "queued") {
       continue;
     }

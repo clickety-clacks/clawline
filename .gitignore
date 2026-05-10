@@ -3,6 +3,7 @@ ios/build/
 ios/*.xcworkspace
 ios/Pods/
 ios/.build/
+.build/
 ios/Clawline/DerivedData/
 *.xcuserstate
 

@@ -19,6 +19,10 @@ import {
 import type { TransportMachine } from "../../runtime/transport/transportMachine";
 import { TransportMachineProvider } from "../../runtime/transport/transportMachine";
 import { INTERACTIVE_HTML_ATTACHMENT_MIME } from "../../protocol/interactive-html-wire";
+import type {
+  SessionControlAction,
+  SessionStatusPayload
+} from "../../protocol/stream-api";
 
 const RICH_MESSAGE: ChatMessageRecord = {
   id: "s_rich",
@@ -173,11 +177,19 @@ function renderMessageList(messages: ChatMessageRecord[]) {
 
 function renderMessageListWithProps(input: {
   messages: ChatMessageRecord[];
+  onCancelCurrentPrompt?: (sessionKey: string) => Promise<void> | void;
+  onSessionControlSelected?: (
+    sessionKey: string,
+    action: SessionControlAction,
+    value?: string | null,
+    enabled?: boolean | null
+  ) => Promise<void> | void;
   rememberedScrollState?: {
     offsetTop: number;
     stickToBottom: boolean;
   };
   sessionKey?: string;
+  sessionStatus?: SessionStatusPayload | null;
   unreadAnchorMessageId?: string | null;
 }) {
   const authStore = createAuthSessionStore();
@@ -218,8 +230,11 @@ function renderMessageListWithProps(input: {
           <TransportMachineProvider value={transportStore}>
             <MessageList
               messages={input.messages}
+              onCancelCurrentPrompt={input.onCancelCurrentPrompt}
               rememberedScrollState={input.rememberedScrollState}
+              onSessionControlSelected={input.onSessionControlSelected}
               sessionKey={input.sessionKey}
+              sessionStatus={input.sessionStatus}
               unreadAnchorMessageId={input.unreadAnchorMessageId}
             />
           </TransportMachineProvider>
@@ -1230,5 +1245,142 @@ describe("MessageList rich rendering", () => {
 
     expect(list.scrollTop).toBe(0);
     expect(screen.queryByTestId("scroll-to-bottom-button")).not.toBeInTheDocument();
+  });
+
+  it("shows the typing indicator from in-flight session status", async () => {
+    renderMessageListWithProps({
+      messages: [],
+      sessionKey: "agent:main:clawline:flynn:main",
+      sessionStatus: {
+        sessionKey: "agent:main:clawline:flynn:main",
+        run: {
+          state: "running"
+        },
+        capabilities: {
+          cancelCurrentRun: { supported: true }
+        }
+      }
+    });
+
+    expect(await screen.findByTestId("typing-indicator")).toBeInTheDocument();
+  });
+
+  it("anchors cancel confirmation to the typing indicator before typed cancellation", async () => {
+    const onCancelCurrentPrompt = vi.fn();
+    renderMessageListWithProps({
+      messages: [makeMessage(1)],
+      onCancelCurrentPrompt,
+      sessionKey: "agent:main:clawline:flynn:main",
+      sessionStatus: {
+        sessionKey: "agent:main:clawline:flynn:main",
+        run: {
+          state: "running"
+        },
+        capabilities: {
+          cancelCurrentRun: { supported: true }
+        }
+      }
+    });
+
+    fireEvent.click(await screen.findByTestId("typing-indicator"));
+    expect(await screen.findByTestId("typing-cancel-popover")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(onCancelCurrentPrompt).toHaveBeenCalledWith("agent:main:clawline:flynn:main");
+  });
+
+  it("opens typing cancellation with Cmd-period and dismisses with Escape", async () => {
+    renderMessageListWithProps({
+      messages: [makeMessage(1)],
+      onCancelCurrentPrompt: vi.fn(),
+      sessionKey: "agent:main:clawline:flynn:main",
+      sessionStatus: {
+        sessionKey: "agent:main:clawline:flynn:main",
+        run: {
+          state: "queued"
+        },
+        capabilities: {
+          cancelCurrentRun: { supported: true }
+        }
+      }
+    });
+
+    fireEvent.keyDown(window, { key: ".", metaKey: true });
+    expect(await screen.findByTestId("typing-cancel-popover")).toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByTestId("typing-cancel-popover")).not.toBeInTheDocument();
+  });
+
+  it("renders interactive session footer controls from session status", async () => {
+    const onSessionControlSelected = vi.fn();
+    renderMessageListWithProps({
+      messages: [makeMessage(1)],
+      onSessionControlSelected,
+      sessionKey: "agent:main:clawline:flynn:main",
+      sessionStatus: {
+        sessionKey: "agent:main:clawline:flynn:main",
+        display: {
+          model: "gpt-5.5",
+          thinkingLevel: "medium",
+          fastMode: true
+        },
+        capabilities: {
+          setModel: { supported: true },
+          setThinking: { supported: true },
+          setFastMode: { supported: true }
+        },
+        modelCatalog: {
+          available: true,
+          models: [
+            {
+              ref: "openai/gpt-5.5",
+              name: "gpt-5.5"
+            },
+            {
+              ref: "openai/gpt-5.4",
+              name: "gpt-5.4"
+            }
+          ]
+        }
+      }
+    });
+
+    expect(await screen.findByTestId("session-status-footer")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("gpt-5.5"), {
+      target: { value: "1" }
+    });
+
+    expect(onSessionControlSelected).toHaveBeenCalledWith(
+      "agent:main:clawline:flynn:main",
+      "set_model",
+      "openai/gpt-5.4",
+      undefined
+    );
+  });
+
+  it("renders read-only fast mode status when mutation is unsupported", async () => {
+    renderMessageListWithProps({
+      messages: [makeMessage(1)],
+      sessionKey: "agent:main:clawline:flynn:main",
+      sessionStatus: {
+        sessionKey: "agent:main:clawline:flynn:main",
+        display: {
+          fastMode: false
+        },
+        capabilities: {
+          setFastMode: {
+            supported: false,
+            reason: "read_only"
+          }
+        }
+      }
+    });
+
+    const fastModeControl = await screen.findByLabelText("Fast off");
+    expect(fastModeControl).toBeDisabled();
+    expect(fastModeControl).toHaveTextContent("Off");
   });
 });

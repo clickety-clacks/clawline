@@ -33,6 +33,7 @@ final class TypingIndicatorCell: UICollectionViewCell {
         contentView.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(handleTap)))
 
         containerView.translatesAutoresizingMaskIntoConstraints = false
+        containerView.isUserInteractionEnabled = false
         contentView.addSubview(containerView)
         NSLayoutConstraint.activate([
             containerView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
@@ -103,6 +104,15 @@ final class TypingIndicatorCell: UICollectionViewCell {
 
     func stopAnimating() {
         dotsView.stopAnimating()
+    }
+
+    func renderedBubbleFrame(in coordinateSpace: UICoordinateSpace?) -> CGRect {
+        layoutIfNeeded()
+        let bubbleFrame = containerView.bubbleFrameInContainer()
+        if let coordinateSpace {
+            return containerView.convert(bubbleFrame, to: coordinateSpace)
+        }
+        return containerView.convert(bubbleFrame, to: nil)
     }
 
     static func makeMessage(sessionKey: String) -> Message {

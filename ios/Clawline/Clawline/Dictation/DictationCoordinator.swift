@@ -867,7 +867,8 @@ final class DictationSession {
             originSessionKey != currentSessionKey
 
         if state == .dictatingPaused, !needsSessionContextInitialization {
-            reanchorActiveTranscriptSessionToLiveSelection()
+            flushPendingTranscriptApply()
+            reanchorActiveTranscriptSessionToLiveSelection(discardCurrentMachineTextFromPendingStream: false)
             transcriptBuffer.reset()
         }
 
@@ -2103,13 +2104,19 @@ final class DictationSession {
         session.committedLenUTF16 = max(0, newCommittedEnd - newCommittedStart)
     }
 
-    private func reanchorActiveTranscriptSessionToLiveSelection() {
+    private func reanchorActiveTranscriptSessionToLiveSelection(discardCurrentMachineTextFromPendingStream: Bool = true) {
         guard let selectionRange = bridge.boundComposeTextView?.selectedRange,
               selectionRange.location != NSNotFound else { return }
-        reanchorActiveTranscriptSession(to: selectionRange)
+        reanchorActiveTranscriptSession(
+            to: selectionRange,
+            discardCurrentMachineTextFromPendingStream: discardCurrentMachineTextFromPendingStream
+        )
     }
 
-    private func reanchorActiveTranscriptSession(to selectionRange: NSRange) {
+    private func reanchorActiveTranscriptSession(
+        to selectionRange: NSRange,
+        discardCurrentMachineTextFromPendingStream: Bool = true
+    ) {
         guard var session = activeTranscriptSession() else { return }
         guard session.originSessionKey == currentSessionKey else { return }
         let snapshot = liveComposeSnapshot(for: session.originSessionKey)
@@ -2135,7 +2142,9 @@ final class DictationSession {
         session.suppressedUntilNextEndpoint = false
         session.pendingUpdate = pendingUpdate
         session.activationSelectionRange = selectedRange
-        session.transcriptPrefixToDiscardAfterReanchor = currentMachineText
+        session.transcriptPrefixToDiscardAfterReanchor = discardCurrentMachineTextFromPendingStream
+            ? currentMachineText
+            : ""
         transcriptOwnership = .active(session)
         if pendingUpdate != nil {
             flushPendingTranscriptApply()

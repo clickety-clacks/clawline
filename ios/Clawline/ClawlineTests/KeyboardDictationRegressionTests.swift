@@ -73,6 +73,54 @@ struct KeyboardDictationRegressionTests {
         coordinator.applyFocusIfNeeded(on: textView, trigger: 2, isKeyboardVisible: false)
     }
 
+    /// Focus requests use the same repair seam as editor taps. A stale local
+    /// interaction lock must not keep the compose field from becoming first responder.
+    @Test("BUG1: focus request repairs stale text interaction lock")
+    @MainActor
+    func focusRequestRepairsStaleInteractionLock() {
+        var focusEvents: [Bool] = []
+        let editor = makeTestEditor(
+            isKeyboardVisible: false,
+            isDictationActive: true,
+            onFocusChange: { focusEvents.append($0) }
+        )
+        let coordinator = editor.makeCoordinator()
+        let textView = KeyboardFocusTestTextView()
+        textView.isEditable = false
+        textView.isSelectable = false
+        textView.simulatedFirstResponder = false
+
+        coordinator.applyFocusIfNeeded(on: textView, trigger: 1, isKeyboardVisible: false)
+
+        #expect(textView.isEditable)
+        #expect(textView.isSelectable)
+        #expect(textView.becomeCount == 1)
+        #expect(textView.isFirstResponder)
+        #expect(focusEvents == [true])
+        #expect(coordinator.parent.isDictationActive)
+    }
+
+    @Test("BUG1: focus request repairs real paste-enabled editor interaction lock")
+    @MainActor
+    func focusRequestRepairsPastableTextViewInteractionLock() {
+        let editor = makeTestEditor(
+            isKeyboardVisible: false,
+            isDictationActive: true
+        )
+        let coordinator = editor.makeCoordinator()
+        let textView = PastableTextView()
+        textView.isInputEnabled = true
+        textView.isEditable = false
+        textView.isSelectable = false
+
+        coordinator.applyFocusIfNeeded(on: textView, trigger: 1, isKeyboardVisible: false)
+
+        #expect(textView.isInputEnabled)
+        #expect(textView.isEditable)
+        #expect(textView.isSelectable)
+        #expect(coordinator.parent.isDictationActive)
+    }
+
     // ------------------------------------------------------------------
     // BUG 2 regression: Tap gesture on editor re-raises keyboard
     // ------------------------------------------------------------------
@@ -171,6 +219,37 @@ struct KeyboardDictationRegressionTests {
         await Task.yield()
 
         #expect(textView.resignCount == 1)
+        #expect(textView.becomeCount == 1)
+        #expect(textView.isFirstResponder)
+        #expect(focusEvents == [true])
+        #expect(coordinator.parent.isDictationActive)
+    }
+
+    /// Compose focus intent owns keyboard summoning during active/paused dictation.
+    /// If a local UIKit interaction lock left the text view non-interactive, the
+    /// focus seam must repair it before asking UIKit to restore first responder.
+    @Test("BUG2: dictation editor tap repairs stale text interaction lock")
+    @MainActor
+    func dictationTapRepairsStaleInteractionLock() async {
+        var focusEvents: [Bool] = []
+        let editor = makeTestEditor(
+            isKeyboardVisible: false,
+            isDictationActive: true,
+            onFocusChange: { focusEvents.append($0) }
+        )
+        let coordinator = editor.makeCoordinator()
+        let textView = KeyboardFocusTestTextView()
+        textView.isEditable = false
+        textView.isSelectable = false
+        textView.simulatedFirstResponder = false
+        let tap = UITapGestureRecognizer(target: coordinator, action: #selector(RichTextEditor.Coordinator.handleEditorTap(_:)))
+        textView.addGestureRecognizer(tap)
+
+        coordinator.handleEditorTap(tap)
+        await Task.yield()
+
+        #expect(textView.isEditable)
+        #expect(textView.isSelectable)
         #expect(textView.becomeCount == 1)
         #expect(textView.isFirstResponder)
         #expect(focusEvents == [true])

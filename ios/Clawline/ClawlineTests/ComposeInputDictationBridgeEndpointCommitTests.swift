@@ -144,6 +144,78 @@ struct DictationCoordinatorTranscriptOwnershipTests {
         #expect(rig.textView.attributedText.string == "hello new world tail")
     }
 
+    @Test("Paused resume applies new stream text even when it prefixes the prior dictation")
+    func pausedResumeAppliesNewTextThatPrefixesPriorDictation() async {
+        let rig = makeRig(
+            initialText: "",
+            selectedRange: NSRange(location: 0, length: 0),
+            freshClientPerFactoryCall: true
+        )
+
+        startDictation(rig)
+        emitProvisional("hello world", into: rig)
+        await waitUntil { rig.textView.attributedText.string == "hello world" }
+
+        rig.coordinator.pauseFromWaveformTap()
+        await waitUntil { rig.coordinator.isDictationActive && !rig.coordinator.isListening }
+
+        rig.coordinator.startStickyDictation()
+        await waitUntil { rig.harness.clientFactoryCallCount >= 2 && rig.harness.latestClient.connected }
+        emitProvisional("hello", into: rig)
+
+        await waitUntil { rig.textView.attributedText.string == "hello worldhello" }
+        #expect(rig.textView.attributedText.string == "hello worldhello")
+    }
+
+    @Test("Paused resume does not truncate a new paragraph sharing the prior dictation prefix")
+    func pausedResumeDoesNotTruncateNewParagraphSharingPriorPrefix() async {
+        let rig = makeRig(
+            initialText: "",
+            selectedRange: NSRange(location: 0, length: 0),
+            freshClientPerFactoryCall: true
+        )
+
+        startDictation(rig)
+        emitProvisional("hello world", into: rig)
+        await waitUntil { rig.textView.attributedText.string == "hello world" }
+
+        rig.coordinator.pauseFromWaveformTap()
+        await waitUntil { rig.coordinator.isDictationActive && !rig.coordinator.isListening }
+
+        rig.coordinator.startStickyDictation()
+        await waitUntil { rig.harness.clientFactoryCallCount >= 2 && rig.harness.latestClient.connected }
+        emitProvisional("hello world again with more detail", into: rig)
+
+        await waitUntil {
+            rig.textView.attributedText.string == "hello worldhello world again with more detail"
+        }
+        #expect(rig.textView.attributedText.string == "hello worldhello world again with more detail")
+    }
+
+    @Test("Paused resume does not replay late old-stream text into the new stream")
+    func pausedResumeDoesNotReplayLateOldStreamUpdateIntoNewStream() async {
+        let rig = makeRig(
+            initialText: "",
+            selectedRange: NSRange(location: 0, length: 0),
+            freshClientPerFactoryCall: true
+        )
+
+        startDictation(rig)
+        emitProvisional("hello world", into: rig)
+        await waitUntil { rig.textView.attributedText.string == "hello world" }
+
+        rig.coordinator.pauseFromWaveformTap()
+        await waitUntil { rig.coordinator.isDictationActive && !rig.coordinator.isListening }
+        emitProvisional("hello world again", into: rig)
+
+        rig.coordinator.startStickyDictation()
+        await waitUntil { rig.harness.clientFactoryCallCount >= 2 && rig.harness.latestClient.connected }
+        emitProvisional("hello", into: rig)
+
+        await waitUntil { rig.textView.attributedText.string == "hello worldhello" }
+        #expect(rig.textView.attributedText.string == "hello worldhello")
+    }
+
     @Test("User edit in provisional range suppresses Soniox provisional updates until endpoint")
     func userEditInProvisionalRangeSuppressesUntilEndpoint() async {
         let rig = makeRig(initialText: "seed ", selectedRange: NSRange(location: 5, length: 0))

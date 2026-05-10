@@ -218,6 +218,12 @@ struct RichTextEditor: UIViewRepresentable {
         }
 
         private func requestEditorFocus(on textView: UITextView, isKeyboardVisible: Bool) {
+            guard parent.isEditable else { return }
+            if let textView = textView as? PastableTextView {
+                textView.isInputEnabled = true
+            }
+            textView.isEditable = true
+            textView.isSelectable = true
             if Self.shouldCycleFirstResponder(
                 isFirstResponder: textView.isFirstResponder,
                 isKeyboardVisible: isKeyboardVisible

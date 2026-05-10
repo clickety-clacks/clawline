@@ -2643,8 +2643,8 @@ enum ChatFlowUIKitTheme {
                 adminAccent: UIColor(red: 0.549, green: 0.756, blue: 0.996, alpha: 1),
                 ink: UIColor(red: 0.910, green: 0.894, blue: 0.878, alpha: 1),
                 bubbleSelfGradient: [
-                    UIColor(red: 0.176, green: 0.231, blue: 0.165, alpha: 1),
-                    UIColor(red: 0.141, green: 0.200, blue: 0.133, alpha: 1)
+                    UIColor(red: 0.161, green: 0.214, blue: 0.149, alpha: 1),
+                    UIColor(red: 0.125, green: 0.182, blue: 0.117, alpha: 1)
                 ],
                 bubbleOtherGradient: [
                     UIColor(red: 0.161, green: 0.145, blue: 0.141, alpha: 1),
@@ -2671,8 +2671,8 @@ enum ChatFlowUIKitTheme {
             adminAccent: UIColor(red: 0.141, green: 0.420, blue: 0.831, alpha: 1),
             ink: UIColor(red: 0.239, green: 0.204, blue: 0.161, alpha: 1),
             bubbleSelfGradient: [
-                UIColor(red: 0.863, green: 0.945, blue: 0.824, alpha: 1),
-                UIColor(red: 0.863, green: 0.945, blue: 0.824, alpha: 1)
+                UIColor(red: 0.834, green: 0.930, blue: 0.789, alpha: 1),
+                UIColor(red: 0.834, green: 0.930, blue: 0.789, alpha: 1)
             ],
             bubbleOtherGradient: [
                 UIColor(red: 1.0, green: 0.992, blue: 0.976, alpha: 1),

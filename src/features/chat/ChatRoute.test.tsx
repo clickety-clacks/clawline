@@ -301,6 +301,36 @@ describe("ChatRoute", () => {
     );
   });
 
+  it("supports browser-safe no-text chat shortcuts", () => {
+    renderChatRoute("/chat/agent:main:clawline:user_1:main");
+
+    fireEvent.keyDown(document.body, { key: "/" });
+
+    expect(screen.getByRole("dialog", { name: "Sessions" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Personal/i }));
+    fireEvent.keyDown(document.body, { key: " " });
+
+    expect(screen.getByRole("textbox", { name: "Message" })).toHaveFocus();
+  });
+
+  it("routes command semicolon to the stream popup without taking browser-reserved command chords", () => {
+    renderChatRoute("/chat/agent:main:clawline:user_1:main");
+
+    const composer = screen.getByRole("textbox", { name: "Message" });
+    composer.focus();
+    fireEvent.keyDown(composer, { key: ";", metaKey: true });
+
+    expect(screen.getByRole("dialog", { name: "Sessions" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Personal/i }));
+    composer.blur();
+    fireEvent.keyDown(document.body, { key: "l", metaKey: true });
+
+    expect(composer).not.toHaveFocus();
+    expect(screen.queryByRole("dialog", { name: "Sessions" })).not.toBeInTheDocument();
+  });
+
   it("opens stream management from the session sheet without changing the route", () => {
     renderChatRoute("/chat/agent:main:clawline:user_1:main");
 

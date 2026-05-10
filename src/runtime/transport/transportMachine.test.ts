@@ -156,6 +156,57 @@ describe("transportMachine", () => {
     });
   });
 
+  it("applies assistant typing activity frames to the chat domain", async () => {
+    const authStore = seedSession();
+    const chatStore = createChatDomainStore({
+      persistence: createMemoryChatPersistence()
+    });
+    const factory = new FakeWebSocketFactory();
+    const transport = createTransportMachine({
+      authSessionStore: authStore,
+      chatDomainStore: chatStore,
+      webSocketFactory: factory.create
+    });
+    const sessionKey = "agent:main:clawline:user_1:main";
+
+    await waitForSocket(factory);
+    factory.sockets[0].emitOpen();
+    factory.sockets[0].emitMessage(
+      JSON.stringify({
+        type: "auth_result",
+        success: true,
+        userId: "user_1",
+        sessionKeys: [sessionKey]
+      })
+    );
+
+    expect(transport.getState().phase).toBe("live");
+
+    factory.sockets[0].emitMessage(
+      JSON.stringify({
+        type: "typing",
+        active: true,
+        role: "assistant",
+        sessionKey
+      })
+    );
+
+    expect(chatStore.getState().assistantTypingBySessionKey[sessionKey]).toBe(true);
+
+    factory.sockets[0].emitMessage(
+      JSON.stringify({
+        type: "event",
+        event: "activity",
+        payload: {
+          sessionKey,
+          isActive: false
+        }
+      })
+    );
+
+    expect(chatStore.getState().assistantTypingBySessionKey[sessionKey]).toBeUndefined();
+  });
+
   it("does not advertise terminal bubble support when WebSocket is unavailable", async () => {
     vi.stubGlobal("WebSocket", undefined);
 

@@ -66,6 +66,7 @@ export interface SessionScrollState {
 export type IncomingMessageSource = "live" | "replay";
 
 export interface ChatDomainState {
+  assistantTypingBySessionKey: Record<string, boolean>;
   firstUnreadMessageIdBySessionKey: Record<string, string>;
   hydrated: boolean;
   lastServerEventId: string | null;
@@ -108,6 +109,10 @@ export interface ChatDomainStore {
     selectedSessionKey?: string;
     source: IncomingMessageSource;
   }): void;
+  applyAssistantTypingState(input: {
+    active: boolean;
+    sessionKey: string;
+  }): void;
   applySessionInfo(info: SessionInfoPayload): void;
   applyStreamReadStateSnapshot(snapshot: Record<string, string>): void;
   applyStreamReadStateUpdate(input: {
@@ -134,6 +139,7 @@ export interface ChatDomainStore {
 const ChatDomainStoreContext = createContext<ChatDomainStore | null>(null);
 
 const EMPTY_STATE: ChatDomainState = {
+  assistantTypingBySessionKey: {},
   firstUnreadMessageIdBySessionKey: {},
   hydrated: false,
   lastServerEventId: null,
@@ -159,7 +165,8 @@ export function createChatDomainStore(options?: {
 
   function persist(nextState: ChatDomainState) {
     const snapshot: ChatDomainSnapshot = {
-      ...nextState
+      ...nextState,
+      assistantTypingBySessionKey: {}
     };
     void persistence.save(snapshot);
   }
@@ -302,6 +309,7 @@ export function createChatDomainStore(options?: {
         const nextState = {
           ...EMPTY_STATE,
           hydrated: current.hydrated,
+          assistantTypingBySessionKey: {},
           messagesBySessionKey: preservedMessagesBySessionKey,
           pendingMessages: acceptedPendingMessagesFrom(
             current,
@@ -335,7 +343,37 @@ export function createChatDomainStore(options?: {
     },
     applyIncomingMessage(input) {
       baseStore.setState((current) => {
-        const nextState = applyServerMessage(current, input);
+        const nextState = clearAssistantTypingForIncomingAssistantMessage(
+          applyServerMessage(current, input),
+          input.message.sessionKey ?? current.streams[0]?.sessionKey ?? "unassigned",
+          input.message.role
+        );
+        persist(nextState);
+        return nextState;
+      });
+    },
+    applyAssistantTypingState(input) {
+      baseStore.setState((current) => {
+        if (input.sessionKey.length === 0) {
+          return current;
+        }
+
+        const currentActive = current.assistantTypingBySessionKey[input.sessionKey] === true;
+        if (currentActive === input.active) {
+          return current;
+        }
+
+        const nextTypingBySessionKey = { ...current.assistantTypingBySessionKey };
+        if (input.active) {
+          nextTypingBySessionKey[input.sessionKey] = true;
+        } else {
+          delete nextTypingBySessionKey[input.sessionKey];
+        }
+
+        const nextState = {
+          ...current,
+          assistantTypingBySessionKey: nextTypingBySessionKey
+        };
         persist(nextState);
         return nextState;
       });
@@ -467,23 +505,29 @@ function mergeHydratedState(
   liveState: ChatDomainState,
   persistedState: ChatDomainSnapshot
 ) {
+  const persisted = {
+    ...persistedState,
+    assistantTypingBySessionKey: {}
+  };
+
   if (
     Object.keys(liveState.messagesBySessionKey).length === 0 &&
     liveState.streams.length === 0
   ) {
-    return persistedState;
+    return persisted;
   }
 
   const streamsByKey = new Map(
-    persistedState.streams.map((stream) => [stream.sessionKey, stream])
+    persisted.streams.map((stream) => [stream.sessionKey, stream])
   );
   for (const stream of liveState.streams) {
     streamsByKey.set(stream.sessionKey, stream);
   }
 
   return {
-    ...persistedState,
+    ...persisted,
     ...liveState,
+    assistantTypingBySessionKey: {},
     streams: [...streamsByKey.values()].sort((left, right) => {
       if (left.orderIndex !== right.orderIndex) {
         return left.orderIndex - right.orderIndex;
@@ -491,41 +535,58 @@ function mergeHydratedState(
       return left.displayName.localeCompare(right.displayName);
     }),
     messagesBySessionKey: {
-      ...persistedState.messagesBySessionKey,
+      ...persisted.messagesBySessionKey,
       ...liveState.messagesBySessionKey
     },
     pendingMessages: {
-      ...persistedState.pendingMessages,
+      ...persisted.pendingMessages,
       ...liveState.pendingMessages
     },
     replayCursorsBySessionKey: {
-      ...persistedState.replayCursorsBySessionKey,
+      ...persisted.replayCursorsBySessionKey,
       ...liveState.replayCursorsBySessionKey
     },
     scrollStateBySessionKey: {
-      ...persistedState.scrollStateBySessionKey,
+      ...persisted.scrollStateBySessionKey,
       ...liveState.scrollStateBySessionKey
     },
     streamReadStateBySessionKey: {
-      ...persistedState.streamReadStateBySessionKey,
+      ...persisted.streamReadStateBySessionKey,
       ...liveState.streamReadStateBySessionKey
     },
     streamTailStateBySessionKey: {
-      ...persistedState.streamTailStateBySessionKey,
+      ...persisted.streamTailStateBySessionKey,
       ...liveState.streamTailStateBySessionKey
     },
     provisionedSessionKeys:
       liveState.provisionedSessionKeys.length > 0
         ? [...liveState.provisionedSessionKeys]
-        : [...persistedState.provisionedSessionKeys],
+        : [...persisted.provisionedSessionKeys],
     firstUnreadMessageIdBySessionKey: {
-      ...persistedState.firstUnreadMessageIdBySessionKey,
+      ...persisted.firstUnreadMessageIdBySessionKey,
       ...liveState.firstUnreadMessageIdBySessionKey
     },
     unreadBySessionKey: {
-      ...persistedState.unreadBySessionKey,
+      ...persisted.unreadBySessionKey,
       ...liveState.unreadBySessionKey
     }
+  };
+}
+
+function clearAssistantTypingForIncomingAssistantMessage(
+  state: ChatDomainState,
+  sessionKey: string,
+  role: "user" | "assistant"
+) {
+  if (role !== "assistant" || state.assistantTypingBySessionKey[sessionKey] !== true) {
+    return state;
+  }
+
+  const nextTypingBySessionKey = { ...state.assistantTypingBySessionKey };
+  delete nextTypingBySessionKey[sessionKey];
+  return {
+    ...state,
+    assistantTypingBySessionKey: nextTypingBySessionKey
   };
 }
 

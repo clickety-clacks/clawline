@@ -27,6 +27,7 @@ struct StreamPageDotsView: View {
     @State private var scrubStartVirtualIndex: CGFloat?
     @State private var scrubVirtualIndex: CGFloat?
     @State private var scrubCandidateIndex: Int?
+    @State private var scrubIsCancelled = false
     @State private var scrubTapSuppressionExpiresAt = Date.distantPast
 
     private static let collapsedMaxVisibleDots = 11
@@ -50,7 +51,11 @@ struct StreamPageDotsView: View {
     }
 
     private var isScrubbing: Bool {
-        scrubStartVirtualIndex != nil || scrubVirtualIndex != nil
+        !scrubIsCancelled && (scrubStartVirtualIndex != nil || scrubVirtualIndex != nil)
+    }
+
+    private var hasActiveScrubGesture: Bool {
+        scrubStartVirtualIndex != nil || scrubVirtualIndex != nil || scrubCandidateIndex != nil
     }
 
     private var baseVisibleDotCount: Int {
@@ -328,11 +333,11 @@ struct StreamPageDotsView: View {
             .onChanged { value in
                 switch value {
                 case .first(true):
-                    beginScrub(at: Self.locationX(forIndex: activeIndex))
+                    beginScrub(at: activeDotCenterX)
                 case .second(true, let dragValue):
                     if let dragValue {
                         beginScrub(at: dragValue.startLocation.x)
-                        updateScrub(at: dragValue.location.x)
+                        updateScrub(at: dragValue.location)
                     }
                 default:
                     break
@@ -344,7 +349,7 @@ struct StreamPageDotsView: View {
                     commitScrub()
                 case .second(true, let dragValue):
                     if let dragValue {
-                        updateScrub(at: dragValue.location.x)
+                        updateScrub(at: dragValue.location)
                     }
                     commitScrub()
                 default:
@@ -361,24 +366,35 @@ struct StreamPageDotsView: View {
         let dockLocationX = dockLocationX(fromScrubFieldLocationX: locationX)
         let virtualIndex = Self.scrubStartVirtualIndex(
             startLocationX: dockLocationX,
-            controlWidth: controlWidth,
+            fieldWidth: controlWidth,
+            totalSessionCount: sessionKeys.count,
             visibleDotIndices: visibleDotIndices,
             fallbackIndex: activeIndex
         )
         withAnimation(.spring(response: 0.18, dampingFraction: 0.86)) {
             scrubStartLocationX = dockLocationX
             scrubStartVirtualIndex = virtualIndex
+            scrubIsCancelled = false
         }
         updateScrubVirtualIndex(virtualIndex)
     }
 
-    private func updateScrub(at locationX: CGFloat) {
+    private func updateScrub(at location: CGPoint) {
         guard !sessionKeys.isEmpty else { return }
         if scrubStartVirtualIndex == nil {
-            beginScrub(at: locationX)
+            beginScrub(at: location.x)
         }
         guard let startVirtualIndex = scrubStartVirtualIndex, let startLocationX = scrubStartLocationX else { return }
-        let dockLocationX = dockLocationX(fromScrubFieldLocationX: locationX)
+        if Self.shouldCancelScrub(locationY: location.y) {
+            enterScrubCancelledState()
+            return
+        }
+
+        let dockLocationX = dockLocationX(fromScrubFieldLocationX: location.x)
+        if scrubIsCancelled {
+            scrubIsCancelled = false
+        }
+
         let virtualIndex = Self.scrubVirtualIndex(
             sessionCount: sessionKeys.count,
             startVirtualIndex: startVirtualIndex,
@@ -388,8 +404,12 @@ struct StreamPageDotsView: View {
         updateScrubVirtualIndex(virtualIndex)
     }
 
-    private func endScrub(at locationX: CGFloat) {
-        updateScrub(at: locationX)
+    private func endScrub(at location: CGPoint) {
+        updateScrub(at: location)
+        guard !scrubIsCancelled else {
+            resetScrubState()
+            return
+        }
         commitScrub()
     }
 
@@ -427,13 +447,26 @@ struct StreamPageDotsView: View {
         onScrubCancel()
     }
 
+    private func enterScrubCancelledState() {
+        guard !scrubIsCancelled || scrubCandidateIndex != nil || scrubVirtualIndex != nil else { return }
+        withAnimation(.spring(response: 0.22, dampingFraction: 0.86)) {
+            scrubIsCancelled = true
+            scrubVirtualIndex = nil
+            scrubCandidateIndex = nil
+        }
+        onScrubCancel()
+    }
+
     private func dockLocationX(fromScrubFieldLocationX locationX: CGFloat) -> CGFloat {
-        let fieldExtra = max(0, scrubMetrics.scrubFieldWidth - baseControlWidth)
-        return locationX - (fieldExtra / 2)
+        Self.dockLocationX(
+            fromScrubFieldLocationX: locationX,
+            scrubFieldWidth: scrubMetrics.scrubFieldWidth,
+            baseControlWidth: baseControlWidth
+        )
     }
 
     private func cancelScrubIfNeeded() {
-        guard scrubStartVirtualIndex != nil || scrubCandidateIndex != nil || scrubVirtualIndex != nil else { return }
+        guard hasActiveScrubGesture else { return }
         cancelScrub()
     }
 
@@ -443,11 +476,35 @@ struct StreamPageDotsView: View {
             scrubStartVirtualIndex = nil
             scrubVirtualIndex = nil
             scrubCandidateIndex = nil
+            scrubIsCancelled = false
         }
     }
 
+    private var activeDotCenterX: CGFloat {
+        Self.dotCenterX(
+            for: activeIndex,
+            totalSessionCount: sessionKeys.count,
+            visibleDotIndices: visibleDotIndices,
+            fieldWidth: baseControlWidth
+        ) ?? (baseControlWidth / 2)
+    }
+
     private var dotRow: some View {
-        HStack(spacing: 7) {
+        let fieldWidth = scrubMetrics.scrubFieldWidth
+        return ZStack {
+            dotRowDots
+            selectionRingOverlay(fieldWidth: fieldWidth)
+        }
+        .frame(width: fieldWidth, height: Self.controlHeight)
+    }
+
+    private var dotRowDots: some View {
+        let selectionRingIndex = Self.selectionRingIndex(
+            activeIndex: activeIndex,
+            scrubCandidateIndex: scrubCandidateIndex,
+            sessionCount: sessionKeys.count
+        )
+        return HStack(spacing: 7) {
             if showsLeadingOverflow {
                 Circle()
                     .fill(StreamDotColor.inactive(colorScheme: colorScheme))
@@ -457,6 +514,7 @@ struct StreamPageDotsView: View {
                 let sessionKey = sessionKeys[index]
                 let isActive = index == activeIndex
                 let isCandidate = index == scrubCandidateIndex
+                let showsSelectionRing = index == selectionRingIndex
                 let dotState = dotStatesBySession[sessionKey] ?? .inactive
                 let scale = Self.scrubMagnificationScale(
                     dotIndex: index,
@@ -473,23 +531,16 @@ struct StreamPageDotsView: View {
                         )
                     )
                     .frame(width: Self.dotDiameter, height: Self.dotDiameter)
-                    .overlay {
-                        if isCandidate && !isActive {
-                            Circle()
-                                .stroke(StreamDotColor.activeGlow(colorScheme: colorScheme).opacity(0.85), lineWidth: 1.2)
-                                .scaleEffect(1.16)
-                        }
-                    }
                     .scaleEffect(scale)
                     .offset(y: verticalOffset)
                     .zIndex(scale)
                     .shadow(
-                        color: (isActive || isCandidate) ? StreamDotColor.activeGlow(colorScheme: colorScheme) : .clear,
-                        radius: (isActive || isCandidate) ? StreamDotColor.activeOuterGlowRadius(colorScheme: colorScheme) : 0
+                        color: (isActive || isCandidate || showsSelectionRing) ? StreamDotColor.activeGlow(colorScheme: colorScheme) : .clear,
+                        radius: (isActive || isCandidate || showsSelectionRing) ? StreamDotColor.activeOuterGlowRadius(colorScheme: colorScheme) : 0
                     )
                     .shadow(
-                        color: (isActive || isCandidate) ? StreamDotColor.activeGlow(colorScheme: colorScheme) : .clear,
-                        radius: (isActive || isCandidate) ? StreamDotColor.activeInnerGlowRadius(colorScheme: colorScheme) : 0
+                        color: (isActive || isCandidate || showsSelectionRing) ? StreamDotColor.activeGlow(colorScheme: colorScheme) : .clear,
+                        radius: (isActive || isCandidate || showsSelectionRing) ? StreamDotColor.activeInnerGlowRadius(colorScheme: colorScheme) : 0
                     )
             }
             if showsTrailingOverflow {
@@ -501,6 +552,42 @@ struct StreamPageDotsView: View {
         .fixedSize(horizontal: true, vertical: false)
         .padding(.horizontal, Self.horizontalPadding)
         .frame(maxWidth: .infinity, alignment: .center)
+    }
+
+    @ViewBuilder
+    private func selectionRingOverlay(fieldWidth: CGFloat) -> some View {
+        let selectionRingIndex = Self.selectionRingIndex(
+            activeIndex: activeIndex,
+            scrubCandidateIndex: scrubCandidateIndex,
+            sessionCount: sessionKeys.count
+        )
+        if let selectionRingIndex,
+           let centerX = Self.dotCenterX(
+               for: selectionRingIndex,
+               totalSessionCount: sessionKeys.count,
+               visibleDotIndices: visibleDotIndices,
+               fieldWidth: fieldWidth
+           ) {
+            let scale = Self.scrubMagnificationScale(
+                dotIndex: selectionRingIndex,
+                virtualIndex: scrubVirtualIndex,
+                metrics: scrubMetrics
+            )
+            let verticalOffset = Self.scrubMagnificationVerticalOffset(scale: scale)
+            ZStack {
+                Circle()
+                    .stroke(StreamDotColor.activeGlow(colorScheme: colorScheme).opacity(0.85), lineWidth: 1.2)
+                    .scaleEffect(1.16)
+                Circle()
+                    .stroke(Color.white.opacity(0.82), lineWidth: 0.55)
+                    .scaleEffect(1.07)
+            }
+            .frame(width: Self.dotDiameter, height: Self.dotDiameter)
+            .scaleEffect(scale)
+            .position(x: centerX, y: (Self.controlHeight / 2) + verticalOffset)
+            .zIndex(scale + 1)
+            .allowsHitTesting(false)
+        }
     }
 
     private var unreadEdgeBloomOverlay: some View {
@@ -528,33 +615,49 @@ struct StreamPageDotsView: View {
 
     static func scrubStartCandidateIndex(
         startLocationX: CGFloat,
-        controlWidth: CGFloat,
+        fieldWidth: CGFloat,
+        totalSessionCount: Int,
         visibleDotIndices: [Int],
         fallbackIndex: Int
     ) -> Int {
-        guard let first = visibleDotIndices.first, !visibleDotIndices.isEmpty else {
-            return fallbackIndex
-        }
-        guard visibleDotIndices.count > 1 else { return first }
-        let usableWidth = max(1, controlWidth - (horizontalPadding * 2))
-        let normalized = min(1, max(0, (startLocationX - horizontalPadding) / usableWidth))
-        let visibleOffset = Int((normalized * CGFloat(visibleDotIndices.count - 1)).rounded())
-        return visibleDotIndices[min(max(0, visibleOffset), visibleDotIndices.count - 1)]
+        scrubCandidateIndex(
+            sessionCount: totalSessionCount,
+            virtualIndex: scrubStartVirtualIndex(
+                startLocationX: startLocationX,
+                fieldWidth: fieldWidth,
+                totalSessionCount: totalSessionCount,
+                visibleDotIndices: visibleDotIndices,
+                fallbackIndex: fallbackIndex
+            )
+        )
     }
 
     static func scrubStartVirtualIndex(
         startLocationX: CGFloat,
-        controlWidth: CGFloat,
+        fieldWidth: CGFloat,
+        totalSessionCount: Int,
         visibleDotIndices: [Int],
         fallbackIndex: Int
     ) -> CGFloat {
-        guard let first = visibleDotIndices.first, !visibleDotIndices.isEmpty else {
+        let centers = visibleDotCenters(
+            totalSessionCount: totalSessionCount,
+            visibleDotIndices: visibleDotIndices,
+            fieldWidth: fieldWidth
+        )
+        guard let firstCenter = centers.first else {
             return CGFloat(fallbackIndex)
         }
-        guard visibleDotIndices.count > 1 else { return CGFloat(first) }
-        let usableWidth = max(1, controlWidth - (horizontalPadding * 2))
-        let normalized = min(1, max(0, (startLocationX - horizontalPadding) / usableWidth))
-        return CGFloat(first) + (normalized * CGFloat(visibleDotIndices.count - 1))
+        guard centers.count > 1 else { return CGFloat(firstCenter.index) }
+        if startLocationX <= firstCenter.centerX {
+            return CGFloat(firstCenter.index)
+        }
+        for (left, right) in zip(centers, centers.dropFirst()) {
+            guard startLocationX <= right.centerX else { continue }
+            let span = max(1, right.centerX - left.centerX)
+            let progress = min(1, max(0, (startLocationX - left.centerX) / span))
+            return CGFloat(left.index) + (CGFloat(right.index - left.index) * progress)
+        }
+        return CGFloat(centers[centers.count - 1].index)
     }
 
     static func scrubCandidateIndex(
@@ -585,9 +688,86 @@ struct StreamPageDotsView: View {
         return min(max(0, Int(virtualIndex.rounded())), sessionCount - 1)
     }
 
+    static func dockLocationX(
+        fromScrubFieldLocationX locationX: CGFloat,
+        scrubFieldWidth: CGFloat,
+        baseControlWidth: CGFloat
+    ) -> CGFloat {
+        let fieldExtra = max(0, scrubFieldWidth - baseControlWidth)
+        return locationX - (fieldExtra / 2)
+    }
+
+    static func shouldCancelScrub(locationY: CGFloat) -> Bool {
+        let indicatorTopY = minimumHitTargetHeight - controlHeight
+        let indicatorBottomY = minimumHitTargetHeight
+        if locationY < indicatorTopY {
+            return (indicatorTopY - locationY) > minimumHitTargetHeight
+        }
+        if locationY > indicatorBottomY {
+            return (locationY - indicatorBottomY) > minimumHitTargetHeight
+        }
+        return false
+    }
+
     static func shouldEmitScrubCandidateHaptic(previousIndex: Int?, candidateIndex: Int) -> Bool {
         guard let previousIndex else { return false }
         return previousIndex != candidateIndex
+    }
+
+    static func selectionRingIndex(activeIndex: Int, scrubCandidateIndex: Int?, sessionCount: Int) -> Int? {
+        guard sessionCount > 0 else { return nil }
+        if let scrubCandidateIndex, (0..<sessionCount).contains(scrubCandidateIndex) {
+            return scrubCandidateIndex
+        }
+        return min(max(0, activeIndex), sessionCount - 1)
+    }
+
+    static func dotCenterX(
+        for index: Int,
+        totalSessionCount: Int,
+        visibleDotIndices: [Int],
+        fieldWidth: CGFloat
+    ) -> CGFloat? {
+        visibleDotCenters(
+            totalSessionCount: totalSessionCount,
+            visibleDotIndices: visibleDotIndices,
+            fieldWidth: fieldWidth
+        )
+        .first { $0.index == index }?
+        .centerX
+    }
+
+    static func visibleDotCenters(
+        totalSessionCount: Int,
+        visibleDotIndices: [Int],
+        fieldWidth: CGFloat
+    ) -> [(index: Int, centerX: CGFloat)] {
+        guard totalSessionCount > 0, !visibleDotIndices.isEmpty else { return [] }
+
+        let includesLeadingOverflow = (visibleDotIndices.first ?? 0) > 0
+        let includesTrailingOverflow = (visibleDotIndices.last ?? -1) < totalSessionCount - 1
+        let overflowCount = (includesLeadingOverflow ? 1 : 0) + (includesTrailingOverflow ? 1 : 0)
+        let elementCount = visibleDotIndices.count + overflowCount
+        let contentWidth = (CGFloat(visibleDotIndices.count) * dotDiameter)
+            + (CGFloat(overflowCount) * overflowDotDiameter)
+            + (CGFloat(max(0, elementCount - 1)) * dotSpacing)
+            + (horizontalPadding * 2)
+        var cursor = ((fieldWidth - contentWidth) / 2) + horizontalPadding
+        var centers: [(index: Int, centerX: CGFloat)] = []
+
+        if includesLeadingOverflow {
+            cursor += overflowDotDiameter + dotSpacing
+        }
+        for (offset, index) in visibleDotIndices.enumerated() {
+            centers.append((index: index, centerX: cursor + (dotDiameter / 2)))
+            cursor += dotDiameter
+            let isLastVisibleDot = offset == visibleDotIndices.count - 1
+            if !isLastVisibleDot || includesTrailingOverflow {
+                cursor += dotSpacing
+            }
+        }
+
+        return centers
     }
 
     static func scrubCandidateHapticStyle(isActive: Bool, dotState: StreamDotState) -> ScrubCandidateHapticStyle {
@@ -595,7 +775,7 @@ struct StreamPageDotsView: View {
     }
 
     static func locationX(forIndex index: Int) -> CGFloat {
-        horizontalPadding + (CGFloat(index) * (dotDiameter + dotSpacing))
+        horizontalPadding + (dotDiameter / 2) + (CGFloat(index) * (dotDiameter + dotSpacing))
     }
 
     static func scrubMagnificationScale(dotIndex: Int, candidateIndex: Int?) -> CGFloat {
@@ -646,8 +826,8 @@ struct StreamPageDotsView: View {
 private struct StreamPageDotsGestureBridge: UIViewRepresentable {
     let onTap: () -> Void
     let onScrubBegan: (CGFloat) -> Void
-    let onScrubChanged: (CGFloat) -> Void
-    let onScrubEnded: (CGFloat) -> Void
+    let onScrubChanged: (CGPoint) -> Void
+    let onScrubEnded: (CGPoint) -> Void
     let onScrubCancelled: () -> Void
 
     func makeUIView(context: Context) -> UIView {
@@ -687,14 +867,14 @@ private struct StreamPageDotsGestureBridge: UIViewRepresentable {
         }
 
         @objc func handleLongPress(_ recognizer: UILongPressGestureRecognizer) {
-            let locationX = recognizer.location(in: recognizer.view).x
+            let location = recognizer.location(in: recognizer.view)
             switch recognizer.state {
             case .began:
-                parent.onScrubBegan(locationX)
+                parent.onScrubBegan(location.x)
             case .changed:
-                parent.onScrubChanged(locationX)
+                parent.onScrubChanged(location)
             case .ended:
-                parent.onScrubEnded(locationX)
+                parent.onScrubEnded(location)
             case .cancelled, .failed:
                 parent.onScrubCancelled()
             default:

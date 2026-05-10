@@ -514,13 +514,14 @@ struct ChatViewModelTests {
             queueDepth: 0,
             canCancelCurrentRun: true
         )
+        let toastManager = ToastManager()
         let viewModel = ChatViewModel(
             auth: auth,
             chatService: chatService,
             settings: SettingsManager(),
             device: TestDevice(),
             uploadService: TestUploadService(),
-            toastManager: ToastManager(),
+            toastManager: toastManager,
             salientHighlightService: SalientHighlightService()
         )
         defer { viewModel.onDisappear() }
@@ -549,6 +550,61 @@ struct ChatViewModelTests {
         #expect(chatService.lastSentId == nil)
         #expect(chatService.lastSentContent == nil)
         #expect(viewModel.inputContent.string == "draft")
+        #expect(toastManager.debugMessages.contains("Prompt cancellation requested."))
+    }
+
+    @Test("Visible typing prompt cancellation requires active typing state")
+    @MainActor
+    func visibleTypingPromptCancellationRequiresActiveTypingState() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        chatService.sessionStatusBySessionKey[personalSessionKey] = makeSessionStatus(
+            sessionKey: personalSessionKey,
+            state: .running,
+            provider: "openai",
+            model: "gpt-5.5",
+            thinkingLevel: "high",
+            queueDepth: 0,
+            canCancelCurrentRun: true
+        )
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        try await setReadyToSend(chatService: chatService, viewModel: viewModel)
+        for _ in 0..<50 {
+            if viewModel.sessionStatus(for: personalSessionKey) != nil { break }
+            try await Task.sleep(forDuration: .milliseconds(20))
+        }
+
+        #expect(viewModel.canCancelCurrentPrompt == true)
+        #expect(viewModel.canCancelCurrentPrompt(in: personalSessionKey) == true)
+        #expect(viewModel.canCancelVisibleTypingPrompt(in: personalSessionKey) == false)
+
+        chatService.emitServiceEvent(.typingStateChanged(isTyping: true, sessionKey: personalSessionKey))
+        for _ in 0..<50 {
+            if viewModel.canCancelVisibleTypingPrompt(in: personalSessionKey) { break }
+            try await Task.sleep(forDuration: .milliseconds(20))
+        }
+        #expect(viewModel.canCancelVisibleTypingPrompt(in: personalSessionKey) == true)
+
+        chatService.emitServiceEvent(.typingStateChanged(isTyping: false, sessionKey: personalSessionKey))
+        for _ in 0..<50 {
+            if !viewModel.canCancelVisibleTypingPrompt(in: personalSessionKey) { break }
+            try await Task.sleep(forDuration: .milliseconds(20))
+        }
+        #expect(viewModel.canCancelCurrentPrompt(in: personalSessionKey) == true)
+        #expect(viewModel.canCancelVisibleTypingPrompt(in: personalSessionKey) == false)
     }
 
     @Test("Current prompt cancellation targets visible stream during pager switch debounce")

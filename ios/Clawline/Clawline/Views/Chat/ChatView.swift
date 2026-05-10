@@ -154,6 +154,10 @@ final class StreamPopupRouteController {
 }
 
 struct ChatView: View {
+    private static var t217DiagnosticBuild: String {
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"
+        return "T217-typing-cancel-\(build)"
+    }
 
     @Bindable var viewModel: ChatViewModel
     let toastManager: ToastManager
@@ -181,6 +185,9 @@ struct ChatView: View {
     @State private var isFileImporterPresented = false
     @State private var isCancelCurrentPromptDialogPresented = false
     @State private var cancelCurrentPromptSessionKey: String?
+    @State private var cancelCurrentPromptRequiresVisibleTyping = false
+    @State private var cancelCurrentPromptAnchorFrame: CGRect?
+    @State private var latestTypingIndicatorAnchorFrameBySessionKey: [String: CGRect] = [:]
     @State private var photoPickerItems: [PhotosPickerItem] = []
     @State private var focusRequestID = 0
     @State private var shouldRestoreFocusAfterPicker = false
@@ -832,7 +839,9 @@ struct ChatView: View {
             && !isPhotosPickerPresented
             && !isFileImporterPresented
         let cancelCurrentPromptDialogCanCancel = cancelCurrentPromptSessionKey.map { sessionKey in
-            viewModel.canCancelCurrentPrompt(in: sessionKey)
+            cancelCurrentPromptRequiresVisibleTyping
+                ? viewModel.canCancelVisibleTypingPrompt(in: sessionKey)
+                : viewModel.canCancelCurrentPrompt(in: sessionKey)
         } ?? viewModel.canCancelCurrentPrompt
 
         let messageLayer: AnyView = AnyView(
@@ -988,12 +997,23 @@ struct ChatView: View {
         .modifier(
             CancelCurrentPromptConfirmationModifier(
                 isPresented: $isCancelCurrentPromptDialogPresented,
+                anchorFrame: cancelCurrentPromptAnchorFrame,
                 canCancel: cancelCurrentPromptDialogCanCancel,
                 canPresentCommand: viewModel.canCancelCurrentPrompt,
                 onPresentCommand: { presentCancelCurrentPromptDialog() },
                 onConfirm: {
+                    if cancelCurrentPromptRequiresVisibleTyping,
+                       let sessionKey = cancelCurrentPromptSessionKey,
+                       !viewModel.canCancelVisibleTypingPrompt(in: sessionKey) {
+                        cancelCurrentPromptSessionKey = nil
+                        cancelCurrentPromptRequiresVisibleTyping = false
+                        cancelCurrentPromptAnchorFrame = nil
+                        return
+                    }
                     viewModel.requestCurrentPromptCancellation(sessionKey: cancelCurrentPromptSessionKey)
                     cancelCurrentPromptSessionKey = nil
+                    cancelCurrentPromptRequiresVisibleTyping = false
+                    cancelCurrentPromptAnchorFrame = nil
                 }
             )
         )
@@ -1490,7 +1510,16 @@ struct ChatView: View {
             forceReReadGeneration: viewModel.forceReReadGeneration(for: sessionKey),
             fontScaleChangeSequence: fontScaleChangeSequence,
             onScrollEvent: handleDeferredMessageFlowScrollEvent,
-            onTypingIndicatorTap: { presentCancelCurrentPromptDialog(sessionKey: sessionKey) },
+            onTypingIndicatorTap: { anchorFrame in
+                presentCancelCurrentPromptDialog(sessionKey: sessionKey, anchorFrame: anchorFrame)
+            },
+            onTypingIndicatorAnchorFrameChanged: { anchorFrame in
+                if let anchorFrame {
+                    latestTypingIndicatorAnchorFrameBySessionKey[sessionKey] = anchorFrame
+                } else {
+                    latestTypingIndicatorAnchorFrameBySessionKey.removeValue(forKey: sessionKey)
+                }
+            },
             onSessionControlSelected: { sessionKey, action, value, enabled in
                 viewModel.applySessionControl(
                     sessionKey: sessionKey,
@@ -1850,23 +1879,63 @@ struct ChatView: View {
         isTypingActive = false
     }
 
-    private func presentCancelCurrentPromptDialog(sessionKey: String? = nil) {
+    private func presentCancelCurrentPromptDialog(sessionKey: String? = nil, anchorFrame: CGRect? = nil) {
         if let sessionKey {
-            guard viewModel.canCancelCurrentPrompt(in: sessionKey) else {
+            let canCancelVisibleTypingPrompt = viewModel.canCancelVisibleTypingPrompt(in: sessionKey)
+            print("T217DIAG present_request build=\(Self.t217DiagnosticBuild) explicitSession=\(sessionKey) canCancelExplicit=\(canCancelVisibleTypingPrompt) canCancelAny=\(viewModel.canCancelCurrentPrompt)")
+            logger.notice(
+                "T217DIAG present_request build=\(Self.t217DiagnosticBuild, privacy: .public) explicitSession=\(sessionKey, privacy: .public) canCancelExplicit=\(canCancelVisibleTypingPrompt, privacy: .public) canCancelAny=\(viewModel.canCancelCurrentPrompt, privacy: .public)"
+            )
+            guard canCancelVisibleTypingPrompt else {
+                print("T217DIAG present_result build=\(Self.t217DiagnosticBuild) result=suppressed explicitSession=\(sessionKey)")
+                logger.notice(
+                    "T217DIAG present_result build=\(Self.t217DiagnosticBuild, privacy: .public) result=suppressed explicitSession=\(sessionKey, privacy: .public)"
+                )
                 cancelCurrentPromptSessionKey = nil
+                cancelCurrentPromptRequiresVisibleTyping = false
+                cancelCurrentPromptAnchorFrame = nil
                 isCancelCurrentPromptDialogPresented = false
                 return
             }
             cancelCurrentPromptSessionKey = sessionKey
+            cancelCurrentPromptRequiresVisibleTyping = true
+            cancelCurrentPromptAnchorFrame = anchorFrame ?? latestTypingIndicatorAnchorFrameBySessionKey[sessionKey]
         } else {
+            print("T217DIAG present_request build=\(Self.t217DiagnosticBuild) explicitSession=nil canCancelAny=\(viewModel.canCancelCurrentPrompt)")
+            logger.notice(
+                "T217DIAG present_request build=\(Self.t217DiagnosticBuild, privacy: .public) explicitSession=nil canCancelAny=\(viewModel.canCancelCurrentPrompt, privacy: .public)"
+            )
             guard viewModel.canCancelCurrentPrompt else {
+                print("T217DIAG present_result build=\(Self.t217DiagnosticBuild) result=suppressed explicitSession=nil")
+                logger.notice(
+                    "T217DIAG present_result build=\(Self.t217DiagnosticBuild, privacy: .public) result=suppressed explicitSession=nil"
+                )
                 cancelCurrentPromptSessionKey = nil
+                cancelCurrentPromptRequiresVisibleTyping = false
+                cancelCurrentPromptAnchorFrame = nil
                 isCancelCurrentPromptDialogPresented = false
                 return
             }
             cancelCurrentPromptSessionKey = nil
+            cancelCurrentPromptRequiresVisibleTyping = false
+            cancelCurrentPromptAnchorFrame = latestTypingIndicatorAnchorFrameForCurrentPrompt()
         }
         isCancelCurrentPromptDialogPresented = true
+        print("T217DIAG present_result build=\(Self.t217DiagnosticBuild) result=presented storedSession=\(cancelCurrentPromptSessionKey ?? "nil")")
+        logger.notice(
+            "T217DIAG present_result build=\(Self.t217DiagnosticBuild, privacy: .public) result=presented storedSession=\(cancelCurrentPromptSessionKey ?? "nil", privacy: .public)"
+        )
+    }
+
+    private func latestTypingIndicatorAnchorFrameForCurrentPrompt() -> CGRect? {
+        if let anchorFrame = latestTypingIndicatorAnchorFrameBySessionKey[viewModel.uiSelectedSessionKey] {
+            return anchorFrame
+        }
+        if let typingSessionKey = viewModel.typingSessionKey,
+           let anchorFrame = latestTypingIndicatorAnchorFrameBySessionKey[typingSessionKey] {
+            return anchorFrame
+        }
+        return nil
     }
 
     private func insertPromptTextFromNoTextOwner(_ text: String) {
@@ -2489,6 +2558,7 @@ private struct KeyboardScrollCommandModifier: ViewModifier {
 
 private struct CancelCurrentPromptConfirmationModifier: ViewModifier {
     @Binding var isPresented: Bool
+    let anchorFrame: CGRect?
     let canCancel: Bool
     let canPresentCommand: Bool
     let onPresentCommand: () -> Void
@@ -2509,16 +2579,263 @@ private struct CancelCurrentPromptConfirmationModifier: ViewModifier {
                 }
             }
             .focusedSceneValue(\.cancelCurrentPromptCommand, command)
-            .alert("Cancel current prompt?", isPresented: $isPresented) {
-                Button("Cancel Prompt", role: .destructive) {
-                    onConfirm()
+            .overlay {
+                if isPresented {
+                    GeometryReader { proxy in
+                        let proxyFrame = proxy.frame(in: .global)
+                        CancelCurrentPromptBubbleOverlay(
+                            anchorFrame: resolvedAnchorFrame(in: proxyFrame),
+                            proxyFrame: proxyFrame,
+                            onDismiss: {
+                                isPresented = false
+                            },
+                            onCancelPrompt: {
+                                isPresented = false
+                                onConfirm()
+                            }
+                        )
+                    }
+                    .transition(.opacity.combined(with: .scale(scale: 0.98)))
+                    .zIndex(50)
                 }
-                .keyboardShortcut(.defaultAction)
-                Button("Keep Running", role: .cancel) {}
-                    .keyboardShortcut(.cancelAction)
-            } message: {
-                Text("Stop the current in-flight prompt?")
             }
+    }
+
+    private func resolvedAnchorFrame(in proxyFrame: CGRect) -> CGRect {
+        guard let anchorFrame,
+              anchorFrame.isNull == false,
+              anchorFrame.isEmpty == false else {
+            return CGRect(
+                x: proxyFrame.midX - 1,
+                y: proxyFrame.midY - 1,
+                width: 2,
+                height: 2
+            )
+        }
+        return anchorFrame
+    }
+}
+
+private enum CancelCurrentPromptBubbleTailEdge {
+    case top
+    case bottom
+}
+
+private struct CancelCurrentPromptBubblePlacement {
+    let origin: CGPoint
+    let size: CGSize
+    let tailEdge: CancelCurrentPromptBubbleTailEdge
+    let tailCenterX: CGFloat
+}
+
+private struct CancelCurrentPromptBubbleOverlay: View {
+    let anchorFrame: CGRect
+    let proxyFrame: CGRect
+    let onDismiss: () -> Void
+    let onCancelPrompt: () -> Void
+
+    private let bubbleSize = CGSize(width: 172, height: 78)
+    private let margin: CGFloat = 12
+    private let gap: CGFloat = 8
+    private let cornerRadius: CGFloat = 20
+    private let tailWidth: CGFloat = 22
+
+    var body: some View {
+        GeometryReader { proxy in
+            let placement = placement(in: proxy.size)
+
+            ZStack(alignment: .topLeading) {
+                Color.black.opacity(0.001)
+                    .ignoresSafeArea()
+                    .contentShape(Rectangle())
+                    .onTapGesture(perform: onDismiss)
+
+                Button("Dismiss cancel prompt") {
+                    onDismiss()
+                }
+                .keyboardShortcut(.cancelAction)
+                .frame(width: 1, height: 1)
+                .opacity(0.001)
+                .accessibilityHidden(true)
+
+                CancelCurrentPromptPopup(
+                    tailEdge: placement.tailEdge,
+                    tailCenterX: placement.tailCenterX,
+                    onCancelPrompt: onCancelPrompt
+                )
+                .frame(width: placement.size.width, height: placement.size.height)
+                .position(
+                    x: placement.origin.x + placement.size.width / 2,
+                    y: placement.origin.y + placement.size.height / 2
+                )
+            }
+        }
+    }
+
+    private func placement(in containerSize: CGSize) -> CancelCurrentPromptBubblePlacement {
+        let anchor = CGRect(
+            x: anchorFrame.minX - proxyFrame.minX,
+            y: anchorFrame.minY - proxyFrame.minY,
+            width: anchorFrame.width,
+            height: anchorFrame.height
+        )
+
+        let fitsAbove = anchor.minY - gap - bubbleSize.height >= margin
+        let tailEdge: CancelCurrentPromptBubbleTailEdge = fitsAbove ? .bottom : .top
+        let proposedY = fitsAbove
+            ? anchor.minY - gap - bubbleSize.height
+            : anchor.maxY + gap
+        let maxY = max(margin, containerSize.height - margin - bubbleSize.height)
+        let y = min(max(proposedY, margin), maxY)
+
+        let proposedX = anchor.width <= 4
+            ? anchor.midX - bubbleSize.width / 2
+            : anchor.minX
+        let maxX = max(margin, containerSize.width - margin - bubbleSize.width)
+        let x = min(max(proposedX, margin), maxX)
+        let tailInset = cornerRadius + tailWidth / 2
+        let tailCenterX = min(max(anchor.midX - x, tailInset), bubbleSize.width - tailInset)
+
+        return CancelCurrentPromptBubblePlacement(
+            origin: CGPoint(x: x, y: y),
+            size: bubbleSize,
+            tailEdge: tailEdge,
+            tailCenterX: tailCenterX
+        )
+    }
+}
+
+private struct CancelCurrentPromptPopup: View {
+    let tailEdge: CancelCurrentPromptBubbleTailEdge
+    let tailCenterX: CGFloat
+    let onCancelPrompt: () -> Void
+
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var isPressed = false
+
+    private let rowHeight: CGFloat = 44
+    private let horizontalPadding: CGFloat = 12
+    private let verticalPadding: CGFloat = 12
+    private let popupCornerRadius: CGFloat = 20
+    private let buttonCornerRadius: CGFloat = 14
+    private let tailHeight: CGFloat = 10
+    private let tailWidth: CGFloat = 22
+
+    var body: some View {
+        content
+            .padding(.top, tailEdge == .top ? tailHeight : 0)
+            .padding(.bottom, tailEdge == .bottom ? tailHeight : 0)
+            .modifier(CancelCurrentPromptBubbleChrome(shape: bubbleShape))
+            .overlay {
+                bubbleShape
+                    .stroke(Color.white.opacity(0.16), lineWidth: 0.75)
+                    .allowsHitTesting(false)
+            }
+            .contentShape(bubbleShape)
+            .accessibilityElement(children: .contain)
+    }
+
+    private var content: some View {
+        Button(action: onCancelPrompt) {
+            Text("Cancel")
+                .font(.clawline(.uiLabel).weight(.semibold))
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity, minHeight: rowHeight, maxHeight: rowHeight)
+                .contentShape(Rectangle())
+                .background(buttonBackground)
+                .scaleEffect(isPressed ? 0.97 : 1)
+                .animation(.easeOut(duration: 0.15), value: isPressed)
+        }
+        .buttonStyle(.plain)
+        .keyboardShortcut(.defaultAction)
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { _ in isPressed = true }
+                .onEnded { _ in isPressed = false }
+        )
+        .padding(.horizontal, horizontalPadding)
+        .padding(.vertical, verticalPadding)
+    }
+
+    private var bubbleShape: CancelCurrentPromptBubbleShape {
+        CancelCurrentPromptBubbleShape(
+            tailEdge: tailEdge,
+            tailCenterX: tailCenterX,
+            cornerRadius: popupCornerRadius,
+            tailWidth: tailWidth,
+            tailHeight: tailHeight
+        )
+    }
+
+    private var buttonBackground: some View {
+        RoundedRectangle(cornerRadius: buttonCornerRadius, style: .continuous)
+            .fill(ChatFlowTheme.connectionDisconnected(colorScheme).opacity(isPressed ? 0.82 : 1))
+    }
+}
+
+private struct CancelCurrentPromptBubbleChrome: ViewModifier {
+    let shape: CancelCurrentPromptBubbleShape
+
+    func body(content: Content) -> some View {
+#if os(visionOS)
+        content
+            .background(.regularMaterial, in: shape)
+#else
+        content
+            .glassEffect(.regular, in: shape)
+#endif
+    }
+}
+
+private struct CancelCurrentPromptBubbleShape: Shape {
+    let tailEdge: CancelCurrentPromptBubbleTailEdge
+    let tailCenterX: CGFloat
+    let cornerRadius: CGFloat
+    let tailWidth: CGFloat
+    let tailHeight: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        let bodyRect: CGRect
+        switch tailEdge {
+        case .top:
+            bodyRect = CGRect(
+                x: rect.minX,
+                y: rect.minY + tailHeight,
+                width: rect.width,
+                height: rect.height - tailHeight
+            )
+        case .bottom:
+            bodyRect = CGRect(
+                x: rect.minX,
+                y: rect.minY,
+                width: rect.width,
+                height: rect.height - tailHeight
+            )
+        }
+
+        let radius = min(cornerRadius, min(bodyRect.width, bodyRect.height) / 2)
+        let clampedTailCenterX = min(
+            max(tailCenterX, radius + tailWidth / 2),
+            rect.width - radius - tailWidth / 2
+        )
+        let tailLeftX = rect.minX + clampedTailCenterX - tailWidth / 2
+        let tailRightX = rect.minX + clampedTailCenterX + tailWidth / 2
+
+        var path = Path(roundedRect: bodyRect, cornerRadius: radius, style: .continuous)
+        var tail = Path()
+        switch tailEdge {
+        case .top:
+            tail.move(to: CGPoint(x: tailLeftX, y: bodyRect.minY + 1))
+            tail.addLine(to: CGPoint(x: rect.minX + clampedTailCenterX, y: rect.minY))
+            tail.addLine(to: CGPoint(x: tailRightX, y: bodyRect.minY + 1))
+        case .bottom:
+            tail.move(to: CGPoint(x: tailLeftX, y: bodyRect.maxY - 1))
+            tail.addLine(to: CGPoint(x: rect.minX + clampedTailCenterX, y: rect.maxY))
+            tail.addLine(to: CGPoint(x: tailRightX, y: bodyRect.maxY - 1))
+        }
+        tail.closeSubpath()
+        path.addPath(tail)
+        return path
     }
 }
 

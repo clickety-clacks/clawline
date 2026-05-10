@@ -135,6 +135,24 @@ describe("chat-wire protocol fixtures", () => {
     expect(parseServerPayload(JSON.stringify(messageFixture))).toEqual(messageFixture);
   });
 
+  it("parses assistant typing payloads", () => {
+    expect(
+      parseServerPayload(
+        JSON.stringify({
+          type: "typing",
+          active: true,
+          role: "assistant",
+          sessionKey: "agent:main:clawline:user_1:main"
+        })
+      )
+    ).toEqual({
+      type: "typing",
+      active: true,
+      role: "assistant",
+      sessionKey: "agent:main:clawline:user_1:main"
+    });
+  });
+
   it("treats missing server message attachments as an empty array", () => {
     expect(
       parseServerPayload(

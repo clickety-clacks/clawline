@@ -193,6 +193,13 @@ export interface StreamTailStateRecord {
   lastMessageRole: MessageRole;
 }
 
+export interface TypingPayload {
+  type: "typing";
+  active: boolean;
+  role?: MessageRole;
+  sessionKey?: string;
+}
+
 export interface ClientStreamReadPayload {
   type: "stream_read";
   sessionKey: string;
@@ -221,6 +228,7 @@ export type PhaseOneServerPayload =
   | StreamMutationPayload
   | StreamSnapshotPayload
   | StreamTailStatePayload
+  | TypingPayload
   | SyncCompletePayload;
 
 export function serializePairRequest(payload: PairRequestPayload) {
@@ -308,6 +316,8 @@ export function parseServerPayload(raw: string): PhaseOneServerPayload {
       return parseStreamReadStateFromRecord(value);
     case "stream_tail_state":
       return parseStreamTailStateFromRecord(value);
+    case "typing":
+      return parseTypingFromRecord(value);
     case "session_info":
       return parseSessionInfoFromRecord(value);
     case "event":
@@ -321,6 +331,21 @@ export function parseServerPayload(raw: string): PhaseOneServerPayload {
     default:
       throw new Error(`Unsupported server payload type: ${type}`);
   }
+}
+
+function parseTypingFromRecord(value: JsonRecord): TypingPayload {
+  assertLiteral(value.type, "typing", "typing.type");
+  const role = optionalString(value.role, "typing.role");
+  if (role != null && role !== "user" && role !== "assistant") {
+    throw new Error(`Invalid typing.role: ${role}`);
+  }
+
+  return {
+    type: "typing",
+    active: requiredBoolean(value.active, "typing.active"),
+    role,
+    sessionKey: optionalString(value.sessionKey, "typing.sessionKey")
+  };
 }
 
 function parseSyncCompleteFromRecord(value: JsonRecord): SyncCompletePayload {

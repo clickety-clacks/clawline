@@ -4,7 +4,7 @@ import { WebSocketServer } from "ws";
 
 test("messages use the wrapping flow layout without blank bubbles", async ({ page }) => {
   const port = 24_401 + Math.floor(Math.random() * 1_000);
-  const sessionKey = "agent:main:clawline:flynn:main";
+  const sessionKey = "agent:main:clawline:clawline_web_test:main";
   const server = createServer();
   const wss = new WebSocketServer({ server, path: "/ws" });
   let authRequestCount = 0;
@@ -21,7 +21,7 @@ test("messages use the wrapping flow layout without blank bubbles", async ({ pag
           JSON.stringify({
             type: "auth_result",
             success: true,
-            userId: "user_flynn",
+            userId: "clawline_web_test",
             replayCount: 0,
             sessionKeys: [sessionKey]
           })
@@ -29,7 +29,7 @@ test("messages use the wrapping flow layout without blank bubbles", async ({ pag
         socket.send(
           JSON.stringify({
             type: "session_info",
-            userId: "user_flynn",
+            userId: "clawline_web_test",
             isAdmin: false,
             sessionKeys: [sessionKey]
           })
@@ -114,12 +114,12 @@ test("messages use the wrapping flow layout without blank bubbles", async ({ pag
         JSON.stringify(session.deviceId)
       );
     }, {
-      claimedName: "Flynn Browser",
+      claimedName: "Clawline Web Test Browser",
       deviceId: "phase5-flow-device",
       isAdmin: false,
       serverUrl: `ws://127.0.0.1:${port}/ws`,
       token: "jwt-phase5-flow-token",
-      userId: "user_flynn"
+      userId: "clawline_web_test"
     });
     await page.setViewportSize({ width: 820, height: 1180 });
     await page.goto(`/chat/${sessionKey}`);
@@ -222,7 +222,7 @@ test("messages use the wrapping flow layout without blank bubbles", async ({ pag
 
 test("tablet-width medium messages pair naturally without oversized row gaps", async ({ page }) => {
   const port = 24_901 + Math.floor(Math.random() * 1_000);
-  const sessionKey = "agent:main:clawline:flynn:main";
+  const sessionKey = "agent:main:clawline:clawline_web_test:main";
   const server = createServer();
   const wss = new WebSocketServer({ server, path: "/ws" });
 
@@ -238,7 +238,7 @@ test("tablet-width medium messages pair naturally without oversized row gaps", a
         JSON.stringify({
           type: "auth_result",
           success: true,
-          userId: "user_flynn",
+          userId: "clawline_web_test",
           replayCount: 0,
           sessionKeys: [sessionKey]
         })
@@ -246,7 +246,7 @@ test("tablet-width medium messages pair naturally without oversized row gaps", a
       socket.send(
         JSON.stringify({
           type: "session_info",
-          userId: "user_flynn",
+          userId: "clawline_web_test",
           isAdmin: false,
           sessionKeys: [sessionKey]
         })
@@ -317,12 +317,12 @@ test("tablet-width medium messages pair naturally without oversized row gaps", a
         JSON.stringify(session.deviceId)
       );
     }, {
-      claimedName: "Flynn Browser",
+      claimedName: "Clawline Web Test Browser",
       deviceId: "phase5-flow-tablet-device",
       isAdmin: false,
       serverUrl: `ws://127.0.0.1:${port}/ws`,
       token: "jwt-phase5-flow-tablet-token",
-      userId: "user_flynn"
+      userId: "clawline_web_test"
     });
 
     await page.setViewportSize({ width: 820, height: 1180 });
@@ -387,7 +387,7 @@ test("tablet-width medium messages pair naturally without oversized row gaps", a
 
 test("medium bubbles wrap on 375px viewports instead of overflowing", async ({ page }) => {
   const port = 25_701 + Math.floor(Math.random() * 1_000);
-  const sessionKey = "agent:main:clawline:flynn:main";
+  const sessionKey = "agent:main:clawline:clawline_web_test:main";
   const server = createServer();
   const wss = new WebSocketServer({ server, path: "/ws" });
 
@@ -403,7 +403,7 @@ test("medium bubbles wrap on 375px viewports instead of overflowing", async ({ p
         JSON.stringify({
           type: "auth_result",
           success: true,
-          userId: "user_flynn",
+          userId: "clawline_web_test",
           replayCount: 0,
           sessionKeys: [sessionKey]
         })
@@ -411,7 +411,7 @@ test("medium bubbles wrap on 375px viewports instead of overflowing", async ({ p
       socket.send(
         JSON.stringify({
           type: "session_info",
-          userId: "user_flynn",
+          userId: "clawline_web_test",
           isAdmin: false,
           sessionKeys: [sessionKey]
         })
@@ -472,12 +472,12 @@ test("medium bubbles wrap on 375px viewports instead of overflowing", async ({ p
         JSON.stringify(session.deviceId)
       );
     }, {
-      claimedName: "Flynn Browser",
+      claimedName: "Clawline Web Test Browser",
       deviceId: "phase5-flow-narrow-device",
       isAdmin: false,
       serverUrl: `ws://127.0.0.1:${port}/ws`,
       token: "jwt-phase5-flow-narrow-token",
-      userId: "user_flynn"
+      userId: "clawline_web_test"
     });
 
     await page.setViewportSize({ width: 375, height: 812 });
@@ -545,7 +545,7 @@ test("medium bubbles wrap on 375px viewports instead of overflowing", async ({ p
 
 test("short bubbles still share a row on 375px viewports when they fit", async ({ page }) => {
   const port = 24_401 + Math.floor(Math.random() * 1_000);
-  const sessionKey = "agent:main:clawline:flynn:main";
+  const sessionKey = "agent:main:clawline:clawline_web_test:main";
   const server = createServer();
   const wss = new WebSocketServer({ server, path: "/ws" });
 
@@ -561,7 +561,7 @@ test("short bubbles still share a row on 375px viewports when they fit", async (
         JSON.stringify({
           type: "auth_result",
           success: true,
-          userId: "user_flynn",
+          userId: "clawline_web_test",
           replayCount: 0,
           sessionKeys: [sessionKey]
         })
@@ -569,7 +569,7 @@ test("short bubbles still share a row on 375px viewports when they fit", async (
       socket.send(
         JSON.stringify({
           type: "session_info",
-          userId: "user_flynn",
+          userId: "clawline_web_test",
           isAdmin: false,
           sessionKeys: [sessionKey]
         })
@@ -630,12 +630,12 @@ test("short bubbles still share a row on 375px viewports when they fit", async (
         JSON.stringify(session.deviceId)
       );
     }, {
-      claimedName: "Flynn Browser",
+      claimedName: "Clawline Web Test Browser",
       deviceId: "phase5-flow-device",
       isAdmin: false,
       serverUrl: `ws://127.0.0.1:${port}/ws`,
       token: "jwt-phase5-flow-token",
-      userId: "user_flynn"
+      userId: "clawline_web_test"
     });
     await page.setViewportSize({ width: 375, height: 812 });
     await page.goto(`/chat/${sessionKey}`);
@@ -669,6 +669,138 @@ test("short bubbles still share a row on 375px viewports when they fit", async (
     expect(Math.abs(positions.first!.top - positions.second!.top)).toBeLessThanOrEqual(4);
     expect(positions.first!.right).toBeLessThanOrEqual(375);
     expect(positions.second!.right).toBeLessThanOrEqual(375);
+  } finally {
+    try {
+      await page.goto("about:blank");
+    } catch {
+      // Ignore teardown navigation errors if the test already closed the page.
+    }
+    for (const client of wss.clients) {
+      client.terminate();
+    }
+    server.closeAllConnections?.();
+    await new Promise<void>((resolve, reject) => {
+      wss.close((error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        server.close((serverError) => {
+          if (serverError) {
+            reject(serverError);
+            return;
+          }
+          resolve();
+        });
+      });
+    });
+  }
+});
+
+test("wide markdown bubbles keep a comfortable max width instead of filling the viewport", async ({
+  page
+}) => {
+  const port = 25_301 + Math.floor(Math.random() * 1_000);
+  const sessionKey = "agent:main:clawline:clawline_web_test:main";
+  const server = createServer();
+  const wss = new WebSocketServer({ server, path: "/ws" });
+
+  wss.on("connection", (socket) => {
+    socket.on("message", (buffer) => {
+      const payload = JSON.parse(buffer.toString()) as { type: string };
+
+      if (payload.type !== "auth") {
+        return;
+      }
+
+      socket.send(
+        JSON.stringify({
+          type: "auth_result",
+          success: true,
+          userId: "clawline_web_test",
+          replayCount: 0,
+          sessionKeys: [sessionKey]
+        })
+      );
+      socket.send(
+        JSON.stringify({
+          type: "stream_snapshot",
+          streams: [
+            {
+              sessionKey,
+              displayName: "Main",
+              kind: "main",
+              orderIndex: 0,
+              isBuiltIn: true,
+              createdAt: 1_764_653_000_000,
+              updatedAt: 1_764_653_000_000,
+              adopted: false
+            }
+          ]
+        })
+      );
+      socket.send(
+        JSON.stringify({
+          type: "message",
+          id: "s_wide_markdown",
+          role: "assistant",
+          content: [
+            "| Column A | Column B | Column C |",
+            "| --- | --- | --- |",
+            "| alpha | beta | gamma |",
+            "| delta | epsilon | zeta |"
+          ].join("\n"),
+          timestamp: 1_764_653_000_010,
+          streaming: false,
+          sessionKey,
+          attachments: []
+        })
+      );
+    });
+  });
+
+  await new Promise<void>((resolve) => {
+    server.listen(port, "127.0.0.1", () => resolve());
+  });
+
+  try {
+    await page.addInitScript((session) => {
+      window.localStorage.setItem("clawline-web:auth-session", JSON.stringify(session));
+      window.localStorage.setItem(
+        "clawline-web:device-id",
+        JSON.stringify(session.deviceId)
+      );
+    }, {
+      claimedName: "Clawline Web Test Browser",
+      deviceId: "phase5-wide-layout-device",
+      isAdmin: true,
+      serverUrl: `ws://127.0.0.1:${port}/ws`,
+      token: "jwt-phase5-wide-layout-token",
+      userId: "clawline_web_test"
+    });
+
+    await page.setViewportSize({ width: 1180, height: 960 });
+    await page.goto(`/chat/${sessionKey}`);
+    const bubble = page.getByTestId("message-s_wide_markdown");
+    await expect(bubble).toBeVisible();
+
+    const metrics = await page.evaluate(() => {
+      const list = document.querySelector<HTMLElement>('[data-testid="message-list"]');
+      const bubble = document.querySelector<HTMLElement>('[data-testid="message-s_wide_markdown"]');
+      if (!list || !bubble) {
+        return null;
+      }
+      const listRect = list.getBoundingClientRect();
+      const bubbleRect = bubble.getBoundingClientRect();
+      return {
+        bubbleWidth: bubbleRect.width,
+        listWidth: listRect.width
+      };
+    });
+
+    expect(metrics).not.toBeNull();
+    expect(metrics!.bubbleWidth).toBeLessThanOrEqual(620);
+    expect(metrics!.bubbleWidth).toBeLessThan(metrics!.listWidth - 240);
   } finally {
     try {
       await page.goto("about:blank");

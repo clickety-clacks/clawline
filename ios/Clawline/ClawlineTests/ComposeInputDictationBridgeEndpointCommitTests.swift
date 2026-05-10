@@ -306,13 +306,82 @@ struct DictationCoordinatorTranscriptOwnershipTests {
         #expect(rig.textView.attributedText.string == "seed hello world from soniox")
     }
 
+    @Test("Active dictation transcript application preserves compose attachments")
+    func activeDictationPreservesComposeAttachments() async {
+        let attachment = makePendingAttachment()
+        let rig = makeRig(
+            initialText: "seed ",
+            selectedRange: NSRange(location: 5, length: 0),
+            attachments: [attachment.id: attachment]
+        )
+
+        startDictation(rig)
+        emitProvisional("hello", into: rig)
+
+        await waitUntil { rig.textView.attributedText.string == "seed hello" }
+        #expect(rig.textView.attributedText.string == "seed hello")
+        #expect(rig.harness.host.currentAttachments(for: rig.harness.host.activeSessionKey).keys.contains(attachment.id))
+    }
+
+    @Test("Coordinator-owned fallback restores base snapshot when live transcript range diverges")
+    func coordinatorFallbackRestoresBaseSnapshotWhenLiveTranscriptRangeDiverges() async {
+        let attachment = makePendingAttachment()
+        let rig = makeRig(
+            initialText: "seed ",
+            selectedRange: NSRange(location: 5, length: 0),
+            attachments: [attachment.id: attachment]
+        )
+
+        startDictation(rig)
+        emitProvisional("hello", into: rig)
+        await waitUntil { rig.textView.attributedText.string == "seed hello" }
+
+        rig.textView.attributedText = NSAttributedString(string: "corrupt")
+        rig.textView.selectedRange = NSRange(location: "corrupt".utf16.count, length: 0)
+        emitProvisional("hello world", into: rig)
+
+        await waitUntil { rig.textView.attributedText.string == "seed hello world" }
+        #expect(rig.textView.attributedText.string == "seed hello world")
+        #expect(rig.harness.host.currentAttachments(for: rig.harness.host.activeSessionKey).keys.contains(attachment.id))
+    }
+
+    @Test("Active dictation replay on compose rebind preserves attachments")
+    func activeDictationReplayOnComposeRebindPreservesAttachments() async {
+        let attachment = makePendingAttachment()
+        let rig = makeRig(
+            initialText: "seed ",
+            selectedRange: NSRange(location: 5, length: 0),
+            attachments: [attachment.id: attachment]
+        )
+
+        startDictation(rig)
+        emitProvisional("hello", into: rig)
+        await waitUntil { rig.textView.attributedText.string == "seed hello" }
+
+        let reboundTextView = PastableTextView()
+        reboundTextView.attributedText = NSAttributedString(string: "seed ")
+        reboundTextView.selectedRange = NSRange(location: 5, length: 0)
+        rig.coordinator.setComposeTextView(reboundTextView)
+
+        await waitUntil { reboundTextView.attributedText.string == "seed hello" }
+        #expect(reboundTextView.attributedText.string == "seed hello")
+        #expect(rig.harness.host.currentAttachments(for: rig.harness.host.activeSessionKey).keys.contains(attachment.id))
+    }
+
     private func makeRig(
         initialText: String,
         selectedRange: NSRange,
+        attachments: [UUID: PendingAttachment] = [:],
         freshClientPerFactoryCall: Bool = false
     ) -> CoordinatorTranscriptRig {
         let harness = DictationTestHarness(freshClientPerFactoryCall: freshClientPerFactoryCall)
-        harness.host.setText(initialText, for: harness.host.activeSessionKey)
+        harness.host.setSnapshot(
+            ComposeDraftSnapshot(
+                content: NSAttributedString(string: initialText),
+                attachments: attachments
+            ),
+            for: harness.host.activeSessionKey
+        )
 
         let coordinator = harness.makeCoordinator()
         let textView = PastableTextView()
@@ -396,6 +465,16 @@ struct DictationCoordinatorTranscriptOwnershipTests {
             replacementUTF16Length: replacement.utf16.count
         )
         syncContext(rig)
+    }
+
+    private func makePendingAttachment() -> PendingAttachment {
+        PendingAttachment(
+            id: UUID(),
+            data: Data([0x01]),
+            thumbnail: UIImage(),
+            mimeType: "image/png",
+            filename: "image.png"
+        )
     }
 }
 

@@ -2039,6 +2039,8 @@ final class DictationSession {
         )
         let startedAt = CFAbsoluteTimeGetCurrent()
         guard var session = activeTranscriptSession() else { return }
+        let previousTranscriptUTF16Length = session.previousTranscriptUTF16Length
+        let previousTranscriptText = session.committedText + session.provisionalText
         if let textView = bridge.boundComposeTextView {
             syncCommittedText(from: textView.attributedText.string, session: &session)
         } else {
@@ -2047,7 +2049,6 @@ final class DictationSession {
                 session: &session
             )
         }
-        let previousTranscriptUTF16Length = session.previousTranscriptUTF16Length
         applySegmentUpdate(update, to: &session)
         let replacementText = NSAttributedString(
             string: session.committedText + session.provisionalText,
@@ -2057,13 +2058,19 @@ final class DictationSession {
             location: session.dictationStartUTF16,
             length: previousTranscriptUTF16Length
         )
+        let applicationMode = textApplicationMode(
+            for: session,
+            replacementRange: replacementRange,
+            expectedTranscript: previousTranscriptText
+        )
         let plan = DictationTextApplicationPlan(
             sessionKey: session.originSessionKey,
             baseSnapshot: session.baseSnapshot,
             replacementRange: replacementRange,
             fallbackLocation: session.dictationStartUTF16,
             replacementText: replacementText,
-            selectionPolicy: .followTranscriptEndWhenSelectionAlreadyAtEnd
+            selectionPolicy: .followTranscriptEndWhenSelectionAlreadyAtEnd,
+            applicationMode: applicationMode
         )
         transcriptOwnership = .active(session)
         bridge.apply(plan)
@@ -2096,6 +2103,19 @@ final class DictationSession {
             ),
             selectionPolicy: .preserveUserSelection
         )
+    }
+
+    private func textApplicationMode(
+        for session: TranscriptSession,
+        replacementRange: NSRange,
+        expectedTranscript: String
+    ) -> DictationTextApplicationMode {
+        guard !expectedTranscript.isEmpty else { return .replaceRange }
+        let snapshot = liveComposeSnapshot(for: session.originSessionKey)
+        guard substring(text: snapshot.content.string, utf16Range: replacementRange) == expectedTranscript else {
+            return .restoreBaseAndAppendReplacement
+        }
+        return .replaceRange
     }
 
     private func resolvedTranscriptAnchorRange(

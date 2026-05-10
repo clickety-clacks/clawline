@@ -20,6 +20,11 @@ enum DictationSelectionPolicy: Equatable {
     case followTranscriptEndWhenSelectionAlreadyAtEnd
 }
 
+enum DictationTextApplicationMode: Equatable {
+    case replaceRange
+    case restoreBaseAndAppendReplacement
+}
+
 @MainActor
 protocol DictationComposeDraftHosting: AnyObject {
     var activeSessionKey: String { get }
@@ -47,6 +52,25 @@ struct DictationTextApplicationPlan {
     let fallbackLocation: Int
     let replacementText: NSAttributedString
     let selectionPolicy: DictationSelectionPolicy
+    let applicationMode: DictationTextApplicationMode
+
+    init(
+        sessionKey: String,
+        baseSnapshot: ComposeDraftSnapshot,
+        replacementRange: NSRange,
+        fallbackLocation: Int,
+        replacementText: NSAttributedString,
+        selectionPolicy: DictationSelectionPolicy,
+        applicationMode: DictationTextApplicationMode = .replaceRange
+    ) {
+        self.sessionKey = sessionKey
+        self.baseSnapshot = baseSnapshot
+        self.replacementRange = replacementRange
+        self.fallbackLocation = fallbackLocation
+        self.replacementText = replacementText
+        self.selectionPolicy = selectionPolicy
+        self.applicationMode = applicationMode
+    }
 }
 
 @MainActor
@@ -107,6 +131,11 @@ final class DictationTranscriptApplicator {
         guard !plan.sessionKey.isEmpty else { return }
         guard host?.activeSessionKey == plan.sessionKey else { return }
 
+        if plan.applicationMode == .restoreBaseAndAppendReplacement {
+            applyFallbackSnapshot(from: plan)
+            return
+        }
+
         if let textView = composeTextView {
             let safeRange = safeReplacementRange(
                 selectedRange: plan.replacementRange,
@@ -126,7 +155,7 @@ final class DictationTranscriptApplicator {
         let currentSnapshot = host.captureComposeDraftSnapshot(for: plan.sessionKey)
         let current = NSMutableAttributedString(attributedString: currentSnapshot.content)
         if !isValidReplacementRange(plan.replacementRange, textLength: current.length) {
-            applyFallbackSnapshot(from: plan, to: host)
+            applyFallbackSnapshot(from: plan)
             return
         }
         let safeRange = safeReplacementRange(
@@ -146,7 +175,7 @@ final class DictationTranscriptApplicator {
             return
         }
 
-        applyFallbackSnapshot(from: plan, to: host)
+        applyFallbackSnapshot(from: plan)
     }
 
     func restore(snapshot: ComposeDraftSnapshot, to sessionKey: String) {
@@ -179,17 +208,22 @@ final class DictationTranscriptApplicator {
         return range.location + range.length <= textLength
     }
 
-    private func applyFallbackSnapshot(from plan: DictationTextApplicationPlan, to host: any DictationComposeDraftHosting) {
+    private func applyFallbackSnapshot(from plan: DictationTextApplicationPlan) {
+        guard let host else { return }
         let fallback = NSMutableAttributedString(attributedString: plan.baseSnapshot.content)
         if plan.replacementText.length > 0 {
             fallback.append(plan.replacementText)
         }
+        let snapshot = ComposeDraftSnapshot(content: fallback, attachments: plan.baseSnapshot.attachments)
         host.applyComposeDraftSnapshot(
-            ComposeDraftSnapshot(content: fallback, attachments: plan.baseSnapshot.attachments),
+            snapshot,
             to: plan.sessionKey,
             moveCursorToEnd: plan.selectionPolicy == .followTranscriptEndWhenSelectionAlreadyAtEnd,
             announceEditorReset: false
         )
+        if let composeTextView, host.activeSessionKey == plan.sessionKey {
+            replaceSnapshot(snapshot, in: composeTextView)
+        }
     }
 
     private func replaceText(

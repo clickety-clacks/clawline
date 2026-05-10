@@ -148,6 +148,35 @@ struct KeyboardDictationRegressionTests {
         )
     }
 
+    /// Dictation does not own keyboard restoration. A user tap in the editor
+    /// is a compose focus intent, so it must use the same responder-cycle path
+    /// whether dictation is active or not.
+    @Test("BUG2: dictation-active editor tap cycles hidden keyboard without ending dictation")
+    @MainActor
+    func dictationActiveTapCyclesHiddenKeyboard() async {
+        var focusEvents: [Bool] = []
+        let editor = makeTestEditor(
+            isKeyboardVisible: false,
+            isDictationActive: true,
+            onFocusChange: { focusEvents.append($0) }
+        )
+        let coordinator = editor.makeCoordinator()
+        let textView = KeyboardFocusTestTextView()
+        textView.simulatedFirstResponder = true
+        let tap = UITapGestureRecognizer(target: coordinator, action: #selector(RichTextEditor.Coordinator.handleEditorTap(_:)))
+        textView.addGestureRecognizer(tap)
+        textView.resetResponderCounts()
+
+        coordinator.handleEditorTap(tap)
+        await Task.yield()
+
+        #expect(textView.resignCount == 1)
+        #expect(textView.becomeCount == 1)
+        #expect(textView.isFirstResponder)
+        #expect(focusEvents == [true])
+        #expect(coordinator.parent.isDictationActive)
+    }
+
     // ------------------------------------------------------------------
     // Combined: active dictation disables scroll dismissal, normal input stays interactive
     // ------------------------------------------------------------------
@@ -179,7 +208,11 @@ struct KeyboardDictationRegressionTests {
 // MARK: - Helpers
 
 @MainActor
-private func makeTestEditor() -> RichTextEditor {
+private func makeTestEditor(
+    isKeyboardVisible: Bool = false,
+    isDictationActive: Bool = false,
+    onFocusChange: @escaping (Bool) -> Void = { _ in }
+) -> RichTextEditor {
     RichTextEditor(
         attributedText: .constant(NSAttributedString()),
         calculatedHeight: .constant(44),
@@ -190,8 +223,37 @@ private func makeTestEditor() -> RichTextEditor {
         focusTrigger: 0,
         dismissTrigger: 0,
         isEditable: true,
-        isKeyboardVisible: false,
+        isKeyboardVisible: isKeyboardVisible,
+        isDictationActive: isDictationActive,
         tintColor: .systemBlue,
-        onFocusChange: { _ in }
+        onFocusChange: onFocusChange
     )
+}
+
+@MainActor
+private final class KeyboardFocusTestTextView: UITextView {
+    var simulatedFirstResponder = false
+    private(set) var becomeCount = 0
+    private(set) var resignCount = 0
+
+    override var isFirstResponder: Bool {
+        simulatedFirstResponder
+    }
+
+    override func becomeFirstResponder() -> Bool {
+        becomeCount += 1
+        simulatedFirstResponder = true
+        return true
+    }
+
+    override func resignFirstResponder() -> Bool {
+        resignCount += 1
+        simulatedFirstResponder = false
+        return true
+    }
+
+    func resetResponderCounts() {
+        becomeCount = 0
+        resignCount = 0
+    }
 }

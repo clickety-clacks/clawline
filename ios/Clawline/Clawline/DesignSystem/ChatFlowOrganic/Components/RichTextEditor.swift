@@ -214,15 +214,13 @@ struct RichTextEditor: UIViewRepresentable {
 
         @objc func handleEditorTap(_ gesture: UITapGestureRecognizer) {
             guard let textView = gesture.view as? UITextView else { return }
-            // During dictation, allow normal tap behavior (cursor placement, selection)
-            // without cycling first responder — the keyboard is managed by the coordinator.
-            if parent.isDictationActive {
-                parent.onFocusChange(true)
-                return
-            }
+            requestEditorFocus(on: textView, isKeyboardVisible: parent.isKeyboardVisible)
+        }
+
+        private func requestEditorFocus(on textView: UITextView, isKeyboardVisible: Bool) {
             if Self.shouldCycleFirstResponder(
                 isFirstResponder: textView.isFirstResponder,
-                isKeyboardVisible: parent.isKeyboardVisible
+                isKeyboardVisible: isKeyboardVisible
             ) {
                 textView.resignFirstResponder()
                 DispatchQueue.main.async { [weak self, weak textView] in
@@ -365,24 +363,7 @@ struct RichTextEditor: UIViewRepresentable {
             lastFocusTrigger = trigger
             guard trigger > 0 else { return }
             guard parent.isEditable else { return }
-            if Self.shouldCycleFirstResponder(
-                isFirstResponder: textView.isFirstResponder,
-                isKeyboardVisible: isKeyboardVisible
-            ) {
-                textView.resignFirstResponder()
-                DispatchQueue.main.async { [weak self, weak textView] in
-                    guard let self, let textView else { return }
-                    let becameFirstResponder = textView.becomeFirstResponder()
-                    if becameFirstResponder || textView.isFirstResponder {
-                        self.parent.onFocusChange(true)
-                    }
-                }
-            } else {
-                let becameFirstResponder = textView.becomeFirstResponder()
-                if becameFirstResponder || textView.isFirstResponder {
-                    parent.onFocusChange(true)
-                }
-            }
+            requestEditorFocus(on: textView, isKeyboardVisible: isKeyboardVisible)
         }
 
         func applyDismissIfNeeded(on textView: UITextView, trigger: Int) {

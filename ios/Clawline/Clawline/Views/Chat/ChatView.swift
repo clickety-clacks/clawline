@@ -1449,11 +1449,13 @@ struct ChatView: View {
 #else
         // The visible chat scroller is UIKit-hosted, so SwiftUI's scrollEdgeEffectStyle
         // has no rendered scroll edge here. Keep a minimal material fallback at the screen top.
-        let solidHeight = max(0, topInset + 8)
-        let fadeHeight: CGFloat = 34
+        let solidHeight = max(0, topInset + 3)
+        let fadeHeight: CGFloat = 14
+        let materialOpacity: CGFloat = 0.38
         let edgeHeight = solidHeight + fadeHeight
         Rectangle()
             .fill(.ultraThinMaterial)
+            .opacity(materialOpacity)
             .frame(height: edgeHeight)
             .mask {
                 VStack(spacing: 0) {

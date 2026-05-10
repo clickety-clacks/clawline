@@ -49,6 +49,7 @@ struct DictationTextApplicationPlan {
     let sessionKey: String
     let baseSnapshot: ComposeDraftSnapshot
     let replacementRange: NSRange
+    let fallbackReplacementRange: NSRange
     let fallbackLocation: Int
     let replacementText: NSAttributedString
     let selectionPolicy: DictationSelectionPolicy
@@ -58,6 +59,7 @@ struct DictationTextApplicationPlan {
         sessionKey: String,
         baseSnapshot: ComposeDraftSnapshot,
         replacementRange: NSRange,
+        fallbackReplacementRange: NSRange? = nil,
         fallbackLocation: Int,
         replacementText: NSAttributedString,
         selectionPolicy: DictationSelectionPolicy,
@@ -66,6 +68,7 @@ struct DictationTextApplicationPlan {
         self.sessionKey = sessionKey
         self.baseSnapshot = baseSnapshot
         self.replacementRange = replacementRange
+        self.fallbackReplacementRange = fallbackReplacementRange ?? replacementRange
         self.fallbackLocation = fallbackLocation
         self.replacementText = replacementText
         self.selectionPolicy = selectionPolicy
@@ -211,9 +214,16 @@ final class DictationTranscriptApplicator {
     private func applyFallbackSnapshot(from plan: DictationTextApplicationPlan) {
         guard let host else { return }
         let fallback = NSMutableAttributedString(attributedString: plan.baseSnapshot.content)
-        if plan.replacementText.length > 0 {
-            fallback.append(plan.replacementText)
+        let replacementRange: NSRange
+        if isValidReplacementRange(plan.fallbackReplacementRange, textLength: fallback.length) {
+            replacementRange = plan.fallbackReplacementRange
+        } else {
+            replacementRange = NSRange(
+                location: min(max(plan.fallbackLocation, 0), fallback.length),
+                length: 0
+            )
         }
+        fallback.replaceCharacters(in: replacementRange, with: plan.replacementText)
         let snapshot = ComposeDraftSnapshot(content: fallback, attachments: plan.baseSnapshot.attachments)
         host.applyComposeDraftSnapshot(
             snapshot,

@@ -255,6 +255,7 @@ final class DictationSession {
         var originSessionKey: String
         var baseSnapshot: ComposeDraftSnapshot
         var dictationStartUTF16: Int
+        var baseReplacementLenUTF16: Int
         var committedLenUTF16: Int
         var provisionalText: String
         var suppressedUntilNextEndpoint: Bool
@@ -1078,6 +1079,14 @@ final class DictationSession {
         }
     }
 
+    private func handleSonioxEvent(_ event: SonioxStreamingEvent, from client: any SonioxStreamingClienting) async {
+        guard streamingClient === client else {
+            logDictation("DICTATION_CONN dropped_stale_soniox_event \(attemptContext())")
+            return
+        }
+        await handleSonioxEvent(event)
+    }
+
     private func flushBufferedFramesIfPossible() {
         guard isPhase3StreamingAudio, isSocketConnected else { return }
         guard !bufferedAudioFrames.isEmpty else { return }
@@ -1866,7 +1875,7 @@ final class DictationSession {
             eventTask = Task { [weak self] in
                 guard let self else { return }
                 for await event in client.events {
-                    await self.handleSonioxEvent(event)
+                    await self.handleSonioxEvent(event, from: client)
                 }
             }
         }
@@ -1981,6 +1990,7 @@ final class DictationSession {
                 originSessionKey: sessionKey,
                 baseSnapshot: snapshot,
                 dictationStartUTF16: selectedRange.location,
+                baseReplacementLenUTF16: selectedRange.length,
                 committedLenUTF16: 0,
                 provisionalText: initialProvisionalText,
                 suppressedUntilNextEndpoint: false,
@@ -2067,6 +2077,10 @@ final class DictationSession {
             sessionKey: session.originSessionKey,
             baseSnapshot: session.baseSnapshot,
             replacementRange: replacementRange,
+            fallbackReplacementRange: NSRange(
+                location: session.dictationStartUTF16,
+                length: session.baseReplacementLenUTF16
+            ),
             fallbackLocation: session.dictationStartUTF16,
             replacementText: replacementText,
             selectionPolicy: .followTranscriptEndWhenSelectionAlreadyAtEnd,
@@ -2155,6 +2169,7 @@ final class DictationSession {
 
         let committedStart = session.dictationStartUTF16
         let committedEnd = committedStart + session.committedLenUTF16
+        let baseReplacementEnd = committedStart + session.baseReplacementLenUTF16
         let newCommittedStart = transformBoundary(
             committedStart,
             editedRange: editedRangeUTF16,
@@ -2167,9 +2182,16 @@ final class DictationSession {
             replacementUTF16Length: replacementUTF16Length,
             affinity: .end
         )
+        let newBaseReplacementEnd = transformBoundary(
+            baseReplacementEnd,
+            editedRange: editedRangeUTF16,
+            replacementUTF16Length: replacementUTF16Length,
+            affinity: .end
+        )
 
         session.dictationStartUTF16 = max(0, newCommittedStart)
         session.committedLenUTF16 = max(0, newCommittedEnd - newCommittedStart)
+        session.baseReplacementLenUTF16 = max(0, newBaseReplacementEnd - newCommittedStart)
     }
 
     private func reanchorActiveTranscriptSessionToLiveSelection(discardCurrentMachineTextFromPendingStream: Bool = true) {
@@ -2204,6 +2226,7 @@ final class DictationSession {
         transcriptApplyTask = nil
         session.baseSnapshot = snapshot
         session.dictationStartUTF16 = selectedRange.location
+        session.baseReplacementLenUTF16 = selectedRange.length
         session.committedLenUTF16 = 0
         session.committedText = ""
         session.provisionalText = selectedText

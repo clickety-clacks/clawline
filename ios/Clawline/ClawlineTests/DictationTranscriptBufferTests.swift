@@ -71,4 +71,18 @@ struct DictationTranscriptBufferTests {
         #expect(third.provisionalText == "Also, dictation")
         #expect(buffer.renderedText == "Also, dictation")
     }
+
+    @Test("Mixed final and interim tokens preserve Soniox order")
+    func mixedFinalAndInterimTokensPreserveOrder() {
+        let buffer = DictationTranscriptBuffer()
+
+        let update = buffer.apply(tokens: [
+            SonioxTranscriptToken(text: "alpha ", isFinal: true),
+            SonioxTranscriptToken(text: "beta ", isFinal: false),
+            SonioxTranscriptToken(text: "gamma", isFinal: true)
+        ], finished: false)
+
+        #expect(update.provisionalText == "alpha beta gamma")
+        #expect(buffer.renderedText == "alpha beta gamma")
+    }
 }

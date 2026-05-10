@@ -216,6 +216,42 @@ struct DictationCoordinatorTranscriptOwnershipTests {
         #expect(rig.textView.attributedText.string == "hello worldhello")
     }
 
+    @Test("Paused resume ignores late responses from the old stream after the new stream is active")
+    func pausedResumeIgnoresLateOldStreamAfterNewStreamIsActive() async {
+        let rig = makeRig(
+            initialText: "",
+            selectedRange: NSRange(location: 0, length: 0),
+            freshClientPerFactoryCall: true
+        )
+
+        startDictation(rig)
+        emitProvisional("hello world", into: rig)
+        await waitUntil { rig.textView.attributedText.string == "hello world" }
+
+        let oldClient = rig.harness.latestClient
+        rig.coordinator.pauseFromWaveformTap()
+        await waitUntil { rig.coordinator.isDictationActive && !rig.coordinator.isListening }
+
+        rig.coordinator.startStickyDictation()
+        await waitUntil { rig.harness.clientFactoryCallCount >= 2 && rig.harness.latestClient.connected }
+        emitProvisional("new text", into: rig)
+        await waitUntil { rig.textView.attributedText.string == "hello worldnew text" }
+
+        oldClient.emit(
+            .response(
+                SonioxStreamingResponse(
+                    tokens: [SonioxTranscriptToken(text: " old stream", isFinal: false)],
+                    finished: false,
+                    errorCode: nil,
+                    errorMessage: nil
+                )
+            )
+        )
+        try? await Task.sleep(for: .milliseconds(60))
+
+        #expect(rig.textView.attributedText.string == "hello worldnew text")
+    }
+
     @Test("User edit in provisional range suppresses Soniox provisional updates until endpoint")
     func userEditInProvisionalRangeSuppressesUntilEndpoint() async {
         let rig = makeRig(initialText: "seed ", selectedRange: NSRange(location: 5, length: 0))
@@ -342,6 +378,28 @@ struct DictationCoordinatorTranscriptOwnershipTests {
 
         await waitUntil { rig.textView.attributedText.string == "seed hello world" }
         #expect(rig.textView.attributedText.string == "seed hello world")
+        #expect(rig.harness.host.currentAttachments(for: rig.harness.host.activeSessionKey).keys.contains(attachment.id))
+    }
+
+    @Test("Coordinator-owned fallback replaces selected base range when live transcript range diverges")
+    func coordinatorFallbackReplacesSelectedBaseRangeWhenLiveTranscriptRangeDiverges() async {
+        let attachment = makePendingAttachment()
+        let rig = makeRig(
+            initialText: "alpha TARGET omega",
+            selectedRange: NSRange(location: "alpha ".utf16.count, length: "TARGET".utf16.count),
+            attachments: [attachment.id: attachment]
+        )
+
+        startDictation(rig)
+        emitProvisional("dictated", into: rig)
+        await waitUntil { rig.textView.attributedText.string == "alpha dictated omega" }
+
+        rig.textView.attributedText = NSAttributedString(string: "corrupt")
+        rig.textView.selectedRange = NSRange(location: "corrupt".utf16.count, length: 0)
+        emitProvisional("dictated text", into: rig)
+
+        await waitUntil { rig.textView.attributedText.string == "alpha dictated text omega" }
+        #expect(rig.textView.attributedText.string == "alpha dictated text omega")
         #expect(rig.harness.host.currentAttachments(for: rig.harness.host.activeSessionKey).keys.contains(attachment.id))
     }
 

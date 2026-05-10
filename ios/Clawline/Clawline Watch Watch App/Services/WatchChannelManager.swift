@@ -4,6 +4,16 @@ import Observation
 @MainActor
 @Observable
 final class WatchChannelManager {
+    private static var isDebugScenarioEnabled: Bool {
+        let processInfo = ProcessInfo.processInfo
+#if WATCH_UI_SCENARIO_DIRECT || WATCH_UI_SCENARIO_RELAY || WATCH_UI_SCENARIO_RECONNECTING || WATCH_UI_SCENARIO_DISCONNECTED
+        return true
+#else
+        return processInfo.environment["WATCH_UI_TEST_SCENARIO"]?.isEmpty == false
+            || processInfo.arguments.contains("-WATCH_UI_TEST_SCENARIO")
+            || processInfo.arguments.contains { $0.hasPrefix("WATCH_UI_TEST_SCENARIO=") }
+#endif
+    }
     enum StreamLoadState: Equatable {
         case idle
         case loading
@@ -30,6 +40,8 @@ final class WatchChannelManager {
         guard !didBind else { return }
         didBind = true
         self.transport = transport
+
+        guard !Self.isDebugScenarioEnabled else { return }
 
         Task { [weak self] in
             guard let self else { return }
@@ -151,4 +163,14 @@ final class WatchChannelManager {
         engineSessionKey = firstKey
         unreadSessionKeys.remove(firstKey)
     }
+
+#if DEBUG
+    func debugSeed(streams: [StreamSession], currentSessionKey: String?) {
+        streamLoadState = .loaded
+        self.streams = streams
+        self.currentSessionKey = currentSessionKey ?? streams.first?.sessionKey
+        self.engineSessionKey = self.currentSessionKey
+        unreadSessionKeys = []
+    }
+#endif
 }

@@ -17,6 +17,7 @@ struct WatchMainView: View {
     var body: some View {
         content
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .accessibilityIdentifier("watch-main-root")
             .task {
                 channelManager.bind(transport: transport)
                 conversationStore.bind(transport: transport)
@@ -27,15 +28,19 @@ struct WatchMainView: View {
                     channelManager: channelManager,
                     conversationStore: conversationStore
                 )
-                channelManager.retryLoadingIfNeeded(for: transport.transportState)
-                observeIncomingResponses()
+                if !WatchUITestMode.isEnabled {
+                    channelManager.retryLoadingIfNeeded(for: transport.transportState)
+                    observeIncomingResponses()
+                }
             }
             .onChange(of: transport.transportState) { _, newValue in
-                channelManager.retryLoadingIfNeeded(for: newValue)
+                if !WatchUITestMode.isEnabled {
+                    channelManager.retryLoadingIfNeeded(for: newValue)
+                }
                 WKInterfaceDevice.current().play(.click)
             }
             .onChange(of: scenePhase) { _, newPhase in
-                guard newPhase == .active else { return }
+                guard newPhase == .active, !WatchUITestMode.isEnabled else { return }
                 channelManager.retryLoadingIfNeeded(for: transport.transportState)
             }
     }
@@ -131,6 +136,7 @@ struct WatchMainView: View {
                     }
                 }
                 .accessibilityLabel("Recent conversation")
+                .accessibilityIdentifier("watch-recent-conversation")
             }
         } else {
             EmptyView()
@@ -211,26 +217,39 @@ struct WatchMainView: View {
         .accessibilityAction {
             handleTapAction()
         }
+        .accessibilityIdentifier("watch-ring-control")
     }
 
     @ViewBuilder
     private func channelRow(for stream: StreamSession?) -> some View {
         if transport.transportState != .disconnected {
-            HStack(spacing: 8) {
+            HStack(spacing: 6) {
                 Text(channelRowTitle(for: stream))
-                    .font(.system(size: 13, weight: .semibold, design: .rounded))
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
                     .lineLimit(1)
-                    .minimumScaleFactor(0.75)
+                    .minimumScaleFactor(0.7)
 
                 Spacer(minLength: 0)
 
-                if let routeIconName {
-                    Image(systemName: routeIconName)
-                        .font(.system(size: 12, weight: .semibold))
-                }
+                routeChipView
             }
             .foregroundStyle(.secondary)
+            .accessibilityIdentifier("watch-channel-row")
         }
+    }
+
+
+    private var routeChipView: some View {
+        HStack(spacing: 3) {
+            Image(systemName: presentationState.routeChip.systemImage)
+                .font(.system(size: 8, weight: .bold))
+            Text(presentationState.routeChip.label)
+                .font(.system(size: 9, weight: .bold, design: .rounded))
+                .lineLimit(1)
+                .minimumScaleFactor(0.65)
+        }
+        .foregroundStyle(presentationState.routeChip.color)
+        .accessibilityIdentifier("watch-route-chip")
     }
 
     private var centerIcon: String {
@@ -394,5 +413,19 @@ struct WatchMainView: View {
         guard let text = await WatchTextInputPresenter.requestPlainTextInput(),
               !text.isEmpty else { return }
         await presentationState.sendTextMessage(text)
+    }
+}
+
+
+private enum WatchUITestMode {
+    static var isEnabled: Bool {
+        let processInfo = ProcessInfo.processInfo
+#if WATCH_UI_SCENARIO_DIRECT || WATCH_UI_SCENARIO_RELAY || WATCH_UI_SCENARIO_RECONNECTING || WATCH_UI_SCENARIO_DISCONNECTED
+        return true
+#else
+        return processInfo.environment["WATCH_UI_TEST_SCENARIO"]?.isEmpty == false
+            || processInfo.arguments.contains("-WATCH_UI_TEST_SCENARIO")
+            || processInfo.arguments.contains { $0.hasPrefix("WATCH_UI_TEST_SCENARIO=") }
+#endif
     }
 }

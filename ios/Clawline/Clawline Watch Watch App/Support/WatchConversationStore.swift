@@ -4,6 +4,12 @@ import Observation
 @MainActor
 @Observable
 final class WatchConversationStore {
+    private static var isDebugScenarioEnabled: Bool {
+        let processInfo = ProcessInfo.processInfo
+        return processInfo.environment["WATCH_UI_TEST_SCENARIO"]?.isEmpty == false
+            || processInfo.arguments.contains("-WATCH_UI_TEST_SCENARIO")
+            || processInfo.arguments.contains { $0.hasPrefix("WATCH_UI_TEST_SCENARIO=") }
+    }
     struct Entry: Identifiable, Equatable {
         let id: String
         let role: Message.Role
@@ -30,6 +36,8 @@ final class WatchConversationStore {
     func bind(transport: WatchProviderTransport) {
         guard !didBind else { return }
         didBind = true
+
+        guard !Self.isDebugScenarioEnabled else { return }
 
         Task { [weak self] in
             guard let self else { return }
@@ -111,4 +119,10 @@ final class WatchConversationStore {
 
         return kept.reversed()
     }
+
+#if DEBUG
+    func debugSeed(entries: [Entry], sessionKey: String) {
+        entriesBySession[sessionKey] = entries
+    }
+#endif
 }

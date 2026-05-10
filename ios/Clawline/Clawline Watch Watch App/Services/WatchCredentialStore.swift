@@ -107,6 +107,18 @@ final class WatchCredentialStore {
 
         onCredentialsChanged?()
     }
+
+#if DEBUG
+    func debugApplyMockCredentials() {
+        providerToken = "watch-ui-test-token"
+        userId = "watch-ui-test-user"
+        providerBaseURL = URL(string: "https://example.invalid")
+        sonioxApiKey = "watch-ui-test-soniox"
+        cartesiaApiKey = "watch-ui-test-cartesia"
+        cartesiaVoiceId = "watch-ui-test-voice"
+        onCredentialsChanged?()
+    }
+#endif
 }
 
 final class WatchKeychainStore {

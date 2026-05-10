@@ -6,6 +6,16 @@ import Network
 @MainActor
 @Observable
 final class WatchProviderTransport: ChatServicing {
+    private static var isDebugScenarioEnabled: Bool {
+        let processInfo = ProcessInfo.processInfo
+#if WATCH_UI_SCENARIO_DIRECT || WATCH_UI_SCENARIO_RELAY || WATCH_UI_SCENARIO_RECONNECTING || WATCH_UI_SCENARIO_DISCONNECTED
+        return true
+#else
+        return processInfo.environment["WATCH_UI_TEST_SCENARIO"]?.isEmpty == false
+            || processInfo.arguments.contains("-WATCH_UI_TEST_SCENARIO")
+            || processInfo.arguments.contains { $0.hasPrefix("WATCH_UI_TEST_SCENARIO=") }
+#endif
+    }
     enum TransportError: Swift.Error, LocalizedError {
         case missingCredentials
         case notConnected
@@ -133,6 +143,7 @@ final class WatchProviderTransport: ChatServicing {
         didSet {
             guard oldValue != transportState else { return }
             stateBroadcaster.send(mappedConnectionState())
+            guard !Self.isDebugScenarioEnabled else { return }
             if transportState == .relay {
                 notifyRelayActivated()
             } else if oldValue == .relay {
@@ -172,8 +183,10 @@ final class WatchProviderTransport: ChatServicing {
             }
         }
 
-        Task { [weak self] in
-            await self?.start()
+        if !Self.isDebugScenarioEnabled {
+            Task { [weak self] in
+                await self?.start()
+            }
         }
     }
 
@@ -400,6 +413,7 @@ final class WatchProviderTransport: ChatServicing {
     }
 
     private func handleCredentialUpdate() {
+        guard !Self.isDebugScenarioEnabled else { return }
         Task { [weak self] in
             await self?.reconnectForBestTransport()
         }
@@ -935,6 +949,19 @@ final class WatchProviderTransport: ChatServicing {
             return .disconnected
         }
     }
+
+#if DEBUG
+    func debugSetTransportState(_ state: WatchProviderTransportState) {
+        receiveTask?.cancel()
+        pingTask?.cancel()
+        relayProbeTask?.cancel()
+        probingTask?.cancel()
+        reachabilityDebounceTask?.cancel()
+        websocketTask?.cancel(with: .goingAway, reason: nil)
+        websocketTask = nil
+        transportState = state
+    }
+#endif
 
     private func notifyRelayActivated() {
         Task {

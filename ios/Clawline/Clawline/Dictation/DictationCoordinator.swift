@@ -825,9 +825,16 @@ final class DictationSession {
 
     func handleAppBackgrounded() {
         teardownPhase1(reason: PrewarmTeardownReason.viewInactive.rawValue)
-        guard state == .dictatingSticky || state == .dictatingWalkieTalkie else { return }
+        guard state == .dictatingSticky || state == .dictatingPaused || state == .dictatingWalkieTalkie else { return }
         Task { [weak self] in
-            let _ = await self?.pauseListening(reason: "app_background")
+            guard let self else { return }
+            await self.stopKeep(
+                reason: "app_background",
+                timeout: self.timing.stopKeepFinalizeTimeout,
+                collapseSurface: true,
+                collapseSurfaceImmediately: true,
+                trigger: "app_background"
+            )
         }
     }
 

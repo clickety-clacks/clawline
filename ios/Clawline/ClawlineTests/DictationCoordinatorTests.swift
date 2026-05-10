@@ -1329,8 +1329,16 @@ final class MockComposeDraftHost: DictationComposeDraftHosting {
         drafts[sessionKey] = ComposeDraftSnapshot(content: NSAttributedString(string: text), attachments: [:])
     }
 
+    func setSnapshot(_ snapshot: ComposeDraftSnapshot, for sessionKey: String) {
+        drafts[sessionKey] = snapshot
+    }
+
     func currentText(for sessionKey: String) -> String {
         drafts[sessionKey]?.content.string ?? ""
+    }
+
+    func currentAttachments(for sessionKey: String) -> [UUID: PendingAttachment] {
+        drafts[sessionKey]?.attachments ?? [:]
     }
 }
 

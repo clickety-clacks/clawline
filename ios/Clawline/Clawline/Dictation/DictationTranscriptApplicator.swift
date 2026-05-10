@@ -125,6 +125,10 @@ final class DictationTranscriptApplicator {
         guard let host else { return }
         let currentSnapshot = host.captureComposeDraftSnapshot(for: plan.sessionKey)
         let current = NSMutableAttributedString(attributedString: currentSnapshot.content)
+        if !isValidReplacementRange(plan.replacementRange, textLength: current.length) {
+            applyFallbackSnapshot(from: plan, to: host)
+            return
+        }
         let safeRange = safeReplacementRange(
             selectedRange: plan.replacementRange,
             textLength: current.length,
@@ -142,16 +146,7 @@ final class DictationTranscriptApplicator {
             return
         }
 
-        let fallback = NSMutableAttributedString(attributedString: plan.baseSnapshot.content)
-        if plan.replacementText.length > 0 {
-            fallback.append(plan.replacementText)
-        }
-        host.applyComposeDraftSnapshot(
-            ComposeDraftSnapshot(content: fallback, attachments: plan.baseSnapshot.attachments),
-            to: plan.sessionKey,
-            moveCursorToEnd: plan.selectionPolicy == .followTranscriptEndWhenSelectionAlreadyAtEnd,
-            announceEditorReset: false
-        )
+        applyFallbackSnapshot(from: plan, to: host)
     }
 
     func restore(snapshot: ComposeDraftSnapshot, to sessionKey: String) {
@@ -173,6 +168,28 @@ final class DictationTranscriptApplicator {
             : min(max(selectedRange.location, 0), textLength)
         let length = min(max(replacementLength, 0), max(0, textLength - location))
         return NSRange(location: location, length: length)
+    }
+
+    private func isValidReplacementRange(_ range: NSRange, textLength: Int) -> Bool {
+        guard range.location != NSNotFound,
+              range.location >= 0,
+              range.length >= 0 else {
+            return false
+        }
+        return range.location + range.length <= textLength
+    }
+
+    private func applyFallbackSnapshot(from plan: DictationTextApplicationPlan, to host: any DictationComposeDraftHosting) {
+        let fallback = NSMutableAttributedString(attributedString: plan.baseSnapshot.content)
+        if plan.replacementText.length > 0 {
+            fallback.append(plan.replacementText)
+        }
+        host.applyComposeDraftSnapshot(
+            ComposeDraftSnapshot(content: fallback, attachments: plan.baseSnapshot.attachments),
+            to: plan.sessionKey,
+            moveCursorToEnd: plan.selectionPolicy == .followTranscriptEndWhenSelectionAlreadyAtEnd,
+            announceEditorReset: false
+        )
     }
 
     private func replaceText(

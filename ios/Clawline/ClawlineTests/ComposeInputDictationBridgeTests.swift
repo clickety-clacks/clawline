@@ -159,6 +159,59 @@ struct DictationTranscriptApplicatorTests {
         #expect(host.currentText(for: host.activeSessionKey) == "seed hello")
     }
 
+    @Test("Applicator preserves host attachments when applying without a UITextView")
+    func applicatorPreservesHostAttachmentsWithoutTextView() {
+        let host = MockComposeDraftHost()
+        let attachment = makePendingAttachment()
+        host.setSnapshot(
+            ComposeDraftSnapshot(
+                content: NSAttributedString(string: "seed "),
+                attachments: [attachment.id: attachment]
+            ),
+            for: host.activeSessionKey
+        )
+        let applicator = DictationTranscriptApplicator(host: host)
+
+        applicator.apply(
+            DictationTextApplicationPlan(
+                sessionKey: host.activeSessionKey,
+                baseSnapshot: host.captureComposeDraftSnapshot(for: host.activeSessionKey),
+                replacementRange: NSRange(location: 5, length: 0),
+                fallbackLocation: 5,
+                replacementText: NSAttributedString(string: "hello"),
+                selectionPolicy: .followTranscriptEndWhenSelectionAlreadyAtEnd
+            )
+        )
+
+        #expect(host.currentText(for: host.activeSessionKey) == "seed hello")
+        #expect(host.currentAttachments(for: host.activeSessionKey).keys.contains(attachment.id))
+    }
+
+    @Test("Applicator fallback preserves machine base attachments")
+    func applicatorFallbackPreservesMachineBaseAttachments() {
+        let host = MockComposeDraftHost()
+        host.setText("", for: host.activeSessionKey)
+        let attachment = makePendingAttachment()
+        let applicator = DictationTranscriptApplicator(host: host)
+
+        applicator.apply(
+            DictationTextApplicationPlan(
+                sessionKey: host.activeSessionKey,
+                baseSnapshot: ComposeDraftSnapshot(
+                    content: NSAttributedString(string: "base "),
+                    attachments: [attachment.id: attachment]
+                ),
+                replacementRange: NSRange(location: NSNotFound, length: 0),
+                fallbackLocation: 5,
+                replacementText: NSAttributedString(string: "dictated"),
+                selectionPolicy: .followTranscriptEndWhenSelectionAlreadyAtEnd
+            )
+        )
+
+        #expect(host.currentText(for: host.activeSessionKey) == "base dictated")
+        #expect(host.currentAttachments(for: host.activeSessionKey).keys.contains(attachment.id))
+    }
+
     @Test("Applicator restore writes the provided snapshot back to the host")
     func applicatorRestoreWritesSnapshotToHost() {
         let host = MockComposeDraftHost()
@@ -355,5 +408,15 @@ struct DictationTranscriptApplicatorTests {
         // Flag is cleared after apply completes
         #expect(textView.dictationProgrammaticEditInFlight == false)
         #expect(textView.attributedText.string == "hello mars")
+    }
+
+    private func makePendingAttachment() -> PendingAttachment {
+        PendingAttachment(
+            id: UUID(),
+            data: Data([0x01]),
+            thumbnail: UIImage(),
+            mimeType: "image/png",
+            filename: "image.png"
+        )
     }
 }

@@ -278,6 +278,35 @@ final class DictationSession {
         case active(TranscriptSession)
     }
 
+    private enum PendingAction {
+        case none
+        case pause(reason: String)
+        case dismiss(reason: String, trigger: String, callSite: String)
+        case send(reason: String)
+        case stopKeep(reason: String, trigger: String, callSite: String)
+        case transportFailure(stage: String)
+        case protocolError(code: String?, message: String)
+
+        var logContext: String {
+            switch self {
+            case .none:
+                return "action=none"
+            case .pause(let reason):
+                return "action=pause reason=\(reason)"
+            case .dismiss(let reason, let trigger, let callSite):
+                return "action=dismiss reason=\(reason) trigger=\(trigger) callSite=\(callSite)"
+            case .send(let reason):
+                return "action=send reason=\(reason)"
+            case .stopKeep(let reason, let trigger, let callSite):
+                return "action=stopKeep reason=\(reason) trigger=\(trigger) callSite=\(callSite)"
+            case .transportFailure(let stage):
+                return "action=transportFailure stage=\(stage)"
+            case .protocolError(let code, let message):
+                return "action=protocolError code=\(code ?? "nil") message=\(message)"
+            }
+        }
+    }
+
     private let bridge: DictationTranscriptApplicator
     private let keyStore: SonioxKeyStore
     private let languageHintProvider: () -> String
@@ -304,7 +333,7 @@ final class DictationSession {
     private var sessionStartedAt: Date?
     private var lastTokenAt: Date?
     private var finishedReceived = false
-    private var pendingStopContext: String?
+    private var pendingAction: PendingAction = .none
 
     private var audioCapture: (any DictationAudioCapturing)?
     private var streamingClient: (any SonioxStreamingClienting)?
@@ -1320,6 +1349,7 @@ final class DictationSession {
         analytics.trackError(errorCode: code, stage: "protocol")
         Task { [weak self] in
             guard let self else { return }
+            self.pendingAction = .protocolError(code: code, message: message)
             logDictation("DICTATION_STOP trace_id=DICTATION_STOP_PROTOCOL_ERROR caller=handleProtocolError ts=\(Date().timeIntervalSince1970) code=\(code ?? "nil")")
             await self.stopKeep(
                 reason: "protocol_error",
@@ -1338,6 +1368,7 @@ final class DictationSession {
         guard isDictationActive else { return }
         guard audioDecodeTimeoutRecoveryCount < 1 else {
             analytics.trackError(errorCode: nil, stage: "protocol")
+            pendingAction = .protocolError(code: nil, message: message)
             logDictation("DICTATION_STOP trace_id=DICTATION_STOP_PROTOCOL_ERROR caller=audio_decode_timeout_exhausted ts=\(Date().timeIntervalSince1970)")
             await stopKeep(
                 reason: "protocol_error",
@@ -1391,6 +1422,7 @@ final class DictationSession {
             state == .dictatingPaused ||
             state == .finalizing
         let stopDuration = elapsedSessionMilliseconds()
+        pendingAction = .transportFailure(stage: stage.rawValue)
         await pauseListening(reason: "transport_failure")
         if shouldTrackTransportStop {
             analytics.trackStop(reason: "transport_failure", durationMs: stopDuration)
@@ -1426,7 +1458,11 @@ final class DictationSession {
             return false
         }
 
-        pendingStopContext = "trigger=\(trigger) callSite=\(callSite)"
+        if case .protocolError = pendingAction {
+            // Preserve the protocol-error outcome while reusing stopKeep finalization mechanics.
+        } else {
+            pendingAction = .stopKeep(reason: reason, trigger: trigger, callSite: callSite)
+        }
         logger.notice(
             "Dictation stopKeep requested reason=\(reason, privacy: .public) trigger=\(trigger, privacy: .public) callSite=\(callSite, privacy: .public) gracefulFinalize=\(gracefulFinalize, privacy: .public) state=\(String(describing: self.state), privacy: .public)"
         )
@@ -1505,7 +1541,7 @@ final class DictationSession {
     ) async {
         guard state == .dictatingSticky || state == .dictatingPaused || state == .dictatingWalkieTalkie || state == .stoppingKeep else { return }
 
-        pendingStopContext = "trigger=\(trigger) callSite=\(callSite)"
+        pendingAction = .dismiss(reason: reason, trigger: trigger, callSite: callSite)
         logDictation("DICTATION_STOP stopDiscard_entry reason=\(reason) trigger=\(trigger) callsite=\(callSite) \(attemptContext())")
         logger.notice(
             "Dictation stopDiscard requested reason=\(reason, privacy: .public) trigger=\(trigger, privacy: .public) callSite=\(callSite, privacy: .public) state=\(String(describing: self.state), privacy: .public)"
@@ -1574,7 +1610,7 @@ final class DictationSession {
         let queuedActivationMode = pendingActivationMode
         let queuedActivationWalkieOrigin = pendingActivationWalkieOrigin
         let duration = elapsedSessionMilliseconds()
-        let stopContext = pendingStopContext ?? "trigger=unknown callSite=unknown"
+        let stopContext = pendingAction.logContext
         logger.notice(
             "Dictation finalizeSessionCleanup reason=\(reason, privacy: .public) stopContext=\(stopContext, privacy: .public) announceStop=\(announceStop, privacy: .public) durationMs=\(duration, privacy: .public)"
         )
@@ -1628,7 +1664,7 @@ final class DictationSession {
         if !keepAudioForPausedWaveform {
             clearOriginSessionContext()
         }
-        pendingStopContext = nil
+        pendingAction = .none
 
         if collapseSurface, state != .error {
             state = .idleSurfaceClosed
@@ -1683,6 +1719,11 @@ final class DictationSession {
         pauseListeningInFlight = true
         defer { pauseListeningInFlight = false }
         logDictation("DICTATION_STOP pauseListening_entry reason=\(reason) \(attemptContext())")
+        if case .transportFailure = pendingAction {
+            // Preserve the transport-failure outcome while reusing pause finalization mechanics.
+        } else {
+            pendingAction = .pause(reason: reason)
+        }
         state = .finalizing
         let keepCaptureForPausedWaveform = reason == "waveform_tap_pause"
             || reason == "walkie_release_to_paused"

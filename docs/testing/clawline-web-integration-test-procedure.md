@@ -1518,3 +1518,131 @@ Pass rule:
 
 - Real-device Safari proof passes only when both iPhone and iPad checklists are completed with screenshots and no Flynn-account traffic.
 - Until then, comprehensive Clawline Web status is: automated/local/deployed/live desktop PASS; real iPhone/iPad Safari manual proof PENDING.
+
+## 02:00 Readiness Snapshot - 2026-05-08
+
+Purpose: preserve the hourly post-fix state before manual Safari execution.
+
+- Eezo source checkout: `/Users/mike/src/clawline`
+- Observed HEAD: `2e1db64698398a29b87d368d220c9d7e40b38270`
+- `origin/main...HEAD`: `0 0`
+- Working tree note: no tracked changes; unrelated untracked `.build/DerivedData_*` and docs artifacts were present and not touched.
+- Deployed URL: `http://100.85.66.60:4173/`
+- HTTP status: `200 OK` from Caddy.
+- Deployed assets still serving the verified Clawline Web bundle from the integration fix:
+  - `assets/index-C4oNo-t-.js`
+  - `assets/index-DR6FtkEm.css`
+- `index.html` SHA-256: `23abd8a1183f46ea81c8bb6a7edb9be7a4c2c1b13ba9993d42a743143c59f15a`
+- Pending Clawline devices: none.
+- Dedicated test devices remain in allowlist under `userId=clawline_web_test`.
+
+Status: automated/local/deployed/live desktop checks remain ready for manual Safari follow-up. Real iPhone/iPad Safari proof is still pending physical/manual execution.
+
+## 03:00 Physical Safari Capability Check - 2026-05-08
+
+Purpose: determine whether CLU can execute the remaining real iPhone/iPad Safari proof without Flynn physically driving devices.
+
+Result:
+
+- `xcrun devicectl list devices`: no physical iPhone/iPad devices found from this host context.
+- `xcrun simctl list devices booted`: one booted iOS simulator was visible (`T001 Reload iPad`), but simulator Safari is not the same as the required real-device Safari keyboard/rotation proof.
+- `safaridriver --enable`: requires an interactive admin password; not used.
+
+Conclusion:
+
+- CLU cannot truthfully complete the remaining real iPhone/iPad Safari checklist from the current control path.
+- The automated/local/deployed/live desktop proof remains green; real iPhone/iPad Safari proof still requires physical/manual execution or a separately provided supported device-control path.
+
+## 05:00 Manual Safari Checklist Published - 2026-05-08
+
+Purpose: make the remaining physical-device verification easy to run from iPhone/iPad.
+
+Published checklist URL:
+
+- `http://100.85.66.60:18800/www/clawline-web-safari-checklist.html`
+
+Contents:
+
+- Current deployed Clawline Web URL.
+- Dedicated-account rule: use `clawline_web_test`, not Flynn primary.
+- iPhone Safari checklist.
+- iPad Safari checklist.
+- Screenshot requirements.
+- Pass rule.
+
+Verification:
+
+- Local provider webroot served the checklist with `HTTP/1.1 200 OK`.
+
+Status: automated/local/deployed/live desktop checks are green. Real iPhone/iPad Safari proof remains pending until the checklist is executed on physical devices.
+
+## 06:00 Safari Readiness Recheck - 2026-05-08
+
+Purpose: keep the remaining physical-device Safari verification ready and verify no new test-device approval is waiting.
+
+- Safari checklist URL rechecked: `http://100.85.66.60:18800/www/clawline-web-safari-checklist.html`
+- Clawline Web URL rechecked: `http://100.85.66.60:4173/`
+- Both URLs returned HTTP 200 during the 06:00 check.
+- Deployed web assets still observed: `assets/index-C4oNo-t-.js`, `assets/index-DR6FtkEm.css`.
+- Pending Clawline devices: none at recheck time.
+- Dedicated `clawline_web_test` devices remain allowlisted.
+
+Status: device-side Safari execution is ready; no pending approval currently needs CLU action.
+
+## 07:00 Safari QR Launch Page Published - 2026-05-08
+
+Purpose: make physical iPhone/iPad execution easier by giving Flynn a scannable launch page.
+
+Published QR page:
+
+- `http://100.85.66.60:18800/www/clawline-web-safari-qr.html`
+
+It links to the manual Safari checklist:
+
+- `http://100.85.66.60:18800/www/clawline-web-safari-checklist.html`
+
+Verification:
+
+- Provider webroot served the QR launch page with `HTTP/1.1 200 OK`.
+
+Status: remaining proof still requires physical iPhone/iPad execution, but the checklist is now one scan away.
+
+## Safari Scroll-Up Regression Fix - 2026-05-08 12:44 PDT
+
+Purpose: record the live Safari/WebKit regression found during physical/plain Safari testing: transcript could scroll down but could not scroll back up.
+
+Product meaning:
+
+- This was confirmed as a Clawline Web bug because it reproduced in plain Safari, not only inside Surf Ace.
+- Surf Ace was told to stand down on this specific scroll issue; Surf Ace ownership/pane-label bugs remain separate.
+
+Root cause reported by implementation agent:
+
+- Safari/WebKit could report wheel/touch scroll intent before the list's scroll event updated bottom-stickiness.
+- Pending bottom-restore animation frames and the virtual window's bottom-follow path could snap the transcript back down while the user tried to scroll up.
+
+Fix summary:
+
+- `src/features/chat/MessageList.tsx`: treats wheel/touch as active user scroll intent, suspends bottom-follow, and lets bottom-restore settle loops yield during active user scrolling.
+- `src/features/chat/useVirtualMessageWindow.ts`: exposes `suspendBottomFollow()`.
+- `src/features/chat/MessageList.test.tsx`: adds regression coverage for active upward wheel scroll not being forced back to bottom.
+
+Shipped/deployed state:
+
+- Commit: `324d6fc27f0d1fa6aef9940fb059ce319e34e15c` (`Fix Safari transcript scroll restoration`).
+- TARS web target: `http://100.85.66.60:4173/`.
+- Deployed JS asset: `assets/index-ZvAdaZQK.js`.
+- CSS asset: `assets/index-DR6FtkEm.css`.
+
+Evidence:
+
+- `npm run build`: PASS.
+- `npm run test`: PASS (`23 files / 172 tests`).
+- `npm run test:e2e`: PASS (`30 tests`).
+- Targeted WebKit scroll checks: PASS (`phase5-responsive-keyboard`, `phase5-scroll-unread`, `phase7-live-bug-regressions`).
+- Deployed dedicated-account WebKit check used `userId=clawline_web_test` / `deviceId=da49d87f-60a5-4a72-b543-4f1da80200db`: scroll moved from `1715` to `1315` and stayed at `1315`.
+
+Status:
+
+- Automated/deployed WebKit evidence is green.
+- Final experiential check remains Flynn/physical Safari: open `http://100.85.66.60:4173/`, scroll down in a long chat, then scroll back up and confirm it no longer snaps down.

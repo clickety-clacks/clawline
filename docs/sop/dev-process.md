@@ -125,7 +125,7 @@ If a follow-up bug is small, the original rehomed agent may YOLO/fix directly on
 
 ### Step 0: Spec (CLU-orchestrated)
 
-Before impl agents are created, CLU spins up a dedicated **spec agent** to write the technical spec.
+Before impl agents are created, CLU spins up a dedicated **spec agent** to write the technical spec/design artifact. Future specs, design docs, architecture docs, and technical plans are HTML-first by default.
 
 **Session naming convention:** `{project}-{feature}-spec`
 - Example: `clawline-bubble-height-spec`, `helm-widget-spec`
@@ -134,13 +134,13 @@ Before impl agents are created, CLU spins up a dedicated **spec agent** to write
 
 **Workspace:** Spec agents write directly to the shared workspace spec folder:
 ```
-/Users/mike/shared-workspace/{project}/specs/{feature-name}.md
+/Users/mike/shared-workspace/{project}/specs/{feature-name}.html
 ```
 
-Spec agents don't need their own worktree — they work in the shared spec directory.
+Spec agents don't need their own worktree — they work in the shared spec directory. They should write a self-contained, Clawline-conformant HTML document unless Flynn or existing tooling explicitly requires Markdown.
 
 **Role:** The spec agent:
-1. Writes the technical specification
+1. Writes the technical specification/design as HTML-first source of truth
 2. Stays alive as the **subject matter expert (SME)**
 3. Impl agents reference the spec (and can ask the spec agent for clarifications)
 

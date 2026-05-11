@@ -57,6 +57,94 @@ struct MessagePresentationURLBoundaryTests {
         #expect(presentation.hasTextualContent)
     }
 
+    @Test("Markdown inline image data URL content renders as attachment image media")
+    func markdownInlineImageDataURLContentRendersAsAttachmentImageMedia() throws {
+        let imageURL = "data:image/png;base64,\(Self.onePixelPNGBase64)"
+        let presentation = buildPresentation(content: "Ticker update\n![Pixel](\(imageURL))")
+        let attachment = try #require(singleImageAttachment(in: presentation))
+
+        #expect(attachment.mimeType == "image/png")
+        #expect(attachment.data == Data(base64Encoded: Self.onePixelPNGBase64))
+        #expect(presentation.parts.contains(where: { part in
+            if case .markdown(let text) = part {
+                return text == "Ticker update"
+            }
+            return false
+        }))
+        #expect(!presentation.parts.contains(where: { part in
+            if case .markdown(let text) = part {
+                return text.contains("data:image") || text.contains(Self.onePixelPNGBase64)
+            }
+            return false
+        }))
+        #expect(!presentation.hasMediaOnly)
+        #expect(presentation.hasTextualContent)
+    }
+
+    @Test("Bare inline image data URL content renders as media-only attachment image")
+    func bareInlineImageDataURLContentRendersAsMediaOnlyAttachmentImage() throws {
+        let imageURL = "data:image/png,\(Self.percentEncodedOnePixelPNG())"
+        let presentation = buildPresentation(content: imageURL)
+        let attachment = try #require(singleImageAttachment(in: presentation))
+
+        #expect(attachment.mimeType == "image/png")
+        #expect(attachment.data == Data(base64Encoded: Self.onePixelPNGBase64))
+        #expect(presentation.hasMediaOnly)
+        #expect(!presentation.hasTextualContent)
+        #expect(presentation.markdownRenderPlan.blocks.isEmpty)
+    }
+
+    @Test("Inline image data URL suppresses generated attachment summary text")
+    func inlineImageDataURLSuppressesGeneratedAttachmentSummaryText() throws {
+        let imageURL = "data:image/png;base64,\(Self.onePixelPNGBase64)"
+        let presentation = buildPresentation(content: "Attachment: screenshot.png\n![Pixel](\(imageURL))")
+        let attachment = try #require(singleImageAttachment(in: presentation))
+
+        #expect(attachment.data == Data(base64Encoded: Self.onePixelPNGBase64))
+        #expect(!presentation.parts.contains(where: { part in
+            if case .markdown(let text) = part {
+                return text.contains("Attachment:")
+            }
+            return false
+        }))
+        #expect(presentation.hasMediaOnly)
+        #expect(!presentation.hasTextualContent)
+    }
+
+    @Test("Invalid inline image data URL content remains textual")
+    func invalidInlineImageDataURLContentRemainsTextual() {
+        let invalidImageURL = "data:image/png;base64,not-an-image"
+        let presentation = buildPresentation(content: invalidImageURL)
+
+        #expect(!presentation.parts.contains(where: { part in
+            if case .image = part { return true }
+            return false
+        }))
+        #expect(presentation.parts.contains(where: { part in
+            if case .markdown(let text) = part {
+                return text.contains(invalidImageURL)
+            }
+            return false
+        }))
+    }
+
+    @Test("Inline image data URLs inside code blocks stay code")
+    func inlineImageDataURLsInsideCodeBlocksStayCode() {
+        let imageURL = "data:image/png;base64,\(Self.onePixelPNGBase64)"
+        let presentation = buildPresentation(content: "```text\n\(imageURL)\n```")
+
+        #expect(presentation.parts.contains(where: { part in
+            if case .code(_, let code) = part {
+                return code.contains(imageURL)
+            }
+            return false
+        }))
+        #expect(!presentation.parts.contains(where: { part in
+            if case .image = part { return true }
+            return false
+        }))
+    }
+
     @Test("Non-image URLs still render as link previews")
     func nonImageURLsStillRenderAsLinkPreviews() {
         let url = "https://example.com/ticker/latest.html"
@@ -196,6 +284,20 @@ struct MessagePresentationURLBoundaryTests {
             metrics: ChatFlowTheme.Metrics(isCompact: true),
             streamingState: &state
         )
+    }
+
+    private func singleImageAttachment(in presentation: MessagePresentation) -> Clawline.Attachment? {
+        for part in presentation.parts {
+            if case .image(let attachment) = part {
+                return attachment
+            }
+        }
+        return nil
+    }
+
+    private static func percentEncodedOnePixelPNG() -> String {
+        guard let data = Data(base64Encoded: onePixelPNGBase64) else { return "" }
+        return data.map { String(format: "%%%02X", $0) }.joined()
     }
 
     private static let onePixelPNGBase64 = """

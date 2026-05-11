@@ -413,7 +413,16 @@ export function createTransportMachine({
               }
             });
             return;
+          case "typing":
+            if ((payload.role == null || payload.role === "assistant") && payload.sessionKey) {
+              chatDomainStore.applyAssistantTypingState({
+                active: payload.active,
+                sessionKey: payload.sessionKey
+              });
+            }
+            return;
           case "event":
+            applyAssistantActivityEvent(payload);
             return;
           case "sync_complete":
             replayMessagesRemaining = 0;
@@ -455,6 +464,37 @@ export function createTransportMachine({
 
       enterRecovery("Connection closed");
     };
+  }
+
+  function applyAssistantActivityEvent(payload: {
+    event: string;
+    payload?: Record<string, unknown> | null;
+  }) {
+    if (payload.event !== "activity") {
+      return;
+    }
+
+    const eventPayload = payload.payload;
+    const sessionKey =
+      typeof eventPayload?.sessionKey === "string" ? eventPayload.sessionKey : "";
+    if (!sessionKey) {
+      return;
+    }
+
+    const active =
+      typeof eventPayload?.isActive === "boolean"
+        ? eventPayload.isActive
+        : typeof eventPayload?.active === "boolean"
+          ? eventPayload.active
+          : null;
+    if (active == null) {
+      return;
+    }
+
+    chatDomainStore.applyAssistantTypingState({
+      active,
+      sessionKey
+    });
   }
 
   function enterRecovery(reason: string) {

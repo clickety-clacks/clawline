@@ -49,7 +49,73 @@ export interface SessionStatusPayload {
   };
   context?: unknown;
   approval?: unknown;
-  capabilities?: unknown;
+  capabilities?: SessionStatusCapabilities | null;
+  modelCatalog?: ModelCatalogPayload | null;
+}
+
+export interface SessionStatusCapability {
+  supported: boolean;
+  reason?: string | null;
+}
+
+export interface SessionStatusCapabilities {
+  cancelCurrentRun?: SessionStatusCapability | null;
+  setModel?: SessionStatusCapability | null;
+  setThinking?: SessionStatusCapability | null;
+  setReasoning?: SessionStatusCapability | null;
+  setFastMode?: SessionStatusCapability | null;
+  setMode?: SessionStatusCapability | null;
+  setVerbosity?: SessionStatusCapability | null;
+  canCancelCurrentRun?: boolean | null;
+  canChangeModel?: boolean | null;
+  canChangeReasoning?: boolean | null;
+  canChangeFastMode?: boolean | null;
+  canChangeVerbosity?: boolean | null;
+  readOnlyStatus?: boolean | null;
+}
+
+export interface ModelCatalogPayload {
+  available?: boolean | null;
+  reason?: string | null;
+  models?: ModelCatalogEntryPayload[] | null;
+}
+
+export interface ModelCatalogEntryPayload {
+  id?: string | null;
+  provider?: string | null;
+  ref: string;
+  name?: string | null;
+  alias?: string | null;
+}
+
+export type SessionControlAction =
+  | "cancel_current_run"
+  | "set_model"
+  | "set_thinking"
+  | "set_reasoning"
+  | "set_fast_mode"
+  | "set_mode"
+  | "set_verbosity";
+
+export interface ApplySessionControlRequest {
+  sessionKey: string;
+  action: SessionControlAction;
+  fastMode?: boolean | null;
+  mode?: string | null;
+  model?: string | null;
+  reasoningLevel?: string | null;
+  thinkingLevel?: string | null;
+  verbosity?: string | null;
+}
+
+export interface ApplySessionControlResponse {
+  ok: boolean;
+  sessionKey: string;
+  action: SessionControlAction | string;
+  code?: string | null;
+  message?: string | null;
+  status?: SessionStatusPayload | null;
+  capabilities?: SessionStatusCapabilities | null;
 }
 
 export interface CreateStreamRequest {
@@ -132,6 +198,23 @@ export function createStreamApiClient(options?: StreamApiClientOptions) {
         token: input.token
       });
     },
+    applySessionControl(input: {
+      action: SessionControlAction;
+      enabled?: boolean | null;
+      serverUrl: string;
+      sessionKey: string;
+      token: string;
+      value?: string | null;
+    }) {
+      return sendRequest<ApplySessionControlRequest, ApplySessionControlResponse>({
+        fetchFn,
+        method: "POST",
+        path: "/api/session-control",
+        serverUrl: input.serverUrl,
+        token: input.token,
+        body: buildSessionControlRequestBody(input)
+      });
+    },
     createStream(input: {
       displayName: string;
       idempotencyKey: string;
@@ -197,6 +280,53 @@ export function createStreamApiClient(options?: StreamApiClientOptions) {
       });
     }
   };
+}
+
+function buildSessionControlRequestBody(input: {
+  action: SessionControlAction;
+  enabled?: boolean | null;
+  sessionKey: string;
+  value?: string | null;
+}): ApplySessionControlRequest {
+  const base = {
+    sessionKey: input.sessionKey,
+    action: input.action
+  };
+
+  switch (input.action) {
+    case "set_model":
+      return {
+        ...base,
+        model: input.value ?? null
+      };
+    case "set_thinking":
+      return {
+        ...base,
+        thinkingLevel: input.value ?? null
+      };
+    case "set_reasoning":
+      return {
+        ...base,
+        reasoningLevel: input.value ?? null
+      };
+    case "set_fast_mode":
+      return {
+        ...base,
+        fastMode: input.enabled ?? null
+      };
+    case "set_mode":
+      return {
+        ...base,
+        mode: input.value ?? null
+      };
+    case "set_verbosity":
+      return {
+        ...base,
+        verbosity: input.value ?? null
+      };
+    case "cancel_current_run":
+      return base;
+  }
 }
 
 export function providerHttpBaseUrlFromServerUrl(serverUrl: string) {

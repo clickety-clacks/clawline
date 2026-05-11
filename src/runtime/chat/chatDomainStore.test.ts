@@ -136,6 +136,38 @@ describe("chatDomainStore", () => {
     expect(messages[0].streaming).toBe(false);
   });
 
+  it("stores assistant typing state transiently and clears it on assistant messages", () => {
+    const store = createChatDomainStore({
+      persistence: createMemoryChatPersistence()
+    });
+    const sessionKey = "agent:main:clawline:user_1:main";
+
+    store.applyAssistantTypingState({
+      active: true,
+      sessionKey
+    });
+
+    expect(store.getState().assistantTypingBySessionKey[sessionKey]).toBe(true);
+
+    store.applyIncomingMessage({
+      localDeviceId: "browser-device-1",
+      message: {
+        type: "message",
+        id: "s_typing_done",
+        role: "assistant",
+        content: "Reply",
+        timestamp: 102,
+        streaming: false,
+        sessionKey,
+        attachments: []
+      },
+      selectedSessionKey: sessionKey,
+      source: "live"
+    });
+
+    expect(store.getState().assistantTypingBySessionKey[sessionKey]).toBeUndefined();
+  });
+
   it("applies stream and provisioning snapshots through the domain owner", () => {
     const store = createChatDomainStore({
       persistence: createMemoryChatPersistence()

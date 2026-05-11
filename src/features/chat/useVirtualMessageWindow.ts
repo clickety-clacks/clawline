@@ -54,10 +54,17 @@ export interface VirtualMessageWindow {
   scrollToMessage: (messageId: string, alignment?: "center" | "start") => boolean;
   scrollToOffset: (offsetTop: number) => void;
   suspendBottomFollow: () => void;
+  trailingRevealAlpha: number;
   totalHeight: number;
 }
 
-export function useVirtualMessageWindow(messages: ChatMessageRecord[]): VirtualMessageWindow {
+export function useVirtualMessageWindow(
+  messages: ChatMessageRecord[],
+  options?: {
+    restingTrailingHeight?: number;
+    revealTrailingHeight?: number;
+  }
+): VirtualMessageWindow {
   const containerRef = useRef<HTMLElement | null>(null);
   const shouldStickToBottomRef = useRef(false);
   const isAtBottomRef = useRef(true);
@@ -65,6 +72,8 @@ export function useVirtualMessageWindow(messages: ChatMessageRecord[]): VirtualM
   const [containerWidth, setContainerWidth] = useState(getInitialContainerWidth);
   const [viewportHeight, setViewportHeight] = useState(getInitialViewportHeight);
   const [measuredSizes, setMeasuredSizes] = useState<Record<string, { height: number; width: number }>>({});
+  const restingTrailingHeight = options?.restingTrailingHeight ?? 0;
+  const revealTrailingHeight = options?.revealTrailingHeight ?? 0;
 
   useLayoutEffect(() => {
     const container = containerRef.current;
@@ -123,8 +132,11 @@ export function useVirtualMessageWindow(messages: ChatMessageRecord[]): VirtualM
     if (container.scrollTop !== nextScrollTop) {
       container.scrollTop = nextScrollTop;
     }
-    const maxScrollTop = maxContainerScrollTop(container);
-    isAtBottomRef.current = maxScrollTop - nextScrollTop <= BOTTOM_THRESHOLD_PX;
+    const restingMaxScrollTop = maxRestingScrollTop(
+      container,
+      revealTrailingHeight
+    );
+    isAtBottomRef.current = restingMaxScrollTop - nextScrollTop <= BOTTOM_THRESHOLD_PX;
     shouldStickToBottomRef.current = isAtBottomRef.current;
     setScrollTop(nextScrollTop);
   }
@@ -135,17 +147,36 @@ export function useVirtualMessageWindow(messages: ChatMessageRecord[]): VirtualM
       return;
     }
 
-    const maxScrollTop = maxContainerScrollTop(container);
+    const maxScrollTop = maxRestingScrollTop(
+      container,
+      revealTrailingHeight
+    );
     const nextScrollTop = Number.isFinite(maxScrollTop) ? maxScrollTop : container.scrollHeight;
     container.scrollTop = nextScrollTop;
     setScrollTop(nextScrollTop);
-  }, [layout.totalHeight]);
+  }, [layout.totalHeight, restingTrailingHeight, revealTrailingHeight]);
+
+  const restingMaxScrollTopForRender = maxCurrentRestingScrollTop(
+    containerRef.current,
+    layout.totalHeight + restingTrailingHeight,
+    revealTrailingHeight,
+    viewportHeight
+  );
+  const effectiveScrollTop = Math.max(0, scrollTop);
+  const isAtRestingBottom =
+    restingMaxScrollTopForRender - effectiveScrollTop <= BOTTOM_THRESHOLD_PX;
+  const trailingRevealAlpha = revealTrailingHeight > 0
+    ? clamp(
+        0,
+        (effectiveScrollTop - restingMaxScrollTopForRender) / revealTrailingHeight,
+        1
+      )
+    : 0;
 
   return {
     containerRef,
     handleScroll,
-    isAtBottom:
-      Math.max(0, layout.totalHeight - viewportHeight - scrollTop) <= BOTTOM_THRESHOLD_PX,
+    isAtBottom: isAtRestingBottom,
     isAtBottomRef,
     registerMessageSize(messageId, size) {
       if (size.height <= 0 || size.width <= 0) {
@@ -170,7 +201,10 @@ export function useVirtualMessageWindow(messages: ChatMessageRecord[]): VirtualM
       }
 
       shouldStickToBottomRef.current = true;
-      const maxScrollTop = maxContainerScrollTop(container);
+      const maxScrollTop = maxRestingScrollTop(
+        container,
+        revealTrailingHeight
+      );
       const nextScrollTop = Number.isFinite(maxScrollTop) ? maxScrollTop : container.scrollHeight;
       container.scrollTop = nextScrollTop;
       isAtBottomRef.current = true;
@@ -195,7 +229,9 @@ export function useVirtualMessageWindow(messages: ChatMessageRecord[]): VirtualM
           : messageLayout.offsetTop;
 
       const clampedOffset = clampContainerScrollTop(container, nextOffset);
-      const isAtBottom = maxContainerScrollTop(container) - clampedOffset <= BOTTOM_THRESHOLD_PX;
+      const isAtBottom =
+        maxRestingScrollTop(container, revealTrailingHeight)
+        - clampedOffset <= BOTTOM_THRESHOLD_PX;
       shouldStickToBottomRef.current = isAtBottom;
       container.scrollTop = clampedOffset;
       isAtBottomRef.current = isAtBottom;
@@ -209,7 +245,9 @@ export function useVirtualMessageWindow(messages: ChatMessageRecord[]): VirtualM
       }
 
       const clampedOffset = clampContainerScrollTop(container, offsetTop);
-      const isAtBottom = maxContainerScrollTop(container) - clampedOffset <= BOTTOM_THRESHOLD_PX;
+      const isAtBottom =
+        maxRestingScrollTop(container, revealTrailingHeight)
+        - clampedOffset <= BOTTOM_THRESHOLD_PX;
       shouldStickToBottomRef.current = isAtBottom;
       container.scrollTop = clampedOffset;
       isAtBottomRef.current = isAtBottom;
@@ -218,8 +256,32 @@ export function useVirtualMessageWindow(messages: ChatMessageRecord[]): VirtualM
     suspendBottomFollow() {
       shouldStickToBottomRef.current = false;
     },
+    trailingRevealAlpha,
     totalHeight: layout.totalHeight
   };
+}
+
+function maxCurrentRestingScrollTop(
+  container: HTMLElement | null,
+  fallbackRestingHeight: number,
+  revealTrailingHeight: number,
+  viewportHeight: number
+) {
+  if (container) {
+    const maxScrollTop = maxRestingScrollTop(container, revealTrailingHeight);
+    if (Number.isFinite(maxScrollTop)) {
+      return maxScrollTop;
+    }
+  }
+  return Math.max(0, fallbackRestingHeight - viewportHeight);
+}
+
+function maxRestingScrollTop(container: HTMLElement, revealTrailingHeight: number) {
+  const maxScrollTop = maxContainerScrollTop(container);
+  if (!Number.isFinite(maxScrollTop)) {
+    return maxScrollTop;
+  }
+  return Math.max(0, maxScrollTop - revealTrailingHeight);
 }
 
 function maxContainerScrollTop(container: HTMLElement) {
@@ -361,7 +423,7 @@ function estimateBubbleWidth(
   let width: number;
 
   if (presentation.isWide || presentation.isTruncated) {
-    width = containerWidth;
+    width = maxAllowedWidth;
   } else if (presentation.sizeClass === "long") {
     width = maxAllowedWidth;
   } else if (presentation.sizeClass === "short") {

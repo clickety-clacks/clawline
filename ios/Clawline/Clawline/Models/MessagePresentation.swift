@@ -279,6 +279,16 @@ enum MessagePresentationBuilder {
         let urls: [URL]
     }
 
+    private struct InlineImageExtraction {
+        let markdownSource: String
+        let attachments: [Attachment]
+    }
+
+    private struct InlineImagePayload {
+        let mimeType: String
+        let data: Data
+    }
+
     static func build(
         from message: Message,
         metrics: ChatFlowTheme.Metrics,
@@ -294,16 +304,16 @@ enum MessagePresentationBuilder {
             from: message.attachments,
             terminalAllowed: terminalAllowed
         )
-        let imageAttachments = attachmentBuckets.imageAttachments
+        var imageAttachments = attachmentBuckets.imageAttachments
         let fileAttachments = attachmentBuckets.fileAttachments
-        let hasAttachments = !attachmentBuckets.richParts.isEmpty || !imageAttachments.isEmpty || !fileAttachments.isEmpty
+        var hasRenderableAttachments = !attachmentBuckets.richParts.isEmpty || !imageAttachments.isEmpty || !fileAttachments.isEmpty
         var parts: [MessagePart] = []
         var markdownParts: [MessagePart] = []
         var effectiveBlocks: [MarkdownRenderBlock] = []
         var plainTextForMetricsParts: [String] = []
         var remoteImageURLs: [URL] = []
         var emojiOnly = parsedMarkdownPlan.isEmojiOnly
-        var hasBlockedParts = hasAttachments
+        var hasBlockedParts = hasRenderableAttachments
         var detectedURLOccurrences: [URL] = []
         let suppressTextForFiles = shouldSuppressTextForFileAttachments(
             content: message.content,
@@ -320,12 +330,23 @@ enum MessagePresentationBuilder {
             for block in parsedMarkdownPlan.blocks {
                 switch block {
                 case .richText(let source):
-                    let extraction = extractRemoteImageURLs(from: source)
-                    remoteImageURLs.append(contentsOf: extraction.urls)
-                    detectedURLOccurrences.append(contentsOf: extractMarkdownURLs(from: extraction.markdownSource))
-                    let trimmed = extraction.markdownSource.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let inlineImageExtraction = extractInlineImagePayloads(
+                        from: source,
+                        messageID: message.id,
+                        startingAt: imageAttachments.count
+                    )
+                    imageAttachments.append(contentsOf: inlineImageExtraction.attachments)
+                    if !inlineImageExtraction.attachments.isEmpty {
+                        hasRenderableAttachments = true
+                        hasBlockedParts = true
+                    }
+
+                    let remoteImageExtraction = extractRemoteImageURLs(from: inlineImageExtraction.markdownSource)
+                    remoteImageURLs.append(contentsOf: remoteImageExtraction.urls)
+                    detectedURLOccurrences.append(contentsOf: extractMarkdownURLs(from: remoteImageExtraction.markdownSource))
+                    let trimmed = remoteImageExtraction.markdownSource.trimmingCharacters(in: .whitespacesAndNewlines)
                     guard !trimmed.isEmpty else { continue }
-                    if hasAttachments, isAttachmentSummaryLine(trimmed) {
+                    if hasRenderableAttachments, isAttachmentSummaryLine(trimmed) {
                         continue
                     }
                     effectiveBlocks.append(.richText(markdownSource: trimmed))
@@ -462,6 +483,145 @@ enum MessagePresentationBuilder {
             markdownSource: normalizeMarkdownAfterRemovingImageURLs(strippedSource),
             urls: matches.map(\.url)
         )
+    }
+
+    private static func extractInlineImagePayloads(
+        from source: String,
+        messageID: String,
+        startingAt attachmentOffset: Int
+    ) -> InlineImageExtraction {
+        var matches: [(range: Range<String.Index>, payload: InlineImagePayload)] = []
+        matches.append(contentsOf: markdownInlineImageMatches(in: source))
+        let markdownImageRanges = matches.map(\.range)
+        for match in bareInlineImageMatches(in: source) where !markdownImageRanges.contains(where: { $0.overlaps(match.range) }) {
+            matches.append(match)
+        }
+        guard !matches.isEmpty else {
+            return InlineImageExtraction(markdownSource: source, attachments: [])
+        }
+
+        matches.sort { $0.range.lowerBound < $1.range.lowerBound }
+        var strippedSource = source
+        for match in matches.reversed() {
+            strippedSource.removeSubrange(match.range)
+        }
+        let attachments = matches.enumerated().map { index, match in
+            Attachment(
+                id: "inline-data-image-\(messageID)-\(attachmentOffset + index)",
+                type: .image,
+                mimeType: match.payload.mimeType,
+                data: match.payload.data,
+                assetId: nil,
+                size: match.payload.data.count
+            )
+        }
+        return InlineImageExtraction(
+            markdownSource: normalizeMarkdownAfterRemovingImageURLs(strippedSource),
+            attachments: attachments
+        )
+    }
+
+    private static func markdownInlineImageMatches(in source: String) -> [(range: Range<String.Index>, payload: InlineImagePayload)] {
+        guard let regex = try? NSRegularExpression(pattern: #"!\[[^\]]*\]\((data:image\/[^)\s]+)(?:\s+"[^"]*")?\)"#) else {
+            return []
+        }
+        let nsRange = NSRange(source.startIndex..<source.endIndex, in: source)
+        return regex.matches(in: source, range: nsRange).compactMap { match in
+            guard match.numberOfRanges >= 2,
+                  let fullRange = Range(match.range(at: 0), in: source),
+                  let payloadRange = Range(match.range(at: 1), in: source),
+                  let payload = inlineImagePayload(from: String(source[payloadRange])) else {
+                return nil
+            }
+            return (fullRange, payload)
+        }
+    }
+
+    private static func bareInlineImageMatches(in source: String) -> [(range: Range<String.Index>, payload: InlineImagePayload)] {
+        guard let regex = try? NSRegularExpression(pattern: #"data:image\/[A-Za-z0-9.+-]+(?:;[^,\s)]*)?,[^\s)]+"#) else {
+            return []
+        }
+        let nsRange = NSRange(source.startIndex..<source.endIndex, in: source)
+        return regex.matches(in: source, range: nsRange).compactMap { match in
+            guard let range = Range(match.range, in: source),
+                  let payload = inlineImagePayload(from: String(source[range])) else {
+                return nil
+            }
+            return (range, payload)
+        }
+    }
+
+    private static func inlineImagePayload(from rawDataURL: String) -> InlineImagePayload? {
+        guard rawDataURL.lowercased().hasPrefix("data:image/"),
+              let commaIndex = rawDataURL.firstIndex(of: ",") else {
+            return nil
+        }
+
+        let metadata = rawDataURL[rawDataURL.index(rawDataURL.startIndex, offsetBy: 5)..<commaIndex]
+        let metadataParts = metadata.split(separator: ";", omittingEmptySubsequences: false)
+        guard let mediaType = metadataParts.first?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+              mediaType.hasPrefix("image/"),
+              !mediaType.isEmpty else {
+            return nil
+        }
+
+        let payload = String(rawDataURL[rawDataURL.index(after: commaIndex)...])
+        let isBase64 = metadataParts.dropFirst().contains { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "base64" }
+        let decodedData: Data?
+        if isBase64 {
+            decodedData = Data(base64Encoded: payload, options: [.ignoreUnknownCharacters])
+        } else {
+            decodedData = percentDecodedData(from: payload)
+        }
+
+        guard let data = decodedData,
+              !data.isEmpty,
+              UIImage(data: data) != nil else {
+            return nil
+        }
+        return InlineImagePayload(mimeType: mediaType, data: data)
+    }
+
+    private static func percentDecodedData(from payload: String) -> Data? {
+        var bytes: [UInt8] = []
+        bytes.reserveCapacity(payload.utf8.count)
+        let scalars = Array(payload.unicodeScalars)
+        var index = scalars.startIndex
+        while index < scalars.endIndex {
+            let scalar = scalars[index]
+            if scalar == "%" {
+                let firstHexIndex = scalars.index(after: index)
+                let secondHexIndex = scalars.index(firstHexIndex, offsetBy: 1, limitedBy: scalars.endIndex)
+                guard let secondHexIndex,
+                      secondHexIndex < scalars.endIndex,
+                      let first = hexValue(scalars[firstHexIndex]),
+                      let second = hexValue(scalars[secondHexIndex]) else {
+                    return nil
+                }
+                bytes.append((first << 4) | second)
+                index = scalars.index(after: secondHexIndex)
+            } else if scalar.isASCII,
+                      let byte = scalar.value <= UInt8.max ? UInt8(exactly: scalar.value) : nil {
+                bytes.append(byte)
+                index = scalars.index(after: index)
+            } else {
+                return nil
+            }
+        }
+        return Data(bytes)
+    }
+
+    private static func hexValue(_ scalar: UnicodeScalar) -> UInt8? {
+        switch scalar.value {
+        case 48...57:
+            return UInt8(scalar.value - 48)
+        case 97...102:
+            return UInt8(scalar.value - 97 + 10)
+        case 65...70:
+            return UInt8(scalar.value - 65 + 10)
+        default:
+            return nil
+        }
     }
 
     private static func markdownImageMatches(in source: String) -> [(range: Range<String.Index>, url: URL)] {

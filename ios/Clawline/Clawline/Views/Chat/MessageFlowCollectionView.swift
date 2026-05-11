@@ -223,6 +223,14 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"
         return "T217-typing-cancel-\(build)"
     }
+
+    static func shouldUpdateCollectionFrame(current: CGRect, target: CGRect, tolerance: CGFloat = 1) -> Bool {
+        abs(current.minX - target.minX) > tolerance ||
+        abs(current.minY - target.minY) > tolerance ||
+        abs(current.width - target.width) > tolerance ||
+        abs(current.height - target.height) > tolerance
+    }
+
     private var collectionView: UICollectionView!
     private var channelOverride: String?
     private var dataSource: UICollectionViewDiffableDataSource<Int, String>!
@@ -1072,8 +1080,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             )
 
             // Only update if significantly different to avoid layout loops
-            if abs(collectionView.frame.minY - extendedFrame.minY) > 1 ||
-               abs(collectionView.frame.height - extendedFrame.height) > 1 {
+            if Self.shouldUpdateCollectionFrame(current: collectionView.frame, target: extendedFrame) {
                 collectionView.frame = extendedFrame
             }
         }

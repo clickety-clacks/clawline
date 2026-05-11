@@ -1,6 +1,7 @@
 import type { ChatDomainSnapshot } from "../../../runtime/chat/chatDomainStore";
 
 export const phase1TranscriptFixture: ChatDomainSnapshot = {
+  assistantTypingBySessionKey: {},
   firstUnreadMessageIdBySessionKey: {},
   hydrated: true,
   lastServerEventId: "s_101",

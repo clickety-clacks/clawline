@@ -209,4 +209,28 @@ struct WatchConnectionPresentationStateTests {
         )
     }
 
+
+    @Test("Soniox availability is based on credentials, not Watch direct-network path")
+    @MainActor
+    func sonioxAvailabilityDoesNotRequireDirectNetworkPath() {
+        let credentials = WatchCredentialStore(keychain: WatchKeychainStore(service: "WatchTests.sonioxAvailability", accessGroup: nil))
+        credentials.clear()
+        credentials.debugApplyMockCredentials()
+        let voiceSession = WatchVoiceSession(credentialStore: credentials)
+
+        #expect(voiceSession.canUseVoice)
+    }
+
+    @Test("tap action does not force text entry just because transport is disconnected")
+    func tapActionDoesNotPreferTextEntryWhenVoiceIsAvailable() throws {
+        let sourcePath = URL(filePath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appending(path: "Clawline Watch Watch App/Views/WatchMainView.swift")
+        let source = try String(contentsOf: sourcePath, encoding: .utf8)
+
+        #expect(!source.contains("transport.transportState == .disconnected || !presentationState.voiceInputAvailable"))
+        #expect(source.contains("if presentationState.voiceInputAvailable {\n                voiceSession.startTap()"))
+    }
+
 }

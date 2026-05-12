@@ -373,10 +373,10 @@ struct WatchMainView: View {
         case .speaking:
             voiceSession.bargeIn()
         case .idle, .error:
-            if transport.transportState == .disconnected || !presentationState.voiceInputAvailable {
-                Task { await requestTextInput() }
-            } else {
+            if presentationState.voiceInputAvailable {
                 voiceSession.startTap()
+            } else {
+                Task { await requestTextInput() }
             }
         case .listening, .finalizing:
             voiceSession.stop()

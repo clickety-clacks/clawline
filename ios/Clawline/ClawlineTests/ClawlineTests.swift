@@ -207,6 +207,21 @@ struct ClawlineTests {
         #expect(source.contains("watchConnectivityService.activate()"))
     }
 
+
+    @Test("watch relay chat.send activates relay observation before dispatch")
+    func watchRelayChatSendActivatesRelayBeforeDispatch() throws {
+        let servicePath = URL(filePath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appending(path: "Clawline/Services/WatchConnectivityService.swift")
+        let source = try String(contentsOf: servicePath, encoding: .utf8)
+        let chatSendRange = try #require(source.range(of: "private func handleChatSend"))
+        let dispatchRange = try #require(source.range(of: "try await chatService.send", range: chatSendRange.lowerBound..<source.endIndex))
+        let bodyBeforeDispatch = source[chatSendRange.lowerBound..<dispatchRange.lowerBound]
+
+        #expect(bodyBeforeDispatch.contains("activateRelay()"))
+    }
+
 }
 
 private final class SpyChatService: ChatServicing {

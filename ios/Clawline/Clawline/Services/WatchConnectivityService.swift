@@ -251,6 +251,8 @@ final class WatchConnectivityService: NSObject, WatchConnectivityServicing {
         let clientId = payload["id"] as? String ?? UUID().uuidString
         let attachments = decodeAttachments(payload["attachments"])
 
+        activateRelay()
+
         Task {
             do {
                 try await chatService.send(

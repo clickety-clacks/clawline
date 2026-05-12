@@ -1098,6 +1098,49 @@ struct DictationCoordinatorTests {
         #expect(!coordinator.isWalkieTalkieActive)
     }
 
+    @Test("Paused waveform resume keeps captured audio frames flowing")
+    @MainActor
+    func pausedWaveformResumeKeepsCapturedAudioFramesFlowing() async {
+        let harness = DictationTestHarness(freshClientPerFactoryCall: true)
+        let coordinator = harness.makeCoordinator()
+
+        coordinator.updateContext(
+            sessionKey: harness.host.activeSessionKey,
+            composeIsEmpty: true,
+            textFieldFocused: false,
+            selectionLength: 0,
+            reduceMotionEnabled: false
+        )
+
+        coordinator.startStickyDictation()
+        await waitUntil { coordinator.isListeningReady }
+
+        let firstClient = harness.latestClient
+        harness.audio.emit(frame: Data([0x01]))
+        await waitUntil { firstClient.sentFrames.contains(Data([0x01])) }
+
+        coordinator.pauseFromWaveformTap()
+        await waitUntil(timeoutMs: 1_500) {
+            !coordinator.isListening
+                && coordinator.isDictationActive
+                && coordinator.isSurfaceOpen
+                && firstClient.finalized
+                && !firstClient.closeCalls.isEmpty
+        }
+
+        coordinator.startStickyDictation()
+        await waitUntil(timeoutMs: 1_500) {
+            coordinator.isListeningReady && harness.clientFactoryCallCount >= 2
+        }
+
+        let resumedClient = harness.latestClient
+        harness.audio.emit(frame: Data([0x02]))
+        await waitUntil { resumedClient.sentFrames.contains(Data([0x02])) }
+
+        #expect(resumedClient !== firstClient)
+        #expect(resumedClient.sentFrames.contains(Data([0x02])))
+    }
+
     @Test("App background publishes closed projection before finalization completes")
     @MainActor
     func appBackgroundPublishesClosedProjectionDuringFinalization() async {
@@ -1381,6 +1424,10 @@ final class MockDictationAudioCapture: DictationAudioCapturing {
         frameContinuation?.finish()
         levelContinuation?.finish()
         eventContinuation?.finish()
+    }
+
+    func emit(frame: Data) {
+        frameContinuation?.yield(frame)
     }
 
     func emit(level: Float) {

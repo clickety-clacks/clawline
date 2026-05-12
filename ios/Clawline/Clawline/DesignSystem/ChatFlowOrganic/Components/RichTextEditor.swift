@@ -55,6 +55,9 @@ struct RichTextEditor: UIViewRepresentable {
         textView.onResponderFocusChange = { isFocused in
             coordinator.parent.onFocusChange(isFocused)
         }
+        textView.onDirectUserTextReplacement = { range, replacementText in
+            coordinator.parent.onUserEdit?(range, replacementText.utf16.count)
+        }
         textView.isScrollEnabled = false
         textView.backgroundColor = .clear
         textView.textContainerInset = UIEdgeInsets(top: 12, left: 20, bottom: 12, right: trailingPadding)
@@ -109,6 +112,9 @@ struct RichTextEditor: UIViewRepresentable {
         onTextViewReady?(textView)
         textView.onResponderFocusChange = { isFocused in
             coordinator.parent.onFocusChange(isFocused)
+        }
+        textView.onDirectUserTextReplacement = { range, replacementText in
+            coordinator.parent.onUserEdit?(range, replacementText.utf16.count)
         }
 
         let isComposing = textView.markedTextRange != nil
@@ -485,19 +491,20 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
     var onEscape: (() -> Void)?
     var onEscapeLongPress: (() -> Void)?
     var onLayout: ((CGFloat) -> Void)?
-        var dictationProgrammaticEditInFlight: Bool = false
-        private var expectedDictationProgrammaticSelectionFeedback: NSRange?
-        var onResponderFocusChange: ((Bool) -> Void)?
-        var isInputEnabled: Bool = true {
-            didSet {
-                guard oldValue != isInputEnabled else { return }
-                isEditable = isInputEnabled
-                isSelectable = isInputEnabled
-                if !isInputEnabled && isFirstResponder {
-                    _ = resignFirstResponder()
-                }
+    var onDirectUserTextReplacement: ((NSRange, String) -> Void)?
+    var dictationProgrammaticEditInFlight: Bool = false
+    private var expectedDictationProgrammaticSelectionFeedback: NSRange?
+    var onResponderFocusChange: ((Bool) -> Void)?
+    var isInputEnabled: Bool = true {
+        didSet {
+            guard oldValue != isInputEnabled else { return }
+            isEditable = isInputEnabled
+            isSelectable = isInputEnabled
+            if !isInputEnabled && isFirstResponder {
+                _ = resignFirstResponder()
             }
         }
+    }
 
     /// Image providers collected during the delegate's `transforming` calls,
     /// flushed after the run-loop tick so all items from a single paste are batched.
@@ -597,7 +604,7 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
         guard canHandleInputShortcut else { return }
 
         if let selectedRange = selectedTextRange, !selectedRange.isEmpty {
-            replace(selectedRange, withText: "")
+            replaceUserText(selectedRange, with: "")
             return
         }
 
@@ -624,7 +631,7 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
               let deleteStart = position(from: cursor, offset: -charsToDelete),
               let deleteRange = textRange(from: deleteStart, to: cursor) else { return }
 
-        replace(deleteRange, withText: "")
+        replaceUserText(deleteRange, with: "")
     }
 
     @objc private func didPressCtrlU(_ sender: UIKeyCommand) {
@@ -632,7 +639,7 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
         guard let cursor = selectedTextRange?.start,
               let range = textRange(from: beginningOfDocument, to: cursor),
               !range.isEmpty else { return }
-        replace(range, withText: "")
+        replaceUserText(range, with: "")
     }
 
     @objc private func didPressCtrlK(_ sender: UIKeyCommand) {
@@ -640,13 +647,13 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
         guard let cursor = selectedTextRange?.start,
               let range = textRange(from: cursor, to: endOfDocument),
               !range.isEmpty else { return }
-        replace(range, withText: "")
+        replaceUserText(range, with: "")
     }
 
     @objc private func didPressCtrlC(_ sender: UIKeyCommand) {
         guard canHandleInputShortcut else { return }
         guard let fullRange = textRange(from: beginningOfDocument, to: endOfDocument) else { return }
-        replace(fullRange, withText: "")
+        replaceUserText(fullRange, with: "")
     }
 
         override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
@@ -808,9 +815,27 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
     private func insertPlainText(_ text: String) {
         let attributed = NSAttributedString(string: text, attributes: typingAttributes)
         let range = selectedRange
+        notifyDirectUserTextReplacement(range: range, replacementText: text)
         textStorage.replaceCharacters(in: range, with: attributed)
         selectedRange = NSRange(location: range.location + attributed.length, length: 0)
         delegate?.textViewDidChange?(self)
+    }
+
+    private func replaceUserText(_ textRange: UITextRange, with replacementText: String) {
+        notifyDirectUserTextReplacement(range: nsRange(from: textRange), replacementText: replacementText)
+        replace(textRange, withText: replacementText)
+    }
+
+    private func notifyDirectUserTextReplacement(range: NSRange, replacementText: String) {
+        guard !dictationProgrammaticEditInFlight else { return }
+        clearExpectedDictationProgrammaticSelectionFeedback()
+        onDirectUserTextReplacement?(range, replacementText)
+    }
+
+    private func nsRange(from textRange: UITextRange) -> NSRange {
+        let location = offset(from: beginningOfDocument, to: textRange.start)
+        let length = offset(from: textRange.start, to: textRange.end)
+        return NSRange(location: location, length: length)
     }
 
     nonisolated private static func loadSanitizedText(from provider: NSItemProvider) async -> String? {

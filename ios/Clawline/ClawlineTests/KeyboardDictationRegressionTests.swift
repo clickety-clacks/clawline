@@ -282,6 +282,36 @@ struct KeyboardDictationRegressionTests {
                 == .none
         )
     }
+
+    @Test("Inactive scene phase does not close dictation as app background")
+    func inactiveScenePhaseDoesNotCloseDictationAsAppBackground() {
+        #expect(!ChatView.shouldCloseDictationForScenePhase(.active))
+        #expect(!ChatView.shouldCloseDictationForScenePhase(.inactive))
+        #expect(ChatView.shouldCloseDictationForScenePhase(.background))
+    }
+
+    @Test("Direct paste mutation reports user edit to dictation owner")
+    @MainActor
+    func directPasteMutationReportsUserEditToDictationOwner() {
+        let textView = PastableTextView()
+        textView.attributedText = NSAttributedString(string: "hello")
+        textView.selectedRange = NSRange(location: 2, length: 2)
+
+        var observedEdits: [(range: NSRange, replacementUTF16Length: Int)] = []
+        textView.onDirectUserTextReplacement = { range, replacementText in
+            observedEdits.append((range, replacementText.utf16.count))
+        }
+
+        UIPasteboard.general.string = "X"
+        defer { UIPasteboard.general.items = [] }
+
+        textView.paste(nil)
+
+        #expect(textView.attributedText.string == "heXo")
+        #expect(observedEdits.count == 1)
+        #expect(observedEdits.first?.range == NSRange(location: 2, length: 2))
+        #expect(observedEdits.first?.replacementUTF16Length == 1)
+    }
 }
 
 // MARK: - Helpers

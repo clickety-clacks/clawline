@@ -1756,9 +1756,11 @@ final class DictationSession {
         )
 
         eventTask?.cancel()
-        frameTask?.cancel()
         eventTask = nil
-        frameTask = nil
+        if !keepCaptureForPausedWaveform {
+            frameTask?.cancel()
+            frameTask = nil
+        }
         activeMaxDurationTaskID = nil
         maxDurationDeadline = nil
         streamingClient = nil
@@ -1881,35 +1883,42 @@ final class DictationSession {
         }
 
         if audioCapture == nil {
-            let capture = audioCaptureFactory()
-            audioCapture = capture
+            audioCapture = audioCaptureFactory()
+        }
 
-            frameTask = Task { [weak self] in
-                guard let self else { return }
-                for await frame in capture.frameStream {
-                    await self.handleCapturedFrame(frame)
-                }
-            }
-
-            levelTask = Task { [weak self] in
-                guard let self else { return }
-                let minimumWaveformUpdateInterval: CFTimeInterval = 1.0 / 60.0
-                var lastWaveformUpdateAt = CFAbsoluteTimeGetCurrent() - minimumWaveformUpdateInterval
-                for await level in capture.levelStream {
-                    let now = CFAbsoluteTimeGetCurrent()
-                    guard now - lastWaveformUpdateAt >= minimumWaveformUpdateInterval else { continue }
-                    lastWaveformUpdateAt = now
-                    let nextLevel = max(0, level)
-                    await MainActor.run {
-                        self.audioLevel = nextLevel
+        if let capture = audioCapture {
+            if frameTask == nil {
+                frameTask = Task { [weak self] in
+                    guard let self else { return }
+                    for await frame in capture.frameStream {
+                        await self.handleCapturedFrame(frame)
                     }
                 }
             }
 
-            audioEventTask = Task { [weak self] in
-                guard let self else { return }
-                for await event in capture.eventStream {
-                    await self.handleAudioCaptureEvent(event)
+            if levelTask == nil {
+                levelTask = Task { [weak self] in
+                    guard let self else { return }
+                    let minimumWaveformUpdateInterval: CFTimeInterval = 1.0 / 60.0
+                    var lastWaveformUpdateAt = CFAbsoluteTimeGetCurrent() - minimumWaveformUpdateInterval
+                    for await level in capture.levelStream {
+                        let now = CFAbsoluteTimeGetCurrent()
+                        guard now - lastWaveformUpdateAt >= minimumWaveformUpdateInterval else { continue }
+                        lastWaveformUpdateAt = now
+                        let nextLevel = max(0, level)
+                        await MainActor.run {
+                            self.audioLevel = nextLevel
+                        }
+                    }
+                }
+            }
+
+            if audioEventTask == nil {
+                audioEventTask = Task { [weak self] in
+                    guard let self else { return }
+                    for await event in capture.eventStream {
+                        await self.handleAudioCaptureEvent(event)
+                    }
                 }
             }
         }

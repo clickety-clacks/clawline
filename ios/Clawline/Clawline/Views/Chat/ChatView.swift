@@ -201,6 +201,10 @@ struct ChatView: View {
         return "T217-typing-cancel-\(build)"
     }
 
+    static func shouldCloseDictationForScenePhase(_ phase: ScenePhase) -> Bool {
+        phase == .background
+    }
+
     @Bindable var viewModel: ChatViewModel
     let toastManager: ToastManager
     @Environment(\.scenePhase) private var scenePhase
@@ -791,7 +795,7 @@ struct ChatView: View {
             if phase == .active {
                 viewModel.handleSceneDidBecomeActive()
                 keyboardRefreshToken &+= 1
-            } else {
+            } else if Self.shouldCloseDictationForScenePhase(phase) {
                 dictationCoordinator.handleAppBackgrounded()
             }
         }

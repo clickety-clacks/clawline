@@ -1064,6 +1064,10 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
                     }
 
                     group.addTask { [weak self] in
+                        await self?.observeProviderConnectionState()
+                    }
+
+                    group.addTask { [weak self] in
                         await self?.observeServiceEvents()
                     }
                 }
@@ -1181,6 +1185,19 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
             recordLifecycleStartupGateEvent(event)
 #endif
         }
+    }
+
+    @MainActor
+    private func observeProviderConnectionState() async {
+        for await state in chatService.connectionState {
+            await handleProviderConnectionState(state)
+        }
+    }
+
+    @MainActor
+    private func handleProviderConnectionState(_ state: ConnectionState) async {
+        guard state == .disconnected, connectionState == .connected else { return }
+        await lifecycleCoordinator.reconnectIntentTransportInterrupted()
     }
 
     @MainActor
@@ -2277,6 +2294,17 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         logger.info("connection failure handled silently: \(error.localizedDescription, privacy: .public)")
     }
 
+    private func handleTransportLossIfNeeded(_ error: Swift.Error, didStartChatSend: Bool) {
+        guard didStartChatSend, isNetworkConnectionLost(error) else { return }
+        Task { await lifecycleCoordinator.reconnectIntentTransportInterrupted() }
+    }
+
+    private func isNetworkConnectionLost(_ error: Swift.Error) -> Bool {
+        let nsError = error as NSError
+        return nsError.domain == NSURLErrorDomain
+            && nsError.code == URLError.networkConnectionLost.rawValue
+    }
+
     private func markPendingMessagesAsFailedForConnectionLoss() {
         guard !pendingLocalMessages.isEmpty else { return }
         let pendingIds = Set(pendingLocalMessages.map(\.id))
@@ -2312,9 +2340,11 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
                              sessionKey: String?,
                              clearInputOnSuccess: Bool = true) async {
         defer { sendTask = nil }
+        var didStartChatSend = false
         do {
             let wireAttachments = try await buildWireAttachments(from: pendingAttachments, content: content)
             try Task.checkCancellation()
+            didStartChatSend = true
             try await chatService.send(
                 id: clientId,
                 content: content,
@@ -2365,6 +2395,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
                     detail: "failure localId=\(clientId) reason=\(error.localizedDescription)"
                 )
 #endif
+                handleTransportLossIfNeeded(error, didStartChatSend: didStartChatSend)
                 toastManager.show(error.localizedDescription)
                 markLocalMessageFailed(
                     id: clientId,
@@ -2382,9 +2413,11 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
                                   attachments: [Attachment],
                                   sessionKey: String?) async {
         defer { sendTask = nil }
+        var didStartChatSend = false
         do {
             let wireAttachments = try await buildWireAttachments(from: attachments, content: content)
             try Task.checkCancellation()
+            didStartChatSend = true
             try await chatService.send(
                 id: clientId,
                 content: content,
@@ -2432,6 +2465,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
                     detail: "failure localId=\(clientId) reason=\(error.localizedDescription) retry=1"
                 )
 #endif
+                handleTransportLossIfNeeded(error, didStartChatSend: didStartChatSend)
                 toastManager.show(error.localizedDescription)
                 markLocalMessageFailed(
                     id: clientId,

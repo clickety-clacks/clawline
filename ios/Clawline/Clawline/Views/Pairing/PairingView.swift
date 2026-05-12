@@ -155,6 +155,7 @@ struct PairingView: View {
                     .textFieldStyle(.plain)
                     .textContentType(.none)
                     .autocorrectionDisabled()
+                    .accessibilityIdentifier("pairing_name_input")
                     .submitLabel(.next)
                     .focused($focusedField, equals: .name)
                     .onSubmit {
@@ -186,6 +187,7 @@ struct PairingView: View {
             .background(Color.accentColor, in: Circle())
             .opacity(viewModel.isNameValid ? 1 : 0.4)
             .disabled(!viewModel.isNameValid)
+            .accessibilityIdentifier("pairing_name_submit")
         }
     }
 
@@ -221,6 +223,7 @@ struct PairingView: View {
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                     .keyboardType(.URL)
+                    .accessibilityIdentifier("pairing_address_input")
                     .submitLabel(.go)
                     .focused($focusedField, equals: .address)
                     .onSubmit {
@@ -252,6 +255,7 @@ struct PairingView: View {
             .background(Color.accentColor, in: Circle())
             .opacity(viewModel.isAddressValid ? 1 : 0.4)
             .disabled(!viewModel.isAddressValid)
+            .accessibilityIdentifier("pairing_address_submit")
         }
     }
 

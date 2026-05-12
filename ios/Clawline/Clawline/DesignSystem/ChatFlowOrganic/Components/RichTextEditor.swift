@@ -79,7 +79,6 @@ struct RichTextEditor: UIViewRepresentable {
         textView.smartInsertDeleteType = .yes
         textView.attributedText = attributedText
         textView.isInputEnabled = isEditable
-
         let focusTap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleEditorTap(_:)))
         focusTap.cancelsTouchesInView = false
         focusTap.delegate = context.coordinator

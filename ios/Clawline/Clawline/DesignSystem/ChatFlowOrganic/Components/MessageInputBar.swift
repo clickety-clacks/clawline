@@ -1660,6 +1660,7 @@ struct MessageInputBar: View {
                         (isDisconnected ? "Disconnected. Tap to reconnect." : "Send message"))
             )
             .accessibilityHint(connectionAlertHint ?? "")
+            .accessibilityIdentifier("send_button")
             .id("send-button")
             .animation(.spring(response: 0.30, dampingFraction: 0.82), value: isSending)
             .animation(.spring(response: 0.30, dampingFraction: 0.82), value: canSend)

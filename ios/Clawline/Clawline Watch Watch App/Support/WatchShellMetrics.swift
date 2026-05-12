@@ -6,6 +6,7 @@ struct WatchShellMetrics {
     static let horizontalPadding: CGFloat = 8
     static let verticalPadding: CGFloat = 6
     static let historyMinHeight: CGFloat = 64
+    static let historyEntriesPerPage = 3
     private static let ringScale: CGFloat = 0.42
 
     static func ringDiameter(for availableSize: CGSize) -> CGFloat {

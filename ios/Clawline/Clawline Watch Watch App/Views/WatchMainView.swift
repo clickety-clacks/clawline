@@ -106,21 +106,23 @@ struct WatchMainView: View {
         let entries = conversationStore.visibleEntries(for: sessionKey)
 
         if !entries.isEmpty {
+            let historyHeight = WatchShellMetrics.historyHeight(for: availableSize)
+            let pages = Self.historyPages(from: entries)
+
             ScrollViewReader { proxy in
                 ScrollView(.vertical) {
-                    VStack(spacing: 6) {
-                        ForEach(entries) { entry in
-                            historyBubble(entry)
-                                .id(entry.id)
+                    LazyVStack(spacing: 0) {
+                        ForEach(pages) { page in
+                            historyPage(page.entries, height: historyHeight)
+                                .id(page.id)
                         }
                     }
-                    .frame(maxWidth: .infinity)
-                    .padding(.horizontal, 2)
-                    .padding(.vertical, 2)
+                    .scrollTargetLayout()
                 }
                 .defaultScrollAnchor(.bottom)
+                .scrollTargetBehavior(.paging)
                 .scrollIndicators(.hidden)
-                .frame(minHeight: WatchShellMetrics.historyMinHeight, maxHeight: WatchShellMetrics.historyHeight(for: availableSize), alignment: .bottom)
+                .frame(height: historyHeight, alignment: .bottom)
                 .background(
                     RoundedRectangle(cornerRadius: 14, style: .continuous)
                         .fill(Color.white.opacity(0.06))
@@ -130,16 +132,42 @@ struct WatchMainView: View {
                         .stroke(Color.white.opacity(0.08), lineWidth: 1)
                 )
                 .task(id: entries.last?.id) {
-                    guard let lastId = entries.last?.id else { return }
+                    guard let newestPageID = pages.last?.id else { return }
                     withAnimation(.easeOut(duration: 0.18)) {
-                        proxy.scrollTo(lastId, anchor: .bottom)
+                        proxy.scrollTo(newestPageID, anchor: .bottom)
                     }
                 }
-                .accessibilityLabel("Recent conversation")
+                .accessibilityLabel("Paged conversation history")
+                .accessibilityHint("Swipe down to page up through older messages. Newest messages stay at the bottom above the microphone.")
                 .accessibilityIdentifier("watch-recent-conversation")
             }
         } else {
             EmptyView()
+        }
+    }
+
+    private func historyPage(_ entries: [WatchConversationStore.Entry], height: CGFloat) -> some View {
+        VStack(spacing: 6) {
+            Spacer(minLength: 0)
+            ForEach(entries) { entry in
+                historyBubble(entry)
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: height, maxHeight: height, alignment: .bottom)
+        .padding(.horizontal, 2)
+        .padding(.vertical, 2)
+    }
+
+    nonisolated static func historyPages(from entries: [WatchConversationStore.Entry]) -> [WatchHistoryPage] {
+        let pageSize = WatchShellMetrics.historyEntriesPerPage
+        guard pageSize > 0 else { return [] }
+
+        return stride(from: 0, to: entries.count, by: pageSize).map { start in
+            let end = min(start + pageSize, entries.count)
+            let pageEntries = Array(entries[start..<end])
+            let firstID = pageEntries.first?.id ?? "empty"
+            let lastID = pageEntries.last?.id ?? firstID
+            return WatchHistoryPage(id: "watch-history-page_\(firstID)_\(lastID)", entries: pageEntries)
         }
     }
 
@@ -414,6 +442,12 @@ struct WatchMainView: View {
               !text.isEmpty else { return }
         await presentationState.sendTextMessage(text)
     }
+}
+
+
+struct WatchHistoryPage: Identifiable, Equatable {
+    let id: String
+    let entries: [WatchConversationStore.Entry]
 }
 
 

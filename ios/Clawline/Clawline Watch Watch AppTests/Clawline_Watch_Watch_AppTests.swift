@@ -5,13 +5,31 @@
 //  Created by Mike Manzano on 1/7/26.
 //
 
+import Foundation
 import Testing
 @testable import Clawline_Watch_Watch_App
 
 struct Clawline_Watch_Watch_AppTests {
 
-    @Test func example() async throws {
-        // Write your test here and use APIs like `#expect(...)` to check expected conditions.
+    @Test func historyPagesKeepNewestMessagesOnFinalPage() async throws {
+        let now = Date()
+        let entries = (1...7).map { index in
+            WatchConversationStore.Entry(
+                id: "entry_\(index)",
+                role: index.isMultiple(of: 2) ? .assistant : .user,
+                content: "Message \(index)",
+                timestamp: now.addingTimeInterval(Double(index))
+            )
+        }
+
+        let pages = WatchMainView.historyPages(from: entries)
+
+        #expect(pages.map { page in page.entries.map { entry in entry.id } } == [
+            ["entry_1", "entry_2", "entry_3"],
+            ["entry_4", "entry_5", "entry_6"],
+            ["entry_7"]
+        ])
+        #expect(pages.last?.entries.last?.id == "entry_7")
     }
 
 }

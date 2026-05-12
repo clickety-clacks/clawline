@@ -8,6 +8,9 @@
 import Observation
 import SwiftUI
 import os
+#if canImport(UIKit)
+import UIKit
+#endif
 
 @main
 struct Clawline_SpatialApp: App {
@@ -20,6 +23,9 @@ struct Clawline_SpatialApp: App {
     private let uploadService: any UploadServicing
 
     init() {
+#if canImport(UIKit)
+        SpatialWindowTransparency.install()
+#endif
         let authManager = AuthManager()
 #if DEBUG
         Self.configureDebugAdminIfNeeded(authManager: authManager)
@@ -131,6 +137,38 @@ private struct SpatialWindowCornerResizeMarker: View {
     private var cornerRadius: CGFloat { 45 }
     private var lineWidth: CGFloat { 1.5 }
 }
+
+#if canImport(UIKit)
+private enum SpatialWindowTransparency {
+    static func install() {
+        UIView.appearance(whenContainedInInstancesOf: [UIHostingController<AnyView>.self]).backgroundColor = .clear
+        UIScrollView.appearance(whenContainedInInstancesOf: [UIHostingController<AnyView>.self]).backgroundColor = .clear
+        UIScrollView.appearance().backgroundColor = .clear
+        clearHostingBackgrounds()
+    }
+
+    private static func clearHostingBackgrounds() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            let scenes = UIApplication.shared.connectedScenes
+                .compactMap { $0 as? UIWindowScene }
+            for scene in scenes {
+                for window in scene.windows {
+                    setHostingBackgroundsClear(in: window)
+                }
+            }
+        }
+    }
+
+    private static func setHostingBackgroundsClear(in view: UIView) {
+        if String(describing: type(of: view)).contains("UIHostingView") {
+            view.backgroundColor = .clear
+        }
+        for subview in view.subviews {
+            setHostingBackgroundsClear(in: subview)
+        }
+    }
+}
+#endif
 
 #if DEBUG
 private extension Clawline_SpatialApp {

@@ -15,6 +15,54 @@ struct DictationCoordinatorTranscriptOwnershipTests {
 
         await waitUntil { rig.textView.attributedText.string == "hello mars" }
         #expect(rig.textView.attributedText.string == "hello mars")
+        #expect(rig.textView.selectedRange == NSRange(location: 6, length: 4))
+    }
+
+    @Test("Long dictation keeps finalized prefix when Soniox interim window advances")
+    func longDictationKeepsFinalizedPrefixWhenInterimWindowAdvances() async {
+        let rig = makeRig(initialText: "", selectedRange: NSRange(location: 0, length: 0))
+
+        startDictation(rig)
+        emitTokens([
+            SonioxTranscriptToken(text: "The first half ", isFinal: true),
+            SonioxTranscriptToken(text: "of the paragraph", isFinal: false)
+        ], into: rig)
+        await waitUntil {
+            rig.textView.attributedText.string == "The first half of the paragraph"
+        }
+
+        emitTokens([
+            SonioxTranscriptToken(text: "continues with the second half", isFinal: false)
+        ], into: rig)
+
+        await waitUntil {
+            rig.textView.attributedText.string == "The first half continues with the second half"
+        }
+        #expect(rig.textView.attributedText.string == "The first half continues with the second half")
+    }
+
+    @Test("Long dictation merges newly final advanced-window prefix")
+    func longDictationMergesNewlyFinalAdvancedWindowPrefix() async {
+        let rig = makeRig(initialText: "", selectedRange: NSRange(location: 0, length: 0))
+
+        startDictation(rig)
+        emitTokens([
+            SonioxTranscriptToken(text: "The first half ", isFinal: true),
+            SonioxTranscriptToken(text: "of the paragraph", isFinal: false)
+        ], into: rig)
+        await waitUntil {
+            rig.textView.attributedText.string == "The first half of the paragraph"
+        }
+
+        emitTokens([
+            SonioxTranscriptToken(text: "of the paragraph ", isFinal: true),
+            SonioxTranscriptToken(text: "continues with the second half", isFinal: false)
+        ], into: rig)
+
+        await waitUntil {
+            rig.textView.attributedText.string == "The first half of the paragraph continues with the second half"
+        }
+        #expect(rig.textView.attributedText.string == "The first half of the paragraph continues with the second half")
     }
 
     @Test("Activation capture wins over later ambient selection changes before dictation starts")
@@ -83,6 +131,26 @@ struct DictationCoordinatorTranscriptOwnershipTests {
         await waitUntil { rig.textView.attributedText.string == "abcX123YZdef" }
 
         #expect(rig.textView.attributedText.string == "abcX123YZdef")
+    }
+
+    @Test("Cursor movement after finalized prefix inserts only new advanced-window text")
+    func cursorMovementAfterFinalizedPrefixInsertsOnlyNewAdvancedWindowText() async {
+        let rig = makeRig(initialText: "", selectedRange: NSRange(location: 0, length: 0))
+
+        startDictation(rig)
+        emitTokens([
+            SonioxTranscriptToken(text: "abcdef", isFinal: true),
+            SonioxTranscriptToken(text: "ghi", isFinal: false)
+        ], into: rig)
+        await waitUntil { rig.textView.attributedText.string == "abcdefghi" }
+
+        moveSelection(in: rig, to: NSRange(location: 3, length: 0))
+        emitTokens([
+            SonioxTranscriptToken(text: "XYZ", isFinal: false)
+        ], into: rig)
+
+        await waitUntil { rig.textView.attributedText.string == "abcXYZdefghi" }
+        #expect(rig.textView.attributedText.string == "abcXYZdefghi")
     }
 
     @Test("Substring selection during active dictation is replaced by the next dictated suffix")
@@ -479,10 +547,14 @@ struct DictationCoordinatorTranscriptOwnershipTests {
     }
 
     private func emitProvisional(_ text: String, into rig: CoordinatorTranscriptRig) {
+        emitTokens([SonioxTranscriptToken(text: text, isFinal: false)], into: rig)
+    }
+
+    private func emitTokens(_ tokens: [SonioxTranscriptToken], into rig: CoordinatorTranscriptRig) {
         rig.harness.latestClient.emit(
             .response(
                 SonioxStreamingResponse(
-                    tokens: [SonioxTranscriptToken(text: text, isFinal: false)],
+                    tokens: tokens,
                     finished: false,
                     errorCode: nil,
                     errorMessage: nil

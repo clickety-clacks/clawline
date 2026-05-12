@@ -85,4 +85,60 @@ struct DictationTranscriptBufferTests {
         #expect(update.provisionalText == "alpha beta gamma")
         #expect(buffer.renderedText == "alpha beta gamma")
     }
+
+    @Test("Finalized token prefix remains owned when later interim updates omit it")
+    func finalizedPrefixSurvivesInterimWindowUpdates() {
+        let buffer = DictationTranscriptBuffer()
+
+        let first = buffer.apply(tokens: [
+            SonioxTranscriptToken(text: "The first half ", isFinal: true),
+            SonioxTranscriptToken(text: "of the paragraph", isFinal: false)
+        ], finished: false)
+        #expect(first.provisionalText == "The first half of the paragraph")
+
+        let second = buffer.apply(tokens: [
+            SonioxTranscriptToken(text: "keeps growing", isFinal: false)
+        ], finished: false)
+
+        #expect(second.provisionalText == "The first half keeps growing")
+        #expect(buffer.renderedText == "The first half keeps growing")
+    }
+
+    @Test("Advanced window newly final tokens extend retained final prefix")
+    func advancedWindowFinalTokensExtendRetainedFinalPrefix() {
+        let buffer = DictationTranscriptBuffer()
+
+        let first = buffer.apply(tokens: [
+            SonioxTranscriptToken(text: "The first half ", isFinal: true),
+            SonioxTranscriptToken(text: "of the paragraph", isFinal: false)
+        ], finished: false)
+        #expect(first.provisionalText == "The first half of the paragraph")
+
+        let second = buffer.apply(tokens: [
+            SonioxTranscriptToken(text: "of the paragraph ", isFinal: true),
+            SonioxTranscriptToken(text: "continues", isFinal: false)
+        ], finished: false)
+
+        #expect(second.provisionalText == "The first half of the paragraph continues")
+        #expect(buffer.renderedText == "The first half of the paragraph continues")
+    }
+
+    @Test("Advanced window does not collapse repeated boundary text")
+    func advancedWindowDoesNotCollapseRepeatedBoundaryText() {
+        let buffer = DictationTranscriptBuffer()
+
+        let first = buffer.apply(tokens: [
+            SonioxTranscriptToken(text: "Tibet ", isFinal: true),
+            SonioxTranscriptToken(text: "bet", isFinal: false)
+        ], finished: false)
+        #expect(first.provisionalText == "Tibet bet")
+
+        let second = buffer.apply(tokens: [
+            SonioxTranscriptToken(text: "bet on it ", isFinal: true),
+            SonioxTranscriptToken(text: "again", isFinal: false)
+        ], finished: false)
+
+        #expect(second.provisionalText == "Tibet bet on it again")
+        #expect(buffer.renderedText == "Tibet bet on it again")
+    }
 }

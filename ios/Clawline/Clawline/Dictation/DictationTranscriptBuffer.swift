@@ -22,10 +22,15 @@ struct DictationSegmentUpdate: Equatable, Sendable {
 
 final class DictationTranscriptBuffer: Sendable {
     private var committedText: String = ""
-    private var currentSegmentTokens: [String] = []
+    private var currentSegmentFinalText: String = ""
+    private var currentSegmentInterimText: String = ""
 
     var renderedText: String {
-        committedText + currentSegmentTokens.joined()
+        committedText + currentSegmentText
+    }
+
+    private var currentSegmentText: String {
+        currentSegmentFinalText + currentSegmentInterimText
     }
 
     func apply(tokens: [SonioxTranscriptToken], finished: Bool) -> DictationSegmentUpdate {
@@ -35,7 +40,22 @@ final class DictationTranscriptBuffer: Sendable {
 
         func applyChunk(_ chunkTokens: [SonioxTranscriptToken]) {
             guard !chunkTokens.isEmpty else { return }
-            currentSegmentTokens = chunkTokens.map(\.text)
+            let finalPrefix = chunkTokens
+                .prefix { $0.isFinal }
+                .map(\.text)
+                .joined()
+            let interimText = chunkTokens
+                .drop { $0.isFinal }
+                .map(\.text)
+                .joined()
+
+            if !finalPrefix.isEmpty {
+                currentSegmentFinalText = mergedFinalText(
+                    currentSegmentFinalText,
+                    with: finalPrefix
+                )
+            }
+            currentSegmentInterimText = interimText
         }
 
         for token in tokens {
@@ -47,12 +67,13 @@ final class DictationTranscriptBuffer: Sendable {
                 chunk.removeAll(keepingCapacity: true)
                 sawEndpoint = true
 
-                let segment = currentSegmentTokens.joined()
+                let segment = currentSegmentText
                 if !segment.isEmpty {
                     committedSegments.append(segment)
                     committedText += segment
                 }
-                currentSegmentTokens.removeAll(keepingCapacity: true)
+                currentSegmentFinalText.removeAll(keepingCapacity: true)
+                currentSegmentInterimText.removeAll(keepingCapacity: true)
                 continue
             }
             chunk.append(token)
@@ -61,7 +82,7 @@ final class DictationTranscriptBuffer: Sendable {
         applyChunk(chunk)
 
         return DictationSegmentUpdate(
-            provisionalText: currentSegmentTokens.joined(),
+            provisionalText: currentSegmentText,
             committedSegments: committedSegments,
             finished: finished,
             sawEndpoint: sawEndpoint,
@@ -71,6 +92,16 @@ final class DictationTranscriptBuffer: Sendable {
 
     func reset() {
         committedText.removeAll(keepingCapacity: true)
-        currentSegmentTokens.removeAll(keepingCapacity: true)
+        currentSegmentFinalText.removeAll(keepingCapacity: true)
+        currentSegmentInterimText.removeAll(keepingCapacity: true)
+    }
+
+    private func mergedFinalText(_ existing: String, with incoming: String) -> String {
+        guard !incoming.isEmpty else { return existing }
+        guard !existing.isEmpty else { return incoming }
+        if incoming.hasPrefix(existing) {
+            return incoming
+        }
+        return existing + incoming
     }
 }

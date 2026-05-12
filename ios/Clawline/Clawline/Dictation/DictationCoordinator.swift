@@ -2246,6 +2246,9 @@ final class DictationSession {
             ? currentMachineText
             : ""
         transcriptOwnership = .active(session)
+        if discardCurrentMachineTextFromPendingStream {
+            transcriptBuffer.reset()
+        }
         if pendingUpdate != nil {
             flushPendingTranscriptApply()
         }

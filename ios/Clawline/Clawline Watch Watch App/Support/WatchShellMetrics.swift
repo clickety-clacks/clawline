@@ -1,13 +1,13 @@
 import CoreGraphics
 
 struct WatchShellMetrics {
-    static let maxRingDiameter: CGFloat = 104
+    static let maxRingDiameter: CGFloat = 145
     static let shellSpacing: CGFloat = 8
     static let horizontalPadding: CGFloat = 8
     static let verticalPadding: CGFloat = 6
     static let historyMinHeight: CGFloat = 64
     static let historyEntriesPerPage = 3
-    private static let ringScale: CGFloat = 0.42
+    private static let ringScale: CGFloat = 0.65
 
     static func ringDiameter(for availableSize: CGSize) -> CGFloat {
         min(min(availableSize.width, availableSize.height) * ringScale, maxRingDiameter)

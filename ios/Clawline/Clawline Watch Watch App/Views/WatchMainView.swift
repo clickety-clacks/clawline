@@ -81,68 +81,68 @@ struct WatchMainView: View {
             let shellMessage = shellMessage(for: stream)
             let showsChannelRow = transport.transportState != .disconnected
 
-            VStack(spacing: WatchShellMetrics.shellSpacing) {
-                historyRevealArea(for: stream?.sessionKey, availableSize: availableSize)
-                    .frame(maxWidth: .infinity)
-
-                if let shellMessage {
-                    shellMessageView(shellMessage)
-                }
-
-                ringControl(ringDiameter: ringDiameter)
-
-                if showsChannelRow {
-                    channelRow(for: stream)
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-            .padding(.horizontal, WatchShellMetrics.horizontalPadding)
-            .padding(.vertical, WatchShellMetrics.verticalPadding)
+            unifiedScrollSurface(
+                stream: stream,
+                availableSize: availableSize,
+                ringDiameter: ringDiameter,
+                shellMessage: shellMessage,
+                showsChannelRow: showsChannelRow
+            )
         }
     }
 
     @ViewBuilder
-    private func historyRevealArea(for sessionKey: String?, availableSize: CGSize) -> some View {
-        let entries = conversationStore.visibleEntries(for: sessionKey)
+    private func unifiedScrollSurface(
+        stream: StreamSession?,
+        availableSize: CGSize,
+        ringDiameter: CGFloat,
+        shellMessage: String?,
+        showsChannelRow: Bool
+    ) -> some View {
+        let entries = conversationStore.visibleEntries(for: stream?.sessionKey)
+        let pages = Self.historyPages(from: entries)
+        let viewportHeight = max(0, availableSize.height - (WatchShellMetrics.verticalPadding * 2))
+        let historyHeight = WatchShellMetrics.historyHeight(for: availableSize)
+        let bottomAnchorID = "watch-shell-bottom-\(stream?.sessionKey ?? placeholderPageKey)"
 
-        if !entries.isEmpty {
-            let historyHeight = WatchShellMetrics.historyHeight(for: availableSize)
-            let pages = Self.historyPages(from: entries)
+        ScrollViewReader { proxy in
+            ScrollView(.vertical) {
+                VStack(spacing: WatchShellMetrics.shellSpacing) {
+                    ForEach(pages) { page in
+                        historyPage(page.entries, height: historyHeight)
+                            .id(page.id)
+                    }
 
-            ScrollViewReader { proxy in
-                ScrollView(.vertical) {
-                    LazyVStack(spacing: 0) {
-                        ForEach(pages) { page in
-                            historyPage(page.entries, height: historyHeight)
-                                .id(page.id)
-                        }
+                    if let shellMessage {
+                        shellMessageView(shellMessage)
                     }
-                    .scrollTargetLayout()
-                }
-                .defaultScrollAnchor(.bottom)
-                .scrollTargetBehavior(.paging)
-                .scrollIndicators(.hidden)
-                .frame(height: historyHeight, alignment: .bottom)
-                .background(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .fill(Color.white.opacity(0.06))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14, style: .continuous)
-                        .stroke(Color.white.opacity(0.08), lineWidth: 1)
-                )
-                .task(id: entries.last?.id) {
-                    guard let newestPageID = pages.last?.id else { return }
-                    withAnimation(.easeOut(duration: 0.18)) {
-                        proxy.scrollTo(newestPageID, anchor: .bottom)
+
+                    ringControl(ringDiameter: ringDiameter)
+
+                    if showsChannelRow {
+                        channelRow(for: stream)
                     }
+
+                    Color.clear
+                        .frame(height: WatchShellMetrics.controlBottomBreathingRoom)
+                        .id(bottomAnchorID)
                 }
-                .accessibilityLabel("Paged conversation history")
-                .accessibilityHint("Swipe down to page up through older messages. Newest messages stay at the bottom above the microphone.")
-                .accessibilityIdentifier("watch-recent-conversation")
+                .frame(maxWidth: .infinity, minHeight: viewportHeight, alignment: .bottom)
+                .padding(.horizontal, WatchShellMetrics.horizontalPadding)
+                .padding(.top, WatchShellMetrics.verticalPadding)
+                .padding(.bottom, max(0, WatchShellMetrics.verticalPadding - WatchShellMetrics.controlBottomBreathingRoom))
+                .scrollTargetLayout()
             }
-        } else {
-            EmptyView()
+            .defaultScrollAnchor(.bottom)
+            .scrollIndicators(.hidden)
+            .accessibilityLabel("Unified conversation and microphone surface")
+            .accessibilityHint("Swipe to move through conversation history. The microphone stays in the same vertical scroll surface below the newest messages.")
+            .accessibilityIdentifier("watch-unified-scroll-surface")
+            .task(id: entries.last?.id ?? shellMessage ?? bottomAnchorID) {
+                withAnimation(.easeOut(duration: 0.18)) {
+                    proxy.scrollTo(bottomAnchorID, anchor: .bottom)
+                }
+            }
         }
     }
 

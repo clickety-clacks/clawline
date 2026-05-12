@@ -5,6 +5,7 @@ struct WatchShellMetrics {
     static let shellSpacing: CGFloat = 8
     static let horizontalPadding: CGFloat = 8
     static let verticalPadding: CGFloat = 6
+    static let controlBottomBreathingRoom: CGFloat = 8
     static let historyMinHeight: CGFloat = 64
     static let historyEntriesPerPage = 3
     private static let ringScale: CGFloat = 0.65

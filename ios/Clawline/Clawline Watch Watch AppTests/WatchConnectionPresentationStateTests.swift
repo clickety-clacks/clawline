@@ -75,6 +75,11 @@ struct WatchConnectionPresentationStateTests {
         #expect(WatchShellMetrics.ringDiameter(for: CGSize(width: 260, height: 280)) == 145)
     }
 
+    @Test("watch controls reserve breathing room at the bottom of the unified scroll surface")
+    func controlsReserveBottomBreathingRoom() {
+        #expect(WatchShellMetrics.controlBottomBreathingRoom >= WatchShellMetrics.verticalPadding)
+    }
+
     @Test("voice-active ring state preserves non-direct transport routes")
     func voiceActiveRingStatePreservesTransportRoute() {
         #expect(

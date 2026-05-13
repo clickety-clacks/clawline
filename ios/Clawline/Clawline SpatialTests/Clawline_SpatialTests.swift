@@ -57,6 +57,34 @@ struct Clawline_SpatialTests {
         #expect(ordinarySubview.isOpaque == true)
     }
 
+    @Test("Spatial transparent message flow installs gaze scroll hit surface")
+    func transparentMessageFlowInstallsGazeScrollHitSurface() {
+        let controller = MessageFlowCollectionViewController()
+        controller.prepareInitialAppearance(isDark: false, allowsTransparentWindowBackground: true)
+
+        controller.loadViewIfNeeded()
+
+        let collectionView = controller.view.subviews.compactMap { $0 as? UICollectionView }.first
+        let hitSurface = collectionView?.backgroundView as? SpatialGazeScrollHitSurfaceView
+        #expect(hitSurface != nil)
+        #expect(hitSurface?.isUserInteractionEnabled == true)
+        #expect(hitSurface?.isOpaque == false)
+        #expect(alpha(hitSurface?.backgroundColor ?? .clear) > 0)
+        #expect(alpha(hitSurface?.backgroundColor ?? .clear) < (1.0 / 255.0))
+        #expect(rgba(hitSurface?.backgroundColor ?? .clear).a == 0)
+    }
+
+    @Test("Spatial normal message flow does not install gaze scroll hit surface")
+    func normalMessageFlowDoesNotInstallGazeScrollHitSurface() {
+        let controller = MessageFlowCollectionViewController()
+        controller.prepareInitialAppearance(isDark: false, allowsTransparentWindowBackground: false)
+
+        controller.loadViewIfNeeded()
+
+        let collectionView = controller.view.subviews.compactMap { $0 as? UICollectionView }.first
+        #expect(collectionView?.backgroundView == nil)
+    }
+
     private func makeWindow() -> UIWindow {
         let scene = UIApplication.shared.connectedScenes
             .compactMap({ $0 as? UIWindowScene })
@@ -66,6 +94,29 @@ struct Clawline_SpatialTests {
             fatalError("Expected a test host window scene")
         }
         return UIWindow(windowScene: scene)
+    }
+
+    private func rgba(_ color: UIColor) -> (r: Int, g: Int, b: Int, a: Int) {
+        var red: CGFloat = 0
+        var green: CGFloat = 0
+        var blue: CGFloat = 0
+        var alpha: CGFloat = 0
+        color.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+        return (
+            Int((red * 255).rounded()),
+            Int((green * 255).rounded()),
+            Int((blue * 255).rounded()),
+            Int((alpha * 255).rounded())
+        )
+    }
+
+    private func alpha(_ color: UIColor) -> CGFloat {
+        var red: CGFloat = 0
+        var green: CGFloat = 0
+        var blue: CGFloat = 0
+        var alpha: CGFloat = 0
+        color.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+        return alpha
     }
 
 }

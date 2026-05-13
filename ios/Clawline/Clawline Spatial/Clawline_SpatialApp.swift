@@ -50,6 +50,11 @@ struct Clawline_SpatialApp: App {
                 .environment(\.chatService, chatService)
                 .environment(\.settingsManager, settingsManager)
                 .environment(\.allowsTransparentWindowBackground, true)
+                .background {
+#if canImport(UIKit)
+                    SpatialWindowTransparencyInstaller()
+#endif
+                }
                 .overlay(alignment: .bottom) {
                     SpatialWindowCornerResizeMarkers()
                 }
@@ -140,33 +145,106 @@ private struct SpatialWindowCornerResizeMarker: View {
 }
 
 #if canImport(UIKit)
-private enum SpatialWindowTransparency {
+enum SpatialWindowTransparency {
     static func install() {
         UIView.appearance(whenContainedInInstancesOf: [UIHostingController<AnyView>.self]).backgroundColor = .clear
         UIScrollView.appearance(whenContainedInInstancesOf: [UIHostingController<AnyView>.self]).backgroundColor = .clear
         UIScrollView.appearance().backgroundColor = .clear
-        clearHostingBackgrounds()
+        UIWindow.appearance().backgroundColor = .clear
+        applyToConnectedWindows()
     }
 
-    private static func clearHostingBackgrounds() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            let scenes = UIApplication.shared.connectedScenes
-                .compactMap { $0 as? UIWindowScene }
-            for scene in scenes {
-                for window in scene.windows {
-                    setHostingBackgroundsClear(in: window)
-                }
+    @MainActor
+    static func applyStarting(at view: UIView) {
+        var candidate: UIView? = view
+        while let current = candidate {
+            setTransparent(current)
+            candidate = current.superview
+        }
+        if let window = view.window {
+            apply(to: window)
+        }
+    }
+
+    @MainActor
+    static func apply(to window: UIWindow) {
+        setTransparent(window)
+        if let rootView = window.rootViewController?.view {
+            setTransparent(rootView)
+        }
+        setHostingBackgroundsClear(in: window)
+    }
+
+    @MainActor
+    static func applyToConnectedWindows() {
+        let scenes = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+        for scene in scenes {
+            for window in scene.windows {
+                apply(to: window)
             }
         }
     }
 
-    private static func setHostingBackgroundsClear(in view: UIView) {
-        if String(describing: type(of: view)).contains("UIHostingView") {
-            view.backgroundColor = .clear
+    @MainActor
+    static func setHostingBackgroundsClear(in view: UIView) {
+        if shouldForceTransparent(view) {
+            setTransparent(view)
         }
         for subview in view.subviews {
             setHostingBackgroundsClear(in: subview)
         }
+    }
+
+    @MainActor
+    static func shouldForceTransparent(_ view: UIView) -> Bool {
+        view is UIWindow || String(describing: type(of: view)).contains("UIHostingView")
+    }
+
+    @MainActor
+    static func setTransparent(_ view: UIView) {
+        view.backgroundColor = .clear
+        view.isOpaque = false
+    }
+}
+
+private struct SpatialWindowTransparencyInstaller: UIViewRepresentable {
+    func makeUIView(context: Context) -> SpatialWindowTransparencyProbeView {
+        SpatialWindowTransparencyProbeView()
+    }
+
+    func updateUIView(_ uiView: SpatialWindowTransparencyProbeView, context: Context) {
+        SpatialWindowTransparency.applyStarting(at: uiView)
+    }
+}
+
+private final class SpatialWindowTransparencyProbeView: UIView {
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        SpatialWindowTransparency.setTransparent(self)
+        isUserInteractionEnabled = false
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        SpatialWindowTransparency.applyStarting(at: self)
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            SpatialWindowTransparency.applyStarting(at: self)
+        }
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        SpatialWindowTransparency.applyStarting(at: self)
+    }
+
+    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+        false
     }
 }
 #endif

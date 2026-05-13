@@ -191,6 +191,24 @@ struct StreamManagerSheet: View {
                                 .disabled(!canPerformRemovalAction(for: stream))
                                 .tint(canPerformRemovalAction(for: stream) ? .red : Color.gray.opacity(0.35))
                             }
+                            .contextMenu {
+                                Button {
+                                    beginRenaming(stream)
+                                } label: {
+                                    Label("Rename", systemImage: "pencil")
+                                }
+                                .disabled(!canPerformRenameAction(for: stream))
+
+                                Button(role: .destructive) {
+                                    pendingRemovalStream = stream
+                                } label: {
+                                    Label(
+                                        removalActionTitle(for: stream),
+                                        systemImage: removalActionImage(for: stream)
+                                    )
+                                }
+                                .disabled(!canPerformRemovalAction(for: stream))
+                            }
                     }
 
                     ForEach(filteredPendingCreateRows) { pendingRow in

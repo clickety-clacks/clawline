@@ -927,8 +927,10 @@ struct ChatView: View {
             : ChatFlowTheme.Metrics(isCompact: false).flowGap
         let bottomInsetFlowGap = bottomFlowGap
         // Keep the bar gap continuous through the final keyboard-dismiss frames.
-        let keyboardInsetProgress = min(1, max(0, keyboardVisibleHeight / 24))
-        let belowBarGap: CGFloat = 24 - (12 * keyboardInsetProgress)
+        let belowBarGap = ChatLayoutCoordinator.inputBarBottomGap(
+            keyboardVisibleHeight: keyboardVisibleHeight,
+            surfaceState: dictationMotion.isSurfaceVisible ? .open : .closed
+        )
         let usesExternalKeyboardInsets: Bool = {
 #if os(visionOS)
             // visionOS keyboard geometry can over-report and cause content overlap drift after

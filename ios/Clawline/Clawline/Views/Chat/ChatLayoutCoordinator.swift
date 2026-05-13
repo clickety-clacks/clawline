@@ -42,6 +42,11 @@ struct ChatInsetLayoutState: Equatable {
     let listBottomInset: CGFloat
 }
 
+enum ChatInputBarSurfaceState: Equatable {
+    case closed
+    case open
+}
+
 struct ChatLayoutTransition: Equatable {
     let animationDuration: TimeInterval
     let animationOptions: UIView.AnimationOptions
@@ -445,6 +450,14 @@ final class ChatLayoutCoordinator {
             inputBarTopFromScreenBottom: inputBarTopFromScreenBottom,
             listBottomInset: listBottomInset
         )
+    }
+
+    static func inputBarBottomGap(keyboardVisibleHeight: CGFloat, surfaceState: ChatInputBarSurfaceState) -> CGFloat {
+        let keyboardInsetProgress = min(1, max(0, keyboardVisibleHeight / 24))
+        if keyboardInsetProgress > 0, surfaceState == .closed {
+            return 0
+        }
+        return 24 - (12 * keyboardInsetProgress)
     }
 
     func runtimeInsetLayoutState(inputs: ChatLayoutInputs,

@@ -305,6 +305,11 @@ final class DictationTranscriptApplicator {
         let selectionStart = safeSelection.location
         let selectionEnd = safeSelection.location + safeSelection.length
 
+        if safeSelection.length > 0,
+           safeSelection == safeRange {
+            return NSRange(location: replacementEnd, length: 0)
+        }
+
         if selectionPolicy == .followTranscriptEndWhenSelectionAlreadyAtEnd,
            safeSelection.length == 0,
            selectionStart == safeRange.location + safeRange.length {

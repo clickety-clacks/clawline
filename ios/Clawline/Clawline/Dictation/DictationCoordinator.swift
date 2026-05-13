@@ -1157,7 +1157,15 @@ final class DictationSession {
             )
             self.activeMaxDurationTaskID = nil
             self.maxDurationDeadline = nil
-            await self.pauseListening(reason: "max_duration")
+            await self.stopKeep(
+                reason: "max_duration",
+                timeout: self.timing.stopKeepFinalizeTimeout,
+                announceStop: false,
+                gracefulFinalize: true,
+                collapseSurface: true,
+                collapseSurfaceImmediately: true,
+                trigger: "timer_max_duration"
+            )
         }
     }
 
@@ -1218,7 +1226,15 @@ final class DictationSession {
             )
             activeTokenInactivityTaskID = nil
             tokenInactivityDeadline = nil
-            await self.pauseListening(reason: "token_inactivity")
+            await self.stopKeep(
+                reason: "token_inactivity",
+                timeout: self.timing.stopKeepFinalizeTimeout,
+                announceStop: false,
+                gracefulFinalize: true,
+                collapseSurface: true,
+                collapseSurfaceImmediately: true,
+                trigger: "timer_token_inactivity"
+            )
         }
     }
 
@@ -1311,8 +1327,17 @@ final class DictationSession {
                state == .dictatingSticky || state == .dictatingWalkieTalkie {
                 let elapsed = elapsedSessionMilliseconds()
                 analytics.trackSocketDrop(mode: mode, elapsedMs: elapsed)
-                let _ = await pauseListening(reason: "socket_drop")
-                analytics.trackStop(reason: "socket_drop", durationMs: elapsed)
+                pendingAction = .transportFailure(stage: "socket_closed")
+                await stopKeep(
+                    reason: "socket_drop",
+                    timeout: .zero,
+                    announceStop: false,
+                    gracefulFinalize: false,
+                    collapseSurface: false,
+                    keepAudioForPausedWaveform: false,
+                    trigger: "soniox_socket_closed"
+                )
+                enterError(message: "Dictation failed", source: "socket_drop")
             }
         case .failed(let stage, let code, let message):
             logDictation("DICTATION_CONN soniox_event_failed stage=\(stage.rawValue) code=\(code ?? "nil") message=\(message) \(attemptContext())")
@@ -1366,6 +1391,7 @@ final class DictationSession {
                 announceStop: false,
                 gracefulFinalize: false,
                 collapseSurface: false,
+                keepAudioForPausedWaveform: false,
                 trigger: "protocol_error_event"
             )
             logDictation("DICTATION_ERROR path=handleProtocolError ts=\(Date().timeIntervalSince1970) code=\(code ?? "nil") message=\(message)")
@@ -1385,6 +1411,7 @@ final class DictationSession {
                 announceStop: false,
                 gracefulFinalize: false,
                 collapseSurface: false,
+                keepAudioForPausedWaveform: false,
                 trigger: "protocol_error_event"
             )
             logDictation("DICTATION_ERROR path=recoverFromAudioDecodeTimeout ts=\(Date().timeIntervalSince1970) message=\(message)")
@@ -1425,17 +1452,16 @@ final class DictationSession {
         }
         logDictation("DICTATION_STOP trace_id=DICTATION_STOP_TRANSPORT_FAILURE caller=handleTransportFailure ts=\(Date().timeIntervalSince1970) stage=\(stage.rawValue) message=\(message) \(attemptContext())")
         analytics.trackError(errorCode: nil, stage: stage.rawValue)
-        let shouldTrackTransportStop =
-            state == .dictatingSticky ||
-            state == .dictatingWalkieTalkie ||
-            state == .dictatingPaused ||
-            state == .finalizing
-        let stopDuration = elapsedSessionMilliseconds()
         pendingAction = .transportFailure(stage: stage.rawValue)
-        await pauseListening(reason: "transport_failure")
-        if shouldTrackTransportStop {
-            analytics.trackStop(reason: "transport_failure", durationMs: stopDuration)
-        }
+        await stopKeep(
+            reason: "transport_failure",
+            timeout: .zero,
+            announceStop: false,
+            gracefulFinalize: false,
+            collapseSurface: false,
+            keepAudioForPausedWaveform: false,
+            trigger: "transport_failure"
+        )
         guard shouldPresentDictationErrorSurface else {
             logDictation("DICTATION_COORD transport_failure_suppressed_to_idle stage=\(stage.rawValue) message=\(message) \(attemptContext())")
             errorMessage = nil
@@ -1453,6 +1479,7 @@ final class DictationSession {
         gracefulFinalize: Bool = true,
         collapseSurface: Bool = true,
         collapseSurfaceImmediately: Bool = false,
+        keepAudioForPausedWaveform explicitKeepAudioForPausedWaveform: Bool? = nil,
         trigger: String = "unspecified",
         callSite: String = DictationSession.callSite()
     ) async -> Bool {
@@ -1467,9 +1494,11 @@ final class DictationSession {
             return false
         }
 
-        if case .protocolError = pendingAction {
-            // Preserve the protocol-error outcome while reusing stopKeep finalization mechanics.
-        } else {
+        switch pendingAction {
+        case .protocolError, .transportFailure:
+            // Preserve failure outcomes while reusing stopKeep finalization mechanics.
+            break
+        default:
             pendingAction = .stopKeep(reason: reason, trigger: trigger, callSite: callSite)
         }
         logger.notice(
@@ -1505,7 +1534,7 @@ final class DictationSession {
                 enterError(message: "Failed to finalize dictation", source: "stopKeep_sendFinalize")
             }
         }
-        let keepAudioForPausedWaveform = !collapseSurface
+        let keepAudioForPausedWaveform = explicitKeepAudioForPausedWaveform ?? !collapseSurface
         if !keepAudioForPausedWaveform {
             audioCapture?.stop()
         }
@@ -1677,7 +1706,7 @@ final class DictationSession {
 
         if collapseSurface, state != .error {
             state = .idleSurfaceClosed
-        } else if !collapseSurface, state != .error {
+        } else if !collapseSurface, keepAudioForPausedWaveform, state != .error {
             state = .dictatingPaused
         }
 

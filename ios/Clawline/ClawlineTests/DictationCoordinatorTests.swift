@@ -53,7 +53,7 @@ struct DictationCoordinatorTests {
         #expect(update.hadAnyTokens == true)
     }
 
-    @Test("Socket drop pauses without collapsing the surface")
+    @Test("Socket drop stops active dictation into an error state")
     @MainActor
     func socketDropStopsSession() async {
         let harness = DictationTestHarness()
@@ -73,11 +73,12 @@ struct DictationCoordinatorTests {
 
         harness.client.emit(.closed(code: nil, reason: "transport drop"))
 
-        await waitUntil { !coordinator.isListening }
+        await waitUntil { coordinator.errorMessage == "Dictation failed" }
 
         #expect(coordinator.isSurfaceOpen)
-        #expect(coordinator.isDictationActive)
         #expect(!coordinator.isListening)
+        #expect(!coordinator.isDictationActive)
+        #expect(coordinator.errorMessage == "Dictation failed")
     }
 
     @Test("Phase 1 prewarm prepares resources when compose becomes active")
@@ -262,9 +263,40 @@ struct DictationCoordinatorTests {
         coordinator.startStickyDictation()
         #expect(coordinator.isStickyDictationActive)
 
-        await waitUntil(timeoutMs: 1_500) {
-            harness.analytics.stopEvents.contains(where: { $0.reason == "token_inactivity" })
-        }
+        await waitUntil(timeoutMs: 1_500) { !coordinator.isDictationActive }
+        #expect(!coordinator.isDictationActive)
+        #expect(!coordinator.isSurfaceOpen)
+        #expect(harness.analytics.stopEvents.contains(where: { $0.reason == "token_inactivity" }))
+    }
+
+    @Test("Max duration stops active dictation instead of leaving it paused")
+    @MainActor
+    func maxDurationStopsSessionWithoutPausedState() async {
+        let harness = DictationTestHarness(
+            timing: DictationTiming(
+                maxSessionDuration: .milliseconds(120),
+                tokenInactivityTimeout: .seconds(30),
+                stopKeepFinalizeTimeout: .milliseconds(50),
+                sendFinalizeTimeout: .milliseconds(40)
+            )
+        )
+        let coordinator = harness.makeCoordinator()
+
+        coordinator.updateContext(
+            sessionKey: harness.host.activeSessionKey,
+            composeIsEmpty: true,
+            textFieldFocused: false,
+            selectionLength: 0,
+            reduceMotionEnabled: false
+        )
+
+        coordinator.startStickyDictation()
+        #expect(coordinator.isStickyDictationActive)
+
+        await waitUntil(timeoutMs: 1_500) { !coordinator.isDictationActive }
+        #expect(!coordinator.isDictationActive)
+        #expect(!coordinator.isSurfaceOpen)
+        #expect(harness.analytics.stopEvents.contains(where: { $0.reason == "max_duration" }))
     }
 
     @Test("Endpoint commit updates flush immediately without coalescing delay")

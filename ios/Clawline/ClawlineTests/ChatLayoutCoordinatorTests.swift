@@ -311,8 +311,20 @@ struct ChatLayoutCoordinatorTests {
             safeAreaBottom: 34,
             usesExternalKeyboardInsets: false
         )
-        let metrics = ChatLayoutMetrics(
-            belowBarGap: 12,
+        let openMetrics = ChatLayoutMetrics(
+            belowBarGap: ChatLayoutCoordinator.inputBarBottomGap(
+                keyboardVisibleHeight: 336,
+                surfaceState: .open
+            ),
+            flowGap: 10,
+            containerPadding: 12,
+            pageIndicatorClearance: 24
+        )
+        let collapsedMetrics = ChatLayoutMetrics(
+            belowBarGap: ChatLayoutCoordinator.inputBarBottomGap(
+                keyboardVisibleHeight: 336,
+                surfaceState: .closed
+            ),
             flowGap: 10,
             containerPadding: 12,
             pageIndicatorClearance: 24
@@ -321,23 +333,40 @@ struct ChatLayoutCoordinatorTests {
         coordinator.updateBarHeight(188)
         let openState = coordinator.runtimeInsetLayoutState(
             inputs: inputs,
-            metrics: metrics,
+            metrics: openMetrics,
             fallbackBarHeight: MessageInputBarMetrics.minInputBarHeight
         )
 
         coordinator.updateBarHeight(88)
         let collapsedState = coordinator.runtimeInsetLayoutState(
             inputs: inputs,
-            metrics: metrics,
+            metrics: collapsedMetrics,
             fallbackBarHeight: 188
         )
 
         #expect(abs(openState.keyboardInset - 336) <= 0.5)
         #expect(abs(collapsedState.keyboardInset - 336) <= 0.5)
         #expect(abs(collapsedState.barHeight - 88) <= 0.5)
-        #expect(abs(collapsedState.inputBarTopFromScreenBottom - 436) <= 0.5)
-        #expect(abs(collapsedState.listBottomInset - 458) <= 0.5)
-        #expect(abs((openState.listBottomInset - collapsedState.listBottomInset) - 100) <= 0.5)
+        #expect(abs(collapsedState.inputBarTopFromScreenBottom - 424) <= 0.5)
+        #expect(abs(collapsedState.listBottomInset - 446) <= 0.5)
+        #expect(abs((openState.listBottomInset - collapsedState.listBottomInset) - 112) <= 0.5)
+    }
+
+    @Test("Keyboard-visible closed input bar resolves flush to keyboard")
+    @MainActor
+    func keyboardVisibleClosedInputBarUsesZeroBottomGap() {
+        #expect(
+            ChatLayoutCoordinator.inputBarBottomGap(
+                keyboardVisibleHeight: 336,
+                surfaceState: .closed
+            ) == 0
+        )
+        #expect(
+            ChatLayoutCoordinator.inputBarBottomGap(
+                keyboardVisibleHeight: 336,
+                surfaceState: .open
+            ) == 12
+        )
     }
 
     @Test("T071: Transient zero bar height does not collapse inset after stabilization")

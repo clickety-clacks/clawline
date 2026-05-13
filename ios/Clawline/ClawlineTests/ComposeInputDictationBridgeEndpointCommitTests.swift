@@ -15,7 +15,7 @@ struct DictationCoordinatorTranscriptOwnershipTests {
 
         await waitUntil { rig.textView.attributedText.string == "hello mars" }
         #expect(rig.textView.attributedText.string == "hello mars")
-        #expect(rig.textView.selectedRange == NSRange(location: 6, length: 4))
+        #expect(rig.textView.selectedRange == NSRange(location: 10, length: 0))
     }
 
     @Test("Long dictation keeps finalized prefix when Soniox interim window advances")
@@ -210,6 +210,41 @@ struct DictationCoordinatorTranscriptOwnershipTests {
 
         await waitUntil { rig.textView.attributedText.string == "hello new world tail" }
         #expect(rig.textView.attributedText.string == "hello new world tail")
+    }
+
+    @Test("Repeated pause and resume keeps transcript insertion live")
+    func repeatedPauseResumeKeepsTranscriptInsertionLive() async {
+        let rig = makeRig(
+            initialText: "",
+            selectedRange: NSRange(location: 0, length: 0),
+            freshClientPerFactoryCall: true
+        )
+
+        startDictation(rig)
+        emitProvisional("one", into: rig)
+        await waitUntil { rig.textView.attributedText.string == "one" }
+
+        rig.coordinator.pauseFromWaveformTap()
+        await waitUntil { rig.coordinator.isDictationActive && !rig.coordinator.isListening }
+
+        rig.coordinator.startStickyDictation()
+        await waitUntil { rig.harness.clientFactoryCallCount >= 2 && rig.harness.latestClient.connected }
+        emitProvisional(" two", into: rig)
+        await waitUntil { rig.textView.attributedText.string == "one two" }
+
+        rig.coordinator.pauseFromWaveformTap()
+        await waitUntil { rig.coordinator.isDictationActive && !rig.coordinator.isListening }
+
+        rig.coordinator.startStickyDictation()
+        await waitUntil { rig.harness.clientFactoryCallCount >= 3 && rig.harness.latestClient.connected }
+        emitProvisional(" three", into: rig)
+
+        await waitUntil { rig.textView.attributedText.string == "one two three" }
+        #expect(rig.coordinator.isListening)
+        #expect(rig.textView.attributedText.string == "one two three")
+
+        rig.coordinator.stopStickyFromMicTap()
+        await waitUntil { !rig.coordinator.isDictationActive }
     }
 
     @Test("Paused resume applies new stream text even when it prefixes the prior dictation")

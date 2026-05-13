@@ -30,6 +30,34 @@ struct DictationTranscriptApplicatorTests {
         #expect(textView.attributedText.string == "hello mars")
     }
 
+    @Test("Applicator collapses the consumed selection after dictation replacement")
+    func applicatorCollapsesConsumedSelectionAfterReplacement() {
+        let host = MockComposeDraftHost()
+        let applicator = DictationTranscriptApplicator(host: host)
+        let textView = PastableTextView()
+        textView.attributedText = NSAttributedString(string: "hello world")
+        textView.selectedRange = NSRange(location: 6, length: 5)
+        applicator.setComposeTextView(textView)
+
+        applicator.apply(
+            DictationTextApplicationPlan(
+                sessionKey: host.activeSessionKey,
+                baseSnapshot: ComposeDraftSnapshot(
+                    content: NSAttributedString(string: "hello world"),
+                    attachments: [:]
+                ),
+                replacementRange: NSRange(location: 6, length: 5),
+                fallbackLocation: 11,
+                replacementText: NSAttributedString(string: "mars"),
+                selectionPolicy: .followTranscriptEndWhenSelectionAlreadyAtEnd
+            )
+        )
+
+        #expect(textView.attributedText.string == "hello mars")
+        #expect(textView.selectedRange == NSRange(location: 10, length: 0))
+        #expect(textView.consumeExpectedDictationProgrammaticSelectionFeedback(textView.selectedRange))
+    }
+
     @Test("Applicator preserves user selection outside the transcript-owned replacement range")
     func applicatorPreservesSelectionOutsideReplacementRange() {
         let host = MockComposeDraftHost()

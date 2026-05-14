@@ -1430,6 +1430,14 @@ final class DictationSession {
                 )
                 return
             }
+            guard self.activeTokenInactivityTaskID == taskID else {
+                self.logDictation(
+                    "DICTATION_STOP trace_id=DICTATION_STOP_TIMER_TOKEN_INACTIVITY_STALE_IGNORED " +
+                    "caller=timer_token_inactivity task_id=\(taskID) active_task_id=\(self.activeTokenInactivityTaskID.map(String.init) ?? "nil") " +
+                    "ts=\(Date().timeIntervalSince1970) \(self.attemptContext())"
+                )
+                return
+            }
             let elapsedSinceLastToken = self.lastTokenAt.map { Date().timeIntervalSince($0) } ?? -1
             logDictation(
                 "DICTATION_STOP trace_id=DICTATION_STOP_TIMER_TOKEN_INACTIVITY " +
@@ -1505,14 +1513,6 @@ final class DictationSession {
                 return
             }
 
-            if !response.tokens.isEmpty || response.finished {
-                let update = transcriptBuffer.apply(tokens: response.tokens, finished: response.finished)
-                queueTranscriptApply(
-                    update,
-                    immediate: update.finished || update.sawEndpoint
-                )
-            }
-
             if !response.tokens.isEmpty {
                 audioDecodeTimeoutRecoveryCount = 0
                 let ts = Date().timeIntervalSince1970
@@ -1521,6 +1521,14 @@ final class DictationSession {
                     "caller=handleSonioxEvent token_count=\(response.tokens.count) finished=\(response.finished) ts=\(ts)"
                 )
                 markInactivityActivity(source: "soniox_token", caller: "handleSonioxEvent")
+            }
+
+            if !response.tokens.isEmpty || response.finished {
+                let update = transcriptBuffer.apply(tokens: response.tokens, finished: response.finished)
+                queueTranscriptApply(
+                    update,
+                    immediate: update.finished || update.sawEndpoint
+                )
             }
 
             if response.finished {

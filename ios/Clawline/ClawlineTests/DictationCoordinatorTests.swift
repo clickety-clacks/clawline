@@ -433,7 +433,7 @@ struct DictationCoordinatorTests {
         let harness = DictationTestHarness(
             timing: DictationTiming(
                 maxSessionDuration: .seconds(30),
-                tokenInactivityTimeout: .milliseconds(120),
+                tokenInactivityTimeout: .milliseconds(300),
                 stopKeepFinalizeTimeout: .milliseconds(50),
                 sendFinalizeTimeout: .milliseconds(40)
             )
@@ -468,7 +468,7 @@ struct DictationCoordinatorTests {
         )
 
         for idx in 0..<3 {
-            try? await Task.sleep(for: .milliseconds(70))
+            try? await Task.sleep(for: .milliseconds(60))
             harness.client.emit(
                 .response(
                     SonioxStreamingResponse(

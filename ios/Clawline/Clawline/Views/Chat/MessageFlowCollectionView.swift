@@ -134,6 +134,7 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
     var onTypingIndicatorAnchorFrameChanged: (@MainActor (CGRect?) -> Void)? = nil
     var onSessionControlSelected: (@MainActor (String, SessionControlAction, String?, Bool?) -> Void)?
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.allowsTransparentWindowBackground) private var allowsTransparentWindowBackground
 
 #if !os(visionOS)
     static func keyboardDismissModeForInputFocus(
@@ -147,8 +148,12 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
 
     func makeUIViewController(context: Context) -> MessageFlowCollectionViewController {
         let controller = MessageFlowCollectionViewController()
-        controller.loadViewIfNeeded()
         let isDark = colorScheme == .dark
+        controller.prepareInitialAppearance(
+            isDark: isDark,
+            allowsTransparentWindowBackground: allowsTransparentWindowBackground
+        )
+        controller.loadViewIfNeeded()
         controller.update(
             viewModel: viewModel,
             isCompact: isCompact,
@@ -173,7 +178,8 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
             onTypingIndicatorTap: onTypingIndicatorTap,
             onTypingIndicatorAnchorFrameChanged: onTypingIndicatorAnchorFrameChanged,
             onSessionControlSelected: onSessionControlSelected,
-            isDark: isDark
+            isDark: isDark,
+            allowsTransparentWindowBackground: allowsTransparentWindowBackground
         )
         if shouldRegisterWithLayoutCoordinator, let sessionKey {
             layoutCoordinator.registerListView(controller, sessionKey: sessionKey)
@@ -207,7 +213,8 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
             onTypingIndicatorTap: onTypingIndicatorTap,
             onTypingIndicatorAnchorFrameChanged: onTypingIndicatorAnchorFrameChanged,
             onSessionControlSelected: onSessionControlSelected,
-            isDark: isDark
+            isDark: isDark,
+            allowsTransparentWindowBackground: allowsTransparentWindowBackground
         )
         if shouldRegisterWithLayoutCoordinator, let sessionKey {
             layoutCoordinator.registerListView(uiViewController, sessionKey: sessionKey)
@@ -243,6 +250,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         let onTypingIndicatorAnchorFrameChanged: (@MainActor (CGRect?) -> Void)?
         let onSessionControlSelected: (@MainActor (String, SessionControlAction, String?, Bool?) -> Void)?
         let isDark: Bool?
+        let allowsTransparentWindowBackground: Bool
     }
 
     private let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "MessagePipeline")
@@ -265,6 +273,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     private var flowLayout: MessageFlowLayout!
     private let uiKitBubbleSizer = MessageBubbleUIKitView(enableDataDetectors: false)
     private var currentIsDark: Bool = true
+    private var allowsTransparentWindowBackground = false
     private let bubbleSizingV2Enabled = BubbleSizingV2.isEnabled
     private let bubbleSizingV2MeasurementCache = BubbleSizingV2.LRUCache<BubbleSizingV2.CacheKey, BubbleSizingV2.Measurement>(maxEntries: 800)
     private let bubbleSizingV2LinkPreviewHeightCache = BubbleSizingV2.LinkPreviewHeightCache()
@@ -290,8 +299,22 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     private static let typingIndicatorTapTargetLeadingOutset: CGFloat = 8
     private static let typingIndicatorTapTargetTrailingOutset: CGFloat = 44
 
-    static func chatPageBackgroundColor(isDark: Bool) -> UIColor {
-        isDark ? .clear : UIColor(ChatFlowTheme.pageBackgroundTopColor(.light))
+    static func chatPageBackgroundColor(
+        isDark: Bool,
+        allowsTransparentWindowBackground: Bool = false
+    ) -> UIColor {
+        if allowsTransparentWindowBackground {
+            return .clear
+        }
+        return isDark ? .clear : UIColor(ChatFlowTheme.pageBackgroundTopColor(.light))
+    }
+
+    func prepareInitialAppearance(isDark: Bool, allowsTransparentWindowBackground: Bool) {
+        currentIsDark = isDark
+        self.allowsTransparentWindowBackground = allowsTransparentWindowBackground
+        if isViewLoaded {
+            applyChatPageBackground(isDark: isDark)
+        }
     }
 
     private var messagesById: [String: Message] = [:]
@@ -1995,7 +2018,8 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             onTypingIndicatorTap: onTypingIndicatorTap,
             onTypingIndicatorAnchorFrameChanged: onTypingIndicatorAnchorFrameChanged,
             onSessionControlSelected: onSessionControlSelected,
-            isDark: currentIsDark
+            isDark: currentIsDark,
+            allowsTransparentWindowBackground: allowsTransparentWindowBackground
         )
     }
 
@@ -2028,7 +2052,8 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 onTypingIndicatorTap: request.onTypingIndicatorTap,
                 onTypingIndicatorAnchorFrameChanged: request.onTypingIndicatorAnchorFrameChanged,
                 onSessionControlSelected: request.onSessionControlSelected,
-                isDark: request.isDark
+                isDark: request.isDark,
+                allowsTransparentWindowBackground: request.allowsTransparentWindowBackground
             )
         }
     }
@@ -2059,6 +2084,9 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         if let isDark = request.isDark, currentIsDark != isDark {
             return false
         }
+        if allowsTransparentWindowBackground != request.allowsTransparentWindowBackground {
+            return false
+        }
         return true
     }
 
@@ -2086,7 +2114,8 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         onTypingIndicatorTap: (@MainActor (CGRect) -> Void)? = nil,
         onTypingIndicatorAnchorFrameChanged: (@MainActor (CGRect?) -> Void)? = nil,
         onSessionControlSelected: (@MainActor (String, SessionControlAction, String?, Bool?) -> Void)? = nil,
-        isDark: Bool? = nil
+        isDark: Bool? = nil,
+        allowsTransparentWindowBackground: Bool = false
     ) {
         let request = UpdateRequest(
             viewModel: viewModel,
@@ -2112,7 +2141,8 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             onTypingIndicatorTap: onTypingIndicatorTap,
             onTypingIndicatorAnchorFrameChanged: onTypingIndicatorAnchorFrameChanged,
             onSessionControlSelected: onSessionControlSelected,
-            isDark: isDark
+            isDark: isDark,
+            allowsTransparentWindowBackground: allowsTransparentWindowBackground
         )
         if isUpdatePassInFlight || isSnapshotApplyInFlight {
             queuedUpdateRequest = request
@@ -2164,6 +2194,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         self.onTypingIndicatorTap = onTypingIndicatorTap
         self.onTypingIndicatorAnchorFrameChanged = onTypingIndicatorAnchorFrameChanged
         self.onSessionControlSelected = onSessionControlSelected
+        self.allowsTransparentWindowBackground = allowsTransparentWindowBackground
 
         // Handle appearance change from SwiftUI colorScheme
         if let isDark = isDark, currentIsDark != isDark {
@@ -3425,8 +3456,11 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         }
         collectionView.translatesAutoresizingMaskIntoConstraints = true
         collectionView.autoresizingMask = []
-        collectionView.backgroundColor = Self.chatPageBackgroundColor(isDark: currentIsDark)
-        collectionView.isOpaque = !currentIsDark
+        collectionView.backgroundColor = Self.chatPageBackgroundColor(
+            isDark: currentIsDark,
+            allowsTransparentWindowBackground: allowsTransparentWindowBackground
+        )
+        collectionView.isOpaque = !currentIsDark && !allowsTransparentWindowBackground
         collectionView.contentInsetAdjustmentBehavior = .never
         collectionView.alwaysBounceVertical = true
         collectionView.panGestureRecognizer.addTarget(self, action: #selector(handleCollectionViewPanForKeyboardDismiss(_:)))
@@ -3541,11 +3575,14 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     }
 
     private func applyChatPageBackground(isDark: Bool) {
-        let color = Self.chatPageBackgroundColor(isDark: isDark)
+        let color = Self.chatPageBackgroundColor(
+            isDark: isDark,
+            allowsTransparentWindowBackground: allowsTransparentWindowBackground
+        )
         view.backgroundColor = color
-        view.isOpaque = !isDark
+        view.isOpaque = !isDark && !allowsTransparentWindowBackground
         collectionView?.backgroundColor = color
-        collectionView?.isOpaque = !isDark
+        collectionView?.isOpaque = !isDark && !allowsTransparentWindowBackground
     }
 
     @objc private func handleCollectionViewTap(_ recognizer: UITapGestureRecognizer) {

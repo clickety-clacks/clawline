@@ -192,6 +192,7 @@ After the refactor, these invariants are mandatory:
 
 11. Keyboard state is preserved, not dictated.
 - The machine may remember activation-time UI context, but it does not own keyboard visibility.
+- User compose focus intent owns keyboard summoning. During active or paused dictation, tapping the compose field must be able to restore the keyboard without stopping dictation or changing transcript ownership.
 
 ## Transition Model
 
@@ -503,7 +504,7 @@ The implementation is correct only if all of the following are true:
 8. Machine-authored text application suppresses re-entrant user-edit / selection feedback correctly.
 9. Rebinding the compose surface does not reset transcript ownership or lose buffered/provisional text.
 10. Send does not close the dictation surface.
-11. Dictation does not force keyboard dismiss or keyboard show.
+11. Dictation does not autonomously force keyboard dismiss or keyboard show; user compose focus intent must still be able to summon the keyboard during active or paused dictation.
 12. Internal finalization state remains private while `surfaceTarget` may project immediately from user intent.
 13. `originSessionKey` remains machine-owned and stream-switch cleanup remains machine-owned.
 14. Walkie-origin routing remains machine-owned and preserved across the new transcript session model.

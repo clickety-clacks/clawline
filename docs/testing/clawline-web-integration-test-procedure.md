@@ -1646,3 +1646,183 @@ Status:
 
 - Automated/deployed WebKit evidence is green.
 - Final experiential check remains Flynn/physical Safari: open `http://100.85.66.60:4173/`, scroll down in a long chat, then scroll back up and confirm it no longer snaps down.
+
+## Web Shortcut Parity Deployment - 2026-05-09 04:10 PDT
+
+Purpose: record T270 parity work for shortcut keys recently added to the iOS app.
+
+Product meaning:
+
+- Clawline Web now supports the browser-safe subset of the iOS shortcut model.
+- Browser/system-owned conflicts remain unsupported and documented in `tracking/T270.md`.
+
+Implemented web shortcuts:
+
+- `/` and `;` open Streams when focus is not inside an editable/interactive element.
+- Space and Enter focus Prompt Input when focus is not inside an editable/interactive element.
+- Cmd-; / Ctrl-; opens Streams, including while Prompt Input is focused.
+
+Source mapping / review:
+
+- Review result: clean.
+- Agent validated the subset against actual iOS sources: `ClawlineAppCommands.swift`, `ChatView.swift`, `RichTextEditor.swift`, and the T216 shortcut architecture retro.
+- External Codex review was attempted twice but hung while emitting context, with no actionable findings.
+
+Shipped/deployed state:
+
+- Final `origin/main`: `7185e868267afbcf5ada609db2da726acfb7d7e8`.
+- Implementation commit: `c6ec701b12 Add web chat shortcut parity subset`.
+- Evidence commits: `1729e6b977`, `3fb7c2542b`, `7185e86826`.
+- TARS web target: `http://100.85.66.60:4173/`.
+- Deployed JS asset: `assets/index-B1UqqFPy.js`.
+- CSS asset: `assets/index-DR6FtkEm.css`.
+
+Evidence:
+
+- Focused ChatRoute shortcut test: PASS (`14` tests).
+- `npm run build`: PASS.
+- `npm run test`: PASS (`174` tests).
+- `npx playwright test playwright/tests/phase5-responsive-keyboard.spec.ts`: PASS (`10` tests).
+- TARS smoke: `/`, `/chat/test`, `/pair` all `200 OK`.
+- Final artifact evidence directory: `/tmp/clawline-t270-final-main-verify-20260509-041002`.
+- Served index/JS/CSS hashes matched local build.
+
+05:00 readiness recheck:
+
+- TARS root returned `HTTP/1.1 200 OK`.
+- Root still references `assets/index-B1UqqFPy.js` and `assets/index-DR6FtkEm.css`.
+
+Status:
+
+- Tracker `T270` is `Verifiable`.
+- Flynn verification target: open `http://100.85.66.60:4173/` and test the shortcut behavior listed above.
+
+## 06:00 Deployed Shortcut Smoke - 2026-05-09
+
+Purpose: reduce Flynn-only verification by testing the deployed T270 shortcut behavior against the live TARS web client with the dedicated test account.
+
+Environment:
+
+- URL: `http://100.85.66.60:4173/chat/agent:main:clawline:clawline_web_test:main`
+- Account: `clawline_web_test`
+- Device/storage state: `da49d87f-60a5-4a72-b543-4f1da80200db`
+- Browser engine: Playwright WebKit
+
+Result: PASS.
+
+Checks:
+
+- `/` opens session popover: PASS.
+- `;` opens session popover: PASS.
+- Space focuses Prompt Input: PASS.
+- Enter focuses Prompt Input: PASS.
+- Cmd-; opens session popover from Prompt Input: PASS.
+
+Status:
+
+- T270 remains `Verifiable`: deployed automated WebKit smoke is green; Flynn can do final experiential confirmation in Safari if desired.
+
+### Flynn physical Safari verification - 2026-05-09
+
+- Flynn verified the Safari/WebKit transcript scroll fix experientially: he can now scroll up and down.
+- This closes the previously reported plain Safari regression where the transcript could scroll down but snapped/prevented scrolling back up.
+
+### Midnight deployed parity readiness check - 2026-05-10 00:00 PDT
+
+- Rechecked TARS Clawline Web routes after the Web parity/layout deploy.
+- `http://100.85.66.60:4173/`, `/chat/test`, and `/pair` all returned HTTP 200.
+- Served assets remain the deployed parity bundle: `assets/index-CCACm0zW.js` and `assets/index-B0esVyXO.css`.
+- This preserves readiness for Flynn live verification of T286/T287/T288 plus bubble-width/flow-layout behavior.
+
+### Final live Safari acceptance targets - 2026-05-10 02:00 PDT
+
+These are the remaining human/device acceptance targets for the deployed Web parity/layout bundle. They are criteria, not a replacement for Flynn's live verification:
+
+1. During an in-flight assistant response, a typing indicator bubble appears at the transcript bottom.
+2. Tapping the typing indicator, or pressing Cmd-. on a keyboard, opens a compact cancel confirmation anchored to that typing bubble.
+3. The cancel confirmation dismisses on outside tap/Esc and confirms on Return or the red Cancel action, using typed cancel behavior rather than sending `/stop` chat text.
+4. The model/thinking/Fast footer controls behave as interactive controls; the model picker uses the model catalog, marks the current model, and does not show as a normal bottom-of-chat obstruction.
+5. Message bubbles keep comfortable content-based widths; ordinary text/markdown bubbles should not stretch edge-to-edge across the viewport.
+6. Transcript scrolling remains bidirectional in Safari: scrolling down and back up both work after the deployed bundle.
+
+### Test identity hygiene rule - 2026-05-10 04:00 PDT
+
+For Clawline Web validation, use the dedicated `clawline_web_test` identity unless Flynn explicitly requests a different account. Do not use Flynn's primary account, browser token, or captured Flynn storage-state for automated harness traffic. If a live-provider scenario cannot run under `clawline_web_test`, mark the scenario BLOCKED/NOT RUN with the exact account/provisioning reason rather than silently falling back to Flynn's account.
+
+### Physical device availability recheck - 2026-05-10 06:00 PDT
+
+- Rechecked local physical-device control path with `xcrun devicectl list devices`.
+- Result: `No devices found.`
+- This confirms the remaining iPhone/iPad Safari proof still requires Flynn's physical device/session or another supported device-control path; no simulator or desktop proof is being substituted.
+
+### Deployed parity readiness recheck - 2026-05-11 00:00 PDT
+
+- Rechecked TARS Clawline Web routes after the deployed Web parity/layout bundle.
+- `http://100.85.66.60:4173/`, `/chat/test`, and `/pair` all returned HTTP 200.
+- Served assets remain the parity bundle: `assets/index-CCACm0zW.js` and `assets/index-B0esVyXO.css`.
+- This preserves readiness for final live Safari/user verification of T286/T287/T288 plus bubble-width/flow-layout behavior.
+
+### Dedicated test-device state recheck - 2026-05-11 02:00 PDT
+
+- Rechecked Clawline device approval files for Web verification readiness.
+- `pending.json` contains no pending device entries.
+- `allowlist.json` still includes dedicated `clawline_web_test` devices.
+- This keeps live-provider/Web verification ready without using Flynn's primary account or storage-state.
+
+### Dedicated test-device count recheck - 2026-05-11 02:07 PDT
+
+- Corrected/expanded the 02:00 device-state check with exact counts.
+- `pending.json` has `0` pending entries.
+- `allowlist.json` has `3` `clawline_web_test` Web devices: `9be5a139-4a76-40fc-a9d4-537c28c6e56b`, `a32b2591-7a38-4a34-a44c-bc12a4e92935`, and `da49d87f-60a5-4a72-b543-4f1da80200db`.
+
+### Manual Safari packet currency note - 2026-05-11 03:00 PDT
+
+- The earlier manual Safari packet remains historical for the previous bundle.
+- For current final verification, use the latest deployed parity bundle recorded above: `assets/index-CCACm0zW.js` and `assets/index-B0esVyXO.css`.
+- Current verification scope is T286/T287/T288, bubble-width/flow-layout behavior, and bidirectional Safari scrolling; do not rely on stale bundle names from the 2026-05-08 packet.
+
+### Physical device availability recheck - 2026-05-11 04:00 PDT
+
+- Rechecked local physical-device control path with `xcrun devicectl list devices`.
+- Result: `No devices found.`
+- Final iPhone/iPad Safari proof still requires Flynn's physical device/session or another supported device-control path; no simulator or desktop substitute is being counted.
+
+### Deployed parity readiness recheck - 2026-05-11 06:00 PDT
+
+- Rechecked TARS Clawline Web routes after the deployed Web parity/layout bundle.
+- `http://100.85.66.60:4173/`, `/chat/test`, and `/pair` all returned HTTP 200.
+- Served assets remain the parity bundle: `assets/index-CCACm0zW.js` and `assets/index-B0esVyXO.css`.
+- This preserves readiness for final live Safari/user verification of T286/T287/T288 plus bubble-width/flow-layout behavior.
+
+### Current-main deploy reconciliation - 2026-05-12 01:00 PDT
+
+- Clean deployer worktree `/Users/mike/src/worktrees/clawline-web-parity-layout-batch` was fast-forwarded to `origin/main` `03c1762e5fe8e54681477bd10bc946243824dfc6`; canonical `/Users/mike/src/clawline` dirty state was left untouched.
+- `npm run build`: PASS on current `origin/main`.
+- `npm run test`: PASS on current `origin/main`.
+- `npm run test:e2e`: NOT GREEN — 29 passed, 3 visual snapshot assertions failed because current bubble width is about `601px` while checked-in dark snapshots expect `780px`. This appears to be snapshot drift against the intended bubble-width fix rather than a deploy/runtime regression, but it prevents claiming full e2e green.
+- Re-rsynced `dist/` to TARS anyway because current `origin/main` produced the same parity bundle filenames already served.
+- TARS smoke after reconciliation: `/`, `/chat/test`, and `/pair` returned HTTP 200 and serve `assets/index-CCACm0zW.js` plus `assets/index-B0esVyXO.css`.
+
+### Flow-layout focused e2e after current-main reconciliation - 2026-05-12 02:00 PDT
+
+- Ran focused Playwright flow-layout spec on clean deployer worktree at current `origin/main` after the 01:00 deploy reconciliation.
+- Command: `npm run test:e2e -- playwright/tests/phase5-flow-layout.spec.ts`.
+- Result: PASS — 5/5 tests.
+- Product meaning: the bubble-width/flow-layout behavior itself remains green; the earlier full-suite non-green state is isolated to stale visual snapshots in other specs expecting older 780px bubble imagery.
+
+### Visual snapshot drift resolved - 2026-05-12 03:37 PDT
+
+- `clawline-web-main` adjudicated the full Playwright non-green state against the flow/bubble design docs.
+- Verdict: stale visual baselines, not a product regression. Current comfortable bubble width is intended; old snapshots expected the previous `780px` width.
+- Review found one real test-harness issue: link-card golden snapshots had embedded a random localhost port. The harness now uses deterministic `https://clawline.test` route fulfillment.
+- Branch/commit: `clawline-web-visual-snapshot-drift` / `123b3f6d652375398ac78e86dc70bbd8689dc031`, pushed to `origin/main`.
+- Evidence before merge: `npm run build && npm run test && npm run test:e2e` PASS; full Playwright suite `32/32` passed; unit suite `184` tests passed; `git diff --check` clean.
+- TARS served runtime bundle remains `assets/index-CCACm0zW.js` / `assets/index-B0esVyXO.css`; this was test/snapshot maintenance and did not require a runtime bundle change.
+
+### Final readiness sweep - 2026-05-12 06:00 PDT
+
+- Coalesced the 05:00 and 06:00 continuation checks into one final readiness sweep.
+- TARS route smoke: `/`, `/chat/test`, and `/pair` returned HTTP 200.
+- Served assets remain `assets/index-CCACm0zW.js` and `assets/index-B0esVyXO.css`.
+- Physical device control recheck with `xcrun devicectl list devices`: `No devices found.`
+- Current state: Web parity/shortcut implementation and full Playwright evidence are green; final iPhone/iPad Safari proof still requires Flynn's physical device/session or another supported physical control path.

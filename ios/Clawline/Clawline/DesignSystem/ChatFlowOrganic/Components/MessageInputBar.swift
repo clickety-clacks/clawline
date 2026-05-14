@@ -1152,8 +1152,12 @@ struct MessageInputBar: View {
 #endif
     }
 
-    static func disabledSendButtonBackingColor(colorScheme: ColorScheme) -> Color? {
-        colorScheme == .light
+    static func disabledSendButtonBackingColor(
+        colorScheme: ColorScheme,
+        drawsDisabledBacking: Bool = true
+    ) -> Color? {
+        guard drawsDisabledBacking else { return nil }
+        return colorScheme == .light
             ? Color(red: 0.925, green: 0.922, blue: 0.890)
             : nil
     }
@@ -1528,6 +1532,13 @@ struct MessageInputBar: View {
         private var sendActionEnabled: Bool { isSending || canSend || isDisconnected }
         private var sendIconColor: Color { .white }
         private let reconnectPulseDuration: TimeInterval = 0.8
+        private var drawsDisabledSendButtonBacking: Bool {
+#if os(visionOS)
+            false
+#else
+            true
+#endif
+        }
         private var isPreparingSpinnerVisible: Bool {
             MessageInputBar.sendButtonShowsPreparingSpinner(
                 isSending: isSending,
@@ -1628,7 +1639,10 @@ struct MessageInputBar: View {
             .frame(width: sendButtonSize, height: sendButtonSize)
             .background {
                 if bubbleVisualState == .ghost,
-                   let backingColor = MessageInputBar.disabledSendButtonBackingColor(colorScheme: uiColorScheme) {
+                   let backingColor = MessageInputBar.disabledSendButtonBackingColor(
+                    colorScheme: uiColorScheme,
+                    drawsDisabledBacking: drawsDisabledSendButtonBacking
+                   ) {
                     Circle()
                         .fill(backingColor)
                         .frame(width: sendButtonSize, height: sendButtonSize)

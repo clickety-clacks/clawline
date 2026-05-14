@@ -1840,6 +1840,7 @@ struct ChatView: View {
         // We manage keyboard avoidance manually inside the collection view.
         // Prevent SwiftUI from shrinking the view and double-applying the keyboard height.
         .ignoresSafeArea(.keyboard, edges: .bottom)
+        .contentShape(Rectangle())
         return list
     }
 
@@ -1894,6 +1895,7 @@ struct ChatView: View {
                     truncationBottomInset: truncationBottomInset,
                     sessionKey: sessionKey
                 )
+                    .contentShape(Rectangle())
                     .background {
 #if os(visionOS)
                         Color.clear
@@ -1941,6 +1943,7 @@ struct ChatView: View {
         }
         .tabViewStyle(.page(indexDisplayMode: .never))
         .scrollContentBackground(.hidden)
+        .contentShape(Rectangle())
         .background(Color.clear)
     }
 

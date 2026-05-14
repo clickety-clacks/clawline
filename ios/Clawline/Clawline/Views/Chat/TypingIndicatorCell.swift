@@ -20,6 +20,9 @@ final class TypingIndicatorCell: UICollectionViewCell {
     private static let indicatorText = ""
     private let containerView = MessageBubbleUIKitContainerView()
     private let dotsView = TypingDotsView()
+#if os(visionOS)
+    private let spatialTapButton = UIButton(type: .custom)
+#endif
     private var currentMetrics = ChatFlowTheme.Metrics(isCompact: true)
     private let showsHeader = false
     private let paddingScale: CGFloat = bubblePaddingScale
@@ -41,6 +44,21 @@ final class TypingIndicatorCell: UICollectionViewCell {
             containerView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
             containerView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor)
         ])
+#if os(visionOS)
+        spatialTapButton.translatesAutoresizingMaskIntoConstraints = false
+        spatialTapButton.backgroundColor = .clear
+        spatialTapButton.isOpaque = false
+        spatialTapButton.accessibilityLabel = "Open council controls"
+        spatialTapButton.accessibilityTraits.insert(.button)
+        spatialTapButton.addTarget(self, action: #selector(handleTap), for: .primaryActionTriggered)
+        contentView.addSubview(spatialTapButton)
+        NSLayoutConstraint.activate([
+            spatialTapButton.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            spatialTapButton.topAnchor.constraint(equalTo: contentView.topAnchor),
+            spatialTapButton.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            spatialTapButton.bottomAnchor.constraint(equalTo: contentView.bottomAnchor)
+        ])
+#endif
     }
 
     required init?(coder: NSCoder) {

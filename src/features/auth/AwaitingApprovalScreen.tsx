@@ -19,16 +19,22 @@ export function AwaitingApprovalScreen({
             ? "This browser is not approved yet. Retry after an admin approves it."
             : "The provider accepted the request but has not approved this browser yet."}
         </p>
-        <p className="pairing-copy">Clawline keeps retrying in the background while you wait.</p>
+        <p className="pairing-copy">
+          {errorMessage
+            ? "The pairing socket is no longer waiting. Retry to resubmit after checking approval."
+            : "Clawline is keeping this pairing request open while you wait."}
+        </p>
         {errorMessage ? (
           <p className="field-error" role="alert">
             {errorMessage}
           </p>
         ) : null}
         <div className="pairing-actions">
-          <button className="button-primary" onClick={onRetry} type="button">
-            Retry pairing
-          </button>
+          {errorMessage ? (
+            <button className="button-primary" onClick={onRetry} type="button">
+              Retry pairing
+            </button>
+          ) : null}
           <button className="button-secondary" onClick={onReset} type="button">
             Edit details
           </button>

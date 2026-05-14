@@ -254,6 +254,32 @@ struct DictationCoordinatorTests {
         #expect(ineligibleIntent == .settleClosed)
     }
 
+    @Test("Closed-surface swipe up starts dictation instead of pull-to-send")
+    @MainActor
+    func closedSurfaceSwipeUpStartsDictationInsteadOfPullToSend() {
+        let harness = DictationTestHarness()
+        let coordinator = harness.makeCoordinator()
+
+        coordinator.updateContext(
+            sessionKey: harness.host.activeSessionKey,
+            composeIsEmpty: false,
+            textFieldFocused: true,
+            reduceMotionEnabled: false
+        )
+
+        let motion = DictationMotion(session: coordinator)
+        motion.gestureBegan(originWasOpen: false, swipeActivationEnabled: true)
+        motion.gestureChanged(translationY: -96, velocityY: -500)
+        let intent = motion.gestureEnded(
+            translationY: -96,
+            predictedY: -120,
+            velocityY: -500,
+            context: .init(pullToSendEligible: true, verticallyDominant: true)
+        )
+
+        #expect(intent == .startSticky)
+    }
+
     @Test("Token inactivity timeout stops dictation")
     @MainActor
     func inactivityTimeoutStopsSession() async {
@@ -537,6 +563,88 @@ struct DictationCoordinatorTests {
         #expect(coordinator.isStickyDictationActive)
         #expect(coordinator.isListening)
         #expect(harness.analytics.sendWhileActiveEvents.contains(where: { $0.mode == .sticky && $0.sendSuccess }))
+    }
+
+    @Test("Submitting while listening resets transcript baseline for repeated next prompts")
+    @MainActor
+    func submitWhileListeningStartsNextPromptFromCleanBaseline() async {
+        let harness = DictationTestHarness()
+        let coordinator = harness.makeCoordinator()
+        let textView = PastableTextView()
+        textView.attributedText = NSAttributedString(string: "")
+        textView.selectedRange = NSRange(location: 0, length: 0)
+        coordinator.setComposeTextView(textView)
+
+        coordinator.updateContext(
+            sessionKey: harness.host.activeSessionKey,
+            composeIsEmpty: true,
+            textFieldFocused: true,
+            reduceMotionEnabled: false
+        )
+        coordinator.startStickyDictation()
+
+        var cumulativeStreamText = "alpha"
+        harness.client.emit(
+            .response(
+                SonioxStreamingResponse(
+                    tokens: [SonioxTranscriptToken(text: cumulativeStreamText, isFinal: false)],
+                    finished: false,
+                    errorCode: nil,
+                    errorMessage: nil
+                )
+            )
+        )
+        await waitUntil {
+            textView.attributedText.string == "alpha"
+        }
+        #expect(textView.attributedText.string == "alpha")
+        coordinator.updateContext(
+            sessionKey: harness.host.activeSessionKey,
+            composeIsEmpty: false,
+            textFieldFocused: true,
+            reduceMotionEnabled: false
+        )
+
+        for nextPrompt in ["beta", "gamma", "delta"] {
+            coordinator.handleSendTapped {
+                harness.host.setText("", for: harness.host.activeSessionKey)
+            }
+            coordinator.updateContext(
+                sessionKey: harness.host.activeSessionKey,
+                composeIsEmpty: true,
+                textFieldFocused: true,
+                reduceMotionEnabled: false
+            )
+
+            await waitUntil {
+                textView.attributedText.string.isEmpty
+            }
+            #expect(coordinator.isListening)
+            #expect(textView.attributedText.string.isEmpty)
+
+            cumulativeStreamText += nextPrompt
+            harness.client.emit(
+                .response(
+                    SonioxStreamingResponse(
+                        tokens: [SonioxTranscriptToken(text: cumulativeStreamText, isFinal: false)],
+                        finished: false,
+                        errorCode: nil,
+                        errorMessage: nil
+                    )
+                )
+            )
+
+            await waitUntil {
+                textView.attributedText.string == nextPrompt
+            }
+            #expect(textView.attributedText.string == nextPrompt)
+            coordinator.updateContext(
+                sessionKey: harness.host.activeSessionKey,
+                composeIsEmpty: false,
+                textFieldFocused: true,
+                reduceMotionEnabled: false
+            )
+        }
     }
 
     @Test("Activation queues through teardown and restarts after stop settles")

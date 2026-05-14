@@ -189,7 +189,7 @@ final class DictationMotion {
         let wasSurfaceOpenAtGestureStart = originWasOpen
         teardownGesture()
 
-        if pullToSendArmed && context.pullToSendEligible {
+        if wasSurfaceOpenAtGestureStart && pullToSendArmed && context.pullToSendEligible {
             pendingCommit = .init(target: originWasOpen ? .openPaused : .closed, reason: "pull_to_send")
             surfaceRevealProgress = originWasOpen ? 1 : 0
             return .send

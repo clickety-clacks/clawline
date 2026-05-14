@@ -1279,7 +1279,7 @@ struct MessageInputBar: View {
             motion.clearGestureState()
         }
         .onAppear {
-            motion.settle(to: dictation.surfaceTarget)
+            resetMotionToCurrentProjection()
             refreshMaxBarWidth()
         }
         .onChange(of: isCompact) { _, _ in
@@ -1289,13 +1289,19 @@ struct MessageInputBar: View {
             refreshMaxBarWidth()
         }
         .onChange(of: dictation.surfaceTarget) { _, target in
-            motion.settle(to: target)
+            resetMotionToCurrentProjection()
             if dictation.isSurfaceOpen {
                 micFadeTask?.cancel()
                 micTransientVisible = false
                 micTransientOpacity = 0
                 micTransientOffset = 0
             }
+        }
+        .onChange(of: dictation.isDictationActive) { _, _ in
+            resetMotionToCurrentProjection()
+        }
+        .onChange(of: dictation.errorMessage) { _, _ in
+            resetMotionToCurrentProjection()
         }
     }
 
@@ -2101,6 +2107,14 @@ struct MessageInputBar: View {
             }
             motion.commitSettledState(commitTarget)
         }
+    }
+
+    private func resetMotionToCurrentProjection() {
+        guard motion.gesturePhase != .dragging else { return }
+        gestureSettleTask?.cancel()
+        shouldRestoreFocusAfterGestureDictationStart = false
+        motion.clearGestureState()
+        motion.settle(to: dictation.surfaceTarget)
     }
 
     private func logDictation(_ message: String) {

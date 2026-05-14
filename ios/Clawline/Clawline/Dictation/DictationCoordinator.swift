@@ -685,6 +685,7 @@ final class DictationSession {
         reduceMotionEnabled: Bool,
         contextTerms: [String] = []
     ) {
+        let previousComposeIsEmpty = self.composeIsEmpty
         let effectiveSessionKey: String
         if sessionKey.isEmpty && isKeyboardDictationUITestMode {
             effectiveSessionKey = uiTestSessionKey
@@ -722,6 +723,15 @@ final class DictationSession {
            state != .stoppingKeep,
            state != .stoppingDiscard {
             state = .idleSurfaceClosed
+        }
+
+        if isDictationActive,
+           !previousComposeIsEmpty,
+           composeIsEmpty,
+           let originSessionKey,
+           !originSessionKey.isEmpty,
+           originSessionKey == effectiveSessionKey {
+            resetActiveTranscriptSessionAfterComposeCleared()
         }
     }
 
@@ -1197,6 +1207,13 @@ final class DictationSession {
         "attempt_id=\(activeAttemptID.map(String.init) ?? "nil") generation=\(prewarmGeneration.map(String.init) ?? "nil") mode=\(String(describing: mode)) state=\(String(describing: state)) socket=\(isSocketConnected) phase3=\(isPhase3StreamingAudio)"
     }
 
+    private func stopLivenessContext() -> String {
+        let now = Date()
+        let elapsedSinceLastToken = lastTokenAt.map { now.timeIntervalSince($0) } ?? -1
+        let tokenDeadlineDelta = tokenInactivityDeadline.map { $0.timeIntervalSince(now) } ?? -1
+        return "elapsed_since_last_token_s=\(elapsedSinceLastToken) token_deadline_delta_s=\(tokenDeadlineDelta) finished=\(finishedReceived) buffered_frames=\(bufferedAudioFrames.count)"
+    }
+
     private func beginPhase2Prewarm(apiKey: String, generation: UInt64) {
         ensurePhase1Prepared()
         prewarmGeneration = generation
@@ -1542,7 +1559,7 @@ final class DictationSession {
                 }
             }
         case .closed:
-            logDictation("DICTATION_STOP trace_id=DICTATION_STOP_SOCKET_CLOSED_EVENT caller=soniox_event_closed state=\(String(describing: state)) mode=\(String(describing: mode)) \(attemptContext())")
+            logDictation("DICTATION_STOP trace_id=DICTATION_STOP_SOCKET_CLOSED_EVENT caller=soniox_event_closed state=\(String(describing: state)) mode=\(String(describing: mode)) \(stopLivenessContext()) \(attemptContext())")
             if let mode,
                state == .dictatingSticky || state == .dictatingWalkieTalkie {
                 let elapsed = elapsedSessionMilliseconds()
@@ -1670,7 +1687,7 @@ final class DictationSession {
             logDictation("DICTATION_COORD suppressed_prewarm_failure stage=\(stage.rawValue) message=\(message) \(attemptContext())")
             return
         }
-        logDictation("DICTATION_STOP trace_id=DICTATION_STOP_TRANSPORT_FAILURE caller=handleTransportFailure ts=\(Date().timeIntervalSince1970) stage=\(stage.rawValue) message=\(message) \(attemptContext())")
+        logDictation("DICTATION_STOP trace_id=DICTATION_STOP_TRANSPORT_FAILURE caller=handleTransportFailure ts=\(Date().timeIntervalSince1970) stage=\(stage.rawValue) message=\(message) \(stopLivenessContext()) \(attemptContext())")
         analytics.trackError(errorCode: nil, stage: stage.rawValue)
         pendingAction = .transportFailure(stage: stage.rawValue)
         await stopKeep(
@@ -1705,7 +1722,7 @@ final class DictationSession {
     ) async -> Bool {
         logDictation(
             "DICTATION_STOP stopKeep_top ts=\(Date().timeIntervalSince1970) reason=\(reason) " +
-            "state=\(String(describing: state)) callsite=\(callSite) \(attemptContext())"
+            "state=\(String(describing: state)) callsite=\(callSite) \(stopLivenessContext()) \(attemptContext())"
         )
         guard state == .dictatingSticky || state == .dictatingPaused || state == .dictatingWalkieTalkie || state == .stoppingKeep else {
             logger.notice(
@@ -2285,6 +2302,39 @@ final class DictationSession {
 
     private func clearOriginSessionContext() {
         transcriptOwnership = .inactive
+        pendingActivationSelectionRange = nil
+        hasExplicitActivationSelectionCapture = false
+    }
+
+    private func resetActiveTranscriptSessionAfterComposeCleared() {
+        guard var session = activeTranscriptSession() else { return }
+        guard session.originSessionKey == currentSessionKey else { return }
+
+        let machineTextToDiscard =
+            session.transcriptPrefixToDiscardAfterReanchor +
+            session.committedText +
+            session.provisionalText
+        cancelPendingTranscriptApply()
+        let capturedSnapshot = bridge.captureSnapshot(for: session.originSessionKey)
+        let snapshot = authoritativeActivationSnapshot(
+            capturedSnapshot,
+            sessionKey: session.originSessionKey
+        )
+        let anchor = NSRange(location: snapshot.content.length, length: 0)
+
+        session.baseSnapshot = snapshot
+        session.dictationStartUTF16 = anchor.location
+        session.baseReplacementLenUTF16 = 0
+        session.committedLenUTF16 = 0
+        session.committedText = ""
+        session.provisionalText = ""
+        session.suppressedUntilNextEndpoint = false
+        session.pendingUpdate = nil
+        session.activationSelectionRange = anchor
+        session.transcriptPrefixToDiscardAfterReanchor = machineTextToDiscard
+        transcriptOwnership = .active(session)
+        transcriptBuffer.reset()
+        latestComposeSelectionRange = anchor
         pendingActivationSelectionRange = nil
         hasExplicitActivationSelectionCapture = false
     }

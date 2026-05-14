@@ -248,7 +248,7 @@ final class DictationSession {
     }
 
     var swipeActivationEnabled: Bool {
-        !isSurfaceOpen && selectionLength == 0
+        !isSurfaceOpen && latestComposeSelectionRange.length == 0
     }
 
     private struct TranscriptSession {
@@ -320,7 +320,7 @@ final class DictationSession {
     private var currentSessionKey: String = ""
     private var composeIsEmpty = true
     private var isTextFieldFocused = false
-    private var selectionLength = 0
+    private var latestComposeSelectionRange = NSRange(location: 0, length: 0)
     private var contextTerms: [String] = []
 
     private var transcriptOwnership: TranscriptOwnership = .inactive
@@ -476,7 +476,6 @@ final class DictationSession {
         sessionKey: String,
         composeIsEmpty: Bool,
         textFieldFocused: Bool,
-        selectionLength: Int,
         reduceMotionEnabled: Bool,
         contextTerms: [String] = []
     ) {
@@ -490,7 +489,6 @@ final class DictationSession {
         self.currentSessionKey = effectiveSessionKey
         self.composeIsEmpty = composeIsEmpty
         self.isTextFieldFocused = textFieldFocused
-        self.selectionLength = selectionLength
         self.reduceMotionEnabled = reduceMotionEnabled
         self.contextTerms = contextTerms
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -583,6 +581,9 @@ final class DictationSession {
         }
 
         pendingActivationSelectionRange = resolvedSelectionRange
+        if let resolvedSelectionRange {
+            latestComposeSelectionRange = resolvedSelectionRange
+        }
         hasExplicitActivationSelectionCapture = true
         updateActiveTranscriptSession { session in
             session.activationSelectionRange = resolvedSelectionRange
@@ -591,6 +592,7 @@ final class DictationSession {
 
     func noteComposeSelectionChanged(_ selectionRange: NSRange) {
         guard selectionRange.location != NSNotFound else { return }
+        latestComposeSelectionRange = selectionRange
         guard isDictationActive else {
             if !hasExplicitActivationSelectionCapture {
                 pendingActivationSelectionRange = selectionRange

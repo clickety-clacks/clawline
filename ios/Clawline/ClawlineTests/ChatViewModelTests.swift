@@ -1254,7 +1254,6 @@ struct ChatViewModelTests {
                 sessionKey: viewModel.activeSessionKey,
                 composeIsEmpty: false,
                 textFieldFocused: true,
-                selectionLength: 0,
                 reduceMotionEnabled: false
             )
             coordinator.startStickyDictation()

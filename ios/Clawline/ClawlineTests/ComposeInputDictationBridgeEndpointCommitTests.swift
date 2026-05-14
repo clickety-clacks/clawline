@@ -565,7 +565,6 @@ struct DictationCoordinatorTranscriptOwnershipTests {
             sessionKey: rig.harness.host.activeSessionKey,
             composeIsEmpty: rig.textView.attributedText.length == 0,
             textFieldFocused: true,
-            selectionLength: rig.textView.selectedRange.length,
             reduceMotionEnabled: false
         )
     }

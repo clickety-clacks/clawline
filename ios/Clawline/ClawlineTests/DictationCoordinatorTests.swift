@@ -63,7 +63,6 @@ struct DictationCoordinatorTests {
             sessionKey: harness.host.activeSessionKey,
             composeIsEmpty: true,
             textFieldFocused: false,
-            selectionLength: 0,
             reduceMotionEnabled: false
         )
 
@@ -91,7 +90,6 @@ struct DictationCoordinatorTests {
             sessionKey: harness.host.activeSessionKey,
             composeIsEmpty: true,
             textFieldFocused: false,
-            selectionLength: 0,
             reduceMotionEnabled: false
         )
 
@@ -99,6 +97,28 @@ struct DictationCoordinatorTests {
         #expect(harness.clientFactoryCallCount == 1)
         #expect(harness.client.connectCallCount == 0)
         #expect(harness.audio.started == false)
+    }
+
+    @Test("Swipe activation follows compose selection observations")
+    @MainActor
+    func swipeActivationFollowsComposeSelectionObservation() {
+        let harness = DictationTestHarness()
+        let coordinator = harness.makeCoordinator()
+
+        coordinator.updateContext(
+            sessionKey: harness.host.activeSessionKey,
+            composeIsEmpty: false,
+            textFieldFocused: true,
+            reduceMotionEnabled: false
+        )
+
+        #expect(coordinator.swipeActivationEnabled)
+
+        coordinator.noteComposeSelectionChanged(NSRange(location: 0, length: 4))
+        #expect(!coordinator.swipeActivationEnabled)
+
+        coordinator.noteComposeSelectionChanged(NSRange(location: 4, length: 0))
+        #expect(coordinator.swipeActivationEnabled)
     }
 
     @Test("Gesture prewarm starts phase 2 connection before activation commit")
@@ -111,7 +131,6 @@ struct DictationCoordinatorTests {
             sessionKey: harness.host.activeSessionKey,
             composeIsEmpty: true,
             textFieldFocused: false,
-            selectionLength: 0,
             reduceMotionEnabled: false
         )
 
@@ -134,7 +153,6 @@ struct DictationCoordinatorTests {
             sessionKey: harness.host.activeSessionKey,
             composeIsEmpty: true,
             textFieldFocused: false,
-            selectionLength: 0,
             reduceMotionEnabled: false
         )
 
@@ -159,7 +177,6 @@ struct DictationCoordinatorTests {
             sessionKey: harness.host.activeSessionKey,
             composeIsEmpty: true,
             textFieldFocused: false,
-            selectionLength: 0,
             reduceMotionEnabled: false
         )
         coordinator.startStickyDictation()
@@ -172,7 +189,6 @@ struct DictationCoordinatorTests {
             sessionKey: newSessionKey,
             composeIsEmpty: true,
             textFieldFocused: false,
-            selectionLength: 0,
             reduceMotionEnabled: false
         )
 
@@ -212,7 +228,6 @@ struct DictationCoordinatorTests {
             sessionKey: harness.host.activeSessionKey,
             composeIsEmpty: true,
             textFieldFocused: false,
-            selectionLength: 0,
             reduceMotionEnabled: false
         )
 
@@ -256,7 +271,6 @@ struct DictationCoordinatorTests {
             sessionKey: harness.host.activeSessionKey,
             composeIsEmpty: true,
             textFieldFocused: false,
-            selectionLength: 0,
             reduceMotionEnabled: false
         )
 
@@ -286,7 +300,6 @@ struct DictationCoordinatorTests {
             sessionKey: harness.host.activeSessionKey,
             composeIsEmpty: true,
             textFieldFocused: false,
-            selectionLength: 0,
             reduceMotionEnabled: false
         )
 
@@ -317,7 +330,6 @@ struct DictationCoordinatorTests {
             sessionKey: harness.host.activeSessionKey,
             composeIsEmpty: true,
             textFieldFocused: false,
-            selectionLength: 0,
             reduceMotionEnabled: false
         )
         coordinator.startStickyDictation()
@@ -356,7 +368,6 @@ struct DictationCoordinatorTests {
             sessionKey: harness.host.activeSessionKey,
             composeIsEmpty: true,
             textFieldFocused: true,
-            selectionLength: 0,
             reduceMotionEnabled: false
         )
 
@@ -394,7 +405,6 @@ struct DictationCoordinatorTests {
             sessionKey: harness.host.activeSessionKey,
             composeIsEmpty: false,
             textFieldFocused: true,
-            selectionLength: 0,
             reduceMotionEnabled: false
         )
 
@@ -434,7 +444,6 @@ struct DictationCoordinatorTests {
             sessionKey: harness.host.activeSessionKey,
             composeIsEmpty: true,
             textFieldFocused: false,
-            selectionLength: 0,
             reduceMotionEnabled: false
         )
         coordinator.startStickyDictation()
@@ -496,7 +505,6 @@ struct DictationCoordinatorTests {
             sessionKey: harness.host.activeSessionKey,
             composeIsEmpty: true,
             textFieldFocused: false,
-            selectionLength: 0,
             reduceMotionEnabled: false
         )
 
@@ -541,7 +549,6 @@ struct DictationCoordinatorTests {
             sessionKey: harness.host.activeSessionKey,
             composeIsEmpty: true,
             textFieldFocused: false,
-            selectionLength: 0,
             reduceMotionEnabled: false
         )
 
@@ -585,7 +592,6 @@ struct DictationCoordinatorTests {
             sessionKey: harness.host.activeSessionKey,
             composeIsEmpty: true,
             textFieldFocused: true,
-            selectionLength: 0,
             reduceMotionEnabled: false
         )
 
@@ -620,7 +626,6 @@ struct DictationCoordinatorTests {
             sessionKey: harness.host.activeSessionKey,
             composeIsEmpty: true,
             textFieldFocused: true,
-            selectionLength: 0,
             reduceMotionEnabled: false
         )
 
@@ -655,7 +660,6 @@ struct DictationCoordinatorTests {
             sessionKey: harness.host.activeSessionKey,
             composeIsEmpty: true,
             textFieldFocused: true,
-            selectionLength: 0,
             reduceMotionEnabled: false
         )
 
@@ -671,7 +675,6 @@ struct DictationCoordinatorTests {
             sessionKey: harness.host.activeSessionKey,
             composeIsEmpty: true,
             textFieldFocused: true,
-            selectionLength: 0,
             reduceMotionEnabled: false
         )
         coordinator.startStickyDictation()
@@ -707,7 +710,6 @@ struct DictationCoordinatorTests {
             sessionKey: harness.host.activeSessionKey,
             composeIsEmpty: false,
             textFieldFocused: true,
-            selectionLength: 0,
             reduceMotionEnabled: false
         )
 
@@ -749,7 +751,6 @@ struct DictationCoordinatorTests {
             sessionKey: harness.host.activeSessionKey,
             composeIsEmpty: true,
             textFieldFocused: false,
-            selectionLength: 0,
             reduceMotionEnabled: false
         )
 
@@ -760,9 +761,9 @@ struct DictationCoordinatorTests {
             sessionKey: harness.host.activeSessionKey,
             composeIsEmpty: true,
             textFieldFocused: true,
-            selectionLength: 4,
             reduceMotionEnabled: false
         )
+        coordinator.noteComposeSelectionChanged(NSRange(location: 0, length: 4))
 
         #expect(coordinator.isStickyDictationActive)
         #expect(coordinator.isDictationActive)
@@ -780,7 +781,6 @@ struct DictationCoordinatorTests {
             sessionKey: harness.host.activeSessionKey,
             composeIsEmpty: true,
             textFieldFocused: false,
-            selectionLength: 0,
             reduceMotionEnabled: false
         )
 
@@ -802,7 +802,6 @@ struct DictationCoordinatorTests {
             sessionKey: harness.host.activeSessionKey,
             composeIsEmpty: true,
             textFieldFocused: false,
-            selectionLength: 0,
             reduceMotionEnabled: false
         )
 
@@ -824,7 +823,6 @@ struct DictationCoordinatorTests {
             sessionKey: harness.host.activeSessionKey,
             composeIsEmpty: true,
             textFieldFocused: false,
-            selectionLength: 0,
             reduceMotionEnabled: false
         )
 
@@ -848,7 +846,6 @@ struct DictationCoordinatorTests {
             sessionKey: harness.host.activeSessionKey,
             composeIsEmpty: true,
             textFieldFocused: false,
-            selectionLength: 0,
             reduceMotionEnabled: false
         )
         coordinator.startStickyDictation()
@@ -876,7 +873,6 @@ struct DictationCoordinatorTests {
             sessionKey: harness.host.activeSessionKey,
             composeIsEmpty: true,
             textFieldFocused: false,
-            selectionLength: 0,
             reduceMotionEnabled: false
         )
         coordinator.startStickyDictation()
@@ -902,7 +898,6 @@ struct DictationCoordinatorTests {
             sessionKey: harness.host.activeSessionKey,
             composeIsEmpty: true,
             textFieldFocused: false,
-            selectionLength: 0,
             reduceMotionEnabled: false
         )
 
@@ -926,7 +921,6 @@ struct DictationCoordinatorTests {
             sessionKey: harness.host.activeSessionKey,
             composeIsEmpty: true,
             textFieldFocused: false,
-            selectionLength: 0,
             reduceMotionEnabled: false
         )
 
@@ -960,7 +954,6 @@ struct DictationCoordinatorTests {
             sessionKey: harness.host.activeSessionKey,
             composeIsEmpty: true,
             textFieldFocused: false,
-            selectionLength: 0,
             reduceMotionEnabled: false
         )
 
@@ -983,7 +976,6 @@ struct DictationCoordinatorTests {
             sessionKey: harness.host.activeSessionKey,
             composeIsEmpty: true,
             textFieldFocused: false,
-            selectionLength: 0,
             reduceMotionEnabled: false
         )
 
@@ -1009,9 +1001,9 @@ struct DictationCoordinatorTests {
             sessionKey: harness.host.activeSessionKey,
             composeIsEmpty: false,
             textFieldFocused: true,
-            selectionLength: 5,
             reduceMotionEnabled: false
         )
+        coordinator.noteComposeSelectionChanged(NSRange(location: 0, length: 5))
 
         coordinator.startStickyDictation()
 
@@ -1033,7 +1025,6 @@ struct DictationCoordinatorTests {
             sessionKey: harness.host.activeSessionKey,
             composeIsEmpty: true,
             textFieldFocused: false,
-            selectionLength: 0,
             reduceMotionEnabled: false
         )
 
@@ -1065,7 +1056,6 @@ struct DictationCoordinatorTests {
             sessionKey: harness.host.activeSessionKey,
             composeIsEmpty: true,
             textFieldFocused: false,
-            selectionLength: 0,
             reduceMotionEnabled: false
         )
 
@@ -1100,7 +1090,6 @@ struct DictationCoordinatorTests {
             sessionKey: harness.host.activeSessionKey,
             composeIsEmpty: true,
             textFieldFocused: false,
-            selectionLength: 0,
             reduceMotionEnabled: false
         )
 
@@ -1140,7 +1129,6 @@ struct DictationCoordinatorTests {
             sessionKey: harness.host.activeSessionKey,
             composeIsEmpty: true,
             textFieldFocused: false,
-            selectionLength: 0,
             reduceMotionEnabled: false
         )
 
@@ -1190,7 +1178,6 @@ struct DictationCoordinatorTests {
             sessionKey: harness.host.activeSessionKey,
             composeIsEmpty: true,
             textFieldFocused: false,
-            selectionLength: 0,
             reduceMotionEnabled: false
         )
 
@@ -1226,7 +1213,6 @@ struct DictationCoordinatorTests {
             sessionKey: harness.host.activeSessionKey,
             composeIsEmpty: true,
             textFieldFocused: false,
-            selectionLength: 0,
             reduceMotionEnabled: false
         )
 
@@ -1252,7 +1238,6 @@ struct DictationCoordinatorTests {
             sessionKey: harness.host.activeSessionKey,
             composeIsEmpty: true,
             textFieldFocused: false,
-            selectionLength: 0,
             reduceMotionEnabled: false
         )
 
@@ -1277,7 +1262,6 @@ struct DictationCoordinatorTests {
             sessionKey: harness.host.activeSessionKey,
             composeIsEmpty: true,
             textFieldFocused: false,
-            selectionLength: 0,
             reduceMotionEnabled: false
         )
 

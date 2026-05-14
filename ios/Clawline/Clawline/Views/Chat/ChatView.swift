@@ -858,7 +858,8 @@ struct ChatView: View {
         .onChange(of: viewModel.inputContent.length) { _, _ in
             reportDictationObservations(viewModel: viewModel)
         }
-        .onChange(of: selectionRange) { _, _ in
+        .onChange(of: selectionRange) { _, newValue in
+            dictationCoordinator.noteComposeSelectionChanged(newValue)
             reportDictationObservations(viewModel: viewModel)
         }
         .onReceive(NotificationCenter.default.publisher(for: UIAccessibility.reduceMotionStatusDidChangeNotification)) { _ in
@@ -1492,7 +1493,6 @@ struct ChatView: View {
             sessionKey: viewModel.activeSessionKey,
             composeIsEmpty: viewModel.inputContent.isEffectivelyEmpty,
             textFieldFocused: isInputFocused,
-            selectionLength: selectionRange.length,
             reduceMotionEnabled: UIAccessibility.isReduceMotionEnabled,
             contextTerms: dictationContextTerms(viewModel: viewModel)
         )

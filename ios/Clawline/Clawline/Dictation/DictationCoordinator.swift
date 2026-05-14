@@ -274,6 +274,212 @@ final class DictationSession {
         }
     }
 
+    private struct TranscriptEngine {
+        private enum BoundaryAffinity {
+            case start
+            case end
+        }
+
+        static func noteUserEdit(
+            session: inout TranscriptSession,
+            editedRangeUTF16: NSRange,
+            replacementUTF16Length: Int
+        ) {
+            let provisionalRange = NSRange(
+                location: session.dictationStartUTF16 + session.committedLenUTF16,
+                length: session.provisionalLenUTF16
+            )
+            if rangesIntersect(editedRangeUTF16, provisionalRange) {
+                session.committedText += session.provisionalText
+                session.committedLenUTF16 += session.provisionalLenUTF16
+                session.provisionalText = ""
+                session.suppressedUntilNextEndpoint = true
+            }
+
+            let committedStart = session.dictationStartUTF16
+            let committedEnd = committedStart + session.committedLenUTF16
+            let baseReplacementEnd = committedStart + session.baseReplacementLenUTF16
+            let newCommittedStart = transformBoundary(
+                committedStart,
+                editedRange: editedRangeUTF16,
+                replacementUTF16Length: replacementUTF16Length,
+                affinity: .start
+            )
+            let newCommittedEnd = transformBoundary(
+                committedEnd,
+                editedRange: editedRangeUTF16,
+                replacementUTF16Length: replacementUTF16Length,
+                affinity: .end
+            )
+            let newBaseReplacementEnd = transformBoundary(
+                baseReplacementEnd,
+                editedRange: editedRangeUTF16,
+                replacementUTF16Length: replacementUTF16Length,
+                affinity: .end
+            )
+
+            session.dictationStartUTF16 = max(0, newCommittedStart)
+            session.committedLenUTF16 = max(0, newCommittedEnd - newCommittedStart)
+            session.baseReplacementLenUTF16 = max(0, newBaseReplacementEnd - newCommittedStart)
+        }
+
+        static func applySegmentUpdate(_ update: DictationSegmentUpdate, to session: inout TranscriptSession) {
+            let update = transcriptUpdateByDiscardingReanchorPrefix(update, session: &session)
+            var shouldSkipFirstEndpointCommit = session.suppressedUntilNextEndpoint
+            var processedAnyEndpoint = false
+
+            for segment in update.committedSegments {
+                processedAnyEndpoint = true
+                if shouldSkipFirstEndpointCommit {
+                    shouldSkipFirstEndpointCommit = false
+                    session.suppressedUntilNextEndpoint = false
+                    session.provisionalText = ""
+                    continue
+                }
+
+                session.committedText += segment
+                session.committedLenUTF16 += segment.utf16.count
+                session.provisionalText = ""
+            }
+
+            if session.suppressedUntilNextEndpoint && update.sawEndpoint && !processedAnyEndpoint {
+                session.suppressedUntilNextEndpoint = false
+                shouldSkipFirstEndpointCommit = false
+                session.provisionalText = ""
+            } else {
+                session.suppressedUntilNextEndpoint = shouldSkipFirstEndpointCommit
+            }
+
+            if !session.suppressedUntilNextEndpoint {
+                session.provisionalText = update.provisionalText
+            }
+
+            if update.finished {
+                if session.suppressedUntilNextEndpoint {
+                    session.suppressedUntilNextEndpoint = false
+                    session.provisionalText = ""
+                } else if !session.provisionalText.isEmpty {
+                    session.committedText += session.provisionalText
+                    session.committedLenUTF16 += session.provisionalLenUTF16
+                    session.provisionalText = ""
+                }
+            }
+        }
+
+        static func syncCommittedText(from text: String, session: inout TranscriptSession) {
+            let committedRange = NSRange(location: session.dictationStartUTF16, length: session.committedLenUTF16)
+            guard let committedSubstring = TranscriptEngine.substring(text: text, utf16Range: committedRange) else { return }
+            session.committedText = committedSubstring
+        }
+
+        static func safeReplacementRange(selectedRange: NSRange, textLength: Int, fallbackLocation: Int) -> NSRange {
+            let replacementLength = selectedRange.location == NSNotFound ? 0 : selectedRange.length
+            let location = selectedRange.location == NSNotFound
+                ? min(max(fallbackLocation, 0), textLength)
+                : min(max(selectedRange.location, 0), textLength)
+            let length = min(max(replacementLength, 0), max(0, textLength - location))
+            return NSRange(location: location, length: length)
+        }
+
+        static func substring(text: String, utf16Range: NSRange) -> String? {
+            let nsString = text as NSString
+            guard utf16Range.location >= 0,
+                  utf16Range.length >= 0,
+                  utf16Range.location + utf16Range.length <= nsString.length else {
+                return nil
+            }
+            return nsString.substring(with: utf16Range)
+        }
+
+        static func mergeUpdates(
+            _ lhs: DictationSegmentUpdate,
+            _ rhs: DictationSegmentUpdate
+        ) -> DictationSegmentUpdate {
+            DictationSegmentUpdate(
+                provisionalText: rhs.provisionalText,
+                committedSegments: lhs.committedSegments + rhs.committedSegments,
+                finished: lhs.finished || rhs.finished,
+                sawEndpoint: lhs.sawEndpoint || rhs.sawEndpoint,
+                hadAnyTokens: lhs.hadAnyTokens || rhs.hadAnyTokens
+            )
+        }
+
+        private static func transcriptUpdateByDiscardingReanchorPrefix(
+            _ update: DictationSegmentUpdate,
+            session: inout TranscriptSession
+        ) -> DictationSegmentUpdate {
+            guard !session.transcriptPrefixToDiscardAfterReanchor.isEmpty else { return update }
+            var prefix = session.transcriptPrefixToDiscardAfterReanchor
+            var committedSegments: [String] = []
+            var didConsumeEndpointPrefix = false
+
+            for segment in update.committedSegments {
+                let normalized = textByRemovingPrefix(prefix, from: segment)
+                if normalized.didRemovePrefix {
+                    didConsumeEndpointPrefix = true
+                    prefix = ""
+                }
+                committedSegments.append(normalized.text)
+            }
+
+            let normalizedProvisional = textByRemovingPrefix(prefix, from: update.provisionalText)
+            if update.sawEndpoint || didConsumeEndpointPrefix {
+                session.transcriptPrefixToDiscardAfterReanchor = ""
+            }
+
+            return DictationSegmentUpdate(
+                provisionalText: normalizedProvisional.text,
+                committedSegments: committedSegments,
+                finished: update.finished,
+                sawEndpoint: update.sawEndpoint,
+                hadAnyTokens: update.hadAnyTokens
+            )
+        }
+
+        private static func textByRemovingPrefix(_ prefix: String, from text: String) -> (text: String, didRemovePrefix: Bool) {
+            guard !prefix.isEmpty else { return (text, false) }
+            if prefix.hasPrefix(text) {
+                return ("", false)
+            }
+            guard text.hasPrefix(prefix) else { return (text, false) }
+            let index = text.index(text.startIndex, offsetBy: prefix.count)
+            return (String(text[index...]), true)
+        }
+
+        private static func transformBoundary(
+            _ boundary: Int,
+            editedRange: NSRange,
+            replacementUTF16Length: Int,
+            affinity: BoundaryAffinity
+        ) -> Int {
+            let editStart = editedRange.location
+            let editEnd = editedRange.location + editedRange.length
+            let delta = replacementUTF16Length - editedRange.length
+
+            if boundary < editStart {
+                return boundary
+            }
+            if boundary > editEnd {
+                return boundary + delta
+            }
+
+            switch affinity {
+            case .start:
+                return editStart
+            case .end:
+                return editStart + replacementUTF16Length
+            }
+        }
+
+        private static func rangesIntersect(_ a: NSRange, _ b: NSRange) -> Bool {
+            if a.length == 0 {
+                let point = a.location
+                return point >= b.location && point <= b.location + b.length
+            }
+            return NSIntersectionRange(a, b).length > 0
+        }
+    }
+
     private enum TranscriptOwnership {
         case inactive
         case active(TranscriptSession)
@@ -609,7 +815,7 @@ final class DictationSession {
         guard let originSessionKey, !originSessionKey.isEmpty, originSessionKey == currentSessionKey else { return }
         guard bridge.boundComposeTextView?.dictationProgrammaticEditInFlight != true else { return }
         updateActiveTranscriptSession { session in
-            noteUserEdit(
+            TranscriptEngine.noteUserEdit(
                 session: &session,
                 editedRangeUTF16: editedRangeUTF16,
                 replacementUTF16Length: replacementUTF16Length
@@ -1971,7 +2177,7 @@ final class DictationSession {
         )
         updateActiveTranscriptSession { session in
             if let pending = session.pendingUpdate {
-                session.pendingUpdate = mergeTranscriptUpdates(pending, update)
+                session.pendingUpdate = TranscriptEngine.mergeUpdates(pending, update)
             } else {
                 session.pendingUpdate = update
             }
@@ -2028,7 +2234,7 @@ final class DictationSession {
             activationSelectionRange: activationSelectionRange,
             snapshot: snapshot
         )
-        let initialProvisionalText = substring(text: snapshot.content.string, utf16Range: selectedRange) ?? ""
+        let initialProvisionalText = TranscriptEngine.substring(text: snapshot.content.string, utf16Range: selectedRange) ?? ""
         transcriptOwnership = .active(
             TranscriptSession(
                 originSessionKey: sessionKey,
@@ -2098,14 +2304,14 @@ final class DictationSession {
         let previousTranscriptUTF16Length = session.previousTranscriptUTF16Length
         let previousTranscriptText = session.committedText + session.provisionalText
         if let textView = bridge.boundComposeTextView {
-            syncCommittedText(from: textView.attributedText.string, session: &session)
+            TranscriptEngine.syncCommittedText(from: textView.attributedText.string, session: &session)
         } else {
-            syncCommittedText(
+            TranscriptEngine.syncCommittedText(
                 from: bridge.captureSnapshot(for: session.originSessionKey).content.string,
                 session: &session
             )
         }
-        applySegmentUpdate(update, to: &session)
+        TranscriptEngine.applySegmentUpdate(update, to: &session)
         let replacementText = NSAttributedString(
             string: session.committedText + session.provisionalText,
             attributes: defaultTextAttributes()
@@ -2174,7 +2380,7 @@ final class DictationSession {
     ) -> DictationTextApplicationMode {
         guard !expectedTranscript.isEmpty else { return .replaceRange }
         let snapshot = liveComposeSnapshot(for: session.originSessionKey)
-        guard substring(text: snapshot.content.string, utf16Range: replacementRange) == expectedTranscript else {
+        guard TranscriptEngine.substring(text: snapshot.content.string, utf16Range: replacementRange) == expectedTranscript else {
             return .restoreBaseAndAppendReplacement
         }
         return .replaceRange
@@ -2185,7 +2391,7 @@ final class DictationSession {
         snapshot: ComposeDraftSnapshot
     ) -> NSRange {
         let selectedRange = activationSelectionRange
-        return safeReplacementRange(
+        return TranscriptEngine.safeReplacementRange(
             selectedRange: selectedRange ?? NSRange(location: NSNotFound, length: 0),
             textLength: snapshot.content.length,
             fallbackLocation: snapshot.content.length
@@ -2197,49 +2403,6 @@ final class DictationSession {
             .font: UIFont.preferredFont(forTextStyle: .body),
             .foregroundColor: UIColor.label
         ]
-    }
-
-    private func noteUserEdit(
-        session: inout TranscriptSession,
-        editedRangeUTF16: NSRange,
-        replacementUTF16Length: Int
-    ) {
-        let provisionalRange = NSRange(
-            location: session.dictationStartUTF16 + session.committedLenUTF16,
-            length: session.provisionalLenUTF16
-        )
-        if rangesIntersect(editedRangeUTF16, provisionalRange) {
-            session.committedText += session.provisionalText
-            session.committedLenUTF16 += session.provisionalLenUTF16
-            session.provisionalText = ""
-            session.suppressedUntilNextEndpoint = true
-        }
-
-        let committedStart = session.dictationStartUTF16
-        let committedEnd = committedStart + session.committedLenUTF16
-        let baseReplacementEnd = committedStart + session.baseReplacementLenUTF16
-        let newCommittedStart = transformBoundary(
-            committedStart,
-            editedRange: editedRangeUTF16,
-            replacementUTF16Length: replacementUTF16Length,
-            affinity: .start
-        )
-        let newCommittedEnd = transformBoundary(
-            committedEnd,
-            editedRange: editedRangeUTF16,
-            replacementUTF16Length: replacementUTF16Length,
-            affinity: .end
-        )
-        let newBaseReplacementEnd = transformBoundary(
-            baseReplacementEnd,
-            editedRange: editedRangeUTF16,
-            replacementUTF16Length: replacementUTF16Length,
-            affinity: .end
-        )
-
-        session.dictationStartUTF16 = max(0, newCommittedStart)
-        session.committedLenUTF16 = max(0, newCommittedEnd - newCommittedStart)
-        session.baseReplacementLenUTF16 = max(0, newBaseReplacementEnd - newCommittedStart)
     }
 
     private func reanchorActiveTranscriptSessionToLiveSelection(discardCurrentMachineTextFromPendingStream: Bool = true) {
@@ -2258,12 +2421,12 @@ final class DictationSession {
         guard var session = activeTranscriptSession() else { return }
         guard session.originSessionKey == currentSessionKey else { return }
         let snapshot = liveComposeSnapshot(for: session.originSessionKey)
-        let selectedRange = safeReplacementRange(
+        let selectedRange = TranscriptEngine.safeReplacementRange(
             selectedRange: selectionRange,
             textLength: snapshot.content.length,
             fallbackLocation: snapshot.content.length
         )
-        let selectedText = substring(text: snapshot.content.string, utf16Range: selectedRange) ?? ""
+        let selectedText = TranscriptEngine.substring(text: snapshot.content.string, utf16Range: selectedRange) ?? ""
         let currentMachineText =
             session.transcriptPrefixToDiscardAfterReanchor +
             session.committedText +
@@ -2299,167 +2462,6 @@ final class DictationSession {
         return ComposeDraftSnapshot(
             content: textView.attributedText ?? NSAttributedString(string: ""),
             attachments: capturedSnapshot.attachments
-        )
-    }
-
-    private func applySegmentUpdate(_ update: DictationSegmentUpdate, to session: inout TranscriptSession) {
-        let update = transcriptUpdateByDiscardingReanchorPrefix(update, session: &session)
-        var shouldSkipFirstEndpointCommit = session.suppressedUntilNextEndpoint
-        var processedAnyEndpoint = false
-
-        for segment in update.committedSegments {
-            processedAnyEndpoint = true
-            if shouldSkipFirstEndpointCommit {
-                shouldSkipFirstEndpointCommit = false
-                session.suppressedUntilNextEndpoint = false
-                session.provisionalText = ""
-                continue
-            }
-
-            session.committedText += segment
-            session.committedLenUTF16 += segment.utf16.count
-            session.provisionalText = ""
-        }
-
-        if session.suppressedUntilNextEndpoint && update.sawEndpoint && !processedAnyEndpoint {
-            session.suppressedUntilNextEndpoint = false
-            shouldSkipFirstEndpointCommit = false
-            session.provisionalText = ""
-        } else {
-            session.suppressedUntilNextEndpoint = shouldSkipFirstEndpointCommit
-        }
-
-        if !session.suppressedUntilNextEndpoint {
-            session.provisionalText = update.provisionalText
-        }
-
-        if update.finished {
-            if session.suppressedUntilNextEndpoint {
-                session.suppressedUntilNextEndpoint = false
-                session.provisionalText = ""
-            } else if !session.provisionalText.isEmpty {
-                session.committedText += session.provisionalText
-                session.committedLenUTF16 += session.provisionalLenUTF16
-                session.provisionalText = ""
-            }
-        }
-    }
-
-    private func transcriptUpdateByDiscardingReanchorPrefix(
-        _ update: DictationSegmentUpdate,
-        session: inout TranscriptSession
-    ) -> DictationSegmentUpdate {
-        guard !session.transcriptPrefixToDiscardAfterReanchor.isEmpty else { return update }
-        var prefix = session.transcriptPrefixToDiscardAfterReanchor
-        var committedSegments: [String] = []
-        var didConsumeEndpointPrefix = false
-
-        for segment in update.committedSegments {
-            let normalized = textByRemovingPrefix(prefix, from: segment)
-            if normalized.didRemovePrefix {
-                didConsumeEndpointPrefix = true
-                prefix = ""
-            }
-            committedSegments.append(normalized.text)
-        }
-
-        let normalizedProvisional = textByRemovingPrefix(prefix, from: update.provisionalText)
-        if update.sawEndpoint || didConsumeEndpointPrefix {
-            session.transcriptPrefixToDiscardAfterReanchor = ""
-        }
-
-        return DictationSegmentUpdate(
-            provisionalText: normalizedProvisional.text,
-            committedSegments: committedSegments,
-            finished: update.finished,
-            sawEndpoint: update.sawEndpoint,
-            hadAnyTokens: update.hadAnyTokens
-        )
-    }
-
-    private func textByRemovingPrefix(_ prefix: String, from text: String) -> (text: String, didRemovePrefix: Bool) {
-        guard !prefix.isEmpty else { return (text, false) }
-        if prefix.hasPrefix(text) {
-            return ("", false)
-        }
-        guard text.hasPrefix(prefix) else { return (text, false) }
-        let index = text.index(text.startIndex, offsetBy: prefix.count)
-        return (String(text[index...]), true)
-    }
-
-    private func syncCommittedText(from text: String, session: inout TranscriptSession) {
-        let committedRange = NSRange(location: session.dictationStartUTF16, length: session.committedLenUTF16)
-        guard let committedSubstring = substring(text: text, utf16Range: committedRange) else { return }
-        session.committedText = committedSubstring
-    }
-
-    private func safeReplacementRange(selectedRange: NSRange, textLength: Int, fallbackLocation: Int) -> NSRange {
-        let replacementLength = selectedRange.location == NSNotFound ? 0 : selectedRange.length
-        let location = selectedRange.location == NSNotFound
-            ? min(max(fallbackLocation, 0), textLength)
-            : min(max(selectedRange.location, 0), textLength)
-        let length = min(max(replacementLength, 0), max(0, textLength - location))
-        return NSRange(location: location, length: length)
-    }
-
-    private func substring(text: String, utf16Range: NSRange) -> String? {
-        let nsString = text as NSString
-        guard utf16Range.location >= 0,
-              utf16Range.length >= 0,
-              utf16Range.location + utf16Range.length <= nsString.length else {
-            return nil
-        }
-        return nsString.substring(with: utf16Range)
-    }
-
-    private enum BoundaryAffinity {
-        case start
-        case end
-    }
-
-    private func transformBoundary(
-        _ boundary: Int,
-        editedRange: NSRange,
-        replacementUTF16Length: Int,
-        affinity: BoundaryAffinity
-    ) -> Int {
-        let editStart = editedRange.location
-        let editEnd = editedRange.location + editedRange.length
-        let delta = replacementUTF16Length - editedRange.length
-
-        if boundary < editStart {
-            return boundary
-        }
-        if boundary > editEnd {
-            return boundary + delta
-        }
-
-        switch affinity {
-        case .start:
-            return editStart
-        case .end:
-            return editStart + replacementUTF16Length
-        }
-    }
-
-    private func rangesIntersect(_ a: NSRange, _ b: NSRange) -> Bool {
-        if a.length == 0 {
-            let point = a.location
-            return point >= b.location && point <= b.location + b.length
-        }
-        return NSIntersectionRange(a, b).length > 0
-    }
-
-    private func mergeTranscriptUpdates(
-        _ lhs: DictationSegmentUpdate,
-        _ rhs: DictationSegmentUpdate
-    ) -> DictationSegmentUpdate {
-        DictationSegmentUpdate(
-            provisionalText: rhs.provisionalText,
-            committedSegments: lhs.committedSegments + rhs.committedSegments,
-            finished: lhs.finished || rhs.finished,
-            sawEndpoint: lhs.sawEndpoint || rhs.sawEndpoint,
-            hadAnyTokens: lhs.hadAnyTokens || rhs.hadAnyTokens
         )
     }
 

@@ -23,7 +23,8 @@ struct DictationTranscriptApplicatorTests {
                 replacementRange: NSRange(location: 6, length: 5),
                 fallbackLocation: 11,
                 replacementText: NSAttributedString(string: "mars"),
-                selectionPolicy: .followTranscriptEndWhenSelectionAlreadyAtEnd
+                selectionPolicy: .followTranscriptEndWhenSelectionAlreadyAtEnd,
+            suppressReentrantFeedback: true
             )
         )
 
@@ -49,7 +50,8 @@ struct DictationTranscriptApplicatorTests {
                 replacementRange: NSRange(location: 6, length: 5),
                 fallbackLocation: 11,
                 replacementText: NSAttributedString(string: "mars"),
-                selectionPolicy: .followTranscriptEndWhenSelectionAlreadyAtEnd
+                selectionPolicy: .followTranscriptEndWhenSelectionAlreadyAtEnd,
+            suppressReentrantFeedback: true
             )
         )
 
@@ -77,7 +79,8 @@ struct DictationTranscriptApplicatorTests {
                 replacementRange: NSRange(location: 6, length: 5),
                 fallbackLocation: 11,
                 replacementText: NSAttributedString(string: "mars"),
-                selectionPolicy: .followTranscriptEndWhenSelectionAlreadyAtEnd
+                selectionPolicy: .followTranscriptEndWhenSelectionAlreadyAtEnd,
+            suppressReentrantFeedback: true
             )
         )
 
@@ -105,7 +108,8 @@ struct DictationTranscriptApplicatorTests {
                 replacementRange: NSRange(location: 6, length: 5),
                 fallbackLocation: 11,
                 replacementText: NSAttributedString(string: "planet earth"),
-                selectionPolicy: .followTranscriptEndWhenSelectionAlreadyAtEnd
+                selectionPolicy: .followTranscriptEndWhenSelectionAlreadyAtEnd,
+            suppressReentrantFeedback: true
             )
         )
 
@@ -132,7 +136,8 @@ struct DictationTranscriptApplicatorTests {
                 replacementRange: NSRange(location: 6, length: 5),
                 fallbackLocation: 11,
                 replacementText: NSAttributedString(string: "mars"),
-                selectionPolicy: .followTranscriptEndWhenSelectionAlreadyAtEnd
+                selectionPolicy: .followTranscriptEndWhenSelectionAlreadyAtEnd,
+            suppressReentrantFeedback: true
             )
         )
 
@@ -159,7 +164,8 @@ struct DictationTranscriptApplicatorTests {
                 replacementRange: NSRange(location: 6, length: 5),
                 fallbackLocation: 11,
                 replacementText: NSAttributedString(string: "planet earth"),
-                selectionPolicy: .followTranscriptEndWhenSelectionAlreadyAtEnd
+                selectionPolicy: .followTranscriptEndWhenSelectionAlreadyAtEnd,
+            suppressReentrantFeedback: true
             )
         )
 
@@ -180,7 +186,8 @@ struct DictationTranscriptApplicatorTests {
                 replacementRange: NSRange(location: 5, length: 0),
                 fallbackLocation: 5,
                 replacementText: NSAttributedString(string: "hello"),
-                selectionPolicy: .followTranscriptEndWhenSelectionAlreadyAtEnd
+                selectionPolicy: .followTranscriptEndWhenSelectionAlreadyAtEnd,
+            suppressReentrantFeedback: true
             )
         )
 
@@ -207,7 +214,8 @@ struct DictationTranscriptApplicatorTests {
                 replacementRange: NSRange(location: 5, length: 0),
                 fallbackLocation: 5,
                 replacementText: NSAttributedString(string: "hello"),
-                selectionPolicy: .followTranscriptEndWhenSelectionAlreadyAtEnd
+                selectionPolicy: .followTranscriptEndWhenSelectionAlreadyAtEnd,
+            suppressReentrantFeedback: true
             )
         )
 
@@ -232,7 +240,8 @@ struct DictationTranscriptApplicatorTests {
                 replacementRange: NSRange(location: NSNotFound, length: 0),
                 fallbackLocation: 5,
                 replacementText: NSAttributedString(string: "dictated"),
-                selectionPolicy: .followTranscriptEndWhenSelectionAlreadyAtEnd
+                selectionPolicy: .followTranscriptEndWhenSelectionAlreadyAtEnd,
+            suppressReentrantFeedback: true
             )
         )
 
@@ -272,7 +281,8 @@ struct DictationTranscriptApplicatorTests {
                 replacementRange: NSRange(location: 5, length: 0),
                 fallbackLocation: 5,
                 replacementText: NSAttributedString(string: "hello"),
-                selectionPolicy: .followTranscriptEndWhenSelectionAlreadyAtEnd
+                selectionPolicy: .followTranscriptEndWhenSelectionAlreadyAtEnd,
+            suppressReentrantFeedback: true
             )
         )
 
@@ -293,7 +303,8 @@ struct DictationTranscriptApplicatorTests {
             replacementRange: NSRange(location: 5, length: 0),
             fallbackLocation: 5,
             replacementText: NSAttributedString(string: "hello"),
-            selectionPolicy: .preserveUserSelection
+            selectionPolicy: .preserveUserSelection,
+            suppressReentrantFeedback: true
         )
         applicator.setReplayPlanProvider { replayPlan }
 
@@ -321,7 +332,8 @@ struct DictationTranscriptApplicatorTests {
             replacementRange: NSRange(location: 5, length: 0),
             fallbackLocation: 5,
             replacementText: NSAttributedString(string: "hello"),
-            selectionPolicy: .preserveUserSelection
+            selectionPolicy: .preserveUserSelection,
+            suppressReentrantFeedback: true
         )
         applicator.setReplayPlanProvider { replayPlan }
 
@@ -350,7 +362,8 @@ struct DictationTranscriptApplicatorTests {
             replacementRange: NSRange(location: 5, length: 5),
             fallbackLocation: 5,
             replacementText: NSAttributedString(string: "hello"),
-            selectionPolicy: .preserveUserSelection
+            selectionPolicy: .preserveUserSelection,
+            suppressReentrantFeedback: true
         )
         applicator.setReplayPlanProvider { replayPlan }
 
@@ -380,7 +393,8 @@ struct DictationTranscriptApplicatorTests {
             replacementRange: NSRange(location: 5, length: 5),
             fallbackLocation: 5,
             replacementText: NSAttributedString(string: "hello"),
-            selectionPolicy: .preserveUserSelection
+            selectionPolicy: .preserveUserSelection,
+            suppressReentrantFeedback: true
         )
         applicator.setReplayPlanProvider { replayPlan }
 
@@ -429,7 +443,8 @@ struct DictationTranscriptApplicatorTests {
                 replacementRange: NSRange(location: 6, length: 5),
                 fallbackLocation: 11,
                 replacementText: NSAttributedString(string: "mars"),
-                selectionPolicy: .followTranscriptEndWhenSelectionAlreadyAtEnd
+                selectionPolicy: .followTranscriptEndWhenSelectionAlreadyAtEnd,
+            suppressReentrantFeedback: true
             )
         )
 

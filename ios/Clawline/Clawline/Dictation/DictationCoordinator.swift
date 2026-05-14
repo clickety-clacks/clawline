@@ -328,6 +328,7 @@ final class DictationSession {
     private var pendingActivationMode: DictationMode?
     private var pendingActivationWalkieOrigin: WalkieOrigin?
     private var pendingActivationSelectionRange: NSRange?
+    private var hasExplicitActivationSelectionCapture = false
     private var gesturePrewarmGeneration: UInt64?
     private var gestureActivationFailed = false
     private(set) var mode: DictationMode?
@@ -582,6 +583,7 @@ final class DictationSession {
         }
 
         pendingActivationSelectionRange = resolvedSelectionRange
+        hasExplicitActivationSelectionCapture = true
         updateActiveTranscriptSession { session in
             session.activationSelectionRange = resolvedSelectionRange
         }
@@ -590,7 +592,9 @@ final class DictationSession {
     func noteComposeSelectionChanged(_ selectionRange: NSRange) {
         guard selectionRange.location != NSNotFound else { return }
         guard isDictationActive else {
-            pendingActivationSelectionRange = selectionRange
+            if !hasExplicitActivationSelectionCapture {
+                pendingActivationSelectionRange = selectionRange
+            }
             return
         }
         guard let originSessionKey, !originSessionKey.isEmpty, originSessionKey == currentSessionKey else { return }
@@ -2041,6 +2045,7 @@ final class DictationSession {
         )
         transcriptBuffer.reset()
         pendingActivationSelectionRange = nil
+        hasExplicitActivationSelectionCapture = false
     }
 
     private func authoritativeActivationSnapshot(
@@ -2065,6 +2070,7 @@ final class DictationSession {
     private func clearOriginSessionContext() {
         transcriptOwnership = .inactive
         pendingActivationSelectionRange = nil
+        hasExplicitActivationSelectionCapture = false
     }
 
     private func applyTranscriptIfNeeded(_ update: DictationSegmentUpdate) {
@@ -2122,7 +2128,8 @@ final class DictationSession {
             fallbackLocation: session.dictationStartUTF16,
             replacementText: replacementText,
             selectionPolicy: .followTranscriptEndWhenSelectionAlreadyAtEnd,
-            applicationMode: applicationMode
+            applicationMode: applicationMode,
+            suppressReentrantFeedback: true
         )
         transcriptOwnership = .active(session)
         bridge.apply(plan)
@@ -2153,7 +2160,8 @@ final class DictationSession {
                 string: session.committedText + session.provisionalText,
                 attributes: defaultTextAttributes()
             ),
-            selectionPolicy: .preserveUserSelection
+            selectionPolicy: .preserveUserSelection,
+            suppressReentrantFeedback: true
         )
     }
 

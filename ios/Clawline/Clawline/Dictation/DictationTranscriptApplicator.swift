@@ -54,6 +54,7 @@ struct DictationTextApplicationPlan {
     let replacementText: NSAttributedString
     let selectionPolicy: DictationSelectionPolicy
     let applicationMode: DictationTextApplicationMode
+    let suppressReentrantFeedback: Bool
 
     init(
         sessionKey: String,
@@ -63,7 +64,8 @@ struct DictationTextApplicationPlan {
         fallbackLocation: Int,
         replacementText: NSAttributedString,
         selectionPolicy: DictationSelectionPolicy,
-        applicationMode: DictationTextApplicationMode = .replaceRange
+        applicationMode: DictationTextApplicationMode = .replaceRange,
+        suppressReentrantFeedback: Bool
     ) {
         self.sessionKey = sessionKey
         self.baseSnapshot = baseSnapshot
@@ -73,6 +75,7 @@ struct DictationTextApplicationPlan {
         self.replacementText = replacementText
         self.selectionPolicy = selectionPolicy
         self.applicationMode = applicationMode
+        self.suppressReentrantFeedback = suppressReentrantFeedback
     }
 }
 
@@ -149,7 +152,8 @@ final class DictationTranscriptApplicator {
                 in: textView,
                 range: safeRange,
                 with: plan.replacementText.string,
-                selectionPolicy: plan.selectionPolicy
+                selectionPolicy: plan.selectionPolicy,
+                suppressReentrantFeedback: plan.suppressReentrantFeedback
             )
             return
         }
@@ -190,7 +194,7 @@ final class DictationTranscriptApplicator {
         )
         guard host?.activeSessionKey == sessionKey,
               let composeTextView else { return }
-        replaceSnapshot(snapshot, in: composeTextView)
+        replaceSnapshot(snapshot, in: composeTextView, suppressReentrantFeedback: true)
     }
 
     private func safeReplacementRange(selectedRange: NSRange, textLength: Int, fallbackLocation: Int) -> NSRange {
@@ -232,7 +236,7 @@ final class DictationTranscriptApplicator {
             announceEditorReset: false
         )
         if let composeTextView, host.activeSessionKey == plan.sessionKey {
-            replaceSnapshot(snapshot, in: composeTextView)
+            replaceSnapshot(snapshot, in: composeTextView, suppressReentrantFeedback: plan.suppressReentrantFeedback)
         }
     }
 
@@ -240,7 +244,8 @@ final class DictationTranscriptApplicator {
         in textView: UITextView,
         range: NSRange,
         with text: String,
-        selectionPolicy: DictationSelectionPolicy
+        selectionPolicy: DictationSelectionPolicy,
+        suppressReentrantFeedback: Bool
     ) {
         guard let textRange = textRange(in: textView, nsRange: range) else { return }
         let selectionAfterReplacement = transformedSelection(
@@ -251,13 +256,17 @@ final class DictationTranscriptApplicator {
             selectionPolicy: selectionPolicy
         )
         if let pastable = textView as? PastableTextView {
-            pastable.dictationProgrammaticEditInFlight = true
-            pastable.expectDictationProgrammaticSelectionFeedback(selectionAfterReplacement)
+            if suppressReentrantFeedback {
+                pastable.dictationProgrammaticEditInFlight = true
+                pastable.expectDictationProgrammaticSelectionFeedback(selectionAfterReplacement)
+            }
             textView.replace(textRange, withText: text)
             if textView.selectedRange != selectionAfterReplacement {
                 textView.selectedRange = selectionAfterReplacement
             }
-            pastable.dictationProgrammaticEditInFlight = false
+            if suppressReentrantFeedback {
+                pastable.dictationProgrammaticEditInFlight = false
+            }
             return
         }
         textView.replace(textRange, withText: text)
@@ -266,12 +275,18 @@ final class DictationTranscriptApplicator {
         }
     }
 
-    private func replaceSnapshot(_ snapshot: ComposeDraftSnapshot, in textView: UITextView) {
+    private func replaceSnapshot(
+        _ snapshot: ComposeDraftSnapshot,
+        in textView: UITextView,
+        suppressReentrantFeedback: Bool
+    ) {
         let location = snapshot.content.length
         let selection = NSRange(location: location, length: 0)
         if let pastable = textView as? PastableTextView {
-            pastable.dictationProgrammaticEditInFlight = true
-            pastable.expectDictationProgrammaticSelectionFeedback(selection)
+            if suppressReentrantFeedback {
+                pastable.dictationProgrammaticEditInFlight = true
+                pastable.expectDictationProgrammaticSelectionFeedback(selection)
+            }
             textView.attributedText = snapshot.content
         } else {
             textView.attributedText = snapshot.content
@@ -280,7 +295,9 @@ final class DictationTranscriptApplicator {
             textView.selectedRange = selection
         }
         if let pastable = textView as? PastableTextView {
-            pastable.dictationProgrammaticEditInFlight = false
+            if suppressReentrantFeedback {
+                pastable.dictationProgrammaticEditInFlight = false
+            }
         }
     }
 

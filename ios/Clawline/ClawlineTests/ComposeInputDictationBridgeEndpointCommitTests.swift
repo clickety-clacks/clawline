@@ -73,6 +73,7 @@ struct DictationCoordinatorTranscriptOwnershipTests {
 
         rig.coordinator.captureComposeSelectionRangeForActivation(capturedRange)
         rig.textView.selectedRange = NSRange(location: initial.utf16.count, length: 0)
+        rig.coordinator.noteComposeSelectionChanged(rig.textView.selectedRange)
         syncContext(rig)
 
         rig.coordinator.startStickyDictation()

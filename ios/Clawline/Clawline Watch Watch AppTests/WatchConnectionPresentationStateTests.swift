@@ -284,4 +284,46 @@ struct WatchConnectionPresentationStateTests {
         #expect(source.contains("if transportState == .probing {\n            if isPhoneReachable {\n                switchToRelayFallback()"))
     }
 
+    @Test("recoverable relay send failures remain on relay retry path")
+    func recoverableRelaySendFailuresStayOnRelayRetryPath() throws {
+        let sourcePath = URL(filePath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appending(path: "Clawline Watch Watch App/Services/WatchProviderTransport.swift")
+        let source = try String(contentsOf: sourcePath, encoding: .utf8)
+        let functionRange = try #require(source.range(of: "private func sendRelayRequest"))
+        let sendRelayRequest = source[functionRange.lowerBound..<source.endIndex]
+
+        #expect(!sendRelayRequest.contains("enterProbing(reason: \"relay unavailable\")"))
+        #expect(!sendRelayRequest.contains("enterProbing(reason: \"relay request failed\")"))
+        #expect(source.contains("buffer(message)\n                    scheduleRelayBufferRetry()\n                    return"))
+    }
+
+    @Test("relay reachability debounce does not apply canceled states")
+    func relayReachabilityDebounceDoesNotApplyCanceledStates() throws {
+        let sourcePath = URL(filePath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appending(path: "Clawline Watch Watch App/Services/WatchProviderTransport.swift")
+        let source = try String(contentsOf: sourcePath, encoding: .utf8)
+
+        #expect(source.contains("catch is CancellationError {\n                return\n            }"))
+        #expect(!source.contains("reachabilityDebounceTask = Task { [weak self] in\n            try? await Task.sleep(for: .seconds(1))"))
+    }
+
+    @Test("direct internet monitor does not terminate active Soniox voice")
+    func directInternetMonitorDoesNotTerminateActiveSonioxVoice() throws {
+        let sourcePath = URL(filePath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appending(path: "Clawline Watch Watch App/Services/WatchVoiceSession.swift")
+        let source = try String(contentsOf: sourcePath, encoding: .utf8)
+        let functionRange = try #require(source.range(of: "private func handleDirectInternetChange"))
+        let handler = source[functionRange.lowerBound..<source.endIndex]
+
+        #expect(handler.contains("hasDirectInternet = available"))
+        #expect(!handler.contains("finalizeAndSend(forceIdleAfterSend: true)"))
+        #expect(!handler.contains("cancelCurrentSpeech(clearQueue: true)"))
+    }
+
 }

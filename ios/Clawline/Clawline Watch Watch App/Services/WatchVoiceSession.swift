@@ -528,18 +528,6 @@ final class WatchVoiceSession {
     private func handleDirectInternetChange(_ available: Bool) {
         guard hasDirectInternet != available else { return }
         hasDirectInternet = available
-
-        guard !available else { return }
-
-        switch phase {
-        case .listening:
-            finalizeAndSend(forceIdleAfterSend: true)
-        case .speaking where activeContextId != nil:
-            cancelCurrentSpeech(clearQueue: true)
-            transitionToIdle()
-        case .idle, .finalizing, .sending, .error, .speaking:
-            break
-        }
     }
 }
 

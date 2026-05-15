@@ -461,7 +461,13 @@ final class WatchProviderTransport: ChatServicing {
     func setPhoneReachable(_ reachable: Bool) {
         reachabilityDebounceTask?.cancel()
         reachabilityDebounceTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(1))
+            do {
+                try await Task.sleep(for: .seconds(1))
+            } catch is CancellationError {
+                return
+            } catch {
+                return
+            }
             await MainActor.run {
                 self?.isPhoneReachable = reachable
                 self?.handleReachabilityChange()
@@ -1068,7 +1074,6 @@ final class WatchProviderTransport: ChatServicing {
     ) async throws -> [String: Any] {
         let session = WCSession.default
         guard session.activationState == .activated, session.isReachable else {
-            enterProbing(reason: "relay unavailable")
             throw TransportError.notConnected
         }
 
@@ -1094,7 +1099,6 @@ final class WatchProviderTransport: ChatServicing {
                 }
             }
         } catch {
-            enterProbing(reason: "relay request failed")
             if Self.shouldTreatRelayRequestErrorAsConnectivityLoss(error) {
                 throw RelayProtocolError.notConnected
             }

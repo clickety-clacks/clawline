@@ -245,6 +245,7 @@ final class WatchProviderTransport: ChatServicing {
                 if Self.shouldBufferRelaySendFailure(error) {
                     buffer(message)
                     scheduleRelayBufferRetry()
+                    return
                 } else {
                     eventBroadcaster.send(
                         .messageError(
@@ -282,7 +283,23 @@ final class WatchProviderTransport: ChatServicing {
             }
         }
 
-        return true
+        return false
+    }
+
+    static func shouldTreatRelayRequestErrorAsConnectivityLoss(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        guard nsError.domain == WCErrorDomain else { return false }
+
+        switch nsError.code {
+        case WCError.Code.notReachable.rawValue,
+             WCError.Code.messageReplyTimedOut.rawValue,
+             WCError.Code.deliveryFailed.rawValue,
+             WCError.Code.sessionInactive.rawValue,
+             WCError.Code.sessionNotActivated.rawValue:
+            return true
+        default:
+            return false
+        }
     }
 
     private func switchToRelayFallback() {
@@ -1078,6 +1095,9 @@ final class WatchProviderTransport: ChatServicing {
             }
         } catch {
             enterProbing(reason: "relay request failed")
+            if Self.shouldTreatRelayRequestErrorAsConnectivityLoss(error) {
+                throw RelayProtocolError.notConnected
+            }
             throw error
         }
 

@@ -57,11 +57,7 @@ final class WatchVoiceSession {
     private(set) var hasDirectInternet: Bool = true
 
     var canUseVoice: Bool {
-        // The mic should prefer Clawline/Soniox whenever credentials exist.
-        // Physical Watches often report no direct Wi-Fi/cellular path while still
-        // having usable paired-phone networking; gating on NWPath made taps fall
-        // through to WatchKit text dictation instead of trying Soniox.
-        credentialStore.sonioxApiKey?.isEmpty == false
+        credentialStore.sonioxApiKey?.isEmpty == false && hasDirectInternet
     }
 
     var onTranscriptReady: ((String) -> Void)?

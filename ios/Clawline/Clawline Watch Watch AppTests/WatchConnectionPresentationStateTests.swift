@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import WatchConnectivity
 @testable import Clawline_Watch_Watch_App
 
 struct WatchConnectionPresentationStateTests {
@@ -249,6 +250,10 @@ struct WatchConnectionPresentationStateTests {
         #expect(WatchProviderTransport.shouldBufferRelaySendFailure(RelayProtocolError.server(code: "not_connected", message: "Reconnecting")))
         #expect(!WatchProviderTransport.shouldBufferRelaySendFailure(RelayProtocolError.server(code: "send_failed", message: "Rejected")))
         #expect(!WatchProviderTransport.shouldBufferRelaySendFailure(WatchProviderTransport.TransportError.authFailed("No token")))
+        #expect(!WatchProviderTransport.shouldBufferRelaySendFailure(CocoaError(.coderInvalidValue)))
+        #expect(WatchProviderTransport.shouldTreatRelayRequestErrorAsConnectivityLoss(NSError(domain: WCErrorDomain, code: WCError.Code.notReachable.rawValue)))
+        #expect(WatchProviderTransport.shouldTreatRelayRequestErrorAsConnectivityLoss(NSError(domain: WCErrorDomain, code: WCError.Code.deliveryFailed.rawValue)))
+        #expect(!WatchProviderTransport.shouldTreatRelayRequestErrorAsConnectivityLoss(NSError(domain: WCErrorDomain, code: WCError.Code.payloadUnsupportedTypes.rawValue)))
     }
 
     @Test("phone reachability recovery uses relay fallback while probing or disconnected")
@@ -262,6 +267,7 @@ struct WatchConnectionPresentationStateTests {
         #expect(source.contains("private func switchToRelayFallback()"))
         #expect(source.contains("private func scheduleRelayBufferRetry()"))
         #expect(source.contains("scheduleRelayBufferRetry()"))
+        #expect(source.contains("throw RelayProtocolError.notConnected"))
         #expect(source.contains("if transportState == .disconnected {\n            if isPhoneReachable {\n                switchToRelayFallback()"))
         #expect(source.contains("if transportState == .probing {\n            if isPhoneReachable {\n                switchToRelayFallback()"))
     }

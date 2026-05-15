@@ -31,12 +31,15 @@ struct DictationTranscriptApplicatorTests {
         #expect(textView.attributedText.string == "hello mars")
     }
 
-    @Test("Applicator publishes bound text view replacements back to the host")
-    func applicatorPublishesBoundTextViewReplacementToHost() {
+    @Test("Editor binding persists bound text view dictation replacement")
+    func editorBindingPersistsBoundTextViewDictationReplacement() {
         let host = MockComposeDraftHost()
         host.setText("hello world", for: host.activeSessionKey)
         let applicator = DictationTranscriptApplicator(host: host)
         let textView = PastableTextView()
+        let bindingDelegate = MockEditorBindingDelegate(host: host)
+        defer { _ = bindingDelegate }
+        textView.delegate = bindingDelegate
         textView.attributedText = NSAttributedString(string: "hello world")
         textView.selectedRange = NSRange(location: 11, length: 0)
         applicator.setComposeTextView(textView)
@@ -55,10 +58,11 @@ struct DictationTranscriptApplicatorTests {
 
         #expect(textView.attributedText.string == "hello mars")
         #expect(host.currentText(for: host.activeSessionKey) == "hello mars")
+        #expect(host.applySnapshotCallCount == 0)
     }
 
-    @Test("Applicator preserves host attachments when publishing a bound text view replacement")
-    func applicatorPreservesHostAttachmentsWhenPublishingBoundTextViewReplacement() {
+    @Test("Editor binding preserves referenced attachments after bound text view replacement")
+    func editorBindingPreservesReferencedAttachmentsAfterBoundTextViewReplacement() {
         let host = MockComposeDraftHost()
         let attachment = makePendingAttachment()
         let content = NSMutableAttributedString(string: "seed ")
@@ -76,6 +80,9 @@ struct DictationTranscriptApplicatorTests {
         )
         let applicator = DictationTranscriptApplicator(host: host)
         let textView = PastableTextView()
+        let bindingDelegate = MockEditorBindingDelegate(host: host)
+        defer { _ = bindingDelegate }
+        textView.delegate = bindingDelegate
         textView.attributedText = content
         textView.selectedRange = NSRange(location: 5, length: 0)
         applicator.setComposeTextView(textView)
@@ -92,12 +99,13 @@ struct DictationTranscriptApplicatorTests {
             )
         )
 
+        #expect(textView.attributedText.string.hasPrefix("seed dictated"))
         #expect(host.currentText(for: host.activeSessionKey).hasPrefix("seed dictated"))
         #expect(host.currentAttachments(for: host.activeSessionKey).keys.contains(attachment.id))
     }
 
-    @Test("Applicator drops host attachments removed by a bound text view replacement")
-    func applicatorDropsHostAttachmentsRemovedByBoundTextViewReplacement() {
+    @Test("Editor binding prunes unreferenced attachments after bound text view replacement")
+    func editorBindingPrunesUnreferencedAttachmentsAfterBoundTextViewReplacement() {
         let host = MockComposeDraftHost()
         let attachment = makePendingAttachment()
         let content = NSMutableAttributedString(string: "seed ")
@@ -115,6 +123,9 @@ struct DictationTranscriptApplicatorTests {
         )
         let applicator = DictationTranscriptApplicator(host: host)
         let textView = PastableTextView()
+        let bindingDelegate = MockEditorBindingDelegate(host: host)
+        defer { _ = bindingDelegate }
+        textView.delegate = bindingDelegate
         textView.attributedText = content
         textView.selectedRange = NSRange(location: 6, length: 0)
         applicator.setComposeTextView(textView)
@@ -131,6 +142,7 @@ struct DictationTranscriptApplicatorTests {
             )
         )
 
+        #expect(textView.attributedText.string == "seed dictated")
         #expect(host.currentText(for: host.activeSessionKey) == "seed dictated")
         #expect(host.currentAttachments(for: host.activeSessionKey).isEmpty)
     }

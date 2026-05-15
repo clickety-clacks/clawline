@@ -1099,12 +1099,15 @@ struct DictationCoordinatorTests {
         #expect(coordinator.errorMessage == nil)
     }
 
-    @Test("Walkie dictation publishes transcript into the prompt host")
+    @Test("Walkie dictation applies transcript into the bound compose view")
     @MainActor
-    func walkieDictationPublishesTranscriptIntoPromptHost() async {
+    func walkieDictationAppliesTranscriptIntoBoundComposeView() async {
         let harness = DictationTestHarness()
         let coordinator = harness.makeCoordinator()
         let textView = PastableTextView()
+        let bindingDelegate = MockEditorBindingDelegate(host: harness.host)
+        defer { _ = bindingDelegate }
+        textView.delegate = bindingDelegate
         textView.attributedText = NSAttributedString(string: "")
         textView.selectedRange = NSRange(location: 0, length: 0)
         coordinator.setComposeTextView(textView)
@@ -1132,7 +1135,6 @@ struct DictationCoordinatorTests {
 
         await waitUntil {
             textView.attributedText.string == "walkie transcript"
-                && harness.host.currentText(for: harness.host.activeSessionKey) == "walkie transcript"
         }
 
         #expect(textView.attributedText.string == "walkie transcript")
@@ -1505,6 +1507,7 @@ final class DictationTestHarness {
 @MainActor
 final class MockComposeDraftHost: DictationComposeDraftHosting {
     var activeSessionKey: String = "agent:main:test:main"
+    private(set) var applySnapshotCallCount = 0
     private var drafts: [String: ComposeDraftSnapshot] = ["agent:main:test:main": .empty]
 
     func captureComposeDraftSnapshot(for sessionKey: String) -> ComposeDraftSnapshot {
@@ -1529,6 +1532,7 @@ final class MockComposeDraftHost: DictationComposeDraftHosting {
                                    to sessionKey: String,
                                    moveCursorToEnd: Bool,
                                    announceEditorReset: Bool) {
+        applySnapshotCallCount += 1
         drafts[sessionKey] = snapshot
     }
 
@@ -1546,6 +1550,29 @@ final class MockComposeDraftHost: DictationComposeDraftHosting {
 
     func currentAttachments(for sessionKey: String) -> [UUID: PendingAttachment] {
         drafts[sessionKey]?.attachments ?? [:]
+    }
+}
+
+@MainActor
+final class MockEditorBindingDelegate: NSObject, UITextViewDelegate {
+    private let host: MockComposeDraftHost
+
+    init(host: MockComposeDraftHost) {
+        self.host = host
+    }
+
+    func textViewDidChange(_ textView: UITextView) {
+        let content = textView.attributedText ?? NSAttributedString(string: "")
+        let referencedAttachmentIds = Set(content.pendingAttachmentIds())
+        let attachments = host.currentAttachments(for: host.activeSessionKey)
+            .filter { referencedAttachmentIds.contains($0.key) }
+        host.setSnapshot(
+            ComposeDraftSnapshot(
+                content: content,
+                attachments: attachments
+            ),
+            for: host.activeSessionKey
+        )
     }
 }
 

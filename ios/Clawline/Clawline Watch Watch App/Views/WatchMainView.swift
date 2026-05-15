@@ -468,7 +468,7 @@ struct WatchMainView: View {
         case .speaking:
             voiceSession.bargeIn()
         case .idle, .error:
-            if presentationState.voiceInputAvailable {
+            if voiceSession.canUseVoice {
                 voiceSession.startTap()
             } else {
                 Task { await requestTextInput() }
@@ -498,7 +498,7 @@ struct WatchMainView: View {
     }
 
     private func beginLongPressAction() {
-        guard presentationState.voiceInputAvailable else { return }
+        guard voiceSession.canUseVoice else { return }
         holdVoiceActive = true
         voiceSession.startHold()
     }

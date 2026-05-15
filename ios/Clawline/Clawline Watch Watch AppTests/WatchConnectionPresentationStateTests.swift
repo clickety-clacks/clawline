@@ -237,7 +237,33 @@ struct WatchConnectionPresentationStateTests {
         let source = try String(contentsOf: sourcePath, encoding: .utf8)
 
         #expect(!source.contains("transport.transportState == .disconnected || !presentationState.voiceInputAvailable"))
-        #expect(source.contains("if presentationState.voiceInputAvailable {\n                voiceSession.startTap()"))
+        #expect(source.contains("if voiceSession.canUseVoice {\n                voiceSession.startTap()"))
+        #expect(source.contains("guard voiceSession.canUseVoice else { return }\n        holdVoiceActive = true"))
+    }
+
+    @Test("relay transport outages are buffered while server send errors remain terminal")
+    @MainActor
+    func relaySendFailureClassificationBuffersOnlyRecoverableTransportLoss() {
+        #expect(WatchProviderTransport.shouldBufferRelaySendFailure(WatchProviderTransport.TransportError.notConnected))
+        #expect(WatchProviderTransport.shouldBufferRelaySendFailure(RelayProtocolError.notConnected))
+        #expect(WatchProviderTransport.shouldBufferRelaySendFailure(RelayProtocolError.server(code: "not_connected", message: "Reconnecting")))
+        #expect(!WatchProviderTransport.shouldBufferRelaySendFailure(RelayProtocolError.server(code: "send_failed", message: "Rejected")))
+        #expect(!WatchProviderTransport.shouldBufferRelaySendFailure(WatchProviderTransport.TransportError.authFailed("No token")))
+    }
+
+    @Test("phone reachability recovery uses relay fallback while probing or disconnected")
+    func phoneReachabilityRecoverySwitchesBackToRelayFallback() throws {
+        let sourcePath = URL(filePath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appending(path: "Clawline Watch Watch App/Services/WatchProviderTransport.swift")
+        let source = try String(contentsOf: sourcePath, encoding: .utf8)
+
+        #expect(source.contains("private func switchToRelayFallback()"))
+        #expect(source.contains("private func scheduleRelayBufferRetry()"))
+        #expect(source.contains("scheduleRelayBufferRetry()"))
+        #expect(source.contains("if transportState == .disconnected {\n            if isPhoneReachable {\n                switchToRelayFallback()"))
+        #expect(source.contains("if transportState == .probing {\n            if isPhoneReachable {\n                switchToRelayFallback()"))
     }
 
 }

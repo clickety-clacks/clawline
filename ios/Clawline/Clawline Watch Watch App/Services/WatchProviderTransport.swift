@@ -160,6 +160,7 @@ final class WatchProviderTransport: ChatServicing {
     private var relayProbeTask: Task<Void, Never>?
     private var probingTask: Task<Void, Never>?
     private var reachabilityDebounceTask: Task<Void, Never>?
+    private var relayBufferRetryTask: Task<Void, Never>?
 
     private var isPhoneReachable: Bool = false
     private var isDirectNetworkReachable: Bool = true
@@ -241,18 +242,56 @@ final class WatchProviderTransport: ChatServicing {
                 )
                 eventBroadcaster.send(.messageAcked(id: id))
             } catch {
-                eventBroadcaster.send(
-                    .messageError(
-                        messageId: id,
-                        code: "send_failed",
-                        message: error.localizedDescription
+                if Self.shouldBufferRelaySendFailure(error) {
+                    buffer(message)
+                    scheduleRelayBufferRetry()
+                } else {
+                    eventBroadcaster.send(
+                        .messageError(
+                            messageId: id,
+                            code: "send_failed",
+                            message: error.localizedDescription
+                        )
                     )
-                )
+                }
                 throw error
             }
         case .probing, .disconnected:
             buffer(message)
         }
+    }
+
+    static func shouldBufferRelaySendFailure(_ error: Error) -> Bool {
+        if let transportError = error as? TransportError {
+            switch transportError {
+            case .notConnected:
+                return true
+            case .missingCredentials, .authFailed, .malformedReply, .unsupported:
+                return false
+            }
+        }
+
+        if let relayError = error as? RelayProtocolError {
+            switch relayError {
+            case .notConnected:
+                return true
+            case .server(let code, _):
+                return code == "not_connected"
+            case .malformed, .unsupported:
+                return false
+            }
+        }
+
+        return true
+    }
+
+    private func switchToRelayFallback() {
+        guard credentialStore.hasProviderCredentials, isPhoneReachable else { return }
+        probingTask?.cancel()
+        probingTask = nil
+        transportState = .relay
+        startRelayProbeLoop()
+        flushBufferedMessages()
     }
 
     func sendInteractiveCallback(sourceMessageId: String, action: String, data: JSONValue?) async throws {
@@ -426,9 +465,16 @@ final class WatchProviderTransport: ChatServicing {
 
     private func handleReachabilityChange() {
         if transportState == .disconnected {
+            if isPhoneReachable {
+                switchToRelayFallback()
+                return
+            }
             enterProbing(reason: "reachability changed")
         }
         if transportState == .probing {
+            if isPhoneReachable {
+                switchToRelayFallback()
+            }
             return
         }
         if transportState == .relay {
@@ -547,6 +593,8 @@ final class WatchProviderTransport: ChatServicing {
     private func enterProbing(reason: String) {
         _ = reason
         guard transportState != .probing else { return }
+        relayBufferRetryTask?.cancel()
+        relayBufferRetryTask = nil
         transportState = .probing
         teardownDirectConnection()
 
@@ -609,6 +657,20 @@ final class WatchProviderTransport: ChatServicing {
     private func stopRelayProbeLoop() {
         relayProbeTask?.cancel()
         relayProbeTask = nil
+    }
+
+    private func scheduleRelayBufferRetry() {
+        guard transportState == .relay, isPhoneReachable else { return }
+
+        relayBufferRetryTask?.cancel()
+        relayBufferRetryTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                guard let self, self.transportState == .relay else { return }
+                self.flushBufferedMessages()
+            }
+        }
     }
 
     private func startPingLoop() {

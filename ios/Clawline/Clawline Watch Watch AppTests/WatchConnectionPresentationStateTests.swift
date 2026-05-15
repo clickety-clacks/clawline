@@ -229,6 +229,18 @@ struct WatchConnectionPresentationStateTests {
         #expect(voiceSession.canUseVoice)
     }
 
+    @Test("configured Soniox keeps mic tap on Clawline voice even when direct network monitor is false")
+    func configuredSonioxDoesNotFallThroughToSystemTextInputWhenDirectNetworkIsFalse() throws {
+        let sourcePath = URL(filePath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appending(path: "Clawline Watch Watch App/Services/WatchVoiceSession.swift")
+        let source = try String(contentsOf: sourcePath, encoding: .utf8)
+
+        #expect(source.contains("credentialStore.sonioxApiKey?.isEmpty == false"))
+        #expect(!source.contains("credentialStore.sonioxApiKey?.isEmpty == false && hasDirectInternet"))
+    }
+
     @Test("tap action does not force text entry just because transport is disconnected")
     func tapActionDoesNotPreferTextEntryWhenVoiceIsAvailable() throws {
         let sourcePath = URL(filePath: #filePath)

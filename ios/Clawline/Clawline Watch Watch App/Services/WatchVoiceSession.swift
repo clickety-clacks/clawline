@@ -57,7 +57,8 @@ final class WatchVoiceSession {
     private(set) var hasDirectInternet: Bool = true
 
     var canUseVoice: Bool {
-        credentialStore.sonioxApiKey?.isEmpty == false && hasDirectInternet
+        // A false NWPath on physical Watch must not send mic taps to WatchKit text input.
+        credentialStore.sonioxApiKey?.isEmpty == false
     }
 
     var onTranscriptReady: ((String) -> Void)?

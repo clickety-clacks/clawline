@@ -100,40 +100,40 @@ struct WatchMainView: View {
         showsChannelRow: Bool
     ) -> some View {
         let entries = conversationStore.visibleEntries(for: stream?.sessionKey)
-        let pages = Self.historyPages(from: entries)
-        let viewportHeight = max(0, availableSize.height - (WatchShellMetrics.verticalPadding * 2))
-        let historyHeight = WatchShellMetrics.historyHeight(for: availableSize)
+        let pagedHistory = Self.pagedHistory(from: entries)
+        let viewportHeight = max(0, availableSize.height + WatchShellMetrics.pageOverscan)
         let bottomAnchorID = "watch-shell-bottom-\(stream?.sessionKey ?? placeholderPageKey)"
 
         ScrollViewReader { proxy in
             ScrollView(.vertical) {
                 VStack(spacing: WatchShellMetrics.shellSpacing) {
-                    ForEach(pages) { page in
-                        historyPage(page.entries, height: historyHeight)
+                    ForEach(pagedHistory.historyPages) { page in
+                        historyPage(
+                            page.entries,
+                            stream: stream,
+                            height: viewportHeight,
+                            ringDiameter: ringDiameter,
+                            showsChannelRow: showsChannelRow
+                        )
                             .id(page.id)
                     }
 
-                    if let shellMessage {
-                        shellMessageView(shellMessage)
-                    }
-
-                    ringControl(ringDiameter: ringDiameter)
-
-                    if showsChannelRow {
-                        channelRow(for: stream)
-                    }
-
-                    Color.clear
-                        .frame(height: WatchShellMetrics.controlBottomBreathingRoom)
+                    currentConversationPage(
+                        entries: pagedHistory.currentPage?.entries ?? [],
+                        stream: stream,
+                        height: viewportHeight,
+                        ringDiameter: ringDiameter,
+                        shellMessage: shellMessage,
+                        showsChannelRow: showsChannelRow
+                    )
                         .id(bottomAnchorID)
                 }
-                .frame(maxWidth: .infinity, minHeight: viewportHeight, alignment: .bottom)
+                .frame(maxWidth: .infinity, alignment: .bottom)
                 .padding(.horizontal, WatchShellMetrics.horizontalPadding)
-                .padding(.top, WatchShellMetrics.verticalPadding)
-                .padding(.bottom, max(0, WatchShellMetrics.verticalPadding - WatchShellMetrics.controlBottomBreathingRoom))
                 .scrollTargetLayout()
             }
             .defaultScrollAnchor(.bottom)
+            .scrollTargetBehavior(.paging)
             .scrollIndicators(.hidden)
             .accessibilityLabel("Unified conversation and microphone surface")
             .accessibilityHint("Swipe to move through conversation history. The microphone stays in the same vertical scroll surface below the newest messages.")
@@ -146,19 +146,74 @@ struct WatchMainView: View {
         }
     }
 
-    private func historyPage(_ entries: [WatchConversationStore.Entry], height: CGFloat) -> some View {
-        VStack(spacing: 6) {
+    private func currentConversationPage(
+        entries: [WatchConversationStore.Entry],
+        stream: StreamSession?,
+        height: CGFloat,
+        ringDiameter: CGFloat,
+        shellMessage: String?,
+        showsChannelRow: Bool
+    ) -> some View {
+        VStack(spacing: WatchShellMetrics.shellSpacing) {
             Spacer(minLength: 0)
+
             ForEach(entries) { entry in
                 historyBubble(entry)
             }
+
+            if let shellMessage {
+                shellMessageView(shellMessage)
+            }
+
+            ringControl(ringDiameter: ringDiameter)
+
+            if showsChannelRow {
+                channelRow(for: stream)
+            }
+
+            Color.clear
+                .frame(height: WatchShellMetrics.controlBottomBreathingRoom)
+        }
+        .frame(maxWidth: .infinity, minHeight: height, maxHeight: height, alignment: .bottom)
+    }
+
+    private func historyPage(
+        _ entries: [WatchConversationStore.Entry],
+        stream: StreamSession?,
+        height: CGFloat,
+        ringDiameter: CGFloat,
+        showsChannelRow: Bool
+    ) -> some View {
+        VStack(spacing: WatchShellMetrics.shellSpacing) {
+            Spacer(minLength: 0)
+
+            ForEach(entries) { entry in
+                historyBubble(entry)
+            }
+
+            ringControl(ringDiameter: ringDiameter)
+
+            if showsChannelRow {
+                channelRow(for: stream)
+            }
+
+            Color.clear
+                .frame(height: WatchShellMetrics.controlBottomBreathingRoom)
         }
         .frame(maxWidth: .infinity, minHeight: height, maxHeight: height, alignment: .bottom)
         .padding(.horizontal, 2)
         .padding(.vertical, 2)
     }
 
-    nonisolated static func historyPages(from entries: [WatchConversationStore.Entry]) -> [WatchHistoryPage] {
+    static func pagedHistory(from entries: [WatchConversationStore.Entry]) -> WatchPagedHistory {
+        let pages = historyPages(from: entries)
+        guard let currentPage = pages.last else {
+            return WatchPagedHistory(historyPages: [], currentPage: nil)
+        }
+        return WatchPagedHistory(historyPages: Array(pages.dropLast()), currentPage: currentPage)
+    }
+
+    static func historyPages(from entries: [WatchConversationStore.Entry]) -> [WatchHistoryPage] {
         let pageSize = WatchShellMetrics.historyEntriesPerPage
         guard pageSize > 0 else { return [] }
 
@@ -267,17 +322,16 @@ struct WatchMainView: View {
     }
 
 
+    @ViewBuilder
     private var routeChipView: some View {
-        HStack(spacing: 3) {
-            Image(systemName: presentationState.routeChip.systemImage)
-                .font(.system(size: 8, weight: .bold))
-            Text(presentationState.routeChip.label)
-                .font(.system(size: 9, weight: .bold, design: .rounded))
-                .lineLimit(1)
-                .minimumScaleFactor(0.65)
+        if let routeIconName {
+            Image(systemName: routeIconName)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(.secondary)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(routeAccessibilityLabel)
+                .accessibilityIdentifier("watch-route-chip")
         }
-        .foregroundStyle(presentationState.routeChip.color)
-        .accessibilityIdentifier("watch-route-chip")
     }
 
     private var centerIcon: String {
@@ -336,6 +390,19 @@ struct WatchMainView: View {
         }
     }
 
+    private var routeAccessibilityLabel: String {
+        switch transport.transportState {
+        case .direct:
+            return "Direct"
+        case .relay:
+            return "Via iPhone"
+        case .probing:
+            return "Reconnecting"
+        case .disconnected:
+            return "No Connection"
+        }
+    }
+
     private func channelRowTitle(for stream: StreamSession?) -> String {
         if let stream {
             return stream.displayName
@@ -354,7 +421,7 @@ struct WatchMainView: View {
         )
     }
 
-    nonisolated static func shellMessage(
+    static func shellMessage(
         hasProviderCredentials: Bool,
         transportState: WatchProviderTransportState,
         statusText: String,
@@ -448,6 +515,11 @@ struct WatchMainView: View {
 struct WatchHistoryPage: Identifiable, Equatable {
     let id: String
     let entries: [WatchConversationStore.Entry]
+}
+
+struct WatchPagedHistory: Equatable {
+    let historyPages: [WatchHistoryPage]
+    let currentPage: WatchHistoryPage?
 }
 
 

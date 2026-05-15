@@ -77,7 +77,7 @@ struct WatchConnectionPresentationStateTests {
 
     @Test("watch controls reserve breathing room at the bottom of the unified scroll surface")
     func controlsReserveBottomBreathingRoom() {
-        #expect(WatchShellMetrics.controlBottomBreathingRoom >= WatchShellMetrics.verticalPadding)
+        #expect(WatchShellMetrics.controlBottomBreathingRoom > 0)
     }
 
     @Test("voice-active ring state preserves non-direct transport routes")
@@ -177,6 +177,7 @@ struct WatchConnectionPresentationStateTests {
     }
 
     @Test("channel load failures are surfaced instead of infinite loading")
+    @MainActor
     func shellMessageSurfacesChannelFailures() {
         #expect(
             WatchMainView.shellMessage(
@@ -191,6 +192,7 @@ struct WatchConnectionPresentationStateTests {
     }
 
     @Test("transport outages are surfaced in shell copy")
+    @MainActor
     func shellMessageSurfacesTransportOutages() {
         #expect(
             WatchMainView.shellMessage(

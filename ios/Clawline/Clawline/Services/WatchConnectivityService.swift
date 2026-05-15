@@ -248,13 +248,14 @@ final class WatchConnectivityService: NSObject, WatchConnectivityServicing {
     private func handleChatSend(requestId: String, payload: [String: Any], replyHandler: @escaping ([String: Any]) -> Void) {
         let content = payload["content"] as? String ?? ""
         let sessionKey = payload["sessionKey"] as? String
-        let clientId = payload["id"] as? String ?? UUID().uuidString
+        let clientId = payload["id"] as? String ?? "c_\(UUID().uuidString)"
         let attachments = decodeAttachments(payload["attachments"])
 
         activateRelay()
 
         Task {
             do {
+                try await ensureRelayChatTransportReady()
                 try await chatService.send(
                     id: clientId,
                     content: content,
@@ -269,6 +270,17 @@ final class WatchConnectivityService: NSObject, WatchConnectivityServicing {
             } catch {
                 replyError(for: error, fallbackCode: "send_failed", replyHandler: replyHandler)
             }
+        }
+    }
+
+    private func ensureRelayChatTransportReady() async throws {
+        guard !chatService.isTransportReadyForSend else { return }
+        guard let token = authManager.token else {
+            throw ProviderChatService.Error.notConnected
+        }
+        try await chatService.connect(token: token, lastMessageId: nil)
+        guard chatService.isTransportReadyForSend else {
+            throw ProviderChatService.Error.notConnected
         }
     }
 

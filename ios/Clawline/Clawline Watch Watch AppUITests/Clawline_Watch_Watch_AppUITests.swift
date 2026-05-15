@@ -8,7 +8,7 @@ final class Clawline_Watch_Watch_AppUITests: XCTestCase {
     @MainActor
     func testCaptureSolidRingStatesAndHistoryScroll() throws {
         let scenario = Self.compileTimeScenario
-        captureScenario(named: scenario.name, expectedRouteLabel: scenario.expectedRouteLabel, screenshotName: scenario.screenshotName) { app in
+        captureScenario(named: scenario.name, expectsRouteChip: scenario.expectsRouteChip, screenshotName: scenario.screenshotName) { app in
             guard scenario.name == "direct" else { return }
             self.saveScreenshot(app: app, name: "watch-direct-history-initial")
             app.swipeDown()
@@ -18,26 +18,30 @@ final class Clawline_Watch_Watch_AppUITests: XCTestCase {
         }
     }
 
-    private static var compileTimeScenario: (name: String, expectedRouteLabel: String, screenshotName: String) {
+    private static var compileTimeScenario: (name: String, expectsRouteChip: Bool, screenshotName: String) {
 #if WATCH_UI_SCENARIO_RELAY
-        return ("relay", "Via iPhone", "watch-relay-solid")
+        return ("relay", true, "watch-relay-solid")
 #elseif WATCH_UI_SCENARIO_RECONNECTING
-        return ("reconnecting", "Reconnecting…", "watch-reconnecting-solid")
+        return ("reconnecting", false, "watch-reconnecting-solid")
 #elseif WATCH_UI_SCENARIO_DISCONNECTED
-        return ("disconnected", "No Connection", "watch-disconnected-solid")
+        return ("disconnected", false, "watch-disconnected-solid")
 #else
-        return ("direct", "Direct", "watch-direct-solid")
+        return ("direct", true, "watch-direct-solid")
 #endif
     }
 
     @MainActor
-    private func captureScenario(named scenario: String, expectedRouteLabel: String, screenshotName: String, afterLaunch: ((XCUIApplication) -> Void)? = nil) {
+    private func captureScenario(named scenario: String, expectsRouteChip: Bool, screenshotName: String, afterLaunch: ((XCUIApplication) -> Void)? = nil) {
         let app = XCUIApplication()
         app.launchArguments += ["-WATCH_UI_TEST_SCENARIO", scenario]
         app.launch()
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10))
-        let routeLabel = app.staticTexts[expectedRouteLabel]
-        XCTAssertTrue(routeLabel.waitForExistence(timeout: 10), "Expected route label \(expectedRouteLabel) for scenario \(scenario)")
+        let ringControl = app.descendants(matching: .any)["watch-ring-control"]
+        XCTAssertTrue(ringControl.waitForExistence(timeout: 10), "Expected ring control for scenario \(scenario)")
+        if expectsRouteChip {
+            let channelTitle = app.staticTexts["Flynn"]
+            XCTAssertTrue(channelTitle.waitForExistence(timeout: 10), "Expected channel row for scenario \(scenario)")
+        }
         sleep(1)
         afterLaunch?(app)
         saveScreenshot(app: app, name: screenshotName)

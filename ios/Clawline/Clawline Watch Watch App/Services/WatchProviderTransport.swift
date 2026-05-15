@@ -241,8 +241,13 @@ final class WatchProviderTransport: ChatServicing {
                 )
                 eventBroadcaster.send(.messageAcked(id: id))
             } catch {
-                enterProbing(reason: "relay send failed")
-                buffer(message)
+                eventBroadcaster.send(
+                    .messageError(
+                        messageId: id,
+                        code: "send_failed",
+                        message: error.localizedDescription
+                    )
+                )
                 throw error
             }
         case .probing, .disconnected:

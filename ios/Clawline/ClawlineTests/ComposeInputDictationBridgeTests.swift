@@ -31,6 +31,110 @@ struct DictationTranscriptApplicatorTests {
         #expect(textView.attributedText.string == "hello mars")
     }
 
+    @Test("Applicator publishes bound text view replacements back to the host")
+    func applicatorPublishesBoundTextViewReplacementToHost() {
+        let host = MockComposeDraftHost()
+        host.setText("hello world", for: host.activeSessionKey)
+        let applicator = DictationTranscriptApplicator(host: host)
+        let textView = PastableTextView()
+        textView.attributedText = NSAttributedString(string: "hello world")
+        textView.selectedRange = NSRange(location: 11, length: 0)
+        applicator.setComposeTextView(textView)
+
+        applicator.apply(
+            DictationTextApplicationPlan(
+                sessionKey: host.activeSessionKey,
+                baseSnapshot: host.captureComposeDraftSnapshot(for: host.activeSessionKey),
+                replacementRange: NSRange(location: 6, length: 5),
+                fallbackLocation: 11,
+                replacementText: NSAttributedString(string: "mars"),
+                selectionPolicy: .followTranscriptEndWhenSelectionAlreadyAtEnd,
+                suppressReentrantFeedback: true
+            )
+        )
+
+        #expect(textView.attributedText.string == "hello mars")
+        #expect(host.currentText(for: host.activeSessionKey) == "hello mars")
+    }
+
+    @Test("Applicator preserves host attachments when publishing a bound text view replacement")
+    func applicatorPreservesHostAttachmentsWhenPublishingBoundTextViewReplacement() {
+        let host = MockComposeDraftHost()
+        let attachment = makePendingAttachment()
+        let content = NSMutableAttributedString(string: "seed ")
+        content.append(NSAttributedString(attachment: PendingTextAttachment(
+            id: attachment.id,
+            thumbnail: attachment.thumbnail,
+            accessibilityLabel: attachment.accessibilityLabel
+        )))
+        host.setSnapshot(
+            ComposeDraftSnapshot(
+                content: content,
+                attachments: [attachment.id: attachment]
+            ),
+            for: host.activeSessionKey
+        )
+        let applicator = DictationTranscriptApplicator(host: host)
+        let textView = PastableTextView()
+        textView.attributedText = content
+        textView.selectedRange = NSRange(location: 5, length: 0)
+        applicator.setComposeTextView(textView)
+
+        applicator.apply(
+            DictationTextApplicationPlan(
+                sessionKey: host.activeSessionKey,
+                baseSnapshot: host.captureComposeDraftSnapshot(for: host.activeSessionKey),
+                replacementRange: NSRange(location: 5, length: 0),
+                fallbackLocation: 5,
+                replacementText: NSAttributedString(string: "dictated"),
+                selectionPolicy: .followTranscriptEndWhenSelectionAlreadyAtEnd,
+                suppressReentrantFeedback: true
+            )
+        )
+
+        #expect(host.currentText(for: host.activeSessionKey).hasPrefix("seed dictated"))
+        #expect(host.currentAttachments(for: host.activeSessionKey).keys.contains(attachment.id))
+    }
+
+    @Test("Applicator drops host attachments removed by a bound text view replacement")
+    func applicatorDropsHostAttachmentsRemovedByBoundTextViewReplacement() {
+        let host = MockComposeDraftHost()
+        let attachment = makePendingAttachment()
+        let content = NSMutableAttributedString(string: "seed ")
+        content.append(NSAttributedString(attachment: PendingTextAttachment(
+            id: attachment.id,
+            thumbnail: attachment.thumbnail,
+            accessibilityLabel: attachment.accessibilityLabel
+        )))
+        host.setSnapshot(
+            ComposeDraftSnapshot(
+                content: content,
+                attachments: [attachment.id: attachment]
+            ),
+            for: host.activeSessionKey
+        )
+        let applicator = DictationTranscriptApplicator(host: host)
+        let textView = PastableTextView()
+        textView.attributedText = content
+        textView.selectedRange = NSRange(location: 6, length: 0)
+        applicator.setComposeTextView(textView)
+
+        applicator.apply(
+            DictationTextApplicationPlan(
+                sessionKey: host.activeSessionKey,
+                baseSnapshot: host.captureComposeDraftSnapshot(for: host.activeSessionKey),
+                replacementRange: NSRange(location: 5, length: 1),
+                fallbackLocation: 6,
+                replacementText: NSAttributedString(string: "dictated"),
+                selectionPolicy: .followTranscriptEndWhenSelectionAlreadyAtEnd,
+                suppressReentrantFeedback: true
+            )
+        )
+
+        #expect(host.currentText(for: host.activeSessionKey) == "seed dictated")
+        #expect(host.currentAttachments(for: host.activeSessionKey).isEmpty)
+    }
+
     @Test("Applicator collapses the consumed selection after dictation replacement")
     func applicatorCollapsesConsumedSelectionAfterReplacement() {
         let host = MockComposeDraftHost()

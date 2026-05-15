@@ -1099,6 +1099,46 @@ struct DictationCoordinatorTests {
         #expect(coordinator.errorMessage == nil)
     }
 
+    @Test("Walkie dictation publishes transcript into the prompt host")
+    @MainActor
+    func walkieDictationPublishesTranscriptIntoPromptHost() async {
+        let harness = DictationTestHarness()
+        let coordinator = harness.makeCoordinator()
+        let textView = PastableTextView()
+        textView.attributedText = NSAttributedString(string: "")
+        textView.selectedRange = NSRange(location: 0, length: 0)
+        coordinator.setComposeTextView(textView)
+
+        coordinator.updateContext(
+            sessionKey: harness.host.activeSessionKey,
+            composeIsEmpty: true,
+            textFieldFocused: false,
+            reduceMotionEnabled: false
+        )
+
+        coordinator.startWalkieTalkieDictation()
+        await waitUntil { coordinator.isListeningReady }
+
+        harness.client.emit(
+            .response(
+                SonioxStreamingResponse(
+                    tokens: [SonioxTranscriptToken(text: "walkie transcript", isFinal: false)],
+                    finished: false,
+                    errorCode: nil,
+                    errorMessage: nil
+                )
+            )
+        )
+
+        await waitUntil {
+            textView.attributedText.string == "walkie transcript"
+                && harness.host.currentText(for: harness.host.activeSessionKey) == "walkie transcript"
+        }
+
+        #expect(textView.attributedText.string == "walkie transcript")
+        #expect(harness.host.currentText(for: harness.host.activeSessionKey) == "walkie transcript")
+    }
+
     @Test("Sticky dictation can start while text is selected")
     @MainActor
     func stickyDictationCanStartWithSelectedText() async {

@@ -143,6 +143,7 @@ final class DictationTranscriptApplicator {
         }
 
         if let textView = composeTextView {
+            let currentSnapshot = host?.captureComposeDraftSnapshot(for: plan.sessionKey)
             let safeRange = safeReplacementRange(
                 selectedRange: plan.replacementRange,
                 textLength: textView.attributedText.length,
@@ -154,6 +155,21 @@ final class DictationTranscriptApplicator {
                 with: plan.replacementText.string,
                 selectionPolicy: plan.selectionPolicy,
                 suppressReentrantFeedback: plan.suppressReentrantFeedback
+            )
+            let attachmentSource = plan.baseSnapshot.attachments.merging(
+                currentSnapshot?.attachments ?? [:]
+            ) { _, current in current }
+            host?.applyComposeDraftSnapshot(
+                ComposeDraftSnapshot(
+                    content: textView.attributedText ?? NSAttributedString(string: ""),
+                    attachments: referencedAttachments(
+                        from: attachmentSource,
+                        in: textView.attributedText ?? NSAttributedString(string: "")
+                    )
+                ),
+                to: plan.sessionKey,
+                moveCursorToEnd: false,
+                announceEditorReset: false
             )
             return
         }
@@ -204,6 +220,14 @@ final class DictationTranscriptApplicator {
             : min(max(selectedRange.location, 0), textLength)
         let length = min(max(replacementLength, 0), max(0, textLength - location))
         return NSRange(location: location, length: length)
+    }
+
+    private func referencedAttachments(
+        from attachments: [UUID: PendingAttachment],
+        in content: NSAttributedString
+    ) -> [UUID: PendingAttachment] {
+        let referencedIds = Set(content.pendingAttachmentIds())
+        return attachments.filter { referencedIds.contains($0.key) }
     }
 
     private func isValidReplacementRange(_ range: NSRange, textLength: Int) -> Bool {

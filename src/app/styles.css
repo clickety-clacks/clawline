@@ -924,6 +924,50 @@ html[data-appearance="light"] body::before {
   white-space: pre-wrap;
 }
 
+.message-markdown h1,
+.message-markdown h2,
+.message-markdown h3,
+.message-markdown h4,
+.message-markdown h5,
+.message-markdown h6 {
+  margin: 0.15rem 0 0;
+  color: var(--color-text);
+  font-weight: 700;
+  line-height: 1.22;
+}
+
+.message-markdown h1 {
+  font-size: 1.35em;
+}
+
+.message-markdown h2 {
+  font-size: 1.22em;
+}
+
+.message-markdown h3,
+.message-markdown h4,
+.message-markdown h5,
+.message-markdown h6 {
+  font-size: 1.08em;
+}
+
+.message-markdown ul,
+.message-markdown ol {
+  display: grid;
+  gap: 0.32rem;
+  padding-left: 1.35rem;
+}
+
+.message-markdown li > p {
+  margin: 0.2rem 0;
+}
+
+.message-markdown blockquote {
+  padding-left: 0.85rem;
+  border-left: 3px solid color-mix(in srgb, var(--color-accent-warm) 42%, transparent);
+  color: var(--color-text-secondary);
+}
+
 .message-markdown p,
 .message-markdown li {
   overflow-wrap: anywhere;
@@ -935,6 +979,7 @@ html[data-appearance="light"] body::before {
 
 .message-markdown pre {
   margin: 0;
+  max-width: 100%;
   padding: 16px;
   border-radius: 12px;
   background: #1e1e1e;

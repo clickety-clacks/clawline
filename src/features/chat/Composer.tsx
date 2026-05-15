@@ -42,8 +42,12 @@ export function Composer({
   const [submitError, setSubmitError] = useState<string | null>(null);
   const fileInputId = useId();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const allowNextLineBreakRef = useRef(false);
+  const allowNextLineBreakTimeoutRef = useRef<number | null>(null);
   const sendClickSuppressionTimeoutRef = useRef<number | null>(null);
   const suppressNextSendClickRef = useRef(false);
+  const suppressNextLineBreakSubmitRef = useRef(false);
+  const suppressNextLineBreakSubmitTimeoutRef = useRef<number | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   const sendState = projectComposerSendState({
@@ -70,9 +74,11 @@ export function Composer({
 
   useEffect(() => {
     return () => {
+      clearAllowedLineBreak();
       if (sendClickSuppressionTimeoutRef.current != null) {
         window.clearTimeout(sendClickSuppressionTimeoutRef.current);
       }
+      clearSuppressedLineBreakSubmit();
     };
   }, []);
 
@@ -87,7 +93,7 @@ export function Composer({
     textarea.style.height = `${nextHeight}px`;
   }, [draft]);
 
-  async function submit() {
+  async function submit(contentOverride?: string) {
     const submitSession = authState.session;
     if (!sessionKey || !submitSession) {
       return;
@@ -97,7 +103,7 @@ export function Composer({
       return;
     }
 
-    const content = draft.trim();
+    const content = (contentOverride ?? draft).trim();
     if (content.length === 0 && stagedAttachments.length === 0) {
       return;
     }
@@ -240,6 +246,90 @@ export function Composer({
     activateSendButton();
   }
 
+  function clearAllowedLineBreak() {
+    allowNextLineBreakRef.current = false;
+    if (allowNextLineBreakTimeoutRef.current != null) {
+      window.clearTimeout(allowNextLineBreakTimeoutRef.current);
+      allowNextLineBreakTimeoutRef.current = null;
+    }
+  }
+
+  function allowNextLineBreak() {
+    clearAllowedLineBreak();
+    allowNextLineBreakRef.current = true;
+    allowNextLineBreakTimeoutRef.current = window.setTimeout(() => {
+      allowNextLineBreakRef.current = false;
+      allowNextLineBreakTimeoutRef.current = null;
+    }, 0);
+  }
+
+  function clearSuppressedLineBreakSubmit() {
+    suppressNextLineBreakSubmitRef.current = false;
+    if (suppressNextLineBreakSubmitTimeoutRef.current != null) {
+      window.clearTimeout(suppressNextLineBreakSubmitTimeoutRef.current);
+      suppressNextLineBreakSubmitTimeoutRef.current = null;
+    }
+  }
+
+  function suppressNextLineBreakSubmit() {
+    clearSuppressedLineBreakSubmit();
+    suppressNextLineBreakSubmitRef.current = true;
+    suppressNextLineBreakSubmitTimeoutRef.current = window.setTimeout(() => {
+      suppressNextLineBreakSubmitRef.current = false;
+      suppressNextLineBreakSubmitTimeoutRef.current = null;
+    }, 0);
+  }
+
+  function handleEditorLineBreak(event: FormEvent<HTMLTextAreaElement>) {
+    const nativeEvent = event.nativeEvent as InputEvent;
+    if (
+      nativeEvent.inputType !== "insertLineBreak" &&
+      nativeEvent.inputType !== "insertParagraph"
+    ) {
+      return;
+    }
+    if (nativeEvent.isComposing) {
+      return;
+    }
+    if (allowNextLineBreakRef.current) {
+      clearAllowedLineBreak();
+      return;
+    }
+
+    event.preventDefault();
+    if (suppressNextLineBreakSubmitRef.current) {
+      clearSuppressedLineBreakSubmit();
+      return;
+    }
+    suppressNextLineBreakSubmit();
+    void submit();
+  }
+
+  function handleEditorInput(event: FormEvent<HTMLTextAreaElement>) {
+    const nativeEvent = event.nativeEvent as InputEvent;
+    if (
+      nativeEvent.inputType !== "insertLineBreak" &&
+      nativeEvent.inputType !== "insertParagraph"
+    ) {
+      return;
+    }
+    if (nativeEvent.isComposing) {
+      return;
+    }
+    if (allowNextLineBreakRef.current) {
+      clearAllowedLineBreak();
+      return;
+    }
+
+    const content = removeInsertedLineBreak(event.currentTarget);
+    setDraft(content);
+    if (suppressNextLineBreakSubmitRef.current) {
+      clearSuppressedLineBreakSubmit();
+      return;
+    }
+    void submit(content);
+  }
+
   return (
     <section
       className={
@@ -320,7 +410,9 @@ export function Composer({
             aria-keyshortcuts="Enter,Shift+Enter,Escape"
             enterKeyHint="send"
             id="composer-input"
+            onBeforeInput={handleEditorLineBreak}
             onChange={(event) => setDraft(event.target.value)}
+            onInput={handleEditorInput}
             onKeyDown={(event) => {
               if (event.key === "Escape") {
                 event.preventDefault();
@@ -329,8 +421,17 @@ export function Composer({
               }
 
               if (event.key === "Enter" && !event.shiftKey) {
+                if (event.nativeEvent.isComposing) {
+                  return;
+                }
                 event.preventDefault();
+                suppressNextLineBreakSubmit();
                 void submit();
+                return;
+              }
+
+              if (event.key === "Enter" && event.shiftKey) {
+                allowNextLineBreak();
               }
             }}
             onPaste={(event) => {
@@ -370,6 +471,15 @@ export function Composer({
       </form>
     </section>
   );
+}
+
+function removeInsertedLineBreak(textarea: HTMLTextAreaElement) {
+  const value = textarea.value;
+  const selectionStart = textarea.selectionStart;
+  if (selectionStart > 0 && value[selectionStart - 1] === "\n") {
+    return value.slice(0, selectionStart - 1) + value.slice(selectionStart);
+  }
+  return value.replace(/\n$/, "");
 }
 
 function formatAttachmentSize(size: number) {

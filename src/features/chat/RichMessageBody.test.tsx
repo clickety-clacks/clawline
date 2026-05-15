@@ -31,6 +31,26 @@ describe("RichMessageBody", () => {
     expect(within(mark as HTMLElement).getByText("signal").tagName).toBe("EM");
   });
 
+  it("renders structured markdown with the shared rich message renderer", () => {
+    render(
+      <RichMessageBody
+        content={[
+          "## Parse this",
+          "",
+          "> Important context",
+          "",
+          "- First item",
+          "- Second item with **weight**"
+        ].join("\n")}
+      />
+    );
+
+    expect(screen.getByRole("heading", { level: 2, name: "Parse this" })).toBeInTheDocument();
+    expect(screen.getByText("Important context").closest("blockquote")).not.toBeNull();
+    expect(screen.getByRole("list")).toBeInTheDocument();
+    expect(screen.getByText("weight").tagName).toBe("STRONG");
+  });
+
   it("does not render mark elements for inline code or fenced code markers", () => {
     render(
       <RichMessageBody

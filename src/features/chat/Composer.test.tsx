@@ -164,6 +164,58 @@ describe("Composer", () => {
     ).toHaveLength(1);
   });
 
+  it("submits send-key line break input and keeps Shift+Enter as multiline", async () => {
+    const { sendMessage } = renderComposer();
+    const textarea = screen.getByLabelText("Message");
+
+    textarea.focus();
+    fireEvent.change(textarea, { target: { value: "Line one" } });
+    fireEvent.keyDown(textarea, { key: "Enter", shiftKey: true });
+    fireEvent.change(textarea, { target: { value: "Line one\nLine two" } });
+    await new Promise((resolve) => window.setTimeout(resolve, 0));
+
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(textarea).toHaveValue("Line one\nLine two");
+
+    fireEvent.input(textarea, {
+      inputType: "insertLineBreak",
+      target: { selectionStart: "Line one\nLine two\n".length, value: "Line one\nLine two\n" }
+    });
+
+    await waitFor(() => {
+      expect(sendMessage).toHaveBeenCalledWith({
+        attachments: [],
+        content: "Line one\nLine two",
+        id: expect.stringMatching(/^c_/),
+        sessionKey: "agent:main:clawline:user_1:main"
+      });
+    });
+    expect(textarea).toHaveValue("");
+  });
+
+  it("does not duplicate keyboard sends if a line-break input follows handled Enter", async () => {
+    const { sendMessage } = renderComposer();
+    const textarea = screen.getByLabelText("Message");
+
+    textarea.focus();
+    fireEvent.change(textarea, { target: { value: "Single send" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    fireEvent.input(textarea, {
+      inputType: "insertLineBreak",
+      target: { selectionStart: "Single send\n".length, value: "Single send\n" }
+    });
+
+    await waitFor(() => {
+      expect(sendMessage).toHaveBeenCalledTimes(1);
+    });
+    expect(sendMessage).toHaveBeenCalledWith({
+      attachments: [],
+      content: "Single send",
+      id: expect.stringMatching(/^c_/),
+      sessionKey: "agent:main:clawline:user_1:main"
+    });
+  });
+
   it("submits when the send button is tapped", async () => {
     const { sendMessage } = renderComposer();
     const textarea = screen.getByLabelText("Message");

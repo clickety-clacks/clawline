@@ -6,7 +6,7 @@ test("common attachment types render through the authenticated display path", as
   page
 }) => {
   const port = 22_901 + Math.floor(Math.random() * 1_000);
-  const sessionKey = "agent:main:clawline:flynn:main";
+  const sessionKey = "agent:main:clawline:clawline_web_test:main";
   const downloadHits: string[] = [];
 
   const server = createServer((request, response) => {
@@ -69,7 +69,7 @@ test("common attachment types render through the authenticated display path", as
             type: "pair_result",
             success: true,
             token: "jwt-phase4-token",
-            userId: "user_flynn"
+            userId: "clawline_web_test"
           })
         );
         return;
@@ -80,7 +80,7 @@ test("common attachment types render through the authenticated display path", as
           JSON.stringify({
             type: "auth_result",
             success: true,
-            userId: "user_flynn",
+            userId: "clawline_web_test",
             replayCount: 0,
             sessionKeys: [sessionKey]
           })
@@ -88,7 +88,7 @@ test("common attachment types render through the authenticated display path", as
         socket.send(
           JSON.stringify({
             type: "session_info",
-            userId: "user_flynn",
+            userId: "clawline_web_test",
             isAdmin: true,
             sessionKeys: [sessionKey]
           })
@@ -185,7 +185,7 @@ test("common attachment types render through the authenticated display path", as
   try {
     await page.setViewportSize({ width: 820, height: 1180 });
     await page.goto("/pair");
-    await page.getByLabel("Name").fill("Flynn Browser");
+    await page.getByLabel("Name").fill("Clawline Web Test Browser");
     await page.getByLabel("Provider address").fill(`ws://127.0.0.1:${port}/ws`);
     await page.getByRole("button", { name: "Pair browser" }).click();
     await expect(page).toHaveURL(new RegExp(`/chat/${escapeForRegExp(sessionKey)}$`));

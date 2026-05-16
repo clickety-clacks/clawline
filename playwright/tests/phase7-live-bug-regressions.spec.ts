@@ -6,8 +6,8 @@ test("live bug procedure: history replay, network status dots, and short-chat sc
   page
 }) => {
   const port = 24_801 + Math.floor(Math.random() * 1_000);
-  const mainSessionKey = "agent:main:clawline:flynn:main";
-  const sideSessionKey = "agent:main:clawline:flynn:side";
+  const mainSessionKey = "agent:main:clawline:clawline_web_test:main";
+  const sideSessionKey = "agent:main:clawline:clawline_web_test:side";
   const authPayloads: Array<Record<string, unknown>> = [];
   let sideRunState = "running";
 
@@ -126,7 +126,7 @@ test("live bug procedure: history replay, network status dots, and short-chat sc
             type: "pair_result",
             success: true,
             token: "jwt-live-bug-token",
-            userId: "user_flynn"
+            userId: "clawline_web_test"
           })
         );
         return;
@@ -147,7 +147,7 @@ test("live bug procedure: history replay, network status dots, and short-chat sc
           JSON.stringify({
             type: "auth_result",
             success: true,
-            userId: "user_flynn",
+            userId: "clawline_web_test",
             sessionId: `sess_${authPayloads.length}`,
             isAdmin: false,
             replayCount: replayMessages.length,
@@ -165,7 +165,7 @@ test("live bug procedure: history replay, network status dots, and short-chat sc
         socket.send(
           JSON.stringify({
             type: "session_info",
-            userId: "user_flynn",
+            userId: "clawline_web_test",
             isAdmin: false,
             sessionKeys: [mainSessionKey, sideSessionKey]
           })
@@ -189,7 +189,7 @@ test("live bug procedure: history replay, network status dots, and short-chat sc
     });
 
     await page.goto("/pair");
-    await page.getByLabel("Name").fill("Flynn Browser");
+    await page.getByLabel("Name").fill("Clawline Web Test Browser");
     await page.getByLabel("Provider address").fill(`ws://127.0.0.1:${port}/ws`);
     await page.getByRole("button", { name: "Pair browser" }).click();
 
@@ -201,7 +201,7 @@ test("live bug procedure: history replay, network status dots, and short-chat sc
     await expect(sideCard.locator(".session-sheet-card-indicator--user-tail")).toHaveCount(1);
     await sideCard.click();
     await expect(page).toHaveURL(new RegExp(`/chat/${escapeForRegExp(sideSessionKey)}$`));
-    await expect(page.getByText("This stream is ready for text chat.")).toBeVisible();
+    await expect(page.getByTestId("typing-indicator")).toBeVisible();
 
     await page.reload();
 

@@ -158,39 +158,7 @@ struct StreamManagerSheet: View {
             VStack(spacing: 0) {
                 List {
                     ForEach(filteredStreams) { stream in
-                        rowContent(for: stream)
-                            .frame(height: listRowHeight, alignment: .center)
-                            .listRowInsets(
-                                EdgeInsets(
-                                    top: 0,
-                                    leading: listRowHorizontalInset,
-                                    bottom: 0,
-                                    trailing: listRowHorizontalInset
-                                )
-                            )
-                            .listRowSeparator(.hidden)
-                            .listRowBackground(rowBackground(for: stream))
-                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                                Button {
-                                    beginRenaming(stream)
-                                } label: {
-                                    Image(systemName: "pencil")
-                                        .font(.title3.weight(.semibold))
-                                }
-                                .accessibilityLabel("Rename")
-                                .disabled(!canPerformRenameAction(for: stream))
-                                .tint(canPerformRenameAction(for: stream) ? .blue : Color.gray.opacity(0.35))
-
-                                Button {
-                                    pendingRemovalStream = stream
-                                } label: {
-                                    Image(systemName: removalActionImage(for: stream))
-                                        .font(.title3.weight(.semibold))
-                                }
-                                .accessibilityLabel(removalActionTitle(for: stream))
-                                .disabled(!canPerformRemovalAction(for: stream))
-                                .tint(canPerformRemovalAction(for: stream) ? .red : Color.gray.opacity(0.35))
-                            }
+                        streamRow(for: stream)
                     }
 
                     ForEach(filteredPendingCreateRows) { pendingRow in
@@ -393,6 +361,52 @@ struct StreamManagerSheet: View {
         .overlay(alignment: .top) {
             sectionSeparator
         }
+    }
+
+    @ViewBuilder
+    private func streamRow(for stream: StreamSession) -> some View {
+        rowContent(for: stream)
+            .frame(height: listRowHeight, alignment: .center)
+            .listRowInsets(
+                EdgeInsets(
+                    top: 0,
+                    leading: listRowHorizontalInset,
+                    bottom: 0,
+                    trailing: listRowHorizontalInset
+                )
+            )
+            .listRowSeparator(.hidden)
+            .listRowBackground(rowBackground(for: stream))
+            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                Button {
+                    beginRenaming(stream)
+                } label: {
+                    Image(systemName: "pencil")
+                        .font(.title3.weight(.semibold))
+                }
+                .accessibilityLabel("Rename")
+                .disabled(!canPerformRenameAction(for: stream))
+                .tint(canPerformRenameAction(for: stream) ? .blue : Color.gray.opacity(0.35))
+
+                Button {
+                    pendingRemovalStream = stream
+                } label: {
+                    Image(systemName: removalActionImage(for: stream))
+                        .font(.title3.weight(.semibold))
+                }
+                .accessibilityLabel(removalActionTitle(for: stream))
+                .disabled(!canPerformRemovalAction(for: stream))
+                .tint(canPerformRemovalAction(for: stream) ? .red : Color.gray.opacity(0.35))
+            }
+            .streamRowContextMenu(
+                isPresented: activeEditor != .renaming(stream.sessionKey),
+                renameEnabled: canPerformRenameAction(for: stream),
+                removalEnabled: canPerformRemovalAction(for: stream),
+                removalTitle: removalActionTitle(for: stream),
+                removalImage: removalActionImage(for: stream),
+                onRename: { beginRenaming(stream) },
+                onRemove: { pendingRemovalStream = stream }
+            )
     }
 
     @ViewBuilder
@@ -1028,6 +1042,39 @@ struct TrackPickerSheet: View {
         let start = sessionKey.prefix(18)
         let end = sessionKey.suffix(12)
         return "\(start)…\(end)"
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func streamRowContextMenu(
+        isPresented: Bool,
+        renameEnabled: Bool,
+        removalEnabled: Bool,
+        removalTitle: String,
+        removalImage: String,
+        onRename: @escaping () -> Void,
+        onRemove: @escaping () -> Void
+    ) -> some View {
+        if isPresented {
+            contextMenu {
+                Button {
+                    onRename()
+                } label: {
+                    Label("Rename", systemImage: "pencil")
+                }
+                .disabled(!renameEnabled)
+
+                Button(role: .destructive) {
+                    onRemove()
+                } label: {
+                    Label(removalTitle, systemImage: removalImage)
+                }
+                .disabled(!removalEnabled)
+            }
+        } else {
+            self
+        }
     }
 }
 

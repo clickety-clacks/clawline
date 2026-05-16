@@ -49,6 +49,7 @@ struct Clawline_SpatialApp: App {
                 .environment(\.deviceIdentifier, deviceIdentifier)
                 .environment(\.chatService, chatService)
                 .environment(\.settingsManager, settingsManager)
+                .environment(\.allowsTransparentWindowBackground, true)
                 .overlay(alignment: .bottom) {
                     SpatialWindowCornerResizeMarkers()
                 }

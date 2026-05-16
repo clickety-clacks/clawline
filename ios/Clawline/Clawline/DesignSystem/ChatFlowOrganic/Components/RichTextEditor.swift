@@ -61,6 +61,7 @@ struct RichTextEditor: UIViewRepresentable {
         textView.smartInsertDeleteType = .yes
         textView.attributedText = attributedText
         textView.isInputEnabled = isEditable
+        textView.accessibilityIdentifier = "prompt_input"
         textView.setContentHuggingPriority(.defaultLow, for: .horizontal)
         textView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         return textView

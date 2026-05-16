@@ -6,9 +6,9 @@ test("message links render as lightweight cards without turning code-block URLs 
   page
 }) => {
   const port = 21_941 + Math.floor(Math.random() * 1_000);
-  const sessionKey = "agent:main:clawline:flynn:main";
-  const docsUrl = `http://127.0.0.1:${port}/docs`;
-  const researchUrl = `http://127.0.0.1:${port}/research`;
+  const sessionKey = "agent:main:clawline:clawline_web_test:main";
+  const docsUrl = "https://clawline.test/docs";
+  const researchUrl = "https://clawline.test/research";
   const linkContent = [
     `Visit ${docsUrl} for docs.`,
     "",
@@ -83,7 +83,7 @@ test("message links render as lightweight cards without turning code-block URLs 
             type: "pair_result",
             success: true,
             token: "jwt-phase4-link-token",
-            userId: "user_flynn"
+            userId: "clawline_web_test"
           })
         );
         return;
@@ -94,7 +94,7 @@ test("message links render as lightweight cards without turning code-block URLs 
           JSON.stringify({
             type: "auth_result",
             success: true,
-            userId: "user_flynn",
+            userId: "clawline_web_test",
             replayCount: 0,
             sessionKeys: [sessionKey]
           })
@@ -102,7 +102,7 @@ test("message links render as lightweight cards without turning code-block URLs 
         socket.send(
           JSON.stringify({
             type: "session_info",
-            userId: "user_flynn",
+            userId: "clawline_web_test",
             isAdmin: true,
             sessionKeys: [sessionKey]
           })
@@ -145,9 +145,52 @@ test("message links render as lightweight cards without turning code-block URLs 
   });
 
   try {
+    await page.route("https://clawline.test/**", async (route) => {
+      const url = new URL(route.request().url());
+      if (url.pathname === "/docs") {
+        await route.fulfill({
+          contentType: "text/html",
+          body: [
+            "<html><head>",
+            "<title>Garden Guide</title>",
+            '<meta property="og:title" content="Garden Guide" />',
+            '<meta property="og:description" content="Fresh herbs, flowers, and paths." />',
+            '<meta property="og:image" content="/card.png" />',
+            "</head><body>Guide</body></html>"
+          ].join("")
+        });
+        return;
+      }
+
+      if (url.pathname === "/research") {
+        await route.fulfill({
+          contentType: "text/html",
+          body: [
+            "<html><head>",
+            "<title>Research Brief</title>",
+            '<meta name="description" content="Open field notes." />',
+            "</head><body>Brief</body></html>"
+          ].join("")
+        });
+        return;
+      }
+
+      if (url.pathname === "/card.png") {
+        await route.fulfill({
+          contentType: "image/png",
+          body: Buffer.from(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9sX6ix0AAAAASUVORK5CYII=",
+            "base64"
+          )
+        });
+        return;
+      }
+
+      await route.abort();
+    });
     await page.setViewportSize({ width: 820, height: 1180 });
     await page.goto("/pair");
-    await page.getByLabel("Name").fill("Flynn Browser");
+    await page.getByLabel("Name").fill("Clawline Web Test Browser");
     await page.getByLabel("Provider address").fill(`ws://127.0.0.1:${port}/ws`);
     await page.getByRole("button", { name: "Pair browser" }).click();
     await expect(page).toHaveURL(new RegExp(`/chat/${escapeForRegExp(sessionKey)}$`));

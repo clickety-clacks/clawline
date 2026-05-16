@@ -248,8 +248,12 @@ struct MessageInputBar: View {
         return 0.75 + (0.25 * clampedPhase)
     }
 
-    static func disabledSendButtonBackingColor(colorScheme: ColorScheme) -> Color? {
-        colorScheme == .light
+    static func disabledSendButtonBackingColor(
+        colorScheme: ColorScheme,
+        drawsDisabledBacking: Bool = true
+    ) -> Color? {
+        guard drawsDisabledBacking else { return nil }
+        return colorScheme == .light
             ? Color(red: 0.925, green: 0.922, blue: 0.890)
             : nil
     }
@@ -506,6 +510,13 @@ private struct MessageSendControl: View {
     private var sendActionEnabled: Bool { isSending || canSend || isDisconnected }
     private var sendIconColor: Color { .white }
     private let reconnectPulseDuration: TimeInterval = 0.8
+    private var drawsDisabledSendButtonBacking: Bool {
+#if os(visionOS)
+        false
+#else
+        true
+#endif
+    }
 
     private var bubbleVisualState: BubbleVisualState {
         switch connectionState {
@@ -588,7 +599,10 @@ private struct MessageSendControl: View {
         .frame(width: sendButtonSize, height: sendButtonSize)
         .background {
             if bubbleVisualState == .ghost,
-               let backingColor = MessageInputBar.disabledSendButtonBackingColor(colorScheme: uiColorScheme) {
+               let backingColor = MessageInputBar.disabledSendButtonBackingColor(
+                   colorScheme: uiColorScheme,
+                   drawsDisabledBacking: drawsDisabledSendButtonBacking
+                ) {
                 Circle()
                     .fill(backingColor)
                     .frame(width: sendButtonSize, height: sendButtonSize)
@@ -615,6 +629,7 @@ private struct MessageSendControl: View {
                 (isStagingSendGate ? "Staging attachments" :
                     (isDisconnected ? "Disconnected. Tap to reconnect." : "Send message"))
         )
+        .accessibilityIdentifier("send_button")
         .id("send-button")
         .animation(.spring(response: 0.30, dampingFraction: 0.82), value: isSending)
         .animation(.spring(response: 0.30, dampingFraction: 0.82), value: canSend)

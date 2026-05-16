@@ -136,6 +136,125 @@ struct ChatViewModelTests {
         #expect(finalState.first?.streaming == false)
     }
 
+    @Test("Live agent progress updates reducer state and clears on assistant final")
+    @MainActor
+    func liveAgentProgressUpdatesAndClears() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        _ = chatService.connectionState
+        _ = chatService.serviceEvents
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        chatService.emitServiceEvent(
+            .agentProgress(
+                AgentProgressEvent(
+                    version: 1,
+                    sessionKey: personalSessionKey,
+                    runId: "run_1",
+                    messageId: "c_1",
+                    seq: 2,
+                    state: "running",
+                    event: AgentProgressItem(
+                        kind: "item",
+                        phase: "start",
+                        status: "running",
+                        title: "Reading files",
+                        name: nil,
+                        summary: "Less specific summary",
+                        progressText: "Reading files"
+                    )
+                )
+            )
+        )
+
+        for _ in 0..<50 {
+            if viewModel.liveProgressSummary(for: personalSessionKey) == "Reading files" { break }
+            try await Task.sleep(forDuration: .milliseconds(20))
+        }
+        #expect(viewModel.liveProgressSummary(for: personalSessionKey) == "Reading files")
+
+        chatService.emitServiceEvent(
+            .agentProgress(
+                AgentProgressEvent(
+                    version: 1,
+                    sessionKey: personalSessionKey,
+                    runId: "run_1",
+                    messageId: "c_1",
+                    seq: 1,
+                    state: "running",
+                    summary: "Stale update"
+                )
+            )
+        )
+        try await Task.sleep(forDuration: .milliseconds(20))
+        #expect(viewModel.liveProgressSummary(for: personalSessionKey) == "Reading files")
+
+        chatService.emitServiceEvent(
+            .agentProgress(
+                AgentProgressEvent(
+                    version: 1,
+                    sessionKey: personalSessionKey,
+                    runId: "run_1",
+                    messageId: "c_1",
+                    seq: 3,
+                    state: "running",
+                    summary: "Running command"
+                )
+            )
+        )
+        for _ in 0..<50 {
+            if viewModel.liveProgressSummary(for: personalSessionKey) == "Running command" { break }
+            try await Task.sleep(forDuration: .milliseconds(20))
+        }
+        #expect(viewModel.liveProgressSummary(for: personalSessionKey) == "Running command")
+
+        chatService.emitServiceEvent(
+            .agentProgress(
+                AgentProgressEvent(
+                    version: 1,
+                    sessionKey: personalSessionKey,
+                    runId: "run_1",
+                    messageId: "c_1",
+                    seq: 2,
+                    state: "done"
+                )
+            )
+        )
+        try await Task.sleep(forDuration: .milliseconds(20))
+        #expect(viewModel.liveProgressSummary(for: personalSessionKey) == "Running command")
+
+        chatService.emit(
+            Message(
+                id: "s_final",
+                role: .assistant,
+                content: "Final",
+                timestamp: Date(),
+                streaming: false,
+                attachments: [],
+                deviceId: nil,
+                sessionKey: personalSessionKey,
+                replyToClientMessageId: "c_1"
+            )
+        )
+        for _ in 0..<50 {
+            if viewModel.liveProgress(for: personalSessionKey) == nil { break }
+            try await Task.sleep(forDuration: .milliseconds(20))
+        }
+        #expect(viewModel.liveProgress(for: personalSessionKey) == nil)
+    }
+
     @Test("Lifecycle replay advances service-owned per-stream cursor after apply")
     @MainActor
     func lifecycleReplayAdvancesServiceReplayCursor() async throws {

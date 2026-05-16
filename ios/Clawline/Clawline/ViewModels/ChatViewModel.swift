@@ -20,6 +20,15 @@ protocol ChatViewModelHosting: AnyObject {
     func handleSceneDidBecomeActive()
 }
 
+struct LiveAgentProgress: Equatable {
+    let sessionKey: String
+    let runId: String?
+    let messageId: String?
+    let seq: Int?
+    let summary: String
+    let isFailure: Bool
+}
+
 // MARK: - Stream Switch State
 // Stream switching now uses two explicit state paths:
 // - uiSelectedSessionKey: immediate, lightweight UI intent.
@@ -37,6 +46,7 @@ final class ChatViewModel: ChatViewModelHosting {
     @MainActor
     private static var currentConnectionOwnerId: String?
     private static let providerMaxTextMessageBytes = 65_536
+    private static let liveProgressStaleTimeout: Duration = .seconds(120)
     private static let richDocumentMimeTypesNeedingPayload: Set<String> = [
         InteractiveHTMLDescriptor.mimeType,
         TerminalSessionDescriptor.mimeType
@@ -350,6 +360,7 @@ final class ChatViewModel: ChatViewModelHosting {
         pendingEngineActivationTask = nil
         engineActivationInFlightSessionKey = nil
         messages = []
+        clearAllLiveProgress()
         if clearPersistedActiveSessionKey {
             streamDefaults.removeObject(forKey: activeSessionDefaultsKey())
         }
@@ -441,6 +452,7 @@ final class ChatViewModel: ChatViewModelHosting {
     private(set) var isSending: Bool = false
     private(set) var isAssistantTyping: Bool = false
     private(set) var typingSessionKey: String?
+    private(set) var liveProgressBySessionKey: [String: LiveAgentProgress] = [:]
     private(set) var connectionState: ConnectionState = .disconnected
     private(set) var sendButtonConnectionState: SendButtonConnectionState = .disconnected
     private(set) var inputResetToken: Int = 0
@@ -452,6 +464,7 @@ final class ChatViewModel: ChatViewModelHosting {
     private var temporarySendButtonOverride: SendButtonConnectionState?
     private var temporarySendButtonOverrideTask: Task<Void, Never>?
     private let temporarySendButtonOverrideDuration: Duration = .seconds(5)
+    private var liveProgressTimeoutTasksBySessionKey: [String: Task<Void, Never>] = [:]
 
     private var transportSendButtonConnectionState: SendButtonConnectionState {
         switch connectionState {
@@ -1203,6 +1216,7 @@ final class ChatViewModel: ChatViewModelHosting {
             )
             if response.ok {
                 toastManager.show(response.message ?? "Prompt cancellation requested.")
+                clearLiveProgress(sessionKey: sessionKey, runId: nil, messageId: nil)
                 scheduleSessionStatusRefresh(for: sessionKey, reason: "cancelCurrentPrompt")
                 return
             }
@@ -1496,6 +1510,7 @@ final class ChatViewModel: ChatViewModelHosting {
         ackedPendingLocalMessageIDs.removeAll()
         isAssistantTyping = false
         typingSessionKey = nil
+        clearAllLiveProgress()
         shouldMorphTypingIndicator = false
         connectionStableTask?.cancel()
         connectionStableTask = nil
@@ -1723,6 +1738,9 @@ final class ChatViewModel: ChatViewModelHosting {
         // Check if this is an assistant message arriving while typing indicator is visible.
         // If so, the UI should morph the typing indicator into this message instead of inserting new.
         ensureStreamEntry(for: message.sessionKey)
+        if message.role == .assistant, !message.streaming {
+            clearLiveProgressForAssistantFinal(message)
+        }
 
         if message.role == .assistant,
            isAssistantTyping,
@@ -2618,6 +2636,16 @@ final class ChatViewModel: ChatViewModelHosting {
         return userFacingMessage(for: failure.code, fallback: failure.message)
     }
 
+    func liveProgress(for sessionKey: String) -> LiveAgentProgress? {
+        let normalizedSessionKey = sessionKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedSessionKey.isEmpty else { return nil }
+        return liveProgressBySessionKey[normalizedSessionKey]
+    }
+
+    func liveProgressSummary(for sessionKey: String) -> String? {
+        liveProgress(for: sessionKey)?.summary
+    }
+
     private func handle(serviceEvent: ChatServiceEvent) {
         switch serviceEvent {
         case .messageError(let messageId, let code, let message):
@@ -2634,9 +2662,11 @@ final class ChatViewModel: ChatViewModelHosting {
                 toastManager.show(resolved)
             }
             guard let messageId else {
+                clearAllLiveProgress()
                 markPendingMessagesFailedForUnscopedMessageError(code: code, message: message)
                 return
             }
+            clearLiveProgress(messageId: messageId)
             messageFailures[messageId] = MessageFailure(code: code, message: message)
             if let pendingIndex = pendingLocalMessages.firstIndex(where: { $0.id == messageId }) {
                 pendingLocalMessages.remove(at: pendingIndex)
@@ -2653,6 +2683,8 @@ final class ChatViewModel: ChatViewModelHosting {
                 activeClientMessageId = nil
                 isSending = false
             }
+        case .agentProgress(let progress):
+            handleAgentProgress(progress)
         case .connectionInterrupted(let reason):
             logger.info("connection interrupted reason=\(reason ?? "unknown", privacy: .public)")
             markPendingMessagesAsFailedForConnectionLoss()
@@ -2735,6 +2767,150 @@ final class ChatViewModel: ChatViewModelHosting {
         }
     }
 
+    private func handleAgentProgress(_ event: AgentProgressEvent) {
+        let sessionKey = event.sessionKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !sessionKey.isEmpty else { return }
+        ensureStreamEntry(for: sessionKey)
+
+        let state = event.state?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if shouldIgnoreStaleAgentProgress(event, current: liveProgressBySessionKey[sessionKey]) {
+            return
+        }
+        if isTerminalAgentProgressState(state) {
+            clearLiveProgress(
+                sessionKey: sessionKey,
+                runId: normalizedAgentProgressText(event.runId),
+                messageId: normalizedAgentProgressText(event.messageId)
+            )
+            return
+        }
+
+        let isFailure = isFailureAgentProgressState(state)
+        let summary = progressSummary(from: event, isFailure: isFailure)
+        guard !summary.isEmpty else { return }
+
+        let progress = LiveAgentProgress(
+            sessionKey: sessionKey,
+            runId: normalizedAgentProgressText(event.runId),
+            messageId: normalizedAgentProgressText(event.messageId),
+            seq: event.seq,
+            summary: summary,
+            isFailure: isFailure
+        )
+        liveProgressBySessionKey[sessionKey] = progress
+        scheduleLiveProgressStaleTimeout(for: progress)
+    }
+
+    private func clearLiveProgress(sessionKey: String, runId: String?, messageId: String?) {
+        guard let current = liveProgressBySessionKey[sessionKey] else { return }
+        if let runId, let currentRunId = current.runId, currentRunId != runId { return }
+        if let messageId, let currentMessageId = current.messageId, currentMessageId != messageId { return }
+        liveProgressBySessionKey.removeValue(forKey: sessionKey)
+        liveProgressTimeoutTasksBySessionKey.removeValue(forKey: sessionKey)?.cancel()
+    }
+
+    private func clearLiveProgress(messageId: String) {
+        let sessionKeys = liveProgressBySessionKey.compactMap { entry in
+            entry.value.messageId == messageId ? entry.key : nil
+        }
+        for sessionKey in sessionKeys {
+            liveProgressBySessionKey.removeValue(forKey: sessionKey)
+            liveProgressTimeoutTasksBySessionKey.removeValue(forKey: sessionKey)?.cancel()
+        }
+    }
+
+    private func clearLiveProgressForAssistantFinal(_ message: Message) {
+        guard let current = liveProgressBySessionKey[message.sessionKey] else { return }
+        let candidateMessageIds = [
+            message.clientMessageId,
+            message.replyToClientMessageId,
+            message.replyToMessageId,
+            message.id
+        ].compactMap(normalizedAgentProgressText)
+        if let currentMessageId = current.messageId,
+           !candidateMessageIds.contains(currentMessageId) {
+            return
+        }
+        clearLiveProgress(
+            sessionKey: message.sessionKey,
+            runId: nil,
+            messageId: current.messageId
+        )
+    }
+
+    private func clearAllLiveProgress() {
+        liveProgressBySessionKey.removeAll()
+        for task in liveProgressTimeoutTasksBySessionKey.values {
+            task.cancel()
+        }
+        liveProgressTimeoutTasksBySessionKey.removeAll()
+    }
+
+    private func scheduleLiveProgressStaleTimeout(for progress: LiveAgentProgress) {
+        liveProgressTimeoutTasksBySessionKey[progress.sessionKey]?.cancel()
+        liveProgressTimeoutTasksBySessionKey[progress.sessionKey] = Task { [weak self] in
+            do {
+                try await Task.sleep(for: Self.liveProgressStaleTimeout)
+            } catch is CancellationError {
+                return
+            } catch {
+                return
+            }
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                guard self.liveProgressBySessionKey[progress.sessionKey] == progress else { return }
+                self.liveProgressBySessionKey.removeValue(forKey: progress.sessionKey)
+                self.liveProgressTimeoutTasksBySessionKey.removeValue(forKey: progress.sessionKey)
+            }
+        }
+    }
+
+    private func shouldIgnoreStaleAgentProgress(_ event: AgentProgressEvent, current: LiveAgentProgress?) -> Bool {
+        guard let current else { return false }
+        guard current.runId == normalizedAgentProgressText(event.runId) else { return false }
+        guard let currentSeq = current.seq, let incomingSeq = event.seq else { return false }
+        return incomingSeq < currentSeq
+    }
+
+    private func progressSummary(from event: AgentProgressEvent, isFailure: Bool) -> String {
+        let candidates = [
+            event.event?.progressText,
+            event.progressText,
+            event.event?.title,
+            event.title,
+            event.event?.summary,
+            event.summary,
+            event.event?.name,
+            event.name
+        ]
+        for candidate in candidates {
+            if let text = normalizedAgentProgressText(candidate) {
+                return text
+            }
+        }
+        if isFailure {
+            return "Agent progress interrupted"
+        }
+        return normalizedAgentProgressText(event.event?.kind)
+            ?? normalizedAgentProgressText(event.state)
+            ?? ""
+    }
+
+    private func normalizedAgentProgressText(_ value: String?) -> String? {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private func isTerminalAgentProgressState(_ state: String?) -> Bool {
+        guard let state else { return false }
+        return ["final", "complete", "completed", "done", "idle"].contains(state)
+    }
+
+    private func isFailureAgentProgressState(_ state: String?) -> Bool {
+        guard let state else { return false }
+        return ["error", "failed", "failure", "cancelled", "canceled"].contains(state)
+    }
+
     private func sendProvisioningState(for sessionKey: String) -> SendProvisioningState {
         if hasReceivedSessionProvisioning {
             return isLocallySendableSessionKey(sessionKey) ? .ready : .unavailable
@@ -2786,11 +2962,13 @@ final class ChatViewModel: ChatViewModelHosting {
             connectionStableTask = nil
             isAssistantTyping = false
             typingSessionKey = nil
+            clearAllLiveProgress()
             auth.refreshAdminStatusFromToken()
             attemptPendingProvisionedSendIfPossible()
         case .connecting, .reconnecting:
             isAssistantTyping = false
             typingSessionKey = nil
+            clearAllLiveProgress()
         case .disconnected, .failed:
             connectionStableTask?.cancel()
             connectionStableTask = nil
@@ -2798,6 +2976,7 @@ final class ChatViewModel: ChatViewModelHosting {
             markPendingMessagesAsFailedForConnectionLoss()
             isAssistantTyping = false
             typingSessionKey = nil
+            clearAllLiveProgress()
         }
     }
 
@@ -3421,6 +3600,7 @@ final class ChatViewModel: ChatViewModelHosting {
             typingSessionKey = nil
             isAssistantTyping = false
         }
+        clearLiveProgress(sessionKey: sessionKey, runId: nil, messageId: nil)
 
         if engineActiveSessionKey == sessionKey {
             let fallback = streamMainSessionKey().flatMap { orderedSessionKeys.contains($0) ? $0 : nil }
@@ -3477,6 +3657,7 @@ final class ChatViewModel: ChatViewModelHosting {
             typingSessionKey = nil
             isAssistantTyping = false
         }
+        clearLiveProgress(sessionKey: sessionKey, runId: nil, messageId: nil)
 
         if engineActiveSessionKey == sessionKey {
             let fallback = streamMainSessionKey().flatMap { orderedSessionKeys.contains($0) ? $0 : nil }

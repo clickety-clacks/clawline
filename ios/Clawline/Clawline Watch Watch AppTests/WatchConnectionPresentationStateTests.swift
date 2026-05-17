@@ -406,11 +406,13 @@ struct WatchConnectionPresentationStateTests {
         #expect(configuration.allowsCellularAccess)
         #expect(configuration.allowsExpensiveNetworkAccess)
         #expect(configuration.allowsConstrainedNetworkAccess)
+        #expect(configuration.timeoutIntervalForRequest == 30)
+        #expect(configuration.timeoutIntervalForResource == 75)
     }
 
-    @Test("false direct network monitor shows Clawline network error without system input")
+    @Test("false direct network monitor still starts configured Soniox without system input")
     @MainActor
-    func falseDirectNetworkShowsNetworkErrorWithoutStartingSoniox() async throws {
+    func falseDirectNetworkStillStartsConfiguredSoniox() async throws {
         let credentials = WatchCredentialStore(keychain: WatchKeychainStore(service: "WatchTests.sonioxFalseDirectNetwork", accessGroup: nil))
         credentials.clear()
         credentials.apply(userInfo: ["sonioxApiKey": "watch-soniox-key"])
@@ -426,9 +428,9 @@ struct WatchConnectionPresentationStateTests {
         try await Task.sleep(for: .milliseconds(50))
 
         #expect(voiceSession.canUseVoice)
-        #expect(voiceSession.voiceState == .error)
-        #expect(voiceSession.errorMessage == "Watch network is unavailable for Soniox. Connect Watch to Wi-Fi or cellular and try again.")
-        #expect(client.startCallCount == 0)
+        #expect(voiceSession.voiceState == .listening)
+        #expect(voiceSession.errorMessage == nil)
+        #expect(client.startCallCount == 1)
     }
 
     @Test("Soniox numeric error response frames decode for voice error handling")

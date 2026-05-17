@@ -11,6 +11,13 @@ protocol WatchVoiceStreaming: AnyObject {
     func stop()
 }
 
+protocol SonioxAudioSource: AnyObject {
+    var onAudioLevel: ((Float) -> Void)? { get set }
+
+    func start(onPCMData: @escaping (Data) -> Void) throws
+    func stop()
+}
+
 extension WatchVoiceStreaming {
     func start(apiKey: String) async throws {
         try await start(apiKey: apiKey, clientReferenceID: UUID().uuidString)
@@ -136,24 +143,33 @@ final class SonioxStreamingClient: WatchVoiceStreaming {
     }
 
     private let session: URLSession
-    private let audioEngine = AVAudioEngine()
+    private let audioSource: any SonioxAudioSource
 
     private var websocketTask: URLSessionWebSocketTask?
     private var receiveTask: Task<Void, Never>?
     private var keepaliveTask: Task<Void, Never>?
+    private var audioSendTask: Task<Void, Never>?
+    private let stateQueue = DispatchQueue(label: "co.clicketyclacks.Clawline.watch.soniox.state")
 
-    private var converter: AVAudioConverter?
     private var latestTranscript: String = ""
     private var finalizeContinuation: CheckedContinuation<Void, Never>?
+    private var finalizeTimeoutTask: Task<Void, Never>?
 
     private var isRunning = false
 
-    init(session: URLSession = URLSession(configuration: SonioxStreamingClient.watchSessionConfiguration())) {
+    init(
+        session: URLSession = URLSession(configuration: SonioxStreamingClient.watchSessionConfiguration()),
+        audioSource: any SonioxAudioSource = MicrophoneSonioxAudioSource()
+    ) {
         self.session = session
+        self.audioSource = audioSource
+        self.audioSource.onAudioLevel = { [weak self] level in
+            self?.onAudioLevel?(level)
+        }
     }
 
     static func watchSessionConfiguration() -> URLSessionConfiguration {
-        let configuration = URLSessionConfiguration.ephemeral
+        let configuration = URLSessionConfiguration.default
         configuration.waitsForConnectivity = true
         configuration.allowsCellularAccess = true
         configuration.allowsExpensiveNetworkAccess = true
@@ -215,26 +231,16 @@ final class SonioxStreamingClient: WatchVoiceStreaming {
         guard isRunning else { return latestTranscript }
 
         stopAudioCapture()
+        await drainAudioSends()
 
-        do {
-            try await sendJSON(["type": "finalize"])
-            try await websocketTask?.send(.data(Data()))
-        } catch {
-            onError?(error)
-        }
-
-        await withTaskGroup(of: Void.self) { group in
-            group.addTask { [weak self] in
-                guard let self else { return }
-                await self.waitForFinalizeSignal()
+        await waitForFinalizeSignal(timeoutNanoseconds: timeoutNanoseconds) { [weak self] in
+            guard let self else { return }
+            do {
+                try await self.sendJSON(["type": "finalize"])
+                try await self.websocketTask?.send(.data(Data()))
+            } catch {
+                self.onError?(error)
             }
-
-            group.addTask {
-                try? await Task.sleep(nanoseconds: timeoutNanoseconds)
-            }
-
-            _ = await group.next()
-            group.cancelAll()
         }
 
         stop()
@@ -250,12 +256,13 @@ final class SonioxStreamingClient: WatchVoiceStreaming {
         keepaliveTask = nil
         receiveTask?.cancel()
         receiveTask = nil
+        clearAudioSendTask()
+        cancelFinalizeWaiter()
 
         websocketTask?.cancel(with: .normalClosure, reason: nil)
         websocketTask = nil
 
-        finalizeContinuation?.resume()
-        finalizeContinuation = nil
+        resumeFinalizeWaiter()
     }
 
     private func startReceiveLoop() {
@@ -269,26 +276,23 @@ final class SonioxStreamingClient: WatchVoiceStreaming {
                     let message = try await websocketTask.receive()
                     switch message {
                     case .string(let string):
-                        handleIncomingText(string)
+                        _ = handleIncomingText(string)
                     case .data(let data):
                         if let string = String(data: data, encoding: .utf8) {
-                            handleIncomingText(string)
+                            _ = handleIncomingText(string)
                         }
                     @unknown default:
                         break
                     }
                 } catch {
+                    if Task.isCancelled || !self.isRunning {
+                        break
+                    }
                     onError?(error)
                     stop()
                     break
                 }
             }
-        }
-    }
-
-    private func waitForFinalizeSignal() async {
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            finalizeContinuation = continuation
         }
     }
 
@@ -304,42 +308,118 @@ final class SonioxStreamingClient: WatchVoiceStreaming {
         }
     }
 
-    private func handleIncomingText(_ text: String) {
+    private func handleIncomingText(_ text: String) -> Bool {
         guard let data = text.data(using: .utf8),
               let payload = try? JSONDecoder().decode(SonioxResponse.self, from: data) else {
-            return
+            return false
         }
 
         if let error = Self.decodeServerError(from: text) {
             onError?(error)
             stop()
-            return
+            return true
         }
+
+        let tokens = payload.tokens ?? []
+        let tokenText = tokens
+            .map(\.text)
+            .filter { $0 != "<fin>" }
+            .joined()
 
         let transcript: String = {
             if let text = payload.text {
                 return text
             }
-            if let tokens = payload.tokens {
-                return tokens.map(\.text).joined()
+            if !tokens.isEmpty {
+                return tokenText
             }
             return latestTranscript
         }()
 
-        let isFinal = payload.tokens?.allSatisfy { $0.isFinal == true } ?? false
+        let hasFinalToken = tokens.contains { $0.text == "<fin>" }
+        let isFinal = !tokens.isEmpty && tokens.allSatisfy { $0.isFinal == true }
         latestTranscript = transcript
 
         onTranscriptUpdate?(
             TranscriptUpdate(
                 text: transcript,
                 isFinal: isFinal,
-                finished: payload.finished == true
+                finished: payload.finished == true || hasFinalToken
             )
         )
 
-        if payload.finished == true {
-            finalizeContinuation?.resume()
+        if payload.finished == true || hasFinalToken {
+            resumeFinalizeWaiter()
+        }
+        return payload.finished == true || hasFinalToken
+    }
+
+    private func waitForFinalizeSignal(timeoutNanoseconds: UInt64, afterInstallingWaiter: @escaping () async -> Void) async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            stateQueue.sync {
+                finalizeContinuation = continuation
+                finalizeTimeoutTask?.cancel()
+                finalizeTimeoutTask = Task { [weak self] in
+                    try? await Task.sleep(nanoseconds: timeoutNanoseconds)
+                    self?.resumeFinalizeWaiter()
+                }
+            }
+            Task {
+                await afterInstallingWaiter()
+            }
+        }
+        cancelFinalizeWaiter()
+    }
+
+    private func resumeFinalizeWaiter() {
+        let continuation = stateQueue.sync {
+            let continuation = finalizeContinuation
             finalizeContinuation = nil
+            finalizeTimeoutTask?.cancel()
+            finalizeTimeoutTask = nil
+            return continuation
+        }
+        continuation?.resume()
+    }
+
+    private func cancelFinalizeWaiter() {
+        stateQueue.sync {
+            finalizeTimeoutTask?.cancel()
+            finalizeTimeoutTask = nil
+        }
+    }
+
+    private func enqueueAudioData(_ data: Data) {
+        stateQueue.sync {
+            let previousTask = audioSendTask
+            audioSendTask = Task { [weak self] in
+                await previousTask?.value
+                guard let self, self.isRunning else { return }
+                guard let websocketTask = self.websocketTask else {
+                    self.onError?(ClientError.notConnected)
+                    return
+                }
+
+                do {
+                    try await websocketTask.send(.data(data))
+                } catch {
+                    guard self.isRunning else { return }
+                    self.onError?(error)
+                }
+            }
+        }
+    }
+
+    private func drainAudioSends() async {
+        let task = stateQueue.sync {
+            audioSendTask
+        }
+        await task?.value
+    }
+
+    private func clearAudioSendTask() {
+        stateQueue.sync {
+            audioSendTask = nil
         }
     }
 
@@ -353,6 +433,23 @@ final class SonioxStreamingClient: WatchVoiceStreaming {
     }
 
     private func startAudioCapture() throws {
+        try audioSource.start { [weak self] data in
+            self?.enqueueAudioData(data)
+        }
+    }
+
+    private func stopAudioCapture() {
+        audioSource.stop()
+    }
+}
+
+final class MicrophoneSonioxAudioSource: SonioxAudioSource {
+    var onAudioLevel: ((Float) -> Void)?
+
+    private let audioEngine = AVAudioEngine()
+    private var converter: AVAudioConverter?
+
+    func start(onPCMData: @escaping (Data) -> Void) throws {
         let inputNode = audioEngine.inputNode
         let inputFormat = inputNode.inputFormat(forBus: 0)
 
@@ -367,19 +464,19 @@ final class SonioxStreamingClient: WatchVoiceStreaming {
 
         inputNode.removeTap(onBus: 0)
         inputNode.installTap(onBus: 0, bufferSize: 1024, format: inputFormat) { [weak self] buffer, _ in
-            self?.handleInputBuffer(buffer, targetFormat: targetFormat)
+            self?.handleInputBuffer(buffer, targetFormat: targetFormat, onPCMData: onPCMData)
         }
 
         audioEngine.prepare()
         try audioEngine.start()
     }
 
-    private func stopAudioCapture() {
+    func stop() {
         audioEngine.inputNode.removeTap(onBus: 0)
         audioEngine.stop()
     }
 
-    private func handleInputBuffer(_ buffer: AVAudioPCMBuffer, targetFormat: AVAudioFormat) {
+    private func handleInputBuffer(_ buffer: AVAudioPCMBuffer, targetFormat: AVAudioFormat, onPCMData: @escaping (Data) -> Void) {
         guard let converter else { return }
 
         if let floatData = buffer.floatChannelData {
@@ -424,18 +521,6 @@ final class SonioxStreamingClient: WatchVoiceStreaming {
         let sampleCount = Int(convertedBuffer.frameLength)
         let byteCount = sampleCount * MemoryLayout<Int16>.size
         let data = Data(bytes: channelData[0], count: byteCount)
-
-        Task { [weak self] in
-            guard let self else { return }
-            guard let websocketTask = self.websocketTask else {
-                self.onError?(ClientError.notConnected)
-                return
-            }
-            do {
-                try await websocketTask.send(.data(data))
-            } catch {
-                self.onError?(error)
-            }
-        }
+        onPCMData(data)
     }
 }

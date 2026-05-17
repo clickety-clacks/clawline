@@ -76,6 +76,7 @@ final class WatchVoiceSession {
     private let directInternetMonitor: any WatchDirectInternetMonitoring
     private let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "WatchVoice")
     private let audioSessionConfigurator: () throws -> Void
+    private let clientReferenceIDProvider: () -> String
 
     private let playbackEngine = AVAudioEngine()
     private let playerNode = AVAudioPlayerNode()
@@ -110,12 +111,14 @@ final class WatchVoiceSession {
         credentialStore: WatchCredentialStore,
         sonioxClient: (any WatchVoiceStreaming)? = nil,
         directInternetMonitor: (any WatchDirectInternetMonitoring)? = nil,
-        audioSessionConfigurator: @escaping () throws -> Void = WatchVoiceSession.configureSharedAudioSession
+        audioSessionConfigurator: @escaping () throws -> Void = WatchVoiceSession.configureSharedAudioSession,
+        clientReferenceIDProvider: @escaping () -> String = { UUID().uuidString }
     ) {
         self.credentialStore = credentialStore
         self.sonioxClient = sonioxClient ?? SonioxStreamingClient()
         self.directInternetMonitor = directInternetMonitor ?? DirectInternetMonitor()
         self.audioSessionConfigurator = audioSessionConfigurator
+        self.clientReferenceIDProvider = clientReferenceIDProvider
 
         self.sonioxClient.onAudioLevel = { [weak self] level in
             Task { @MainActor in
@@ -251,11 +254,6 @@ final class WatchVoiceSession {
     }
 
     private func transitionToListening(mode: VoiceMode) {
-        guard hasDirectInternet else {
-            transitionToVoiceError(kind: .watchNetworkUnavailable)
-            return
-        }
-
         do {
             try configureAudioSessionIfNeeded()
         } catch {
@@ -285,7 +283,7 @@ final class WatchVoiceSession {
             }
 
             do {
-                try await self.sonioxClient.start(apiKey: key)
+                try await self.sonioxClient.start(apiKey: key, clientReferenceID: self.clientReferenceIDProvider())
                 await MainActor.run {
                     if mode == .tap {
                         self.startTapTimers()

@@ -67,10 +67,19 @@ final class WatchCredentialStore {
             changed = true
         }
 
-        if let soniox = userInfo["sonioxApiKey"] as? String, sonioxApiKey != soniox {
-            sonioxApiKey = soniox
-            keychain.setString(soniox, forKey: Keys.sonioxApiKey)
-            changed = true
+        if let soniox = userInfo["sonioxApiKey"] as? String {
+            let trimmed = soniox.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty {
+                if sonioxApiKey != nil {
+                    sonioxApiKey = nil
+                    keychain.removeValue(forKey: Keys.sonioxApiKey)
+                    changed = true
+                }
+            } else if sonioxApiKey != trimmed {
+                sonioxApiKey = trimmed
+                keychain.setString(trimmed, forKey: Keys.sonioxApiKey)
+                changed = true
+            }
         }
 
         if let cartesia = userInfo["cartesiaApiKey"] as? String, cartesiaApiKey != cartesia {

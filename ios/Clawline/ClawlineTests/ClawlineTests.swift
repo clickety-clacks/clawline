@@ -173,7 +173,7 @@ struct ClawlineTests {
         let authManager = AuthManager(storage: defaults, secureStore: InMemorySecureStore())
         let service = WatchConnectivityService(
             authManager: authManager,
-            sonioxKeyStore: SonioxKeyStore(keychain: KeychainSecureStore()),
+            sonioxKeyStore: SonioxKeyStore(),
             cartesiaKeyStore: CartesiaKeyStore(keychain: KeychainSecureStore()),
             chatService: chatService
         )
@@ -207,6 +207,127 @@ struct ClawlineTests {
         #expect(source.contains("watchConnectivityService.activate()"))
     }
 
+    @Test("Settings Soniox key source is shared with Watch credential bridge")
+    @MainActor
+    func settingsSonioxKeySourceFeedsWatchCredentialBridge() async {
+        let defaults = UserDefaults.standard
+        let previousKey = defaults.object(forKey: "soniox.apiKey")
+        let previousStatus = defaults.object(forKey: "soniox.apiKeyStatus")
+        defaults.removeObject(forKey: "soniox.apiKey")
+        defaults.removeObject(forKey: "soniox.apiKeyStatus")
+        defer {
+            if let previousKey {
+                defaults.set(previousKey, forKey: "soniox.apiKey")
+            } else {
+                defaults.removeObject(forKey: "soniox.apiKey")
+            }
+            if let previousStatus {
+                defaults.set(previousStatus, forKey: "soniox.apiKeyStatus")
+            } else {
+                defaults.removeObject(forKey: "soniox.apiKeyStatus")
+            }
+        }
+
+        let sonioxKeyStore = SonioxKeyStore(verifier: AcceptingSonioxKeyVerifier())
+        let settings = SettingsManager(sonioxKeyStore: sonioxKeyStore)
+        settings.sonioxAPIKey = "  iphone-soniox-key  "
+
+        let suiteName = "ClawlineTests.sonioxWatchBridge"
+        let authDefaults = UserDefaults(suiteName: suiteName) ?? .standard
+        authDefaults.removePersistentDomain(forName: suiteName)
+        defer { authDefaults.removePersistentDomain(forName: suiteName) }
+        let authManager = AuthManager(storage: authDefaults, secureStore: InMemorySecureStore())
+        authManager.storeCredentials(token: "jwt", userId: "user")
+        let service = WatchConnectivityService(
+            authManager: authManager,
+            sonioxKeyStore: sonioxKeyStore,
+            cartesiaKeyStore: CartesiaKeyStore(keychain: KeychainSecureStore()),
+            chatService: SpyChatService()
+        )
+
+        let reply = await service.handleTestMessage([
+            "type": "auth.refresh",
+            "requestId": "req-soniox"
+        ])
+        let payload = reply["payload"] as? [String: Any]
+
+        #expect(SonioxConfigurationStore.apiKey == "iphone-soniox-key")
+        #expect(sonioxKeyStore.keyForCredentialSync == "iphone-soniox-key")
+        #expect(payload?["sonioxApiKey"] as? String == "iphone-soniox-key")
+
+        settings.sonioxAPIKey = " "
+        let clearedReply = await service.handleTestMessage([
+            "type": "auth.refresh",
+            "requestId": "req-soniox-clear"
+        ])
+        let clearedPayload = clearedReply["payload"] as? [String: Any]
+
+        #expect(SonioxConfigurationStore.apiKey == nil)
+        #expect(sonioxKeyStore.keyForCredentialSync == nil)
+        #expect(clearedPayload?["sonioxApiKey"] as? String == "")
+    }
+
+    @Test("Soniox key clear is included in Watch credential push without provider auth")
+    @MainActor
+    func sonioxClearPushDoesNotRequireProviderAuth() {
+        let defaults = UserDefaults.standard
+        let previousKey = defaults.object(forKey: "soniox.apiKey")
+        let previousStatus = defaults.object(forKey: "soniox.apiKeyStatus")
+        defaults.removeObject(forKey: "soniox.apiKey")
+        defaults.removeObject(forKey: "soniox.apiKeyStatus")
+        defer {
+            if let previousKey {
+                defaults.set(previousKey, forKey: "soniox.apiKey")
+            } else {
+                defaults.removeObject(forKey: "soniox.apiKey")
+            }
+            if let previousStatus {
+                defaults.set(previousStatus, forKey: "soniox.apiKeyStatus")
+            } else {
+                defaults.removeObject(forKey: "soniox.apiKeyStatus")
+            }
+        }
+
+        let sonioxKeyStore = SonioxKeyStore(verifier: AcceptingSonioxKeyVerifier())
+        sonioxKeyStore.setKey(" ")
+        let authDefaults = UserDefaults(suiteName: "ClawlineTests.sonioxClearNoAuth") ?? .standard
+        authDefaults.removePersistentDomain(forName: "ClawlineTests.sonioxClearNoAuth")
+        defer { authDefaults.removePersistentDomain(forName: "ClawlineTests.sonioxClearNoAuth") }
+        let service = WatchConnectivityService(
+            authManager: AuthManager(storage: authDefaults, secureStore: InMemorySecureStore()),
+            sonioxKeyStore: sonioxKeyStore,
+            cartesiaKeyStore: CartesiaKeyStore(keychain: KeychainSecureStore()),
+            chatService: SpyChatService()
+        )
+
+        let payload = service.makeCredentialPushPayload(pushedAt: 123)
+
+        #expect(payload["type"] as? String == "credential_push")
+        #expect(payload["pushedAt"] as? TimeInterval == 123)
+        #expect(payload["sonioxApiKey"] as? String == "")
+        #expect(payload["token"] == nil)
+        #expect(payload["userId"] == nil)
+    }
+
+    @Test("Clawline app wires one Soniox store into Settings and Watch connectivity")
+    func clawlineAppSharesSonioxStoreBetweenSettingsAndWatchBridge() throws {
+        let appPath = URL(filePath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appending(path: "Clawline/ClawlineApp.swift")
+        let appSource = try String(contentsOf: appPath, encoding: .utf8)
+        let bridgePath = URL(filePath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appending(path: "Clawline/Services/WatchConnectivityService.swift")
+        let bridgeSource = try String(contentsOf: bridgePath, encoding: .utf8)
+
+        #expect(appSource.contains("let sonioxKeyStore = SonioxKeyStore()"))
+        #expect(appSource.contains("SettingsManager(sonioxKeyStore: sonioxKeyStore)"))
+        #expect(appSource.contains("sonioxKeyStore: sonioxKeyStore"))
+        #expect(bridgeSource.contains("sonioxKeyStore.keyForCredentialSync"))
+    }
+
 
     @Test("watch relay chat.send activates relay observation before dispatch")
     func watchRelayChatSendActivatesRelayBeforeDispatch() throws {
@@ -236,7 +357,7 @@ struct ClawlineTests {
         authManager.storeCredentials(token: "jwt", userId: "user")
         let service = WatchConnectivityService(
             authManager: authManager,
-            sonioxKeyStore: SonioxKeyStore(keychain: KeychainSecureStore()),
+            sonioxKeyStore: SonioxKeyStore(),
             cartesiaKeyStore: CartesiaKeyStore(keychain: KeychainSecureStore()),
             chatService: chatService
         )
@@ -273,7 +394,7 @@ struct ClawlineTests {
         authManager.storeCredentials(token: "jwt", userId: "user")
         let service = WatchConnectivityService(
             authManager: authManager,
-            sonioxKeyStore: SonioxKeyStore(keychain: KeychainSecureStore()),
+            sonioxKeyStore: SonioxKeyStore(),
             cartesiaKeyStore: CartesiaKeyStore(keychain: KeychainSecureStore()),
             chatService: chatService
         )
@@ -344,6 +465,12 @@ private final class SpyChatService: ChatServicing {
     func createStream(displayName: String, idempotencyKey: String) async throws -> StreamSession { fatalError() }
     func renameStream(sessionKey: String, displayName: String) async throws -> StreamSession { fatalError() }
     func deleteStream(sessionKey: String, idempotencyKey: String?) async throws -> String { fatalError() }
+}
+
+private final class AcceptingSonioxKeyVerifier: SonioxKeyVerifying {
+    func verify(apiKey: String) async -> Bool {
+        !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
 }
 
 private final class InMemorySecureStore: SecureStoring {

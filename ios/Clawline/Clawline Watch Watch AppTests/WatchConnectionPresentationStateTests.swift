@@ -229,6 +229,20 @@ struct WatchConnectionPresentationStateTests {
         #expect(voiceSession.canUseVoice)
     }
 
+    @Test("empty iPhone Soniox payload clears existing Watch voice credential")
+    @MainActor
+    func emptySonioxPayloadClearsExistingWatchVoiceCredential() {
+        let credentials = WatchCredentialStore(keychain: WatchKeychainStore(service: "WatchTests.sonioxClear", accessGroup: nil))
+        credentials.clear()
+        credentials.apply(userInfo: ["sonioxApiKey": "watch-soniox-key"])
+        #expect(credentials.sonioxApiKey == "watch-soniox-key")
+
+        credentials.apply(userInfo: ["sonioxApiKey": "  "])
+
+        #expect(credentials.sonioxApiKey == nil)
+        #expect(!WatchVoiceSession(credentialStore: credentials).canUseVoice)
+    }
+
     @Test("configured Soniox keeps mic tap on Clawline voice even when direct network monitor is false")
     func configuredSonioxDoesNotFallThroughToSystemTextInputWhenDirectNetworkIsFalse() throws {
         let sourcePath = URL(filePath: #filePath)

@@ -92,26 +92,38 @@ final class WatchConnectivityService: NSObject, WatchConnectivityServicing {
 
     func syncCredentials() {
         guard WCSession.default.isPaired else { return }
-        guard let token = authManager.token,
-              let userId = authManager.currentUserId,
-              let providerURL = ProviderBaseURLStore.baseURL?.absoluteString
-        else { return }
-
-        var userInfo: [String: Any] = [
-            "type": "credential_push",
-            "token": token,
-            "userId": userId,
-            "providerBaseURL": providerURL,
-            "pushedAt": Date().timeIntervalSince1970 * 1000
-        ]
-        if let key = sonioxKeyStore.apiKey { userInfo["sonioxApiKey"] = key }
-        if let key = cartesiaKeyStore.apiKey { userInfo["cartesiaApiKey"] = key }
-        if let id = cartesiaKeyStore.selectedVoiceId { userInfo["cartesiaVoiceId"] = id }
+        let userInfo = makeCredentialPushPayload()
 
         // Update application context so Watch can recover credentials on activation
         // even if transferUserInfo queue was never delivered (fresh install, reinstall, etc.)
         try? WCSession.default.updateApplicationContext(userInfo)
         WCSession.default.transferUserInfo(userInfo)
+    }
+
+    func makeCredentialPushPayload(pushedAt: TimeInterval = Date().timeIntervalSince1970 * 1000) -> [String: Any] {
+        var userInfo: [String: Any] = [
+            "type": "credential_push",
+            "pushedAt": pushedAt,
+            "sonioxApiKey": sonioxKeyStore.keyForCredentialSync ?? ""
+        ]
+
+        if let token = authManager.token {
+            userInfo["token"] = token
+        }
+        if let userId = authManager.currentUserId {
+            userInfo["userId"] = userId
+        }
+        if let providerURL = ProviderBaseURLStore.baseURL?.absoluteString {
+            userInfo["providerBaseURL"] = providerURL
+        }
+        if let key = cartesiaKeyStore.apiKey {
+            userInfo["cartesiaApiKey"] = key
+        }
+        if let id = cartesiaKeyStore.selectedVoiceId {
+            userInfo["cartesiaVoiceId"] = id
+        }
+
+        return userInfo
     }
 
     @objc private func handleCredentialChange() {
@@ -398,9 +410,7 @@ final class WatchConnectivityService: NSObject, WatchConnectivityServicing {
         if let providerBaseURL = ProviderBaseURLStore.baseURL?.absoluteString {
             payload["providerBaseURL"] = providerBaseURL
         }
-        if let sonioxApiKey = sonioxKeyStore.apiKey {
-            payload["sonioxApiKey"] = sonioxApiKey
-        }
+        payload["sonioxApiKey"] = sonioxKeyStore.keyForCredentialSync ?? ""
         if let cartesiaApiKey = cartesiaKeyStore.apiKey {
             payload["cartesiaApiKey"] = cartesiaApiKey
         }

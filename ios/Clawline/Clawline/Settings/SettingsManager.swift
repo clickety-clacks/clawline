@@ -24,6 +24,8 @@ final class SettingsManager {
         didSet { saveAppearanceMode() }
     }
 
+    let sonioxKeyStore: SonioxKeyStore
+
     var trustSelfSignedCertificates: Bool {
         didSet { saveTrustSelfSignedCertificates() }
     }
@@ -44,13 +46,28 @@ final class SettingsManager {
     private(set) var fontScaleToastSequence: Int = 0
     private var pendingFontScaleToastMessage: String?
 
+    var sonioxAPIKey: String {
+        get { sonioxKeyStore.editableKey }
+        set { sonioxKeyStore.setKey(newValue) }
+    }
+
+    var sonioxKeyStatus: SonioxKeyVerificationStatus {
+        sonioxKeyStore.keyStatus
+    }
+
+    var sonioxCTATitle: String {
+        sonioxKeyStore.ctaTitle
+    }
+
     var isSettingsPresented: Bool = false
 
     private static let effectConfigKey = "backgroundEffectConfiguration"
     private static let appearanceModeKey = "appearanceMode"
     private static let lifecycleDebugOverlayEnabledKey = "debug.lifecycleOverlayEnabled"
 
-    init() {
+    init(sonioxKeyStore: SonioxKeyStore) {
+        self.sonioxKeyStore = sonioxKeyStore
+
         if let data = UserDefaults.standard.data(forKey: Self.effectConfigKey),
            let config = try? JSONDecoder().decode(BackgroundEffectConfiguration.self, from: data) {
             self.effectConfig = config
@@ -71,6 +88,10 @@ final class SettingsManager {
         self.fontScale = initialFontScale
         self.isLifecycleDebugOverlayEnabled = UserDefaults.standard.bool(forKey: Self.lifecycleDebugOverlayEnabledKey)
         AppFontScale.useActiveValue(initialFontScale)
+    }
+
+    convenience init() {
+        self.init(sonioxKeyStore: SonioxKeyStore())
     }
 
     private func save() {
@@ -123,6 +144,22 @@ final class SettingsManager {
         appearanceMode = appearanceMode == .dark ? .light : .dark
     }
 
+    func handleSonioxPrimaryAction(openURL: (URL) -> Void) async -> Bool {
+        if !sonioxKeyStore.hasKey {
+            openURL(SonioxConfigurationStore.keyManagementURL)
+            return false
+        }
+        return await verifySonioxKey()
+    }
+
+    @discardableResult
+    func verifySonioxKey() async -> Bool {
+        guard sonioxKeyStore.hasKey else {
+            return false
+        }
+        return await sonioxKeyStore.verify()
+    }
+
     func increaseFontScale() {
         adjustFontScale(by: AppFontScale.step)
     }
@@ -159,7 +196,7 @@ final class SettingsManager {
 // MARK: - Environment Key
 
 private struct SettingsManagerKey: EnvironmentKey {
-    static let defaultValue: SettingsManager = SettingsManager()
+    @MainActor static let defaultValue: SettingsManager = SettingsManager()
 }
 
 extension EnvironmentValues {

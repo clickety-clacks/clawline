@@ -51,6 +51,17 @@ extension EnvironmentValues {
     }
 }
 
+private struct AllowsTransparentWindowBackgroundKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+extension EnvironmentValues {
+    var allowsTransparentWindowBackground: Bool {
+        get { self[AllowsTransparentWindowBackgroundKey.self] }
+        set { self[AllowsTransparentWindowBackgroundKey.self] = newValue }
+    }
+}
+
 private struct StubUploadService: UploadServicing {
     func upload(data: Data, mimeType: String, filename: String?) async throws -> String {
         throw AttachmentError.missingAuth

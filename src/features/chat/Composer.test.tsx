@@ -13,6 +13,7 @@ import type {
   TransportMachine,
   TransportPhase
 } from "../../runtime/transport/transportMachine";
+import type { StreamRecord } from "../../runtime/chat/chatDomainStore";
 import { TransportMachineProvider } from "../../runtime/transport/transportMachine";
 import type { SessionProvisioningState } from "../streams/provisioning";
 import { Composer } from "./Composer";
@@ -22,13 +23,15 @@ function renderComposer({
   provisioningState = "ready" as const,
   retryNow = vi.fn(),
   sendMessage = vi.fn().mockResolvedValue(undefined),
-  sessionKey = "agent:main:clawline:user_1:main"
+  sessionKey = "agent:main:clawline:user_1:main",
+  streams = []
 }: {
   phase?: TransportPhase;
   provisioningState?: SessionProvisioningState;
   retryNow?: TransportMachine["retryNow"];
   sendMessage?: TransportMachine["sendMessage"];
   sessionKey?: string;
+  streams?: StreamRecord[];
 } = {}) {
   const authStore = createAuthSessionStore();
   const chatStore = createChatDomainStore({
@@ -60,6 +63,7 @@ function renderComposer({
     token: "jwt-token",
     userId: "user_1"
   });
+  let currentStreams = streams;
 
   function renderTree(input: {
     provisioningState: SessionProvisioningState;
@@ -72,6 +76,7 @@ function renderComposer({
             <Composer
               provisioningState={input.provisioningState}
               sessionKey={input.sessionKey}
+              streams={currentStreams}
             />
           </TransportMachineProvider>
         </ChatDomainStoreProvider>
@@ -92,7 +97,9 @@ function renderComposer({
     rerenderComposer(input: {
       provisioningState?: SessionProvisioningState;
       sessionKey?: string;
+      streams?: StreamRecord[];
     }) {
+      currentStreams = input.streams ?? currentStreams;
       renderResult.rerender(
         renderTree({
           provisioningState: input.provisioningState ?? provisioningState,
@@ -179,6 +186,342 @@ describe("Composer", () => {
         sessionKey: "agent:main:clawline:user_1:main"
       });
     });
+  });
+
+  it("resolves a leading mention with Tab and sends only to the destination chat", async () => {
+    const streams: StreamRecord[] = [
+      {
+        adopted: false,
+        createdAt: 10,
+        displayName: "Personal",
+        isBuiltIn: true,
+        kind: "main",
+        orderIndex: 0,
+        sessionKey: "agent:main:clawline:user_1:main",
+        updatedAt: 10
+      },
+      {
+        adopted: false,
+        createdAt: 11,
+        displayName: "Side Thread",
+        isBuiltIn: false,
+        kind: "custom",
+        orderIndex: 1,
+        sessionKey: "agent:main:clawline:user_1:side",
+        updatedAt: 11
+      }
+    ];
+    const { chatStore, sendMessage } = renderComposer({ streams });
+    const textarea = screen.getByLabelText("Message");
+
+    fireEvent.change(textarea, { target: { value: "@side" } });
+
+    expect(screen.getByRole("listbox", { name: "Mention destination" }))
+      .toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /Side Thread/i })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /Personal/i })).not.toBeInTheDocument();
+
+    fireEvent.keyDown(textarea, { key: "Tab" });
+    expect(screen.getByTestId("composer-mention-chip")).toHaveTextContent(
+      "@Side Thread"
+    );
+
+    fireEvent.change(textarea, { target: { value: "Please check this" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+
+    await waitFor(() => {
+      expect(sendMessage).toHaveBeenCalledWith({
+        attachments: [],
+        content: "Please check this",
+        id: expect.stringMatching(/^c_/),
+        sessionKey: "agent:main:clawline:user_1:side"
+      });
+    });
+    expect(await screen.findByRole("status")).toHaveTextContent("Sent to Side Thread");
+
+    expect(
+      chatStore.getState().messagesBySessionKey["agent:main:clawline:user_1:main"]
+    ).toBeUndefined();
+    expect(
+      chatStore.getState().messagesBySessionKey["agent:main:clawline:user_1:side"]
+    ).toHaveLength(1);
+  });
+
+  it("moves the leading mention picker highlight with ArrowUp and ArrowDown", async () => {
+    const streams: StreamRecord[] = [
+      {
+        adopted: false,
+        createdAt: 10,
+        displayName: "Personal",
+        isBuiltIn: true,
+        kind: "main",
+        orderIndex: 0,
+        sessionKey: "agent:main:clawline:user_1:main",
+        updatedAt: 10
+      },
+      {
+        adopted: false,
+        createdAt: 11,
+        displayName: "Side Thread",
+        isBuiltIn: false,
+        kind: "custom",
+        orderIndex: 1,
+        sessionKey: "agent:main:clawline:user_1:side",
+        updatedAt: 11
+      },
+      {
+        adopted: false,
+        createdAt: 12,
+        displayName: "Dictation",
+        isBuiltIn: false,
+        kind: "custom",
+        orderIndex: 2,
+        sessionKey: "agent:main:clawline:user_1:dictation",
+        updatedAt: 12
+      }
+    ];
+    renderComposer({ streams });
+    const textarea = screen.getByLabelText("Message");
+
+    fireEvent.change(textarea, { target: { value: "@" } });
+    const sideOption = screen.getByRole("option", { name: /Side Thread/i });
+    const dictationOption = screen.getByRole("option", { name: /Dictation/i });
+    expect(sideOption).toHaveAttribute("aria-selected", "true");
+    expect(dictationOption).toHaveAttribute("aria-selected", "false");
+
+    fireEvent.keyDown(textarea, { key: "ArrowDown" });
+    expect(sideOption).toHaveAttribute("aria-selected", "false");
+    expect(dictationOption).toHaveAttribute("aria-selected", "true");
+
+    fireEvent.keyDown(textarea, { key: "Tab" });
+    expect(screen.getByTestId("composer-mention-chip")).toHaveTextContent(
+      "@Dictation"
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Remove Dictation mention" }));
+    fireEvent.change(textarea, { target: { value: "@" } });
+    fireEvent.keyDown(textarea, { key: "ArrowDown" });
+    fireEvent.keyDown(textarea, { key: "ArrowUp" });
+    expect(screen.getByRole("option", { name: /Side Thread/i })).toHaveAttribute(
+      "aria-selected",
+      "true"
+    );
+    expect(screen.getByRole("option", { name: /Dictation/i })).toHaveAttribute(
+      "aria-selected",
+      "false"
+    );
+  });
+
+  it("resolves the highlighted leading mention with Enter before submitting", async () => {
+    const streams: StreamRecord[] = [
+      {
+        adopted: false,
+        createdAt: 10,
+        displayName: "Personal",
+        isBuiltIn: true,
+        kind: "main",
+        orderIndex: 0,
+        sessionKey: "agent:main:clawline:user_1:main",
+        updatedAt: 10
+      },
+      {
+        adopted: false,
+        createdAt: 11,
+        displayName: "Side Thread",
+        isBuiltIn: false,
+        kind: "custom",
+        orderIndex: 1,
+        sessionKey: "agent:main:clawline:user_1:side",
+        updatedAt: 11
+      },
+      {
+        adopted: false,
+        createdAt: 12,
+        displayName: "Dictation",
+        isBuiltIn: false,
+        kind: "custom",
+        orderIndex: 2,
+        sessionKey: "agent:main:clawline:user_1:dictation",
+        updatedAt: 12
+      }
+    ];
+    const { sendMessage } = renderComposer({ streams });
+    const textarea = screen.getByLabelText("Message");
+
+    fireEvent.change(textarea, { target: { value: "@" } });
+    fireEvent.keyDown(textarea, { key: "ArrowDown" });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(screen.getByTestId("composer-mention-chip")).toHaveTextContent(
+      "@Dictation"
+    );
+    expect(screen.queryByRole("listbox", { name: "Mention destination" }))
+      .not.toBeInTheDocument();
+
+    fireEvent.change(textarea, { target: { value: "Please check this" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+
+    await waitFor(() => {
+      expect(sendMessage).toHaveBeenCalledWith({
+        attachments: [],
+        content: "Please check this",
+        id: expect.stringMatching(/^c_/),
+        sessionKey: "agent:main:clawline:user_1:dictation"
+      });
+    });
+  });
+
+  it("keeps ArrowUp and ArrowDown inside an empty leading mention picker", async () => {
+    const streams: StreamRecord[] = [
+      {
+        adopted: false,
+        createdAt: 10,
+        displayName: "Personal",
+        isBuiltIn: true,
+        kind: "main",
+        orderIndex: 0,
+        sessionKey: "agent:main:clawline:user_1:main",
+        updatedAt: 10
+      }
+    ];
+    renderComposer({ streams });
+    const textarea = screen.getByLabelText("Message");
+
+    fireEvent.change(textarea, { target: { value: "@" } });
+    expect(fireEvent.keyDown(textarea, { key: "ArrowDown" })).toBe(false);
+    expect(fireEvent.keyDown(textarea, { key: "ArrowUp" })).toBe(false);
+    expect(screen.getByText("No matching sessions")).toBeInTheDocument();
+  });
+
+  it("submits unresolved leading mention text normally to the current chat", async () => {
+    const streams: StreamRecord[] = [
+      {
+        adopted: false,
+        createdAt: 10,
+        displayName: "Personal",
+        isBuiltIn: true,
+        kind: "main",
+        orderIndex: 0,
+        sessionKey: "agent:main:clawline:user_1:main",
+        updatedAt: 10
+      },
+      {
+        adopted: false,
+        createdAt: 11,
+        displayName: "Side Thread",
+        isBuiltIn: false,
+        kind: "custom",
+        orderIndex: 1,
+        sessionKey: "agent:main:clawline:user_1:side",
+        updatedAt: 11
+      }
+    ];
+    const { sendMessage } = renderComposer({ streams });
+    const textarea = screen.getByLabelText("Message");
+
+    fireEvent.change(textarea, { target: { value: "@side normal text" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+
+    await waitFor(() => {
+      expect(sendMessage).toHaveBeenCalledWith({
+        attachments: [],
+        content: "@side normal text",
+        id: expect.stringMatching(/^c_/),
+        sessionKey: "agent:main:clawline:user_1:main"
+      });
+    });
+  });
+
+  it("reports cross-chat send failure in the initiating composer without echoing into the current chat", async () => {
+    const streams: StreamRecord[] = [
+      {
+        adopted: false,
+        createdAt: 10,
+        displayName: "Personal",
+        isBuiltIn: true,
+        kind: "main",
+        orderIndex: 0,
+        sessionKey: "agent:main:clawline:user_1:main",
+        updatedAt: 10
+      },
+      {
+        adopted: false,
+        createdAt: 11,
+        displayName: "Side Thread",
+        isBuiltIn: false,
+        kind: "custom",
+        orderIndex: 1,
+        sessionKey: "agent:main:clawline:user_1:side",
+        updatedAt: 11
+      }
+    ];
+    const { chatStore, sendMessage } = renderComposer({
+      sendMessage: vi.fn().mockRejectedValue(new Error("offline")),
+      streams
+    });
+    const textarea = screen.getByLabelText("Message");
+
+    fireEvent.change(textarea, { target: { value: "@side" } });
+    fireEvent.keyDown(textarea, { key: "Tab" });
+    fireEvent.change(textarea, { target: { value: "Please check this" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+
+    await waitFor(() => {
+      expect(screen.getByText("Message send failed.")).toBeInTheDocument();
+    });
+    expect(sendMessage).toHaveBeenCalledWith({
+      attachments: [],
+      content: "Please check this",
+      id: expect.stringMatching(/^c_/),
+      sessionKey: "agent:main:clawline:user_1:side"
+    });
+    expect(
+      chatStore.getState().messagesBySessionKey["agent:main:clawline:user_1:main"]
+    ).toBeUndefined();
+    expect(
+      chatStore.getState().messagesBySessionKey["agent:main:clawline:user_1:side"]?.[0]
+        ?.delivery
+    ).toBe("failed");
+  });
+
+  it("fails a disappeared resolved destination through the composer send-error path", async () => {
+    const streams: StreamRecord[] = [
+      {
+        adopted: false,
+        createdAt: 10,
+        displayName: "Personal",
+        isBuiltIn: true,
+        kind: "main",
+        orderIndex: 0,
+        sessionKey: "agent:main:clawline:user_1:main",
+        updatedAt: 10
+      },
+      {
+        adopted: false,
+        createdAt: 11,
+        displayName: "Side Thread",
+        isBuiltIn: false,
+        kind: "custom",
+        orderIndex: 1,
+        sessionKey: "agent:main:clawline:user_1:side",
+        updatedAt: 11
+      }
+    ];
+    const { chatStore, rerenderComposer, sendMessage } = renderComposer({ streams });
+    const textarea = screen.getByLabelText("Message");
+
+    fireEvent.change(textarea, { target: { value: "@side" } });
+    fireEvent.keyDown(textarea, { key: "Tab" });
+    rerenderComposer({ streams: [streams[0]] });
+    fireEvent.change(textarea, { target: { value: "Please check this" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+
+    await waitFor(() => {
+      expect(screen.getByText("Message send failed.")).toBeInTheDocument();
+    });
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(chatStore.getState().messagesBySessionKey).toEqual({});
   });
 
   it("submits on primary pointer-down while focused without waiting for click", async () => {

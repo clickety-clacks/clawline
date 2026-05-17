@@ -12,6 +12,623 @@ private final class HapticCounter {
 }
 
 struct ChatViewModelTests {
+    @Test("T307 cross-chat mention sends to destination only")
+    @MainActor
+    func crossChatMentionSendRoutesToDestinationOnly() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let destinationSessionKey = "agent:main:clawline:user:s_destination"
+        let streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: destinationSessionKey, displayName: "Side", kind: "custom", orderIndex: 1, isBuiltIn: false),
+        ]
+        let chatService = TestChatService()
+        chatService.streams = streams
+        chatService.sessionStatusBySessionKey[personalSessionKey] = makeSessionStatus(
+            sessionKey: personalSessionKey,
+            state: .idle,
+            provider: "openai",
+            model: "gpt-5.5",
+            thinkingLevel: "medium",
+            queueDepth: 0
+        )
+        chatService.sessionStatusBySessionKey[destinationSessionKey] = makeSessionStatus(
+            sessionKey: destinationSessionKey,
+            state: .running,
+            provider: "openai",
+            model: "gpt-5.5",
+            thinkingLevel: "medium",
+            queueDepth: 1
+        )
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        chatService.emitServiceEvent(.streamSnapshot(streams))
+        try await setReadyToSend(chatService: chatService, viewModel: viewModel)
+        chatService.resetFetchedSessionStatusKeys()
+        viewModel.inputContent = NSAttributedString(string: "route this")
+
+        let dispatched = viewModel.sendCrossChatMention(to: destinationSessionKey)
+
+        #expect(dispatched)
+        for _ in 0..<50 {
+            if chatService.lastSessionKey == destinationSessionKey { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(chatService.lastSessionKey == destinationSessionKey)
+        #expect(chatService.lastSentContent == "route this")
+        #expect(viewModel.messages.isEmpty)
+        for _ in 0..<50 {
+            if viewModel.sessionStatus(for: destinationSessionKey)?.run.state == .running { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(chatService.fetchedSessionStatusKeys.contains(destinationSessionKey))
+        #expect(viewModel.sessionStatus(for: destinationSessionKey)?.run.state == .running)
+        #expect(viewModel.sessionStatus(for: personalSessionKey)?.run.state != .running)
+    }
+
+    @Test("T307 cross-chat mention sends only content after chip")
+    @MainActor
+    func crossChatMentionSendUsesOnlyContentAfterChip() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let destinationSessionKey = "agent:main:clawline:user:s_destination"
+        let streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: destinationSessionKey, displayName: "Side", kind: "custom", orderIndex: 1, isBuiltIn: false),
+        ]
+        let chatService = TestChatService()
+        chatService.streams = streams
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        chatService.emitServiceEvent(.streamSnapshot(streams))
+        try await setReadyToSend(chatService: chatService, viewModel: viewModel)
+        let content = NSMutableAttributedString(string: "do not route ")
+        content.append(
+            NSAttributedString(
+                attachment: CrossChatMentionTextAttachment(
+                    destinationChatId: destinationSessionKey,
+                    displayName: "Side"
+                )
+            )
+        )
+        content.append(NSAttributedString(string: " route this"))
+        viewModel.inputContent = content
+
+        let dispatched = viewModel.sendCrossChatMention(to: destinationSessionKey)
+
+        #expect(dispatched)
+        for _ in 0..<50 {
+            if chatService.lastSessionKey == destinationSessionKey { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(chatService.lastSessionKey == destinationSessionKey)
+        #expect(chatService.lastSentContent == "route this")
+        #expect(viewModel.messages.isEmpty)
+    }
+
+    @Test("T307 queued cross-chat mention clears composer to prevent current-chat leak")
+    @MainActor
+    func queuedCrossChatMentionClearsComposerToPreventCurrentChatLeak() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let destinationSessionKey = "agent:main:clawline:user:s_waiting"
+        let streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: destinationSessionKey, displayName: "Waiting", kind: "custom", orderIndex: 1, isBuiltIn: false),
+        ]
+        let chatService = TestChatService()
+        chatService.streams = streams
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        chatService.emitServiceEvent(.streamSnapshot(streams))
+        try await setConnected(chatService: chatService, viewModel: viewModel)
+        chatService.emitServiceEvent(.sessionProvisioningAvailable(true))
+        try await Task.sleep(for: .milliseconds(20))
+        viewModel.inputContent = NSAttributedString(string: "queue this")
+
+        let dispatched = viewModel.sendCrossChatMention(to: destinationSessionKey)
+        viewModel.send()
+        try await Task.sleep(for: .milliseconds(20))
+
+        #expect(dispatched)
+        #expect(viewModel.inputContent.string.isEmpty)
+        #expect(chatService.lastSentContent == nil)
+        #expect(viewModel.messages.isEmpty)
+    }
+
+    @Test("T307 assistant notifications are assistant-only and dismiss on source navigation")
+    @MainActor
+    func assistantNotificationsAreAssistantOnlyAndDismissOnNavigation() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let sourceSessionKey = "agent:main:clawline:user:s_source"
+        let streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: sourceSessionKey, displayName: "Source", kind: "custom", orderIndex: 1, isBuiltIn: false),
+        ]
+        let chatService = TestChatService()
+        chatService.streams = streams
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        chatService.emitServiceEvent(.streamSnapshot(streams))
+        try await setConnected(chatService: chatService, viewModel: viewModel)
+
+        chatService.emit(
+            Message(
+                id: "u_other",
+                role: .user,
+                content: "user echo",
+                timestamp: Date(),
+                streaming: false,
+                attachments: [],
+                deviceId: nil,
+                sessionKey: sourceSessionKey
+            )
+        )
+        chatService.emit(
+            Message(
+                id: "s_first",
+                role: .assistant,
+                content: "older",
+                timestamp: Date(timeIntervalSince1970: 10),
+                streaming: false,
+                attachments: [],
+                deviceId: nil,
+                sessionKey: sourceSessionKey
+            )
+        )
+        chatService.emit(
+            Message(
+                id: "s_second",
+                role: .assistant,
+                content: "newer",
+                timestamp: Date(timeIntervalSince1970: 11),
+                streaming: false,
+                attachments: [],
+                deviceId: nil,
+                sessionKey: sourceSessionKey
+            )
+        )
+
+        for _ in 0..<50 {
+            if viewModel.crossChatNotificationBubbles.first?.entries.count == 2 { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let bubble = try #require(viewModel.crossChatNotificationBubbles.first)
+        #expect(bubble.sourceChatId == sourceSessionKey)
+        #expect(bubble.entries.map(\.content) == ["newer", "older"])
+
+        viewModel.requestStreamSwitch(to: sourceSessionKey, source: .programmatic)
+        #expect(viewModel.crossChatNotificationBubbles.isEmpty)
+    }
+
+    @Test("T307 assistant notifications dismiss when source disappears from stream snapshot")
+    @MainActor
+    func assistantNotificationsDismissWhenSourceDisappearsFromStreamSnapshot() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let sourceSessionKey = "agent:main:clawline:user:s_removed"
+        let personalStream = makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true)
+        let sourceStream = makeStreamSession(sessionKey: sourceSessionKey, displayName: "Source", kind: "custom", orderIndex: 1, isBuiltIn: false)
+        let chatService = TestChatService()
+        chatService.streams = [personalStream, sourceStream]
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        chatService.emitServiceEvent(.streamSnapshot([personalStream, sourceStream]))
+        try await setConnected(chatService: chatService, viewModel: viewModel)
+        chatService.emit(
+            Message(
+                id: "s_removed",
+                role: .assistant,
+                content: "removed source",
+                timestamp: Date(),
+                streaming: false,
+                attachments: [],
+                deviceId: nil,
+                sessionKey: sourceSessionKey
+            )
+        )
+        for _ in 0..<50 {
+            if viewModel.crossChatNotificationBubblesBySourceChatId[sourceSessionKey] != nil { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+
+        chatService.emitServiceEvent(.streamSnapshot([personalStream]))
+        for _ in 0..<50 {
+            if viewModel.crossChatNotificationBubblesBySourceChatId[sourceSessionKey] == nil { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+
+        #expect(viewModel.crossChatNotificationBubblesBySourceChatId[sourceSessionKey] == nil)
+
+        chatService.emit(
+            Message(
+                id: "s_removed_late",
+                role: .assistant,
+                content: "late removed source",
+                timestamp: Date(),
+                streaming: false,
+                attachments: [],
+                deviceId: nil,
+                sessionKey: sourceSessionKey
+            )
+        )
+        try await Task.sleep(for: .milliseconds(20))
+        #expect(viewModel.crossChatNotificationBubblesBySourceChatId[sourceSessionKey] == nil)
+    }
+
+    @Test("T307 dismissing notification clears source unread dot through read-state")
+    @MainActor
+    func dismissingNotificationClearsSourceUnreadDot() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let sourceSessionKey = "agent:main:clawline:user:s_read_notification"
+        let streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: sourceSessionKey, displayName: "Source", kind: "custom", orderIndex: 1, isBuiltIn: false)
+        ]
+        let chatService = TestChatService()
+        chatService.streams = streams
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        chatService.emitServiceEvent(.streamSnapshot(streams))
+        try await setConnected(chatService: chatService, viewModel: viewModel)
+        chatService.emitServiceEvent(.streamReadStateUpdated(sessionKey: sourceSessionKey, lastReadMessageId: "s_old_read"))
+        chatService.emit(
+            Message(
+                id: "s_notification_unread",
+                role: .assistant,
+                content: "unread source notification",
+                timestamp: Date(),
+                streaming: false,
+                attachments: [],
+                deviceId: nil,
+                sessionKey: sourceSessionKey
+            )
+        )
+
+        for _ in 0..<50 {
+            if viewModel.crossChatNotificationBubblesBySourceChatId[sourceSessionKey] != nil,
+               viewModel.streamDotState(for: sourceSessionKey) == .unread {
+                break
+            }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(viewModel.streamDotState(for: sourceSessionKey) == .unread)
+
+        chatService.lastPublishedReadState = nil
+        viewModel.dismissCrossChatNotification(sourceChatId: sourceSessionKey)
+        for _ in 0..<50 {
+            if chatService.lastPublishedReadState?.lastReadMessageId == "s_notification_unread" { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+
+        #expect(viewModel.crossChatNotificationBubblesBySourceChatId[sourceSessionKey] == nil)
+        #expect(chatService.lastPublishedReadState?.sessionKey == sourceSessionKey)
+        #expect(chatService.lastPublishedReadState?.lastReadMessageId == "s_notification_unread")
+        #expect(viewModel.lastReadMessageIdBySession[sourceSessionKey] == "s_notification_unread")
+        #expect(viewModel.streamDotState(for: sourceSessionKey) == .inactive)
+    }
+
+    @Test("T307 overflowing notification preserves active reply draft")
+    @MainActor
+    func overflowingNotificationClosesReplyDraft() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let streams = [makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true)]
+            + (0..<11).map { index in
+                makeStreamSession(
+                    sessionKey: "agent:main:clawline:user:s_overflow_\(index)",
+                    displayName: "Overflow \(index)",
+                    kind: "custom",
+                    orderIndex: index + 1,
+                    isBuiltIn: false
+                )
+            }
+        let chatService = TestChatService()
+        chatService.streams = streams
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        chatService.emitServiceEvent(.streamSnapshot(streams))
+        try await setConnected(chatService: chatService, viewModel: viewModel)
+
+        for index in 0..<10 {
+            chatService.emit(
+                Message(
+                    id: "s_overflow_\(index)",
+                    role: .assistant,
+                    content: "message \(index)",
+                    timestamp: Date(timeIntervalSince1970: TimeInterval(index)),
+                    streaming: false,
+                    attachments: [],
+                    deviceId: nil,
+                    sessionKey: "agent:main:clawline:user:s_overflow_\(index)"
+                )
+            )
+        }
+        for _ in 0..<50 {
+            if viewModel.crossChatNotificationBubbles.count == 10 { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+
+        let oldestVisible = "agent:main:clawline:user:s_overflow_0"
+        viewModel.openCrossChatNotificationReply(sourceChatId: oldestVisible)
+        viewModel.setCrossChatNotificationReplyDraft(sourceChatId: oldestVisible, draft: "draft")
+        viewModel.closeOverflowingCrossChatNotificationReplies(visibleSourceChatIds: [oldestVisible])
+        let replyingBubble = try #require(viewModel.crossChatNotificationBubblesBySourceChatId[oldestVisible])
+        #expect(replyingBubble.isReplying)
+        #expect(replyingBubble.replyDraft == "draft")
+
+        chatService.emit(
+            Message(
+                id: "s_overflow_10",
+                role: .assistant,
+                content: "message 10",
+                timestamp: Date(timeIntervalSince1970: 10),
+                streaming: false,
+                attachments: [],
+                deviceId: nil,
+                sessionKey: "agent:main:clawline:user:s_overflow_10"
+            )
+        )
+
+        for _ in 0..<50 {
+            let bubble = viewModel.crossChatNotificationBubblesBySourceChatId[oldestVisible]
+            if bubble?.isReplying == true, bubble?.replyDraft == "draft" { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let overflowed = try #require(viewModel.crossChatNotificationBubblesBySourceChatId[oldestVisible])
+        #expect(overflowed.isReplying)
+        #expect(overflowed.replyDraft == "draft")
+    }
+
+    @Test("T307 notification reply closes only after successful send")
+    @MainActor
+    func notificationReplyClosesOnlyAfterSuccessfulSend() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let sourceSessionKey = "agent:main:clawline:user:s_reply"
+        let streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: sourceSessionKey, displayName: "Source", kind: "custom", orderIndex: 1, isBuiltIn: false),
+        ]
+        let chatService = TestChatService()
+        chatService.streams = streams
+        chatService.sessionStatusBySessionKey[personalSessionKey] = makeSessionStatus(
+            sessionKey: personalSessionKey,
+            state: .idle,
+            provider: "openai",
+            model: "gpt-5.5",
+            thinkingLevel: "medium",
+            queueDepth: 0
+        )
+        chatService.sessionStatusBySessionKey[sourceSessionKey] = makeSessionStatus(
+            sessionKey: sourceSessionKey,
+            state: .running,
+            provider: "openai",
+            model: "gpt-5.5",
+            thinkingLevel: "medium",
+            queueDepth: 1
+        )
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        chatService.emitServiceEvent(.streamSnapshot(streams))
+        try await setReadyToSend(chatService: chatService, viewModel: viewModel)
+        chatService.emit(
+            Message(
+                id: "s_reply",
+                role: .assistant,
+                content: "reply target",
+                timestamp: Date(),
+                streaming: false,
+                attachments: [],
+                deviceId: nil,
+                sessionKey: sourceSessionKey
+            )
+        )
+        for _ in 0..<50 {
+            if viewModel.crossChatNotificationBubblesBySourceChatId[sourceSessionKey] != nil { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+
+        viewModel.openCrossChatNotificationReply(sourceChatId: sourceSessionKey)
+        viewModel.setCrossChatNotificationReplyDraft(sourceChatId: sourceSessionKey, draft: "reply draft")
+        chatService.sendError = NSError(domain: "test", code: 1)
+        viewModel.sendCrossChatNotificationReply(sourceChatId: sourceSessionKey)
+        try await Task.sleep(for: .milliseconds(50))
+
+        let bubble = try #require(viewModel.crossChatNotificationBubblesBySourceChatId[sourceSessionKey])
+        #expect(bubble.isReplying)
+        #expect(bubble.replyDraft == "reply draft")
+
+        chatService.sendError = nil
+        chatService.resetFetchedSessionStatusKeys()
+        chatService.sendDelay = .milliseconds(300)
+        viewModel.sendCrossChatNotificationReply(sourceChatId: sourceSessionKey)
+        for _ in 0..<50 {
+            if chatService.lastSentId != nil { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+
+        let replyMessageId = try #require(chatService.lastSentId)
+        #expect(viewModel.crossChatNotificationBubblesBySourceChatId[sourceSessionKey] != nil)
+        viewModel.cancelSend()
+        chatService.emitServiceEvent(.messageAcked(id: replyMessageId))
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(viewModel.crossChatNotificationBubblesBySourceChatId[sourceSessionKey] != nil)
+
+        chatService.sendDelay = nil
+        viewModel.sendCrossChatNotificationReply(sourceChatId: sourceSessionKey)
+        for _ in 0..<50 {
+            if chatService.lastSentId != replyMessageId { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+
+        let acceptedReplyMessageId = try #require(chatService.lastSentId)
+        #expect(acceptedReplyMessageId != replyMessageId)
+        chatService.emitServiceEvent(.messageAcked(id: replyMessageId))
+        chatService.emitServiceEvent(.messageAcked(id: acceptedReplyMessageId))
+        for _ in 0..<50 {
+            if viewModel.crossChatNotificationBubblesBySourceChatId[sourceSessionKey] == nil { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+
+        #expect(chatService.lastSentContent == "reply draft")
+        #expect(chatService.lastSessionKey == sourceSessionKey)
+        #expect(viewModel.crossChatNotificationBubblesBySourceChatId[sourceSessionKey] == nil)
+        for _ in 0..<50 {
+            if viewModel.sessionStatus(for: sourceSessionKey)?.run.state == .running { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(chatService.fetchedSessionStatusKeys.contains(sourceSessionKey))
+        #expect(viewModel.sessionStatus(for: sourceSessionKey)?.run.state == .running)
+        #expect(viewModel.sessionStatus(for: personalSessionKey)?.run.state != .running)
+    }
+
+    @Test("T307 notification reply action toggles reply mode without dismissing")
+    @MainActor
+    func notificationReplyActionTogglesReplyMode() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let sourceSessionKey = "agent:main:clawline:user:s_toggle"
+        let streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: sourceSessionKey, displayName: "Source", kind: "custom", orderIndex: 1, isBuiltIn: false),
+        ]
+        let chatService = TestChatService()
+        chatService.streams = streams
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        chatService.emitServiceEvent(.streamSnapshot(streams))
+        try await setConnected(chatService: chatService, viewModel: viewModel)
+        chatService.emit(
+            Message(
+                id: "s_toggle",
+                role: .assistant,
+                content: "toggle target",
+                timestamp: Date(),
+                streaming: false,
+                attachments: [],
+                deviceId: nil,
+                sessionKey: sourceSessionKey
+            )
+        )
+        for _ in 0..<50 {
+            if viewModel.crossChatNotificationBubblesBySourceChatId[sourceSessionKey] != nil { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+
+        viewModel.toggleCrossChatNotificationReply(sourceChatId: sourceSessionKey)
+        viewModel.setCrossChatNotificationReplyDraft(sourceChatId: sourceSessionKey, draft: "discard me")
+        var bubble = try #require(viewModel.crossChatNotificationBubblesBySourceChatId[sourceSessionKey])
+        #expect(bubble.isReplying)
+        #expect(bubble.replyDraft == "discard me")
+
+        viewModel.toggleCrossChatNotificationReply(sourceChatId: sourceSessionKey)
+        bubble = try #require(viewModel.crossChatNotificationBubblesBySourceChatId[sourceSessionKey])
+        #expect(bubble.isReplying == false)
+        #expect(bubble.replyDraft.isEmpty)
+    }
+
     @Test("Records last server message id for reconnects")
     @MainActor
     func recordsLastServerMessageId() async throws {
@@ -930,6 +1547,86 @@ struct ChatViewModelTests {
 
         #expect(viewModel.failureMessage(for: messageId) == "Message not delivered — connection lost.")
         #expect(toastManager.debugMessages.isEmpty)
+    }
+
+    @Test("Network-lost send failure leaves send button non-green")
+    @MainActor
+    func networkLostSendFailureLeavesSendButtonNonGreen() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let toastManager = ToastManager()
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: toastManager,
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.activate(origin: "test.networkLostSendFailure")
+        await viewModel.onAppear()
+        try await setReadyToSend(chatService: chatService, viewModel: viewModel)
+        viewModel.inputContent = NSAttributedString(string: "Pending")
+        #expect(viewModel.sendButtonConnectionState == .connected)
+        #expect(viewModel.canSend)
+
+        chatService.sendError = URLError(.networkConnectionLost)
+        viewModel.send()
+
+        for _ in 0..<100 {
+            if toastManager.debugMessages.contains("The network connection was lost."),
+               viewModel.sendButtonConnectionState == .reconnecting {
+                break
+            }
+            try await Task.sleep(forDuration: .milliseconds(20))
+        }
+
+        #expect(toastManager.debugMessages.contains("The network connection was lost."))
+        #expect(viewModel.sendButtonConnectionState == .reconnecting)
+        #expect(!viewModel.canSend)
+    }
+
+    @Test("Provider disconnected state alone leaves send button non-green")
+    @MainActor
+    func providerDisconnectedStateAloneLeavesSendButtonNonGreen() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.activate(origin: "test.providerDisconnectedStateAlone")
+        await viewModel.onAppear()
+        try await setReadyToSend(chatService: chatService, viewModel: viewModel)
+        viewModel.inputContent = NSAttributedString(string: "Pending")
+        #expect(viewModel.sendButtonConnectionState == .connected)
+        #expect(viewModel.canSend)
+
+        chatService.emitProviderConnectionStateOnly(.disconnected)
+
+        for _ in 0..<100 {
+            if viewModel.sendButtonConnectionState == .reconnecting {
+                break
+            }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        #expect(viewModel.sendButtonConnectionState == .reconnecting)
+        #expect(!viewModel.canSend)
     }
 
     @Test("Disconnected transport maps to disconnected send-button state")
@@ -4130,6 +4827,7 @@ private final class TestChatService: ChatServicing {
     private(set) var connectCallCount: Int = 0
     var isTransportReadyForSend: Bool = false
     var sendError: Swift.Error?
+    var sendDelay: Duration?
     var createStreamError: Error?
     var deleteStreamError: Error?
     var deleteStreamErrorSequence: [Error] = []
@@ -4150,6 +4848,7 @@ private final class TestChatService: ChatServicing {
     private(set) var fetchStreamsCallCount: Int = 0
     private(set) var fetchTrackableSessionsCallCount: Int = 0
     private(set) var fetchSessionStatusCallCount: Int = 0
+    private(set) var fetchedSessionStatusKeys: [String] = []
     private(set) var cancelCurrentRunCallCount: Int = 0
     private(set) var lastCancelledSessionKey: String?
     private(set) var deleteStreamCallCount: Int = 0
@@ -4259,6 +4958,9 @@ private final class TestChatService: ChatServicing {
         lastSentContent = content
         lastSentAttachments = attachments
         lastSessionKey = sessionKey
+        if let sendDelay {
+            try await Task.sleep(for: sendDelay)
+        }
     }
 
     func sendInteractiveCallback(sourceMessageId: String, action: String, data: JSONValue?) async throws {
@@ -4310,6 +5012,11 @@ private final class TestChatService: ChatServicing {
         }
     }
 
+    func emitProviderConnectionStateOnly(_ state: ConnectionState) {
+        isTransportReadyForSend = (state == .connected)
+        stateContinuation?.yield(state)
+    }
+
     func emitServiceEvent(_ event: ChatServiceEvent) {
         if let continuation = eventContinuation {
             continuation.yield(event)
@@ -4331,10 +5038,15 @@ private final class TestChatService: ChatServicing {
 
     func fetchSessionStatus(sessionKey: String) async throws -> SessionStatus {
         fetchSessionStatusCallCount += 1
+        fetchedSessionStatusKeys.append(sessionKey)
         if let status = sessionStatusBySessionKey[sessionKey] {
             return status
         }
         throw StreamAPIError(code: "stream_not_found", message: "not found", statusCode: 404)
+    }
+
+    func resetFetchedSessionStatusKeys() {
+        fetchedSessionStatusKeys.removeAll()
     }
 
     func applySessionControl(

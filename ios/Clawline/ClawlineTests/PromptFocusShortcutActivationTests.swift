@@ -6,6 +6,7 @@
 //
 
 import Testing
+import SwiftUI
 import UIKit
 @testable import Clawline
 
@@ -86,6 +87,29 @@ struct PromptFocusShortcutActivationTests {
                     && spec.action.selector == #selector(UIResponder.clawlineScrollChatUpCommand(_:))
             }
         )
+        #expect(!ChatAppCommandShortcut.keyCommandSpecs.contains { spec in
+            spec.input == "0" && spec.modifierFlags == [.command]
+        })
+        let notificationCommandSpecs = ChatAppCommandShortcut.keyCommandSpecs(
+            notificationVisibleCount: 10
+        )
+        for index in 0...9 {
+            #expect(notificationCommandSpecs.contains { spec in
+                spec.input == "\(index)"
+                    && spec.modifierFlags == [.command]
+                    && spec.action.selector == #selector(UIResponder.clawlineNotificationNumberCommand(_:))
+            })
+            #expect(notificationCommandSpecs.contains { spec in
+                spec.input == "\(index)"
+                    && spec.modifierFlags == [.command, .shift]
+                    && spec.action.selector == #selector(UIResponder.clawlineNotificationNumberCommand(_:))
+            })
+            #expect(notificationCommandSpecs.contains { spec in
+                spec.input == "\(index)"
+                    && spec.modifierFlags == [.command, .shift, .alternate]
+                    && spec.action.selector == #selector(UIResponder.clawlineNotificationNumberCommand(_:))
+            })
+        }
         #expect(
             !ChatAppCommandShortcut.keyCommandSpecs.contains { spec in
                 spec.input == "h" && spec.modifierFlags == [.command]
@@ -112,6 +136,70 @@ struct PromptFocusShortcutActivationTests {
         }
 
         #expect(firstEscapeCommand?.action == Selector(("didPressEscape:")))
+    }
+
+    @Test("Prompt text input exposes app scroll commands before base text-view commands")
+    @MainActor
+    func promptTextInputExposesAppScrollCommandsBeforeBaseTextViewCommands() {
+        let textView = PastableTextView(frame: .zero, textContainer: nil)
+        textView.notificationVisibleCount = 2
+
+        let firstCommandJ = textView.keyCommands?.first { command in
+            command.input == "j" && command.modifierFlags == [.command]
+        }
+        let firstCommandShiftK = textView.keyCommands?.first { command in
+            command.input == "k" && command.modifierFlags == [.command, .shift]
+        }
+
+        #expect(firstCommandJ?.action == #selector(UIResponder.clawlineScrollDownCommand(_:)))
+        #expect(firstCommandShiftK?.action == #selector(UIResponder.clawlineScrollChatUpCommand(_:)))
+    }
+
+    @Test("Text input priority is limited to visible notification-owned shortcuts")
+    @MainActor
+    func textInputPriorityIsLimitedToVisibleNotificationOwnedShortcuts() {
+        #expect(
+            ChatAppCommandShortcut.prioritizesTextInputBaseCommand(
+                input: "j",
+                modifierFlags: [.command],
+                notificationVisibleCount: 0
+            ) == false
+        )
+        #expect(
+            ChatAppCommandShortcut.prioritizesTextInputBaseCommand(
+                input: "j",
+                modifierFlags: [.command],
+                notificationVisibleCount: 2
+            )
+        )
+        #expect(
+            ChatAppCommandShortcut.prioritizesTextInputBaseCommand(
+                input: "k",
+                modifierFlags: [.command, .shift],
+                notificationVisibleCount: 2
+            )
+        )
+        #expect(
+            ChatAppCommandShortcut.prioritizesTextInputBaseCommand(
+                input: "1",
+                modifierFlags: [.command, .shift, .alternate],
+                notificationVisibleCount: 2
+            )
+        )
+        #expect(
+            ChatAppCommandShortcut.prioritizesTextInputBaseCommand(
+                input: "l",
+                modifierFlags: [.command],
+                notificationVisibleCount: 2
+            ) == false
+        )
+        #expect(
+            ChatAppCommandShortcut.prioritizesTextInputBaseCommand(
+                input: "1",
+                modifierFlags: [.command, .control],
+                notificationVisibleCount: 2
+            ) == false
+        )
     }
 
     @Test("Prompt text input reports responder focus transitions")
@@ -288,6 +376,56 @@ struct PromptFocusShortcutActivationTests {
         ])
     }
 
+    @Test("Notification number responders post menu reply and dismiss notifications")
+    @MainActor
+    func notificationNumberRespondersPostMenuReplyAndDismissNotifications() {
+        let center = NotificationCenter.default
+        var posted: [(Notification.Name, Int?)] = []
+        let names: [Notification.Name] = [
+            .clawlineOpenNotificationActionMenuCommand,
+            .clawlineReplyNotificationCommand,
+            .clawlineDismissNotificationCommand
+        ]
+        let tokens = names.map { name in
+            center.addObserver(forName: name, object: nil, queue: nil) { notification in
+                posted.append((name, notification.object as? Int))
+            }
+        }
+        defer {
+            tokens.forEach(center.removeObserver)
+        }
+
+        let responder = UIResponder()
+        responder.clawlineNotificationNumberCommand(
+            UIKeyCommand(
+                input: "3",
+                modifierFlags: [.command],
+                action: #selector(UIResponder.clawlineNotificationNumberCommand(_:))
+            )
+        )
+        responder.clawlineNotificationNumberCommand(
+            UIKeyCommand(
+                input: "3",
+                modifierFlags: [.command, .shift],
+                action: #selector(UIResponder.clawlineNotificationNumberCommand(_:))
+            )
+        )
+        responder.clawlineNotificationNumberCommand(
+            UIKeyCommand(
+                input: "3",
+                modifierFlags: [.command, .shift, .alternate],
+                action: #selector(UIResponder.clawlineNotificationNumberCommand(_:))
+            )
+        )
+
+        #expect(posted.map(\.0) == [
+            .clawlineOpenNotificationActionMenuCommand,
+            .clawlineReplyNotificationCommand,
+            .clawlineDismissNotificationCommand
+        ])
+        #expect(posted.map(\.1) == [3, 3, 3])
+    }
+
     @Test("No-text composed printable typing activates prompt insertion")
     func noTextComposedPrintableTypingActivatesPromptInsertion() {
         #expect(PromptFocusTypingActivation.promptInsertionText(from: "a") == "a")
@@ -361,6 +499,141 @@ struct PromptFocusShortcutActivationTests {
                 photosPickerPresented: false,
                 fileImporterPresented: true
             )
+        )
+    }
+
+    @Test("Visible notifications own Cmd-J/K and Cmd-Shift-J/K before text-field focus blocks")
+    @MainActor
+    func visibleNotificationsOwnScrollShortcutsBeforeTextFieldFocusBlocks() {
+        #expect(
+            ChatKeyboardScrollRouting.route(
+                command: .scrollDown,
+                isEnabled: true,
+                hasVisibleNotifications: true,
+                firstResponderBlocksKeyboardScroll: true
+            ) == .notificationDown
+        )
+        #expect(
+            ChatKeyboardScrollRouting.route(
+                command: .scrollUp,
+                isEnabled: true,
+                hasVisibleNotifications: true,
+                firstResponderBlocksKeyboardScroll: true
+            ) == .notificationUp
+        )
+        #expect(
+            ChatKeyboardScrollRouting.route(
+                command: .scrollChatDown,
+                isEnabled: true,
+                hasVisibleNotifications: true,
+                firstResponderBlocksKeyboardScroll: true
+            ) == .notificationDown
+        )
+        #expect(
+            ChatKeyboardScrollRouting.route(
+                command: .scrollChatUp,
+                isEnabled: true,
+                hasVisibleNotifications: true,
+                firstResponderBlocksKeyboardScroll: true
+            ) == .notificationUp
+        )
+    }
+
+    @Test("Notification reply field keeps notification number and scroll shortcuts above text focus")
+    @MainActor
+    func notificationReplyFieldKeepsNotificationNumberAndScrollShortcutsAboveTextFocus() {
+        #expect(
+            CrossChatNotificationKeyPrecedence.replyFieldAction(
+                characters: "3",
+                modifiers: .command,
+                visibleNotificationCount: 4
+            ) == .openMenu(3)
+        )
+        #expect(
+            CrossChatNotificationKeyPrecedence.replyFieldAction(
+                characters: "#",
+                modifiers: [.command, .shift],
+                visibleNotificationCount: 4
+            ) == .reply(3)
+        )
+        #expect(
+            CrossChatNotificationKeyPrecedence.replyFieldAction(
+                characters: "#",
+                modifiers: [.command, .shift, .option],
+                visibleNotificationCount: 4
+            ) == .dismiss(3)
+        )
+        #expect(
+            CrossChatNotificationKeyPrecedence.replyFieldAction(
+                characters: "1",
+                modifiers: .command,
+                visibleNotificationCount: 4
+            ) == .openMenu(1)
+        )
+        #expect(
+            CrossChatNotificationKeyPrecedence.replyFieldAction(
+                characters: "j",
+                modifiers: .command,
+                visibleNotificationCount: 4
+            ) == .scrollDown
+        )
+        #expect(
+            CrossChatNotificationKeyPrecedence.replyFieldAction(
+                characters: "k",
+                modifiers: [.command, .shift],
+                visibleNotificationCount: 4
+            ) == .scrollUp
+        )
+        #expect(
+            CrossChatNotificationKeyPrecedence.replyFieldAction(
+                characters: "3",
+                modifiers: [.command, .control],
+                visibleNotificationCount: 4
+            ) == nil
+        )
+        #expect(
+            CrossChatNotificationKeyPrecedence.replyFieldAction(
+                characters: "4",
+                modifiers: .command,
+                visibleNotificationCount: 4
+            ) == nil
+        )
+    }
+
+    @Test("Transcript and chat scroll receive only unclaimed scroll shortcuts")
+    @MainActor
+    func transcriptAndChatScrollReceiveOnlyUnclaimedScrollShortcuts() {
+        #expect(
+            ChatKeyboardScrollRouting.route(
+                command: .scrollDown,
+                isEnabled: true,
+                hasVisibleNotifications: false,
+                firstResponderBlocksKeyboardScroll: false
+            ) == .bubbleDown
+        )
+        #expect(
+            ChatKeyboardScrollRouting.route(
+                command: .scrollChatDown,
+                isEnabled: true,
+                hasVisibleNotifications: false,
+                firstResponderBlocksKeyboardScroll: false
+            ) == .chatDown
+        )
+        #expect(
+            ChatKeyboardScrollRouting.route(
+                command: .scrollDown,
+                isEnabled: true,
+                hasVisibleNotifications: false,
+                firstResponderBlocksKeyboardScroll: true
+            ) == .none
+        )
+        #expect(
+            ChatKeyboardScrollRouting.route(
+                command: .scrollChatDown,
+                isEnabled: true,
+                hasVisibleNotifications: false,
+                firstResponderBlocksKeyboardScroll: true
+            ) == .none
         )
     }
 

@@ -1291,9 +1291,10 @@ describe("MessageList rich rendering", () => {
   });
 
   it("opens typing cancellation with Cmd-period and dismisses with Escape", async () => {
+    const onCancelCurrentPrompt = vi.fn();
     renderMessageListWithProps({
       messages: [makeMessage(1)],
-      onCancelCurrentPrompt: vi.fn(),
+      onCancelCurrentPrompt,
       sessionKey: "agent:main:clawline:flynn:main",
       sessionStatus: {
         sessionKey: "agent:main:clawline:flynn:main",
@@ -1311,6 +1312,13 @@ describe("MessageList rich rendering", () => {
 
     fireEvent.keyDown(window, { key: "Escape" });
     expect(screen.queryByTestId("typing-cancel-popover")).not.toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: ".", metaKey: true });
+    expect(await screen.findByTestId("typing-cancel-popover")).toBeInTheDocument();
+
+    screen.getByRole("button", { name: "Assistant is typing. Cancel current prompt" }).focus();
+    fireEvent.keyDown(window, { key: "Enter" });
+    expect(onCancelCurrentPrompt).toHaveBeenCalledWith("agent:main:clawline:flynn:main");
   });
 
   it("renders interactive session footer controls from session status", async () => {

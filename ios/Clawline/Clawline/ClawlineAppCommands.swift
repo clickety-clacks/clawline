@@ -10,6 +10,11 @@ import SwiftUI
 struct ClawlineAppCommands: Commands {
     let settingsManager: SettingsManager
     @FocusedValue(\.cancelCurrentPromptCommand) private var cancelCurrentPromptCommand
+    @FocusedValue(\.crossChatNotificationCommand) private var crossChatNotificationCommand
+
+    private var notificationCommandsActive: Bool {
+        crossChatNotificationCommand?.hasVisibleNotifications == true
+    }
 
     var body: some Commands {
         CommandGroup(replacing: .appSettings) {
@@ -29,11 +34,34 @@ struct ClawlineAppCommands: Commands {
                 settingsManager.decreaseFontScale()
             }
             .keyboardShortcut("-", modifiers: .command)
+            .disabled(notificationCommandsActive)
 
-            Button("Reset Font Size") {
-                settingsManager.resetFontScale()
+            if notificationCommandsActive {
+                ForEach(0...9, id: \.self) { index in
+                    Button("Notification \(index) Actions") {
+                        crossChatNotificationCommand?.openActionMenu(index)
+                    }
+                    .keyboardShortcut(KeyEquivalent(Character("\(index)")), modifiers: .command)
+                    .disabled((crossChatNotificationCommand?.visibleCount ?? 0) <= index)
+
+                    Button("Reply to Notification \(index)") {
+                        crossChatNotificationCommand?.reply(index)
+                    }
+                    .keyboardShortcut(KeyEquivalent(Character("\(index)")), modifiers: [.command, .shift])
+                    .disabled((crossChatNotificationCommand?.visibleCount ?? 0) <= index)
+
+                    Button("Dismiss Notification \(index)") {
+                        crossChatNotificationCommand?.dismiss(index)
+                    }
+                    .keyboardShortcut(KeyEquivalent(Character("\(index)")), modifiers: [.command, .shift, .option])
+                    .disabled((crossChatNotificationCommand?.visibleCount ?? 0) <= index)
+                }
+            } else {
+                Button("Reset Font Size") {
+                    settingsManager.resetFontScale()
+                }
+                .keyboardShortcut("0", modifiers: .command)
             }
-            .keyboardShortcut("0", modifiers: .command)
 
             Divider()
 

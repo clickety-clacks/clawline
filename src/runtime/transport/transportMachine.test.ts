@@ -1,5 +1,6 @@
 import { createAuthSessionStore } from "../auth/authSessionStore";
 import { createChatDomainStore } from "../chat/chatDomainStore";
+import { createCrossChatNotificationStore } from "../chat/crossChatNotificationStore";
 import { createMemoryChatPersistence } from "../persistence/indexedDbChatPersistence";
 import { createTransportMachine } from "./transportMachine";
 import { FakeWebSocketFactory } from "../../test/support/fakeWebSocket";
@@ -570,6 +571,95 @@ describe("transportMachine", () => {
     );
 
     expect(transport.getState().phase).toBe("live");
+  });
+
+  it("dismisses cross-chat notifications when a source stream becomes unprovisioned", async () => {
+    const authStore = seedSession();
+    const chatStore = createChatDomainStore({
+      persistence: createMemoryChatPersistence()
+    });
+    const notificationStore = createCrossChatNotificationStore();
+    const factory = new FakeWebSocketFactory();
+    createTransportMachine({
+      authSessionStore: authStore,
+      chatDomainStore: chatStore,
+      crossChatNotificationStore: notificationStore,
+      webSocketFactory: factory.create
+    });
+
+    await waitForSocket(factory);
+    factory.sockets[0].emitOpen();
+    factory.sockets[0].emitMessage(
+      JSON.stringify({
+        type: "auth_result",
+        success: true,
+        userId: "user_1",
+        sessionKeys: [
+          "agent:main:clawline:user_1:main",
+          "agent:main:clawline:user_1:side"
+        ]
+      })
+    );
+    factory.sockets[0].emitMessage(
+      JSON.stringify({
+        type: "stream_snapshot",
+        streams: [
+          {
+            sessionKey: "agent:main:clawline:user_1:main",
+            displayName: "Personal",
+            kind: "main",
+            orderIndex: 0,
+            isBuiltIn: true,
+            createdAt: 10,
+            updatedAt: 10,
+            adopted: false
+          },
+          {
+            sessionKey: "agent:main:clawline:user_1:side",
+            displayName: "Side Thread",
+            kind: "custom",
+            orderIndex: 1,
+            isBuiltIn: false,
+            createdAt: 11,
+            updatedAt: 11,
+            adopted: false
+          }
+        ]
+      })
+    );
+    factory.sockets[0].emitMessage(
+      JSON.stringify({
+        type: "message",
+        id: "s_side_notify",
+        role: "assistant",
+        content: "Side notification",
+        timestamp: 21,
+        streaming: false,
+        sessionKey: "agent:main:clawline:user_1:side",
+        attachments: []
+      })
+    );
+
+    expect(notificationStore.getState().bubblesBySourceChatId).toHaveProperty(
+      "agent:main:clawline:user_1:side"
+    );
+
+    factory.sockets[0].emitMessage(
+      JSON.stringify({
+        type: "session_info",
+        userId: "user_1",
+        sessionKeys: ["agent:main:clawline:user_1:main"]
+      })
+    );
+
+    expect(notificationStore.getState().bubblesBySourceChatId).not.toHaveProperty(
+      "agent:main:clawline:user_1:side"
+    );
+    expect(
+      chatStore.getState().streams.some(
+        (stream) => stream.sessionKey === "agent:main:clawline:user_1:side"
+      )
+    ).toBe(true);
   });
 
   it("accepts native read-state and event frames without regressing the live connection", async () => {

@@ -11,7 +11,7 @@ import {
 import { normalizePairingWebSocketUrl } from "./pairingUrl";
 
 type PairingStage = "idle" | "submitting" | "awaiting-approval" | "error";
-const PAIRING_RETRY_INTERVAL_MS = 3_000;
+const PAIRING_PENDING_TIMEOUT_MS = 5 * 60_000;
 
 export function usePairingActions() {
   const navigate = useNavigate();
@@ -19,7 +19,8 @@ export function usePairingActions() {
   const [stage, setStage] = useState<PairingStage>("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [approvalReason, setApprovalReason] = useState<string | undefined>();
-  const [pendingRetryVersion, setPendingRetryVersion] = useState(0);
+  const activePairingAbortRef = useRef<AbortController | null>(null);
+  const pairingAttemptIdRef = useRef(0);
   const pairingAttemptInFlightRef = useRef(false);
 
   const normalizedServerUrl = useMemo(
@@ -36,7 +37,6 @@ export function usePairingActions() {
       if (!normalizedServerUrl) {
         setStage("error");
         setErrorMessage("Enter a valid provider address.");
-        setPendingRetryVersion(0);
         return;
       }
 
@@ -44,10 +44,14 @@ export function usePairingActions() {
       if (claimedName.length === 0) {
         setStage("error");
         setErrorMessage("Enter a name for this browser.");
-        setPendingRetryVersion(0);
         return;
       }
 
+      activePairingAbortRef.current?.abort();
+      const abortController = new AbortController();
+      activePairingAbortRef.current = abortController;
+      const attemptId = pairingAttemptIdRef.current + 1;
+      pairingAttemptIdRef.current = attemptId;
       pairingAttemptInFlightRef.current = true;
 
       if (!keepAwaitingState) {
@@ -61,11 +65,24 @@ export function usePairingActions() {
         const result = await requestPairing({
           claimedName: claimedName.slice(0, 64),
           deviceId,
-          serverUrl: normalizedServerUrl
+          onPending(reason) {
+            if (pairingAttemptIdRef.current !== attemptId) {
+              return;
+            }
+
+            setStage("awaiting-approval");
+            setApprovalReason(reason);
+            setErrorMessage(null);
+          },
+          serverUrl: normalizedServerUrl,
+          signal: abortController.signal
         });
 
+        if (pairingAttemptIdRef.current !== attemptId || result.status === "aborted") {
+          return;
+        }
+
         if (result.status === "success") {
-          setPendingRetryVersion(0);
           store.storePairingSession({
             claimedName,
             deviceId,
@@ -81,22 +98,22 @@ export function usePairingActions() {
         if (result.status === "awaiting-approval") {
           setStage("awaiting-approval");
           setApprovalReason(result.reason);
-          setPendingRetryVersion((version) => version + 1);
           return;
         }
 
-        if (keepAwaitingState) {
+        if (keepAwaitingState || result.pendingObserved) {
           setStage("awaiting-approval");
-          setErrorMessage(result.reason ?? "Could not reach the provider.");
-          setPendingRetryVersion((version) => version + 1);
+          setErrorMessage(result.reason ?? "Pairing connection stalled. Retry to resubmit the request.");
           return;
         }
 
         setStage("error");
         setErrorMessage(result.reason ?? "Pairing failed.");
-        setPendingRetryVersion(0);
       } finally {
-        pairingAttemptInFlightRef.current = false;
+        if (pairingAttemptIdRef.current === attemptId) {
+          activePairingAbortRef.current = null;
+          pairingAttemptInFlightRef.current = false;
+        }
       }
     }
   );
@@ -110,21 +127,16 @@ export function usePairingActions() {
   }
 
   useEffect(() => {
-    if (stage !== "awaiting-approval" || pendingRetryVersion === 0) {
-      return undefined;
-    }
-
-    const retryTimer = window.setTimeout(() => {
-      retryPendingPairing();
-    }, PAIRING_RETRY_INTERVAL_MS);
-
     return () => {
-      window.clearTimeout(retryTimer);
+      activePairingAbortRef.current?.abort();
     };
-  }, [pendingRetryVersion, stage]);
+  }, []);
 
   function resetPairing() {
-    setPendingRetryVersion(0);
+    activePairingAbortRef.current?.abort();
+    activePairingAbortRef.current = null;
+    pairingAttemptInFlightRef.current = false;
+    pairingAttemptIdRef.current += 1;
     setStage("idle");
     setErrorMessage(null);
     setApprovalReason(undefined);
@@ -144,10 +156,14 @@ export function usePairingActions() {
 async function requestPairing({
   claimedName,
   deviceId,
+  onPending,
+  signal,
   serverUrl
 }: {
   claimedName: string;
   deviceId: string;
+  onPending: (reason?: string) => void;
+  signal: AbortSignal;
   serverUrl: string;
 }) {
   const socket = new WebSocket(serverUrl);
@@ -155,9 +171,25 @@ async function requestPairing({
   return new Promise<
     | { status: "success"; token: string; userId: string }
     | { status: "awaiting-approval"; reason?: string }
-    | { status: "error"; reason?: string }
+    | { status: "error"; reason?: string; pendingObserved?: boolean }
+    | { status: "aborted" }
   >((resolve) => {
+    let pendingObserved = false;
+    let settled = false;
+    let pendingTimeoutId: number | null = window.setTimeout(() => {
+      settle({
+        status: "error",
+        pendingObserved,
+        reason: "Pairing timed out. Retry after checking approval."
+      });
+    }, PAIRING_PENDING_TIMEOUT_MS);
+
     const cleanup = () => {
+      if (pendingTimeoutId !== null) {
+        window.clearTimeout(pendingTimeoutId);
+        pendingTimeoutId = null;
+      }
+      signal.removeEventListener("abort", handleAbort);
       socket.onopen = null;
       socket.onmessage = null;
       socket.onerror = null;
@@ -165,7 +197,34 @@ async function requestPairing({
       socket.close();
     };
 
+    const settle = (
+      result:
+        | { status: "success"; token: string; userId: string }
+        | { status: "awaiting-approval"; reason?: string }
+        | { status: "error"; reason?: string; pendingObserved?: boolean }
+        | { status: "aborted" }
+    ) => {
+      if (settled) {
+        return;
+      }
+
+      settled = true;
+      cleanup();
+      resolve(result);
+    };
+
+    const handleAbort = () => {
+      settle({ status: "aborted" });
+    };
+
+    signal.addEventListener("abort", handleAbort);
+
     socket.onopen = () => {
+      if (signal.aborted) {
+        settle({ status: "aborted" });
+        return;
+      }
+
       socket.send(
         serializePairRequest({
           type: "pair_request",
@@ -188,8 +247,7 @@ async function requestPairing({
           message?: string;
           code?: string;
         };
-        cleanup();
-        resolve({
+        settle({
           status: "error",
           reason: payload.message ?? payload.code ?? "Pairing failed."
         });
@@ -199,8 +257,7 @@ async function requestPairing({
       const payload = parsePairResultPayload(event.data);
 
       if (payload.success && payload.token && payload.userId) {
-        cleanup();
-        resolve({
+        settle({
           status: "success",
           token: payload.token,
           userId: payload.userId
@@ -212,34 +269,35 @@ async function requestPairing({
         payload.reason === "pair_pending" ||
         payload.reason === "device_not_approved"
       ) {
-        cleanup();
-        resolve({
-          status: "awaiting-approval",
-          reason: payload.reason
-        });
+        pendingObserved = true;
+        onPending(payload.reason);
         return;
       }
 
-      cleanup();
-      resolve({
+      settle({
         status: "error",
         reason: payload.reason
       });
     };
 
     socket.onerror = () => {
-      cleanup();
-      resolve({
+      settle({
         status: "error",
+        pendingObserved,
         reason: "Could not reach the provider."
       });
     };
 
     socket.onclose = () => {
-      resolve({
+      settle({
         status: "error",
+        pendingObserved,
         reason: "Provider closed the pairing socket."
       });
     };
+
+    if (signal.aborted) {
+      settle({ status: "aborted" });
+    }
   });
 }

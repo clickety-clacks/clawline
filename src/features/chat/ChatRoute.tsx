@@ -8,6 +8,7 @@ import {
   type StreamDotState,
   useChatDomainStore
 } from "../../runtime/chat/chatDomainStore";
+import { useCrossChatNotificationStore } from "../../runtime/chat/crossChatNotificationStore";
 import { useTransportMachine } from "../../runtime/transport/transportMachine";
 import {
   createStreamApiClient,
@@ -27,6 +28,7 @@ export function ChatRoute() {
   const params = useParams();
   const { state: authState } = useAuthSessionStore();
   const { state: chatState, store: chatStore } = useChatDomainStore();
+  const { store: notificationStore } = useCrossChatNotificationStore();
   const { state: transportState, store: transportStore } = useTransportMachine();
   const [sessionStatusBySessionKey, setSessionStatusBySessionKey] = useState<
     Record<string, SessionStatusPayload>
@@ -260,6 +262,7 @@ export function ChatRoute() {
     });
 
     const lastReadMessageId = chatStore.markSessionRead(activeSessionKey);
+    notificationStore.dismissCrossChatNotification(activeSessionKey);
     if (
       lastReadMessageId &&
       chatState.provisionedSessionKeys.includes(activeSessionKey)
@@ -271,6 +274,7 @@ export function ChatRoute() {
     chatState.firstUnreadMessageIdBySessionKey,
     chatState.provisionedSessionKeys,
     chatStore,
+    notificationStore,
     transportStore
   ]);
 

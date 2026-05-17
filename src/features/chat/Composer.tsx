@@ -1,13 +1,16 @@
 import {
   useEffect,
   useId,
+  useMemo,
   useRef,
   useState,
   type FormEvent,
+  type KeyboardEvent,
   type PointerEvent
 } from "react";
-import { Plus, RefreshCw, SendHorizontal } from "lucide-react";
+import { Plus, RefreshCw, SendHorizontal, X } from "lucide-react";
 import type { SessionProvisioningState } from "../streams/provisioning";
+import type { StreamRecord } from "../../runtime/chat/chatDomainStore";
 import { useAuthSessionStore } from "../../runtime/auth/authSessionStore";
 import { useChatDomainStore } from "../../runtime/chat/chatDomainStore";
 import { generateUuidV4 } from "../../runtime/shared/uuid";
@@ -26,11 +29,13 @@ interface ComposerAttachmentDraft {
 export function Composer({
   activeStreamDisplayName,
   provisioningState,
-  sessionKey
+  sessionKey,
+  streams = []
 }: {
   activeStreamDisplayName?: string;
   provisioningState: SessionProvisioningState;
   sessionKey?: string;
+  streams?: StreamRecord[];
 }) {
   const { state: authState, store: authStore } = useAuthSessionStore();
   const { store: chatStore } = useChatDomainStore();
@@ -40,11 +45,46 @@ export function Composer({
   const [isSubmitting, setSubmitting] = useState(false);
   const [stagedAttachments, setStagedAttachments] = useState<ComposerAttachmentDraft[]>([]);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [sentToastMessage, setSentToastMessage] = useState<string | null>(null);
+  const [resolvedMention, setResolvedMention] = useState<{
+    destinationChatId: string;
+    displayTitle: string;
+  } | null>(null);
+  const [highlightedMentionIndex, setHighlightedMentionIndex] = useState(0);
   const fileInputId = useId();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const sentToastTimeoutRef = useRef<number | null>(null);
   const sendClickSuppressionTimeoutRef = useRef<number | null>(null);
   const suppressNextSendClickRef = useRef(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const leadingMentionQuery =
+    !resolvedMention && draft.startsWith("@") ? draft.slice(1) : null;
+  const mentionPickerVisible = leadingMentionQuery !== null;
+  const eligibleMentionStreams = useMemo(
+    () => streams.filter((stream) => stream.sessionKey !== sessionKey),
+    [sessionKey, streams]
+  );
+  const filteredMentionStreams = useMemo(() => {
+    if (leadingMentionQuery === null) {
+      return [];
+    }
+
+    const normalizedQuery = leadingMentionQuery.trim().toLowerCase();
+    if (normalizedQuery.length === 0) {
+      return eligibleMentionStreams;
+    }
+
+    return eligibleMentionStreams.filter((stream) => {
+      return (
+        stream.displayName.toLowerCase().includes(normalizedQuery) ||
+        stream.sessionKey.toLowerCase().includes(normalizedQuery)
+      );
+    });
+  }, [eligibleMentionStreams, leadingMentionQuery]);
+  const highlightedMentionStream =
+    filteredMentionStreams[
+      Math.min(highlightedMentionIndex, filteredMentionStreams.length - 1)
+    ];
 
   const sendState = projectComposerSendState({
     activeStreamDisplayName,
@@ -87,6 +127,36 @@ export function Composer({
     textarea.style.height = `${nextHeight}px`;
   }, [draft]);
 
+  useEffect(() => {
+    setHighlightedMentionIndex(0);
+  }, [leadingMentionQuery]);
+
+  useEffect(() => {
+    if (highlightedMentionIndex < filteredMentionStreams.length) {
+      return;
+    }
+    setHighlightedMentionIndex(Math.max(0, filteredMentionStreams.length - 1));
+  }, [filteredMentionStreams.length, highlightedMentionIndex]);
+
+  useEffect(() => {
+    return () => {
+      if (sentToastTimeoutRef.current != null) {
+        window.clearTimeout(sentToastTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  function showSentToast(displayTitle: string) {
+    setSentToastMessage(`Sent to ${displayTitle}`);
+    if (sentToastTimeoutRef.current != null) {
+      window.clearTimeout(sentToastTimeoutRef.current);
+    }
+    sentToastTimeoutRef.current = window.setTimeout(() => {
+      setSentToastMessage(null);
+      sentToastTimeoutRef.current = null;
+    }, 2500);
+  }
+
   async function submit() {
     const submitSession = authState.session;
     if (!sessionKey || !submitSession) {
@@ -94,6 +164,21 @@ export function Composer({
     }
 
     if (sendState.sendAction !== "send") {
+      return;
+    }
+
+    const isCrossChatSend = resolvedMention !== null;
+    const destinationSessionKey = resolvedMention?.destinationChatId ?? sessionKey;
+    const crossChatSentToastTitle = resolvedMention?.displayTitle;
+    if (!destinationSessionKey) {
+      return;
+    }
+
+    if (
+      resolvedMention &&
+      !streams.some((stream) => stream.sessionKey === resolvedMention.destinationChatId)
+    ) {
+      setSubmitError("Message send failed.");
       return;
     }
 
@@ -145,12 +230,13 @@ export function Composer({
       content,
       deviceId: submitSession.deviceId,
       id,
-      sessionKey,
+      sessionKey: destinationSessionKey,
       timestamp,
       wireAttachments: preparedAttachments.wireAttachments
     });
 
     setDraft("");
+    setResolvedMention(null);
     setStagedAttachments([]);
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
@@ -164,10 +250,16 @@ export function Composer({
         attachments: preparedAttachments.wireAttachments,
         content,
         id,
-        sessionKey
+        sessionKey: destinationSessionKey
       });
+      if (isCrossChatSend && crossChatSentToastTitle) {
+        showSentToast(crossChatSentToastTitle);
+      }
     } catch {
       chatStore.markMessageFailed(id);
+      if (isCrossChatSend) {
+        setSubmitError("Message send failed.");
+      }
     } finally {
       setSubmitting(false);
     }
@@ -197,6 +289,78 @@ export function Composer({
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     void submit();
+  }
+
+  function resolveHighlightedMention() {
+    if (!highlightedMentionStream) {
+      return;
+    }
+
+    setResolvedMention({
+      destinationChatId: highlightedMentionStream.sessionKey,
+      displayTitle: highlightedMentionStream.displayName
+    });
+    setDraft("");
+    window.requestAnimationFrame(() => {
+      textareaRef.current?.focus({ preventScroll: true });
+    });
+  }
+
+  function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (mentionPickerVisible) {
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        if (filteredMentionStreams.length > 0) {
+          setHighlightedMentionIndex((current) =>
+            Math.min(current + 1, filteredMentionStreams.length - 1)
+          );
+        }
+        return;
+      }
+
+      if (event.key === "ArrowUp") {
+        event.preventDefault();
+        if (filteredMentionStreams.length > 0) {
+          setHighlightedMentionIndex((current) => Math.max(current - 1, 0));
+        }
+        return;
+      }
+
+      if (event.key === "Tab") {
+        event.preventDefault();
+        resolveHighlightedMention();
+        return;
+      }
+
+      if (event.key === "Enter" && highlightedMentionStream) {
+        event.preventDefault();
+        resolveHighlightedMention();
+        return;
+      }
+    }
+
+    if (
+      resolvedMention &&
+      event.key === "Backspace" &&
+      draft.length === 0 &&
+      event.currentTarget.selectionStart === 0 &&
+      event.currentTarget.selectionEnd === 0
+    ) {
+      event.preventDefault();
+      setResolvedMention(null);
+      return;
+    }
+
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.currentTarget.blur();
+      return;
+    }
+
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      void submit();
+    }
   }
 
   function activateSendButton() {
@@ -301,6 +465,11 @@ export function Composer({
         </div>
       ) : null}
       {submitError ? <p className="field-error">{submitError}</p> : null}
+      {sentToastMessage ? (
+        <div className="composer-sent-toast" role="status">
+          {sentToastMessage}
+        </div>
+      ) : null}
       <form
         className="composer-input-bar"
         data-testid="composer-input-bar"
@@ -316,23 +485,25 @@ export function Composer({
           <Plus aria-hidden="true" size={18} strokeWidth={2.3} />
         </button>
         <div className="composer-input-field">
+          {resolvedMention ? (
+            <span className="composer-mention-chip" data-testid="composer-mention-chip">
+              <span>@{resolvedMention.displayTitle}</span>
+              <button
+                aria-label={`Remove ${resolvedMention.displayTitle} mention`}
+                className="composer-mention-remove"
+                onClick={() => setResolvedMention(null)}
+                type="button"
+              >
+                <X aria-hidden="true" size={14} strokeWidth={2.3} />
+              </button>
+            </span>
+          ) : null}
           <textarea
             aria-keyshortcuts="Enter,Shift+Enter,Escape"
             enterKeyHint="send"
             id="composer-input"
             onChange={(event) => setDraft(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Escape") {
-                event.preventDefault();
-                event.currentTarget.blur();
-                return;
-              }
-
-              if (event.key === "Enter" && !event.shiftKey) {
-                event.preventDefault();
-                void submit();
-              }
-            }}
+            onKeyDown={handleComposerKeyDown}
             onPaste={(event) => {
               const files = Array.from(event.clipboardData?.files ?? []);
               if (files.length > 0) {
@@ -345,6 +516,44 @@ export function Composer({
             rows={1}
             value={draft}
           />
+          {mentionPickerVisible ? (
+            <div
+              aria-label="Mention destination"
+              className="composer-mention-picker"
+              role="listbox"
+            >
+              {filteredMentionStreams.length > 0 ? (
+                filteredMentionStreams.map((stream, index) => (
+                  <button
+                    aria-selected={index === highlightedMentionIndex}
+                    className={
+                      index === highlightedMentionIndex
+                        ? "composer-mention-option composer-mention-option--active"
+                        : "composer-mention-option"
+                    }
+                    key={stream.sessionKey}
+                    onClick={() => {
+                      setResolvedMention({
+                        destinationChatId: stream.sessionKey,
+                        displayTitle: stream.displayName
+                      });
+                      setDraft("");
+                      textareaRef.current?.focus({ preventScroll: true });
+                    }}
+                    role="option"
+                    type="button"
+                  >
+                    <span>{stream.displayName}</span>
+                    <small>{stream.sessionKey}</small>
+                  </button>
+                ))
+              ) : (
+                <div className="composer-mention-empty" role="option">
+                  No matching sessions
+                </div>
+              )}
+            </div>
+          ) : null}
         </div>
         <button
           aria-label={sendState.sendAriaLabel}

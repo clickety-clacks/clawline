@@ -141,6 +141,20 @@ struct ClawlineTests {
         #expect(regex.firstMatch(in: source, range: range) != nil)
     }
 
+    @Test("T294: Spatial typing indicator exposes a concrete tap control")
+    func spatialTypingIndicatorHasConcreteTapControl() throws {
+        let sourcePath = URL(filePath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appending(path: "Clawline/Views/Chat/TypingIndicatorCell.swift")
+        let source = try String(contentsOf: sourcePath, encoding: .utf8)
+        let pattern = #"(?s)#if os\(visionOS\).*?spatialTapButton.*?UIButton\(type: \.custom\).*?addTarget\(self, action: #selector\(handleTap\), for: \.primaryActionTriggered\).*?#endif"#
+        let range = NSRange(source.startIndex..<source.endIndex, in: source)
+        let regex = try NSRegularExpression(pattern: pattern)
+
+        #expect(regex.firstMatch(in: source, range: range) != nil)
+    }
+
     @Test("T219: pairing shader is active only while pairing route is visible")
     func rootBackgroundShaderLifecycleFollowsPairingRoute() {
         #expect(RootBackgroundShaderLifecycle.isShaderActive(

@@ -44,6 +44,16 @@ struct MessageInputBarBoundaryTests {
         #expect(darkColor == nil)
     }
 
+    @Test("Disabled send backing can be suppressed for transparent hosts")
+    func disabledSendButtonBackingCanBeSuppressed() {
+        let lightColor = MessageInputBar.disabledSendButtonBackingColor(
+            colorScheme: .light,
+            drawsDisabledBacking: false
+        )
+
+        #expect(lightColor == nil)
+    }
+
     @Test("Send button backing uses the same soft blur in every state")
     func sendButtonBackingUsesSoftBlur() {
         #expect(MessageInputBar.sendButtonColoredBackingBlurRadius == 7)

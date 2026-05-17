@@ -25,6 +25,46 @@ struct ChatPageBackgroundTests {
         #expect(Self.rgba(color).a == 0)
     }
 
+    @Test("Transparent window hosts keep light message flow clear")
+    func transparentWindowHostKeepsLightMessageFlowClear() {
+        let color = MessageFlowCollectionViewController.chatPageBackgroundColor(
+            isDark: false,
+            allowsTransparentWindowBackground: true
+        )
+
+        #expect(Self.rgba(color).a == 0)
+    }
+
+    @Test("Transparent window hosts seed clear backgrounds before first update")
+    func transparentWindowHostSeedsClearBackgroundsBeforeFirstUpdate() {
+        let controller = MessageFlowCollectionViewController()
+        controller.prepareInitialAppearance(isDark: false, allowsTransparentWindowBackground: true)
+
+        controller.loadViewIfNeeded()
+
+        let collectionView = controller.view.subviews.compactMap { $0 as? UICollectionView }.first
+        #expect(Self.rgba(controller.view.backgroundColor ?? .black).a == 0)
+        #expect(controller.view.isOpaque == false)
+        #expect(collectionView != nil)
+        #expect(Self.rgba(collectionView?.backgroundColor ?? .black).a == 0)
+        #expect(collectionView?.isOpaque == false)
+    }
+
+    @Test("Normal light hosts keep design background before first update")
+    func normalLightHostSeedsDesignBackgroundBeforeFirstUpdate() {
+        let controller = MessageFlowCollectionViewController()
+        controller.prepareInitialAppearance(isDark: false, allowsTransparentWindowBackground: false)
+
+        controller.loadViewIfNeeded()
+
+        let collectionView = controller.view.subviews.compactMap { $0 as? UICollectionView }.first
+        #expect(Self.rgba(controller.view.backgroundColor ?? .clear) == (240, 234, 224, 255))
+        #expect(controller.view.isOpaque)
+        #expect(collectionView != nil)
+        #expect(Self.rgba(collectionView?.backgroundColor ?? .clear) == (240, 234, 224, 255))
+        #expect(collectionView?.isOpaque == true)
+    }
+
     private static func rgba(_ color: UIColor) -> (r: Int, g: Int, b: Int, a: Int) {
         var red: CGFloat = 0
         var green: CGFloat = 0

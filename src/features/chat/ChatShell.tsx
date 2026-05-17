@@ -11,6 +11,7 @@ import type {
   SessionStatusPayload
 } from "../../protocol/stream-api";
 import { Composer } from "./Composer";
+import { CrossChatNotificationOverlay } from "./CrossChatNotificationOverlay";
 import { MessageList } from "./MessageList";
 import { SessionListSheet } from "./SessionListSheet";
 import { StreamPageDots } from "./StreamPageDots";
@@ -115,6 +116,7 @@ export function ChatShell({
               : null
           }) : undefined}
       >
+        <CrossChatNotificationOverlay />
         <MessageList
           messages={selectedMessages}
           onCancelCurrentPrompt={onCancelCurrentPrompt}
@@ -152,6 +154,7 @@ export function ChatShell({
             activeStreamDisplayName={streams.find((s) => s.sessionKey === selectedSessionKey)?.displayName}
             provisioningState={provisioningState}
             sessionKey={selectedSessionKey}
+            streams={streams}
           />
         </div>
       </main>

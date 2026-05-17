@@ -264,7 +264,7 @@ export function useChatSessionInteractionCoordinator({
     if (
       !(target instanceof Element) ||
       target.closest(
-        "button, input, textarea, select, a, label, audio, video, .chat-floating-stack"
+        "button, input, textarea, select, a, label, audio, video, .chat-floating-stack, .cross-chat-notification-overlay"
       )
     ) {
       touchStartRef.current.active = false;

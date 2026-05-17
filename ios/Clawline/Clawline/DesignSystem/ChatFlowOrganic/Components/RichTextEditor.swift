@@ -12,6 +12,12 @@ import UniformTypeIdentifiers
 
 private let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "RichTextEditor")
 
+private extension UIKey {
+    var hasNoCommandModifiers: Bool {
+        modifierFlags.intersection([.command, .shift, .alternate, .control]).isEmpty
+    }
+}
+
 struct RichTextEditor: UIViewRepresentable {
     @Binding var attributedText: NSAttributedString
     @Binding var calculatedHeight: CGFloat
@@ -26,7 +32,13 @@ struct RichTextEditor: UIViewRepresentable {
     var onFocusChange: (Bool) -> Void
     var onTextEditActivity: (() -> Void)?
     var onSubmit: (() -> Void)?
+    var handlesMentionPickerKeyCommands: Bool = false
+    var mentionPickerHasCompletion: Bool = false
+    var onMentionPickerTab: (() -> Void)?
+    var onMentionPickerMoveUp: (() -> Void)?
+    var onMentionPickerMoveDown: (() -> Void)?
     var onPasteImages: (([UIImage]) -> Void)?
+    var notificationVisibleCount: Int = 0
     var trailingPadding: CGFloat = 20
 
     func makeUIView(context: Context) -> PastableTextView {
@@ -42,6 +54,11 @@ struct RichTextEditor: UIViewRepresentable {
         textView.onResponderFocusChange = { isFocused in
             coordinator.parent.onFocusChange(isFocused)
         }
+        textView.handlesMentionPickerKeyCommands = handlesMentionPickerKeyCommands
+        textView.notificationVisibleCount = notificationVisibleCount
+        textView.onMentionPickerTab = { coordinator.parent.onMentionPickerTab?() }
+        textView.onMentionPickerMoveUp = { coordinator.parent.onMentionPickerMoveUp?() }
+        textView.onMentionPickerMoveDown = { coordinator.parent.onMentionPickerMoveDown?() }
         textView.isScrollEnabled = false
         textView.backgroundColor = .clear
         textView.textContainerInset = UIEdgeInsets(top: 12, left: 20, bottom: 12, right: trailingPadding)
@@ -61,6 +78,7 @@ struct RichTextEditor: UIViewRepresentable {
         textView.smartInsertDeleteType = .yes
         textView.attributedText = attributedText
         textView.isInputEnabled = isEditable
+        textView.accessibilityIdentifier = "prompt_input"
         textView.setContentHuggingPriority(.defaultLow, for: .horizontal)
         textView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         return textView
@@ -82,6 +100,11 @@ struct RichTextEditor: UIViewRepresentable {
         textView.onResponderFocusChange = { isFocused in
             coordinator.parent.onFocusChange(isFocused)
         }
+        textView.handlesMentionPickerKeyCommands = handlesMentionPickerKeyCommands
+        textView.notificationVisibleCount = notificationVisibleCount
+        textView.onMentionPickerTab = { coordinator.parent.onMentionPickerTab?() }
+        textView.onMentionPickerMoveUp = { coordinator.parent.onMentionPickerMoveUp?() }
+        textView.onMentionPickerMoveDown = { coordinator.parent.onMentionPickerMoveDown?() }
 
         let isComposing = textView.markedTextRange != nil
         let resetRequested = resetToken != context.coordinator.lastResetToken
@@ -164,8 +187,8 @@ struct RichTextEditor: UIViewRepresentable {
         func textViewDidChange(_ textView: UITextView) {
             guard !isUpdatingFromSwiftUI else { return }
             isApplyingLocalEdit = true
-            parent.onTextEditActivity?()
             parent.attributedText = textView.attributedText
+            parent.onTextEditActivity?()
             setSelectionRange(textView.selectedRange)
             updateHeight(for: textView, allowAutoScroll: true)
             ensureCaretVisible(in: textView)
@@ -187,7 +210,11 @@ struct RichTextEditor: UIViewRepresentable {
                       shouldChangeTextIn range: NSRange,
                       replacementText text: String) -> Bool {
             if text == "\n" {
-                parent.onSubmit?()
+                if parent.handlesMentionPickerKeyCommands, parent.mentionPickerHasCompletion {
+                    parent.onMentionPickerTab?()
+                } else {
+                    parent.onSubmit?()
+                }
                 return false
             }
             return true
@@ -345,6 +372,11 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
     var onPasteImages: (([UIImage]) -> Void)?
     var onLayout: ((CGFloat) -> Void)?
     var onResponderFocusChange: ((Bool) -> Void)?
+    var handlesMentionPickerKeyCommands = false
+    var notificationVisibleCount = 0
+    var onMentionPickerTab: (() -> Void)?
+    var onMentionPickerMoveUp: (() -> Void)?
+    var onMentionPickerMoveDown: (() -> Void)?
     var isInputEnabled: Bool = true {
         didSet {
             guard oldValue != isInputEnabled else { return }
@@ -405,21 +437,87 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
             UIKeyCommand(input: "k", modifierFlags: [.control], action: #selector(didPressCtrlK)),
             UIKeyCommand(input: "c", modifierFlags: [.control], action: #selector(didPressCtrlC))
         ]
-        let appCommandShortcuts = ChatAppCommandShortcut.keyCommandSpecs.map { spec in
+        let appCommandShortcuts = ChatAppCommandShortcut
+            .keyCommandSpecs(notificationVisibleCount: notificationVisibleCount)
+            .map { spec in
             UIKeyCommand(
                 input: spec.input,
                 modifierFlags: spec.modifierFlags,
                 action: spec.action.selector
             )
         }
+        let prioritizedAppCommandShortcuts = appCommandShortcuts.filter {
+            ChatAppCommandShortcut.prioritizesTextInputBaseCommand(
+                input: $0.input,
+                modifierFlags: $0.modifierFlags,
+                notificationVisibleCount: notificationVisibleCount
+            )
+        }
+        let deferredAppCommandShortcuts = appCommandShortcuts.filter { command in
+            !prioritizedAppCommandShortcuts.contains { prioritized in
+                prioritized.input == command.input
+                    && prioritized.modifierFlags == command.modifierFlags
+                    && prioritized.action == command.action
+            }
+        }
         let inputReleaseCommands = [
             UIKeyCommand(input: UIKeyCommand.inputEscape, modifierFlags: [], action: #selector(didPressEscape))
         ]
-        return inputReleaseCommands + base + emacsCommands + appCommandShortcuts
+        let mentionPickerCommands: [UIKeyCommand] = handlesMentionPickerKeyCommands
+            ? [
+                UIKeyCommand(input: "\t", modifierFlags: [], action: #selector(didPressMentionPickerTab)),
+                UIKeyCommand(input: UIKeyCommand.inputUpArrow, modifierFlags: [], action: #selector(didPressMentionPickerUp)),
+                UIKeyCommand(input: UIKeyCommand.inputDownArrow, modifierFlags: [], action: #selector(didPressMentionPickerDown))
+            ]
+            : []
+        return mentionPickerCommands
+            + prioritizedAppCommandShortcuts
+            + inputReleaseCommands
+            + base
+            + emacsCommands
+            + deferredAppCommandShortcuts
     }
 
     private var canHandleInputShortcut: Bool {
         isInputEnabled && isFirstResponder
+    }
+
+    @objc private func didPressMentionPickerTab(_ sender: UIKeyCommand) {
+        guard canHandleInputShortcut, handlesMentionPickerKeyCommands else { return }
+        onMentionPickerTab?()
+    }
+
+    @objc private func didPressMentionPickerUp(_ sender: UIKeyCommand) {
+        guard canHandleInputShortcut, handlesMentionPickerKeyCommands else { return }
+        onMentionPickerMoveUp?()
+    }
+
+    @objc private func didPressMentionPickerDown(_ sender: UIKeyCommand) {
+        guard canHandleInputShortcut, handlesMentionPickerKeyCommands else { return }
+        onMentionPickerMoveDown?()
+    }
+
+    override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        guard canHandleInputShortcut, handlesMentionPickerKeyCommands else {
+            super.pressesBegan(presses, with: event)
+            return
+        }
+
+        for press in presses {
+            guard let key = press.key, key.hasNoCommandModifiers else { continue }
+            switch key.keyCode {
+            case .keyboardUpArrow:
+                onMentionPickerMoveUp?()
+                return
+            case .keyboardDownArrow:
+                onMentionPickerMoveDown?()
+                return
+            default:
+                continue
+            }
+        }
+
+        super.pressesBegan(presses, with: event)
     }
 
     @objc private func didPressCtrlA(_ sender: UIKeyCommand) {

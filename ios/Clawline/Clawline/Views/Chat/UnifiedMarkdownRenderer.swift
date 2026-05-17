@@ -229,7 +229,19 @@ enum UnifiedMarkdownRenderer {
                 return
             }
 
-            let traits = existingFont.fontDescriptor.symbolicTraits
+            var traits = existingFont.fontDescriptor.symbolicTraits
+            let inlineIntent = nsAttributed.attribute(.inlinePresentationIntent, at: range.location, effectiveRange: nil) as? NSNumber
+            if let rawIntent = inlineIntent?.uintValue {
+                if (rawIntent & InlinePresentationIntent.stronglyEmphasized.rawValue) != 0 {
+                    traits.insert(.traitBold)
+                }
+                if (rawIntent & InlinePresentationIntent.emphasized.rawValue) != 0 {
+                    traits.insert(.traitItalic)
+                }
+                if (rawIntent & InlinePresentationIntent.code.rawValue) != 0 {
+                    traits.insert(.traitMonoSpace)
+                }
+            }
             let size = baseFont.pointSize
             var newFont = UIFont(descriptor: baseFont.fontDescriptor, size: size)
 

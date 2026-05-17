@@ -67,14 +67,22 @@ struct MessageInputBar: View {
     /// Keyboard visibility state owned by parent view to survive geometry changes.
     let isKeyboardVisible: Bool
     @Binding var isAttachmentMenuPresented: Bool
+    var resolvedMentionTitle: String? = nil
     let onSend: () -> Void
     let onCancel: () -> Void
     let onReconnect: () -> Void
     let onAdd: () -> Void
+    var onRemoveResolvedMention: (() -> Void)? = nil
     let attachmentMenuContent: () -> AnyView
     let onFocusChange: (Bool) -> Void
     let onTextEditActivity: () -> Void
+    var handlesMentionPickerKeyCommands: Bool = false
+    var mentionPickerHasCompletion: Bool = false
+    var onMentionPickerTab: (() -> Void)?
+    var onMentionPickerMoveUp: (() -> Void)?
+    var onMentionPickerMoveDown: (() -> Void)?
     var onPasteImages: (([UIImage]) -> Void)?
+    var notificationVisibleCount: Int = 0
 
     @State private var editorHeight: CGFloat = 44
     @State private var cachedMaxBarWidth: CGFloat?
@@ -248,8 +256,12 @@ struct MessageInputBar: View {
         return 0.75 + (0.25 * clampedPhase)
     }
 
-    static func disabledSendButtonBackingColor(colorScheme: ColorScheme) -> Color? {
-        colorScheme == .light
+    static func disabledSendButtonBackingColor(
+        colorScheme: ColorScheme,
+        drawsDisabledBacking: Bool = true
+    ) -> Color? {
+        guard drawsDisabledBacking else { return nil }
+        return colorScheme == .light
             ? Color(red: 0.925, green: 0.922, blue: 0.890)
             : nil
     }
@@ -345,7 +357,15 @@ struct MessageInputBar: View {
                 onSubmitRequested: handleEditorSubmitIntent,
                 onFocusChange: onFocusChange,
                 onTextEditActivity: onTextEditActivity,
+                resolvedMentionTitle: resolvedMentionTitle,
+                onRemoveResolvedMention: onRemoveResolvedMention,
+                handlesMentionPickerKeyCommands: handlesMentionPickerKeyCommands,
+                mentionPickerHasCompletion: mentionPickerHasCompletion,
+                onMentionPickerTab: onMentionPickerTab,
+                onMentionPickerMoveUp: onMentionPickerMoveUp,
+                onMentionPickerMoveDown: onMentionPickerMoveDown,
                 onPasteImages: onPasteImages,
+                notificationVisibleCount: notificationVisibleCount,
                 placeholderText: placeholderText,
                 isLightModeForInputBar: isLightModeForInputBar,
                 visionOSBorderColor: visionOSBorderColor
@@ -399,7 +419,15 @@ private struct MessageEditorChrome: View {
     let onSubmitRequested: () -> Void
     let onFocusChange: (Bool) -> Void
     let onTextEditActivity: () -> Void
+    var resolvedMentionTitle: String?
+    var onRemoveResolvedMention: (() -> Void)?
+    var handlesMentionPickerKeyCommands: Bool = false
+    var mentionPickerHasCompletion: Bool = false
+    var onMentionPickerTab: (() -> Void)?
+    var onMentionPickerMoveUp: (() -> Void)?
+    var onMentionPickerMoveDown: (() -> Void)?
     var onPasteImages: (([UIImage]) -> Void)?
+    var notificationVisibleCount: Int = 0
     let placeholderText: String
     let isLightModeForInputBar: Bool
     let visionOSBorderColor: Color
@@ -426,40 +454,75 @@ private struct MessageEditorChrome: View {
     }
 
     var body: some View {
-        ZStack(alignment: .leading) {
-            RichTextEditor(
-                attributedText: $content,
-                calculatedHeight: $editorHeight,
-                selectionRange: $selectionRange,
-                pendingInsertions: $pendingInsertions,
-                fontScaleChangeSequence: fontScaleChangeSequence,
-                resetToken: resetToken,
-                focusTrigger: focusTrigger,
-                isEditable: true,
-                tintColor: chrome.tintColor,
-                textColor: chrome.textColor,
-                onFocusChange: onFocusChange,
-                onTextEditActivity: onTextEditActivity,
-                onSubmit: {
-                    onSubmitRequested()
-                },
-                onPasteImages: onPasteImages,
-                trailingPadding: 20
-            )
-            .opacity(editorOpacity)
+        HStack(spacing: 6) {
+            if let resolvedMentionTitle {
+                HStack(spacing: 6) {
+                    Text("@\(resolvedMentionTitle)")
+                        .font(.clawline(.secondaryLabel).weight(.semibold))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Button(action: {
+                        onRemoveResolvedMention?()
+                    }) {
+                        Image(systemName: "xmark")
+                            .font(.clawline(.secondaryLabel).weight(.bold))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Remove mention")
+                }
+                .foregroundStyle(isLightModeForInputBar ? ChatFlowTheme.ink(.light) : .white)
+                .padding(.leading, 12)
+                .padding(.trailing, 8)
+                .padding(.vertical, 7)
+                .background(
+                    Capsule()
+                        .fill(Color.primary.opacity(isLightModeForInputBar ? 0.10 : 0.18))
+                )
+                .padding(.leading, 8)
+                .frame(maxWidth: 170)
+            }
 
-            if content.length == 0 {
-                Text(placeholderText)
-                    .font(.clawline(.bodyText))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .minimumScaleFactor(0.7)
-                    .foregroundColor(placeholderColor)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-                    .frame(maxHeight: .infinity, alignment: .center)
-                    .padding(.leading, 20)
-                    .padding(.trailing, 20)
-                    .allowsHitTesting(false)
+            ZStack(alignment: .leading) {
+                RichTextEditor(
+                    attributedText: $content,
+                    calculatedHeight: $editorHeight,
+                    selectionRange: $selectionRange,
+                    pendingInsertions: $pendingInsertions,
+                    fontScaleChangeSequence: fontScaleChangeSequence,
+                    resetToken: resetToken,
+                    focusTrigger: focusTrigger,
+                    isEditable: true,
+                    tintColor: chrome.tintColor,
+                    textColor: chrome.textColor,
+                    onFocusChange: onFocusChange,
+                    onTextEditActivity: onTextEditActivity,
+                    onSubmit: {
+                        onSubmitRequested()
+                    },
+                    handlesMentionPickerKeyCommands: handlesMentionPickerKeyCommands,
+                    mentionPickerHasCompletion: mentionPickerHasCompletion,
+                    onMentionPickerTab: onMentionPickerTab,
+                    onMentionPickerMoveUp: onMentionPickerMoveUp,
+                    onMentionPickerMoveDown: onMentionPickerMoveDown,
+                    onPasteImages: onPasteImages,
+                    notificationVisibleCount: notificationVisibleCount,
+                    trailingPadding: 20
+                )
+                .opacity(editorOpacity)
+
+                if content.length == 0 {
+                    Text(placeholderText)
+                        .font(.clawline(.bodyText))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .minimumScaleFactor(0.7)
+                        .foregroundColor(placeholderColor)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                        .frame(maxHeight: .infinity, alignment: .center)
+                        .padding(.leading, 20)
+                        .padding(.trailing, 20)
+                        .allowsHitTesting(false)
+                }
             }
         }
         .frame(height: inputHeight)
@@ -478,7 +541,7 @@ private struct MessageEditorChrome: View {
     }
 }
 
-private struct MessageSendControl: View {
+struct MessageSendControl: View {
     private enum BubbleVisualState: Equatable {
         case ghost
         case active
@@ -506,6 +569,13 @@ private struct MessageSendControl: View {
     private var sendActionEnabled: Bool { isSending || canSend || isDisconnected }
     private var sendIconColor: Color { .white }
     private let reconnectPulseDuration: TimeInterval = 0.8
+    private var drawsDisabledSendButtonBacking: Bool {
+#if os(visionOS)
+        false
+#else
+        true
+#endif
+    }
 
     private var bubbleVisualState: BubbleVisualState {
         switch connectionState {
@@ -588,7 +658,10 @@ private struct MessageSendControl: View {
         .frame(width: sendButtonSize, height: sendButtonSize)
         .background {
             if bubbleVisualState == .ghost,
-               let backingColor = MessageInputBar.disabledSendButtonBackingColor(colorScheme: uiColorScheme) {
+               let backingColor = MessageInputBar.disabledSendButtonBackingColor(
+                   colorScheme: uiColorScheme,
+                   drawsDisabledBacking: drawsDisabledSendButtonBacking
+                ) {
                 Circle()
                     .fill(backingColor)
                     .frame(width: sendButtonSize, height: sendButtonSize)
@@ -615,6 +688,7 @@ private struct MessageSendControl: View {
                 (isStagingSendGate ? "Staging attachments" :
                     (isDisconnected ? "Disconnected. Tap to reconnect." : "Send message"))
         )
+        .accessibilityIdentifier("send_button")
         .id("send-button")
         .animation(.spring(response: 0.30, dampingFraction: 0.82), value: isSending)
         .animation(.spring(response: 0.30, dampingFraction: 0.82), value: canSend)

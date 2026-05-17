@@ -4,7 +4,7 @@ import { WebSocketServer } from "ws";
 
 test("markdown messages render rich blocks and expand into an overlay", async ({ page }) => {
   const port = 21_901 + Math.floor(Math.random() * 1_000);
-  const sessionKey = "agent:main:clawline:flynn:main";
+  const sessionKey = "agent:main:clawline:clawline_web_test:main";
   const richContent = [
     "Intro paragraph.",
     "",
@@ -37,7 +37,7 @@ test("markdown messages render rich blocks and expand into an overlay", async ({
             type: "pair_result",
             success: true,
             token: "jwt-phase4-token",
-            userId: "user_flynn"
+            userId: "clawline_web_test"
           })
         );
         return;
@@ -48,7 +48,7 @@ test("markdown messages render rich blocks and expand into an overlay", async ({
           JSON.stringify({
             type: "auth_result",
             success: true,
-            userId: "user_flynn",
+            userId: "clawline_web_test",
             replayCount: 0,
             sessionKeys: [sessionKey]
           })
@@ -56,7 +56,7 @@ test("markdown messages render rich blocks and expand into an overlay", async ({
         socket.send(
           JSON.stringify({
             type: "session_info",
-            userId: "user_flynn",
+            userId: "clawline_web_test",
             isAdmin: true,
             sessionKeys: [sessionKey]
           })
@@ -173,7 +173,7 @@ test("markdown messages render rich blocks and expand into an overlay", async ({
   try {
     await page.setViewportSize({ width: 820, height: 1180 });
     await page.goto("/pair");
-    await page.getByLabel("Name").fill("Flynn Browser");
+    await page.getByLabel("Name").fill("Clawline Web Test Browser");
     await page.getByLabel("Provider address").fill(`ws://127.0.0.1:${port}/ws`);
     await page.getByRole("button", { name: "Pair browser" }).click();
     await expect(page).toHaveURL(new RegExp(`/chat/${escapeForRegExp(sessionKey)}$`));

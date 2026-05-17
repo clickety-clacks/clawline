@@ -3,6 +3,7 @@ import { RefreshCw, X } from "lucide-react";
 import { useAuthSessionStore } from "../../runtime/auth/authSessionStore";
 import type { StreamRecord } from "../../runtime/chat/chatDomainStore";
 import { useChatDomainStore } from "../../runtime/chat/chatDomainStore";
+import { useCrossChatNotificationStore } from "../../runtime/chat/crossChatNotificationStore";
 import { generateUuidV4 } from "../../runtime/shared/uuid";
 import { useTransportMachine } from "../../runtime/transport/transportMachine";
 import {
@@ -26,6 +27,7 @@ export function StreamManagerDrawer({
 }) {
   const { state: authState } = useAuthSessionStore();
   const { state: chatState, store: chatStore } = useChatDomainStore();
+  const { store: notificationStore } = useCrossChatNotificationStore();
   const { state: transportState } = useTransportMachine();
   const [createName, setCreateName] = useState("");
   const [editingSessionKey, setEditingSessionKey] = useState<string | null>(null);
@@ -208,6 +210,7 @@ export function StreamManagerDrawer({
         token: session.token
       });
       chatStore.removeStream(stream.sessionKey);
+      notificationStore.dismissCrossChatNotification(stream.sessionKey);
 
       if (activeSessionKey === stream.sessionKey) {
         const remainingStreams = chatState.streams.filter(

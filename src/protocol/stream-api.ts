@@ -34,6 +34,7 @@ export interface SessionStatusPayload {
     fallbackModels?: string[] | null;
     provider?: string | null;
     harness?: string | null;
+    authMode?: string | null;
     reasoningLevel?: string | null;
     thinkingLevel?: string | null;
     fastMode?: boolean | null;

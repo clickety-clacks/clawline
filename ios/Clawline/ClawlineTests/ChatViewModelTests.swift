@@ -949,6 +949,76 @@ struct ChatViewModelTests {
         #expect(messages.first?.id == "s_user_echo")
     }
 
+    @Test("Message reference token sends structured identity without quoted prompt text")
+    @MainActor
+    func messageReferenceSendsStructuredIdentity() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        try await setReadyToSend(chatService: chatService, viewModel: viewModel)
+        let referenced = Message(
+            id: "s_ref",
+            role: .assistant,
+            content: "Do not paste this into the prompt",
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: "agent:main:clawline:user:s_ref",
+            clientMessageId: "c_ref"
+        )
+        let resetBeforeReference = viewModel.inputResetToken
+        let selection = viewModel.referenceMessageInPrompt(referenced, selectionRange: NSRange(location: 0, length: 0))
+        #expect(viewModel.inputResetToken == resetBeforeReference + 1)
+        viewModel.inputContent = NSAttributedString(string: "Summarize the selected context")
+        _ = viewModel.referenceMessageInPrompt(referenced, selectionRange: selection)
+        viewModel.send()
+
+        try await Task.sleep(forDuration: .milliseconds(10))
+        #expect(chatService.lastSentContent == "Summarize the selected context")
+        #expect(chatService.lastSentContent?.contains("Do not paste") == false)
+        let reference = try #require(chatService.lastSentReferences.first)
+        #expect(reference.kind == "message")
+        #expect(reference.sessionKey == referenced.sessionKey)
+        #expect(reference.messageId == referenced.id)
+        #expect(reference.messageRole == .assistant)
+        #expect(reference.clientMessageId == "c_ref")
+
+        let payload = ClientMessagePayload(
+            id: "c_payload",
+            content: "Prompt",
+            attachments: [],
+            sessionKey: personalSessionKey,
+            references: [reference]
+        )
+        let encoded = try JSONEncoder().encode(payload)
+        let object = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        let references = try #require(object["references"] as? [[String: Any]])
+        #expect(references.first?["createdAt"] as? Double == 1_700_000_000_000)
+    }
+
+    @Test("Composer exposes modified Return as local newline key commands")
+    @MainActor
+    func composerModifiedReturnKeyCommands() {
+        let textView = PastableTextView()
+        let commands = textView.keyCommands ?? []
+        #expect(commands.contains { $0.input == "\r" && $0.modifierFlags == [.shift] })
+        #expect(commands.contains { $0.input == "\r" && $0.modifierFlags == [.control] })
+    }
+
     @Test("Interactive callback fallback echoes are suppressed from visible messages")
     @MainActor
     func interactiveCallbackFallbackEchoesAreSuppressed() async throws {
@@ -5135,6 +5205,7 @@ private final class TestChatService: ChatServicing {
     private(set) var lastSentContent: String?
     private(set) var lastSessionKey: String?
     private(set) var sentIds: [String] = []
+    private(set) var lastSentReferences: [MessageReferenceContext] = []
     var lastPublishedReadState: (sessionKey: String, lastReadMessageId: String)?
     private(set) var connectCallCount: Int = 0
     var isTransportReadyForSend: Bool = false
@@ -5262,7 +5333,11 @@ private final class TestChatService: ChatServicing {
         replayCursorBySessionKey.removeAll()
     }
 
-    func send(id: String, content: String, attachments: [WireAttachment], sessionKey: String?) async throws {
+    func send(id: String,
+              content: String,
+              attachments: [WireAttachment],
+              sessionKey: String?,
+              references: [MessageReferenceContext]) async throws {
         if let sendError {
             throw sendError
         }
@@ -5271,6 +5346,7 @@ private final class TestChatService: ChatServicing {
         lastSentAttachments = attachments
         lastSessionKey = sessionKey
         sentIds.append(id)
+        lastSentReferences = references
         if let sendDelay {
             try await Task.sleep(for: sendDelay)
         }

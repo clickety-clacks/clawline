@@ -92,3 +92,31 @@ struct Message: Identifiable, Equatable, Codable {
         case assistant
     }
 }
+
+struct PendingMessageReference: Identifiable, Equatable, Codable {
+    let id: UUID
+    let sessionKey: String
+    let messageId: String
+    let messageRole: Message.Role
+    let createdAt: Date
+    let clientMessageId: String?
+    let preview: String
+
+    init(id: UUID = UUID(), message: Message) {
+        self.id = id
+        self.sessionKey = message.sessionKey
+        self.messageId = message.id
+        self.messageRole = message.role
+        self.createdAt = message.timestamp
+        self.clientMessageId = message.clientMessageId
+        self.preview = message.content
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    var tokenLabel: String {
+        let label = messageRole == .user ? "You" : "Assistant"
+        guard !preview.isEmpty else { return label }
+        return "\(label): \(String(preview.prefix(48)))"
+    }
+}

@@ -367,7 +367,21 @@ export function Composer({
       return;
     }
 
-    if (event.key === "Enter" && !event.shiftKey) {
+    if (event.key === "Enter" && (event.shiftKey || event.ctrlKey)) {
+      event.preventDefault();
+      const textarea = event.currentTarget;
+      const start = textarea.selectionStart;
+      const end = textarea.selectionEnd;
+      const nextDraft = draft.slice(0, start) + "\n" + draft.slice(end);
+      setDraft(nextDraft);
+      requestAnimationFrame(() => {
+        textarea.selectionStart = start + 1;
+        textarea.selectionEnd = start + 1;
+      });
+      return;
+    }
+
+    if (event.key === "Enter" && !event.shiftKey && !event.ctrlKey) {
       event.preventDefault();
       void submit();
     }
@@ -509,7 +523,7 @@ export function Composer({
             </span>
           ) : null}
           <textarea
-            aria-keyshortcuts="Enter,Shift+Enter,Escape"
+            aria-keyshortcuts="Enter,Shift+Enter,Control+Enter,Escape"
             enterKeyHint="send"
             id="composer-input"
             onChange={(event) => setDraft(event.target.value)}

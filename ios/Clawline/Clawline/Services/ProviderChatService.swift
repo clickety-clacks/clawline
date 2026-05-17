@@ -531,7 +531,8 @@ final class ProviderChatService: ChatServicing {
         id: String,
         content: String,
         attachments: [WireAttachment],
-        sessionKey: String?
+        sessionKey: String?,
+        references: [MessageReferenceContext] = []
     ) async throws {
         guard let socket else {
             throw Error.notConnected
@@ -548,7 +549,8 @@ final class ProviderChatService: ChatServicing {
             id: id,
             content: content,
             attachments: attachments,
-            sessionKey: sessionKey
+            sessionKey: sessionKey,
+            references: references
         )
         let data = try encoder.encode(payload)
         guard let text = String(data: data, encoding: .utf8) else {

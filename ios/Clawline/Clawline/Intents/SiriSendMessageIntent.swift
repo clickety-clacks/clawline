@@ -109,7 +109,8 @@ struct SendMessageIntent: AppIntent {
                     id: messageId,
                     content: content,
                     attachments: [],
-                    sessionKey: sessionKey
+                    sessionKey: sessionKey,
+                    references: []
                 )
             }
             NSLog("[SiriIntent][10] sent, waiting for ack")

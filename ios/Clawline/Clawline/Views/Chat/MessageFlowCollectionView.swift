@@ -158,6 +158,8 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
     var onTypingIndicatorTap: (@MainActor (CGRect) -> Void)?
     var onTypingIndicatorAnchorFrameChanged: (@MainActor (CGRect?) -> Void)? = nil
     var onSessionControlSelected: (@MainActor (String, SessionControlAction, String?, Bool?) -> Void)?
+    var onInsertMessageIntoPrompt: (@MainActor (Message) -> Void)?
+    var onReferenceMessageInPrompt: (@MainActor (Message) -> Void)?
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.allowsTransparentWindowBackground) private var allowsTransparentWindowBackground
 
@@ -190,6 +192,8 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
             onTypingIndicatorTap: onTypingIndicatorTap,
             onTypingIndicatorAnchorFrameChanged: onTypingIndicatorAnchorFrameChanged,
             onSessionControlSelected: onSessionControlSelected,
+            onInsertMessageIntoPrompt: onInsertMessageIntoPrompt,
+            onReferenceMessageInPrompt: onReferenceMessageInPrompt,
             isDark: isDark,
             allowsTransparentWindowBackground: allowsTransparentWindowBackground
         )
@@ -222,6 +226,8 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
             onTypingIndicatorTap: onTypingIndicatorTap,
             onTypingIndicatorAnchorFrameChanged: onTypingIndicatorAnchorFrameChanged,
             onSessionControlSelected: onSessionControlSelected,
+            onInsertMessageIntoPrompt: onInsertMessageIntoPrompt,
+            onReferenceMessageInPrompt: onReferenceMessageInPrompt,
             isDark: isDark,
             allowsTransparentWindowBackground: allowsTransparentWindowBackground
         )
@@ -253,6 +259,8 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         let onTypingIndicatorTap: (@MainActor (CGRect) -> Void)?
         let onTypingIndicatorAnchorFrameChanged: (@MainActor (CGRect?) -> Void)?
         let onSessionControlSelected: (@MainActor (String, SessionControlAction, String?, Bool?) -> Void)?
+        let onInsertMessageIntoPrompt: (@MainActor (Message) -> Void)?
+        let onReferenceMessageInPrompt: (@MainActor (Message) -> Void)?
         let isDark: Bool?
         let allowsTransparentWindowBackground: Bool
     }
@@ -408,6 +416,8 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     private var onTypingIndicatorAnchorFrameChanged: (@MainActor (CGRect?) -> Void)?
     private var lastReportedTypingIndicatorAnchorFrame: CGRect?
     private var onSessionControlSelected: (@MainActor (String, SessionControlAction, String?, Bool?) -> Void)?
+    private var onInsertMessageIntoPrompt: (@MainActor (Message) -> Void)?
+    private var onReferenceMessageInPrompt: (@MainActor (Message) -> Void)?
     private let webBubbleCoordinator = WebBubbleCoordinator()
     private var lastMessages: [Message] = []
     private var lastEffectiveStream: ChatStream?
@@ -2102,6 +2112,8 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         onTypingIndicatorTap: (@MainActor (CGRect) -> Void)? = nil,
         onTypingIndicatorAnchorFrameChanged: (@MainActor (CGRect?) -> Void)? = nil,
         onSessionControlSelected: (@MainActor (String, SessionControlAction, String?, Bool?) -> Void)? = nil,
+        onInsertMessageIntoPrompt: (@MainActor (Message) -> Void)? = nil,
+        onReferenceMessageInPrompt: (@MainActor (Message) -> Void)? = nil,
         isDark: Bool? = nil,
         allowsTransparentWindowBackground: Bool = false
     ) {
@@ -2126,6 +2138,8 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             onTypingIndicatorTap: onTypingIndicatorTap,
             onTypingIndicatorAnchorFrameChanged: onTypingIndicatorAnchorFrameChanged,
             onSessionControlSelected: onSessionControlSelected,
+            onInsertMessageIntoPrompt: onInsertMessageIntoPrompt,
+            onReferenceMessageInPrompt: onReferenceMessageInPrompt,
             isDark: isDark,
             allowsTransparentWindowBackground: allowsTransparentWindowBackground
         )
@@ -2166,6 +2180,8 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         self.onTypingIndicatorTap = onTypingIndicatorTap
         self.onTypingIndicatorAnchorFrameChanged = onTypingIndicatorAnchorFrameChanged
         self.onSessionControlSelected = onSessionControlSelected
+        self.onInsertMessageIntoPrompt = onInsertMessageIntoPrompt
+        self.onReferenceMessageInPrompt = onReferenceMessageInPrompt
         self.allowsTransparentWindowBackground = allowsTransparentWindowBackground
 
         // Handle appearance change from SwiftUI colorScheme
@@ -3723,6 +3739,12 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                         data: data
                     )
                 },
+                onInsertIntoPrompt: { [weak self] message in
+                    self?.onInsertMessageIntoPrompt?(message)
+                },
+                onReferenceMessage: { [weak self] message in
+                    self?.onReferenceMessageInPrompt?(message)
+                },
                 onResend: { [weak self] in
                     self?.viewModel?.resendFailedMessage(messageId: message.id)
                 }
@@ -4238,7 +4260,9 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             maxWidthOverride: maxWidthOverride,
             onRequestExpand: nil,
             onRequestLayout: nil,
-            onInteractiveCallback: nil
+            onInteractiveCallback: nil,
+            onInsertIntoPrompt: nil,
+            onReferenceMessage: nil
         )
         let effectiveMaxWidth = maxWidthOverride ?? maxWidth
         let preferredWidth: CGFloat
@@ -4513,7 +4537,9 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             showsHeader: showsHeader,
             onRequestExpand: nil,
             onRequestLayout: nil,
-            onInteractiveCallback: nil
+            onInteractiveCallback: nil,
+            onInsertIntoPrompt: nil,
+            onReferenceMessage: nil
         )
 
         let measuredBubbleWidth: CGFloat = {
@@ -4573,7 +4599,9 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             showsHeader: showsHeader,
             onRequestExpand: nil,
             onRequestLayout: nil,
-            onInteractiveCallback: nil
+            onInteractiveCallback: nil,
+            onInsertIntoPrompt: nil,
+            onReferenceMessage: nil
         )
         let target = CGSize(width: measuredBubbleWidth, height: UIView.layoutFittingCompressedSize.height)
         let measured1 = uiKitBubbleSizer.systemLayoutSizeFitting(
@@ -4615,7 +4643,9 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             showsHeader: showsHeader,
             onRequestExpand: nil,
             onRequestLayout: nil,
-            onInteractiveCallback: nil
+            onInteractiveCallback: nil,
+            onInsertIntoPrompt: nil,
+            onReferenceMessage: nil
         )
 
         let measured2 = uiKitBubbleSizer.systemLayoutSizeFitting(

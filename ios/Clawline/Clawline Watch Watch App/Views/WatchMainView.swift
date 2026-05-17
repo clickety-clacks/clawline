@@ -139,10 +139,17 @@ struct WatchMainView: View {
             .accessibilityHint("Swipe to move through conversation history. The microphone stays in the same vertical scroll surface below the newest messages.")
             .accessibilityIdentifier("watch-unified-scroll-surface")
             .task(id: entries.last?.id ?? shellMessage ?? bottomAnchorID) {
-                withAnimation(.easeOut(duration: 0.18)) {
-                    proxy.scrollTo(bottomAnchorID, anchor: .bottom)
-                }
+                await settleAtNewestPage(proxy: proxy, bottomAnchorID: bottomAnchorID)
             }
+        }
+    }
+
+    private func settleAtNewestPage(proxy: ScrollViewProxy, bottomAnchorID: String) async {
+        await Task.yield()
+        proxy.scrollTo(bottomAnchorID, anchor: .bottom)
+        await Task.yield()
+        withAnimation(.easeOut(duration: 0.18)) {
+            proxy.scrollTo(bottomAnchorID, anchor: .bottom)
         }
     }
 
@@ -190,8 +197,6 @@ struct WatchMainView: View {
             ForEach(entries) { entry in
                 historyBubble(entry)
             }
-
-            ringControl(ringDiameter: ringDiameter)
 
             if showsChannelRow {
                 channelRow(for: stream)
@@ -269,22 +274,28 @@ struct WatchMainView: View {
     }
 
     private func ringControl(ringDiameter: CGFloat) -> some View {
-        ZStack {
-            WaveformRingView(audioLevel: voiceSession.audioLevel, state: ringVisualState)
-                .frame(width: ringDiameter, height: ringDiameter)
+        Button {} label: {
+            ZStack {
+                WaveformRingView(audioLevel: voiceSession.audioLevel, state: ringVisualState)
+                    .frame(width: ringDiameter, height: ringDiameter)
 
-            Image(systemName: centerIcon)
-                .font(.system(size: ringDiameter * 0.34, weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(
-                    width: max(44, ringDiameter * 0.4),
-                    height: max(44, ringDiameter * 0.4)
-                )
+                Image(systemName: centerIcon)
+                    .font(.system(size: ringDiameter * 0.34, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(
+                        width: max(44, ringDiameter * 0.4),
+                        height: max(44, ringDiameter * 0.4)
+                    )
+            }
+            .frame(width: ringDiameter, height: ringDiameter)
+            .contentShape(Circle())
         }
-        .contentShape(Circle())
-        .onTapGesture {
-            handleTapAction()
-        }
+        .buttonStyle(.plain)
+        .highPriorityGesture(
+            TapGesture().onEnded {
+                handleTapAction()
+            }
+        )
         .onLongPressGesture(minimumDuration: 0.35, maximumDistance: 30, pressing: { isPressing in
             if !isPressing, holdVoiceActive {
                 holdVoiceActive = false
@@ -293,14 +304,12 @@ struct WatchMainView: View {
         }) {
             beginLongPressAction()
         }
-        .accessibilityElement(children: .ignore)
         .accessibilityLabel("Microphone")
         .accessibilityHint("Tap to talk or stop. Touch and hold for push to talk.")
-        .accessibilityAddTraits(.isButton)
-        .accessibilityAction {
+        .accessibilityIdentifier("watch-ring-control")
+        .accessibilityAction(.default) {
             handleTapAction()
         }
-        .accessibilityIdentifier("watch-ring-control")
     }
 
     @ViewBuilder

@@ -6,6 +6,41 @@ final class Clawline_Watch_Watch_AppUITests: XCTestCase {
     }
 
     @MainActor
+    func testMicTapStartsVoiceOrShowsVisibleError() throws {
+        let app = XCUIApplication()
+        app.launchArguments += ["-WATCH_UI_TEST_SCENARIO", "direct"]
+        app.launch()
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10))
+
+        let ringControls = app.descendants(matching: .any).matching(identifier: "watch-ring-control")
+        XCTAssertEqual(ringControls.count, 1, "Expected exactly one exposed microphone ring control")
+        let ringControl = ringControls.firstMatch
+        XCTAssertTrue(ringControl.waitForExistence(timeout: 10), "Expected microphone ring control")
+        saveScreenshot(app: app, name: "watch-mic-before-tap")
+
+        ringControl.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).tap()
+        saveScreenshot(app: app, name: "watch-mic-after-tap-immediate")
+
+        let listening = app.staticTexts["Listening..."]
+        let visibleVoiceError = app.staticTexts.matching(
+            NSPredicate(format: "label CONTAINS[c] %@ OR label CONTAINS[c] %@ OR label CONTAINS[c] %@ OR label CONTAINS[c] %@",
+                        "Soniox",
+                        "Microphone",
+                        "Voice couldn't",
+                        "Watch relay")
+        ).firstMatch
+        let enteredListening = listening.waitForExistence(timeout: 2)
+        let surfacedVoiceError = visibleVoiceError.waitForExistence(timeout: 4)
+        XCTAssertTrue(
+            enteredListening || surfacedVoiceError,
+            "Expected mic tap to enter listening or surface a Clawline voice error"
+        )
+        sleep(2)
+        saveScreenshot(app: app, name: "watch-mic-after-tap-2s")
+        app.terminate()
+    }
+
+    @MainActor
     func testCaptureSolidRingStatesAndHistoryScroll() throws {
         let scenario = Self.compileTimeScenario
         captureScenario(named: scenario.name, expectsRouteChip: scenario.expectsRouteChip, screenshotName: scenario.screenshotName) { app in

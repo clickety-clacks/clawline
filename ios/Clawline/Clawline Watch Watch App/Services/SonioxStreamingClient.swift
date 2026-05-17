@@ -1,14 +1,49 @@
 import AVFoundation
 import Foundation
 
-final class SonioxStreamingClient {
+protocol WatchVoiceStreaming: AnyObject {
+    var onTranscriptUpdate: ((SonioxStreamingClient.TranscriptUpdate) -> Void)? { get set }
+    var onAudioLevel: ((Float) -> Void)? { get set }
+    var onError: ((Error) -> Void)? { get set }
+
+    func start(apiKey: String, clientReferenceID: String) async throws
+    func finalize(timeoutNanoseconds: UInt64) async -> String
+    func stop()
+}
+
+extension WatchVoiceStreaming {
+    func start(apiKey: String) async throws {
+        try await start(apiKey: apiKey, clientReferenceID: UUID().uuidString)
+    }
+
+    func finalize() async -> String {
+        await finalize(timeoutNanoseconds: 1_200_000_000)
+    }
+}
+
+final class SonioxStreamingClient: WatchVoiceStreaming {
     enum ClientError: LocalizedError {
         case notConnected
+        case serverError(code: String?, message: String?)
 
         var errorDescription: String? {
             switch self {
             case .notConnected:
                 return "Soniox socket is not connected"
+            case .serverError(let code, let message):
+                let trimmedMessage = message?.trimmingCharacters(in: .whitespacesAndNewlines)
+                let trimmedCode = code?.trimmingCharacters(in: .whitespacesAndNewlines)
+                if let trimmedMessage, !trimmedMessage.isEmpty,
+                   let trimmedCode, !trimmedCode.isEmpty {
+                    return "Soniox error \(trimmedCode): \(trimmedMessage)"
+                }
+                if let trimmedMessage, !trimmedMessage.isEmpty {
+                    return "Soniox error: \(trimmedMessage)"
+                }
+                if let trimmedCode, !trimmedCode.isEmpty {
+                    return "Soniox error \(trimmedCode)"
+                }
+                return "Soniox returned an error"
             }
         }
     }
@@ -37,6 +72,21 @@ final class SonioxStreamingClient {
         let text: String?
         let tokens: [Token]?
         let finished: Bool?
+        let errorCode: String?
+        let errorMessage: String?
+
+        enum CodingKeys: String, CodingKey {
+            case text
+            case tokens
+            case finished
+            case errorCode = "error_code"
+            case errorMessage = "error_message"
+        }
+
+        var hasError: Bool {
+            errorCode?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false ||
+                errorMessage?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+        }
     }
 
     private let session = URLSession(configuration: .default)
@@ -182,6 +232,12 @@ final class SonioxStreamingClient {
     private func handleIncomingText(_ text: String) {
         guard let data = text.data(using: .utf8),
               let payload = try? JSONDecoder().decode(SonioxResponse.self, from: data) else {
+            return
+        }
+
+        if payload.hasError {
+            onError?(ClientError.serverError(code: payload.errorCode, message: payload.errorMessage))
+            stop()
             return
         }
 

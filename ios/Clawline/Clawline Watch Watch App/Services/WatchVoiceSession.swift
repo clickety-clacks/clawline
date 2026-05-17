@@ -2,6 +2,7 @@ import AVFoundation
 import Observation
 import Foundation
 import Network
+import OSLog
 
 @MainActor
 @Observable
@@ -29,10 +30,38 @@ final class WatchVoiceSession {
         case error(message: String, autoRecoverTask: Task<Void, Never>?)
     }
 
+    private enum VoiceFailureKind: String {
+        case missingSonioxKey
+        case microphoneUnavailable
+        case sonioxConnectivity
+        case sonioxStart
+        case relayConnectivity
+        case unexpected
+
+        var userMessage: String {
+            switch self {
+            case .missingSonioxKey:
+                return "Soniox key is not synced to Watch yet. Open Clawline on iPhone and check voice settings."
+            case .microphoneUnavailable:
+                return "Microphone is unavailable. Check Watch microphone permission and try again."
+            case .sonioxConnectivity:
+                return "Couldn't connect to Soniox. Check Watch Wi-Fi or cellular and try again."
+            case .sonioxStart:
+                return "Couldn't start Soniox dictation. Try again."
+            case .relayConnectivity:
+                return "Watch relay is reconnecting. Try again when iPhone is nearby."
+            case .unexpected:
+                return "Voice couldn't start. Try again."
+            }
+        }
+    }
+
     private let credentialStore: WatchCredentialStore
-    private let sonioxClient = SonioxStreamingClient()
+    private let sonioxClient: any WatchVoiceStreaming
     private let cartesiaClient = CartesiaTTSClient()
     private let directInternetMonitor = DirectInternetMonitor()
+    private let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "WatchVoice")
+    private let audioSessionConfigurator: () throws -> Void
 
     private let playbackEngine = AVAudioEngine()
     private let playerNode = AVAudioPlayerNode()
@@ -63,16 +92,22 @@ final class WatchVoiceSession {
 
     var onTranscriptReady: ((String) -> Void)?
 
-    init(credentialStore: WatchCredentialStore) {
+    init(
+        credentialStore: WatchCredentialStore,
+        sonioxClient: (any WatchVoiceStreaming)? = nil,
+        audioSessionConfigurator: @escaping () throws -> Void = WatchVoiceSession.configureSharedAudioSession
+    ) {
         self.credentialStore = credentialStore
+        self.sonioxClient = sonioxClient ?? SonioxStreamingClient()
+        self.audioSessionConfigurator = audioSessionConfigurator
 
-        sonioxClient.onAudioLevel = { [weak self] level in
+        self.sonioxClient.onAudioLevel = { [weak self] level in
             Task { @MainActor in
                 self?.audioLevel = level
             }
         }
 
-        sonioxClient.onTranscriptUpdate = { [weak self] update in
+        self.sonioxClient.onTranscriptUpdate = { [weak self] update in
             Task { @MainActor in
                 guard let self else { return }
                 self.transcript = update.text
@@ -82,9 +117,10 @@ final class WatchVoiceSession {
             }
         }
 
-        sonioxClient.onError = { [weak self] error in
+        self.sonioxClient.onError = { [weak self] error in
             Task { @MainActor in
-                self?.transitionToError(error.localizedDescription)
+                guard let self else { return }
+                self.transitionToVoiceError(kind: self.voiceFailureKind(for: error), error: error)
             }
         }
 
@@ -106,7 +142,7 @@ final class WatchVoiceSession {
         }
 
         guard canUseVoice else {
-            transitionToError("Voice unavailable — text only via iPhone")
+            transitionToVoiceError(kind: .missingSonioxKey)
             return
         }
 
@@ -123,7 +159,7 @@ final class WatchVoiceSession {
         }
 
         guard canUseVoice else {
-            transitionToError("Voice unavailable — text only via iPhone")
+            transitionToVoiceError(kind: .missingSonioxKey)
             return
         }
 
@@ -175,6 +211,7 @@ final class WatchVoiceSession {
 
     func handleSendFailure(error: Error) {
         guard case .sending = phase else { return }
+        logger.error("Watch voice send failure diagnostic=\(String(describing: error), privacy: .public)")
         transitionToError(error.localizedDescription)
     }
 
@@ -197,7 +234,7 @@ final class WatchVoiceSession {
         do {
             try configureAudioSessionIfNeeded()
         } catch {
-            transitionToError(error.localizedDescription)
+            transitionToVoiceError(kind: .microphoneUnavailable, error: error)
             return
         }
 
@@ -217,7 +254,7 @@ final class WatchVoiceSession {
             guard let self else { return }
             guard let key = self.credentialStore.sonioxApiKey, !key.isEmpty else {
                 await MainActor.run {
-                    self.transitionToError("Missing Soniox key")
+                    self.transitionToVoiceError(kind: .missingSonioxKey)
                 }
                 return
             }
@@ -231,7 +268,7 @@ final class WatchVoiceSession {
                 }
             } catch {
                 await MainActor.run {
-                    self.transitionToError(error.localizedDescription)
+                    self.transitionToVoiceError(kind: self.voiceFailureKind(for: error), error: error)
                 }
             }
         }
@@ -250,6 +287,7 @@ final class WatchVoiceSession {
             let finalTranscript = await self.sonioxClient.finalize()
 
             await MainActor.run {
+                guard case .finalizing = self.phase else { return }
                 self.transcript = finalTranscript
                 let cleaned = finalTranscript.trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -298,7 +336,7 @@ final class WatchVoiceSession {
         do {
             try configureAudioSessionIfNeeded()
         } catch {
-            transitionToError(error.localizedDescription)
+            transitionToVoiceError(kind: .microphoneUnavailable, error: error)
             return
         }
 
@@ -352,7 +390,7 @@ final class WatchVoiceSession {
                     },
                     onError: { [weak self] error in
                         Task { @MainActor in
-                            self?.transitionToError(error.localizedDescription)
+                            self?.transitionToVoiceError(kind: .unexpected, error: error)
                         }
                     }
                 )
@@ -363,7 +401,7 @@ final class WatchVoiceSession {
                 }
             } catch {
                 await MainActor.run {
-                    self.transitionToError(error.localizedDescription)
+                    self.transitionToVoiceError(kind: .unexpected, error: error)
                 }
             }
         }
@@ -457,9 +495,20 @@ final class WatchVoiceSession {
         }
     }
 
-    private func transitionToError(_ message: String) {
+    private func transitionToVoiceError(
+        kind: VoiceFailureKind,
+        error: Error? = nil,
+        autoRecover: Bool = false
+    ) {
+        let diagnostic = error.map { String(describing: $0) } ?? "none"
+        logger.error("Watch voice failure kind=\(kind.rawValue, privacy: .public) directInternet=\(self.hasDirectInternet, privacy: .public) diagnostic=\(diagnostic, privacy: .public)")
+        transitionToError(kind.userMessage, autoRecover: autoRecover)
+    }
+
+    private func transitionToError(_ message: String, autoRecover: Bool = false) {
         inactivityTask?.cancel()
         maxDurationTask?.cancel()
+        sonioxClient.stop()
 
         if case .error(_, let existingTask) = phase {
             existingTask?.cancel()
@@ -468,15 +517,63 @@ final class WatchVoiceSession {
         errorMessage = message
         voiceState = .error
 
-        let recoveryTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(3))
-            guard !Task.isCancelled else { return }
-            await MainActor.run {
-                self?.transitionToIdle()
+        let recoveryTask: Task<Void, Never>?
+        if autoRecover {
+            recoveryTask = Task { [weak self] in
+                do {
+                    try await Task.sleep(for: .seconds(3))
+                } catch {
+                    return
+                }
+                guard !Task.isCancelled else { return }
+                await MainActor.run {
+                    self?.transitionToIdle()
+                }
             }
+        } else {
+            recoveryTask = nil
         }
 
         phase = .error(message: message, autoRecoverTask: recoveryTask)
+    }
+
+    private func voiceFailureKind(for error: Error) -> VoiceFailureKind {
+        if isAudioCaptureError(error) {
+            return .microphoneUnavailable
+        }
+        return isNetworkConnectivityError(error) ? .sonioxConnectivity : .sonioxStart
+    }
+
+    private func isAudioCaptureError(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        if nsError.domain == NSOSStatusErrorDomain {
+            return true
+        }
+
+        let domain = nsError.domain.lowercased()
+        return domain.contains("avaudio") ||
+            domain.contains("avfaudio") ||
+            domain.contains("coreaudio") ||
+            domain.contains("audio")
+    }
+
+    private func isNetworkConnectivityError(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        guard nsError.domain == NSURLErrorDomain else { return false }
+
+        switch URLError.Code(rawValue: nsError.code) {
+        case .notConnectedToInternet,
+             .networkConnectionLost,
+             .cannotConnectToHost,
+             .cannotFindHost,
+             .dnsLookupFailed,
+             .timedOut,
+             .internationalRoamingOff,
+             .dataNotAllowed:
+            return true
+        default:
+            return false
+        }
     }
 
     private func transitionToIdle() {
@@ -519,10 +616,14 @@ final class WatchVoiceSession {
 
     private func configureAudioSessionIfNeeded() throws {
         guard !hasConfiguredAudioSession else { return }
+        try audioSessionConfigurator()
+        hasConfiguredAudioSession = true
+    }
+
+    private nonisolated static func configureSharedAudioSession() throws {
         let audioSession = AVAudioSession.sharedInstance()
         try audioSession.setCategory(.playAndRecord, mode: .measurement, options: [])
         try audioSession.setActive(true)
-        hasConfiguredAudioSession = true
     }
 
     private func handleDirectInternetChange(_ available: Bool) {

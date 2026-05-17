@@ -415,6 +415,7 @@ struct WatchMainView: View {
             hasProviderCredentials: presentationState.hasProviderCredentials,
             transportState: transport.transportState,
             statusText: presentationState.statusText,
+            voiceState: voiceSession.voiceState,
             streamLoadState: channelManager.streamLoadState,
             streams: channelManager.streams,
             stream: stream
@@ -425,6 +426,7 @@ struct WatchMainView: View {
         hasProviderCredentials: Bool,
         transportState: WatchProviderTransportState,
         statusText: String,
+        voiceState: WatchVoiceSession.VoiceState = .idle,
         streamLoadState: WatchChannelManager.StreamLoadState,
         streams: [StreamSession],
         stream: StreamSession?
@@ -438,6 +440,10 @@ struct WatchMainView: View {
             return statusText
         case .direct, .relay:
             break
+        }
+
+        if shouldShowVoiceStatus(voiceState) {
+            return statusText
         }
 
         switch streamLoadState {
@@ -455,6 +461,15 @@ struct WatchMainView: View {
         }
     }
 
+    private static func shouldShowVoiceStatus(_ state: WatchVoiceSession.VoiceState) -> Bool {
+        switch state {
+        case .listening, .finalizing, .sending, .speaking, .error:
+            return true
+        case .idle:
+            return false
+        }
+    }
+
     private func shellMessageView(_ message: String) -> some View {
         Text(message)
             .font(.system(size: 13, weight: .medium, design: .rounded))
@@ -468,11 +483,7 @@ struct WatchMainView: View {
         case .speaking:
             voiceSession.bargeIn()
         case .idle, .error:
-            if voiceSession.canUseVoice {
-                voiceSession.startTap()
-            } else {
-                Task { await requestTextInput() }
-            }
+            voiceSession.startTap()
         case .listening, .finalizing:
             voiceSession.stop()
         case .sending:
@@ -498,16 +509,8 @@ struct WatchMainView: View {
     }
 
     private func beginLongPressAction() {
-        guard voiceSession.canUseVoice else { return }
         holdVoiceActive = true
         voiceSession.startHold()
-    }
-
-    @MainActor
-    private func requestTextInput() async {
-        guard let text = await WatchTextInputPresenter.requestPlainTextInput(),
-              !text.isEmpty else { return }
-        await presentationState.sendTextMessage(text)
     }
 }
 

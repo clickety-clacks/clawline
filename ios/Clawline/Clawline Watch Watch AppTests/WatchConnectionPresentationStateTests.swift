@@ -217,6 +217,32 @@ struct WatchConnectionPresentationStateTests {
         )
     }
 
+    @Test("voice errors remain visible on active loaded channel pages")
+    @MainActor
+    func shellMessageSurfacesVoiceErrorOnActiveChannelPage() {
+        let stream = StreamSession(
+            sessionKey: "agent:main:main",
+            displayName: "#watch",
+            kind: "dm",
+            orderIndex: 0,
+            isBuiltIn: true,
+            createdAt: .now,
+            updatedAt: .now
+        )
+
+        #expect(
+            WatchMainView.shellMessage(
+                hasProviderCredentials: true,
+                transportState: .relay,
+                statusText: "Couldn't start Soniox dictation. Try again.",
+                voiceState: .error,
+                streamLoadState: .loaded,
+                streams: [stream],
+                stream: stream
+            ) == "Couldn't start Soniox dictation. Try again."
+        )
+    }
+
 
     @Test("Soniox availability is based on credentials, not Watch direct-network path")
     @MainActor
@@ -243,6 +269,96 @@ struct WatchConnectionPresentationStateTests {
         #expect(!WatchVoiceSession(credentialStore: credentials).canUseVoice)
     }
 
+    @Test("missing Soniox credential produces Clawline voice error instead of system input")
+    @MainActor
+    func missingSonioxCredentialShowsVoiceError() {
+        let credentials = WatchCredentialStore(keychain: WatchKeychainStore(service: "WatchTests.sonioxMissingError", accessGroup: nil))
+        credentials.clear()
+        let voiceSession = WatchVoiceSession(
+            credentialStore: credentials,
+            audioSessionConfigurator: {}
+        )
+
+        voiceSession.startTap()
+
+        #expect(voiceSession.voiceState == .error)
+        #expect(voiceSession.errorMessage == "Soniox key is not synced to Watch yet. Open Clawline on iPhone and check voice settings.")
+    }
+
+    @Test("Soniox start failure remains visible and hides raw diagnostics")
+    @MainActor
+    func sonioxStartFailureShowsHumanReadablePersistentError() async throws {
+        let credentials = WatchCredentialStore(keychain: WatchKeychainStore(service: "WatchTests.sonioxStartFailure", accessGroup: nil))
+        credentials.clear()
+        credentials.apply(userInfo: ["sonioxApiKey": "watch-soniox-key"])
+        let client = FailingWatchVoiceStreamingClient(
+            error: NSError(
+                domain: NSURLErrorDomain,
+                code: URLError.networkConnectionLost.rawValue,
+                userInfo: [NSLocalizedDescriptionKey: "socket exploded while bootstrapping"]
+            )
+        )
+        let voiceSession = WatchVoiceSession(
+            credentialStore: credentials,
+            sonioxClient: client,
+            audioSessionConfigurator: {}
+        )
+
+        voiceSession.startTap()
+        try await Task.sleep(for: .milliseconds(50))
+
+        #expect(voiceSession.voiceState == .error)
+        #expect(voiceSession.errorMessage == "Couldn't connect to Soniox. Check Watch Wi-Fi or cellular and try again.")
+        #expect(voiceSession.errorMessage?.contains("socket exploded") == false)
+        #expect(client.startCallCount == 1)
+        #expect(client.stopCallCount > 0)
+    }
+
+    @Test("Soniox error response frames are routed to voice error handling")
+    func sonioxErrorFramesAreNotAcceptedAsEmptyTranscripts() throws {
+        let sourcePath = URL(filePath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appending(path: "Clawline Watch Watch App/Services/SonioxStreamingClient.swift")
+        let source = try String(contentsOf: sourcePath, encoding: .utf8)
+
+        #expect(source.contains("case errorCode = \"error_code\""))
+        #expect(source.contains("case errorMessage = \"error_message\""))
+        #expect(source.contains("if payload.hasError"))
+        #expect(source.contains("onError?(ClientError.serverError(code: payload.errorCode, message: payload.errorMessage))"))
+        #expect(source.contains("stop()\n            return"))
+    }
+
+    @Test("voice send failure preserves presentation error instead of relabeling as relay")
+    @MainActor
+    func voiceSendFailurePreservesPresentationError() async throws {
+        let credentials = WatchCredentialStore(keychain: WatchKeychainStore(service: "WatchTests.voiceSendFailure", accessGroup: nil))
+        credentials.clear()
+        credentials.apply(userInfo: ["sonioxApiKey": "watch-soniox-key"])
+        let client = SuccessfulWatchVoiceStreamingClient(finalTranscript: "send this")
+        let voiceSession = WatchVoiceSession(
+            credentialStore: credentials,
+            sonioxClient: client,
+            audioSessionConfigurator: {}
+        )
+
+        voiceSession.startTap()
+        try await Task.sleep(for: .milliseconds(50))
+        voiceSession.stop()
+        try await Task.sleep(for: .milliseconds(50))
+
+        voiceSession.handleSendFailure(
+            error: NSError(
+                domain: "WatchPresentation",
+                code: -1,
+                userInfo: [NSLocalizedDescriptionKey: "Message not delivered - connection lost."]
+            )
+        )
+
+        #expect(voiceSession.voiceState == .error)
+        #expect(voiceSession.errorMessage == "Message not delivered - connection lost.")
+    }
+
     @Test("configured Soniox keeps mic tap on Clawline voice even when direct network monitor is false")
     func configuredSonioxDoesNotFallThroughToSystemTextInputWhenDirectNetworkIsFalse() throws {
         let sourcePath = URL(filePath: #filePath)
@@ -264,8 +380,9 @@ struct WatchConnectionPresentationStateTests {
         let source = try String(contentsOf: sourcePath, encoding: .utf8)
 
         #expect(!source.contains("transport.transportState == .disconnected || !presentationState.voiceInputAvailable"))
-        #expect(source.contains("if voiceSession.canUseVoice {\n                voiceSession.startTap()"))
-        #expect(source.contains("guard voiceSession.canUseVoice else { return }\n        holdVoiceActive = true"))
+        #expect(!source.contains("Task { await requestTextInput() }"))
+        #expect(source.contains("case .idle, .error:\n            voiceSession.startTap()"))
+        #expect(source.contains("holdVoiceActive = true\n        voiceSession.startHold()"))
     }
 
     @Test("relay transport outages are buffered while server send errors remain terminal")
@@ -340,4 +457,51 @@ struct WatchConnectionPresentationStateTests {
         #expect(!handler.contains("cancelCurrentSpeech(clearQueue: true)"))
     }
 
+}
+
+private final class FailingWatchVoiceStreamingClient: WatchVoiceStreaming {
+    var onTranscriptUpdate: ((SonioxStreamingClient.TranscriptUpdate) -> Void)?
+    var onAudioLevel: ((Float) -> Void)?
+    var onError: ((Error) -> Void)?
+
+    private let error: Error
+    private(set) var startCallCount = 0
+    private(set) var stopCallCount = 0
+
+    init(error: Error) {
+        self.error = error
+    }
+
+    func start(apiKey: String, clientReferenceID: String) async throws {
+        startCallCount += 1
+        throw error
+    }
+
+    func finalize(timeoutNanoseconds: UInt64) async -> String {
+        ""
+    }
+
+    func stop() {
+        stopCallCount += 1
+    }
+}
+
+private final class SuccessfulWatchVoiceStreamingClient: WatchVoiceStreaming {
+    var onTranscriptUpdate: ((SonioxStreamingClient.TranscriptUpdate) -> Void)?
+    var onAudioLevel: ((Float) -> Void)?
+    var onError: ((Error) -> Void)?
+
+    private let finalTranscript: String
+
+    init(finalTranscript: String) {
+        self.finalTranscript = finalTranscript
+    }
+
+    func start(apiKey: String, clientReferenceID: String) async throws {}
+
+    func finalize(timeoutNanoseconds: UInt64) async -> String {
+        finalTranscript
+    }
+
+    func stop() {}
 }

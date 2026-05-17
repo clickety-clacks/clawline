@@ -53,6 +53,7 @@ export function Composer({
   const [highlightedMentionIndex, setHighlightedMentionIndex] = useState(0);
   const fileInputId = useId();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const mentionOptionRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const sentToastTimeoutRef = useRef<number | null>(null);
   const sendClickSuppressionTimeoutRef = useRef<number | null>(null);
   const suppressNextSendClickRef = useRef(false);
@@ -137,6 +138,15 @@ export function Composer({
     }
     setHighlightedMentionIndex(Math.max(0, filteredMentionStreams.length - 1));
   }, [filteredMentionStreams.length, highlightedMentionIndex]);
+
+  useEffect(() => {
+    if (!mentionPickerVisible || !highlightedMentionStream) {
+      return;
+    }
+    mentionOptionRefs.current[highlightedMentionStream.sessionKey]?.scrollIntoView?.({
+      block: "nearest"
+    });
+  }, [highlightedMentionStream, mentionPickerVisible]);
 
   useEffect(() => {
     return () => {
@@ -487,7 +497,7 @@ export function Composer({
         <div className="composer-input-field">
           {resolvedMention ? (
             <span className="composer-mention-chip" data-testid="composer-mention-chip">
-              <span>@{resolvedMention.displayTitle}</span>
+              <span>{resolvedMention.displayTitle}</span>
               <button
                 aria-label={`Remove ${resolvedMention.displayTitle} mention`}
                 className="composer-mention-remove"
@@ -520,6 +530,8 @@ export function Composer({
             <div
               aria-label="Mention destination"
               className="composer-mention-picker"
+              onTouchMove={(event) => event.stopPropagation()}
+              onWheel={(event) => event.stopPropagation()}
               role="listbox"
             >
               {filteredMentionStreams.length > 0 ? (
@@ -539,6 +551,9 @@ export function Composer({
                       });
                       setDraft("");
                       textareaRef.current?.focus({ preventScroll: true });
+                    }}
+                    ref={(element) => {
+                      mentionOptionRefs.current[stream.sessionKey] = element;
                     }}
                     role="option"
                     type="button"

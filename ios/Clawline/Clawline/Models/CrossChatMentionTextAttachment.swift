@@ -62,7 +62,7 @@ final class CrossChatMentionTextAttachment: NSTextAttachment {
         let iconConfiguration = UIImage.SymbolConfiguration(pointSize: font.pointSize, weight: .semibold)
         let iconImage = UIImage(systemName: "bubble.left.and.bubble.right", withConfiguration: iconConfiguration)?
             .withTintColor(.secondaryLabel, renderingMode: .alwaysOriginal)
-        let title = "@\(displayName)" as NSString
+        let title = displayName as NSString
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineBreakMode = .byTruncatingTail
         let titleAttributes: [NSAttributedString.Key: Any] = [

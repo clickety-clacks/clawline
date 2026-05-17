@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -223,7 +224,7 @@ describe("Composer", () => {
 
     fireEvent.keyDown(textarea, { key: "Tab" });
     expect(screen.getByTestId("composer-mention-chip")).toHaveTextContent(
-      "@Side Thread"
+      "Side Thread"
     );
 
     fireEvent.change(textarea, { target: { value: "Please check this" } });
@@ -247,7 +248,51 @@ describe("Composer", () => {
     ).toHaveLength(1);
   });
 
+  it("lists every eligible chat for bare at-sign and keeps the popup scroll-contained", () => {
+    const streams: StreamRecord[] = [
+      {
+        adopted: false,
+        createdAt: 10,
+        displayName: "Personal",
+        isBuiltIn: true,
+        kind: "main",
+        orderIndex: 0,
+        sessionKey: "agent:main:clawline:user_1:main",
+        updatedAt: 10
+      },
+      ...Array.from({ length: 8 }, (_, index) => ({
+        adopted: false,
+        createdAt: 11 + index,
+        displayName: `Project Room ${index + 1}`,
+        isBuiltIn: false,
+        kind: "custom",
+        orderIndex: index + 1,
+        sessionKey: `agent:main:clawline:user_1:room_${index + 1}`,
+        updatedAt: 11 + index
+      }))
+    ];
+    renderComposer({ streams });
+    const textarea = screen.getByLabelText("Message");
+
+    fireEvent.change(textarea, { target: { value: "@" } });
+
+    const options = screen.getAllByRole("option");
+    expect(options).toHaveLength(8);
+    expect(screen.queryByRole("option", { name: /Personal/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /Project Room 1/i })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /Project Room 8/i })).toBeInTheDocument();
+
+    const styleText = readFileSync("src/app/styles.css", "utf8");
+    expect(styleText).toContain(".composer-mention-picker");
+    expect(styleText).toContain("bottom: calc(100% + 0.28rem);");
+    expect(styleText).toContain("overflow: auto;");
+    expect(styleText).toContain("overscroll-behavior: contain;");
+  });
+
   it("moves the leading mention picker highlight with ArrowUp and ArrowDown", async () => {
+    const scrollIntoView = vi.fn();
+    const originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = scrollIntoView;
     const streams: StreamRecord[] = [
       {
         adopted: false,
@@ -292,10 +337,11 @@ describe("Composer", () => {
     fireEvent.keyDown(textarea, { key: "ArrowDown" });
     expect(sideOption).toHaveAttribute("aria-selected", "false");
     expect(dictationOption).toHaveAttribute("aria-selected", "true");
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest" });
 
     fireEvent.keyDown(textarea, { key: "Tab" });
     expect(screen.getByTestId("composer-mention-chip")).toHaveTextContent(
-      "@Dictation"
+      "Dictation"
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Remove Dictation mention" }));
@@ -310,6 +356,7 @@ describe("Composer", () => {
       "aria-selected",
       "false"
     );
+    HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
   });
 
   it("resolves the highlighted leading mention with Enter before submitting", async () => {
@@ -354,7 +401,7 @@ describe("Composer", () => {
 
     expect(sendMessage).not.toHaveBeenCalled();
     expect(screen.getByTestId("composer-mention-chip")).toHaveTextContent(
-      "@Dictation"
+      "Dictation"
     );
     expect(screen.queryByRole("listbox", { name: "Mention destination" }))
       .not.toBeInTheDocument();

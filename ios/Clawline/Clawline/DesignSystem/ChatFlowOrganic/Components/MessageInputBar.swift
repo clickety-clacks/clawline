@@ -457,7 +457,7 @@ private struct MessageEditorChrome: View {
         HStack(spacing: 6) {
             if let resolvedMentionTitle {
                 HStack(spacing: 6) {
-                    Text("@\(resolvedMentionTitle)")
+                    Text(resolvedMentionTitle)
                         .font(.clawline(.secondaryLabel).weight(.semibold))
                         .lineLimit(1)
                         .truncationMode(.tail)

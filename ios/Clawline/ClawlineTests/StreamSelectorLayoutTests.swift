@@ -52,6 +52,56 @@ struct StreamSelectorLayoutTests {
         #expect(result.map(\.displayName) == ["Research Notes"])
     }
 
+    @Test("T307 bare at mention lists every eligible chat except current")
+    func crossChatMentionPickerBareAtListsEveryEligibleChat() {
+        let streams = [
+            StreamSession(
+                sessionKey: "agent:main:clawline:user:s_current",
+                displayName: "Current",
+                kind: "main",
+                orderIndex: 0,
+                isBuiltIn: true,
+                createdAt: Date(),
+                updatedAt: Date()
+            ),
+            StreamSession(
+                sessionKey: "agent:main:clawline:user:s_one",
+                displayName: "One",
+                kind: "custom",
+                orderIndex: 1,
+                isBuiltIn: false,
+                createdAt: Date(),
+                updatedAt: Date()
+            ),
+            StreamSession(
+                sessionKey: "agent:main:clawline:user:s_two",
+                displayName: "Two",
+                kind: "custom",
+                orderIndex: 2,
+                isBuiltIn: false,
+                createdAt: Date(),
+                updatedAt: Date()
+            ),
+            StreamSession(
+                sessionKey: "agent:main:clawline:user:s_three",
+                displayName: "Three",
+                kind: "custom",
+                orderIndex: 3,
+                isBuiltIn: false,
+                createdAt: Date(),
+                updatedAt: Date()
+            ),
+        ]
+
+        let result = CrossChatMentionPickerLogic.filteredStreams(
+            streams: streams,
+            currentSessionKey: "agent:main:clawline:user:s_current",
+            query: ""
+        )
+
+        #expect(result.map(\.displayName) == ["One", "Two", "Three"])
+    }
+
     @Test("T307 mention picker filtering uses visible session labels")
     func crossChatMentionPickerFilteringUsesVisibleLabels() {
         let streams = [

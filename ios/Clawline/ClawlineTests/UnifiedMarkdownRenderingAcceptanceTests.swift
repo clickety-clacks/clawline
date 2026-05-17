@@ -560,6 +560,14 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
                 stop.pointee = true
             }
         }
+        if !foundBold {
+            attributed.enumerateAttribute(.inlinePresentationIntent, in: range) { value, _, stop in
+                if value != nil {
+                    foundBold = true
+                    stop.pointee = true
+                }
+            }
+        }
         return foundBold
     }
 

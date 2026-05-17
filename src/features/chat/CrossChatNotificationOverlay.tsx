@@ -3,6 +3,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type KeyboardEvent,
   type PointerEvent
 } from "react";
@@ -22,10 +23,9 @@ import { RichMessageBody } from "./RichMessageBody";
 
 const VISIBLE_NOTIFICATION_LIMIT = 10;
 const OVERLAY_VERTICAL_MARGIN_PX = 14;
-const NOTIFICATION_MAX_BUBBLE_HEIGHT_PX = 320;
-const NOTIFICATION_MAX_BUBBLE_VIEWPORT_RATIO = 0.45;
 const NOTIFICATION_BUBBLE_GAP_PX = 9;
 const COLLAPSE_SWIPE_THRESHOLD_PX = 44;
+const DRAG_PLIABILITY_LIMIT_PX = 82;
 const CLEAR_ALL_HOLD_DELAY_MS = 650;
 const NOTIFICATION_EXIT_ANIMATION_MS = 300;
 const COLLAPSED_NOTIFICATION_REVEAL_MS = 5000;
@@ -75,6 +75,8 @@ export function CrossChatNotificationOverlay() {
   const [replyPinSlotsBySourceChatId, setReplyPinSlotsBySourceChatId] = useState<
     Record<string, number>
   >({});
+  const [bubbleDragOffsetsBySourceChatId, setBubbleDragOffsetsBySourceChatId] =
+    useState<Record<string, number>>({});
   const dragStartXRef = useRef<number | null>(null);
   const dragStartYRef = useRef<number | null>(null);
   const suppressNavigationClickRef = useRef(false);
@@ -184,13 +186,20 @@ export function CrossChatNotificationOverlay() {
   ]);
 
   useEffect(() => {
+    const visualViewport = window.visualViewport;
     function updateVisibleCapacity() {
       setViewportHeight(getViewportHeight());
     }
 
     updateVisibleCapacity();
     window.addEventListener("resize", updateVisibleCapacity);
-    return () => window.removeEventListener("resize", updateVisibleCapacity);
+    visualViewport?.addEventListener("resize", updateVisibleCapacity);
+    visualViewport?.addEventListener("scroll", updateVisibleCapacity);
+    return () => {
+      window.removeEventListener("resize", updateVisibleCapacity);
+      visualViewport?.removeEventListener("resize", updateVisibleCapacity);
+      visualViewport?.removeEventListener("scroll", updateVisibleCapacity);
+    };
   }, []);
 
   useEffect(() => {
@@ -413,8 +422,16 @@ export function CrossChatNotificationOverlay() {
       } else if (event.shiftKey) {
         event.preventDefault();
         setActionMenuSourceChatId(null);
-        pinReplySourceChatId(sourceChatId);
-        notificationStore.openCrossChatNotificationReply(sourceChatId);
+        const bubble = visibleBubbles.find(
+          (visibleBubble) => visibleBubble.sourceChatId === sourceChatId
+        );
+        if (bubble?.replyMode) {
+          unpinReplySourceChatId(sourceChatId);
+          notificationStore.closeCrossChatNotificationReply(sourceChatId);
+        } else {
+          pinReplySourceChatId(sourceChatId);
+          notificationStore.openCrossChatNotificationReply(sourceChatId);
+        }
       } else if (!event.altKey) {
         event.preventDefault();
         if (isCollapsed || hasCollapsedPreview) {
@@ -438,6 +455,7 @@ export function CrossChatNotificationOverlay() {
     orderedBubbles,
     transportStore,
     visibleCapacity,
+    visibleBubbles,
     visibleSourceChatIds
   ]);
 
@@ -682,8 +700,16 @@ export function CrossChatNotificationOverlay() {
 
     setActionMenuSourceChatId(null);
     if (index === 1) {
-      pinReplySourceChatId(sourceChatId);
-      notificationStore.openCrossChatNotificationReply(sourceChatId);
+      const bubble = visibleBubbles.find(
+        (visibleBubble) => visibleBubble.sourceChatId === sourceChatId
+      );
+      if (bubble?.replyMode) {
+        unpinReplySourceChatId(sourceChatId);
+        notificationStore.closeCrossChatNotificationReply(sourceChatId);
+      } else {
+        pinReplySourceChatId(sourceChatId);
+        notificationStore.openCrossChatNotificationReply(sourceChatId);
+      }
     } else {
       unpinReplySourceChatId(sourceChatId);
       dismissNotificationAndMarkSourceRead(sourceChatId);
@@ -791,9 +817,66 @@ export function CrossChatNotificationOverlay() {
     dragStartYRef.current = event.clientY;
   }
 
+  function rubberBandOffset(horizontal: number) {
+    const magnitude = Math.abs(horizontal);
+    if (magnitude === 0) {
+      return 0;
+    }
+    const pliableMagnitude =
+      (magnitude * DRAG_PLIABILITY_LIMIT_PX) / (magnitude + DRAG_PLIABILITY_LIMIT_PX);
+    return horizontal < 0 ? -pliableMagnitude : pliableMagnitude;
+  }
+
+  function setBubbleDragOffset(sourceChatId: string, offset: number) {
+    setBubbleDragOffsetsBySourceChatId((current) => {
+      if (offset === 0) {
+        if (current[sourceChatId] === undefined) {
+          return current;
+        }
+        const next = { ...current };
+        delete next[sourceChatId];
+        return next;
+      }
+      if (current[sourceChatId] === offset) {
+        return current;
+      }
+      return { ...current, [sourceChatId]: offset };
+    });
+  }
+
+  function handleBubblePointerMove(
+    event: PointerEvent<HTMLElement>,
+    sourceChatId: string
+  ) {
+    const startX = dragStartXRef.current;
+    const startY = dragStartYRef.current;
+    if (startX === null || startY === null) {
+      return;
+    }
+    const horizontal = event.clientX - startX;
+    const vertical = event.clientY - startY;
+    if (Math.abs(horizontal) <= Math.abs(vertical)) {
+      setBubbleDragOffset(sourceChatId, 0);
+      return;
+    }
+    setBubbleDragOffset(sourceChatId, rubberBandOffset(horizontal));
+  }
+
   function clearPointerDragState() {
     dragStartXRef.current = null;
     dragStartYRef.current = null;
+  }
+
+  function clearBubblePointerDragState(sourceChatId: string) {
+    clearPointerDragState();
+    setBubbleDragOffset(sourceChatId, 0);
+  }
+
+  function suppressNextNavigationClick() {
+    suppressNavigationClickRef.current = true;
+    window.setTimeout(() => {
+      suppressNavigationClickRef.current = false;
+    }, 0);
   }
 
   function releasePointerCapture(event: PointerEvent<HTMLElement>) {
@@ -816,6 +899,10 @@ export function CrossChatNotificationOverlay() {
 
     const horizontal = event.clientX - startX;
     const vertical = event.clientY - startY;
+    setBubbleDragOffset(sourceChatId, 0);
+    if (Math.abs(horizontal) > 4 && Math.abs(horizontal) > Math.abs(vertical)) {
+      suppressNextNavigationClick();
+    }
     if (
       Math.abs(horizontal) <= Math.abs(vertical) ||
       Math.abs(horizontal) < COLLAPSE_SWIPE_THRESHOLD_PX
@@ -823,10 +910,6 @@ export function CrossChatNotificationOverlay() {
       return;
     }
 
-    suppressNavigationClickRef.current = true;
-    window.setTimeout(() => {
-      suppressNavigationClickRef.current = false;
-    }, 0);
     if (horizontal > 0) {
       if (isCollapsed) {
         clearCollapsedRevealPreview(sourceChatId);
@@ -858,10 +941,7 @@ export function CrossChatNotificationOverlay() {
       return;
     }
 
-    suppressNavigationClickRef.current = true;
-    window.setTimeout(() => {
-      suppressNavigationClickRef.current = false;
-    }, 0);
+    suppressNextNavigationClick();
     if (horizontal < 0) {
       restoreNotifications();
     }
@@ -899,6 +979,13 @@ export function CrossChatNotificationOverlay() {
           isCollapsed && !previewingCollapsedSourceChatIds.has(bubble.sourceChatId);
         const replySendState = replySendStateFor(bubble);
         const isReplySubmitting = sendingReplySourceChatIds.has(bubble.sourceChatId);
+        const dragOffset = bubbleDragOffsetsBySourceChatId[bubble.sourceChatId] ?? 0;
+        const bubbleStyle: CSSProperties | undefined =
+          dragOffset === 0
+            ? undefined
+            : ({
+                "--notification-drag-offset": `${dragOffset}px`
+              } as CSSProperties);
         return (
           <section
             aria-label={`${bubble.sourceTitle} notification`}
@@ -906,16 +993,19 @@ export function CrossChatNotificationOverlay() {
               "cross-chat-notification-bubble",
               isExiting ? "cross-chat-notification-bubble--exiting" : null,
               isBubbleCollapsed ? "cross-chat-notification-bubble--collapsed" : null,
-              bubble.replyMode ? "cross-chat-notification-bubble--replying" : null
+              bubble.replyMode ? "cross-chat-notification-bubble--replying" : null,
+              dragOffset !== 0 ? "cross-chat-notification-bubble--dragging" : null
             ]
               .filter(Boolean)
               .join(" ")}
             data-testid="cross-chat-notification-bubble"
             data-source-chat-id={bubble.sourceChatId}
             key={bubble.sourceChatId}
-            onPointerCancel={clearPointerDragState}
+            onPointerCancel={() => clearBubblePointerDragState(bubble.sourceChatId)}
             onPointerDown={handlePointerDown}
+            onPointerMove={(event) => handleBubblePointerMove(event, bubble.sourceChatId)}
             onPointerUp={(event) => handleBubblePointerUp(event, bubble.sourceChatId)}
+            style={bubbleStyle}
             onBlur={(event) => {
               const nextFocused = event.relatedTarget;
               if (!(nextFocused instanceof Node) || !event.currentTarget.contains(nextFocused)) {
@@ -1104,7 +1194,9 @@ export function CrossChatNotificationOverlay() {
 }
 
 function getViewportHeight() {
-  return typeof window === "undefined" ? 0 : window.innerHeight;
+  return typeof window === "undefined"
+    ? 0
+    : window.visualViewport?.height ?? window.innerHeight;
 }
 
 function visibleCapacityForViewportHeight(
@@ -1121,10 +1213,8 @@ function visibleCapacityForViewportHeight(
   let capacity = 0;
   for (const bubble of bubbles.slice(0, VISIBLE_NOTIFICATION_LIMIT)) {
     const measuredHeight = measuredHeightsBySourceChatId[bubble.sourceChatId];
-    const nextHeight =
-      measuredHeight && measuredHeight > 0
-        ? measuredHeight
-        : estimatedResolvedBubbleHeight(bubble, viewportHeight);
+      const nextHeight =
+        measuredHeight && measuredHeight > 0 ? measuredHeight : estimatedUnmeasuredBubbleHeight(bubble);
     const nextUsedHeight =
       usedHeight + nextHeight + (capacity === 0 ? 0 : NOTIFICATION_BUBBLE_GAP_PX);
     if (capacity > 0 && nextUsedHeight > availableHeight) {
@@ -1136,29 +1226,11 @@ function visibleCapacityForViewportHeight(
   return Math.max(1, Math.min(VISIBLE_NOTIFICATION_LIMIT, capacity));
 }
 
-function estimatedResolvedBubbleHeight(
-  bubble: CrossChatNotificationBubble,
-  viewportHeight: number
-) {
-  const maxHeight = Math.min(
-    NOTIFICATION_MAX_BUBBLE_HEIGHT_PX,
-    viewportHeight * NOTIFICATION_MAX_BUBBLE_VIEWPORT_RATIO
-  );
+function estimatedUnmeasuredBubbleHeight(bubble: CrossChatNotificationBubble) {
   if (bubble.replyMode) {
-    return Math.min(maxHeight, 92);
+    return 92;
   }
-  const text = bubble.entriesNewestFirst
-    .map((entry) => entry.contentPreview)
-    .join("\n")
-    .trim();
-  if (text.length === 0) {
-    return Math.min(maxHeight, 86);
-  }
-
-  const lineCount = text.split(/\n/).reduce((count, line) => {
-    return count + Math.max(1, Math.ceil(Math.max(1, line.length) / 48));
-  }, 0);
-  return Math.min(maxHeight, Math.max(86, 60 + lineCount * 21));
+  return 86;
 }
 
 function shallowNumberRecordEqual(

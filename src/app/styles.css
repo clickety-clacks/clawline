@@ -1605,7 +1605,7 @@ html[data-appearance="light"] body::before {
   position: absolute;
   left: 0.7rem;
   right: 0.7rem;
-  bottom: calc(100% + 0.55rem);
+  bottom: calc(100% + 0.28rem);
   display: grid;
   gap: 0.25rem;
   max-height: 16rem;
@@ -1621,7 +1621,8 @@ html[data-appearance="light"] body::before {
     inset 0 1px 0 var(--color-glass-specular-soft);
   backdrop-filter: blur(24px) saturate(190%);
   -webkit-backdrop-filter: blur(24px) saturate(190%);
-  z-index: 12;
+  overscroll-behavior: contain;
+  z-index: 36;
 }
 
 .composer-mention-option,
@@ -1667,18 +1668,22 @@ html[data-appearance="light"] body::before {
 .cross-chat-notification-overlay {
   --notification-bubble-radius: 1.15rem;
   --notification-peek-width: var(--notification-bubble-radius);
+  --notification-undocked-right-inset: calc(var(--message-bubble-padding-horizontal) / 2);
   --notification-motion-duration: 300ms;
   --notification-motion-reveal: cubic-bezier(0, 0, 0.2, 1);
   --notification-motion-hide: cubic-bezier(0.4, 0, 1, 1);
   --notification-motion-resize: cubic-bezier(0.4, 0, 0.2, 1);
   position: fixed;
   top: calc(0.9rem + env(safe-area-inset-top, 0px));
-  right: calc(0.9rem + env(safe-area-inset-right, 0px));
+  right: calc(var(--notification-undocked-right-inset) + env(safe-area-inset-right, 0px));
   z-index: 7;
   display: grid;
   justify-items: end;
   gap: 0.55rem;
-  width: min(28.75rem, calc(100% - 1.8rem));
+  width: min(
+    35.9375rem,
+    calc(100% - var(--notification-undocked-right-inset) - var(--notification-undocked-right-inset))
+  );
   pointer-events: none;
   transform: translateX(0);
   transition:
@@ -1696,7 +1701,7 @@ html[data-appearance="light"] body::before {
 .cross-chat-notification-peek {
   position: absolute;
   top: 0;
-  right: calc(-0.9rem - env(safe-area-inset-right, 0px));
+  right: calc(0px - var(--notification-undocked-right-inset) - env(safe-area-inset-right, 0px));
   bottom: 0;
   z-index: 30;
   width: var(--notification-peek-width);
@@ -1708,13 +1713,14 @@ html[data-appearance="light"] body::before {
 }
 
 .cross-chat-notification-bubble {
+  --notification-drag-offset: 0px;
   interpolate-size: allow-keywords;
   position: relative;
   align-self: start;
   justify-self: end;
-  width: min(28.75rem, 100%);
+  width: min(35.9375rem, 100%);
   height: auto;
-  max-height: min(20rem, 45vh);
+  max-height: min(16rem, 36vh);
   display: grid;
   grid-template-rows: auto auto auto;
   align-content: start;
@@ -1724,10 +1730,17 @@ html[data-appearance="light"] body::before {
   border: 1px solid color-mix(in srgb, var(--color-border-strong) 76%, var(--color-glass-specular) 24%);
   border-radius: var(--notification-bubble-radius);
   background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--color-notification-accent) 30%, transparent)
+        0 var(--notification-bubble-radius),
+      transparent var(--notification-bubble-radius)
+    ),
     linear-gradient(180deg, var(--color-glass-specular-soft), transparent 44%),
     color-mix(in srgb, var(--color-panel-glass-strong) 90%, var(--color-panel));
   color: var(--color-text);
   box-shadow:
+    0 8px 18px rgba(0, 0, 0, 0.16),
     0 18px 46px var(--color-glass-shadow),
     0 3px 14px var(--color-glass-shadow-soft),
     inset 0 1px 0 var(--color-glass-specular-soft);
@@ -1742,6 +1755,14 @@ html[data-appearance="light"] body::before {
   animation: cross-chat-notification-enter var(--notification-motion-duration) var(--notification-motion-reveal) both;
 }
 
+.cross-chat-notification-bubble--dragging {
+  transform: translateX(var(--notification-drag-offset));
+  transition:
+    height var(--notification-motion-duration) var(--notification-motion-resize),
+    max-height var(--notification-motion-duration) var(--notification-motion-resize),
+    opacity var(--notification-motion-duration) var(--notification-motion-reveal);
+}
+
 .cross-chat-notification-bubble--replying {
   padding-top: 0.46rem;
   padding-bottom: 0.58rem;
@@ -1752,7 +1773,6 @@ html[data-appearance="light"] body::before {
   position: absolute;
   inset: 0 auto 0 0;
   width: var(--notification-bubble-radius);
-  background: color-mix(in srgb, var(--color-notification-accent) 50%, transparent);
   pointer-events: none;
 }
 
@@ -1762,7 +1782,7 @@ html[data-appearance="light"] body::before {
 }
 
 .cross-chat-notification-bubble--collapsed {
-  transform: translateX(calc(100% - var(--notification-peek-width) + 0.9rem + env(safe-area-inset-right, 0px)));
+  transform: translateX(calc(100% - var(--notification-peek-width) + var(--notification-undocked-right-inset) + env(safe-area-inset-right, 0px) + var(--notification-drag-offset)));
   pointer-events: none;
   transition:
     height var(--notification-motion-duration) var(--notification-motion-resize),
@@ -1828,15 +1848,16 @@ html[data-appearance="light"] body::before {
   display: grid;
   gap: 0.38rem;
   min-height: 0;
-  max-height: calc(min(20rem, 45vh) - 4.7rem);
+  max-height: calc(min(16rem, 36vh) - 4.7rem);
   overflow: auto;
+  padding-bottom: 0.57rem;
   cursor: pointer;
   overscroll-behavior: contain;
 }
 
 .cross-chat-notification-markdown {
   gap: 0.38rem;
-  color: var(--color-text-secondary);
+  color: color-mix(in srgb, var(--color-text-secondary) 72%, var(--color-text) 28%);
   font-size: 0.985rem;
   line-height: 1.35;
 }
@@ -1870,10 +1891,12 @@ html[data-appearance="light"] body::before {
 
 .cross-chat-notification-reply textarea {
   flex: 1 1 auto;
+  field-sizing: content;
   min-width: 0;
   min-height: 2.1rem;
-  max-height: 4.8rem;
-  resize: vertical;
+  max-height: calc(5 * 1.25em + 0.9rem);
+  overflow-y: auto;
+  resize: none;
   padding: 0.45rem 0.6rem;
   border: 1px solid color-mix(in srgb, var(--color-border-strong) 72%, transparent);
   border-radius: 0.75rem;
@@ -1907,9 +1930,10 @@ html[data-appearance="light"] body::before {
 
 .cross-chat-notification-action-menu-layer {
   position: absolute;
-  right: 0;
+  left: 50%;
   z-index: 120;
   width: min(16rem, 100%);
+  transform: translateX(-50%);
   pointer-events: auto;
   isolation: isolate;
 }

@@ -4,6 +4,11 @@ import Foundation
 import Network
 import OSLog
 
+protocol WatchDirectInternetMonitoring: AnyObject {
+    var isDirectInternetAvailable: Bool { get }
+    var onChange: ((Bool) -> Void)? { get set }
+}
+
 @MainActor
 @Observable
 final class WatchVoiceSession {
@@ -33,7 +38,10 @@ final class WatchVoiceSession {
     private enum VoiceFailureKind: String {
         case missingSonioxKey
         case microphoneUnavailable
-        case sonioxConnectivity
+        case watchNetworkUnavailable
+        case sonioxAuthRejected
+        case sonioxTimedOut
+        case sonioxWebSocketFailure
         case sonioxStart
         case relayConnectivity
         case unexpected
@@ -44,8 +52,14 @@ final class WatchVoiceSession {
                 return "Soniox key is not synced to Watch yet. Open Clawline on iPhone and check voice settings."
             case .microphoneUnavailable:
                 return "Microphone is unavailable. Check Watch microphone permission and try again."
-            case .sonioxConnectivity:
-                return "Couldn't connect to Soniox. Check Watch Wi-Fi or cellular and try again."
+            case .watchNetworkUnavailable:
+                return "Watch network is unavailable for Soniox. Connect Watch to Wi-Fi or cellular and try again."
+            case .sonioxAuthRejected:
+                return "Soniox rejected the synced key. Open Clawline on iPhone and check voice settings."
+            case .sonioxTimedOut:
+                return "Soniox connection timed out. Check the Watch network and try again."
+            case .sonioxWebSocketFailure:
+                return "Soniox connection failed during startup. Try again from a stronger Watch network."
             case .sonioxStart:
                 return "Couldn't start Soniox dictation. Try again."
             case .relayConnectivity:
@@ -59,7 +73,7 @@ final class WatchVoiceSession {
     private let credentialStore: WatchCredentialStore
     private let sonioxClient: any WatchVoiceStreaming
     private let cartesiaClient = CartesiaTTSClient()
-    private let directInternetMonitor = DirectInternetMonitor()
+    private let directInternetMonitor: any WatchDirectInternetMonitoring
     private let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "WatchVoice")
     private let audioSessionConfigurator: () throws -> Void
 
@@ -95,10 +109,12 @@ final class WatchVoiceSession {
     init(
         credentialStore: WatchCredentialStore,
         sonioxClient: (any WatchVoiceStreaming)? = nil,
+        directInternetMonitor: (any WatchDirectInternetMonitoring)? = nil,
         audioSessionConfigurator: @escaping () throws -> Void = WatchVoiceSession.configureSharedAudioSession
     ) {
         self.credentialStore = credentialStore
         self.sonioxClient = sonioxClient ?? SonioxStreamingClient()
+        self.directInternetMonitor = directInternetMonitor ?? DirectInternetMonitor()
         self.audioSessionConfigurator = audioSessionConfigurator
 
         self.sonioxClient.onAudioLevel = { [weak self] level in
@@ -124,8 +140,8 @@ final class WatchVoiceSession {
             }
         }
 
-        hasDirectInternet = directInternetMonitor.isDirectInternetAvailable
-        directInternetMonitor.onChange = { [weak self] available in
+        hasDirectInternet = self.directInternetMonitor.isDirectInternetAvailable
+        self.directInternetMonitor.onChange = { [weak self] available in
             Task { @MainActor in
                 self?.handleDirectInternetChange(available)
             }
@@ -212,6 +228,10 @@ final class WatchVoiceSession {
     func handleSendFailure(error: Error) {
         guard case .sending = phase else { return }
         logger.error("Watch voice send failure diagnostic=\(String(describing: error), privacy: .public)")
+        if isRelayConnectivityError(error) {
+            transitionToVoiceError(kind: .relayConnectivity, error: error)
+            return
+        }
         transitionToError(error.localizedDescription)
     }
 
@@ -231,6 +251,11 @@ final class WatchVoiceSession {
     }
 
     private func transitionToListening(mode: VoiceMode) {
+        guard hasDirectInternet else {
+            transitionToVoiceError(kind: .watchNetworkUnavailable)
+            return
+        }
+
         do {
             try configureAudioSessionIfNeeded()
         } catch {
@@ -538,10 +563,31 @@ final class WatchVoiceSession {
     }
 
     private func voiceFailureKind(for error: Error) -> VoiceFailureKind {
+        if case SonioxStreamingClient.ClientError.serverError(let code, let message) = error {
+            return isSonioxAuthRejection(code: code, message: message) ? .sonioxAuthRejected : .sonioxWebSocketFailure
+        }
+
         if isAudioCaptureError(error) {
             return .microphoneUnavailable
         }
-        return isNetworkConnectivityError(error) ? .sonioxConnectivity : .sonioxStart
+        if isWatchNetworkUnavailable(error) {
+            return .watchNetworkUnavailable
+        }
+        if isNetworkTimeout(error) {
+            return hasDirectInternet ? .sonioxTimedOut : .watchNetworkUnavailable
+        }
+        if isSonioxHTTPAuthRejection(error) {
+            return .sonioxAuthRejected
+        }
+        if isSonioxWebSocketFailure(error) {
+            return .sonioxWebSocketFailure
+        }
+        return .sonioxStart
+    }
+
+    private func isRelayConnectivityError(_ error: Error) -> Bool {
+        WatchProviderTransport.shouldBufferRelaySendFailure(error) ||
+            WatchProviderTransport.shouldTreatRelayRequestErrorAsConnectivityLoss(error)
     }
 
     private func isAudioCaptureError(_ error: Error) -> Bool {
@@ -557,23 +603,75 @@ final class WatchVoiceSession {
             domain.contains("audio")
     }
 
-    private func isNetworkConnectivityError(_ error: Error) -> Bool {
+    private func isWatchNetworkUnavailable(_ error: Error) -> Bool {
         let nsError = error as NSError
         guard nsError.domain == NSURLErrorDomain else { return false }
 
         switch URLError.Code(rawValue: nsError.code) {
         case .notConnectedToInternet,
-             .networkConnectionLost,
-             .cannotConnectToHost,
-             .cannotFindHost,
-             .dnsLookupFailed,
-             .timedOut,
              .internationalRoamingOff,
              .dataNotAllowed:
             return true
         default:
             return false
         }
+    }
+
+    private func isNetworkTimeout(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        guard nsError.domain == NSURLErrorDomain else { return false }
+        return URLError.Code(rawValue: nsError.code) == .timedOut
+    }
+
+    private func isSonioxWebSocketFailure(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        guard nsError.domain == NSURLErrorDomain else { return false }
+
+        switch URLError.Code(rawValue: nsError.code) {
+        case .networkConnectionLost,
+             .cannotConnectToHost,
+             .cannotFindHost,
+             .dnsLookupFailed,
+             .secureConnectionFailed,
+             .serverCertificateUntrusted,
+             .serverCertificateHasBadDate,
+             .serverCertificateHasUnknownRoot,
+             .serverCertificateNotYetValid,
+             .clientCertificateRejected,
+             .clientCertificateRequired,
+             .badServerResponse:
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func isSonioxHTTPAuthRejection(_ error: Error) -> Bool {
+        let nsError = error as NSError
+        guard nsError.domain == NSURLErrorDomain else { return false }
+
+        switch URLError.Code(rawValue: nsError.code) {
+        case .userAuthenticationRequired,
+             .userCancelledAuthentication:
+            return true
+        case .badServerResponse:
+            return isSonioxAuthRejection(code: nil, message: error.localizedDescription)
+        default:
+            return false
+        }
+    }
+
+    private func isSonioxAuthRejection(code: String?, message: String?) -> Bool {
+        let combined = [code, message]
+            .compactMap { $0?.lowercased() }
+            .joined(separator: " ")
+        return combined.contains("auth") ||
+            combined.contains("unauthor") ||
+            combined.contains("forbid") ||
+            combined.contains("api key") ||
+            combined.contains("apikey") ||
+            combined.contains("invalid key") ||
+            combined.contains("permission")
     }
 
     private func transitionToIdle() {
@@ -632,7 +730,7 @@ final class WatchVoiceSession {
     }
 }
 
-private final class DirectInternetMonitor {
+private final class DirectInternetMonitor: WatchDirectInternetMonitoring {
     private let monitor = NWPathMonitor()
     private let queue = DispatchQueue(label: "co.clicketyclacks.clawline.watch.internet")
 

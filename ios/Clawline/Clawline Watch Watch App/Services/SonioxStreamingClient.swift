@@ -22,6 +22,8 @@ extension WatchVoiceStreaming {
 }
 
 final class SonioxStreamingClient: WatchVoiceStreaming {
+    static let model = "stt-rt-v4"
+
     enum ClientError: LocalizedError {
         case notConnected
         case serverError(code: String?, message: String?)
@@ -48,6 +50,9 @@ final class SonioxStreamingClient: WatchVoiceStreaming {
         }
     }
 
+    private static let endpointURL = URL(string: "wss://stt-rt.soniox.com/transcribe-websocket")!
+    private static let originHeaderValue = "https://clawline.app"
+
     struct TranscriptUpdate {
         let text: String
         let isFinal: Bool
@@ -72,15 +77,19 @@ final class SonioxStreamingClient: WatchVoiceStreaming {
         let text: String?
         let tokens: [Token]?
         let finished: Bool?
-        let errorCode: String?
+        let rawErrorCode: SonioxErrorCode?
         let errorMessage: String?
 
         enum CodingKeys: String, CodingKey {
             case text
             case tokens
             case finished
-            case errorCode = "error_code"
+            case rawErrorCode = "error_code"
             case errorMessage = "error_message"
+        }
+
+        var errorCode: String? {
+            rawErrorCode?.asString
         }
 
         var hasError: Bool {
@@ -89,7 +98,44 @@ final class SonioxStreamingClient: WatchVoiceStreaming {
         }
     }
 
-    private let session = URLSession(configuration: .default)
+    private enum SonioxErrorCode: Decodable {
+        case string(String)
+        case int(Int)
+        case double(Double)
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.singleValueContainer()
+            if let value = try? container.decode(String.self) {
+                self = .string(value)
+                return
+            }
+            if let value = try? container.decode(Int.self) {
+                self = .int(value)
+                return
+            }
+            if let value = try? container.decode(Double.self) {
+                self = .double(value)
+                return
+            }
+            throw DecodingError.typeMismatch(
+                SonioxErrorCode.self,
+                .init(codingPath: decoder.codingPath, debugDescription: "Unsupported Soniox error_code type.")
+            )
+        }
+
+        var asString: String {
+            switch self {
+            case .string(let value):
+                return value
+            case .int(let value):
+                return String(value)
+            case .double(let value):
+                return String(value)
+            }
+        }
+    }
+
+    private let session: URLSession
     private let audioEngine = AVAudioEngine()
 
     private var websocketTask: URLSessionWebSocketTask?
@@ -102,22 +148,51 @@ final class SonioxStreamingClient: WatchVoiceStreaming {
 
     private var isRunning = false
 
+    init(session: URLSession = URLSession(configuration: SonioxStreamingClient.watchSessionConfiguration())) {
+        self.session = session
+    }
+
+    static func watchSessionConfiguration() -> URLSessionConfiguration {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.waitsForConnectivity = true
+        configuration.allowsCellularAccess = true
+        configuration.allowsExpensiveNetworkAccess = true
+        configuration.allowsConstrainedNetworkAccess = true
+        configuration.timeoutIntervalForRequest = 30
+        configuration.timeoutIntervalForResource = 75
+        return configuration
+    }
+
+    static func webSocketRequest() -> URLRequest {
+        var request = URLRequest(url: endpointURL)
+        request.timeoutInterval = 30
+        request.setValue(originHeaderValue, forHTTPHeaderField: "Origin")
+        return request
+    }
+
+    static func decodeServerError(from text: String) -> ClientError? {
+        guard let data = text.data(using: .utf8),
+              let payload = try? JSONDecoder().decode(SonioxResponse.self, from: data),
+              payload.hasError else {
+            return nil
+        }
+        return .serverError(code: payload.errorCode, message: payload.errorMessage)
+    }
+
     func start(apiKey: String, clientReferenceID: String = UUID().uuidString) async throws {
         guard !isRunning else { return }
         isRunning = true
         latestTranscript = ""
 
         do {
-            let url = URL(string: "wss://stt-rt.soniox.com/transcribe-websocket")!
-            var request = URLRequest(url: url)
-            request.timeoutInterval = 20
+            let request = Self.webSocketRequest()
             let task = session.webSocketTask(with: request)
             websocketTask = task
             task.resume()
 
             let config: [String: Any] = [
                 "api_key": apiKey,
-                "model": "stt-rt-preview",
+                "model": Self.model,
                 "audio_format": "s16le",
                 "sample_rate": 16000,
                 "num_channels": 1,
@@ -235,8 +310,8 @@ final class SonioxStreamingClient: WatchVoiceStreaming {
             return
         }
 
-        if payload.hasError {
-            onError?(ClientError.serverError(code: payload.errorCode, message: payload.errorMessage))
+        if let error = Self.decodeServerError(from: text) {
+            onError?(error)
             stop()
             return
         }

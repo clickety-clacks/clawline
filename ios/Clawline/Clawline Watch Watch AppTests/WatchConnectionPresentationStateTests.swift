@@ -308,25 +308,143 @@ struct WatchConnectionPresentationStateTests {
         try await Task.sleep(for: .milliseconds(50))
 
         #expect(voiceSession.voiceState == .error)
-        #expect(voiceSession.errorMessage == "Couldn't connect to Soniox. Check Watch Wi-Fi or cellular and try again.")
+        #expect(voiceSession.errorMessage == "Soniox connection failed during startup. Try again from a stronger Watch network.")
         #expect(voiceSession.errorMessage?.contains("socket exploded") == false)
         #expect(client.startCallCount == 1)
         #expect(client.stopCallCount > 0)
     }
 
-    @Test("Soniox error response frames are routed to voice error handling")
-    func sonioxErrorFramesAreNotAcceptedAsEmptyTranscripts() throws {
-        let sourcePath = URL(filePath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .appending(path: "Clawline Watch Watch App/Services/SonioxStreamingClient.swift")
-        let source = try String(contentsOf: sourcePath, encoding: .utf8)
+    @Test("Watch network absence gets a distinct Soniox error")
+    @MainActor
+    func watchNetworkUnavailableShowsDistinctVoiceError() async throws {
+        let credentials = WatchCredentialStore(keychain: WatchKeychainStore(service: "WatchTests.sonioxNetworkUnavailable", accessGroup: nil))
+        credentials.clear()
+        credentials.apply(userInfo: ["sonioxApiKey": "watch-soniox-key"])
+        let client = FailingWatchVoiceStreamingClient(
+            error: NSError(
+                domain: NSURLErrorDomain,
+                code: URLError.notConnectedToInternet.rawValue,
+                userInfo: [NSLocalizedDescriptionKey: "no route to internet"]
+            )
+        )
+        let voiceSession = WatchVoiceSession(
+            credentialStore: credentials,
+            sonioxClient: client,
+            audioSessionConfigurator: {}
+        )
 
-        #expect(source.contains("case errorCode = \"error_code\""))
-        #expect(source.contains("case errorMessage = \"error_message\""))
-        #expect(source.contains("if payload.hasError"))
-        #expect(source.contains("onError?(ClientError.serverError(code: payload.errorCode, message: payload.errorMessage))"))
-        #expect(source.contains("stop()\n            return"))
+        voiceSession.startTap()
+        try await Task.sleep(for: .milliseconds(50))
+
+        #expect(voiceSession.voiceState == .error)
+        #expect(voiceSession.errorMessage == "Watch network is unavailable for Soniox. Connect Watch to Wi-Fi or cellular and try again.")
+        #expect(voiceSession.errorMessage?.contains("no route") == false)
+    }
+
+    @Test("Soniox timeout gets a distinct startup error")
+    @MainActor
+    func sonioxTimeoutShowsDistinctVoiceError() async throws {
+        let credentials = WatchCredentialStore(keychain: WatchKeychainStore(service: "WatchTests.sonioxTimeout", accessGroup: nil))
+        credentials.clear()
+        credentials.apply(userInfo: ["sonioxApiKey": "watch-soniox-key"])
+        let client = FailingWatchVoiceStreamingClient(
+            error: NSError(
+                domain: NSURLErrorDomain,
+                code: URLError.timedOut.rawValue,
+                userInfo: [NSLocalizedDescriptionKey: "request timed out"]
+            )
+        )
+        let voiceSession = WatchVoiceSession(
+            credentialStore: credentials,
+            sonioxClient: client,
+            audioSessionConfigurator: {}
+        )
+
+        voiceSession.startTap()
+        try await Task.sleep(for: .milliseconds(50))
+
+        #expect(voiceSession.voiceState == .error)
+        #expect(voiceSession.errorMessage == "Soniox connection timed out. Check the Watch network and try again.")
+    }
+
+    @Test("Soniox auth rejection points back to synced key")
+    @MainActor
+    func sonioxAuthRejectionShowsKeyError() async throws {
+        let credentials = WatchCredentialStore(keychain: WatchKeychainStore(service: "WatchTests.sonioxAuthRejected", accessGroup: nil))
+        credentials.clear()
+        credentials.apply(userInfo: ["sonioxApiKey": "watch-soniox-key"])
+        let client = FailingWatchVoiceStreamingClient(
+            error: SonioxStreamingClient.ClientError.serverError(
+                code: "unauthorized",
+                message: "Invalid API key"
+            )
+        )
+        let voiceSession = WatchVoiceSession(
+            credentialStore: credentials,
+            sonioxClient: client,
+            audioSessionConfigurator: {}
+        )
+
+        voiceSession.startTap()
+        try await Task.sleep(for: .milliseconds(50))
+
+        #expect(voiceSession.voiceState == .error)
+        #expect(voiceSession.errorMessage == "Soniox rejected the synced key. Open Clawline on iPhone and check voice settings.")
+        #expect(voiceSession.errorMessage?.contains("Invalid API key") == false)
+    }
+
+    @Test("Watch Soniox WebSocket uses production origin, current model, and Watch connectivity session config")
+    func watchSonioxWebSocketUsesProductionConnectionConfig() throws {
+        let request = SonioxStreamingClient.webSocketRequest()
+        let configuration = SonioxStreamingClient.watchSessionConfiguration()
+
+        #expect(request.url?.absoluteString == "wss://stt-rt.soniox.com/transcribe-websocket")
+        #expect(request.value(forHTTPHeaderField: "Origin") == "https://clawline.app")
+        #expect(request.timeoutInterval == 30)
+        #expect(SonioxStreamingClient.model == "stt-rt-v4")
+        #expect(configuration.waitsForConnectivity)
+        #expect(configuration.allowsCellularAccess)
+        #expect(configuration.allowsExpensiveNetworkAccess)
+        #expect(configuration.allowsConstrainedNetworkAccess)
+    }
+
+    @Test("false direct network monitor shows Clawline network error without system input")
+    @MainActor
+    func falseDirectNetworkShowsNetworkErrorWithoutStartingSoniox() async throws {
+        let credentials = WatchCredentialStore(keychain: WatchKeychainStore(service: "WatchTests.sonioxFalseDirectNetwork", accessGroup: nil))
+        credentials.clear()
+        credentials.apply(userInfo: ["sonioxApiKey": "watch-soniox-key"])
+        let client = SuccessfulWatchVoiceStreamingClient(finalTranscript: "")
+        let voiceSession = WatchVoiceSession(
+            credentialStore: credentials,
+            sonioxClient: client,
+            directInternetMonitor: FakeWatchDirectInternetMonitor(isAvailable: false),
+            audioSessionConfigurator: {}
+        )
+
+        voiceSession.startTap()
+        try await Task.sleep(for: .milliseconds(50))
+
+        #expect(voiceSession.canUseVoice)
+        #expect(voiceSession.voiceState == .error)
+        #expect(voiceSession.errorMessage == "Watch network is unavailable for Soniox. Connect Watch to Wi-Fi or cellular and try again.")
+        #expect(client.startCallCount == 0)
+    }
+
+    @Test("Soniox numeric error response frames decode for voice error handling")
+    func sonioxNumericErrorFrameDecodesForVoiceErrorHandling() throws {
+        let error = try #require(
+            SonioxStreamingClient.decodeServerError(
+                from: #"{"error_code":401,"error_message":"Invalid API key."}"#
+            )
+        )
+
+        guard case .serverError(let code, let message) = error else {
+            Issue.record("Expected Soniox server error")
+            return
+        }
+        #expect(code == "401")
+        #expect(message == "Invalid API key.")
     }
 
     @Test("voice send failure preserves presentation error instead of relabeling as relay")
@@ -357,6 +475,30 @@ struct WatchConnectionPresentationStateTests {
 
         #expect(voiceSession.voiceState == .error)
         #expect(voiceSession.errorMessage == "Message not delivered - connection lost.")
+    }
+
+    @Test("relay connectivity send failures use relay voice error category")
+    @MainActor
+    func relayConnectivitySendFailureShowsRelayVoiceError() async throws {
+        let credentials = WatchCredentialStore(keychain: WatchKeychainStore(service: "WatchTests.voiceRelayFailure", accessGroup: nil))
+        credentials.clear()
+        credentials.apply(userInfo: ["sonioxApiKey": "watch-soniox-key"])
+        let client = SuccessfulWatchVoiceStreamingClient(finalTranscript: "send this")
+        let voiceSession = WatchVoiceSession(
+            credentialStore: credentials,
+            sonioxClient: client,
+            audioSessionConfigurator: {}
+        )
+
+        voiceSession.startTap()
+        try await Task.sleep(for: .milliseconds(50))
+        voiceSession.stop()
+        try await Task.sleep(for: .milliseconds(50))
+
+        voiceSession.handleSendFailure(error: RelayProtocolError.notConnected)
+
+        #expect(voiceSession.voiceState == .error)
+        #expect(voiceSession.errorMessage == "Watch relay is reconnecting. Try again when iPhone is nearby.")
     }
 
     @Test("configured Soniox keeps mic tap on Clawline voice even when direct network monitor is false")
@@ -492,16 +634,28 @@ private final class SuccessfulWatchVoiceStreamingClient: WatchVoiceStreaming {
     var onError: ((Error) -> Void)?
 
     private let finalTranscript: String
+    private(set) var startCallCount = 0
 
     init(finalTranscript: String) {
         self.finalTranscript = finalTranscript
     }
 
-    func start(apiKey: String, clientReferenceID: String) async throws {}
+    func start(apiKey: String, clientReferenceID: String) async throws {
+        startCallCount += 1
+    }
 
     func finalize(timeoutNanoseconds: UInt64) async -> String {
         finalTranscript
     }
 
     func stop() {}
+}
+
+private final class FakeWatchDirectInternetMonitor: WatchDirectInternetMonitoring {
+    var isDirectInternetAvailable: Bool
+    var onChange: ((Bool) -> Void)?
+
+    init(isAvailable: Bool) {
+        self.isDirectInternetAvailable = isAvailable
+    }
 }

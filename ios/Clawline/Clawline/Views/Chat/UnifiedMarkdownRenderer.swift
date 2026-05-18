@@ -197,9 +197,13 @@ enum UnifiedMarkdownRenderer {
             options: .regularExpression
         ) != nil
         let shouldUseInlineListParsing = hasOrderedListSyntax || hasUnorderedListSyntax
-        let markdownForRender = hasOrderedListSyntax
-            ? normalizeOrderedListMarkers(in: parsedMarkdown)
-            : parsedMarkdown
+        var markdownForRender = parsedMarkdown
+        if hasOrderedListSyntax {
+            markdownForRender = normalizeOrderedListMarkers(in: markdownForRender)
+        }
+        if hasUnorderedListSyntax {
+            markdownForRender = normalizeHyphenUnorderedListMarkers(in: markdownForRender)
+        }
 
         // Prefer full parsing (block syntax like headings), but keep list separators intact.
         let attributed: AttributedString
@@ -605,6 +609,54 @@ enum UnifiedMarkdownRenderer {
         }
 
         return normalized.joined(separator: "\n")
+    }
+
+    private static func normalizeHyphenUnorderedListMarkers(in markdown: String) -> String {
+        let linePattern = #"^([ \t]{0,3})(-)([ \t]+)(.*)$"#
+        guard let regex = try? NSRegularExpression(pattern: linePattern) else { return markdown }
+
+        let lines = markdown.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        var normalized: [String] = []
+        normalized.reserveCapacity(lines.count)
+
+        var inFence = false
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~") {
+                inFence.toggle()
+                normalized.append(line)
+                continue
+            }
+
+            guard !inFence else {
+                normalized.append(line)
+                continue
+            }
+
+            let nsLine = line as NSString
+            let range = NSRange(location: 0, length: nsLine.length)
+            guard let match = regex.firstMatch(in: line, options: [], range: range),
+                  match.range.location != NSNotFound else {
+                normalized.append(line)
+                continue
+            }
+
+            let prefix = nsLine.substring(with: match.range(at: 1))
+            let spacing = nsLine.substring(with: match.range(at: 3))
+            let content = nsLine.substring(with: match.range(at: 4))
+            if isHyphenThematicBreakContent(content) {
+                normalized.append(line)
+                continue
+            }
+            normalized.append("\(prefix)•\(spacing)\(content)")
+        }
+
+        return normalized.joined(separator: "\n")
+    }
+
+    private static func isHyphenThematicBreakContent(_ content: String) -> Bool {
+        let compact = content.filter { $0 != " " && $0 != "\t" }
+        return compact.count >= 2 && compact.allSatisfy { $0 == "-" }
     }
 
     private static func orderedListContextKey(prefix: String, delimiter: String) -> String {

@@ -65,15 +65,19 @@ struct Clawline_SpatialApp: App {
 }
 
 private struct SpatialWindowCornerResizeMarkers: View {
+    private let edgeInset: CGFloat = 10
+
     var body: some View {
         HStack {
             SpatialWindowCornerResizeMarker(edge: .leading)
+                .offset(x: -edgeInset, y: edgeInset)
             Spacer(minLength: 0)
             SpatialWindowCornerResizeMarker(edge: .trailing)
+                .offset(x: edgeInset, y: edgeInset)
         }
         .frame(maxWidth: .infinity)
-        .padding(.horizontal, 10)
-        .padding(.bottom, 10)
+        .padding(.horizontal, edgeInset)
+        .padding(.bottom, edgeInset)
         .allowsHitTesting(false)
         .accessibilityHidden(true)
     }

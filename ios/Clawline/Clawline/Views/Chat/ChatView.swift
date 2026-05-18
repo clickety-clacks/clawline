@@ -5144,11 +5144,7 @@ private struct CrossChatMentionPickerView: View {
             }
             .padding(chromePadding)
             .frame(maxWidth: 390)
-#if os(visionOS)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-#else
-            .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-#endif
+            .modifier(CrossChatMentionPickerChrome())
             .transition(.opacity.combined(with: .scale(scale: 0.96)))
         }
     }
@@ -5180,6 +5176,22 @@ private struct CrossChatMentionPickerView: View {
                 color: isCurrent ? StreamDotColor.activeGlow(colorScheme: colorScheme) : .clear,
                 radius: isCurrent ? StreamDotColor.activeInnerGlowRadius(colorScheme: colorScheme) : 0
             )
+    }
+}
+
+private struct CrossChatMentionPickerChrome: ViewModifier {
+    private var shape: RoundedRectangle {
+        RoundedRectangle(cornerRadius: 18, style: .continuous)
+    }
+
+    func body(content: Content) -> some View {
+#if os(visionOS)
+        content
+            .glassBackgroundEffect(in: shape)
+#else
+        content
+            .glassEffect(.regular, in: shape)
+#endif
     }
 }
 

@@ -12,7 +12,7 @@ import SafariServices
 import UIKit
 import WebKit
 #if canImport(SwiftUI)
-import SwiftUI
+    import SwiftUI
 #endif
 
 private final class BubbleSafeAreaNeutralWebView: WKWebView {
@@ -128,7 +128,8 @@ final class LinkPreviewView: UIView, WKNavigationDelegate, WKUIDelegate, UIGestu
             layer.mask = maskLayer
         }
 
-        required init?(coder: NSCoder) {
+        @available(*, unavailable)
+        required init?(coder _: NSCoder) {
             fatalError("init(coder:) has not been implemented")
         }
 
@@ -183,7 +184,7 @@ final class LinkPreviewView: UIView, WKNavigationDelegate, WKUIDelegate, UIGestu
             let n = max(2, exponent)
             let power = 2.0 / n
             let step = (.pi / 2) / CGFloat(steps - 1)
-            return (0..<steps).map { idx in
+            return (0 ..< steps).map { idx in
                 let theta = CGFloat(idx) * step
                 let cosv = max(0, cos(theta))
                 let sinv = max(0, sin(theta))
@@ -197,7 +198,8 @@ final class LinkPreviewView: UIView, WKNavigationDelegate, WKUIDelegate, UIGestu
                                          center: CGPoint,
                                          radius: CGFloat,
                                          points: [CGPoint],
-                                         transform: (CGPoint) -> CGPoint) {
+                                         transform: (CGPoint) -> CGPoint)
+        {
             guard radius > 0 else { return }
             for point in points {
                 let p = transform(CGPoint(x: point.x * radius, y: point.y * radius))
@@ -293,7 +295,8 @@ final class LinkPreviewView: UIView, WKNavigationDelegate, WKUIDelegate, UIGestu
         }
     }
 
-    required init?(coder: NSCoder) {
+    @available(*, unavailable)
+    required init?(coder _: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
@@ -374,7 +377,8 @@ final class LinkPreviewView: UIView, WKNavigationDelegate, WKUIDelegate, UIGestu
     func configure(url: URL,
                    maxHeight: CGFloat? = nil,
                    ownerItemId: String? = nil,
-                   webBubbleCoordinator: (any WebBubbleCoordinating)? = nil) {
+                   webBubbleCoordinator: (any WebBubbleCoordinating)? = nil)
+    {
         configure(
             url: url,
             maxHeight: maxHeight,
@@ -392,7 +396,8 @@ final class LinkPreviewView: UIView, WKNavigationDelegate, WKUIDelegate, UIGestu
                    cacheKey: String? = nil,
                    initialHeight: CGFloat? = nil,
                    ownerItemId: String? = nil,
-                   webBubbleCoordinator: (any WebBubbleCoordinating)? = nil) {
+                   webBubbleCoordinator: (any WebBubbleCoordinating)? = nil)
+    {
         let desiredMinHeight = max(1, minHeight ?? Constants.defaultMinHeight)
         let desiredMaxHeight = max(desiredMinHeight, maxHeight ?? Constants.defaultMaxHeight)
         let desiredKey = cacheKey ?? url.absoluteString
@@ -400,7 +405,8 @@ final class LinkPreviewView: UIView, WKNavigationDelegate, WKUIDelegate, UIGestu
            configuredURLKey == desiredKey,
            state != .failed,
            abs(self.minHeight - desiredMinHeight) <= 1,
-           abs(self.maxHeight - desiredMaxHeight) <= 1 {
+           abs(self.maxHeight - desiredMaxHeight) <= 1
+        {
             return
         }
         if self.webBubbleCoordinator != nil {
@@ -420,7 +426,8 @@ final class LinkPreviewView: UIView, WKNavigationDelegate, WKUIDelegate, UIGestu
         // Flynn directive: keep link preview height stable once determined. Use cached height
         // on scroll-back; only re-measure after explicit reload.
         if let cachedKey = configuredURLKey,
-           let cached = Self.heightCache.object(forKey: cachedKey as NSString) {
+           let cached = Self.heightCache.object(forKey: cachedKey as NSString)
+        {
             isHeightLocked = true
             canLockHeight = false
             webViewHeightConstraint.constant = max(self.minHeight, min(self.maxHeight, CGFloat(truncating: cached)))
@@ -494,7 +501,7 @@ final class LinkPreviewView: UIView, WKNavigationDelegate, WKUIDelegate, UIGestu
             stackView.leadingAnchor.constraint(equalTo: leadingAnchor),
             stackView.trailingAnchor.constraint(equalTo: trailingAnchor),
             stackView.topAnchor.constraint(equalTo: topAnchor),
-            stackView.bottomAnchor.constraint(equalTo: bottomAnchor)
+            stackView.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
 
         webContainer.translatesAutoresizingMaskIntoConstraints = false
@@ -552,7 +559,7 @@ final class LinkPreviewView: UIView, WKNavigationDelegate, WKUIDelegate, UIGestu
             webViewHeightConstraint,
 
             spinner.centerXAnchor.constraint(equalTo: webContainer.centerXAnchor),
-            spinner.centerYAnchor.constraint(equalTo: webContainer.centerYAnchor)
+            spinner.centerYAnchor.constraint(equalTo: webContainer.centerYAnchor),
         ])
 
         statusLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -638,7 +645,7 @@ final class LinkPreviewView: UIView, WKNavigationDelegate, WKUIDelegate, UIGestu
             DispatchQueue.main.async {
                 guard self.currentURL == url else { return }
                 switch resolution {
-                case .allowed(let ipSet):
+                case let .allowed(ipSet):
                     self.logger.info("host resolved host=\(host, privacy: .public) ips=\(ipSet.joined(separator: ","), privacy: .public)")
                     self.loadURL(url)
                 case .blocked:
@@ -704,7 +711,9 @@ final class LinkPreviewView: UIView, WKNavigationDelegate, WKUIDelegate, UIGestu
 
     private func closeUnexpectedMediaPresentationsIfNeeded() {
         guard webView.fullscreenState != .notInFullscreen else { return }
-        logger.warning("closing unexpected media presentation url=\(self.currentURL?.absoluteString ?? "nil", privacy: .public) fullscreenState=\(self.webView.fullscreenState.rawValue, privacy: .public)")
+        let urlString = currentURL?.absoluteString ?? "nil"
+        let fullscreenState = webView.fullscreenState.rawValue
+        logger.warning("closing unexpected media presentation url=\(urlString, privacy: .public) fullscreenState=\(fullscreenState, privacy: .public)")
         webView.closeAllMediaPresentations(completionHandler: nil)
     }
 
@@ -786,7 +795,7 @@ final class LinkPreviewView: UIView, WKNavigationDelegate, WKUIDelegate, UIGestu
             guard let dict = result as? [String: Any],
                   let textLength = dict["textLength"] as? Int,
                   let childCount = dict["childCount"] as? Int else { return }
-            if textLength < 16 && childCount < 1 {
+            if textLength < 16, childCount < 1 {
                 // #39: Do not treat "empty body" as terminal failure. Many JS-heavy pages
                 // render late, use canvas/shadow DOM, or populate after initial load.
                 guard !self.didShowEmptyBodyWarning else { return }
@@ -843,7 +852,7 @@ final class LinkPreviewView: UIView, WKNavigationDelegate, WKUIDelegate, UIGestu
         reloadButton.isHidden = false
 
         // Always show the failure reason so users (and Flynn) can understand what happened.
-        var lines: [String] = ["Preview unavailable (\(reason.rawValue))"]
+        var lines = ["Preview unavailable (\(reason.rawValue))"]
         if let detail, !detail.isEmpty {
             lines.append(detail)
         }
@@ -868,7 +877,8 @@ final class LinkPreviewView: UIView, WKNavigationDelegate, WKUIDelegate, UIGestu
 
     @objc private func handleReloadTap() {
         guard currentURL != nil else { return }
-        logger.info("reload tapped url=\(self.currentURL?.absoluteString ?? "nil", privacy: .public)")
+        let urlString = currentURL?.absoluteString ?? "nil"
+        logger.info("reload tapped url=\(urlString, privacy: .public)")
         if let configuredURLKey {
             Self.heightCache.removeObject(forKey: configuredURLKey as NSString)
         }
@@ -886,12 +896,12 @@ final class LinkPreviewView: UIView, WKNavigationDelegate, WKUIDelegate, UIGestu
 
     @objc private func handleOverlayTap() {
         guard let url = currentURL else { return }
-#if os(visionOS)
-        UIApplication.shared.open(url)
-#else
-        let safari = SFSafariViewController(url: url)
-        parentViewController?.present(safari, animated: true)
-#endif
+        #if os(visionOS)
+            UIApplication.shared.open(url)
+        #else
+            let safari = SFSafariViewController(url: url)
+            clawlineParentViewController?.present(safari, animated: true)
+        #endif
     }
 
     override func accessibilityActivate() -> Bool {
@@ -901,8 +911,9 @@ final class LinkPreviewView: UIView, WKNavigationDelegate, WKUIDelegate, UIGestu
 
     // MARK: - WKNavigationDelegate
 
-    func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
-        logger.info("didStartProvisionalNavigation url=\(self.currentURL?.absoluteString ?? "nil", privacy: .public)")
+    func webView(_: WKWebView, didStartProvisionalNavigation _: WKNavigation!) {
+        let urlString = currentURL?.absoluteString ?? "nil"
+        logger.info("didStartProvisionalNavigation url=\(urlString, privacy: .public)")
         // #36: No silent failures. Clear any non-fatal warnings/errors once WebKit starts a new navigation.
         if state != .failed {
             statusLabel.isHidden = true
@@ -910,7 +921,7 @@ final class LinkPreviewView: UIView, WKNavigationDelegate, WKUIDelegate, UIGestu
         }
     }
 
-    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+    func webView(_: WKWebView, didCommit _: WKNavigation!) {
         markLoadedIfNeeded()
         if isDirectMediaPreview {
             syncDirectMediaPreviewHeightIfNeeded()
@@ -919,9 +930,10 @@ final class LinkPreviewView: UIView, WKNavigationDelegate, WKUIDelegate, UIGestu
         scheduleFallbackMeasurement()
     }
 
-    func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+    func webView(_: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         guard let url = navigationAction.request.url else {
-            logger.info("navigationAction cancelled: missing url token=\(self.loadToken.uuidString, privacy: .public)")
+            let token = loadToken.uuidString
+            logger.info("navigationAction cancelled: missing url token=\(token, privacy: .public)")
             decisionHandler(.cancel)
             return
         }
@@ -931,7 +943,15 @@ final class LinkPreviewView: UIView, WKNavigationDelegate, WKUIDelegate, UIGestu
             return
         }
         guard isAllowedScheme(url) else {
-            logger.info("navigationAction cancelled: blocked scheme scheme=\(url.scheme ?? "nil", privacy: .public) url=\(url.absoluteString, privacy: .public) token=\(self.loadToken.uuidString, privacy: .public)")
+            let token = loadToken.uuidString
+            logger.info("navigationAction cancelled: blocked scheme scheme=\(url.scheme ?? "nil", privacy: .public) url=\(url.absoluteString, privacy: .public) token=\(token, privacy: .public)")
+            decisionHandler(.cancel)
+            return
+        }
+        if ExternalWebContentPolicy.shouldOpenInBrowserSurface(url) {
+            let token = loadToken.uuidString
+            logger.info("navigationAction handed off to browser surface url=\(url.absoluteString, privacy: .public) token=\(token, privacy: .public)")
+            ExternalWebContentPolicy.openBrowserSurface(for: url, from: self)
             decisionHandler(.cancel)
             return
         }
@@ -977,14 +997,16 @@ final class LinkPreviewView: UIView, WKNavigationDelegate, WKUIDelegate, UIGestu
         decisionHandler(.allow)
     }
 
-    func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse, decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
+    func webView(_: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse, decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
         guard let url = navigationResponse.response.url else {
-            logger.info("navigationResponse cancelled: missing url token=\(self.loadToken.uuidString, privacy: .public)")
+            let token = loadToken.uuidString
+            logger.info("navigationResponse cancelled: missing url token=\(token, privacy: .public)")
             decisionHandler(.cancel)
             return
         }
         guard isAllowedScheme(url) else {
-            logger.info("navigationResponse cancelled: blocked scheme scheme=\(url.scheme ?? "nil", privacy: .public) url=\(url.absoluteString, privacy: .public) token=\(self.loadToken.uuidString, privacy: .public)")
+            let token = loadToken.uuidString
+            logger.info("navigationResponse cancelled: blocked scheme scheme=\(url.scheme ?? "nil", privacy: .public) url=\(url.absoluteString, privacy: .public) token=\(token, privacy: .public)")
             decisionHandler(.cancel)
             return
         }
@@ -1002,7 +1024,7 @@ final class LinkPreviewView: UIView, WKNavigationDelegate, WKUIDelegate, UIGestu
         decisionHandler(.allow)
     }
 
-    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+    func webView(_: WKWebView, didFinish _: WKNavigation!) {
         guard state == .loading else { return }
         markLoadedIfNeeded()
         if isDirectMediaPreview {
@@ -1016,7 +1038,7 @@ final class LinkPreviewView: UIView, WKNavigationDelegate, WKUIDelegate, UIGestu
         scheduleFallbackMeasurement()
     }
 
-    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+    func webView(_: WKWebView, didFail _: WKNavigation!, withError error: Error) {
         if shouldSuppressDirectMediaNavigationFailure(error) {
             logger.info("didFail navigation suppressed direct-media handoff error=\(error.localizedDescription, privacy: .public)")
             markLoadedIfNeeded()
@@ -1039,7 +1061,7 @@ final class LinkPreviewView: UIView, WKNavigationDelegate, WKUIDelegate, UIGestu
         handleFailure(.navigationError, detail: "\(nsError.domain)(\(nsError.code)) \(nsError.localizedDescription)")
     }
 
-    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+    func webView(_: WKWebView, didFailProvisionalNavigation _: WKNavigation!, withError error: Error) {
         if shouldSuppressDirectMediaNavigationFailure(error) {
             logger.info("didFailProvisionalNavigation suppressed direct-media handoff error=\(error.localizedDescription, privacy: .public)")
             markLoadedIfNeeded()
@@ -1063,18 +1085,20 @@ final class LinkPreviewView: UIView, WKNavigationDelegate, WKUIDelegate, UIGestu
 
     // MARK: - WKUIDelegate
 
-    func webView(_ webView: WKWebView,
-                 requestMediaCapturePermissionFor origin: WKSecurityOrigin,
-                 initiatedByFrame frame: WKFrameInfo,
-                 type: WKMediaCaptureType,
-                 decisionHandler: @escaping (WKPermissionDecision) -> Void) {
+    func webView(_: WKWebView,
+                 requestMediaCapturePermissionFor _: WKSecurityOrigin,
+                 initiatedByFrame _: WKFrameInfo,
+                 type _: WKMediaCaptureType,
+                 decisionHandler: @escaping (WKPermissionDecision) -> Void)
+    {
         decisionHandler(.deny)
     }
 
     func webView(_ webView: WKWebView,
                  createWebViewWith configuration: WKWebViewConfiguration,
                  for navigationAction: WKNavigationAction,
-                 windowFeatures: WKWindowFeatures) -> WKWebView? {
+                 windowFeatures: WKWindowFeatures) -> WKWebView?
+    {
         guard let webBubbleCoordinator else { return nil }
         if let ownerItemId {
             webBubbleCoordinator.register(webView: webView, ownerItemId: ownerItemId)
@@ -1093,7 +1117,7 @@ final class LinkPreviewView: UIView, WKNavigationDelegate, WKUIDelegate, UIGestu
 
     // MARK: - UIGestureRecognizerDelegate
 
-    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+    func gestureRecognizer(_: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
         otherGestureRecognizer == webView.scrollView.panGestureRecognizer
     }
 
@@ -1285,7 +1309,7 @@ final class LinkPreviewView: UIView, WKNavigationDelegate, WKUIDelegate, UIGestu
         isDirectMediaPreview && Self.isPluginHandledLoadNavigationError(error)
     }
 
-    private func isBlockedIPAddressHost(_ host: String?) -> Bool {
+    private func isBlockedIPAddressHost(_: String?) -> Bool {
         // Policy: show everything (match browser behavior). Do not block local/LAN/Tailscale hosts.
         return false
     }
@@ -1332,19 +1356,19 @@ final class LinkPreviewView: UIView, WKNavigationDelegate, WKUIDelegate, UIGestu
         return frameInWindow.intersects(window.bounds)
     }
 
-    private func isPrivateIPAddress(_ host: String) -> Bool {
+    private func isPrivateIPAddress(_: String) -> Bool {
         // Policy: show everything (match browser behavior). Do not treat private IPs / localhost as blocked.
         return false
     }
 
     private func isPrivateIPv4(_ ip: UInt32) -> Bool {
-        if (ip & 0xFF000000) == 0x0A000000 { return true }          // 10.0.0.0/8
-        if (ip & 0xFFF00000) == 0xAC100000 { return true }          // 172.16.0.0/12
-        if (ip & 0xFFFF0000) == 0xC0A80000 { return true }          // 192.168.0.0/16
-        if (ip & 0xFF000000) == 0x7F000000 { return true }          // 127.0.0.0/8
-        if (ip & 0xFFFF0000) == 0xA9FE0000 { return true }          // 169.254.0.0/16
-        if (ip & 0xFF000000) == 0x00000000 { return true }          // 0.0.0.0/8
-        if (ip & 0xFFC00000) == 0x64400000 { return true }          // 100.64.0.0/10
+        if (ip & 0xFF00_0000) == 0x0A00_0000 { return true } // 10.0.0.0/8
+        if (ip & 0xFFF0_0000) == 0xAC10_0000 { return true } // 172.16.0.0/12
+        if (ip & 0xFFFF_0000) == 0xC0A8_0000 { return true } // 192.168.0.0/16
+        if (ip & 0xFF00_0000) == 0x7F00_0000 { return true } // 127.0.0.0/8
+        if (ip & 0xFFFF_0000) == 0xA9FE_0000 { return true } // 169.254.0.0/16
+        if (ip & 0xFF00_0000) == 0x0000_0000 { return true } // 0.0.0.0/8
+        if (ip & 0xFFC0_0000) == 0x6440_0000 { return true } // 100.64.0.0/10
         return false
     }
 
@@ -1353,8 +1377,9 @@ final class LinkPreviewView: UIView, WKNavigationDelegate, WKUIDelegate, UIGestu
         if nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled {
             return true
         }
-        if (nsError.domain == WKErrorDomain || nsError.domain == "WebKitErrorDomain"),
-           nsError.code == 102 {
+        if nsError.domain == WKErrorDomain || nsError.domain == "WebKitErrorDomain",
+           nsError.code == 102
+        {
             return true
         }
         return false
@@ -1364,14 +1389,14 @@ final class LinkPreviewView: UIView, WKNavigationDelegate, WKUIDelegate, UIGestu
 // MARK: - WKScriptMessageHandler
 
 extension LinkPreviewView: WKScriptMessageHandler {
-    func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+    func userContentController(_: WKUserContentController, didReceive message: WKScriptMessage) {
         guard let handlerName else { return }
         guard message.name == handlerName else { return }
         guard let body = message.body as? [String: Any],
               let token = body["token"] as? String,
               token == loadToken.uuidString else { return }
         guard let heightValue = body["height"] as? Double, heightValue.isFinite else { return }
-        guard heightValue >= 1 && heightValue <= 10000 else { return }
+        guard heightValue >= 1, heightValue <= 10000 else { return }
 
         heightUpdates += 1
         applyMeasuredHeight(heightValue)
@@ -1381,38 +1406,27 @@ extension LinkPreviewView: WKScriptMessageHandler {
     }
 }
 
-private extension UIView {
-    var parentViewController: UIViewController? {
-        var responder: UIResponder? = self
-        while let current = responder {
-            if let viewController = current as? UIViewController {
-                return viewController
-            }
-            responder = current.next
-        }
-        return nil
-    }
-}
-
 private extension LinkPreviewView {
     func logCancel(_ reason: CancelReason) {
-        let urlString = self.currentURL?.absoluteString ?? "nil"
+        let urlString = currentURL?.absoluteString ?? "nil"
         let elapsed = loadElapsedMsString()
-        self.logger.info("cancel reason=\(reason.rawValue, privacy: .public) url=\(urlString, privacy: .public) elapsedMs=\(elapsed, privacy: .public) token=\(self.loadToken.uuidString, privacy: .public)")
+        let token = loadToken.uuidString
+        logger.info("cancel reason=\(reason.rawValue, privacy: .public) url=\(urlString, privacy: .public) elapsedMs=\(elapsed, privacy: .public) token=\(token, privacy: .public)")
     }
 
     func logFailure(_ reason: FailureReason, detail: String?) {
-        let urlString = self.currentURL?.absoluteString ?? "nil"
+        let urlString = currentURL?.absoluteString ?? "nil"
         let elapsed = loadElapsedMsString()
+        let token = loadToken.uuidString
         if let detail, !detail.isEmpty {
-            self.logger.error("failure reason=\(reason.rawValue, privacy: .public) url=\(urlString, privacy: .public) elapsedMs=\(elapsed, privacy: .public) token=\(self.loadToken.uuidString, privacy: .public) detail=\(detail, privacy: .public)")
+            logger.error("failure reason=\(reason.rawValue, privacy: .public) url=\(urlString, privacy: .public) elapsedMs=\(elapsed, privacy: .public) token=\(token, privacy: .public) detail=\(detail, privacy: .public)")
         } else {
-            self.logger.error("failure reason=\(reason.rawValue, privacy: .public) url=\(urlString, privacy: .public) elapsedMs=\(elapsed, privacy: .public) token=\(self.loadToken.uuidString, privacy: .public)")
+            logger.error("failure reason=\(reason.rawValue, privacy: .public) url=\(urlString, privacy: .public) elapsedMs=\(elapsed, privacy: .public) token=\(token, privacy: .public)")
         }
     }
 
     func loadElapsedMsString() -> String {
-        guard let loadStartedAt = self.loadStartedAt else { return "nil" }
+        guard let loadStartedAt = loadStartedAt else { return "nil" }
         let elapsedMs = Int(((CACurrentMediaTime() - loadStartedAt) * 1000.0).rounded())
         return String(elapsedMs)
     }
@@ -1440,17 +1454,17 @@ private extension UIColor {
 // Superellipse helpers are implemented in MaskedWebContainerView.
 
 #if canImport(SwiftUI)
-struct LinkPreviewRepresentable: UIViewRepresentable {
-    let url: URL
+    struct LinkPreviewRepresentable: UIViewRepresentable {
+        let url: URL
 
-    func makeUIView(context: Context) -> LinkPreviewView {
-        let view = LinkPreviewView()
-        view.configure(url: url)
-        return view
-    }
+        func makeUIView(context _: Context) -> LinkPreviewView {
+            let view = LinkPreviewView()
+            view.configure(url: url)
+            return view
+        }
 
-    func updateUIView(_ uiView: LinkPreviewView, context: Context) {
-        uiView.configure(url: url)
+        func updateUIView(_ uiView: LinkPreviewView, context _: Context) {
+            uiView.configure(url: url)
+        }
     }
-}
 #endif

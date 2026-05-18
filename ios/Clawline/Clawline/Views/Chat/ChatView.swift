@@ -4926,9 +4926,6 @@ private struct AttachmentSourceSheet: View {
     let onFiles: () -> Void
 
     @Environment(\.colorScheme) private var colorScheme
-#if os(visionOS)
-    @Environment(\.dismiss) private var dismiss
-#endif
 
     private let rowHeight: CGFloat = 52
     private let rowSpacing: CGFloat = 2
@@ -4941,7 +4938,7 @@ private struct AttachmentSourceSheet: View {
 
     private var rowCount: Int {
 #if os(visionOS)
-        3
+        2
 #else
         3
 #endif
@@ -4956,18 +4953,6 @@ private struct AttachmentSourceSheet: View {
     private var effectiveColorScheme: ColorScheme { colorScheme }
     var body: some View {
         VStack(spacing: rowSpacing) {
-#if os(visionOS)
-            HStack {
-                Spacer()
-                Button("Close") {
-                    dismiss()
-                }
-                .font(.clawline(.uiLabel).weight(.semibold))
-                .foregroundStyle(.secondary)
-            }
-            .frame(height: rowHeight, alignment: .center)
-            .padding(.horizontal, rowHorizontalInset)
-#endif
 #if !os(visionOS)
             AttachmentActionButton(
                 title: "Camera",

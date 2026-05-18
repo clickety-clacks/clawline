@@ -4257,6 +4257,10 @@ enum KeyboardPinnedChromeEventRouting {
     static func scrollButtonHostReceivesEvents(hasView: Bool, isVisible: Bool) -> Bool {
         hasView && isVisible
     }
+
+    static func scrollButtonHostIsHidden(hasView: Bool, isVisible: Bool) -> Bool {
+        !hasView || !isVisible
+    }
 }
 
 private final class KeyboardPinnedContainerView<Content: View>: UIView, KeyboardPinnedContainerViewProtocol {
@@ -4392,7 +4396,15 @@ private final class KeyboardPinnedContainerView<Content: View>: UIView, Keyboard
             hasView: view != nil,
             isVisible: isVisible
         )
-        scrollButtonHost?.view.isHidden = (view == nil)
+        if !scrollButtonReceivesEvents, scrollButtonIsPanning {
+            scrollButtonIsPanning = false
+            scrollButtonLiveTranslation = 0
+            scrollButtonHost?.view.transform = .identity
+        }
+        scrollButtonHost?.view.isHidden = KeyboardPinnedChromeEventRouting.scrollButtonHostIsHidden(
+            hasView: view != nil,
+            isVisible: isVisible
+        )
         scrollButtonHost?.view.isUserInteractionEnabled = scrollButtonReceivesEvents
         scrollButtonPanGestureRecognizer?.isEnabled = scrollButtonReceivesEvents
         scrollButtonBottomToBarTop?.constant = -gap

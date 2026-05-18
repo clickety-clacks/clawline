@@ -56,6 +56,9 @@ struct ClawlineApp: App {
                 .environment(\.deviceIdentifier, deviceIdentifier)
                 .environment(\.chatService, chatService)
                 .environment(\.settingsManager, settingsManager)
+                .overlay(alignment: .bottom) {
+                    ClawlineWindowCornerIndicators()
+                }
                 .sheet(isPresented: $settingsManager.isSettingsPresented) {
                     SettingsView(settings: settingsManager)
                 }

@@ -1759,6 +1759,7 @@ struct ChatView: View {
                 resetToken: viewModel.inputResetToken,
                 canSend: viewModel.canSend,
                 isSending: viewModel.isSending,
+                canCancelSend: viewModel.canCancelSend,
                 isStagingAttachments: viewModel.pendingAttachmentStageCount > 0,
                 connectionStateStore: inputBarSendButtonConnectionState,
                 focusTrigger: focusRequestID,
@@ -5414,6 +5415,7 @@ private struct CrossChatNotificationOverlay: View {
                         maxBubbleWidth: stackWidth,
                         bubbleCornerRadius: Self.bubbleCornerRadius,
                         isSending: isReplySendActive,
+                        canCancelSend: viewModel.canCancelSend,
                         canSendReply: canSendReply,
                         connectionState: viewModel.sendButtonConnectionState,
                         replyDraft: Binding(
@@ -6075,6 +6077,7 @@ struct CrossChatNotificationBubbleView: View {
     let maxBubbleWidth: CGFloat
     let bubbleCornerRadius: CGFloat
     let isSending: Bool
+    let canCancelSend: Bool
     let canSendReply: Bool
     let connectionState: SendButtonConnectionState
     @Binding var replyDraft: String
@@ -6338,6 +6341,7 @@ struct CrossChatNotificationBubbleView: View {
                         .layoutPriority(1)
                     MessageSendControl(
                         isSending: isSending,
+                        canCancelSend: canCancelSend,
                         canSend: canSendReply,
                         isStagingAttachments: false,
                         connectionState: connectionState,

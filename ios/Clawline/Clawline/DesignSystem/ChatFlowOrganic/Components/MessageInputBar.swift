@@ -59,6 +59,7 @@ struct MessageInputBar: View {
     var resetToken: Int
     let canSend: Bool
     let isSending: Bool
+    let canCancelSend: Bool
     let isStagingAttachments: Bool
     let connectionStateStore: SendButtonConnectionStateStore
     let focusTrigger: Int
@@ -373,6 +374,7 @@ struct MessageInputBar: View {
 
             MessageSendControl(
                 isSending: isSending,
+                canCancelSend: canCancelSend,
                 canSend: canSend,
                 isStagingAttachments: isStagingAttachments,
                 connectionState: connectionState,
@@ -550,6 +552,7 @@ struct MessageSendControl: View {
     }
 
     let isSending: Bool
+    let canCancelSend: Bool
     let canSend: Bool
     let isStagingAttachments: Bool
     let connectionState: SendButtonConnectionState
@@ -566,7 +569,7 @@ struct MessageSendControl: View {
     private var isStagingSendGate: Bool {
         connectionState == .connected && isStagingAttachments && !isSending && !canSend
     }
-    private var sendActionEnabled: Bool { isSending || canSend || isDisconnected }
+    private var sendActionEnabled: Bool { (isSending && canCancelSend) || canSend || isDisconnected }
     private var sendIconColor: Color { .white }
     private let reconnectPulseDuration: TimeInterval = 0.8
     private var drawsDisabledSendButtonBacking: Bool {
@@ -628,7 +631,9 @@ struct MessageSendControl: View {
     var body: some View {
         Button(action: {
             if isSending {
-                onCancel()
+                if canCancelSend {
+                    onCancel()
+                }
                 return
             }
             switch connectionState {
@@ -686,7 +691,9 @@ struct MessageSendControl: View {
         .accessibilityLabel(
             isReconnecting ? "Reconnecting" :
                 (isStagingSendGate ? "Staging attachments" :
-                    (isDisconnected ? "Disconnected. Tap to reconnect." : "Send message"))
+                    (isDisconnected ? "Disconnected. Tap to reconnect." :
+                        (isSending && canCancelSend ? "Cancel send" :
+                            (isSending ? "Sending message" : "Send message"))))
         )
         .accessibilityIdentifier("send_button")
         .id("send-button")
@@ -711,6 +718,7 @@ struct MessageSendControl: View {
                 resetToken: 0,
                 canSend: true,
                 isSending: false,
+                canCancelSend: false,
                 isStagingAttachments: false,
                 connectionStateStore: connectionStateStore,
                 focusTrigger: 0,

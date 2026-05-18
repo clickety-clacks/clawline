@@ -1070,6 +1070,97 @@ struct ChatViewModelTests {
         Issue.record("Expected pending send indicator before server ack")
     }
 
+    @Test("Canceled prompt remains visible as terminal ghost and does not send")
+    @MainActor
+    func canceledPromptRemainsVisibleAsTerminalGhostAndDoesNotSend() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let uploadService = TestUploadService()
+        uploadService.uploadDelay = .milliseconds(300)
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: uploadService,
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        let attachment = makePendingAttachment(dataSize: 512_000, mimeType: "application/pdf")
+        viewModel.attachmentData[attachment.id] = attachment
+        viewModel.inputContent = makeAttributedContent(with: [attachment.id])
+
+        await viewModel.onAppear()
+        try await setReadyToSend(chatService: chatService, viewModel: viewModel)
+        viewModel.send()
+
+        for _ in 0..<50 {
+            if viewModel.isSending, viewModel.messages.count == 1 { break }
+            try await Task.sleep(forDuration: .milliseconds(20))
+        }
+
+        let canceledId = try #require(viewModel.messages.first?.id)
+        #expect(viewModel.sendIndicatorState(for: canceledId) == .pending)
+        #expect(viewModel.canCancelSend == true)
+        let task = viewModel.sendTask
+        viewModel.cancelSend()
+        await task?.value
+
+        #expect(chatService.sentIds.isEmpty)
+        #expect(chatService.lastSentId == nil)
+        #expect(viewModel.messages.count == 1)
+        #expect(viewModel.messages.first?.id == canceledId)
+        #expect(viewModel.messages.first?.deliveryState == .canceled)
+        #expect(viewModel.sendIndicatorState(for: canceledId) == nil)
+        #expect(viewModel.failureMessage(for: canceledId) == nil)
+    }
+
+    @Test("Cancel after transport send starts does not mark prompt canceled")
+    @MainActor
+    func cancelAfterTransportSendStartsDoesNotMarkPromptCanceled() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        chatService.sendDelay = .milliseconds(300)
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        try await setReadyToSend(chatService: chatService, viewModel: viewModel)
+        viewModel.inputContent = NSAttributedString(string: "Already sent")
+        viewModel.send()
+
+        let messageId = try await requireLastSentId(chatService)
+        #expect(viewModel.canCancelSend == false)
+        viewModel.cancelSend()
+
+        #expect(viewModel.messages.first?.id == messageId)
+        #expect(viewModel.messages.first?.deliveryState == .normal)
+        #expect(viewModel.sendIndicatorState(for: messageId) == .pending)
+
+        chatService.emitServiceEvent(.messageAcked(id: messageId))
+        for _ in 0..<50 {
+            if viewModel.sendIndicatorState(for: messageId) == nil { break }
+            try await Task.sleep(forDuration: .milliseconds(20))
+        }
+
+        #expect(viewModel.messages.first?.deliveryState == .normal)
+        #expect(viewModel.sendIndicatorState(for: messageId) == nil)
+    }
+
     @Test("Server ack clears pending indicator and shields accepted send from later errors")
     @MainActor
     func serverAckClearsPendingIndicatorAndShieldsAcceptedSend() async throws {
@@ -5510,8 +5601,12 @@ private final class TestUploadService: UploadServicing {
     private(set) var uploadedPayloads: [(data: Data, mimeType: String, filename: String?)] = []
     var downloadPayloads: [String: Data] = [:]
     private(set) var downloadedAssetIds: [String] = []
+    var uploadDelay: Duration?
 
     func upload(data: Data, mimeType: String, filename: String?) async throws -> String {
+        if let uploadDelay {
+            try await Task.sleep(for: uploadDelay)
+        }
         uploadedPayloads.append((data, mimeType, filename))
         return "asset_\(uploadedPayloads.count - 1)"
     }

@@ -474,6 +474,7 @@ final class ChatViewModel: ChatViewModelHosting {
     private(set) var sendButtonConnectionState: SendButtonConnectionState = .disconnected
     private(set) var inputResetToken: Int = 0
     private(set) var sendTask: Task<Void, Never>?
+    var canCancelSend: Bool { isSending && !activeSendHasReachedTransport }
     /// Tracks if typing indicator was visible when a message arrives (for morph transition).
     private(set) var shouldMorphTypingIndicator: Bool = false
     private var typingIndicatorMorphTargetMessageIdBySessionKey: [String: String] = [:]
@@ -528,6 +529,7 @@ final class ChatViewModel: ChatViewModelHosting {
     private let stableConnectionInterval: Duration = .seconds(5)
     private var activeClientMessageId: String?
     private var activeCrossChatNotificationReplySourceChatId: String?
+    private var activeSendHasReachedTransport = false
     private var crossChatNotificationReplySourceByClientMessageId: [String: String] = [:]
     private var messageFailures: [String: MessageFailure] = [:]
     private var presentationCache: [PresentationCacheKey: PresentationCacheEntry] = [:]
@@ -1065,7 +1067,7 @@ final class ChatViewModel: ChatViewModelHosting {
         hasActivatedLifecycleOwnership = false
         clearSessionStatusRefreshes()
         stopObservingLifecycle(origin: "prepareForReplacement")
-        cancelSend()
+        cancelSendForTeardown()
         guard isConnectionOwner else { return }
         Task { await lifecycleCoordinator.disconnectRequested() }
         chatService.disconnect()
@@ -1579,6 +1581,7 @@ final class ChatViewModel: ChatViewModelHosting {
 #endif
 
         isSending = true  // Set immediately to prevent double-tap race condition
+        activeSendHasReachedTransport = false
         let placeholder = Message(
             id: clientId,
             role: .user,
@@ -1655,6 +1658,7 @@ final class ChatViewModel: ChatViewModelHosting {
         isSending = true
         activeClientMessageId = clientId
         activeCrossChatNotificationReplySourceChatId = nil
+        activeSendHasReachedTransport = false
 
         sendTask = Task { [weak self] in
             await self?.performRetrySend(
@@ -1667,15 +1671,33 @@ final class ChatViewModel: ChatViewModelHosting {
     }
 
     func cancelSend() {
+        cancelActiveSend(shouldGhostOnlyBeforeTransport: true)
+    }
+
+    private func cancelSendForTeardown() {
+        cancelActiveSend(shouldGhostOnlyBeforeTransport: false)
+    }
+
+    private func cancelActiveSend(shouldGhostOnlyBeforeTransport: Bool) {
         guard isSending else { return }
+        if shouldGhostOnlyBeforeTransport, activeSendHasReachedTransport {
+            return
+        }
+        let canceledClientMessageId = activeClientMessageId
+        let shouldGhost = !activeSendHasReachedTransport
         sendTask?.cancel()
         sendTask = nil
-        if let activeClientMessageId {
-            removePlaceholder(withId: activeClientMessageId)
-            crossChatNotificationReplySourceByClientMessageId.removeValue(forKey: activeClientMessageId)
+        if let canceledClientMessageId {
+            if shouldGhost {
+                markLocalMessageCanceled(id: canceledClientMessageId)
+            } else {
+                removePlaceholder(withId: canceledClientMessageId)
+            }
+            crossChatNotificationReplySourceByClientMessageId.removeValue(forKey: canceledClientMessageId)
         }
         activeClientMessageId = nil
         activeCrossChatNotificationReplySourceChatId = nil
+        activeSendHasReachedTransport = false
         isSending = false
     }
 
@@ -1713,7 +1735,7 @@ final class ChatViewModel: ChatViewModelHosting {
     }
 
     func logout() {
-        cancelSend()
+        cancelSendForTeardown()
         observationStartupTask?.cancel()
         observationStartupTask = nil
         activationTask?.cancel()
@@ -2386,6 +2408,7 @@ final class ChatViewModel: ChatViewModelHosting {
         if activeClientMessageId == pending.id {
             activeClientMessageId = nil
             activeCrossChatNotificationReplySourceChatId = nil
+            activeSendHasReachedTransport = false
         }
         if let replySourceChatId = crossChatNotificationReplySourceByClientMessageId.removeValue(forKey: pending.id) {
             dismissCrossChatNotification(sourceChatId: replySourceChatId)
@@ -2530,6 +2553,7 @@ final class ChatViewModel: ChatViewModelHosting {
         if let activeClientMessageId, pendingIds.contains(activeClientMessageId) {
             self.activeClientMessageId = nil
             self.activeCrossChatNotificationReplySourceChatId = nil
+            self.activeSendHasReachedTransport = false
             self.isSending = false
         }
     }
@@ -2552,6 +2576,7 @@ final class ChatViewModel: ChatViewModelHosting {
         if let activeClientMessageId, failedIds.contains(activeClientMessageId) {
             self.activeClientMessageId = nil
             self.activeCrossChatNotificationReplySourceChatId = nil
+            self.activeSendHasReachedTransport = false
             self.isSending = false
         }
     }
@@ -2568,6 +2593,7 @@ final class ChatViewModel: ChatViewModelHosting {
             let wireAttachments = try await buildWireAttachments(from: pendingAttachments, content: content)
             try Task.checkCancellation()
             didStartChatSend = true
+            activeSendHasReachedTransport = true
             try await chatService.send(
                 id: clientId,
                 content: content,
@@ -2585,17 +2611,23 @@ final class ChatViewModel: ChatViewModelHosting {
                 isSending = false
                 activeClientMessageId = nil
                 activeCrossChatNotificationReplySourceChatId = nil
+                activeSendHasReachedTransport = false
             }
         } catch is CancellationError {
             await MainActor.run {
 #if DEBUG
                 self.recordImageSendDebugEvent(.sendResult, detail: "failure localId=\(clientId) reason=cancelled")
 #endif
-                removePlaceholder(withId: clientId)
+                if activeSendHasReachedTransport {
+                    removePlaceholder(withId: clientId)
+                } else {
+                    markLocalMessageCanceled(id: clientId)
+                }
                 crossChatNotificationReplySourceByClientMessageId.removeValue(forKey: clientId)
                 isSending = false
                 activeClientMessageId = nil
                 activeCrossChatNotificationReplySourceChatId = nil
+                activeSendHasReachedTransport = false
             }
         } catch let attachmentError as AttachmentError {
             await MainActor.run {
@@ -2615,6 +2647,7 @@ final class ChatViewModel: ChatViewModelHosting {
                 isSending = false
                 activeClientMessageId = nil
                 activeCrossChatNotificationReplySourceChatId = nil
+                activeSendHasReachedTransport = false
             }
         } catch {
             await MainActor.run {
@@ -2635,6 +2668,7 @@ final class ChatViewModel: ChatViewModelHosting {
                 isSending = false
                 activeClientMessageId = nil
                 activeCrossChatNotificationReplySourceChatId = nil
+                activeSendHasReachedTransport = false
             }
         }
     }
@@ -2649,6 +2683,7 @@ final class ChatViewModel: ChatViewModelHosting {
             let wireAttachments = try await buildWireAttachments(from: attachments, content: content)
             try Task.checkCancellation()
             didStartChatSend = true
+            activeSendHasReachedTransport = true
             try await chatService.send(
                 id: clientId,
                 content: content,
@@ -2662,16 +2697,22 @@ final class ChatViewModel: ChatViewModelHosting {
                 isSending = false
                 activeClientMessageId = nil
                 activeCrossChatNotificationReplySourceChatId = nil
+                activeSendHasReachedTransport = false
             }
         } catch is CancellationError {
             await MainActor.run {
 #if DEBUG
                 self.recordImageSendDebugEvent(.sendResult, detail: "failure localId=\(clientId) reason=cancelled retry=1")
 #endif
-                removePlaceholder(withId: clientId)
+                if activeSendHasReachedTransport {
+                    removePlaceholder(withId: clientId)
+                } else {
+                    markLocalMessageCanceled(id: clientId)
+                }
                 isSending = false
                 activeClientMessageId = nil
                 activeCrossChatNotificationReplySourceChatId = nil
+                activeSendHasReachedTransport = false
             }
         } catch let attachmentError as AttachmentError {
             await MainActor.run {
@@ -2690,6 +2731,7 @@ final class ChatViewModel: ChatViewModelHosting {
                 isSending = false
                 activeClientMessageId = nil
                 activeCrossChatNotificationReplySourceChatId = nil
+                activeSendHasReachedTransport = false
             }
         } catch {
             await MainActor.run {
@@ -2709,6 +2751,7 @@ final class ChatViewModel: ChatViewModelHosting {
                 isSending = false
                 activeClientMessageId = nil
                 activeCrossChatNotificationReplySourceChatId = nil
+                activeSendHasReachedTransport = false
             }
         }
     }
@@ -3026,6 +3069,7 @@ final class ChatViewModel: ChatViewModelHosting {
             if activeClientMessageId == messageId {
                 activeClientMessageId = nil
                 activeCrossChatNotificationReplySourceChatId = nil
+                activeSendHasReachedTransport = false
             }
             isSending = false
         case .messageAcked(let messageId):
@@ -3041,6 +3085,7 @@ final class ChatViewModel: ChatViewModelHosting {
             if activeClientMessageId == messageId {
                 activeClientMessageId = nil
                 activeCrossChatNotificationReplySourceChatId = nil
+                activeSendHasReachedTransport = false
                 isSending = false
             }
         case .connectionInterrupted(let reason):
@@ -4085,6 +4130,23 @@ final class ChatViewModel: ChatViewModelHosting {
         ackedPendingLocalMessageIDs.remove(id)
     }
 
+    private func markLocalMessageCanceled(id: String) {
+        for sessionKey in Array(sessionMessages.keys) {
+            var list = sessionMessages[sessionKey] ?? []
+            guard let index = list.firstIndex(where: { $0.id == id }) else { continue }
+            list[index].deliveryState = .canceled
+            list[index].streaming = false
+            setMessages(list, for: sessionKey)
+            break
+        }
+        if let pendingIndex = pendingLocalMessages.firstIndex(where: { $0.id == id }) {
+            pendingLocalMessages.remove(at: pendingIndex)
+        }
+        ackedPendingLocalMessageIDs.remove(id)
+        messageFailures.removeValue(forKey: id)
+        bumpSendIndicatorRevision()
+    }
+
     private func isNoReply(code: String, message: String?) -> Bool {
         let normalizedCode = code.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if normalizedCode == "no_reply" || normalizedCode == "no-reply" || normalizedCode.hasPrefix("no_reply") {
@@ -4122,6 +4184,7 @@ final class ChatViewModel: ChatViewModelHosting {
         if let messageId, activeClientMessageId == messageId {
             activeClientMessageId = nil
             activeCrossChatNotificationReplySourceChatId = nil
+            activeSendHasReachedTransport = false
         }
         if let messageId,
            let replySourceChatId = crossChatNotificationReplySourceByClientMessageId.removeValue(forKey: messageId) {

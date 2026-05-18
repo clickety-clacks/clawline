@@ -435,6 +435,7 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
                 maxBubbleWidth: 360,
                 bubbleCornerRadius: 18,
                 isSending: false,
+                canCancelSend: false,
                 canSendReply: false,
                 connectionState: .connected,
                 replyDraft: .constant(""),

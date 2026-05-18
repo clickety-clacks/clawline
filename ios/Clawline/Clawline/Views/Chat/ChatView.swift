@@ -4258,6 +4258,10 @@ enum KeyboardPinnedChromeEventRouting {
     static func scrollButtonHostReceivesEvents(hasView: Bool, isVisible: Bool) -> Bool {
         hasView && isVisible
     }
+
+    static func scrollButtonHostIsHidden(hasView: Bool, isVisible: Bool) -> Bool {
+        !hasView || !isVisible
+    }
 }
 
 private final class KeyboardPinnedContainerView<Content: View>: UIView, KeyboardPinnedContainerViewProtocol {
@@ -4393,7 +4397,15 @@ private final class KeyboardPinnedContainerView<Content: View>: UIView, Keyboard
             hasView: view != nil,
             isVisible: isVisible
         )
-        scrollButtonHost?.view.isHidden = (view == nil)
+        if !scrollButtonReceivesEvents, scrollButtonIsPanning {
+            scrollButtonIsPanning = false
+            scrollButtonLiveTranslation = 0
+            scrollButtonHost?.view.transform = .identity
+        }
+        scrollButtonHost?.view.isHidden = KeyboardPinnedChromeEventRouting.scrollButtonHostIsHidden(
+            hasView: view != nil,
+            isVisible: isVisible
+        )
         scrollButtonHost?.view.isUserInteractionEnabled = scrollButtonReceivesEvents
         scrollButtonPanGestureRecognizer?.isEnabled = scrollButtonReceivesEvents
         scrollButtonBottomToBarTop?.constant = -gap
@@ -7103,6 +7115,38 @@ private struct CrossChatNotificationActionMenuKeyBridge: UIViewRepresentable {
     }
 }
 
+enum CrossChatNotificationGlobalShortcut {
+    enum Action: Equatable {
+        case scrollDown
+        case scrollUp
+
+        var notificationName: Notification.Name {
+            switch self {
+            case .scrollDown:
+                return .clawlineScrollNotificationDownCommand
+            case .scrollUp:
+                return .clawlineScrollNotificationUpCommand
+            }
+        }
+    }
+
+    struct Spec: Equatable {
+        let input: Character
+        let modifiers: EventModifiers
+        let action: Action
+    }
+
+    static func scrollSpecs(visibleNotificationCount: Int) -> [Spec] {
+        guard visibleNotificationCount > 0 else { return [] }
+        return [
+            Spec(input: "j", modifiers: .command, action: .scrollDown),
+            Spec(input: "k", modifiers: .command, action: .scrollUp),
+            Spec(input: "j", modifiers: [.command, .shift], action: .scrollDown),
+            Spec(input: "k", modifiers: [.command, .shift], action: .scrollUp),
+        ]
+    }
+}
+
 private struct CrossChatNotificationKeyboardShortcuts: View {
     let bubbles: [CrossChatNotificationBubble]
     let maxContainerHeight: CGFloat
@@ -7150,6 +7194,15 @@ private struct CrossChatNotificationKeyboardShortcuts: View {
                     .keyboardShortcut("-", modifiers: .command)
                 Button("") { onToggleDock() }
                     .keyboardShortcut("\\", modifiers: .command)
+                ForEach(
+                    Array(CrossChatNotificationGlobalShortcut.scrollSpecs(visibleNotificationCount: visibleBubbles.count).enumerated()),
+                    id: \.offset
+                ) { _, spec in
+                    Button("") {
+                        NotificationCenter.default.post(name: spec.action.notificationName, object: nil)
+                    }
+                    .keyboardShortcut(KeyEquivalent(spec.input), modifiers: spec.modifiers)
+                }
             }
             .opacity(0.001)
             .frame(width: 1, height: 1)

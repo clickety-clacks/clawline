@@ -643,6 +643,19 @@ struct PromptFocusShortcutActivationTests {
         )
     }
 
+    @Test("Visible notifications expose global scroll shortcuts outside focused command ownership")
+    func visibleNotificationsExposeGlobalScrollShortcutsOutsideFocusedCommandOwnership() {
+        #expect(CrossChatNotificationGlobalShortcut.scrollSpecs(visibleNotificationCount: 0).isEmpty)
+        #expect(
+            CrossChatNotificationGlobalShortcut.scrollSpecs(visibleNotificationCount: 2) == [
+                .init(input: "j", modifiers: .command, action: .scrollDown),
+                .init(input: "k", modifiers: .command, action: .scrollUp),
+                .init(input: "j", modifiers: [.command, .shift], action: .scrollDown),
+                .init(input: "k", modifiers: [.command, .shift], action: .scrollUp),
+            ]
+        )
+    }
+
     @Test("Notification reply field keeps notification number and scroll shortcuts above text focus")
     @MainActor
     func notificationReplyFieldKeepsNotificationNumberAndScrollShortcutsAboveTextFocus() {

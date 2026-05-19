@@ -5265,6 +5265,7 @@ private struct CrossChatNotificationOverlay: View {
     @State private var collapsedPreviewTasksBySourceChatId: [String: Task<Void, Never>] = [:]
     @State private var bubbleDragOffsetsBySourceChatId: [String: CGFloat] = [:]
     @State private var dismissSwipeActiveSourceChatIds: Set<String> = []
+    @State private var gestureAxisLocksBySourceChatId: [String: CrossChatNotificationGestureAxisLock] = [:]
     @FocusState private var isActionMenuFocused: Bool
 
     private static let maxVisibleBubbleCount = 10
@@ -5494,12 +5495,19 @@ private struct CrossChatNotificationOverlay: View {
                         onRegisterScrollView: { scrollView in
                             registerScrollView(sourceChatId: bubble.sourceChatId, scrollView: scrollView)
                         },
-                        isDismissSwipeActive: dismissSwipeActiveSourceChatIds.contains(bubble.sourceChatId)
+                        isDismissSwipeActive: dismissSwipeActiveSourceChatIds.contains(bubble.sourceChatId),
+                        isContentScrollLocked: gestureAxisLocksBySourceChatId[bubble.sourceChatId] == .horizontalSwipe,
+                        onContentScrollDragChanged: { translation in
+                            handleNotificationContentDragChanged(translation, sourceChatId: bubble.sourceChatId)
+                        },
+                        onContentScrollDragEnded: {
+                            handleNotificationContentDragEnded(sourceChatId: bubble.sourceChatId)
+                        }
                     )
                     .offset(x: horizontalOffset(for: bubble) + (bubbleDragOffsetsBySourceChatId[bubble.sourceChatId] ?? 0))
                     .transition(Self.notificationTransition)
                     .simultaneousGesture(
-                        DragGesture(minimumDistance: 20)
+                        DragGesture(minimumDistance: CrossChatNotificationGestureAxisLock.minimumDistance)
                             .onChanged { value in
                                 handleBubbleDragChanged(value, sourceChatId: bubble.sourceChatId)
                             }
@@ -5556,6 +5564,7 @@ private struct CrossChatNotificationOverlay: View {
                 isCollapsed = false
                 bubbleDragOffsetsBySourceChatId = [:]
                 dismissSwipeActiveSourceChatIds = []
+                clearAllGestureAxisLocks()
             }
 #if os(iOS) && !targetEnvironment(macCatalyst) && canImport(GameController)
             .onReceive(NotificationCenter.default.publisher(for: .GCKeyboardDidConnect)) { _ in
@@ -5612,6 +5621,7 @@ private struct CrossChatNotificationOverlay: View {
                 if let actionMenuSourceChatId, !sourceChatIds.contains(actionMenuSourceChatId) {
                     closeActionMenu()
                 }
+                pruneGestureAxisLocks(visibleSourceChatIds: Set(sourceChatIds))
             }
             .onChange(of: visibleBubbles.map { "\($0.sourceChatId):\($0.isReplying)" }) { _, _ in
                 if let actionMenuSourceChatId,
@@ -5771,8 +5781,33 @@ private struct CrossChatNotificationOverlay: View {
     private func registerScrollView(sourceChatId: String, scrollView: UIScrollView?) {
         if let scrollView {
             scrollViewsBySourceChatId[sourceChatId] = WeakScrollViewBox(scrollView)
+            scrollView.isScrollEnabled = gestureAxisLocksBySourceChatId[sourceChatId] != .horizontalSwipe
         } else {
+            setGestureAxisLock(.none, sourceChatId: sourceChatId)
             scrollViewsBySourceChatId.removeValue(forKey: sourceChatId)
+        }
+    }
+
+    private func setGestureAxisLock(_ lock: CrossChatNotificationGestureAxisLock, sourceChatId: String) {
+        switch lock {
+        case .none:
+            gestureAxisLocksBySourceChatId[sourceChatId] = nil
+        case .verticalScroll, .horizontalSwipe:
+            gestureAxisLocksBySourceChatId[sourceChatId] = lock
+        }
+        scrollViewsBySourceChatId[sourceChatId]?.scrollView?.isScrollEnabled = lock != .horizontalSwipe
+    }
+
+    private func clearAllGestureAxisLocks() {
+        for box in scrollViewsBySourceChatId.values {
+            box.scrollView?.isScrollEnabled = true
+        }
+        gestureAxisLocksBySourceChatId = [:]
+    }
+
+    private func pruneGestureAxisLocks(visibleSourceChatIds: Set<String>) {
+        for sourceChatId in gestureAxisLocksBySourceChatId.keys where !visibleSourceChatIds.contains(sourceChatId) {
+            setGestureAxisLock(.none, sourceChatId: sourceChatId)
         }
     }
 
@@ -5830,11 +5865,15 @@ private struct CrossChatNotificationOverlay: View {
 
     private func handleBubbleDragChanged(_ value: DragGesture.Value, sourceChatId: String) {
         let horizontal = value.translation.width
-        guard abs(horizontal) > abs(value.translation.height) else {
+        let ownership = CrossChatNotificationGestureAxisLock.ownership(for: value.translation)
+        guard ownership != .verticalScroll,
+              gestureAxisLocksBySourceChatId[sourceChatId] != .verticalScroll else {
             bubbleDragOffsetsBySourceChatId[sourceChatId] = nil
             dismissSwipeActiveSourceChatIds.remove(sourceChatId)
             return
         }
+        guard ownership == .horizontalSwipe else { return }
+        setGestureAxisLock(.horizontalSwipe, sourceChatId: sourceChatId)
         bubbleDragOffsetsBySourceChatId[sourceChatId] = rubberBandOffset(for: horizontal)
         if horizontal <= -Self.collapseSwipeThreshold {
             dismissSwipeActiveSourceChatIds.insert(sourceChatId)
@@ -5845,12 +5884,17 @@ private struct CrossChatNotificationOverlay: View {
 
     private func handleBubbleDrag(_ value: DragGesture.Value, sourceChatId: String) {
         let horizontal = value.translation.width
+        let activeLock = gestureAxisLocksBySourceChatId[sourceChatId]
         withAnimation(Self.resizeAnimation) {
             bubbleDragOffsetsBySourceChatId[sourceChatId] = nil
             dismissSwipeActiveSourceChatIds.remove(sourceChatId)
         }
-        guard abs(horizontal) > abs(value.translation.height),
-              abs(horizontal) >= Self.collapseSwipeThreshold else { return }
+        setGestureAxisLock(.none, sourceChatId: sourceChatId)
+        guard CrossChatNotificationGestureAxisLock.allowsBubbleSwipeCompletion(
+            activeLock: activeLock,
+            finalTranslation: value.translation,
+            completionThreshold: Self.collapseSwipeThreshold
+        ) else { return }
         if horizontal > 0 {
             if isCollapsed {
                 clearCollapsedPreview(sourceChatId: sourceChatId)
@@ -5861,6 +5905,22 @@ private struct CrossChatNotificationOverlay: View {
             closeActionMenu()
             unpinReply(sourceChatId: sourceChatId)
             dismissNotification(sourceChatId: sourceChatId)
+        }
+    }
+
+    private func handleNotificationContentDragChanged(_ translation: CGSize, sourceChatId: String) {
+        guard CrossChatNotificationGestureAxisLock.ownership(for: translation) == .verticalScroll,
+              gestureAxisLocksBySourceChatId[sourceChatId] != .horizontalSwipe else {
+            return
+        }
+        bubbleDragOffsetsBySourceChatId[sourceChatId] = nil
+        dismissSwipeActiveSourceChatIds.remove(sourceChatId)
+        setGestureAxisLock(.verticalScroll, sourceChatId: sourceChatId)
+    }
+
+    private func handleNotificationContentDragEnded(sourceChatId: String) {
+        if gestureAxisLocksBySourceChatId[sourceChatId] == .verticalScroll {
+            setGestureAxisLock(.none, sourceChatId: sourceChatId)
         }
     }
 
@@ -6108,6 +6168,9 @@ struct CrossChatNotificationBubbleView: View {
     let onActionMenuAction: (CrossChatNotificationActionMenuItem) -> Void
     let onRegisterScrollView: (UIScrollView?) -> Void
     let isDismissSwipeActive: Bool
+    let isContentScrollLocked: Bool
+    let onContentScrollDragChanged: (CGSize) -> Void
+    let onContentScrollDragEnded: () -> Void
     @Environment(\.colorScheme) private var colorScheme
     @State private var isClearAllConfirmationPresented = false
     @State private var measuredEntriesHeight: CGFloat = 0
@@ -6300,6 +6363,16 @@ struct CrossChatNotificationBubbleView: View {
                         }
                         .frame(height: resolvedEntriesHeight ?? contentMaxHeight, alignment: .top)
                         .scrollIndicators(.visible)
+                        .scrollDisabled(isContentScrollLocked)
+                        .simultaneousGesture(
+                            DragGesture(minimumDistance: CrossChatNotificationGestureAxisLock.minimumDistance)
+                                .onChanged { value in
+                                    onContentScrollDragChanged(value.translation)
+                                }
+                                .onEnded { _ in
+                                    onContentScrollDragEnded()
+                                }
+                        )
                         .background(
                             NotificationScrollViewResolver(onResolve: onRegisterScrollView)
                         )
@@ -6505,6 +6578,37 @@ enum CrossChatNotificationAccentReplyGesture {
     static func shouldToggleReply(translation: CGSize) -> Bool {
         abs(translation.height) >= minimumDistance
             && abs(translation.height) > abs(translation.width)
+    }
+}
+
+enum CrossChatNotificationGestureAxisLock: Equatable {
+    case none
+    case verticalScroll
+    case horizontalSwipe
+
+    static let minimumDistance: CGFloat = 20
+
+    static func ownership(for translation: CGSize) -> CrossChatNotificationGestureAxisLock {
+        let horizontal = abs(translation.width)
+        let vertical = abs(translation.height)
+        guard max(horizontal, vertical) >= minimumDistance else { return .none }
+        if horizontal > vertical {
+            return .horizontalSwipe
+        }
+        if vertical > horizontal {
+            return .verticalScroll
+        }
+        return .none
+    }
+
+    static func allowsBubbleSwipeCompletion(
+        activeLock: CrossChatNotificationGestureAxisLock?,
+        finalTranslation: CGSize,
+        completionThreshold: CGFloat
+    ) -> Bool {
+        activeLock != .verticalScroll
+            && ownership(for: finalTranslation) == .horizontalSwipe
+            && abs(finalTranslation.width) >= completionThreshold
     }
 }
 

@@ -1025,9 +1025,8 @@ struct ChatView: View {
 
         let rootLayer: AnyView = AnyView(ZStack(alignment: .top) {
             messageLayer
-                // #31: fade out message content behind the system status bar (mask, not overlay tint).
                 .compositingGroup()
-                .mask(statusBarFadeMask(topInset: statusBarTopInset))
+                .mask(messageViewportFadeMask(topInset: statusBarTopInset))
 
             streamToastView(
                 inputBarTopFromScreenBottom: inputBarTopFromScreenBottom
@@ -1845,6 +1844,60 @@ struct ChatView: View {
         streamToastBusySince = nil
         streamToastBusyClearTask?.cancel()
         streamToastBusyClearTask = nil
+    }
+
+    @ViewBuilder
+    private func messageViewportFadeMask(topInset: CGFloat) -> some View {
+        #if os(visionOS)
+            spatialViewportEdgeFadeMask()
+        #else
+            // #31: fade out message content behind the system status bar (mask, not overlay tint).
+            statusBarFadeMask(topInset: topInset)
+        #endif
+    }
+
+    private func spatialViewportEdgeFadeMask() -> some View {
+        GeometryReader { proxy in
+            let verticalFade = min(CGFloat(88), proxy.size.height / 2)
+            let horizontalFade = min(CGFloat(176), proxy.size.width / 2)
+
+            Rectangle()
+                .fill(Color.white)
+                .mask {
+                    VStack(spacing: 0) {
+                        LinearGradient(
+                            colors: [.clear, .white],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                        .frame(height: verticalFade)
+                        Rectangle().fill(Color.white)
+                        LinearGradient(
+                            colors: [.white, .clear],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                        .frame(height: verticalFade)
+                    }
+                }
+                .mask {
+                    HStack(spacing: 0) {
+                        LinearGradient(
+                            colors: [.clear, .white],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                        .frame(width: horizontalFade)
+                        Rectangle().fill(Color.white)
+                        LinearGradient(
+                            colors: [.white, .clear],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                        .frame(width: horizontalFade)
+                    }
+                }
+        }
     }
 
     @ViewBuilder

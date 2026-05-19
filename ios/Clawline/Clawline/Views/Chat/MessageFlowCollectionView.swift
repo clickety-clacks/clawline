@@ -6,7 +6,6 @@
 //
 
 import OSLog
-import QuartzCore
 import SwiftUI
 import UIKit
 
@@ -118,114 +117,6 @@ enum ChatVisibleBubbleContentScroll {
         return rect.width > 1 && rect.height > 1 && viewport.bounds.intersects(rect)
     }
 }
-
-#if os(visionOS)
-private final class SpatialViewportFadeMaskLayer: CALayer {
-    var fadeLength: CGFloat = 40 {
-        didSet {
-            guard fadeLength != oldValue else { return }
-            setNeedsDisplay()
-        }
-    }
-
-    override func draw(in context: CGContext) {
-        let width = bounds.width
-        let height = bounds.height
-        guard width > 0, height > 0 else { return }
-
-        context.clear(bounds)
-        let fade = min(fadeLength, width / 2, height / 2)
-        guard fade > 0 else {
-            context.setFillColor(UIColor.black.cgColor)
-            context.fill(bounds)
-            return
-        }
-
-        let colorSpace = CGColorSpaceCreateDeviceGray()
-        let clear = UIColor.black.withAlphaComponent(0).cgColor
-        let opaque = UIColor.black.cgColor
-        guard let fadeIn = CGGradient(colorsSpace: colorSpace, colors: [clear, opaque] as CFArray, locations: [0, 1]),
-              let fadeOut = CGGradient(colorsSpace: colorSpace, colors: [opaque, clear] as CFArray, locations: [0, 1]) else {
-            return
-        }
-
-        context.saveGState()
-        context.addRect(bounds)
-        context.clip()
-        context.drawLinearGradient(
-            fadeIn,
-            start: CGPoint(x: width / 2, y: 0),
-            end: CGPoint(x: width / 2, y: fade),
-            options: []
-        )
-        context.setFillColor(opaque)
-        context.fill(CGRect(x: 0, y: fade, width: width, height: max(0, height - fade * 2)))
-        context.drawLinearGradient(
-            fadeOut,
-            start: CGPoint(x: width / 2, y: height - fade),
-            end: CGPoint(x: width / 2, y: height),
-            options: []
-        )
-        context.restoreGState()
-
-        context.setBlendMode(.destinationIn)
-        context.drawLinearGradient(
-            fadeIn,
-            start: CGPoint(x: 0, y: height / 2),
-            end: CGPoint(x: fade, y: height / 2),
-            options: []
-        )
-        context.setFillColor(opaque)
-        context.fill(CGRect(x: fade, y: 0, width: max(0, width - fade * 2), height: height))
-        context.drawLinearGradient(
-            fadeOut,
-            start: CGPoint(x: width - fade, y: height / 2),
-            end: CGPoint(x: width, y: height / 2),
-            options: []
-        )
-    }
-}
-
-private final class SpatialTranscriptCollectionView: UICollectionView {
-    private let viewportFadeMask = SpatialViewportFadeMaskLayer()
-
-    override init(frame: CGRect, collectionViewLayout layout: UICollectionViewLayout) {
-        super.init(frame: frame, collectionViewLayout: layout)
-        layer.mask = viewportFadeMask
-    }
-
-    required init?(coder: NSCoder) {
-        super.init(coder: coder)
-        layer.mask = viewportFadeMask
-    }
-
-    override func layoutSubviews() {
-        super.layoutSubviews()
-        updateViewportFadeMask()
-    }
-
-    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
-        guard isUserInteractionEnabled,
-              !isHidden,
-              alpha > 0.01,
-              self.point(inside: point, with: event) else {
-            return nil
-        }
-        return super.hitTest(point, with: event) ?? self
-    }
-
-    private func updateViewportFadeMask() {
-        let scale = traitCollection.displayScale > 0 ? traitCollection.displayScale : 2
-        if viewportFadeMask.frame != bounds {
-            viewportFadeMask.frame = bounds
-        }
-        if viewportFadeMask.contentsScale != scale {
-            viewportFadeMask.contentsScale = scale
-        }
-        viewportFadeMask.setNeedsDisplay()
-    }
-}
-#endif
 
 @MainActor
 struct MessageFlowCollectionView: UIViewControllerRepresentable {
@@ -3594,11 +3485,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         flowLayout.estimatedItemSize = .zero
 
         // Use frame-based layout - we extend to window bounds in viewDidLayoutSubviews
-#if os(visionOS)
-        collectionView = SpatialTranscriptCollectionView(frame: view.bounds, collectionViewLayout: flowLayout)
-#else
         collectionView = UICollectionView(frame: view.bounds, collectionViewLayout: flowLayout)
-#endif
         collectionView.translatesAutoresizingMaskIntoConstraints = true
         collectionView.autoresizingMask = []
         collectionView.backgroundColor = Self.chatPageBackgroundColor(

@@ -561,6 +561,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
     private var onInsertIntoPrompt: ((Message) -> Void)?
     private var onReferenceMessage: ((Message) -> Void)?
     private var currentMessage: Message?
+    private var currentCopyableReadableText: String?
 
     // Salient highlights are applied asynchronously and must be cancelable on cell reuse.
     private var salientTask: Task<Void, Never>?
@@ -994,6 +995,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
         let isMessageReuse = (currentMessageId != nil && currentMessageId != message.id)
         currentMessage = message
         currentMessageId = message.id
+        currentCopyableReadableText = presentation.copyableReadableText
         // Store for trait collection updates
         currentMessageRole = message.role
         currentStream = message.stream
@@ -1553,6 +1555,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
     func prepareForReuse() {
         currentMessage = nil
         currentMessageId = nil
+        currentCopyableReadableText = nil
         onInsertIntoPrompt = nil
         onReferenceMessage = nil
 #if targetEnvironment(macCatalyst)
@@ -1907,6 +1910,11 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
     private func messageContextMenu() -> UIMenu? {
         guard let currentMessage else { return nil }
         var actions: [UIMenuElement] = []
+        if let copyableReadableText = currentCopyableReadableText {
+            actions.append(UIAction(title: "Copy to Clipboard", image: UIImage(systemName: "doc.on.doc")) { _ in
+                UIPasteboard.general.string = copyableReadableText
+            })
+        }
         if currentMessage.role == .user {
             actions.append(UIAction(title: "Insert into prompt", image: UIImage(systemName: "text.insert")) { [weak self] _ in
                 guard let self, let message = self.currentMessage else { return }

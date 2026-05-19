@@ -1419,6 +1419,7 @@ final class ChatViewModel: ChatViewModelHosting {
             beginSend(
                 content: text,
                 pendingAttachments: [],
+                references: [],
                 sessionKey: sourceChatId,
                 clearInputOnSuccess: false,
                 crossChatNotificationReplySourceChatId: sourceChatId,
@@ -1482,12 +1483,12 @@ final class ChatViewModel: ChatViewModelHosting {
         let pendingAttachments = pendingIds.compactMap { attachmentData[$0] }
         let referenceIds = inputContent.pendingMessageReferenceIds()
         let pendingReferences = referenceIds.compactMap { messageReferenceData[$0] }
-        guard pendingReferences.count == referenceIds.count else {
+            guard pendingReferences.count == referenceIds.count else {
 #if DEBUG
             recordImageSendDebugEvent(.sendResult, detail: "failure reason=missing_message_reference")
 #endif
             toastManager.show("Referenced message is unavailable.")
-            return
+            return false
         }
         let referenceContexts = pendingReferences.map(MessageReferenceContext.init(reference:))
 

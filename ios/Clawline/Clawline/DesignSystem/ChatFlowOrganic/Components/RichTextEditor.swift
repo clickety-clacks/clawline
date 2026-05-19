@@ -210,6 +210,9 @@ struct RichTextEditor: UIViewRepresentable {
                       shouldChangeTextIn range: NSRange,
                       replacementText text: String) -> Bool {
             if text == "\n" {
+                // UIKit's software-keyboard text delegate reports only the replacement text,
+                // so Return and software Shift-Return are not distinguishable here. Hardware
+                // modified Return is handled by keyCommands before this submit path.
                 if parent.handlesMentionPickerKeyCommands, parent.mentionPickerHasCompletion {
                     parent.onMentionPickerTab?()
                 } else {

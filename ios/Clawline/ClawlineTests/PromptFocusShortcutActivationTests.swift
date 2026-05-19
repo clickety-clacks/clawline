@@ -191,6 +191,73 @@ struct PromptFocusShortcutActivationTests {
         #expect(textView.selectedRange == NSRange(location: 4, length: 0))
     }
 
+    @Test("T342 main prompt software Return delegate path stays submit because Shift-Return is not distinguishable")
+    @MainActor
+    func mainPromptSoftwareReturnDelegatePathStaysSubmitBecauseShiftReturnIsNotDistinguishable() {
+        var attributedText = NSAttributedString(string: "draft")
+        var calculatedHeight: CGFloat = 44
+        var selectionRange = NSRange(location: 0, length: 0)
+        var pendingInsertions: [PendingAttachment] = []
+        var submitCount = 0
+        let editor = RichTextEditor(
+            attributedText: Binding(get: { attributedText }, set: { attributedText = $0 }),
+            calculatedHeight: Binding(get: { calculatedHeight }, set: { calculatedHeight = $0 }),
+            selectionRange: Binding(get: { selectionRange }, set: { selectionRange = $0 }),
+            pendingInsertions: Binding(get: { pendingInsertions }, set: { pendingInsertions = $0 }),
+            fontScaleChangeSequence: 0,
+            resetToken: 0,
+            focusTrigger: 0,
+            isEditable: true,
+            tintColor: .systemBlue,
+            onFocusChange: { _ in },
+            onSubmit: { submitCount += 1 }
+        )
+        let coordinator = RichTextEditor.Coordinator(parent: editor)
+        let textView = UITextView()
+        textView.text = "draft"
+
+        let shouldChange = coordinator.textView(
+            textView,
+            shouldChangeTextIn: NSRange(location: 5, length: 0),
+            replacementText: "\n"
+        )
+
+        #expect(!shouldChange)
+        #expect(submitCount == 1)
+        #expect(textView.text == "draft")
+    }
+
+    @Test("T342 reply software Return delegate path stays submit because Shift-Return is not distinguishable")
+    @MainActor
+    func replySoftwareReturnDelegatePathStaysSubmitBecauseShiftReturnIsNotDistinguishable() {
+        var text = "reply"
+        var measuredHeight: CGFloat = 20
+        var submitCount = 0
+        let input = NotificationReplyTextInput(
+            text: Binding(get: { text }, set: { text = $0 }),
+            measuredHeight: Binding(get: { measuredHeight }, set: { measuredHeight = $0 }),
+            font: UIFont.systemFont(ofSize: 15),
+            textColor: .label,
+            tintColor: .systemBlue,
+            visibleNotificationCount: 0,
+            onSubmit: { submitCount += 1 },
+            onCancel: {}
+        )
+        let coordinator = NotificationReplyTextInput.Coordinator(parent: input)
+        let textView = UITextView()
+        textView.text = "reply"
+
+        let shouldChange = coordinator.textView(
+            textView,
+            shouldChangeTextIn: NSRange(location: 5, length: 0),
+            replacementText: "\n"
+        )
+
+        #expect(!shouldChange)
+        #expect(submitCount == 1)
+        #expect(textView.text == "reply")
+    }
+
     @Test("No-text prompt focus shortcuts keep Cmd-L out of the unmodified host")
     func noTextPromptFocusShortcutsKeepCommandLOutOfTheUnmodifiedHost() {
         #expect(

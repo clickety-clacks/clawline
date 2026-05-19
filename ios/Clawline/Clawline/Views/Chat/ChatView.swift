@@ -6636,6 +6636,9 @@ struct NotificationReplyTextInput: UIViewRepresentable {
             replacementText replacement: String
         ) -> Bool {
             if replacement == "\n" {
+                // UIKit's software-keyboard text delegate reports only the replacement text,
+                // so Return and software Shift-Return are not distinguishable here. Hardware
+                // modified Return is handled by keyCommands before this submit path.
                 parent.onSubmit()
                 return false
             }

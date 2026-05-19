@@ -210,6 +210,9 @@ struct RichTextEditor: UIViewRepresentable {
                       shouldChangeTextIn range: NSRange,
                       replacementText text: String) -> Bool {
             if text == "\n" {
+                // UIKit's software-keyboard text delegate reports only the replacement text,
+                // so Return and software Shift-Return are not distinguishable here. Hardware
+                // modified Return is handled by keyCommands before this submit path.
                 if parent.handlesMentionPickerKeyCommands, parent.mentionPickerHasCompletion {
                     parent.onMentionPickerTab?()
                 } else {
@@ -463,6 +466,12 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
         let inputReleaseCommands = [
             UIKeyCommand(input: UIKeyCommand.inputEscape, modifierFlags: [], action: #selector(didPressEscape))
         ]
+        let modifiedReturnCommands = [
+            UIKeyCommand(input: "\r", modifierFlags: [.control], action: #selector(didPressModifiedReturn)),
+            UIKeyCommand(input: "\n", modifierFlags: [.control], action: #selector(didPressModifiedReturn)),
+            UIKeyCommand(input: "\r", modifierFlags: [.shift], action: #selector(didPressModifiedReturn)),
+            UIKeyCommand(input: "\n", modifierFlags: [.shift], action: #selector(didPressModifiedReturn))
+        ]
         let mentionPickerCommands: [UIKeyCommand] = handlesMentionPickerKeyCommands
             ? [
                 UIKeyCommand(input: "\t", modifierFlags: [], action: #selector(didPressMentionPickerTab)),
@@ -473,6 +482,7 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
         return mentionPickerCommands
             + prioritizedAppCommandShortcuts
             + inputReleaseCommands
+            + modifiedReturnCommands
             + base
             + emacsCommands
             + deferredAppCommandShortcuts
@@ -589,6 +599,11 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
     @objc private func didPressEscape(_ sender: UIKeyCommand) {
         guard canHandleInputShortcut else { return }
         _ = resignFirstResponder()
+    }
+
+    @objc private func didPressModifiedReturn(_ sender: UIKeyCommand) {
+        guard canHandleInputShortcut else { return }
+        insertPlainText("\n")
     }
 
     // MARK: - Paste action gating

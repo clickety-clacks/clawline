@@ -6698,7 +6698,13 @@ final class NotificationReplyUITextView: UITextView {
             modifierFlags: [],
             action: #selector(didPressEscape)
         )
-        return prioritizedNotificationCommands + [escapeCommand] + (super.keyCommands ?? [])
+        let modifiedReturnCommands = [
+            UIKeyCommand(input: "\r", modifierFlags: [.control], action: #selector(didPressModifiedReturn)),
+            UIKeyCommand(input: "\n", modifierFlags: [.control], action: #selector(didPressModifiedReturn)),
+            UIKeyCommand(input: "\r", modifierFlags: [.shift], action: #selector(didPressModifiedReturn)),
+            UIKeyCommand(input: "\n", modifierFlags: [.shift], action: #selector(didPressModifiedReturn))
+        ]
+        return prioritizedNotificationCommands + [escapeCommand] + modifiedReturnCommands + (super.keyCommands ?? [])
     }
 
     override func didMoveToWindow() {
@@ -6727,6 +6733,18 @@ final class NotificationReplyUITextView: UITextView {
 
     @objc private func didPressEscape(_ sender: UIKeyCommand) {
         onCancel?()
+    }
+
+    @objc private func didPressModifiedReturn(_ sender: UIKeyCommand) {
+        insertPlainText("\n")
+    }
+
+    private func insertPlainText(_ text: String) {
+        let attributed = NSAttributedString(string: text, attributes: typingAttributes)
+        let range = selectedRange
+        textStorage.replaceCharacters(in: range, with: attributed)
+        selectedRange = NSRange(location: range.location + attributed.length, length: 0)
+        delegate?.textViewDidChange?(self)
     }
 }
 

@@ -99,6 +99,98 @@ struct PromptFocusShortcutActivationTests {
         )
     }
 
+    @Test("T342 main prompt input exposes modified Return newline hardware shortcuts")
+    @MainActor
+    func mainPromptInputExposesModifiedReturnNewlineHardwareShortcuts() {
+        let textView = PastableTextView(frame: .zero, textContainer: nil)
+
+        assertModifiedReturnCommands(
+            in: textView.keyCommands,
+            action: Selector(("didPressModifiedReturn:"))
+        )
+        #expect(
+            textView.keyCommands?.contains { command in
+                (command.input == "\r" || command.input == "\n")
+                    && command.modifierFlags.isEmpty
+                    && command.action == Selector(("didPressModifiedReturn:"))
+            } == false
+        )
+    }
+
+    @Test("T342 main prompt modified Return inserts newline at caret")
+    @MainActor
+    func mainPromptModifiedReturnInsertsNewlineAtCaret() {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 120))
+        let textView = PastableTextView(frame: CGRect(x: 0, y: 0, width: 320, height: 44), textContainer: nil)
+        window.addSubview(textView)
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+
+        textView.text = "abcd"
+        textView.selectedRange = NSRange(location: 2, length: 0)
+        #expect(textView.becomeFirstResponder())
+
+        textView.perform(
+            Selector(("didPressModifiedReturn:")),
+            with: UIKeyCommand(input: "\r", modifierFlags: [.control], action: Selector(("didPressModifiedReturn:")))
+        )
+        #expect(textView.text == "ab\ncd")
+        #expect(textView.selectedRange == NSRange(location: 3, length: 0))
+
+        textView.perform(
+            Selector(("didPressModifiedReturn:")),
+            with: UIKeyCommand(input: "\n", modifierFlags: [.shift], action: Selector(("didPressModifiedReturn:")))
+        )
+        #expect(textView.text == "ab\n\ncd")
+        #expect(textView.selectedRange == NSRange(location: 4, length: 0))
+    }
+
+    @Test("T342 reply input exposes modified Return newline hardware shortcuts")
+    @MainActor
+    func replyInputExposesModifiedReturnNewlineHardwareShortcuts() {
+        let textView = NotificationReplyUITextView()
+
+        assertModifiedReturnCommands(
+            in: textView.keyCommands,
+            action: Selector(("didPressModifiedReturn:"))
+        )
+        #expect(
+            textView.keyCommands?.contains { command in
+                (command.input == "\r" || command.input == "\n")
+                    && command.modifierFlags.isEmpty
+                    && command.action == Selector(("didPressModifiedReturn:"))
+            } == false
+        )
+    }
+
+    @Test("T342 reply input modified Return inserts newline at caret")
+    @MainActor
+    func replyInputModifiedReturnInsertsNewlineAtCaret() {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 120))
+        let textView = NotificationReplyUITextView(frame: CGRect(x: 0, y: 0, width: 320, height: 44), textContainer: nil)
+        window.addSubview(textView)
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+
+        textView.text = "reply"
+        textView.selectedRange = NSRange(location: 2, length: 0)
+        #expect(textView.becomeFirstResponder())
+
+        textView.perform(
+            Selector(("didPressModifiedReturn:")),
+            with: UIKeyCommand(input: "\r", modifierFlags: [.control], action: Selector(("didPressModifiedReturn:")))
+        )
+        #expect(textView.text == "re\nply")
+        #expect(textView.selectedRange == NSRange(location: 3, length: 0))
+
+        textView.perform(
+            Selector(("didPressModifiedReturn:")),
+            with: UIKeyCommand(input: "\n", modifierFlags: [.shift], action: Selector(("didPressModifiedReturn:")))
+        )
+        #expect(textView.text == "re\n\nply")
+        #expect(textView.selectedRange == NSRange(location: 4, length: 0))
+    }
+
     @Test("No-text prompt focus shortcuts keep Cmd-L out of the unmodified host")
     func noTextPromptFocusShortcutsKeepCommandLOutOfTheUnmodifiedHost() {
         #expect(
@@ -860,6 +952,23 @@ private func makeVerticalScrollView(frame: CGRect, contentHeight: CGFloat) -> UI
     scrollView.isScrollEnabled = true
     scrollView.contentSize = CGSize(width: frame.width, height: contentHeight)
     return scrollView
+}
+
+private func assertModifiedReturnCommands(in commands: [UIKeyCommand]?, action: Selector) {
+    let commandInputs = ["\r", "\n"]
+    let modifierFlags: [UIKeyModifierFlags] = [.control, .shift]
+
+    for input in commandInputs {
+        for flags in modifierFlags {
+            #expect(
+                commands?.contains { command in
+                    command.input == input
+                        && command.modifierFlags == flags
+                        && command.action == action
+                } == true
+            )
+        }
+    }
 }
 
 private final class ScrollCommandNotificationRecorder: NSObject {

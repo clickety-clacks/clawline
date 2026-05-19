@@ -393,11 +393,12 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
             Issue.record("Expected bubble markdown to render as attributed text")
             return
         }
+        let text = joinedText(from: rendered)
 
         #expect(attributed.string.contains("Intro with bold and link."))
-        #expect(attributed.string.contains("• Alpha code"))
-        #expect(attributed.string.contains("• Beta"))
-        #expect(!attributed.string.contains("- Alpha"))
+        #expect(text.contains("• Alpha code"))
+        #expect(text.contains("• Beta"))
+        #expect(!text.contains("- Alpha"))
         #expect(isBold("bold", in: attributed))
         #expect(linkTarget("link", in: attributed)?.absoluteString == "https://example.com")
     }

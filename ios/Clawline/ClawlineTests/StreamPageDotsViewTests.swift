@@ -99,7 +99,7 @@ struct StreamPageDotsViewTests {
         let view = StreamPageDotsView(
             sessionKeys: sessionKeys,
             activeSessionKey: sessionKeys[35],
-            dotStatesBySession: [:],
+            dotStateLookup: StreamDotStateLookup { _ in .inactive },
             maxWidth: requestedWidth,
             onTap: {},
             onScrubPreview: { _ in },

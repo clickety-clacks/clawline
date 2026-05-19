@@ -1545,7 +1545,14 @@ struct ChatView: View {
                 )
                 .visionOSOverlayDepthOffset(spatialOverlayDepthOffset)
             }
-            .frame(maxWidth: .infinity, maxHeight: topMargin + maxContainerHeight + 12, alignment: .topTrailing)
+            .frame(
+                maxWidth: .infinity,
+                maxHeight: CrossChatNotificationOverlay.overlayHostHeight(
+                    topMargin: topMargin,
+                    maxContainerHeight: maxContainerHeight
+                ),
+                alignment: .topTrailing
+            )
             .ignoresSafeArea(.container, edges: .horizontal)
         )
     }
@@ -5332,6 +5339,12 @@ private struct CrossChatNotificationOverlay: View {
     private static let collapsedPeekWidth: CGFloat = bubbleCornerRadius
     private static let collapseSwipeThreshold: CGFloat = 44
     private static let dragPliabilityLimit: CGFloat = 82
+    // Drag is rubber-banded to `dragPliabilityLimit`; the rest covers card corner,
+    // dismiss blur, shadow/material halo, and pixel rounding outside the bubble frame.
+    static let motionOverflowBleed: CGFloat = dragPliabilityLimit
+        + bubbleCornerRadius
+        + MessageInputBar.sendButtonColoredBackingBlurRadius
+        + 24
     static let revealAnimation = CrossChatNotificationMotion.reveal
     static let hideAnimation = CrossChatNotificationMotion.hide
     static let resizeAnimation = CrossChatNotificationMotion.resize
@@ -5348,6 +5361,14 @@ private struct CrossChatNotificationOverlay: View {
         let slotHeight = minVisibleBubbleHeight + bubbleSpacing
         let capacity = Int((maxContainerHeight + bubbleSpacing) / slotHeight)
         return max(1, min(maxVisibleBubbleCount, capacity))
+    }
+
+    static func motionContainerHeight(maxContainerHeight: CGFloat) -> CGFloat {
+        maxContainerHeight + motionOverflowBleed
+    }
+
+    static func overlayHostHeight(topMargin: CGFloat, maxContainerHeight: CGFloat) -> CGFloat {
+        topMargin + motionContainerHeight(maxContainerHeight: maxContainerHeight) + 12
     }
 
     static func visibleCapacity(
@@ -5434,6 +5455,12 @@ private struct CrossChatNotificationOverlay: View {
         return min(Self.maxStackWidth, max(0, maxContainerWidth - externalHorizontalMargin))
     }
 
+    private var motionContainerWidth: CGFloat {
+        stackWidth
+            + (Self.motionOverflowBleed * 2)
+            + (isCollapsed ? 0 : normalTrailingMargin)
+    }
+
     private var collapsedOffset: CGFloat {
         max(0, stackWidth - Self.collapsedPeekWidth)
     }
@@ -5466,143 +5493,156 @@ private struct CrossChatNotificationOverlay: View {
 
     var body: some View {
         if !visibleBubbles.isEmpty {
-            VStack(alignment: .trailing, spacing: Self.bubbleSpacing) {
-                ForEach(Array(visibleBubbles.enumerated()), id: \.element.sourceChatId) { index, bubble in
-                    let isReplySendActive = viewModel.isSendingCrossChatNotificationReply(sourceChatId: bubble.sourceChatId)
-                    let canSendReply = viewModel.canImmediatelySendCrossChatNotificationReply(
-                        sourceChatId: bubble.sourceChatId
+            ZStack(alignment: .topTrailing) {
+                Color.clear
+                    .frame(
+                        width: motionContainerWidth,
+                        height: Self.overlayHostHeight(
+                            topMargin: topMargin,
+                            maxContainerHeight: maxContainerHeight
+                        )
                     )
-                    CrossChatNotificationBubbleView(
-                        bubble: bubble,
-                        assignedNumber: index,
-                        visibleNotificationCount: visibleBubbles.count,
-                        showShortcutLabel: showShortcutLabels,
-                        maxBubbleHeight: maxBubbleHeight,
-                        maxBubbleWidth: stackWidth,
-                        bubbleCornerRadius: Self.bubbleCornerRadius,
-                        isSending: isReplySendActive,
-                        canCancelSend: viewModel.canCancelSend,
-                        canSendReply: canSendReply,
-                        connectionState: viewModel.sendButtonConnectionState,
-                        replyDraft: Binding(
-                            get: {
-                                viewModel.crossChatNotificationBubblesBySourceChatId[bubble.sourceChatId]?.replyDraft ?? ""
-                            },
-                            set: { newValue in
-                                viewModel.setCrossChatNotificationReplyDraft(
-                                    sourceChatId: bubble.sourceChatId,
-                                    draft: newValue
-                                )
-                            }
-                        ),
-                        onDismiss: {
-                            unpinReply(sourceChatId: bubble.sourceChatId)
-                            dismissNotification(sourceChatId: bubble.sourceChatId)
-                        },
-                        onReply: {
-                            animateNotificationResize {
-                                if bubble.isReplying {
-                                    unpinReply(sourceChatId: bubble.sourceChatId)
-                                } else {
-                                    pinReply(sourceChatId: bubble.sourceChatId)
+                    .allowsHitTesting(false)
+
+                VStack(alignment: .trailing, spacing: Self.bubbleSpacing) {
+                    ForEach(Array(visibleBubbles.enumerated()), id: \.element.sourceChatId) { index, bubble in
+                        let isReplySendActive = viewModel.isSendingCrossChatNotificationReply(sourceChatId: bubble.sourceChatId)
+                        let canSendReply = viewModel.canImmediatelySendCrossChatNotificationReply(
+                            sourceChatId: bubble.sourceChatId
+                        )
+                        CrossChatNotificationBubbleView(
+                            bubble: bubble,
+                            assignedNumber: index,
+                            visibleNotificationCount: visibleBubbles.count,
+                            showShortcutLabel: showShortcutLabels,
+                            maxBubbleHeight: maxBubbleHeight,
+                            maxBubbleWidth: stackWidth,
+                            bubbleCornerRadius: Self.bubbleCornerRadius,
+                            isSending: isReplySendActive,
+                            canCancelSend: viewModel.canCancelSend,
+                            canSendReply: canSendReply,
+                            connectionState: viewModel.sendButtonConnectionState,
+                            replyDraft: Binding(
+                                get: {
+                                    viewModel.crossChatNotificationBubblesBySourceChatId[bubble.sourceChatId]?.replyDraft ?? ""
+                                },
+                                set: { newValue in
+                                    viewModel.setCrossChatNotificationReplyDraft(
+                                        sourceChatId: bubble.sourceChatId,
+                                        draft: newValue
+                                    )
                                 }
-                                viewModel.toggleCrossChatNotificationReply(sourceChatId: bubble.sourceChatId)
-                            }
-                        },
-                        onCancelReply: {
-                            animateNotificationResize {
+                            ),
+                            onDismiss: {
                                 unpinReply(sourceChatId: bubble.sourceChatId)
-                                viewModel.closeCrossChatNotificationReply(sourceChatId: bubble.sourceChatId)
+                                dismissNotification(sourceChatId: bubble.sourceChatId)
+                            },
+                            onReply: {
+                                animateNotificationResize {
+                                    if bubble.isReplying {
+                                        unpinReply(sourceChatId: bubble.sourceChatId)
+                                    } else {
+                                        pinReply(sourceChatId: bubble.sourceChatId)
+                                    }
+                                    viewModel.toggleCrossChatNotificationReply(sourceChatId: bubble.sourceChatId)
+                                }
+                            },
+                            onCancelReply: {
+                                animateNotificationResize {
+                                    unpinReply(sourceChatId: bubble.sourceChatId)
+                                    viewModel.closeCrossChatNotificationReply(sourceChatId: bubble.sourceChatId)
+                                }
+                            },
+                            onDismissAll: {
+                                dismissAllNotifications()
+                            },
+                            onNavigate: {
+                                closeActionMenu()
+                                unpinReply(sourceChatId: bubble.sourceChatId)
+                                onNavigateToSource(bubble.sourceChatId)
+                            },
+                            onSendReply: {
+                                viewModel.sendCrossChatNotificationReply(sourceChatId: bubble.sourceChatId)
+                            },
+                            onCancelSend: {
+                                if isReplySendActive {
+                                    viewModel.cancelSend()
+                                }
+                            },
+                            onReconnect: {
+                                viewModel.reconnect()
+                            },
+                            onActivate: {
+                                activeScrollSourceChatId = bubble.sourceChatId
+                            },
+                            isActionMenuOpen: actionMenuSourceChatId == bubble.sourceChatId,
+                            actionMenuSelection: actionMenuSelection,
+                            onActionMenuSelectionChange: { selection in
+                                actionMenuSelection = selection
+                            },
+                            onActionMenuAction: { item in
+                                handleActionMenuAction(item, bubble: bubble)
+                            },
+                            onRegisterScrollView: { scrollView in
+                                registerScrollView(sourceChatId: bubble.sourceChatId, scrollView: scrollView)
+                            },
+                            isDismissSwipeActive: dismissSwipeActiveSourceChatIds.contains(bubble.sourceChatId),
+                            isContentScrollLocked: gestureAxisLocksBySourceChatId[bubble.sourceChatId] == .horizontalSwipe,
+                            onContentScrollDragChanged: { translation in
+                                handleNotificationContentDragChanged(translation, sourceChatId: bubble.sourceChatId)
+                            },
+                            onContentScrollDragEnded: {
+                                handleNotificationContentDragEnded(sourceChatId: bubble.sourceChatId)
                             }
-                        },
-                        onDismissAll: {
-                            dismissAllNotifications()
-                        },
-                        onNavigate: {
-                            closeActionMenu()
-                            unpinReply(sourceChatId: bubble.sourceChatId)
-                            onNavigateToSource(bubble.sourceChatId)
-                        },
-                        onSendReply: {
-                            viewModel.sendCrossChatNotificationReply(sourceChatId: bubble.sourceChatId)
-                        },
-                        onCancelSend: {
-                            if isReplySendActive {
-                                viewModel.cancelSend()
-                            }
-                        },
-                        onReconnect: {
-                            viewModel.reconnect()
-                        },
-                        onActivate: {
-                            activeScrollSourceChatId = bubble.sourceChatId
-                        },
-                        isActionMenuOpen: actionMenuSourceChatId == bubble.sourceChatId,
-                        actionMenuSelection: actionMenuSelection,
-                        onActionMenuSelectionChange: { selection in
-                            actionMenuSelection = selection
-                        },
-                        onActionMenuAction: { item in
-                            handleActionMenuAction(item, bubble: bubble)
-                        },
-                        onRegisterScrollView: { scrollView in
-                            registerScrollView(sourceChatId: bubble.sourceChatId, scrollView: scrollView)
-                        },
-                        isDismissSwipeActive: dismissSwipeActiveSourceChatIds.contains(bubble.sourceChatId),
-                        isContentScrollLocked: gestureAxisLocksBySourceChatId[bubble.sourceChatId] == .horizontalSwipe,
-                        onContentScrollDragChanged: { translation in
-                            handleNotificationContentDragChanged(translation, sourceChatId: bubble.sourceChatId)
-                        },
-                        onContentScrollDragEnded: {
-                            handleNotificationContentDragEnded(sourceChatId: bubble.sourceChatId)
-                        }
-                    )
-                    .offset(x: horizontalOffset(for: bubble) + (bubbleDragOffsetsBySourceChatId[bubble.sourceChatId] ?? 0))
-                    .transition(Self.notificationTransition)
-                    .simultaneousGesture(
-                        DragGesture(minimumDistance: CrossChatNotificationGestureAxisLock.minimumDistance)
-                            .onChanged { value in
-                                handleBubbleDragChanged(value, sourceChatId: bubble.sourceChatId)
-                            }
-                            .onEnded { value in
-                                handleBubbleDrag(value, sourceChatId: bubble.sourceChatId)
-                            }
-                    )
-                    .zIndex(actionMenuSourceChatId == bubble.sourceChatId ? 1 : 0)
-                }
-            }
-            .padding(.vertical, 2)
-            .frame(width: stackWidth, alignment: .topTrailing)
-            .frame(maxHeight: maxContainerHeight, alignment: .topTrailing)
-            .padding(.top, topMargin)
-            .padding(.trailing, isCollapsed ? 0 : normalTrailingMargin)
-            .animation(Self.revealAnimation, value: visibleBubbleIdentity)
-            .onPreferenceChange(CrossChatNotificationBubbleHeightPreferenceKey.self) { heights in
-                let activeSourceChatIds = Set(viewModel.crossChatNotificationBubbles.map(\.sourceChatId))
-                let next = heights.filter { activeSourceChatIds.contains($0.key) }
-                guard measuredBubbleHeightsBySourceChatId != next else { return }
-                measuredBubbleHeightsBySourceChatId = next
-            }
-            .overlay(alignment: .top) {
-                actionMenuOverlay()
-            }
-            .overlay(alignment: .trailing) {
-                if isCollapsed {
-                    Button {
-                        restoreDock()
-                    } label: {
-                        Color.clear
-                            .frame(width: Self.collapsedPeekWidth)
-                            .contentShape(Rectangle())
+                        )
+                        .offset(x: horizontalOffset(for: bubble) + (bubbleDragOffsetsBySourceChatId[bubble.sourceChatId] ?? 0))
+                        .transition(Self.notificationTransition)
+                        .simultaneousGesture(
+                            DragGesture(minimumDistance: CrossChatNotificationGestureAxisLock.minimumDistance)
+                                .onChanged { value in
+                                    handleBubbleDragChanged(value, sourceChatId: bubble.sourceChatId)
+                                }
+                                .onEnded { value in
+                                    handleBubbleDrag(value, sourceChatId: bubble.sourceChatId)
+                                }
+                        )
+                        .zIndex(actionMenuSourceChatId == bubble.sourceChatId ? 1 : 0)
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Show notifications")
-                    .simultaneousGesture(
-                        DragGesture(minimumDistance: 20)
-                            .onEnded(handlePeekDrag)
-                    )
+                }
+                .padding(.vertical, 2)
+                .frame(width: stackWidth, alignment: .topTrailing)
+                .frame(maxHeight: maxContainerHeight, alignment: .topTrailing)
+                .padding(.top, topMargin)
+                .padding(.trailing, (isCollapsed ? 0 : normalTrailingMargin) + Self.motionOverflowBleed)
+                .animation(Self.revealAnimation, value: visibleBubbleIdentity)
+                .onPreferenceChange(CrossChatNotificationBubbleHeightPreferenceKey.self) { heights in
+                    let activeSourceChatIds = Set(viewModel.crossChatNotificationBubbles.map(\.sourceChatId))
+                    let next = heights.filter { activeSourceChatIds.contains($0.key) }
+                    guard measuredBubbleHeightsBySourceChatId != next else { return }
+                    measuredBubbleHeightsBySourceChatId = next
+                }
+                .overlay(alignment: .top) {
+                    actionMenuOverlay()
+                }
+                .overlay(alignment: .trailing) {
+                    if isCollapsed {
+                        Button {
+                            restoreDock()
+                        } label: {
+                            Color.clear
+                                .frame(width: Self.collapsedPeekWidth)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Show notifications")
+                        .simultaneousGesture(
+                            DragGesture(minimumDistance: 20)
+                                .onEnded(handlePeekDrag)
+                        )
+                    }
                 }
             }
+            .offset(x: Self.motionOverflowBleed)
             .transition(Self.notificationTransition)
             .animation(isCollapsed ? Self.hideAnimation : Self.revealAnimation, value: isCollapsed)
             .onAppear {

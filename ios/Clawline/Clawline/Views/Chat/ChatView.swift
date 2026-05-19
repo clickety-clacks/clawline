@@ -276,6 +276,9 @@ struct ChatView: View {
     @State private var isCrossChatNotificationStackDocked = false
     @State private var crossChatNotificationReplyPinSlotsBySourceChatId: [String: Int] = [:]
     @State private var crossChatNotificationMeasuredHeightsBySourceChatId: [String: CGFloat] = [:]
+    @State private var crossChatNotificationActionMenuSourceChatId: String?
+    @State private var crossChatNotificationFocusedSourceChatId: String?
+    @State private var crossChatNotificationFocusedReplySourceChatId: String?
     @State private var chatViewTraceId = UUID().uuidString
 #if DEBUG
     @State private var lifecycleDebugOverlayVisible = true
@@ -1001,12 +1004,27 @@ struct ChatView: View {
             geometry.size.height - notificationOverlayTopMargin - inputBarTopFromScreenBottom - 24
         )
         let notificationOverlayMaxWidth = geometry.size.width
-        let notificationShortcutVisibleCount = CrossChatNotificationOverlay.visibleBubbles(
+        let keyboardVisibleNotificationBubbles = CrossChatNotificationOverlay.visibleBubbles(
             maxContainerHeight: notificationOverlayMaxHeight,
             bubbles: viewModel.crossChatNotificationBubbles,
             replyPinSlotsBySourceChatId: crossChatNotificationReplyPinSlotsBySourceChatId,
             measuredHeightsBySourceChatId: crossChatNotificationMeasuredHeightsBySourceChatId
-        ).count
+        )
+        let keyboardVisibleNotificationSourceChatIds = keyboardVisibleNotificationBubbles.map(\.sourceChatId)
+        let keyboardVisibleReplySourceChatIds = keyboardVisibleNotificationBubbles
+            .filter(\.isReplying)
+            .map(\.sourceChatId)
+        let notificationShortcutVisibleCount = keyboardVisibleNotificationSourceChatIds.count
+        let keyboardOwnershipStore = KeyboardOwnershipSceneFactory.chatScene(
+            visibleNotificationSourceChatIds: keyboardVisibleNotificationSourceChatIds,
+            mentionPickerVisible: isMentionPickerVisible,
+            mentionPickerHasCompletion: !mentionPickerStreams.isEmpty,
+            composerFocused: isInputFocused,
+            notificationFocusedSourceChatId: crossChatNotificationFocusedSourceChatId,
+            notificationReplySourceChatIds: keyboardVisibleReplySourceChatIds,
+            notificationReplyFocusedSourceChatId: crossChatNotificationFocusedReplySourceChatId,
+            actionMenuSourceChatId: crossChatNotificationActionMenuSourceChatId
+        )
         let cancelCurrentPromptDialogCanCancel = cancelCurrentPromptSessionKey.map { sessionKey in
             cancelCurrentPromptRequiresVisibleTyping
                 ? viewModel.canCancelVisibleTypingPrompt(in: sessionKey)
@@ -1049,35 +1067,50 @@ struct ChatView: View {
                 maxContainerWidth: notificationOverlayMaxWidth,
                 normalTrailingMargin: notificationNormalTrailingMargin,
                 compactLeadingFitMargin: notificationCompactLeadingFitMargin,
-                measuredBubbleHeightsBySourceChatId: $crossChatNotificationMeasuredHeightsBySourceChatId
+                measuredBubbleHeightsBySourceChatId: $crossChatNotificationMeasuredHeightsBySourceChatId,
+                actionMenuSourceChatId: $crossChatNotificationActionMenuSourceChatId,
+                focusedSourceChatId: $crossChatNotificationFocusedSourceChatId,
+                focusedReplySourceChatId: $crossChatNotificationFocusedReplySourceChatId,
+                keyboardOwnershipStore: keyboardOwnershipStore
             )
             .zIndex(20)
             notificationKeyboardShortcutView(
                 viewModel: viewModel,
                 maxContainerHeight: notificationOverlayMaxHeight,
-                measuredHeightsBySourceChatId: crossChatNotificationMeasuredHeightsBySourceChatId
+                measuredHeightsBySourceChatId: crossChatNotificationMeasuredHeightsBySourceChatId,
+                keyboardOwnershipStore: keyboardOwnershipStore
             )
         })
 
-        rootLayer
-        .ignoresSafeArea(.keyboard)
-        .handleKeyboardScrollCommands(
+        let keyboardRoutedRootLayer: AnyView = AnyView(rootLayer
+            .ignoresSafeArea(.keyboard)
+            .handleKeyboardScrollCommands(
             isEnabled: keyboardScrollShortcutEnabled,
-            hasVisibleNotifications: notificationShortcutVisibleCount > 0,
+            keyboardOwnershipStore: keyboardOwnershipStore,
             onScrollDown: { scrollVisibleBubbleContents(.down) },
             onScrollUp: { scrollVisibleBubbleContents(.up) },
             onScrollChatDown: { scrollChatSurface(.down) },
             onScrollChatUp: { scrollChatSurface(.up) }
-        )
-        .focusedSceneValue(
-            \.crossChatNotificationCommand,
-            crossChatNotificationCommand(
-                viewModel: viewModel,
-                maxContainerHeight: notificationOverlayMaxHeight,
-                replyPinSlotsBySourceChatId: crossChatNotificationReplyPinSlotsBySourceChatId,
-                measuredHeightsBySourceChatId: crossChatNotificationMeasuredHeightsBySourceChatId
             )
         )
+        let notificationCommand = crossChatNotificationCommand(
+            viewModel: viewModel,
+            maxContainerHeight: notificationOverlayMaxHeight,
+            replyPinSlotsBySourceChatId: crossChatNotificationReplyPinSlotsBySourceChatId,
+            measuredHeightsBySourceChatId: crossChatNotificationMeasuredHeightsBySourceChatId,
+            keyboardOwnershipStore: keyboardOwnershipStore
+        )
+
+        let commandFocusedRootLayer: AnyView = AnyView(keyboardRoutedRootLayer.focusedSceneValue(
+            \.crossChatNotificationCommand,
+            notificationCommand
+        ))
+
+        let lifecycleRootLayer: AnyView = AnyView(commandFocusedRootLayer
+        .onReceive(NotificationCenter.default.publisher(for: .clawlineKeyboardCommandIntent)) { notification in
+            guard let intent = notification.object as? KeyboardCommandIntent else { return }
+            handleRootKeyboardCommandIntent(intent, keyboardOwnershipStore: keyboardOwnershipStore)
+        }
         .onChange(of: layoutInputs) { _, _ in
             layoutCoordinator.updateInputs(layoutInputs, metrics: layoutMetrics)
             layoutCoordinator.markInputsChanged()
@@ -1169,7 +1202,8 @@ struct ChatView: View {
                 belowBarGap: belowBarGap,
                 isKeyboardVisible: isKeyboardVisible,
                 layoutKey: layoutKey,
-                streamSelectorMaxHeight: streamSelectorMaxHeight
+                streamSelectorMaxHeight: streamSelectorMaxHeight,
+                keyboardOwnershipStore: keyboardOwnershipStore
             )
         }
         .overlay(alignment: .bottom) {
@@ -1202,7 +1236,9 @@ struct ChatView: View {
             EmptyView()
 #endif
         }
-        .modifier(
+        )
+
+        let promptRootLayer: AnyView = AnyView(lifecycleRootLayer.modifier(
             PromptFocusShortcutModifier(
                 isEnabled: promptFocusShortcutEnabled,
                 hasStreams: !effectiveSessionKeys.isEmpty,
@@ -1215,40 +1251,46 @@ struct ChatView: View {
                 onTextInserted: { text in
                     insertPromptTextFromNoTextOwner(text)
                 },
-                notificationVisibleCount: notificationShortcutVisibleCount
+                notificationVisibleCount: notificationShortcutVisibleCount,
+                keyboardOwnershipStore: keyboardOwnershipStore
             )
-        )
-        .modifier(
+        ))
+
+        let decoratedRootLayer: AnyView = AnyView(promptRootLayer.modifier(
             CancelCurrentPromptConfirmationModifier(
                 isPresented: $isCancelCurrentPromptDialogPresented,
                 anchorFrame: cancelCurrentPromptAnchorFrame,
                 canCancel: cancelCurrentPromptDialogCanCancel,
                 canPresentCommand: viewModel.canCancelCurrentPrompt,
                 onPresentCommand: { presentCancelCurrentPromptDialog() },
-                onConfirm: {
-                    if cancelCurrentPromptRequiresVisibleTyping,
-                       let sessionKey = cancelCurrentPromptSessionKey,
-                       !viewModel.canCancelVisibleTypingPrompt(in: sessionKey) {
-                        cancelCurrentPromptSessionKey = nil
-                        cancelCurrentPromptRequiresVisibleTyping = false
-                        cancelCurrentPromptAnchorFrame = nil
-                        return
-                    }
-                    viewModel.requestCurrentPromptCancellation(sessionKey: cancelCurrentPromptSessionKey)
-                    cancelCurrentPromptSessionKey = nil
-                    cancelCurrentPromptRequiresVisibleTyping = false
-                    cancelCurrentPromptAnchorFrame = nil
-                }
+                onConfirm: { confirmCancelCurrentPromptDialog(viewModel: viewModel) }
             )
-        )
+        ))
 #if DEBUG
-        .overlay(alignment: .topTrailing) {
+        decoratedRootLayer.overlay(alignment: .topTrailing) {
             lifecycleDebugOverlay(
                 viewModel: viewModel,
                 containerHeight: geometry.size.height
             )
         }
+#else
+        decoratedRootLayer
 #endif
+    }
+
+    private func confirmCancelCurrentPromptDialog(viewModel: ChatViewModel) {
+        if cancelCurrentPromptRequiresVisibleTyping,
+           let sessionKey = cancelCurrentPromptSessionKey,
+           !viewModel.canCancelVisibleTypingPrompt(in: sessionKey) {
+            cancelCurrentPromptSessionKey = nil
+            cancelCurrentPromptRequiresVisibleTyping = false
+            cancelCurrentPromptAnchorFrame = nil
+            return
+        }
+        viewModel.requestCurrentPromptCancellation(sessionKey: cancelCurrentPromptSessionKey)
+        cancelCurrentPromptSessionKey = nil
+        cancelCurrentPromptRequiresVisibleTyping = false
+        cancelCurrentPromptAnchorFrame = nil
     }
 
 #if DEBUG
@@ -1523,7 +1565,11 @@ struct ChatView: View {
         maxContainerWidth: CGFloat,
         normalTrailingMargin: CGFloat,
         compactLeadingFitMargin: CGFloat,
-        measuredBubbleHeightsBySourceChatId: Binding<[String: CGFloat]>
+        measuredBubbleHeightsBySourceChatId: Binding<[String: CGFloat]>,
+        actionMenuSourceChatId: Binding<String?>,
+        focusedSourceChatId: Binding<String?>,
+        focusedReplySourceChatId: Binding<String?>,
+        keyboardOwnershipStore: KeyboardOwnershipStore
     ) -> AnyView {
         AnyView(
             HStack(alignment: .top, spacing: 0) {
@@ -1539,6 +1585,10 @@ struct ChatView: View {
                     isCollapsed: $isCrossChatNotificationStackDocked,
                     replyPinSlotsBySourceChatId: $crossChatNotificationReplyPinSlotsBySourceChatId,
                     measuredBubbleHeightsBySourceChatId: measuredBubbleHeightsBySourceChatId,
+                    actionMenuSourceChatId: actionMenuSourceChatId,
+                    focusedSourceChatId: focusedSourceChatId,
+                    focusedReplySourceChatId: focusedReplySourceChatId,
+                    keyboardOwnershipStore: keyboardOwnershipStore,
                     onNavigateToSource: { sourceChatId in
                         selectStream(sourceChatId, source: .programmatic)
                     }
@@ -1561,7 +1611,8 @@ struct ChatView: View {
         viewModel: ChatViewModel,
         maxContainerHeight: CGFloat,
         replyPinSlotsBySourceChatId: [String: Int],
-        measuredHeightsBySourceChatId: [String: CGFloat]
+        measuredHeightsBySourceChatId: [String: CGFloat],
+        keyboardOwnershipStore: KeyboardOwnershipStore
     ) -> CrossChatNotificationCommand? {
         let allBubbles = viewModel.crossChatNotificationBubbles
         let bubbles = CrossChatNotificationOverlay.visibleBubbles(
@@ -1574,31 +1625,47 @@ struct ChatView: View {
         return CrossChatNotificationCommand(
             hasVisibleNotifications: true,
             visibleCount: bubbles.count,
+            keyboardOwnershipStore: keyboardOwnershipStore,
             openActionMenu: { index in
-                guard bubbles.indices.contains(index) else { return }
+                guard bubbles.indices.contains(index),
+                      case .handled(.notificationBubble(_)) = KeyboardCommandRouter
+                        .route(intent: .notificationAssignedOpen(index), store: keyboardOwnershipStore)
+                        .outcome else { return }
                 NotificationCenter.default.post(
                     name: .clawlineOpenNotificationActionMenuCommand,
                     object: index
                 )
             },
             dismiss: { index in
-                guard bubbles.indices.contains(index) else { return }
+                guard bubbles.indices.contains(index),
+                      case .handled(.notificationBubble(_)) = KeyboardCommandRouter
+                        .route(intent: .notificationAssignedDismiss(index), store: keyboardOwnershipStore)
+                        .outcome else { return }
                 NotificationCenter.default.post(
                     name: .clawlineDismissNotificationCommand,
                     object: index
                 )
             },
             reply: { index in
-                guard bubbles.indices.contains(index) else { return }
+                guard bubbles.indices.contains(index),
+                      case .handled(.notificationBubble(_)) = KeyboardCommandRouter
+                        .route(intent: .notificationAssignedReply(index), store: keyboardOwnershipStore)
+                        .outcome else { return }
                 NotificationCenter.default.post(
                     name: .clawlineReplyNotificationCommand,
                     object: index
                 )
             },
             scrollDown: {
+                guard case .handled(.notificationBubble(_)) = KeyboardCommandRouter
+                    .route(intent: .notificationScrollForward, store: keyboardOwnershipStore)
+                    .outcome else { return }
                 NotificationCenter.default.post(name: .clawlineScrollNotificationDownCommand, object: nil)
             },
             scrollUp: {
+                guard case .handled(.notificationBubble(_)) = KeyboardCommandRouter
+                    .route(intent: .notificationScrollBackward, store: keyboardOwnershipStore)
+                    .outcome else { return }
                 NotificationCenter.default.post(name: .clawlineScrollNotificationUpCommand, object: nil)
             },
             dismissAll: {
@@ -1609,10 +1676,23 @@ struct ChatView: View {
         )
     }
 
+    private func handleRootKeyboardCommandIntent(
+        _ intent: KeyboardCommandIntent,
+        keyboardOwnershipStore: KeyboardOwnershipStore
+    ) {
+        if let notificationName = ChatRootKeyboardCommandDispatch.notificationName(
+            for: intent,
+            keyboardOwnershipStore: keyboardOwnershipStore
+        ) {
+            NotificationCenter.default.post(name: notificationName, object: nil)
+        }
+    }
+
     private func notificationKeyboardShortcutView(
         viewModel: ChatViewModel,
         maxContainerHeight: CGFloat,
-        measuredHeightsBySourceChatId: [String: CGFloat]
+        measuredHeightsBySourceChatId: [String: CGFloat],
+        keyboardOwnershipStore: KeyboardOwnershipStore
     ) -> AnyView {
         AnyView(
             CrossChatNotificationKeyboardShortcuts(
@@ -1620,6 +1700,7 @@ struct ChatView: View {
                 maxContainerHeight: maxContainerHeight,
                 replyPinSlotsBySourceChatId: crossChatNotificationReplyPinSlotsBySourceChatId,
                 measuredHeightsBySourceChatId: measuredHeightsBySourceChatId,
+                keyboardOwnershipStore: keyboardOwnershipStore,
                 onDismissAll: {
                     withAnimation(CrossChatNotificationMotion.hide) {
                         viewModel.dismissAllCrossChatNotifications()
@@ -1675,7 +1756,8 @@ struct ChatView: View {
                                  belowBarGap: CGFloat,
                                  isKeyboardVisible: Bool,
                                  layoutKey: ChatLayoutKey,
-                                 streamSelectorMaxHeight: CGFloat) -> some View {
+                                 streamSelectorMaxHeight: CGFloat,
+                                 keyboardOwnershipStore: KeyboardOwnershipStore) -> some View {
         let sessionKey = viewModel.uiSelectedSessionKey
         let effectiveSessionKeys = effectiveStreams.map(\.sessionKey)
         let state = scrollButtonState(for: sessionKey)
@@ -1832,6 +1914,7 @@ struct ChatView: View {
                 },
                 onPasteImages: handlePastedImages,
                 notificationVisibleCount: notificationVisibleCount,
+                keyboardOwnershipStore: keyboardOwnershipStore,
                 isCompact: horizontalSizeClass == .compact
             )
         }
@@ -2255,13 +2338,12 @@ struct ChatView: View {
     }
 
     private var keyboardScrollShortcutEnabled: Bool {
-        ChatKeyboardScrollRouting.isEnabled(
-            platformSupportsKeyboardNavigation: supportsKeyboardNavigationShortcuts,
-            streamPopupRoute: streamPopupRouteController.route,
-            activeSheetPresented: activeSheet != nil || isAttachmentMenuPresented,
-            photosPickerPresented: isPhotosPickerPresented,
-            fileImporterPresented: isFileImporterPresented
-        )
+        supportsKeyboardNavigationShortcuts
+            && streamPopupRouteController.route == .closed
+            && activeSheet == nil
+            && !isAttachmentMenuPresented
+            && !isPhotosPickerPresented
+            && !isFileImporterPresented
     }
 
     private var keyboardNavigationSessionKey: String? {
@@ -2928,7 +3010,7 @@ private extension View {
 
     func handleKeyboardScrollCommands(
         isEnabled: Bool,
-        hasVisibleNotifications: Bool,
+        keyboardOwnershipStore: KeyboardOwnershipStore,
         onScrollDown: @escaping () -> Void,
         onScrollUp: @escaping () -> Void,
         onScrollChatDown: @escaping () -> Void,
@@ -2937,7 +3019,7 @@ private extension View {
         modifier(
             KeyboardScrollCommandModifier(
                 isEnabled: isEnabled,
-                hasVisibleNotifications: hasVisibleNotifications,
+                keyboardOwnershipStore: keyboardOwnershipStore,
                 onScrollDown: onScrollDown,
                 onScrollUp: onScrollUp,
                 onScrollChatDown: onScrollChatDown,
@@ -2945,6 +3027,7 @@ private extension View {
             )
         )
     }
+
 }
 
 private struct PromptFocusCommandModifier: ViewModifier {
@@ -2989,7 +3072,7 @@ private struct StreamNavigationCommandModifier: ViewModifier {
 
 private struct KeyboardScrollCommandModifier: ViewModifier {
     let isEnabled: Bool
-    let hasVisibleNotifications: Bool
+    var keyboardOwnershipStore = KeyboardOwnershipStore()
     let onScrollDown: () -> Void
     let onScrollUp: () -> Void
     let onScrollChatDown: () -> Void
@@ -2998,60 +3081,44 @@ private struct KeyboardScrollCommandModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
             .onReceive(NotificationCenter.default.publisher(for: .clawlineScrollDownCommand)) { _ in
-                switch ChatKeyboardScrollRouting.route(
-                    command: .scrollDown,
-                    isEnabled: isEnabled,
-                    hasVisibleNotifications: hasVisibleNotifications,
-                    firstResponderBlocksKeyboardScroll: UIWindow.clawlineCurrentFirstResponderBlocksKeyboardScroll
-                ) {
-                case .notificationDown:
+                guard isEnabled else { return }
+                switch KeyboardCommandRouter.route(intent: .transcriptBubbleScrollForward, store: keyboardOwnershipStore).outcome {
+                case .handled(.notificationBubble(_)):
                     NotificationCenter.default.post(name: .clawlineScrollNotificationDownCommand, object: nil)
-                case .bubbleDown:
+                case .handled(.transcript):
                     onScrollDown()
                 default:
                     break
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: .clawlineScrollUpCommand)) { _ in
-                switch ChatKeyboardScrollRouting.route(
-                    command: .scrollUp,
-                    isEnabled: isEnabled,
-                    hasVisibleNotifications: hasVisibleNotifications,
-                    firstResponderBlocksKeyboardScroll: UIWindow.clawlineCurrentFirstResponderBlocksKeyboardScroll
-                ) {
-                case .notificationUp:
+                guard isEnabled else { return }
+                switch KeyboardCommandRouter.route(intent: .transcriptBubbleScrollBackward, store: keyboardOwnershipStore).outcome {
+                case .handled(.notificationBubble(_)):
                     NotificationCenter.default.post(name: .clawlineScrollNotificationUpCommand, object: nil)
-                case .bubbleUp:
+                case .handled(.transcript):
                     onScrollUp()
                 default:
                     break
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: .clawlineScrollChatDownCommand)) { _ in
-                switch ChatKeyboardScrollRouting.route(
-                    command: .scrollChatDown,
-                    isEnabled: isEnabled,
-                    hasVisibleNotifications: hasVisibleNotifications,
-                    firstResponderBlocksKeyboardScroll: UIWindow.clawlineCurrentFirstResponderBlocksKeyboardScroll
-                ) {
-                case .notificationDown:
+                guard isEnabled else { return }
+                switch KeyboardCommandRouter.route(intent: .transcriptChatScrollForward, store: keyboardOwnershipStore).outcome {
+                case .handled(.notificationBubble(_)):
                     NotificationCenter.default.post(name: .clawlineScrollNotificationDownCommand, object: nil)
-                case .chatDown:
+                case .handled(.transcript):
                     onScrollChatDown()
                 default:
                     break
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: .clawlineScrollChatUpCommand)) { _ in
-                switch ChatKeyboardScrollRouting.route(
-                    command: .scrollChatUp,
-                    isEnabled: isEnabled,
-                    hasVisibleNotifications: hasVisibleNotifications,
-                    firstResponderBlocksKeyboardScroll: UIWindow.clawlineCurrentFirstResponderBlocksKeyboardScroll
-                ) {
-                case .notificationUp:
+                guard isEnabled else { return }
+                switch KeyboardCommandRouter.route(intent: .transcriptChatScrollBackward, store: keyboardOwnershipStore).outcome {
+                case .handled(.notificationBubble(_)):
                     NotificationCenter.default.post(name: .clawlineScrollNotificationUpCommand, object: nil)
-                case .chatUp:
+                case .handled(.transcript):
                     onScrollChatUp()
                 default:
                     break
@@ -3437,6 +3504,7 @@ private struct PromptFocusShortcutModifier: ViewModifier {
     let onFocusRequested: () -> Void
     let onTextInserted: (String) -> Void
     let notificationVisibleCount: Int
+    let keyboardOwnershipStore: KeyboardOwnershipStore
 
     func body(content: Content) -> some View {
         content.background {
@@ -3446,7 +3514,8 @@ private struct PromptFocusShortcutModifier: ViewModifier {
                 onOpenStreamPopup: onOpenStreamPopup,
                 onFocusRequested: onFocusRequested,
                 onTextInserted: onTextInserted,
-                notificationVisibleCount: notificationVisibleCount
+                notificationVisibleCount: notificationVisibleCount,
+                keyboardOwnershipStore: keyboardOwnershipStore
             )
             .frame(width: 0, height: 0)
             .allowsHitTesting(false)
@@ -3461,6 +3530,7 @@ private struct PromptFocusShortcutHost: UIViewRepresentable {
     let onFocusRequested: () -> Void
     let onTextInserted: (String) -> Void
     let notificationVisibleCount: Int
+    let keyboardOwnershipStore: KeyboardOwnershipStore
 
     func makeUIView(context: Context) -> PromptFocusShortcutView {
         let view = PromptFocusShortcutView()
@@ -3470,6 +3540,7 @@ private struct PromptFocusShortcutHost: UIViewRepresentable {
         view.isShortcutEnabled = isEnabled
         view.hasStreams = hasStreams
         view.notificationVisibleCount = notificationVisibleCount
+        view.keyboardOwnershipStore = keyboardOwnershipStore
         return view
     }
 
@@ -3480,6 +3551,7 @@ private struct PromptFocusShortcutHost: UIViewRepresentable {
         view.isShortcutEnabled = isEnabled
         view.hasStreams = hasStreams
         view.notificationVisibleCount = notificationVisibleCount
+        view.keyboardOwnershipStore = keyboardOwnershipStore
         if isEnabled {
             view.activateWhenReady()
         } else if view.isFirstResponder {
@@ -3495,6 +3567,7 @@ private final class PromptFocusShortcutView: UIView {
     var isShortcutEnabled = false
     var hasStreams = false
     var notificationVisibleCount = 0
+    var keyboardOwnershipStore = KeyboardOwnershipStore()
     private var hasPendingActivationRetry = false
     private static let keyboardSuppressingInputView = PromptFocusShortcutSuppressedInputView()
 
@@ -3575,13 +3648,23 @@ private final class PromptFocusShortcutView: UIView {
     }
 
     @objc private func focusPromptInput(_ sender: UIKeyCommand) {
-        guard isShortcutEnabled else { return }
+        guard isShortcutEnabled,
+              routeOwnsTranscript(intent: .focusPromptInput) else { return }
         onFocusRequested?()
     }
 
     @objc private func openStreamPopup(_ sender: UIKeyCommand) {
-        guard isShortcutEnabled, hasStreams else { return }
+        guard isShortcutEnabled,
+              hasStreams,
+              routeOwnsTranscript(intent: .openStreamPopup) else { return }
         onOpenStreamPopup?()
+    }
+
+    private func routeOwnsTranscript(intent: KeyboardCommandIntent) -> Bool {
+        guard case .handled(.transcript) = KeyboardCommandRouter
+            .route(intent: intent, store: keyboardOwnershipStore)
+            .outcome else { return false }
+        return true
     }
 }
 
@@ -3676,116 +3759,66 @@ enum ChatAppCommandShortcut {
         let action: Action
     }
 
-    private static let navigationKeyCommandSpecs: [KeyCommandSpec] = [
-        KeyCommandSpec(input: "l", modifierFlags: [.command], action: .focusPromptInput),
-        KeyCommandSpec(input: ";", modifierFlags: [.command], action: .openStreamPopup),
-        KeyCommandSpec(input: "h", modifierFlags: [.command, .shift], action: .navigatePreviousStream),
-        KeyCommandSpec(input: "l", modifierFlags: [.command, .shift], action: .navigateNextStream)
-    ]
-
-    private static let transcriptScrollKeyCommandSpecs: [KeyCommandSpec] = [
-        KeyCommandSpec(input: "j", modifierFlags: [.command], action: .scrollDown),
-        KeyCommandSpec(input: "k", modifierFlags: [.command], action: .scrollUp),
-        KeyCommandSpec(input: "j", modifierFlags: [.command, .shift], action: .scrollChatDown),
-        KeyCommandSpec(input: "k", modifierFlags: [.command, .shift], action: .scrollChatUp)
-    ]
-
-    private static let notificationDirectScrollKeyCommandSpecs: [KeyCommandSpec] = [
-        KeyCommandSpec(input: "j", modifierFlags: [.command], action: .scrollNotificationDown),
-        KeyCommandSpec(input: "k", modifierFlags: [.command], action: .scrollNotificationUp),
-        KeyCommandSpec(input: "j", modifierFlags: [.command, .shift], action: .scrollNotificationDown),
-        KeyCommandSpec(input: "k", modifierFlags: [.command, .shift], action: .scrollNotificationUp)
-    ]
-
-    static let baseKeyCommandSpecs = navigationKeyCommandSpecs + transcriptScrollKeyCommandSpecs
+    static let baseKeyCommandSpecs = convert(KeyboardCommandBridge.navigationSpecs + KeyboardCommandBridge.transcriptScrollSpecs)
 
     static let keyCommandSpecs = keyCommandSpecs(notificationVisibleCount: 0)
 
     static func keyCommandSpecs(notificationVisibleCount: Int) -> [KeyCommandSpec] {
-        navigationKeyCommandSpecs
-            + scrollKeyCommandSpecs(notificationVisibleCount: notificationVisibleCount)
-            + notificationNumberKeyCommandSpecs(visibleCount: notificationVisibleCount)
+        convert(KeyboardCommandBridge.appSpecs(notificationVisibleCount: notificationVisibleCount))
     }
 
     static func scrollKeyCommandSpecs(notificationVisibleCount: Int) -> [KeyCommandSpec] {
-        notificationVisibleCount > 0 ? notificationDirectScrollKeyCommandSpecs : transcriptScrollKeyCommandSpecs
+        convert(KeyboardCommandBridge.transcriptScrollSpecs)
     }
 
     static func notificationScrollKeyCommandSpecs(notificationVisibleCount: Int) -> [KeyCommandSpec] {
-        scrollKeyCommandSpecs(notificationVisibleCount: notificationVisibleCount).filter {
-            switch $0.action {
-            case .scrollDown, .scrollUp, .scrollChatDown, .scrollChatUp, .scrollNotificationDown, .scrollNotificationUp:
-                return true
-            default:
-                return false
-            }
-        }
+        scrollKeyCommandSpecs(notificationVisibleCount: notificationVisibleCount)
     }
 
     static func notificationNumberKeyCommandSpecs(visibleCount: Int) -> [KeyCommandSpec] {
-        guard visibleCount > 0 else { return [] }
-        return (0..<min(visibleCount, 10)).flatMap { index in
-        [
-            KeyCommandSpec(input: "\(index)", modifierFlags: [.command], action: .notificationNumber),
-            KeyCommandSpec(input: "\(index)", modifierFlags: [.command, .shift], action: .notificationNumber),
-            KeyCommandSpec(input: "\(index)", modifierFlags: [.command, .shift, .alternate], action: .notificationNumber),
-        ]
-        }
+        convert(KeyboardCommandBridge.notificationNumberSpecs(visibleCount: visibleCount))
     }
 
-    static func prioritizesTextInputBaseCommand(
-        input: String?,
-        modifierFlags: UIKeyModifierFlags,
-        notificationVisibleCount: Int
-    ) -> Bool {
-        guard notificationVisibleCount > 0,
-              let normalizedInput = input?.lowercased() else {
-            return false
-        }
-        let isNotificationNumberShortcut =
-            normalizedInput.count == 1
-            && Int(normalizedInput) != nil
-            && (
-                modifierFlags == [.command]
-                || modifierFlags == [.command, .shift]
-                || modifierFlags == [.command, .shift, .alternate]
+    private static func convert(_ specs: [KeyboardCommandBridge.KeyCommandSpec]) -> [KeyCommandSpec] {
+        specs.compactMap { spec in
+            guard let action = action(for: spec.intent) else { return nil }
+            return KeyCommandSpec(
+                input: spec.input,
+                modifierFlags: spec.modifierFlags,
+                action: action
             )
-        if isNotificationNumberShortcut {
-            return true
         }
-        guard normalizedInput == "j" || normalizedInput == "k" else { return false }
-        return modifierFlags == [.command] || modifierFlags == [.command, .shift]
-    }
-}
-
-enum ChatShortcutRouting {
-    enum Owner: Equatable {
-        case appCommand
-        case noTextResponder
-        case textInput
     }
 
-    static func owner(input: String, modifierFlags: UIKeyModifierFlags) -> Owner {
-        let normalizedInput = input.lowercased()
-        if modifierFlags == [.command], normalizedInput == ";" {
-            return .appCommand
+    private static func action(for intent: KeyboardCommandIntent) -> Action? {
+        switch intent {
+        case .focusPromptInput:
+            return .focusPromptInput
+        case .openStreamPopup:
+            return .openStreamPopup
+        case .navigatePreviousStream:
+            return .navigatePreviousStream
+        case .navigateNextStream:
+            return .navigateNextStream
+        case .transcriptBubbleScrollForward:
+            return .scrollDown
+        case .transcriptBubbleScrollBackward:
+            return .scrollUp
+        case .transcriptChatScrollForward:
+            return .scrollChatDown
+        case .transcriptChatScrollBackward:
+            return .scrollChatUp
+        case .notificationScrollForward:
+            return .scrollNotificationDown
+        case .notificationScrollBackward:
+            return .scrollNotificationUp
+        case .notificationAssignedOpen,
+             .notificationAssignedReply,
+             .notificationAssignedDismiss:
+            return .notificationNumber
+        default:
+            return nil
         }
-        if modifierFlags == [.command], normalizedInput == "l" {
-            return .appCommand
-        }
-        if modifierFlags == [.command, .shift], ["h", "l"].contains(normalizedInput) {
-            return .appCommand
-        }
-        if modifierFlags == [.command], ["j", "k"].contains(normalizedInput) {
-            return .appCommand
-        }
-        if modifierFlags == [.command, .shift], ["j", "k"].contains(normalizedInput) {
-            return .appCommand
-        }
-        if modifierFlags.contains(.command) {
-            return .textInput
-        }
-        return ["/", ";", " ", "\r"].contains(input) ? .noTextResponder : .textInput
     }
 }
 
@@ -3798,135 +3831,104 @@ enum PromptFocusTypingActivation {
     }
 }
 
-enum ChatKeyboardScrollRouting {
-    // T307 keyboard ownership: notification-owned command shortcuts are routed
-    // before transcript scrolling, even when text fields are first responder.
-    enum Command {
-        case scrollDown
-        case scrollUp
-        case scrollChatDown
-        case scrollChatUp
-    }
-
-    enum Route: Equatable {
-        case notificationDown
-        case notificationUp
-        case bubbleDown
-        case bubbleUp
-        case chatDown
-        case chatUp
-        case none
-    }
-
-    static func isEnabled(
-        platformSupportsKeyboardNavigation: Bool,
-        streamPopupRoute: StreamPopupRoute,
-        activeSheetPresented: Bool,
-        photosPickerPresented: Bool,
-        fileImporterPresented: Bool
-    ) -> Bool {
-        platformSupportsKeyboardNavigation
-            && streamPopupRoute == .closed
-            && !activeSheetPresented
-            && !photosPickerPresented
-            && !fileImporterPresented
-    }
-
-    static func route(
-        command: Command,
-        isEnabled: Bool,
-        hasVisibleNotifications: Bool,
-        firstResponderBlocksKeyboardScroll: Bool
-    ) -> Route {
-        guard isEnabled else { return .none }
-        if hasVisibleNotifications {
-            switch command {
-            case .scrollDown, .scrollChatDown:
-                return .notificationDown
-            case .scrollUp, .scrollChatUp:
-                return .notificationUp
-            }
+enum ChatRootKeyboardCommandDispatch {
+    static func notificationName(
+        for intent: KeyboardCommandIntent,
+        keyboardOwnershipStore: KeyboardOwnershipStore
+    ) -> Notification.Name? {
+        let route = KeyboardCommandRouter.route(intent: intent, store: keyboardOwnershipStore)
+        switch route.outcome {
+        case .handled(.transcript):
+            return transcriptNotificationName(for: intent)
+        case .handled(.notificationBubble(_)):
+            return notificationScrollName(for: intent)
+        default:
+            return nil
         }
-        guard !firstResponderBlocksKeyboardScroll else { return .none }
-        switch command {
-        case .scrollDown:
-            return .bubbleDown
-        case .scrollUp:
-            return .bubbleUp
-        case .scrollChatDown:
-            return .chatDown
-        case .scrollChatUp:
-            return .chatUp
+    }
+
+    private static func transcriptNotificationName(for intent: KeyboardCommandIntent) -> Notification.Name? {
+        switch intent {
+        case .focusPromptInput:
+            return .clawlineFocusPromptInputCommand
+        case .openStreamPopup:
+            return .clawlineOpenStreamPopupCommand
+        case .navigatePreviousStream:
+            return .clawlineNavigateToPreviousStreamCommand
+        case .navigateNextStream:
+            return .clawlineNavigateToNextStreamCommand
+        case .transcriptBubbleScrollForward:
+            return .clawlineScrollDownCommand
+        case .transcriptBubbleScrollBackward:
+            return .clawlineScrollUpCommand
+        case .transcriptChatScrollForward:
+            return .clawlineScrollChatDownCommand
+        case .transcriptChatScrollBackward:
+            return .clawlineScrollChatUpCommand
+        default:
+            return nil
+        }
+    }
+
+    private static func notificationScrollName(for intent: KeyboardCommandIntent) -> Notification.Name? {
+        switch intent {
+        case .transcriptBubbleScrollForward, .transcriptChatScrollForward:
+            return .clawlineScrollNotificationDownCommand
+        case .transcriptBubbleScrollBackward, .transcriptChatScrollBackward:
+            return .clawlineScrollNotificationUpCommand
+        default:
+            return nil
         }
     }
 }
 
 extension UIResponder {
     @objc func clawlineFocusPromptInputCommand(_ sender: UIKeyCommand) {
-        NotificationCenter.default.post(name: .clawlineFocusPromptInputCommand, object: nil)
+        NotificationCenter.default.post(name: .clawlineKeyboardCommandIntent, object: KeyboardCommandBridge.intent(input: sender.input, modifierFlags: sender.modifierFlags))
     }
 
     @objc func clawlineOpenStreamPopupCommand(_ sender: UIKeyCommand) {
-        NotificationCenter.default.post(name: .clawlineOpenStreamPopupCommand, object: nil)
+        NotificationCenter.default.post(name: .clawlineKeyboardCommandIntent, object: KeyboardCommandBridge.intent(input: sender.input, modifierFlags: sender.modifierFlags))
     }
 
     @objc func clawlineNavigateToPreviousStreamCommand(_ sender: UIKeyCommand) {
-        NotificationCenter.default.post(name: .clawlineNavigateToPreviousStreamCommand, object: nil)
+        NotificationCenter.default.post(name: .clawlineKeyboardCommandIntent, object: KeyboardCommandBridge.intent(input: sender.input, modifierFlags: sender.modifierFlags))
     }
 
     @objc func clawlineNavigateToNextStreamCommand(_ sender: UIKeyCommand) {
-        NotificationCenter.default.post(name: .clawlineNavigateToNextStreamCommand, object: nil)
+        NotificationCenter.default.post(name: .clawlineKeyboardCommandIntent, object: KeyboardCommandBridge.intent(input: sender.input, modifierFlags: sender.modifierFlags))
     }
 
     @objc func clawlineScrollDownCommand(_ sender: UIKeyCommand) {
-        NotificationCenter.default.post(name: .clawlineScrollDownCommand, object: nil)
+        NotificationCenter.default.post(name: .clawlineKeyboardCommandIntent, object: KeyboardCommandBridge.intent(input: sender.input, modifierFlags: sender.modifierFlags))
     }
 
     @objc func clawlineScrollUpCommand(_ sender: UIKeyCommand) {
-        NotificationCenter.default.post(name: .clawlineScrollUpCommand, object: nil)
+        NotificationCenter.default.post(name: .clawlineKeyboardCommandIntent, object: KeyboardCommandBridge.intent(input: sender.input, modifierFlags: sender.modifierFlags))
     }
 
     @objc func clawlineScrollChatDownCommand(_ sender: UIKeyCommand) {
-        NotificationCenter.default.post(name: .clawlineScrollChatDownCommand, object: nil)
+        NotificationCenter.default.post(name: .clawlineKeyboardCommandIntent, object: KeyboardCommandBridge.intent(input: sender.input, modifierFlags: sender.modifierFlags))
     }
 
     @objc func clawlineScrollChatUpCommand(_ sender: UIKeyCommand) {
-        NotificationCenter.default.post(name: .clawlineScrollChatUpCommand, object: nil)
+        NotificationCenter.default.post(name: .clawlineKeyboardCommandIntent, object: KeyboardCommandBridge.intent(input: sender.input, modifierFlags: sender.modifierFlags))
     }
 
     @objc func clawlineScrollNotificationDownCommand(_ sender: UIKeyCommand) {
-        NotificationCenter.default.post(name: .clawlineScrollNotificationDownCommand, object: nil)
+        NotificationCenter.default.post(name: .clawlineKeyboardCommandIntent, object: KeyboardCommandBridge.intent(input: sender.input, modifierFlags: sender.modifierFlags))
     }
 
     @objc func clawlineScrollNotificationUpCommand(_ sender: UIKeyCommand) {
-        NotificationCenter.default.post(name: .clawlineScrollNotificationUpCommand, object: nil)
+        NotificationCenter.default.post(name: .clawlineKeyboardCommandIntent, object: KeyboardCommandBridge.intent(input: sender.input, modifierFlags: sender.modifierFlags))
     }
 
     @objc func clawlineNotificationNumberCommand(_ sender: UIKeyCommand) {
-        guard let input = sender.input,
-              input.count == 1,
-              let index = Int(input) else {
-            return
-        }
-        switch sender.modifierFlags.intersection([.command, .shift, .alternate, .control]) {
-        case [.command]:
-            NotificationCenter.default.post(
-                name: .clawlineOpenNotificationActionMenuCommand,
-                object: index
-            )
-        case [.command, .shift]:
-            NotificationCenter.default.post(
-                name: .clawlineReplyNotificationCommand,
-                object: index
-            )
-        case [.command, .shift, .alternate]:
-            NotificationCenter.default.post(
-                name: .clawlineDismissNotificationCommand,
-                object: index
-            )
-        default:
-            break
-        }
+        guard let intent = KeyboardCommandBridge.intent(
+            input: sender.input,
+            modifierFlags: sender.modifierFlags
+        ) else { return }
+        NotificationCenter.default.post(name: .clawlineKeyboardCommandIntent, object: intent)
     }
 }
 
@@ -5315,10 +5317,12 @@ private struct CrossChatNotificationOverlay: View {
     @Binding var isCollapsed: Bool
     @Binding var replyPinSlotsBySourceChatId: [String: Int]
     @Binding var measuredBubbleHeightsBySourceChatId: [String: CGFloat]
+    @Binding var actionMenuSourceChatId: String?
+    @Binding var focusedSourceChatId: String?
+    @Binding var focusedReplySourceChatId: String?
+    var keyboardOwnershipStore = KeyboardOwnershipStore()
     let onNavigateToSource: (String) -> Void
     @State private var showShortcutLabels = CrossChatShortcutLabelAvailability.current
-    @State private var activeScrollSourceChatId: String?
-    @State private var actionMenuSourceChatId: String?
     @State private var actionMenuSelection: CrossChatNotificationActionMenuItem = .goToChat
     @State private var scrollViewsBySourceChatId: [String: WeakScrollViewBox] = [:]
     @State private var previewingCollapsedSourceChatIds: Set<String> = []
@@ -5471,6 +5475,14 @@ private struct CrossChatNotificationOverlay: View {
         }
     }
 
+    private var visibleSourceChatIds: [String] {
+        visibleBubbles.map(\.sourceChatId)
+    }
+
+    private var visibleReplySignature: [String] {
+        visibleBubbles.map { "\($0.sourceChatId):\($0.isReplying)" }
+    }
+
     private var allBubbleActivitySignaturesBySourceChatId: [String: String] {
         Dictionary(
             uniqueKeysWithValues: viewModel.crossChatNotificationBubbles.map { bubble in
@@ -5541,6 +5553,7 @@ private struct CrossChatNotificationOverlay: View {
                                 animateNotificationResize {
                                     if bubble.isReplying {
                                         unpinReply(sourceChatId: bubble.sourceChatId)
+                                        clearReplyFocus(sourceChatId: bubble.sourceChatId)
                                     } else {
                                         pinReply(sourceChatId: bubble.sourceChatId)
                                     }
@@ -5550,6 +5563,7 @@ private struct CrossChatNotificationOverlay: View {
                             onCancelReply: {
                                 animateNotificationResize {
                                     unpinReply(sourceChatId: bubble.sourceChatId)
+                                    clearReplyFocus(sourceChatId: bubble.sourceChatId)
                                     viewModel.closeCrossChatNotificationReply(sourceChatId: bubble.sourceChatId)
                                 }
                             },
@@ -5559,6 +5573,7 @@ private struct CrossChatNotificationOverlay: View {
                             onNavigate: {
                                 closeActionMenu()
                                 unpinReply(sourceChatId: bubble.sourceChatId)
+                                clearReplyFocus(sourceChatId: bubble.sourceChatId)
                                 onNavigateToSource(bubble.sourceChatId)
                             },
                             onSendReply: {
@@ -5573,10 +5588,18 @@ private struct CrossChatNotificationOverlay: View {
                                 viewModel.reconnect()
                             },
                             onActivate: {
-                                activeScrollSourceChatId = bubble.sourceChatId
+                                focusedSourceChatId = bubble.sourceChatId
+                            },
+                            onReplyFocusChange: { isFocused in
+                                if isFocused {
+                                    focusedReplySourceChatId = bubble.sourceChatId
+                                } else {
+                                    clearReplyFocus(sourceChatId: bubble.sourceChatId)
+                                }
                             },
                             isActionMenuOpen: actionMenuSourceChatId == bubble.sourceChatId,
                             actionMenuSelection: actionMenuSelection,
+                            keyboardOwnershipStore: keyboardOwnershipStore,
                             onActionMenuSelectionChange: { selection in
                                 actionMenuSelection = selection
                             },
@@ -5668,31 +5691,38 @@ private struct CrossChatNotificationOverlay: View {
             }
 #endif
             .onReceive(NotificationCenter.default.publisher(for: .clawlineScrollNotificationDownCommand)) { _ in
-                scrollActiveNotification(.down)
+                guard let sourceChatId = routedNotificationSourceChatId(for: .notificationScrollForward) else { return }
+                scrollNotification(sourceChatId: sourceChatId, direction: .down)
             }
             .onReceive(NotificationCenter.default.publisher(for: .clawlineScrollNotificationUpCommand)) { _ in
-                scrollActiveNotification(.up)
+                guard let sourceChatId = routedNotificationSourceChatId(for: .notificationScrollBackward) else { return }
+                scrollNotification(sourceChatId: sourceChatId, direction: .up)
             }
             .onReceive(NotificationCenter.default.publisher(for: .clawlineToggleNotificationDockCommand)) { _ in
+                guard routedNotificationSourceChatId(for: .notificationToggleDock) != nil else { return }
                 toggleDock()
             }
             .onReceive(NotificationCenter.default.publisher(for: .clawlineOpenNotificationActionMenuCommand)) { notification in
                 guard let index = notification.object as? Int,
                       visibleBubbles.indices.contains(index) else { return }
+                guard let sourceChatId = routedNotificationSourceChatId(for: .notificationAssignedOpen(index)),
+                      visibleBubbles.contains(where: { $0.sourceChatId == sourceChatId }) else { return }
                 if isCollapsed {
                     restoreDock()
                 }
                 actionMenuSelection = .goToChat
-                actionMenuSourceChatId = visibleBubbles[index].sourceChatId
+                actionMenuSourceChatId = sourceChatId
             }
             .onReceive(NotificationCenter.default.publisher(for: .clawlineReplyNotificationCommand)) { notification in
                 guard let index = notification.object as? Int,
                       visibleBubbles.indices.contains(index) else { return }
+                guard let sourceChatId = routedNotificationSourceChatId(for: .notificationAssignedReply(index)),
+                      let bubble = visibleBubbles.first(where: { $0.sourceChatId == sourceChatId }) else { return }
                 closeActionMenu()
                 animateNotificationResize {
-                    let bubble = visibleBubbles[index]
                     if bubble.isReplying {
                         unpinReply(sourceChatId: bubble.sourceChatId)
+                        clearReplyFocus(sourceChatId: bubble.sourceChatId)
                         viewModel.closeCrossChatNotificationReply(sourceChatId: bubble.sourceChatId)
                     } else {
                         pinReply(sourceChatId: bubble.sourceChatId)
@@ -5703,24 +5733,35 @@ private struct CrossChatNotificationOverlay: View {
             .onReceive(NotificationCenter.default.publisher(for: .clawlineDismissNotificationCommand)) { notification in
                 guard let index = notification.object as? Int,
                       visibleBubbles.indices.contains(index) else { return }
+                guard let sourceChatId = routedNotificationSourceChatId(for: .notificationAssignedDismiss(index)),
+                      visibleBubbles.contains(where: { $0.sourceChatId == sourceChatId }) else { return }
                 closeActionMenu()
-                unpinReply(sourceChatId: visibleBubbles[index].sourceChatId)
-                dismissNotification(sourceChatId: visibleBubbles[index].sourceChatId)
+                unpinReply(sourceChatId: sourceChatId)
+                dismissNotification(sourceChatId: sourceChatId)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .clawlineKeyboardCommandIntent)) { notification in
+                guard let intent = notification.object as? KeyboardCommandIntent else { return }
+                handleKeyboardCommandIntent(intent)
             }
             .onChange(of: visibleCapacity) { _, newCapacity in
                 viewModel.closeOverflowingCrossChatNotificationReplies(visibleSourceChatIds: Set(visibleBubbles.map(\.sourceChatId)))
             }
-            .onChange(of: visibleBubbles.map(\.sourceChatId)) { _, sourceChatIds in
-                if let actionMenuSourceChatId, !sourceChatIds.contains(actionMenuSourceChatId) {
+            .onChange(of: visibleSourceChatIds) { _, sourceChatIds in
+                let sourceChatIdSet = Set(sourceChatIds)
+                if let actionMenuSourceChatId, !sourceChatIdSet.contains(actionMenuSourceChatId) {
                     closeActionMenu()
                 }
-                pruneGestureAxisLocks(visibleSourceChatIds: Set(sourceChatIds))
+                if let focusedSourceChatId, !sourceChatIdSet.contains(focusedSourceChatId) {
+                    self.focusedSourceChatId = nil
+                }
+                if let focusedReplySourceChatId, !sourceChatIdSet.contains(focusedReplySourceChatId) {
+                    self.focusedReplySourceChatId = nil
+                }
+                pruneGestureAxisLocks(visibleSourceChatIds: sourceChatIdSet)
             }
-            .onChange(of: visibleBubbles.map { "\($0.sourceChatId):\($0.isReplying)" }) { _, _ in
-                if let actionMenuSourceChatId,
-                   visibleBubbles.first(where: { $0.sourceChatId == actionMenuSourceChatId })?.isReplying == true {
-                    closeActionMenu()
-                }
+            .onChange(of: visibleReplySignature) { _, _ in
+                closeActionMenuIfSourceIsReplying()
+                clearReplyFocusIfClosed()
                 updateReplyPins()
             }
             .onChange(of: viewModel.crossChatNotificationBubbles.map { bubble in
@@ -5858,6 +5899,27 @@ private struct CrossChatNotificationOverlay: View {
         }
     }
 
+    private func closeActionMenuIfSourceIsReplying() {
+        guard let actionMenuSourceChatId,
+              visibleBubbles.first(where: { $0.sourceChatId == actionMenuSourceChatId })?.isReplying == true else {
+            return
+        }
+        closeActionMenu()
+    }
+
+    private func clearReplyFocus(sourceChatId: String) {
+        if focusedReplySourceChatId == sourceChatId {
+            focusedReplySourceChatId = nil
+        }
+    }
+
+    private func clearReplyFocusIfClosed() {
+        guard let focusedReplySourceChatId else { return }
+        if visibleBubbles.first(where: { $0.sourceChatId == focusedReplySourceChatId })?.isReplying != true {
+            self.focusedReplySourceChatId = nil
+        }
+    }
+
     private func pinReply(sourceChatId: String) {
         let maxSlot = max(0, visibleCapacity - 1)
         let currentSlot = visibleBubbles.firstIndex(where: { $0.sourceChatId == sourceChatId }) ?? 0
@@ -5910,6 +5972,7 @@ private struct CrossChatNotificationOverlay: View {
             CrossChatNotificationActionMenu(
                 assignedNumber: actionMenuBubble.index,
                 visibleNotificationCount: visibleBubbles.count,
+                keyboardOwnershipStore: keyboardOwnershipStore,
                 selection: actionMenuSelection,
                 onSelectionChange: { selection in
                     actionMenuSelection = selection
@@ -5934,11 +5997,8 @@ private struct CrossChatNotificationOverlay: View {
         }
     }
 
-    private func scrollActiveNotification(_ direction: ChatScrollPageDirection) {
-        let visibleSourceChatIds = visibleBubbles.map(\.sourceChatId)
-        guard let sourceChatId = activeScrollSourceChatId.flatMap({ visibleSourceChatIds.contains($0) ? $0 : nil })
-                ?? visibleSourceChatIds.first,
-              let scrollView = scrollViewsBySourceChatId[sourceChatId]?.scrollView else {
+    private func scrollNotification(sourceChatId: String, direction: ChatScrollPageDirection) {
+        guard let scrollView = scrollViewsBySourceChatId[sourceChatId]?.scrollView else {
             return
         }
 
@@ -5954,6 +6014,67 @@ private struct CrossChatNotificationOverlay: View {
         let clampedY = max(minY, min(targetY, maxY))
         guard abs(scrollView.contentOffset.y - clampedY) > 0.5 else { return }
         scrollView.setContentOffset(CGPoint(x: scrollView.contentOffset.x, y: clampedY), animated: true)
+    }
+
+    private func routedNotificationSourceChatId(for intent: KeyboardCommandIntent) -> String? {
+        if case .handled(.notificationBubble(let sourceChatId)) = KeyboardCommandRouter
+            .route(intent: intent, store: keyboardOwnershipStore)
+            .outcome {
+            return sourceChatId
+        }
+        return nil
+    }
+
+    private func handleKeyboardCommandIntent(_ intent: KeyboardCommandIntent) {
+        let route = KeyboardCommandRouter.route(intent: intent, store: keyboardOwnershipStore)
+        switch intent {
+        case .notificationAssignedOpen(let index):
+            guard case .handled(.notificationBubble(let sourceChatId)) = route.outcome else { return }
+            guard visibleBubbles.indices.contains(index),
+                  visibleBubbles.contains(where: { $0.sourceChatId == sourceChatId }) else { return }
+            if isCollapsed {
+                restoreDock()
+            }
+            actionMenuSelection = .goToChat
+            actionMenuSourceChatId = sourceChatId
+        case .notificationAssignedReply(let index):
+            guard case .handled(.notificationBubble(let sourceChatId)) = route.outcome else { return }
+            guard visibleBubbles.indices.contains(index),
+                  let bubble = visibleBubbles.first(where: { $0.sourceChatId == sourceChatId }) else { return }
+            closeActionMenu()
+            animateNotificationResize {
+                if bubble.isReplying {
+                    unpinReply(sourceChatId: bubble.sourceChatId)
+                    clearReplyFocus(sourceChatId: bubble.sourceChatId)
+                    viewModel.closeCrossChatNotificationReply(sourceChatId: bubble.sourceChatId)
+                } else {
+                    pinReply(sourceChatId: bubble.sourceChatId)
+                    viewModel.openCrossChatNotificationReply(sourceChatId: bubble.sourceChatId)
+                }
+            }
+        case .notificationAssignedDismiss(let index):
+            guard case .handled(.notificationBubble(let sourceChatId)) = route.outcome else { return }
+            guard visibleBubbles.indices.contains(index),
+                  visibleBubbles.contains(where: { $0.sourceChatId == sourceChatId }) else { return }
+            closeActionMenu()
+            unpinReply(sourceChatId: sourceChatId)
+            clearReplyFocus(sourceChatId: sourceChatId)
+            dismissNotification(sourceChatId: sourceChatId)
+        case .notificationDismissAll:
+            guard case .handled(.notificationBubble(_)) = route.outcome else { return }
+            dismissAllNotifications()
+        case .notificationToggleDock:
+            guard case .handled(.notificationBubble(_)) = route.outcome else { return }
+            toggleDock()
+        case .notificationScrollForward:
+            guard case .handled(.notificationBubble(let sourceChatId)) = route.outcome else { return }
+            scrollNotification(sourceChatId: sourceChatId, direction: .down)
+        case .notificationScrollBackward:
+            guard case .handled(.notificationBubble(let sourceChatId)) = route.outcome else { return }
+            scrollNotification(sourceChatId: sourceChatId, direction: .up)
+        default:
+            break
+        }
     }
 
     private func handleBubbleDragChanged(_ value: DragGesture.Value, sourceChatId: String) {
@@ -6110,11 +6231,13 @@ private struct CrossChatNotificationOverlay: View {
         switch item {
         case .goToChat:
             unpinReply(sourceChatId: bubble.sourceChatId)
+            clearReplyFocus(sourceChatId: bubble.sourceChatId)
             onNavigateToSource(bubble.sourceChatId)
         case .reply:
             animateNotificationResize {
                 if bubble.isReplying {
                     unpinReply(sourceChatId: bubble.sourceChatId)
+                    clearReplyFocus(sourceChatId: bubble.sourceChatId)
                     viewModel.closeCrossChatNotificationReply(sourceChatId: bubble.sourceChatId)
                 } else {
                     pinReply(sourceChatId: bubble.sourceChatId)
@@ -6123,6 +6246,7 @@ private struct CrossChatNotificationOverlay: View {
             }
         case .dismiss:
             unpinReply(sourceChatId: bubble.sourceChatId)
+            clearReplyFocus(sourceChatId: bubble.sourceChatId)
             dismissNotification(sourceChatId: bubble.sourceChatId)
         }
     }
@@ -6134,12 +6258,16 @@ private struct CrossChatNotificationOverlay: View {
     }
 
     private func dismissNotification(sourceChatId: String) {
+        clearReplyFocus(sourceChatId: sourceChatId)
         withAnimation(Self.hideAnimation) {
             viewModel.dismissCrossChatNotification(sourceChatId: sourceChatId)
         }
     }
 
     private func dismissAllNotifications() {
+        focusedReplySourceChatId = nil
+        focusedSourceChatId = nil
+        closeActionMenu()
         withAnimation(Self.hideAnimation) {
             viewModel.dismissAllCrossChatNotifications()
         }
@@ -6255,8 +6383,10 @@ struct CrossChatNotificationBubbleView: View {
     let onCancelSend: () -> Void
     let onReconnect: () -> Void
     let onActivate: () -> Void
+    let onReplyFocusChange: (Bool) -> Void
     let isActionMenuOpen: Bool
     let actionMenuSelection: CrossChatNotificationActionMenuItem
+    var keyboardOwnershipStore = KeyboardOwnershipStore()
     let onActionMenuSelectionChange: (CrossChatNotificationActionMenuItem) -> Void
     let onActionMenuAction: (CrossChatNotificationActionMenuItem) -> Void
     let onRegisterScrollView: (UIScrollView?) -> Void
@@ -6499,14 +6629,17 @@ struct CrossChatNotificationBubbleView: View {
             if bubble.isReplying {
                 HStack(alignment: .bottom, spacing: 8) {
                     NotificationReplyTextInput(
+                        sourceChatId: bubble.sourceChatId,
                         text: $replyDraft,
                         measuredHeight: $measuredReplyFieldHeight,
                         font: replyFieldFont,
                         textColor: UIColor.label,
                         tintColor: UIColor(notificationAccentColor),
                         visibleNotificationCount: visibleNotificationCount,
+                        keyboardOwnershipStore: keyboardOwnershipStore,
                         onSubmit: activateReplySendControl,
-                        onCancel: onCancelReply
+                        onCancel: onCancelReply,
+                        onFocusChange: onReplyFocusChange
                     )
                         .frame(height: replyFieldHeight)
                         .padding(.horizontal, 10)
@@ -6752,19 +6885,24 @@ enum NotificationReplyTextInputConfiguration {
 }
 
 struct NotificationReplyTextInput: UIViewRepresentable {
+    let sourceChatId: String
     @Binding var text: String
     @Binding var measuredHeight: CGFloat
     let font: UIFont
     let textColor: UIColor
     let tintColor: UIColor
     let visibleNotificationCount: Int
+    var keyboardOwnershipStore = KeyboardOwnershipStore()
     let onSubmit: () -> Void
     let onCancel: () -> Void
+    let onFocusChange: (Bool) -> Void
 
     func makeUIView(context: Context) -> NotificationReplyUITextView {
         let textView = NotificationReplyUITextView()
         textView.delegate = context.coordinator
         textView.onCancel = onCancel
+        textView.sourceChatId = sourceChatId
+        textView.keyboardOwnershipStore = keyboardOwnershipStore
         textView.wantsInitialFocus = true
         NotificationReplyTextInputConfiguration.configure(
             textView,
@@ -6780,6 +6918,8 @@ struct NotificationReplyTextInput: UIViewRepresentable {
     func updateUIView(_ textView: NotificationReplyUITextView, context: Context) {
         context.coordinator.parent = self
         textView.onCancel = onCancel
+        textView.sourceChatId = sourceChatId
+        textView.keyboardOwnershipStore = keyboardOwnershipStore
         NotificationReplyTextInputConfiguration.configure(
             textView,
             font: font,
@@ -6827,6 +6967,14 @@ struct NotificationReplyTextInput: UIViewRepresentable {
             updateHeight(for: textView)
         }
 
+        func textViewDidBeginEditing(_ textView: UITextView) {
+            parent.onFocusChange(true)
+        }
+
+        func textViewDidEndEditing(_ textView: UITextView) {
+            parent.onFocusChange(false)
+        }
+
         func textView(
             _ textView: UITextView,
             shouldChangeTextIn range: NSRange,
@@ -6836,7 +6984,11 @@ struct NotificationReplyTextInput: UIViewRepresentable {
                 // UIKit's software-keyboard text delegate reports only the replacement text,
                 // so Return and software Shift-Return are not distinguishable here. Hardware
                 // modified Return is handled by keyCommands before this submit path.
-                parent.onSubmit()
+                if parent.isOwnedReplyRoute(.textSubmit) {
+                    parent.onSubmit()
+                } else {
+                    return true
+                }
                 return false
             }
             return true
@@ -6862,12 +7014,24 @@ struct NotificationReplyTextInput: UIViewRepresentable {
             }
         }
     }
+
+    func isOwnedReplyRoute(_ intent: KeyboardCommandIntent) -> Bool {
+        if case .handled(.notificationReply(let routedSourceChatId)) = KeyboardCommandRouter
+            .route(intent: intent, store: keyboardOwnershipStore)
+            .outcome,
+           routedSourceChatId == sourceChatId {
+            return true
+        }
+        return false
+    }
 }
 
 final class NotificationReplyUITextView: UITextView {
+    var sourceChatId = ""
     var onCancel: (() -> Void)?
     var wantsInitialFocus = false
     var visibleNotificationCount = 0
+    var keyboardOwnershipStore = KeyboardOwnershipStore()
 
     func enforceSendReturnKey() {
         returnKeyType = .send
@@ -6880,11 +7044,13 @@ final class NotificationReplyUITextView: UITextView {
         let prioritizedNotificationCommands = ChatAppCommandShortcut
             .keyCommandSpecs(notificationVisibleCount: visibleNotificationCount)
             .filter {
-                ChatAppCommandShortcut.prioritizesTextInputBaseCommand(
-                    input: $0.input,
-                    modifierFlags: $0.modifierFlags,
-                    notificationVisibleCount: visibleNotificationCount
-                )
+                guard let intent = KeyboardCommandBridge.intent(input: $0.input, modifierFlags: $0.modifierFlags) else {
+                    return false
+                }
+                guard case .handled(.notificationBubble(_)) = KeyboardCommandRouter
+                    .route(intent: intent, store: keyboardOwnershipStore)
+                    .outcome else { return false }
+                return true
             }
             .map {
                 UIKeyCommand(
@@ -6898,12 +7064,14 @@ final class NotificationReplyUITextView: UITextView {
             modifierFlags: [],
             action: #selector(didPressEscape)
         )
-        let modifiedReturnCommands = [
-            UIKeyCommand(input: "\r", modifierFlags: [.control], action: #selector(didPressModifiedReturn)),
-            UIKeyCommand(input: "\n", modifierFlags: [.control], action: #selector(didPressModifiedReturn)),
-            UIKeyCommand(input: "\r", modifierFlags: [.shift], action: #selector(didPressModifiedReturn)),
-            UIKeyCommand(input: "\n", modifierFlags: [.shift], action: #selector(didPressModifiedReturn))
-        ]
+        let modifiedReturnCommands = KeyboardCommandBridge.textInputSpecs.compactMap { spec -> UIKeyCommand? in
+            guard spec.intent == .textModifiedNewline else { return nil }
+            return UIKeyCommand(
+                input: spec.input,
+                modifierFlags: spec.modifierFlags,
+                action: #selector(didPressModifiedReturn)
+            )
+        }
         return prioritizedNotificationCommands + [escapeCommand] + modifiedReturnCommands + (super.keyCommands ?? [])
     }
 
@@ -6932,10 +7100,18 @@ final class NotificationReplyUITextView: UITextView {
     }
 
     @objc private func didPressEscape(_ sender: UIKeyCommand) {
+        guard case .handled(.notificationReply(let routedSourceChatId)) = KeyboardCommandRouter
+            .route(intent: .textCancel, store: keyboardOwnershipStore)
+            .outcome,
+              routedSourceChatId == sourceChatId else { return }
         onCancel?()
     }
 
     @objc private func didPressModifiedReturn(_ sender: UIKeyCommand) {
+        guard case .handled(.notificationReply(let routedSourceChatId)) = KeyboardCommandRouter
+            .route(intent: .textModifiedNewline, store: keyboardOwnershipStore)
+            .outcome,
+              routedSourceChatId == sourceChatId else { return }
         insertPlainText("\n")
     }
 
@@ -6948,87 +7124,20 @@ final class NotificationReplyUITextView: UITextView {
     }
 }
 
-enum CrossChatNotificationKeyPrecedence {
-    enum Action: Equatable {
-        case openMenu(Int)
-        case reply(Int)
-        case dismiss(Int)
-        case scrollDown
-        case scrollUp
-    }
-
-    static func replyFieldAction(
-        characters: String,
-        modifiers: EventModifiers,
-        visibleNotificationCount: Int
-    ) -> Action? {
-        guard characters.count == 1 else { return nil }
-        if let index = shortcutNumberIndex(
-            characters,
-            visibleNotificationCount: visibleNotificationCount
-        ) {
-            if modifiers == .command {
-                return .openMenu(index)
-            }
-            if modifiers == [.command, .shift] {
-                return .reply(index)
-            }
-            if modifiers == [.command, .shift, .option] {
-                return .dismiss(index)
-            }
+private extension UIKeyModifierFlags {
+    init(eventModifiers: EventModifiers) {
+        self.init()
+        if eventModifiers.contains(.command) {
+            insert(.command)
         }
-
-        guard modifiers == .command || modifiers == [.command, .shift] else {
-            return nil
+        if eventModifiers.contains(.shift) {
+            insert(.shift)
         }
-        switch characters.lowercased() {
-        case "j":
-            return .scrollDown
-        case "k":
-            return .scrollUp
-        default:
-            return nil
+        if eventModifiers.contains(.option) {
+            insert(.alternate)
         }
-    }
-
-    private static func shortcutNumberIndex(
-        _ characters: String,
-        visibleNotificationCount: Int
-    ) -> Int? {
-        let cappedVisibleCount = min(max(0, visibleNotificationCount), 10)
-        guard cappedVisibleCount > 0 else { return nil }
-        for index in 0..<cappedVisibleCount {
-            if characters == "\(index)" || characters == shiftedShortcutCharacter(index) {
-                return index
-            }
-        }
-        return nil
-    }
-
-    private static func shiftedShortcutCharacter(_ assignedNumber: Int) -> String {
-        switch assignedNumber {
-        case 0:
-            return ")"
-        case 1:
-            return "!"
-        case 2:
-            return "@"
-        case 3:
-            return "#"
-        case 4:
-            return "$"
-        case 5:
-            return "%"
-        case 6:
-            return "^"
-        case 7:
-            return "&"
-        case 8:
-            return "*"
-        case 9:
-            return "("
-        default:
-            return ""
+        if eventModifiers.contains(.control) {
+            insert(.control)
         }
     }
 }
@@ -7075,6 +7184,7 @@ private struct CrossChatNotificationActionMenu: View {
 
     let assignedNumber: Int
     let visibleNotificationCount: Int
+    let keyboardOwnershipStore: KeyboardOwnershipStore
     let selection: CrossChatNotificationActionMenuItem
     let onSelectionChange: (CrossChatNotificationActionMenuItem) -> Void
     let onActivate: (CrossChatNotificationActionMenuItem) -> Void
@@ -7086,6 +7196,14 @@ private struct CrossChatNotificationActionMenu: View {
             return .system(size: pointSize, weight: weight)
         }
         return .system(size: pointSize)
+    }
+
+    private func routeMenuIntent(_ intent: KeyboardCommandIntent) -> Bool {
+        guard assignedNumber < visibleNotificationCount else { return false }
+        guard case .handled(.notificationActionMenu(_)) = KeyboardCommandRouter
+            .route(intent: intent, store: keyboardOwnershipStore)
+            .outcome else { return false }
+        return true
     }
 
     var body: some View {
@@ -7155,24 +7273,30 @@ private struct CrossChatNotificationActionMenu: View {
 #endif
         .focusable()
         .onKeyPress(.upArrow) {
+            guard routeMenuIntent(.menuNavigateUp) else { return .ignored }
             onSelectionChange(selection.moved(step: -1))
             return .handled
         }
         .onKeyPress(.downArrow) {
+            guard routeMenuIntent(.menuNavigateDown) else { return .ignored }
             onSelectionChange(selection.moved(step: 1))
             return .handled
         }
         .onKeyPress(.return) {
+            guard routeMenuIntent(.menuActivate) else { return .ignored }
             onActivate(selection)
             return .handled
         }
         .onKeyPress(.escape) {
+            guard routeMenuIntent(.menuCancel) else { return .ignored }
             onCancel()
             return .handled
         }
         .background(
             CrossChatNotificationActionMenuKeyBridge(
+                assignedNumber: assignedNumber,
                 visibleNotificationCount: visibleNotificationCount,
+                keyboardOwnershipStore: keyboardOwnershipStore,
                 selection: selection,
                 onSelectionChange: onSelectionChange,
                 onActivate: onActivate,
@@ -7185,7 +7309,9 @@ private struct CrossChatNotificationActionMenu: View {
 }
 
 private struct CrossChatNotificationActionMenuKeyBridge: UIViewRepresentable {
+    let assignedNumber: Int
     let visibleNotificationCount: Int
+    let keyboardOwnershipStore: KeyboardOwnershipStore
     let selection: CrossChatNotificationActionMenuItem
     let onSelectionChange: (CrossChatNotificationActionMenuItem) -> Void
     let onActivate: (CrossChatNotificationActionMenuItem) -> Void
@@ -7194,12 +7320,16 @@ private struct CrossChatNotificationActionMenuKeyBridge: UIViewRepresentable {
     func makeUIView(context: Context) -> KeyCommandView {
         let view = KeyCommandView()
         view.delegate = context.coordinator
+        view.assignedNumber = assignedNumber
         view.visibleNotificationCount = visibleNotificationCount
+        view.keyboardOwnershipStore = keyboardOwnershipStore
         return view
     }
 
     func updateUIView(_ uiView: KeyCommandView, context: Context) {
+        uiView.assignedNumber = assignedNumber
         uiView.visibleNotificationCount = visibleNotificationCount
+        uiView.keyboardOwnershipStore = keyboardOwnershipStore
         context.coordinator.selection = selection
         context.coordinator.onSelectionChange = onSelectionChange
         context.coordinator.onActivate = onActivate
@@ -7250,20 +7380,21 @@ private struct CrossChatNotificationActionMenuKeyBridge: UIViewRepresentable {
 
     final class KeyCommandView: UIView {
         weak var delegate: Coordinator?
+        var assignedNumber = 0
         var visibleNotificationCount = 0
+        var keyboardOwnershipStore = KeyboardOwnershipStore()
 
         override var canBecomeFirstResponder: Bool { true }
 
         override var keyCommands: [UIKeyCommand]? {
-            let menuCommands = [
-                UIKeyCommand(input: UIKeyCommand.inputUpArrow, modifierFlags: [], action: #selector(handleUp)),
-                UIKeyCommand(input: UIKeyCommand.inputUpArrow, modifierFlags: [.numericPad], action: #selector(handleUp)),
-                UIKeyCommand(input: UIKeyCommand.inputDownArrow, modifierFlags: [], action: #selector(handleDown)),
-                UIKeyCommand(input: UIKeyCommand.inputDownArrow, modifierFlags: [.numericPad], action: #selector(handleDown)),
-                UIKeyCommand(input: "\r", modifierFlags: [], action: #selector(handleReturn)),
-                UIKeyCommand(input: "\n", modifierFlags: [], action: #selector(handleReturn)),
-                UIKeyCommand(input: UIKeyCommand.inputEscape, modifierFlags: [], action: #selector(handleEscape))
-            ]
+            let menuCommands = KeyboardCommandBridge.menuSpecs.compactMap { spec -> UIKeyCommand? in
+                guard let selector = selector(for: spec.intent) else { return nil }
+                return UIKeyCommand(
+                    input: spec.input,
+                    modifierFlags: spec.modifierFlags,
+                    action: selector
+                )
+            }
             let notificationNumberCommands = ChatAppCommandShortcut
                 .notificationNumberKeyCommandSpecs(visibleCount: visibleNotificationCount)
                 .map { spec in
@@ -7281,8 +7412,23 @@ private struct CrossChatNotificationActionMenuKeyBridge: UIViewRepresentable {
                         modifierFlags: spec.modifierFlags,
                         action: spec.action.selector
                     )
-                }
+            }
             return menuCommands + notificationNumberCommands + notificationScrollCommands
+        }
+
+        private func selector(for intent: KeyboardCommandIntent) -> Selector? {
+            switch intent {
+            case .menuNavigateUp:
+                return #selector(handleUp)
+            case .menuNavigateDown:
+                return #selector(handleDown)
+            case .menuActivate:
+                return #selector(handleReturn)
+            case .menuCancel:
+                return #selector(handleEscape)
+            default:
+                return nil
+            }
         }
 
         override func didMoveToWindow() {
@@ -7316,19 +7462,31 @@ private struct CrossChatNotificationActionMenuKeyBridge: UIViewRepresentable {
         }
 
         @objc private func handleUp() {
+            guard routes(.menuNavigateUp) else { return }
             delegate?.move(step: -1)
         }
 
         @objc private func handleDown() {
+            guard routes(.menuNavigateDown) else { return }
             delegate?.move(step: 1)
         }
 
         @objc private func handleReturn() {
+            guard routes(.menuActivate) else { return }
             delegate?.activate()
         }
 
         @objc private func handleEscape() {
+            guard routes(.menuCancel) else { return }
             delegate?.cancel()
+        }
+
+        private func routes(_ intent: KeyboardCommandIntent) -> Bool {
+            guard assignedNumber < visibleNotificationCount else { return false }
+            guard case .handled(.notificationActionMenu(_)) = KeyboardCommandRouter
+                .route(intent: intent, store: keyboardOwnershipStore)
+                .outcome else { return false }
+            return true
         }
     }
 }
@@ -7355,13 +7513,18 @@ enum CrossChatNotificationGlobalShortcut {
     }
 
     static func scrollSpecs(visibleNotificationCount: Int) -> [Spec] {
-        guard visibleNotificationCount > 0 else { return [] }
-        return [
-            Spec(input: "j", modifiers: .command, action: .scrollDown),
-            Spec(input: "k", modifiers: .command, action: .scrollUp),
-            Spec(input: "j", modifiers: [.command, .shift], action: .scrollDown),
-            Spec(input: "k", modifiers: [.command, .shift], action: .scrollUp),
-        ]
+        KeyboardCommandBridge
+            .hiddenNotificationSwiftUIFallbackSpecs(visibleNotificationCount: visibleNotificationCount)
+            .compactMap { spec in
+                switch spec.intent {
+                case .notificationScrollForward:
+                    return Spec(input: spec.input, modifiers: spec.modifiers, action: .scrollDown)
+                case .notificationScrollBackward:
+                    return Spec(input: spec.input, modifiers: spec.modifiers, action: .scrollUp)
+                default:
+                    return nil
+                }
+            }
     }
 }
 
@@ -7370,6 +7533,7 @@ private struct CrossChatNotificationKeyboardShortcuts: View {
     let maxContainerHeight: CGFloat
     let replyPinSlotsBySourceChatId: [String: Int]
     let measuredHeightsBySourceChatId: [String: CGFloat]
+    let keyboardOwnershipStore: KeyboardOwnershipStore
     let onDismissAll: () -> Void
     let onToggleDock: () -> Void
 
@@ -7387,37 +7551,51 @@ private struct CrossChatNotificationKeyboardShortcuts: View {
             ZStack {
                 ForEach(Array(visibleBubbles.enumerated()), id: \.element.sourceChatId) { index, _ in
                     Button("") {
-                        NotificationCenter.default.post(
-                            name: .clawlineOpenNotificationActionMenuCommand,
-                            object: index
-                        )
+                        routeAssignedShortcut(.notificationAssignedOpen(index), index: index) {
+                            NotificationCenter.default.post(
+                                name: .clawlineOpenNotificationActionMenuCommand,
+                                object: index
+                            )
+                        }
                     }
                         .keyboardShortcut(KeyEquivalent(Character("\(index)")), modifiers: .command)
                     Button("") {
-                        NotificationCenter.default.post(
-                            name: .clawlineReplyNotificationCommand,
-                            object: index
-                        )
+                        routeAssignedShortcut(.notificationAssignedReply(index), index: index) {
+                            NotificationCenter.default.post(
+                                name: .clawlineReplyNotificationCommand,
+                                object: index
+                            )
+                        }
                     }
                         .keyboardShortcut(KeyEquivalent(Character("\(index)")), modifiers: [.command, .shift])
                     Button("") {
-                        NotificationCenter.default.post(
-                            name: .clawlineDismissNotificationCommand,
-                            object: index
-                        )
+                        routeAssignedShortcut(.notificationAssignedDismiss(index), index: index) {
+                            NotificationCenter.default.post(
+                                name: .clawlineDismissNotificationCommand,
+                                object: index
+                            )
+                        }
                     }
                         .keyboardShortcut(KeyEquivalent(Character("\(index)")), modifiers: [.command, .shift, .option])
                 }
-                Button("") { onDismissAll() }
+                Button("") {
+                    routeNotificationStackShortcut(.notificationDismissAll) {
+                        onDismissAll()
+                    }
+                }
                     .keyboardShortcut("-", modifiers: .command)
-                Button("") { onToggleDock() }
+                Button("") {
+                    routeNotificationStackShortcut(.notificationToggleDock) {
+                        onToggleDock()
+                    }
+                }
                     .keyboardShortcut("\\", modifiers: .command)
                 ForEach(
                     Array(CrossChatNotificationGlobalShortcut.scrollSpecs(visibleNotificationCount: visibleBubbles.count).enumerated()),
                     id: \.offset
                 ) { _, spec in
                     Button("") {
-                        NotificationCenter.default.post(name: spec.action.notificationName, object: nil)
+                        routeScrollShortcut(spec)
                     }
                     .keyboardShortcut(KeyEquivalent(spec.input), modifiers: spec.modifiers)
                 }
@@ -7426,6 +7604,42 @@ private struct CrossChatNotificationKeyboardShortcuts: View {
             .frame(width: 1, height: 1)
             .accessibilityHidden(true)
         }
+    }
+
+    private func routeAssignedShortcut(
+        _ intent: KeyboardCommandIntent,
+        index: Int,
+        perform action: () -> Void
+    ) {
+        guard visibleBubbles.indices.contains(index),
+              case .handled(.notificationBubble(_)) = KeyboardCommandRouter
+                .route(intent: intent, store: keyboardOwnershipStore)
+                .outcome else { return }
+        action()
+    }
+
+    private func routeScrollShortcut(_ spec: CrossChatNotificationGlobalShortcut.Spec) {
+        let intent: KeyboardCommandIntent
+        switch spec.action {
+        case .scrollDown:
+            intent = .notificationScrollForward
+        case .scrollUp:
+            intent = .notificationScrollBackward
+        }
+        guard case .handled(.notificationBubble(_)) = KeyboardCommandRouter
+            .route(intent: intent, store: keyboardOwnershipStore)
+            .outcome else { return }
+        NotificationCenter.default.post(name: spec.action.notificationName, object: nil)
+    }
+
+    private func routeNotificationStackShortcut(
+        _ intent: KeyboardCommandIntent,
+        perform action: () -> Void
+    ) {
+        guard case .handled(.notificationBubble(_)) = KeyboardCommandRouter
+            .route(intent: intent, store: keyboardOwnershipStore)
+            .outcome else { return }
+        action()
     }
 }
 

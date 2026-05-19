@@ -39,19 +39,25 @@ struct ClawlineAppCommands: Commands {
             if notificationCommandsActive {
                 ForEach(0...9, id: \.self) { index in
                     Button("Notification \(index) Actions") {
-                        crossChatNotificationCommand?.openActionMenu(index)
+                        routeNotificationShortcut(.notificationAssignedOpen(index)) {
+                            crossChatNotificationCommand?.openActionMenu(index)
+                        }
                     }
                     .keyboardShortcut(KeyEquivalent(Character("\(index)")), modifiers: .command)
                     .disabled((crossChatNotificationCommand?.visibleCount ?? 0) <= index)
 
                     Button("Reply to Notification \(index)") {
-                        crossChatNotificationCommand?.reply(index)
+                        routeNotificationShortcut(.notificationAssignedReply(index)) {
+                            crossChatNotificationCommand?.reply(index)
+                        }
                     }
                     .keyboardShortcut(KeyEquivalent(Character("\(index)")), modifiers: [.command, .shift])
                     .disabled((crossChatNotificationCommand?.visibleCount ?? 0) <= index)
 
                     Button("Dismiss Notification \(index)") {
-                        crossChatNotificationCommand?.dismiss(index)
+                        routeNotificationShortcut(.notificationAssignedDismiss(index)) {
+                            crossChatNotificationCommand?.dismiss(index)
+                        }
                     }
                     .keyboardShortcut(KeyEquivalent(Character("\(index)")), modifiers: [.command, .shift, .option])
                     .disabled((crossChatNotificationCommand?.visibleCount ?? 0) <= index)
@@ -66,22 +72,22 @@ struct ClawlineAppCommands: Commands {
             Divider()
 
             Button("Focus Prompt Input") {
-                NotificationCenter.default.post(name: .clawlineFocusPromptInputCommand, object: nil)
+                routeAppShortcut(.focusPromptInput)
             }
             .keyboardShortcut("l", modifiers: .command)
 
             Button("Open Streams") {
-                NotificationCenter.default.post(name: .clawlineOpenStreamPopupCommand, object: nil)
+                routeAppShortcut(.openStreamPopup)
             }
             .keyboardShortcut(";", modifiers: .command)
 
             Button("Previous Chat") {
-                NotificationCenter.default.post(name: .clawlineNavigateToPreviousStreamCommand, object: nil)
+                routeAppShortcut(.navigatePreviousStream)
             }
             .keyboardShortcut("h", modifiers: [.command, .shift])
 
             Button("Next Chat") {
-                NotificationCenter.default.post(name: .clawlineNavigateToNextStreamCommand, object: nil)
+                routeAppShortcut(.navigateNextStream)
             }
             .keyboardShortcut("l", modifiers: [.command, .shift])
 
@@ -94,40 +100,82 @@ struct ClawlineAppCommands: Commands {
             Divider()
 
             Button("Scroll Bubble Contents Down") {
-                if notificationCommandsActive {
-                    crossChatNotificationCommand?.scrollDown()
-                } else {
-                    NotificationCenter.default.post(name: .clawlineScrollDownCommand, object: nil)
-                }
+                routeScrollShortcut(
+                    .transcriptBubbleScrollForward,
+                    transcriptNotificationName: .clawlineScrollDownCommand,
+                    notificationAction: { crossChatNotificationCommand?.scrollDown() }
+                )
             }
             .keyboardShortcut("j", modifiers: .command)
 
             Button("Scroll Bubble Contents Up") {
-                if notificationCommandsActive {
-                    crossChatNotificationCommand?.scrollUp()
-                } else {
-                    NotificationCenter.default.post(name: .clawlineScrollUpCommand, object: nil)
-                }
+                routeScrollShortcut(
+                    .transcriptBubbleScrollBackward,
+                    transcriptNotificationName: .clawlineScrollUpCommand,
+                    notificationAction: { crossChatNotificationCommand?.scrollUp() }
+                )
             }
             .keyboardShortcut("k", modifiers: .command)
 
             Button("Scroll Chat Down") {
-                if notificationCommandsActive {
-                    crossChatNotificationCommand?.scrollDown()
-                } else {
-                    NotificationCenter.default.post(name: .clawlineScrollChatDownCommand, object: nil)
-                }
+                routeScrollShortcut(
+                    .transcriptChatScrollForward,
+                    transcriptNotificationName: .clawlineScrollChatDownCommand,
+                    notificationAction: { crossChatNotificationCommand?.scrollDown() }
+                )
             }
             .keyboardShortcut("j", modifiers: [.command, .shift])
 
             Button("Scroll Chat Up") {
-                if notificationCommandsActive {
-                    crossChatNotificationCommand?.scrollUp()
-                } else {
-                    NotificationCenter.default.post(name: .clawlineScrollChatUpCommand, object: nil)
-                }
+                routeScrollShortcut(
+                    .transcriptChatScrollBackward,
+                    transcriptNotificationName: .clawlineScrollChatUpCommand,
+                    notificationAction: { crossChatNotificationCommand?.scrollUp() }
+                )
             }
             .keyboardShortcut("k", modifiers: [.command, .shift])
+        }
+    }
+
+    private func routerStore() -> KeyboardOwnershipStore {
+        crossChatNotificationCommand?.keyboardOwnershipStore ?? KeyboardOwnershipSceneFactory.chatScene(
+            visibleNotificationSourceChatIds: [],
+            mentionPickerVisible: false,
+            composerFocused: false,
+            notificationReplyFocusedSourceChatId: nil,
+            actionMenuSourceChatId: nil
+        )
+    }
+
+    private func routeNotificationShortcut(
+        _ intent: KeyboardCommandIntent,
+        perform action: () -> Void
+    ) {
+        guard case .handled(.notificationBubble(_)) = KeyboardCommandRouter
+            .route(intent: intent, store: routerStore())
+            .outcome else { return }
+        action()
+    }
+
+    private func routeAppShortcut(_ intent: KeyboardCommandIntent) {
+        guard case .handled(.transcript) = KeyboardCommandRouter
+            .route(intent: intent, store: routerStore())
+            .outcome else { return }
+        NotificationCenter.default.post(name: .clawlineKeyboardCommandIntent, object: intent)
+    }
+
+    private func routeScrollShortcut(
+        _ intent: KeyboardCommandIntent,
+        transcriptNotificationName: Notification.Name,
+        notificationAction: () -> Void
+    ) {
+        switch KeyboardCommandRouter.route(intent: intent, store: routerStore()).outcome {
+        case .handled(.notificationBubble(_)):
+            notificationAction()
+        case .handled(.transcript):
+            NotificationCenter.default.post(name: transcriptNotificationName, object: nil)
+        default:
+            break
         }
     }
 }

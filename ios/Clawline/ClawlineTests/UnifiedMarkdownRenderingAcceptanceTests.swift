@@ -365,6 +365,65 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
         #expect(!text.contains("AlphaBetaNested Beta OneNested Beta TwoGamma"))
     }
 
+    @Test("T340: hyphen unordered list renders as bullets in chat bubble markdown")
+    func t340_hyphenUnorderedListRendersAsBullets() {
+        let message = Message(
+            id: "t340",
+            role: .assistant,
+            content: """
+            Intro with **bold** and [link](https://example.com).
+            - Alpha `code`
+            - Beta
+            """,
+            timestamp: Date(),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: "agent:main:clawline:user:main"
+        )
+        var state = StreamingTableParseState()
+        let presentation = MessagePresentationBuilder.build(
+            from: message,
+            metrics: metrics,
+            streamingState: &state
+        )
+        let rendered = UnifiedMarkdownRenderer.render(plan: presentation.markdownRenderPlan, options: bubbleOptions())
+
+        guard case .attributedText(let attributed)? = rendered.first else {
+            Issue.record("Expected bubble markdown to render as attributed text")
+            return
+        }
+
+        #expect(attributed.string.contains("Intro with bold and link."))
+        #expect(attributed.string.contains("• Alpha code"))
+        #expect(attributed.string.contains("• Beta"))
+        #expect(!attributed.string.contains("- Alpha"))
+        #expect(isBold("bold", in: attributed))
+        #expect(linkTarget("link", in: attributed)?.absoluteString == "https://example.com")
+    }
+
+    @Test("T340: hyphen bullet normalization preserves thematic breaks and indented literals")
+    func t340_hyphenBulletNormalizationStaysScoped() {
+        let markdown = """
+        - Bullet
+        - - -
+            - literal
+        """
+        let plan = MarkdownRenderPlan(
+            blocks: [.richText(markdownSource: markdown)],
+            plainTextForMetrics: markdown,
+            containsTextualContent: true,
+            isEmojiOnly: false
+        )
+        let rendered = UnifiedMarkdownRenderer.render(plan: plan, options: bubbleOptions())
+        let text = joinedText(from: rendered)
+
+        #expect(text.contains("• Bullet"))
+        #expect(text.contains("- - -"))
+        #expect(text.contains("    - literal"))
+        #expect(!text.contains("• literal"))
+    }
+
     @Test("T137: ordered list markers render as 1,2,3 instead of repeating 1")
     func t137_orderedListMarkersIncrement() {
         let markdown = """

@@ -386,6 +386,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     private var isUpdatePassInFlight = false
     private var isSnapshotApplyInFlight = false
     private var queuedUpdateRequest: UpdateRequest?
+    private var queuedDiffableSnapshotApplies: [() -> Void] = []
     private var isWebBubbleSnapshotApplyQueued = false
     private var lastAppliedEffectiveSessionKey: String?
     private var invalidationScheduled = false
@@ -2032,6 +2033,11 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
 
     private func drainQueuedUpdateIfPossible() {
         guard !isUpdatePassInFlight, !isSnapshotApplyInFlight else { return }
+        if !queuedDiffableSnapshotApplies.isEmpty {
+            let apply = queuedDiffableSnapshotApplies.removeFirst()
+            apply()
+            return
+        }
         if isWebBubbleSnapshotApplyQueued {
             applySnapshotForWebBubbles()
             return
@@ -2073,6 +2079,39 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     private func markSnapshotApplyCompleted() {
         isSnapshotApplyInFlight = false
         drainQueuedUpdateIfPossible()
+    }
+
+    private func applyDiffableSnapshot(
+        _ snapshot: NSDiffableDataSourceSnapshot<Int, String>,
+        animatingDifferences: Bool,
+        sessionKey: String? = nil,
+        completion: (() -> Void)? = nil
+    ) {
+        // Diffable data sources trap on reentrant snapshot applies. Keep every
+        // MessageFlowCollectionView snapshot mutation behind this seam so future
+        // render triggers queue behind the active apply instead of bypassing it.
+        guard !isSnapshotApplyInFlight else {
+            queuedDiffableSnapshotApplies.append { [weak self] in
+                self?.applyDiffableSnapshot(
+                    snapshot,
+                    animatingDifferences: animatingDifferences,
+                    sessionKey: sessionKey,
+                    completion: completion
+                )
+            }
+            return
+        }
+        isSnapshotApplyInFlight = true
+        if let sessionKey {
+            StreamSwitchTiming.log("dataSource_apply_start", sessionKey: sessionKey)
+        }
+        dataSource.apply(snapshot, animatingDifferences: animatingDifferences) { [weak self] in
+            completion?()
+            if let sessionKey {
+                StreamSwitchTiming.log("dataSource_apply_end", sessionKey: sessionKey)
+            }
+            self?.markSnapshotApplyCompleted()
+        }
     }
 
     private func shouldDeferUpdateDuringActiveTyping(
@@ -2447,22 +2486,19 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             : nil
 
         if shouldMorph {
-            isSnapshotApplyInFlight = true
-            StreamSwitchTiming.log("dataSource_apply_start", sessionKey: effectiveSessionKey)
-            applySnapshotWithTypingMorphIfPossible(snapshot: snapshot, targetMessageId: morphTargetMessageId) { [weak self] in
-                afterSnapshotApplied()
-                self?.scheduleBubbleSizingV2ViewportAnchorCompensation(expansionAnchor)
-                StreamSwitchTiming.log("dataSource_apply_end", sessionKey: effectiveSessionKey)
-                self?.markSnapshotApplyCompleted()
-            }
+            applySnapshotWithTypingMorphIfPossible(
+                snapshot: snapshot,
+                targetMessageId: morphTargetMessageId,
+                onApplied: { [weak self] in
+                    afterSnapshotApplied()
+                    self?.scheduleBubbleSizingV2ViewportAnchorCompensation(expansionAnchor)
+                },
+                onAppliedSessionKey: effectiveSessionKey
+            )
         } else {
-            isSnapshotApplyInFlight = true
-            StreamSwitchTiming.log("dataSource_apply_start", sessionKey: effectiveSessionKey)
-            dataSource.apply(snapshot, animatingDifferences: false) { [weak self] in
+            applyDiffableSnapshot(snapshot, animatingDifferences: false, sessionKey: effectiveSessionKey) { [weak self] in
                 afterSnapshotApplied()
                 self?.scheduleBubbleSizingV2ViewportAnchorCompensation(expansionAnchor)
-                StreamSwitchTiming.log("dataSource_apply_end", sessionKey: effectiveSessionKey)
-                self?.markSnapshotApplyCompleted()
             }
         }
         logger.info(
@@ -3772,18 +3808,19 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     private func applySnapshotWithTypingMorphIfPossible(
         snapshot: NSDiffableDataSourceSnapshot<Int, String>,
         targetMessageId: String?,
-        onApplied: (() -> Void)?
+        onApplied: (() -> Void)?,
+        onAppliedSessionKey: String
     ) {
         guard let targetMessageId,
               let typingIndexPath = dataSource.indexPath(for: TypingIndicatorCell.itemId),
               let typingCell = collectionView.cellForItem(at: typingIndexPath)
         else {
             // Fallback: let diffable handle it (better than skipping updates).
-            dataSource.apply(snapshot, animatingDifferences: true, completion: onApplied)
+            applyDiffableSnapshot(snapshot, animatingDifferences: true, sessionKey: onAppliedSessionKey, completion: onApplied)
             return
         }
         guard let morphToken = activeSessionGenerationToken() else {
-            dataSource.apply(snapshot, animatingDifferences: true, completion: onApplied)
+            applyDiffableSnapshot(snapshot, animatingDifferences: true, sessionKey: onAppliedSessionKey, completion: onApplied)
             return
         }
 
@@ -3792,7 +3829,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         collectionView.layoutIfNeeded()
         let startFrame = typingCell.convert(typingCell.bounds, to: collectionView)
         guard let typingSnapshotView = typingCell.snapshotView(afterScreenUpdates: false) else {
-            dataSource.apply(snapshot, animatingDifferences: true, completion: onApplied)
+            applyDiffableSnapshot(snapshot, animatingDifferences: true, sessionKey: onAppliedSessionKey, completion: onApplied)
             return
         }
 
@@ -3800,12 +3837,12 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         collectionView.addSubview(typingSnapshotView)
 
         // Apply without diffable animations; we animate the visual transform ourselves.
-        dataSource.apply(snapshot, animatingDifferences: false) { [weak self] in
+        applyDiffableSnapshot(snapshot, animatingDifferences: false, sessionKey: onAppliedSessionKey) { [weak self] in
             guard let self else { return }
             self.collectionView.layoutIfNeeded()
             onApplied?()
 
-            // `dataSource.apply(..., animatingDifferences: false)` is frequently executed under a
+            // Diffable no-animation applies are frequently executed under a
             // no-animation context (UIKit disables animations so updates "snap" into place). If we
             // start our morph `UIView.animate` inside that completion, the 2s duration can collapse
             // to an instantaneous state change.
@@ -5410,10 +5447,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             return
         }
         snapshot.reconfigureItems(existing)
-        isSnapshotApplyInFlight = true
-        dataSource.apply(snapshot, animatingDifferences: false) { [weak self] in
-            self?.markSnapshotApplyCompleted()
-        }
+        applyDiffableSnapshot(snapshot, animatingDifferences: false)
     }
 
     private func reconfigureItem(id: String) {
@@ -5470,11 +5504,9 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         if !snapshotMessages.isEmpty, SessionMetadataFooterCell.footerText(for: sessionStatus) != nil {
             snapshot.appendItems([SessionMetadataFooterCell.itemId])
         }
-        isSnapshotApplyInFlight = true
-        dataSource.apply(snapshot, animatingDifferences: false) { [weak self] in
+        applyDiffableSnapshot(snapshot, animatingDifferences: false) { [weak self] in
             self?.updateVisibleFooterAlpha()
             self?.notifyTypingIndicatorAnchorFrameIfNeeded()
-            self?.markSnapshotApplyCompleted()
         }
     }
 

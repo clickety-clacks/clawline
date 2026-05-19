@@ -1,4 +1,9 @@
 import { useEffect } from "react";
+import {
+  keyboardIntentFromEvent,
+  routeKeyboardCommand,
+  useKeyboardOwnershipStore
+} from "./keyboardCommandRouter";
 
 export function useChatKeyboardShortcuts({
   canOpenSessionList,
@@ -11,6 +16,8 @@ export function useChatKeyboardShortcuts({
   onFocusPromptInput: () => void;
   onOpenSessionList: () => void;
 }) {
+  const keyboardOwnershipStore = useKeyboardOwnershipStore();
+
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
       if (event.defaultPrevented || event.altKey) {
@@ -20,12 +27,13 @@ export function useChatKeyboardShortcuts({
         return;
       }
 
-      const key = normalizeShortcutKey(event.key);
-      const hasCommandModifier = event.metaKey || event.ctrlKey;
-      const hasOnlyCommandModifier =
-        hasCommandModifier && !event.shiftKey && !event.altKey;
+      const routed = keyboardIntentFromEvent(event);
 
-      if (hasOnlyCommandModifier && key === ";") {
+      if (
+        routed?.intent === "openStreamPopup" &&
+        routeKeyboardCommand(routed.intent, keyboardOwnershipStore).ownerSurfaceId ===
+          "transcript"
+      ) {
         if (!canOpenSessionList) {
           return;
         }
@@ -34,7 +42,7 @@ export function useChatKeyboardShortcuts({
         return;
       }
 
-      if (hasCommandModifier || event.shiftKey || event.altKey) {
+      if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
         return;
       }
 
@@ -42,13 +50,23 @@ export function useChatKeyboardShortcuts({
         return;
       }
 
-      if ((key === "/" || key === ";") && canOpenSessionList) {
+      const key = normalizeShortcutKey(event.key);
+      if (
+        (key === "/" || key === ";") &&
+        canOpenSessionList &&
+        routeKeyboardCommand("openStreamPopup", keyboardOwnershipStore).ownerSurfaceId ===
+          "transcript"
+      ) {
         event.preventDefault();
         onOpenSessionList();
         return;
       }
 
-      if (key === " " || key === "enter") {
+      if (
+        (key === " " || key === "enter") &&
+        routeKeyboardCommand("focusPromptInput", keyboardOwnershipStore).ownerSurfaceId ===
+          "transcript"
+      ) {
         event.preventDefault();
         onFocusPromptInput();
       }
@@ -56,7 +74,13 @@ export function useChatKeyboardShortcuts({
 
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [canOpenSessionList, isShortcutSurfaceBlocked, onFocusPromptInput, onOpenSessionList]);
+  }, [
+    canOpenSessionList,
+    isShortcutSurfaceBlocked,
+    keyboardOwnershipStore,
+    onFocusPromptInput,
+    onOpenSessionList
+  ]);
 }
 
 function normalizeShortcutKey(key: string) {

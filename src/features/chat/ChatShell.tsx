@@ -15,12 +15,15 @@ import { CrossChatNotificationOverlay } from "./CrossChatNotificationOverlay";
 import { MessageList } from "./MessageList";
 import { SessionListSheet } from "./SessionListSheet";
 import { StreamPageDots } from "./StreamPageDots";
+import { KeyboardOwnershipProvider } from "./keyboardCommandRouter";
+import { useChatKeyboardShortcuts } from "./useChatKeyboardShortcuts";
 import type { SessionProvisioningState } from "../streams/provisioning";
 
 export function ChatShell({
   chatLayoutStyle,
   keyboardInset,
   isSessionListOpen,
+  isStreamManagerOpen,
   onCloseSessionList,
   onChatPanelTouchCancel,
   onChatPanelTouchEnd,
@@ -47,6 +50,7 @@ export function ChatShell({
   chatLayoutStyle: CSSProperties;
   keyboardInset: number;
   isSessionListOpen: boolean;
+  isStreamManagerOpen: boolean;
   onCloseSessionList: () => void;
   onChatPanelTouchCancel: () => void;
   onChatPanelTouchEnd: (input: {
@@ -87,11 +91,17 @@ export function ChatShell({
   const shouldEnableSwipeNavigation = keyboardInset <= 0;
 
   return (
-    <section
-      className="chat-layout"
-      data-testid="chat-layout"
-      style={chatLayoutStyle}
-    >
+    <KeyboardOwnershipProvider>
+      <ChatKeyboardShortcutBridge
+        canOpenSessionList={streams.length > 0}
+        isShortcutSurfaceBlocked={isSessionListOpen || isStreamManagerOpen}
+        onOpenSessionList={onOpenSessionList}
+      />
+      <section
+        className="chat-layout"
+        data-testid="chat-layout"
+        style={chatLayoutStyle}
+      >
       <main
         className="chat-panel"
         data-testid="chat-panel"
@@ -170,6 +180,27 @@ export function ChatShell({
         streams={streams}
         transportPhase={transportPhase}
       />
-    </section>
+      </section>
+    </KeyboardOwnershipProvider>
   );
+}
+
+function ChatKeyboardShortcutBridge({
+  canOpenSessionList,
+  isShortcutSurfaceBlocked,
+  onOpenSessionList
+}: {
+  canOpenSessionList: boolean;
+  isShortcutSurfaceBlocked: boolean;
+  onOpenSessionList: () => void;
+}) {
+  useChatKeyboardShortcuts({
+    canOpenSessionList,
+    isShortcutSurfaceBlocked,
+    onFocusPromptInput: () => {
+      document.getElementById("composer-input")?.focus({ preventScroll: true });
+    },
+    onOpenSessionList
+  });
+  return null;
 }

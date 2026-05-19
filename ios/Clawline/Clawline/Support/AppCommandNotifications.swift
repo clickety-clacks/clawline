@@ -21,6 +21,7 @@ extension Notification.Name {
     static let clawlineOpenNotificationActionMenuCommand = Notification.Name("clawline.openNotificationActionMenuCommand")
     static let clawlineReplyNotificationCommand = Notification.Name("clawline.replyNotificationCommand")
     static let clawlineDismissNotificationCommand = Notification.Name("clawline.dismissNotificationCommand")
+    static let clawlineKeyboardCommandIntent = Notification.Name("clawline.keyboardCommandIntent")
 }
 
 struct CancelCurrentPromptCommand {
@@ -30,6 +31,7 @@ struct CancelCurrentPromptCommand {
 struct CrossChatNotificationCommand {
     let hasVisibleNotifications: Bool
     let visibleCount: Int
+    let keyboardOwnershipStore: KeyboardOwnershipStore
     let openActionMenu: @MainActor (Int) -> Void
     let dismiss: @MainActor (Int) -> Void
     let reply: @MainActor (Int) -> Void

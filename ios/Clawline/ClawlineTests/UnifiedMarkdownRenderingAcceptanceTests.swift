@@ -448,6 +448,7 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
                 onCancelSend: {},
                 onReconnect: {},
                 onActivate: {},
+                onReplyFocusChange: { _ in },
                 isActionMenuOpen: false,
                 actionMenuSelection: .goToChat,
                 onActionMenuSelectionChange: { _ in },

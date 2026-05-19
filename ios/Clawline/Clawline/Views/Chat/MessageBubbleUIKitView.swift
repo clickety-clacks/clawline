@@ -506,7 +506,7 @@ final class MessageBubbleUIKitContainerView: UIView {
     }
 }
 
-final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
+final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecognizerDelegate {
     private static let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "BubbleTheme")
     static func timestampTextAlpha(isDark: Bool) -> CGFloat {
         isDark ? 0.76 : 0.68
@@ -633,6 +633,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
         bubbleTap.cancelsTouchesInView = false
         bubbleTap.delaysTouchesBegan = false
         bubbleTap.delaysTouchesEnded = false
+        bubbleTap.delegate = self
         bubbleBackgroundView.addGestureRecognizer(bubbleTap)
         let bubbleSwipeUp = UISwipeGestureRecognizer(target: self, action: #selector(handleBubbleSwipeUp))
         bubbleSwipeUp.direction = .up
@@ -737,6 +738,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
         bodyTap.cancelsTouchesInView = false
         bodyTap.delaysTouchesBegan = false
         bodyTap.delaysTouchesEnded = false
+        bodyTap.delegate = self
         bodyLabel.addGestureRecognizer(bodyTap)
         if let longPress = bodyLabel.gestureRecognizers?.first(where: { $0 is UILongPressGestureRecognizer }) {
             bubbleTap.require(toFail: longPress)
@@ -1844,6 +1846,24 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
         if dynamicContentScrollView.contentSize.height > dynamicContentScrollView.bounds.height + 1 {
             onRequestExpand?()
         }
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        shouldAllowBubbleExpandTap(from: touch.view)
+    }
+
+    func shouldAllowBubbleExpandTap(from touchedView: UIView?) -> Bool {
+        var view = touchedView
+        while let current = view {
+            if current is UIControl {
+                return false
+            }
+            if current === bubbleBackgroundView || current === bodyLabel {
+                return true
+            }
+            view = current.superview
+        }
+        return true
     }
 
     @objc private func handleBubbleSwipeUp() {

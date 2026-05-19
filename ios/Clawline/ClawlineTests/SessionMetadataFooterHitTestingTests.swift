@@ -144,6 +144,15 @@ struct SessionMetadataFooterHitTestingTests {
         #expect(SessionMetadataFooterCell.fadeRevealRange == 56)
     }
 
+    @Test("Footer renders sanitized auth mode as right-most text")
+    func footerRendersSanitizedAuthModeRightMost() {
+        let apiKeyStatus = makeStatus(authMode: "api_key")
+        #expect(SessionMetadataFooterCell.footerText(for: apiKeyStatus) == "gpt-5.5  ·  Thinking high  ·  Fast on  ·  API KEY")
+
+        let unknownStatus = makeStatus(authMode: "unknown")
+        #expect(SessionMetadataFooterCell.footerText(for: unknownStatus) == "gpt-5.5  ·  Thinking high  ·  Fast on")
+    }
+
     @Test("Popup selectors mark current item with checkmark image instead of text")
     func popupSelectorsMarkCurrentItemWithCheckmarkImageInsteadOfText() throws {
         let cell = makeConfiguredCell()
@@ -187,7 +196,7 @@ private func makeConfiguredCell() -> SessionMetadataFooterCell {
     return cell
 }
 
-private func makeStatus() -> SessionStatus {
+private func makeStatus(authMode: String? = nil) -> SessionStatus {
     SessionStatus(
         sessionKey: "agent:main:clawline:user:s_test",
         display: .init(
@@ -195,6 +204,7 @@ private func makeStatus() -> SessionStatus {
             fallbackModels: ["gpt-5.5", "claude-sonnet-4.6"],
             provider: "openai",
             harness: nil,
+            authMode: authMode,
             reasoningLevel: nil,
             thinkingLevel: "high",
             fastMode: true,

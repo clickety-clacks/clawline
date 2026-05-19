@@ -853,6 +853,7 @@ struct ProviderServiceTests {
                 "fallbackModels": null,
                 "provider": "anthropic",
                 "harness": null,
+                "authMode": "oauth",
                 "reasoningLevel": null,
                 "thinkingLevel": "high",
                 "fastMode": true,
@@ -928,6 +929,7 @@ struct ProviderServiceTests {
         #expect(status.sessionKey == sessionKey)
         #expect(status.display.provider == "anthropic")
         #expect(status.display.model == "claude-sonnet-4.6")
+        #expect(status.display.authMode == "oauth")
         #expect(status.display.thinkingLevel == "high")
         #expect(status.display.fastMode == true)
         #expect(status.run.state == .running)

@@ -5753,8 +5753,8 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
                     providerOptions: fastControl.options
                 ),
                 unsupportedReason: fastControl.reason
-            ),
-        ]
+            )
+        ] + authModeFooterItems(display.authMode)
     }
 
     private static func capability(_ capability: SessionStatus.Capability?,
@@ -5970,6 +5970,31 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         }
         guard let fastMode else { return "Fast Unknown" }
         return fastMode ? "Fast on" : "Fast off"
+    }
+
+    private static func authModeFooterItems(_ authMode: String?) -> [FooterItem] {
+        switch authMode?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "oauth":
+            return [
+                FooterItem(
+                    text: "OAUTH",
+                    action: nil,
+                    options: [FooterOption(title: "OAUTH", value: nil, enabled: nil, isCurrent: true)],
+                    unsupportedReason: nil
+                )
+            ]
+        case "api_key", "api-key":
+            return [
+                FooterItem(
+                    text: "API KEY",
+                    action: nil,
+                    options: [FooterOption(title: "API KEY", value: nil, enabled: nil, isCurrent: true)],
+                    unsupportedReason: nil
+                )
+            ]
+        default:
+            return []
+        }
     }
 
     private static func normalized(_ value: String?) -> String? {

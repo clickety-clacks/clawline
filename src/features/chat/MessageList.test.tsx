@@ -1459,4 +1459,51 @@ describe("MessageList rich rendering", () => {
       "codex_fast_mode_not_supported_by_session_control"
     );
   });
+
+  it("renders sanitized auth mode as the right-most footer item", async () => {
+    renderMessageListWithProps({
+      messages: [makeMessage(1)],
+      sessionKey: "agent:main:clawline:flynn:main",
+      sessionStatus: {
+        sessionKey: "agent:main:clawline:flynn:main",
+        display: {
+          model: "gpt-5.5",
+          thinkingLevel: "medium",
+          fastMode: true,
+          authMode: "api_key"
+        },
+        capabilities: {
+          setModel: { supported: false },
+          setThinking: { supported: false },
+          setFastMode: { supported: false }
+        }
+      }
+    });
+
+    const footer = await screen.findByTestId("session-status-footer");
+    expect(footer).toHaveAccessibleName("gpt-5.5 · Thinking medium · Fast on · API KEY");
+    const authControl = screen.getByLabelText("API KEY");
+    expect(authControl).toBeDisabled();
+    expect(authControl).toHaveTextContent("API KEY");
+  });
+
+  it("hides unknown auth mode in the footer", async () => {
+    renderMessageListWithProps({
+      messages: [makeMessage(1)],
+      sessionKey: "agent:main:clawline:flynn:main",
+      sessionStatus: {
+        sessionKey: "agent:main:clawline:flynn:main",
+        display: {
+          fastMode: false,
+          authMode: "unknown"
+        },
+        capabilities: {
+          setFastMode: { supported: false }
+        }
+      }
+    });
+
+    expect(await screen.findByLabelText("Fast off")).toBeInTheDocument();
+    expect(screen.queryByLabelText("UNKNOWN")).not.toBeInTheDocument();
+  });
 });

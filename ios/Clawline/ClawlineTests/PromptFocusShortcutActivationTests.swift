@@ -40,6 +40,88 @@ struct PromptFocusShortcutActivationTests {
         )
     }
 
+    @Test("T344 notification gesture ownership locks to vertical scroll only after vertical dominance")
+    func notificationGestureOwnershipLocksToVerticalScrollOnlyAfterVerticalDominance() {
+        #expect(
+            CrossChatNotificationGestureAxisLock.ownership(
+                for: CGSize(width: 0, height: CrossChatNotificationGestureAxisLock.minimumDistance)
+            ) == .verticalScroll
+        )
+        #expect(
+            CrossChatNotificationGestureAxisLock.ownership(
+                for: CGSize(width: 8, height: -32)
+            ) == .verticalScroll
+        )
+        #expect(
+            CrossChatNotificationGestureAxisLock.ownership(
+                for: CGSize(width: 24, height: 24)
+            ) == .none
+        )
+        #expect(
+            CrossChatNotificationGestureAxisLock.ownership(
+                for: CGSize(width: 0, height: CrossChatNotificationGestureAxisLock.minimumDistance - 1)
+            ) == .none
+        )
+    }
+
+    @Test("T344 notification gesture ownership locks to horizontal swipe only after horizontal dominance")
+    func notificationGestureOwnershipLocksToHorizontalSwipeOnlyAfterHorizontalDominance() {
+        #expect(
+            CrossChatNotificationGestureAxisLock.ownership(
+                for: CGSize(width: CrossChatNotificationGestureAxisLock.minimumDistance, height: 0)
+            ) == .horizontalSwipe
+        )
+        #expect(
+            CrossChatNotificationGestureAxisLock.ownership(
+                for: CGSize(width: -40, height: 12)
+            ) == .horizontalSwipe
+        )
+        #expect(
+            CrossChatNotificationGestureAxisLock.ownership(
+                for: CGSize(width: 18, height: 2)
+            ) == .none
+        )
+        #expect(
+            CrossChatNotificationGestureAxisLock.ownership(
+                for: CGSize(width: 28, height: 36)
+            ) != .horizontalSwipe
+        )
+    }
+
+    @Test("T344 vertical-owned notification drag cannot complete as horizontal dock or dismiss")
+    func verticalOwnedNotificationDragCannotCompleteAsHorizontalDockOrDismiss() {
+        let threshold: CGFloat = 44
+
+        #expect(
+            CrossChatNotificationGestureAxisLock.allowsBubbleSwipeCompletion(
+                activeLock: .verticalScroll,
+                finalTranslation: CGSize(width: threshold + 20, height: 24),
+                completionThreshold: threshold
+            ) == false
+        )
+        #expect(
+            CrossChatNotificationGestureAxisLock.allowsBubbleSwipeCompletion(
+                activeLock: .horizontalSwipe,
+                finalTranslation: CGSize(width: -(threshold + 20), height: 12),
+                completionThreshold: threshold
+            )
+        )
+        #expect(
+            CrossChatNotificationGestureAxisLock.allowsBubbleSwipeCompletion(
+                activeLock: nil,
+                finalTranslation: CGSize(width: threshold + 20, height: 12),
+                completionThreshold: threshold
+            )
+        )
+        #expect(
+            CrossChatNotificationGestureAxisLock.allowsBubbleSwipeCompletion(
+                activeLock: nil,
+                finalTranslation: CGSize(width: threshold - 1, height: 4),
+                completionThreshold: threshold
+            ) == false
+        )
+    }
+
     @Test("T307 notification reply input presents Send return key and five-line cap")
     @MainActor
     func notificationReplyInputUsesSendReturnKeyAndFiveLineCap() {

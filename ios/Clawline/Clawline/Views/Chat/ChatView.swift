@@ -1609,7 +1609,7 @@ struct ChatView: View {
                 alignment: .topTrailing
             )
             .frame(
-                maxHeight: CrossChatNotificationOverlay.overlayHostHeight(
+                height: CrossChatNotificationGeometry.layoutHostHeight(
                     topMargin: topMargin,
                     maxContainerHeight: maxContainerHeight
                 ),
@@ -5326,6 +5326,10 @@ enum CrossChatNotificationMarkdownRenderer {
 enum CrossChatNotificationGeometry {
     static func layoutHostWidth(maxContainerWidth: CGFloat) -> CGFloat {
         max(0, maxContainerWidth)
+    }
+
+    static func layoutHostHeight(topMargin: CGFloat, maxContainerHeight: CGFloat) -> CGFloat {
+        max(0, topMargin) + max(0, maxContainerHeight) + 12
     }
 
     static func collapsedOffset(

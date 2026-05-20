@@ -115,6 +115,20 @@ struct MessageInputBarBoundaryTests {
         ) == viewportWidth)
     }
 
+    @Test("T354 notification layout host height excludes motion overflow")
+    func notificationLayoutHostHeightExcludesMotionOverflow() {
+        let topMargin = CGFloat(8)
+        let availableHeightAboveComposer = CGFloat(620)
+        let motionEnvelopeHeight = topMargin + availableHeightAboveComposer + 131 + 12
+        let layoutHostHeight = CrossChatNotificationGeometry.layoutHostHeight(
+            topMargin: topMargin,
+            maxContainerHeight: availableHeightAboveComposer
+        )
+
+        #expect(motionEnvelopeHeight > layoutHostHeight)
+        #expect(layoutHostHeight == topMargin + availableHeightAboveComposer + 12)
+    }
+
     @Test("Notification layout host keeps Ansible landscape safe area out of root width")
     func notificationLayoutHostKeepsAnsibleLandscapeSafeAreaOutOfRootWidth() {
         let viewportWidth = CGFloat(852)

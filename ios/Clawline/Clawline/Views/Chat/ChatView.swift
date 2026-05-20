@@ -963,7 +963,8 @@ struct ChatView: View {
         )
         let keyboardGeometryRefreshKey = ChatKeyboardGeometryRefreshKey(
             size: geometry.size,
-            safeAreaBottom: geometry.safeAreaInsets.bottom
+            safeAreaBottom: geometry.safeAreaInsets.bottom,
+            notificationVisibleCount: viewModel.crossChatNotificationBubbles.count
         )
         let streamSelectorSpacingFromMessageBarTop: CGFloat = 8
         let streamSelectorMaxHeight = max(

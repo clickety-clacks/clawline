@@ -5313,15 +5313,6 @@ enum CrossChatNotificationGeometry {
     static func layoutHostWidth(maxContainerWidth: CGFloat) -> CGFloat {
         max(0, maxContainerWidth)
     }
-
-    static func isFullyInsideViewport(
-        minX: CGFloat,
-        maxX: CGFloat,
-        viewportWidth: CGFloat,
-        tolerance: CGFloat = 0.5
-    ) -> Bool {
-        minX >= -tolerance && maxX <= viewportWidth + tolerance
-    }
 }
 
 private struct CrossChatNotificationOverlay: View {

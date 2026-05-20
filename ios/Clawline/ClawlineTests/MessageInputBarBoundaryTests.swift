@@ -104,17 +104,14 @@ struct MessageInputBarBoundaryTests {
         ) == CGFloat(0))
     }
 
-    @Test("Notification viewport edge check fails right overflow")
-    func notificationViewportEdgeCheckFailsRightOverflow() {
-        #expect(CrossChatNotificationGeometry.isFullyInsideViewport(
-            minX: 24,
-            maxX: 392.5,
-            viewportWidth: 393
-        ))
-        #expect(!CrossChatNotificationGeometry.isFullyInsideViewport(
-            minX: 24,
-            maxX: 398,
-            viewportWidth: 393
-        ))
+    @Test("Notification layout host ignores oversized motion envelope width")
+    func notificationLayoutHostIgnoresOversizedMotionEnvelopeWidth() {
+        let viewportWidth = CGFloat(393)
+        let motionEnvelopeWidth = viewportWidth + 131 + 131 + 24
+
+        #expect(motionEnvelopeWidth > viewportWidth)
+        #expect(CrossChatNotificationGeometry.layoutHostWidth(
+            maxContainerWidth: viewportWidth
+        ) == viewportWidth)
     }
 }

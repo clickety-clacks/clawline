@@ -122,6 +122,58 @@ struct PromptFocusShortcutActivationTests {
         )
     }
 
+    @Test("T355 docked notification left swipe restores stack instead of dismissing")
+    @MainActor
+    func dockedNotificationLeftSwipeRestoresStackInsteadOfDismissing() {
+        let dockedLeftSwipe = CrossChatNotificationBubbleSwipeCompletion.effect(
+            activeLock: .horizontalSwipe,
+            finalTranslation: CGSize(width: -64, height: 4),
+            completionThreshold: 44,
+            isCollapsed: true
+        )
+
+        #expect(dockedLeftSwipe == .restoreDock)
+        #expect(dockedLeftSwipe?.restoresDock == true)
+        #expect(dockedLeftSwipe?.dismissesNotification == false)
+        #expect(
+            CrossChatNotificationBubbleSwipeCompletion.effect(
+                activeLock: .verticalScroll,
+                finalTranslation: CGSize(width: -64, height: 4),
+                completionThreshold: 44,
+                isCollapsed: true
+            ) == nil
+        )
+        #expect(
+            CrossChatNotificationBubbleSwipeCompletion.effect(
+                activeLock: .horizontalSwipe,
+                finalTranslation: CGSize(width: -64, height: 4),
+                completionThreshold: 44,
+                isCollapsed: false
+            ) == .dismiss
+        )
+    }
+
+    @Test("T355 notification right swipe preserves dock and collapsed preview behavior")
+    @MainActor
+    func notificationRightSwipePreservesDockAndCollapsedPreviewBehavior() {
+        #expect(
+            CrossChatNotificationBubbleSwipeCompletion.effect(
+                activeLock: .horizontalSwipe,
+                finalTranslation: CGSize(width: 64, height: 4),
+                completionThreshold: 44,
+                isCollapsed: false
+            ) == .dock
+        )
+        #expect(
+            CrossChatNotificationBubbleSwipeCompletion.effect(
+                activeLock: .horizontalSwipe,
+                finalTranslation: CGSize(width: 64, height: 4),
+                completionThreshold: 44,
+                isCollapsed: true
+            ) == .clearCollapsedPreview
+        )
+    }
+
     @Test("T307 notification reply input presents Send return key and five-line cap")
     @MainActor
     func notificationReplyInputUsesSendReturnKeyAndFiveLineCap() {

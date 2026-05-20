@@ -6116,7 +6116,7 @@ private struct CrossChatNotificationOverlay: View {
         guard ownership == .horizontalSwipe else { return }
         setGestureAxisLock(.horizontalSwipe, sourceChatId: sourceChatId)
         bubbleDragOffsetsBySourceChatId[sourceChatId] = rubberBandOffset(for: horizontal)
-        if horizontal <= -Self.collapseSwipeThreshold {
+        if !isCollapsed, horizontal <= -Self.collapseSwipeThreshold {
             dismissSwipeActiveSourceChatIds.insert(sourceChatId)
         } else {
             dismissSwipeActiveSourceChatIds.remove(sourceChatId)
@@ -6124,25 +6124,26 @@ private struct CrossChatNotificationOverlay: View {
     }
 
     private func handleBubbleDrag(_ value: DragGesture.Value, sourceChatId: String) {
-        let horizontal = value.translation.width
         let activeLock = gestureAxisLocksBySourceChatId[sourceChatId]
         withAnimation(Self.resizeAnimation) {
             bubbleDragOffsetsBySourceChatId[sourceChatId] = nil
             dismissSwipeActiveSourceChatIds.remove(sourceChatId)
         }
         setGestureAxisLock(.none, sourceChatId: sourceChatId)
-        guard CrossChatNotificationGestureAxisLock.allowsBubbleSwipeCompletion(
+        guard let completion = CrossChatNotificationBubbleSwipeCompletion.effect(
             activeLock: activeLock,
             finalTranslation: value.translation,
-            completionThreshold: Self.collapseSwipeThreshold
+            completionThreshold: Self.collapseSwipeThreshold,
+            isCollapsed: isCollapsed
         ) else { return }
-        if horizontal > 0 {
-            if isCollapsed {
-                clearCollapsedPreview(sourceChatId: sourceChatId)
-            } else {
-                dock()
-            }
-        } else {
+        switch completion {
+        case .clearCollapsedPreview:
+            clearCollapsedPreview(sourceChatId: sourceChatId)
+        case .dock:
+            dock()
+        case .restoreDock:
+            restoreDock()
+        case .dismiss:
             closeActionMenu()
             unpinReply(sourceChatId: sourceChatId)
             dismissNotification(sourceChatId: sourceChatId)
@@ -6862,6 +6863,51 @@ enum CrossChatNotificationGestureAxisLock: Equatable {
         activeLock != .verticalScroll
             && ownership(for: finalTranslation) == .horizontalSwipe
             && abs(finalTranslation.width) >= completionThreshold
+    }
+}
+
+enum CrossChatNotificationBubbleSwipeCompletion: Equatable {
+    case dock
+    case restoreDock
+    case clearCollapsedPreview
+    case dismiss
+
+    var dismissesNotification: Bool {
+        self == .dismiss
+    }
+
+    var restoresDock: Bool {
+        self == .restoreDock
+    }
+
+    static func effect(
+        activeLock: CrossChatNotificationGestureAxisLock?,
+        finalTranslation: CGSize,
+        completionThreshold: CGFloat,
+        isCollapsed: Bool
+    ) -> CrossChatNotificationBubbleSwipeCompletion? {
+        guard CrossChatNotificationGestureAxisLock.allowsBubbleSwipeCompletion(
+            activeLock: activeLock,
+            finalTranslation: finalTranslation,
+            completionThreshold: completionThreshold
+        ) else { return nil }
+        return effect(
+            isCollapsed: isCollapsed,
+            horizontalTranslation: finalTranslation.width
+        )
+    }
+
+    private static func effect(
+        isCollapsed: Bool,
+        horizontalTranslation: CGFloat
+    ) -> CrossChatNotificationBubbleSwipeCompletion? {
+        if horizontalTranslation > 0 {
+            return isCollapsed ? .clearCollapsedPreview : .dock
+        }
+        if horizontalTranslation < 0 {
+            return isCollapsed ? .restoreDock : .dismiss
+        }
+        return nil
     }
 }
 

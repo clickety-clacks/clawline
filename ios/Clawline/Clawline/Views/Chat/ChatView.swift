@@ -1957,8 +1957,8 @@ struct ChatView: View {
     private func spatialViewportEdgeFadeMask() -> some View {
         GeometryReader { proxy in
             let topFade = min(CGFloat(88), proxy.size.height / 2)
-            let bottomFade = min(CGFloat(176), proxy.size.height / 2)
-            let horizontalFade = min(CGFloat(88), proxy.size.width / 2)
+            let bottomFade = min(CGFloat(120), proxy.size.height / 2)
+            let horizontalFade = min(CGFloat(44), proxy.size.width / 2)
 
             Rectangle()
                 .fill(Color.white)

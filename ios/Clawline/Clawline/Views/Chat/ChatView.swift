@@ -1070,6 +1070,7 @@ struct ChatView: View {
                 topMargin: notificationOverlayTopMargin,
                 maxContainerHeight: notificationOverlayMaxHeight,
                 maxContainerWidth: notificationOverlayMaxWidth,
+                trailingSafeAreaInset: geometry.safeAreaInsets.trailing,
                 normalTrailingMargin: notificationNormalTrailingMargin,
                 compactLeadingFitMargin: notificationCompactLeadingFitMargin,
                 measuredBubbleHeightsBySourceChatId: $crossChatNotificationMeasuredHeightsBySourceChatId,
@@ -1571,6 +1572,7 @@ struct ChatView: View {
         topMargin: CGFloat,
         maxContainerHeight: CGFloat,
         maxContainerWidth: CGFloat,
+        trailingSafeAreaInset: CGFloat,
         normalTrailingMargin: CGFloat,
         compactLeadingFitMargin: CGFloat,
         measuredBubbleHeightsBySourceChatId: Binding<[String: CGFloat]>,
@@ -1586,6 +1588,7 @@ struct ChatView: View {
                     topMargin: topMargin,
                     maxContainerHeight: maxContainerHeight,
                     maxContainerWidth: maxContainerWidth,
+                    trailingSafeAreaInset: trailingSafeAreaInset,
                     normalTrailingMargin: normalTrailingMargin,
                     compactLeadingFitMargin: compactLeadingFitMargin,
                     isCollapsed: $isCrossChatNotificationStackDocked,
@@ -5326,9 +5329,10 @@ enum CrossChatNotificationGeometry {
 
     static func collapsedOffset(
         stackWidth: CGFloat,
-        collapsedPeekWidth: CGFloat
+        collapsedPeekWidth: CGFloat,
+        trailingSafeAreaInset: CGFloat
     ) -> CGFloat {
-        max(0, stackWidth - collapsedPeekWidth)
+        max(0, stackWidth - collapsedPeekWidth + max(0, trailingSafeAreaInset))
     }
 }
 
@@ -5337,6 +5341,7 @@ private struct CrossChatNotificationOverlay: View {
     let topMargin: CGFloat
     let maxContainerHeight: CGFloat
     let maxContainerWidth: CGFloat
+    let trailingSafeAreaInset: CGFloat
     let normalTrailingMargin: CGFloat
     let compactLeadingFitMargin: CGFloat
     @Binding var isCollapsed: Bool
@@ -5493,7 +5498,8 @@ private struct CrossChatNotificationOverlay: View {
     private var collapsedOffset: CGFloat {
         CrossChatNotificationGeometry.collapsedOffset(
             stackWidth: stackWidth,
-            collapsedPeekWidth: Self.collapsedPeekWidth
+            collapsedPeekWidth: Self.collapsedPeekWidth,
+            trailingSafeAreaInset: trailingSafeAreaInset
         )
     }
 

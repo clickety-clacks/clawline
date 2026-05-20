@@ -126,7 +126,8 @@ struct MessageInputBarBoundaryTests {
         ) == viewportWidth)
         #expect(CrossChatNotificationGeometry.collapsedOffset(
             stackWidth: stackWidth,
-            collapsedPeekWidth: peekWidth
+            collapsedPeekWidth: peekWidth,
+            trailingSafeAreaInset: 0
         ) == stackWidth - peekWidth)
     }
 
@@ -137,19 +138,22 @@ struct MessageInputBarBoundaryTests {
 
         #expect(CrossChatNotificationGeometry.collapsedOffset(
             stackWidth: stackWidth,
-            collapsedPeekWidth: peekWidth
+            collapsedPeekWidth: peekWidth,
+            trailingSafeAreaInset: 0
         ) == stackWidth - peekWidth)
     }
 
-    @Test("Notification collapsed offset preserves Ansible landscape peek")
-    func notificationCollapsedOffsetPreservesAnsibleLandscapePeek() {
+    @Test("Notification collapsed offset compensates compact landscape safe-area gutter")
+    func notificationCollapsedOffsetCompensatesCompactLandscapeSafeAreaGutter() {
         let stackWidth = CGFloat(562.5)
         let peekWidth = CGFloat(18)
+        let landscapeTrailingSafeArea = CGFloat(47)
 
         #expect(CrossChatNotificationGeometry.collapsedOffset(
             stackWidth: stackWidth,
-            collapsedPeekWidth: peekWidth
-        ) == stackWidth - peekWidth)
+            collapsedPeekWidth: peekWidth,
+            trailingSafeAreaInset: landscapeTrailingSafeArea
+        ) == stackWidth - peekWidth + landscapeTrailingSafeArea)
     }
 
     @Test("Notification collapsed offset keeps iPad zero-inset landscape behavior")
@@ -159,7 +163,8 @@ struct MessageInputBarBoundaryTests {
 
         #expect(CrossChatNotificationGeometry.collapsedOffset(
             stackWidth: stackWidth,
-            collapsedPeekWidth: peekWidth
+            collapsedPeekWidth: peekWidth,
+            trailingSafeAreaInset: 0
         ) == stackWidth - peekWidth)
     }
 }

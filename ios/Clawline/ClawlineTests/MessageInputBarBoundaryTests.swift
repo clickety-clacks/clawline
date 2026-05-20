@@ -89,4 +89,32 @@ struct MessageInputBarBoundaryTests {
 
         #expect(fieldCap == expectedFieldWidth)
     }
+
+    @Test("Notification layout host reports viewport width")
+    func notificationLayoutHostReportsViewportWidth() {
+        #expect(CrossChatNotificationGeometry.layoutHostWidth(
+            maxContainerWidth: 393
+        ) == CGFloat(393))
+    }
+
+    @Test("Notification layout host rejects negative viewport widths")
+    func notificationLayoutHostRejectsNegativeViewportWidths() {
+        #expect(CrossChatNotificationGeometry.layoutHostWidth(
+            maxContainerWidth: -10
+        ) == CGFloat(0))
+    }
+
+    @Test("Notification viewport edge check fails right overflow")
+    func notificationViewportEdgeCheckFailsRightOverflow() {
+        #expect(CrossChatNotificationGeometry.isFullyInsideViewport(
+            minX: 24,
+            maxX: 392.5,
+            viewportWidth: 393
+        ))
+        #expect(!CrossChatNotificationGeometry.isFullyInsideViewport(
+            minX: 24,
+            maxX: 398,
+            viewportWidth: 393
+        ))
+    }
 }

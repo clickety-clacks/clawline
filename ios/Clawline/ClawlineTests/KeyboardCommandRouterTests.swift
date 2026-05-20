@@ -248,6 +248,26 @@ struct KeyboardCommandRouterTests {
                     }
                 }
         )
+        #expect(
+            ChatAppCommandShortcut.prioritizedTextInputKeyCommandSpecs(notificationVisibleCount: 0).map(\.action) == [
+                .scrollChatDown,
+                .scrollChatUp
+            ]
+        )
+        #expect(
+            ChatAppCommandShortcut.prioritizedTextInputKeyCommandSpecs(notificationVisibleCount: 2).map(\.action) == [
+                .scrollNotificationDown,
+                .scrollNotificationUp,
+                .scrollNotificationDown,
+                .scrollNotificationUp,
+                .notificationNumber,
+                .notificationNumber,
+                .notificationNumber,
+                .notificationNumber,
+                .notificationNumber,
+                .notificationNumber
+            ]
+        )
         #expect(CrossChatNotificationGlobalShortcut.scrollSpecs(visibleNotificationCount: 2).map(\.input) == ["j", "k", "j", "k"])
     }
 

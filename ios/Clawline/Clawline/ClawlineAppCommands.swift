@@ -100,38 +100,22 @@ struct ClawlineAppCommands: Commands {
             Divider()
 
             Button("Scroll Bubble Contents Down") {
-                routeScrollShortcut(
-                    .transcriptBubbleScrollForward,
-                    transcriptNotificationName: .clawlineScrollDownCommand,
-                    notificationAction: { crossChatNotificationCommand?.scrollDown() }
-                )
+                routeAppShortcut(.transcriptBubbleScrollForward)
             }
             .keyboardShortcut("j", modifiers: .command)
 
             Button("Scroll Bubble Contents Up") {
-                routeScrollShortcut(
-                    .transcriptBubbleScrollBackward,
-                    transcriptNotificationName: .clawlineScrollUpCommand,
-                    notificationAction: { crossChatNotificationCommand?.scrollUp() }
-                )
+                routeAppShortcut(.transcriptBubbleScrollBackward)
             }
             .keyboardShortcut("k", modifiers: .command)
 
             Button("Scroll Chat Down") {
-                routeScrollShortcut(
-                    .transcriptChatScrollForward,
-                    transcriptNotificationName: .clawlineScrollChatDownCommand,
-                    notificationAction: { crossChatNotificationCommand?.scrollDown() }
-                )
+                routeAppShortcut(.transcriptChatScrollForward)
             }
             .keyboardShortcut("j", modifiers: [.command, .shift])
 
             Button("Scroll Chat Up") {
-                routeScrollShortcut(
-                    .transcriptChatScrollBackward,
-                    transcriptNotificationName: .clawlineScrollChatUpCommand,
-                    notificationAction: { crossChatNotificationCommand?.scrollUp() }
-                )
+                routeAppShortcut(.transcriptChatScrollBackward)
             }
             .keyboardShortcut("k", modifiers: [.command, .shift])
         }
@@ -158,24 +142,6 @@ struct ClawlineAppCommands: Commands {
     }
 
     private func routeAppShortcut(_ intent: KeyboardCommandIntent) {
-        guard case .handled(.transcript) = KeyboardCommandRouter
-            .route(intent: intent, store: routerStore())
-            .outcome else { return }
         NotificationCenter.default.post(name: .clawlineKeyboardCommandIntent, object: intent)
-    }
-
-    private func routeScrollShortcut(
-        _ intent: KeyboardCommandIntent,
-        transcriptNotificationName: Notification.Name,
-        notificationAction: () -> Void
-    ) {
-        switch KeyboardCommandRouter.route(intent: intent, store: routerStore()).outcome {
-        case .handled(.notificationBubble(_)):
-            notificationAction()
-        case .handled(.transcript):
-            NotificationCenter.default.post(name: transcriptNotificationName, object: nil)
-        default:
-            break
-        }
     }
 }

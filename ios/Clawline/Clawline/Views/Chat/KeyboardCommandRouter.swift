@@ -311,15 +311,23 @@ enum KeyboardCommandRouter {
             return decision(.fallthroughToDefault, "PR-07")
 
         case .transcriptBubbleScrollForward,
-             .transcriptBubbleScrollBackward,
-             .transcriptChatScrollForward,
-             .transcriptChatScrollBackward:
+             .transcriptBubbleScrollBackward:
             if let notification = reconciledStore.activeNotificationSurface(supporting: .notificationScroll) {
                 return decision(.handled(notification.surfaceId), "PR-04")
             }
             if reconciledStore.firstActiveSurface(kind: .notificationReply, focusedOnly: true, supporting: .textEditing) != nil
                 || reconciledStore.firstActiveSurface(kind: .composer, focusedOnly: true, supporting: .textEditing) != nil {
                 return decision(.ignored, "PR-05/PR-06")
+            }
+            if let transcript = reconciledStore.firstActiveSurface(kind: .transcript, supporting: .transcriptFallback) {
+                return decision(.handled(transcript.surfaceId), "PR-07")
+            }
+            return decision(.fallthroughToDefault, "PR-07")
+
+        case .transcriptChatScrollForward,
+             .transcriptChatScrollBackward:
+            if let notification = reconciledStore.activeNotificationSurface(supporting: .notificationScroll) {
+                return decision(.handled(notification.surfaceId), "PR-04")
             }
             if let transcript = reconciledStore.firstActiveSurface(kind: .transcript, supporting: .transcriptFallback) {
                 return decision(.handled(transcript.surfaceId), "PR-07")
@@ -435,7 +443,11 @@ enum KeyboardCommandBridge {
     }
 
     static func prioritizedTextInputSpecs(notificationVisibleCount: Int) -> [KeyCommandSpec] {
-        guard notificationVisibleCount > 0 else { return [] }
+        guard notificationVisibleCount > 0 else {
+            return transcriptScrollSpecs.filter {
+                $0.intent == .transcriptChatScrollForward || $0.intent == .transcriptChatScrollBackward
+            }
+        }
         return notificationScrollSpecs + notificationNumberSpecs(visibleCount: notificationVisibleCount)
     }
 

@@ -1572,9 +1572,7 @@ struct ChatView: View {
         keyboardOwnershipStore: KeyboardOwnershipStore
     ) -> AnyView {
         AnyView(
-            HStack(alignment: .top, spacing: 0) {
-                Spacer(minLength: 0)
-                    .allowsHitTesting(false)
+            ZStack(alignment: .topTrailing) {
                 CrossChatNotificationOverlay(
                     viewModel: viewModel,
                     topMargin: topMargin,
@@ -1596,8 +1594,8 @@ struct ChatView: View {
                 .visionOSOverlayDepthOffset(spatialOverlayDepthOffset)
             }
             .frame(
-                maxWidth: .infinity,
-                maxHeight: CrossChatNotificationOverlay.overlayHostHeight(
+                width: CrossChatNotificationGeometry.layoutHostWidth(maxContainerWidth: maxContainerWidth),
+                height: CrossChatNotificationOverlay.overlayHostHeight(
                     topMargin: topMargin,
                     maxContainerHeight: maxContainerHeight
                 ),
@@ -3772,7 +3770,11 @@ enum ChatAppCommandShortcut {
     }
 
     static func notificationScrollKeyCommandSpecs(notificationVisibleCount: Int) -> [KeyCommandSpec] {
-        scrollKeyCommandSpecs(notificationVisibleCount: notificationVisibleCount)
+        convert(KeyboardCommandBridge.notificationScrollSpecs)
+    }
+
+    static func prioritizedTextInputKeyCommandSpecs(notificationVisibleCount: Int) -> [KeyCommandSpec] {
+        convert(KeyboardCommandBridge.prioritizedTextInputSpecs(notificationVisibleCount: notificationVisibleCount))
     }
 
     static func notificationNumberKeyCommandSpecs(visibleCount: Int) -> [KeyCommandSpec] {
@@ -3916,11 +3918,11 @@ extension UIResponder {
     }
 
     @objc func clawlineScrollNotificationDownCommand(_ sender: UIKeyCommand) {
-        NotificationCenter.default.post(name: .clawlineKeyboardCommandIntent, object: KeyboardCommandBridge.intent(input: sender.input, modifierFlags: sender.modifierFlags))
+        NotificationCenter.default.post(name: .clawlineKeyboardCommandIntent, object: KeyboardCommandIntent.notificationScrollForward)
     }
 
     @objc func clawlineScrollNotificationUpCommand(_ sender: UIKeyCommand) {
-        NotificationCenter.default.post(name: .clawlineKeyboardCommandIntent, object: KeyboardCommandBridge.intent(input: sender.input, modifierFlags: sender.modifierFlags))
+        NotificationCenter.default.post(name: .clawlineKeyboardCommandIntent, object: KeyboardCommandIntent.notificationScrollBackward)
     }
 
     @objc func clawlineNotificationNumberCommand(_ sender: UIKeyCommand) {
@@ -5304,6 +5306,21 @@ enum CrossChatNotificationMarkdownRenderer {
             return [.attributedText(attributed)]
         }
         return rendered
+    }
+}
+
+enum CrossChatNotificationGeometry {
+    static func layoutHostWidth(maxContainerWidth: CGFloat) -> CGFloat {
+        max(0, maxContainerWidth)
+    }
+
+    static func isFullyInsideViewport(
+        minX: CGFloat,
+        maxX: CGFloat,
+        viewportWidth: CGFloat,
+        tolerance: CGFloat = 0.5
+    ) -> Bool {
+        minX >= -tolerance && maxX <= viewportWidth + tolerance
     }
 }
 
@@ -7042,7 +7059,7 @@ final class NotificationReplyUITextView: UITextView {
 
     override var keyCommands: [UIKeyCommand]? {
         let prioritizedNotificationCommands = ChatAppCommandShortcut
-            .keyCommandSpecs(notificationVisibleCount: visibleNotificationCount)
+            .prioritizedTextInputKeyCommandSpecs(notificationVisibleCount: visibleNotificationCount)
             .filter {
                 guard let intent = KeyboardCommandBridge.intent(input: $0.input, modifierFlags: $0.modifierFlags) else {
                     return false

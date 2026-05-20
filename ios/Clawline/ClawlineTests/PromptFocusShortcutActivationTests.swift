@@ -483,18 +483,18 @@ struct PromptFocusShortcutActivationTests {
         )
         #expect(
             ChatAppCommandShortcut.notificationScrollKeyCommandSpecs(notificationVisibleCount: 0).map(\.action) == [
-                .scrollDown,
-                .scrollUp,
-                .scrollChatDown,
-                .scrollChatUp
+                .scrollNotificationDown,
+                .scrollNotificationUp,
+                .scrollNotificationDown,
+                .scrollNotificationUp
             ]
         )
         #expect(
             ChatAppCommandShortcut.notificationScrollKeyCommandSpecs(notificationVisibleCount: 2).map(\.action) == [
-                .scrollDown,
-                .scrollUp,
-                .scrollChatDown,
-                .scrollChatUp
+                .scrollNotificationDown,
+                .scrollNotificationUp,
+                .scrollNotificationDown,
+                .scrollNotificationUp
             ]
         )
     }
@@ -533,8 +533,8 @@ struct PromptFocusShortcutActivationTests {
             command.input == "k" && command.modifierFlags == [.command, .shift]
         }
 
-        #expect(firstCommandJ?.action == #selector(UIResponder.clawlineScrollDownCommand(_:)))
-        #expect(firstCommandShiftK?.action == #selector(UIResponder.clawlineScrollChatUpCommand(_:)))
+        #expect(firstCommandJ?.action == #selector(UIResponder.clawlineScrollNotificationDownCommand(_:)))
+        #expect(firstCommandShiftK?.action == #selector(UIResponder.clawlineScrollNotificationUpCommand(_:)))
     }
 
     @Test("Text input bridge exposure follows router notification ownership")
@@ -753,6 +753,42 @@ struct PromptFocusShortcutActivationTests {
         ])
     }
 
+    @Test("Notification scroll responders post notification scroll intents")
+    @MainActor
+    func notificationScrollRespondersPostNotificationScrollIntents() {
+        let center = NotificationCenter.default
+        var posted: [KeyboardCommandIntent] = []
+        let token = center.addObserver(forName: .clawlineKeyboardCommandIntent, object: nil, queue: nil) { notification in
+            if let intent = notification.object as? KeyboardCommandIntent {
+                posted.append(intent)
+            }
+        }
+        defer {
+            center.removeObserver(token)
+        }
+
+        let responder = UIResponder()
+        responder.clawlineScrollNotificationDownCommand(
+            UIKeyCommand(
+                input: "j",
+                modifierFlags: [.command, .shift],
+                action: #selector(UIResponder.clawlineScrollNotificationDownCommand(_:))
+            )
+        )
+        responder.clawlineScrollNotificationUpCommand(
+            UIKeyCommand(
+                input: "k",
+                modifierFlags: [.command, .shift],
+                action: #selector(UIResponder.clawlineScrollNotificationUpCommand(_:))
+            )
+        )
+
+        #expect(posted == [
+            .notificationScrollForward,
+            .notificationScrollBackward
+        ])
+    }
+
     @Test("No-text composed printable typing activates prompt insertion")
     func noTextComposedPrintableTypingActivatesPromptInsertion() {
         #expect(PromptFocusTypingActivation.promptInsertionText(from: "a") == "a")
@@ -800,6 +836,13 @@ struct PromptFocusShortcutActivationTests {
         )
     }
 
+    @Test("T351 notification overlay host reports viewport width, not motion overflow width")
+    func notificationOverlayHostReportsViewportWidthNotMotionOverflowWidth() {
+        #expect(CrossChatNotificationGeometry.layoutHostWidth(maxContainerWidth: 393) == 393)
+        #expect(CrossChatNotificationGeometry.layoutHostWidth(maxContainerWidth: 0) == 0)
+        #expect(CrossChatNotificationGeometry.layoutHostWidth(maxContainerWidth: -10) == 0)
+    }
+
     @Test("Notification reply field keeps notification number and scroll shortcuts above text focus")
     @MainActor
     func notificationReplyFieldKeepsNotificationNumberAndScrollShortcutsAboveTextFocus() {
@@ -819,6 +862,19 @@ struct PromptFocusShortcutActivationTests {
         assertRoute(.notificationScrollBackward, in: store, isHandledBy: .notificationBubble("notification-0"), rule: "PR-04")
         #expect(KeyboardCommandBridge.intent(input: "3", modifierFlags: [.command, .control]) == nil)
         #expect(KeyboardCommandRouter.route(intent: .notificationAssignedOpen(4), store: store).outcome == .fallthroughToDefault)
+
+        let textView = NotificationReplyUITextView()
+        textView.visibleNotificationCount = 4
+        textView.keyboardOwnershipStore = store
+        let firstCommandJ = textView.keyCommands?.first { command in
+            command.input == "j" && command.modifierFlags == [.command]
+        }
+        let firstCommandShiftK = textView.keyCommands?.first { command in
+            command.input == "k" && command.modifierFlags == [.command, .shift]
+        }
+
+        #expect(firstCommandJ?.action == #selector(UIResponder.clawlineScrollNotificationDownCommand(_:)))
+        #expect(firstCommandShiftK?.action == #selector(UIResponder.clawlineScrollNotificationUpCommand(_:)))
     }
 
     @Test("Transcript and chat scroll receive only unclaimed scroll shortcuts")
@@ -841,7 +897,7 @@ struct PromptFocusShortcutActivationTests {
         assertRoute(.transcriptBubbleScrollForward, in: transcriptStore, isHandledBy: .transcript, rule: "PR-07")
         assertRoute(.transcriptChatScrollForward, in: transcriptStore, isHandledBy: .transcript, rule: "PR-07")
         #expect(KeyboardCommandRouter.route(intent: .transcriptBubbleScrollForward, store: composerFocusedStore).outcome == .ignored)
-        #expect(KeyboardCommandRouter.route(intent: .transcriptChatScrollForward, store: composerFocusedStore).outcome == .ignored)
+        assertRoute(.transcriptChatScrollForward, in: composerFocusedStore, isHandledBy: .transcript, rule: "PR-07")
     }
 
     @Test("Chat keyboard navigation follows stream order without wrapping")

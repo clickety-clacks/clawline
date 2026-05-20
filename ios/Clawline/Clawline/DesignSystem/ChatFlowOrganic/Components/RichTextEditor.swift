@@ -448,7 +448,7 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
             UIKeyCommand(input: "c", modifierFlags: [.control], action: #selector(didPressCtrlC))
         ]
         let appCommandShortcuts = ChatAppCommandShortcut
-            .keyCommandSpecs(notificationVisibleCount: notificationVisibleCount)
+            .prioritizedTextInputKeyCommandSpecs(notificationVisibleCount: notificationVisibleCount)
             .map { spec in
             UIKeyCommand(
                 input: spec.input,

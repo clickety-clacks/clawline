@@ -301,6 +301,7 @@ struct StreamPageDotsView: View {
             dotRow
                 .frame(width: scrubFieldWidth, height: Self.controlHeight, alignment: .center)
                 .frame(width: controlWidth, height: Self.controlHeight, alignment: .center)
+                .clipShape(Capsule())
                 .frame(maxHeight: .infinity, alignment: .bottom)
         }
         .frame(width: scrubFieldWidth, height: Self.minimumHitTargetHeight, alignment: .bottom)

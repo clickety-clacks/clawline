@@ -961,6 +961,10 @@ struct ChatView: View {
             containerPadding: metrics.containerPadding,
             pageIndicatorClearance: pageIndicatorClearance
         )
+        let keyboardGeometryRefreshKey = ChatKeyboardGeometryRefreshKey(
+            size: geometry.size,
+            safeAreaBottom: geometry.safeAreaInsets.bottom
+        )
         let streamSelectorSpacingFromMessageBarTop: CGFloat = 8
         let streamSelectorMaxHeight = max(
             0,
@@ -1177,7 +1181,10 @@ struct ChatView: View {
             layoutRevision &+= 1
         }
         .onChange(of: isInputFocused) { _, _ in layoutRevision &+= 1 }
-        .onChange(of: geometry.safeAreaInsets.bottom) { _, _ in layoutRevision &+= 1 }
+        .onChange(of: keyboardGeometryRefreshKey) { _, _ in
+            layoutRevision &+= 1
+            keyboardRefreshToken &+= 1
+        }
         .onChange(of: horizontalSizeClass) { _, _ in layoutRevision &+= 1 }
         .overlay(alignment: .bottom) {
 #if os(visionOS)

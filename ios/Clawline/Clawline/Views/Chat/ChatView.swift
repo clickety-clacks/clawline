@@ -1595,7 +1595,10 @@ struct ChatView: View {
             }
             .frame(
                 width: CrossChatNotificationGeometry.layoutHostWidth(maxContainerWidth: maxContainerWidth),
-                height: CrossChatNotificationOverlay.overlayHostHeight(
+                alignment: .topTrailing
+            )
+            .frame(
+                maxHeight: CrossChatNotificationOverlay.overlayHostHeight(
                     topMargin: topMargin,
                     maxContainerHeight: maxContainerHeight
                 ),

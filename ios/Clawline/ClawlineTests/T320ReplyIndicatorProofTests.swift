@@ -130,6 +130,7 @@ struct T320ReplyIndicatorProofTests {
         #expect(outgoingReplyReference?.clientMessageId == referenced.clientMessageId)
         #expect(outgoingReplyReference?.tokenLabel.contains("assistant:") == false)
     }
+
 }
 
 @MainActor

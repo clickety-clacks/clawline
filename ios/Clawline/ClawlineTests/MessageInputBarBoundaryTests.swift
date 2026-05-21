@@ -131,6 +131,28 @@ struct MessageInputBarBoundaryTests {
         ) == stackWidth - peekWidth)
     }
 
+    @Test("T357 transcript collection frame stays inside landscape safe-area host")
+    func transcriptCollectionFrameStaysInsideLandscapeSafeAreaHost() {
+        let targetFrame = MessageFlowCollectionViewController.targetCollectionFrame(
+            viewBounds: CGRect(x: 0, y: 0, width: 750, height: 402),
+            windowBounds: CGRect(x: 0, y: 0, width: 874, height: 402),
+            viewOriginInWindow: CGPoint(x: 62, y: 0)
+        )
+
+        #expect(targetFrame == CGRect(x: 0, y: 0, width: 750, height: 402))
+    }
+
+    @Test("T357 transcript collection frame preserves full-window width when host is unconstrained")
+    func transcriptCollectionFramePreservesFullWindowWidthWhenHostIsUnconstrained() {
+        let targetFrame = MessageFlowCollectionViewController.targetCollectionFrame(
+            viewBounds: CGRect(x: 0, y: 0, width: 874, height: 402),
+            windowBounds: CGRect(x: 0, y: 0, width: 874, height: 402),
+            viewOriginInWindow: CGPoint(x: 0, y: 0)
+        )
+
+        #expect(targetFrame == CGRect(x: 0, y: 0, width: 874, height: 402))
+    }
+
     @Test("Notification collapsed offset preserves portrait peek with no trailing inset")
     func notificationCollapsedOffsetPreservesPortraitPeekWithNoTrailingInset() {
         let stackWidth = CGFloat(361)

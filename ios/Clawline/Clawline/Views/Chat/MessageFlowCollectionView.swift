@@ -256,6 +256,25 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             abs(current.height - target.height) > tolerance
     }
 
+    static func targetCollectionFrame(
+        viewBounds: CGRect,
+        windowBounds: CGRect?,
+        viewOriginInWindow: CGPoint?,
+        tolerance: CGFloat = 1
+    ) -> CGRect {
+        guard let windowBounds, let viewOriginInWindow else {
+            return viewBounds
+        }
+
+        let isHorizontallyConstrained = viewBounds.width < windowBounds.width - tolerance
+        return CGRect(
+            x: 0,
+            y: -viewOriginInWindow.y,
+            width: isHorizontallyConstrained ? viewBounds.width : windowBounds.width,
+            height: windowBounds.height
+        )
+    }
+
     private var collectionView: UICollectionView!
     private var channelOverride: String?
     private var dataSource: UICollectionViewDiffableDataSource<Int, String>!
@@ -1104,9 +1123,10 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
 
-        // iOS: Extend the collection view to fill the entire screen, ignoring safe areas.
+        // iOS: Extend vertically to fill the entire screen, ignoring top/bottom safe areas.
         // SwiftUI's UIViewControllerRepresentable doesn't respect .ignoresSafeArea() for UIKit views,
-        // so we manually extend the collection view to window bounds.
+        // so we manually extend the collection view against window bounds. Keep the collection view
+        // within its host width when SwiftUI has already constrained that host for landscape safe areas.
         //
         // visionOS: In a spatial window this "counter-positioning" can create a layout feedback loop
         // (window position/size <-> view origin <-> collectionView frame), visible as the chat list
@@ -1114,22 +1134,15 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         #if os(visionOS)
             collectionView.frame = view.bounds
         #else
-            if let window = view.window {
-                let windowBounds = window.bounds
-                let viewOriginInWindow = view.convert(CGPoint.zero, to: window)
+            let targetFrame = Self.targetCollectionFrame(
+                viewBounds: view.bounds,
+                windowBounds: view.window?.bounds,
+                viewOriginInWindow: view.window.map { view.convert(CGPoint.zero, to: $0) }
+            )
 
-                // Calculate frame that extends from top of screen to bottom
-                let extendedFrame = CGRect(
-                    x: 0,
-                    y: -viewOriginInWindow.y,
-                    width: windowBounds.width,
-                    height: windowBounds.height
-                )
-
-                // Only update if significantly different to avoid layout loops
-                if Self.shouldUpdateCollectionFrame(current: collectionView.frame, target: extendedFrame) {
-                    collectionView.frame = extendedFrame
-                }
+            // Only update if significantly different to avoid layout loops
+            if Self.shouldUpdateCollectionFrame(current: collectionView.frame, target: targetFrame) {
+                collectionView.frame = targetFrame
             }
         #endif
 

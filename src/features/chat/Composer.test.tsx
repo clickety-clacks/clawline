@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   AuthSessionStoreProvider,
@@ -174,6 +175,18 @@ describe("Composer", () => {
     expect(
       chatStore.getState().messagesBySessionKey["agent:main:clawline:user_1:main"]
     ).toHaveLength(1);
+  });
+
+  it("does not submit with modified Enter", async () => {
+    const { sendMessage } = renderComposer();
+    const textarea = screen.getByLabelText("Message");
+    const user = userEvent.setup();
+
+    await user.click(textarea);
+    await user.keyboard("Line one{Shift>}{Enter}{/Shift}Line two{Control>}{Enter}{/Control}Line three");
+
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(textarea).toHaveValue("Line one\nLine two\nLine three");
   });
 
   it("submits when the send button is tapped", async () => {
@@ -495,8 +508,9 @@ describe("Composer", () => {
     fireEvent.focus(textarea);
     fireEvent.change(textarea, { target: { value: "line one" } });
 
-    expect(fireEvent.keyDown(textarea, { key: "Enter", shiftKey: true })).toBe(true);
+    expect(fireEvent.keyDown(textarea, { key: "Enter", shiftKey: true })).toBe(false);
     expect(sendMessage).not.toHaveBeenCalled();
+    expect(textarea).toHaveValue("line one\n");
   });
 
   it("reports cross-chat send failure in the initiating composer without echoing into the current chat", async () => {

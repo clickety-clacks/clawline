@@ -129,8 +129,10 @@ final class StubChatService: ChatServicing {
         id: String,
         content: String,
         attachments: [WireAttachment],
-        sessionKey: String?
+        sessionKey: String?,
+        references: [MessageReferenceContext] = []
     ) async throws {
+        _ = references
         try await Task.sleep(for: .seconds(responseDelay))
         serviceEventContinuation?.yield(.messageAcked(id: id))
 

@@ -750,6 +750,125 @@ struct ChatViewModelTests {
         #expect(finalState.first?.streaming == false)
     }
 
+    @Test("Live agent progress updates reducer state and clears on assistant final")
+    @MainActor
+    func liveAgentProgressUpdatesAndClears() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        _ = chatService.connectionState
+        _ = chatService.serviceEvents
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        chatService.emitServiceEvent(
+            .agentProgress(
+                AgentProgressEvent(
+                    version: 1,
+                    sessionKey: personalSessionKey,
+                    runId: "run_1",
+                    messageId: "c_1",
+                    seq: 2,
+                    state: "running",
+                    event: AgentProgressItem(
+                        kind: "item",
+                        phase: "start",
+                        status: "running",
+                        title: "Reading files",
+                        name: nil,
+                        summary: "Less specific summary",
+                        progressText: "Reading files"
+                    )
+                )
+            )
+        )
+
+        for _ in 0..<50 {
+            if viewModel.liveProgressSummary(for: personalSessionKey) == "Reading files" { break }
+            try await Task.sleep(forDuration: .milliseconds(20))
+        }
+        #expect(viewModel.liveProgressSummary(for: personalSessionKey) == "Reading files")
+
+        chatService.emitServiceEvent(
+            .agentProgress(
+                AgentProgressEvent(
+                    version: 1,
+                    sessionKey: personalSessionKey,
+                    runId: "run_1",
+                    messageId: "c_1",
+                    seq: 1,
+                    state: "running",
+                    summary: "Stale update"
+                )
+            )
+        )
+        try await Task.sleep(forDuration: .milliseconds(20))
+        #expect(viewModel.liveProgressSummary(for: personalSessionKey) == "Reading files")
+
+        chatService.emitServiceEvent(
+            .agentProgress(
+                AgentProgressEvent(
+                    version: 1,
+                    sessionKey: personalSessionKey,
+                    runId: "run_1",
+                    messageId: "c_1",
+                    seq: 3,
+                    state: "running",
+                    summary: "Running command"
+                )
+            )
+        )
+        for _ in 0..<50 {
+            if viewModel.liveProgressSummary(for: personalSessionKey) == "Running command" { break }
+            try await Task.sleep(forDuration: .milliseconds(20))
+        }
+        #expect(viewModel.liveProgressSummary(for: personalSessionKey) == "Running command")
+
+        chatService.emitServiceEvent(
+            .agentProgress(
+                AgentProgressEvent(
+                    version: 1,
+                    sessionKey: personalSessionKey,
+                    runId: "run_1",
+                    messageId: "c_1",
+                    seq: 2,
+                    state: "done"
+                )
+            )
+        )
+        try await Task.sleep(forDuration: .milliseconds(20))
+        #expect(viewModel.liveProgressSummary(for: personalSessionKey) == "Running command")
+
+        chatService.emit(
+            Message(
+                id: "s_final",
+                role: .assistant,
+                content: "Final",
+                timestamp: Date(),
+                streaming: false,
+                attachments: [],
+                deviceId: nil,
+                sessionKey: personalSessionKey,
+                replyToClientMessageId: "c_1"
+            )
+        )
+        for _ in 0..<50 {
+            if viewModel.liveProgress(for: personalSessionKey) == nil { break }
+            try await Task.sleep(forDuration: .milliseconds(20))
+        }
+        #expect(viewModel.liveProgress(for: personalSessionKey) == nil)
+    }
+
     @Test("Lifecycle replay advances service-owned per-stream cursor after apply")
     @MainActor
     func lifecycleReplayAdvancesServiceReplayCursor() async throws {
@@ -947,6 +1066,76 @@ struct ChatViewModelTests {
         let messages = await MainActor.run { viewModel.messages }
         #expect(messages.count == 1)
         #expect(messages.first?.id == "s_user_echo")
+    }
+
+    @Test("Message reference token sends structured identity without quoted prompt text")
+    @MainActor
+    func messageReferenceSendsStructuredIdentity() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        try await setReadyToSend(chatService: chatService, viewModel: viewModel)
+        let referenced = Message(
+            id: "s_ref",
+            role: .assistant,
+            content: "Do not paste this into the prompt",
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: "agent:main:clawline:user:s_ref",
+            clientMessageId: "c_ref"
+        )
+        let resetBeforeReference = viewModel.inputResetToken
+        let selection = viewModel.referenceMessageInPrompt(referenced, selectionRange: NSRange(location: 0, length: 0))
+        #expect(viewModel.inputResetToken == resetBeforeReference + 1)
+        viewModel.inputContent = NSAttributedString(string: "Summarize the selected context")
+        _ = viewModel.referenceMessageInPrompt(referenced, selectionRange: selection)
+        viewModel.send()
+
+        try await Task.sleep(forDuration: .milliseconds(10))
+        #expect(chatService.lastSentContent == "Summarize the selected context")
+        #expect(chatService.lastSentContent?.contains("Do not paste") == false)
+        let reference = try #require(chatService.lastSentReferences.first)
+        #expect(reference.kind == "message")
+        #expect(reference.sessionKey == referenced.sessionKey)
+        #expect(reference.messageId == referenced.id)
+        #expect(reference.messageRole == .assistant)
+        #expect(reference.clientMessageId == "c_ref")
+
+        let payload = ClientMessagePayload(
+            id: "c_payload",
+            content: "Prompt",
+            attachments: [],
+            sessionKey: personalSessionKey,
+            references: [reference]
+        )
+        let encoded = try JSONEncoder().encode(payload)
+        let object = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        let references = try #require(object["references"] as? [[String: Any]])
+        #expect(references.first?["createdAt"] as? Double == 1_700_000_000_000)
+    }
+
+    @Test("Composer exposes modified Return as local newline key commands")
+    @MainActor
+    func composerModifiedReturnKeyCommands() {
+        let textView = PastableTextView()
+        let commands = textView.keyCommands ?? []
+        #expect(commands.contains { $0.input == "\r" && $0.modifierFlags == [.shift] })
+        #expect(commands.contains { $0.input == "\r" && $0.modifierFlags == [.control] })
     }
 
     @Test("Interactive callback fallback echoes are suppressed from visible messages")
@@ -5226,6 +5415,7 @@ private final class TestChatService: ChatServicing {
     private(set) var lastSentContent: String?
     private(set) var lastSessionKey: String?
     private(set) var sentIds: [String] = []
+    private(set) var lastSentReferences: [MessageReferenceContext] = []
     var lastPublishedReadState: (sessionKey: String, lastReadMessageId: String)?
     private(set) var connectCallCount: Int = 0
     var isTransportReadyForSend: Bool = false
@@ -5353,7 +5543,11 @@ private final class TestChatService: ChatServicing {
         replayCursorBySessionKey.removeAll()
     }
 
-    func send(id: String, content: String, attachments: [WireAttachment], sessionKey: String?) async throws {
+    func send(id: String,
+              content: String,
+              attachments: [WireAttachment],
+              sessionKey: String?,
+              references: [MessageReferenceContext]) async throws {
         if let sendError {
             throw sendError
         }
@@ -5362,6 +5556,7 @@ private final class TestChatService: ChatServicing {
         lastSentAttachments = attachments
         lastSessionKey = sessionKey
         sentIds.append(id)
+        lastSentReferences = references
         if let sendDelay {
             try await Task.sleep(for: sendDelay)
         }

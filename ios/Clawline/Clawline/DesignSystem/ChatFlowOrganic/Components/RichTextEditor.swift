@@ -473,6 +473,10 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
             }
         }
         let inputReleaseCommands = [
+            UIKeyCommand(input: "\r", modifierFlags: [.shift], action: #selector(didPressModifiedReturn)),
+            UIKeyCommand(input: "\r", modifierFlags: [.control], action: #selector(didPressModifiedReturn)),
+            UIKeyCommand(input: "\n", modifierFlags: [.shift], action: #selector(didPressModifiedReturn)),
+            UIKeyCommand(input: "\n", modifierFlags: [.control], action: #selector(didPressModifiedReturn)),
             UIKeyCommand(input: UIKeyCommand.inputEscape, modifierFlags: [], action: #selector(didPressEscape))
         ]
         let modifiedReturnCommands = KeyboardCommandBridge.textInputSpecs.compactMap { spec -> UIKeyCommand? in

@@ -207,7 +207,7 @@ final class ProviderChatService: ChatServicing {
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
     private let replayCursorDefaults = UserDefaults.standard
-    private let supportedClientFeatures = ["terminal_bubbles_v1"]
+    private let supportedClientFeatures = ["terminal_bubbles_v1", "live_agent_progress_v1"]
     private let authTimeout: Duration = .seconds(12)
 
     private let messageBroadcaster = AsyncStreamBroadcaster<Message>()
@@ -531,7 +531,8 @@ final class ProviderChatService: ChatServicing {
         id: String,
         content: String,
         attachments: [WireAttachment],
-        sessionKey: String?
+        sessionKey: String?,
+        references: [MessageReferenceContext] = []
     ) async throws {
         guard let socket else {
             throw Error.notConnected
@@ -548,7 +549,8 @@ final class ProviderChatService: ChatServicing {
             id: id,
             content: content,
             attachments: attachments,
-            sessionKey: sessionKey
+            sessionKey: sessionKey,
+            references: references
         )
         let data = try encoder.encode(payload)
         guard let text = String(data: data, encoding: .utf8) else {
@@ -809,6 +811,8 @@ final class ProviderChatService: ChatServicing {
             )
         case "ack":
             handleAck(data: data)
+        case "agent_progress":
+            handleAgentProgress(data: data)
         case "error":
             handleServerError(
                 data: data,
@@ -965,6 +969,21 @@ final class ProviderChatService: ChatServicing {
         }
         pendingMessages.remove(payload.id)
         emitServiceEvent(.messageAcked(id: payload.id))
+    }
+
+    private func handleAgentProgress(data: Data) {
+        let payload: AgentProgressEvent
+        do {
+            payload = try decoder.decode(AgentProgressEvent.self, from: data)
+        } catch {
+            logger.warning("Dropping agent_progress payload: decode failed error=\(error.localizedDescription, privacy: .public)")
+            return
+        }
+        guard !payload.sessionKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            logger.warning("Dropping agent_progress: missing sessionKey")
+            return
+        }
+        emitServiceEvent(.agentProgress(payload))
     }
 
     private func handleServerError(data: Data, lifecycleEpoch: Int?, lifecycleConnectionToken: UUID?) {

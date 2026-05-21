@@ -98,6 +98,12 @@ struct ChatLayoutKey: Equatable {
     }
 }
 
+struct ChatKeyboardGeometryRefreshKey: Equatable {
+    let size: CGSize
+    let safeAreaBottom: CGFloat
+    let notificationVisibleCount: Int
+}
+
 protocol KeyboardPinnedContainerViewProtocol: AnyObject {
     var containerView: UIView { get }
     var barHeight: CGFloat { get }

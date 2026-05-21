@@ -81,7 +81,7 @@ final class WebBubbleCoordinator: WebBubbleCoordinating {
         originatingWebView: WKWebView,
         configuration: WKWebViewConfiguration,
         navigationAction: WKNavigationAction,
-        windowFeatures: WKWindowFeatures
+        windowFeatures _: WKWindowFeatures
     ) -> WKWebView? {
         let parentItemId = ownerItemIdByWebViewId[ObjectIdentifier(originatingWebView)]
 
@@ -186,12 +186,18 @@ final class WebBubbleWebViewDelegate: NSObject, WKNavigationDelegate, WKUIDelega
 
     func webView(_ webView: WKWebView,
                  decidePolicyFor navigationAction: WKNavigationAction,
-                 decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+                 decisionHandler: @escaping (WKNavigationActionPolicy) -> Void)
+    {
         guard let url = navigationAction.request.url else {
             decisionHandler(.cancel)
             return
         }
         guard Self.isAllowedScheme(url) else {
+            decisionHandler(.cancel)
+            return
+        }
+        if ExternalWebContentPolicy.shouldOpenInBrowserSurface(url) {
+            ExternalWebContentPolicy.openBrowserSurface(for: url, from: webView)
             decisionHandler(.cancel)
             return
         }
@@ -210,9 +216,10 @@ final class WebBubbleWebViewDelegate: NSObject, WKNavigationDelegate, WKUIDelega
         decisionHandler(.allow)
     }
 
-    func webView(_ webView: WKWebView,
+    func webView(_: WKWebView,
                  decidePolicyFor navigationResponse: WKNavigationResponse,
-                 decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
+                 decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void)
+    {
         guard let url = navigationResponse.response.url else {
             decisionHandler(.cancel)
             return
@@ -224,22 +231,24 @@ final class WebBubbleWebViewDelegate: NSObject, WKNavigationDelegate, WKUIDelega
         decisionHandler(.allow)
     }
 
-    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+    func webView(_ webView: WKWebView, didFinish _: WKNavigation!) {
         coordinator?.updateTitle(for: ownerItemId, title: webView.title)
     }
 
-    func webView(_ webView: WKWebView,
-                 requestMediaCapturePermissionFor origin: WKSecurityOrigin,
-                 initiatedByFrame frame: WKFrameInfo,
-                 type: WKMediaCaptureType,
-                 decisionHandler: @escaping (WKPermissionDecision) -> Void) {
+    func webView(_: WKWebView,
+                 requestMediaCapturePermissionFor _: WKSecurityOrigin,
+                 initiatedByFrame _: WKFrameInfo,
+                 type _: WKMediaCaptureType,
+                 decisionHandler: @escaping (WKPermissionDecision) -> Void)
+    {
         decisionHandler(.deny)
     }
 
     func webView(_ webView: WKWebView,
                  createWebViewWith configuration: WKWebViewConfiguration,
                  for navigationAction: WKNavigationAction,
-                 windowFeatures: WKWindowFeatures) -> WKWebView? {
+                 windowFeatures: WKWindowFeatures) -> WKWebView?
+    {
         guard let coordinator else { return nil }
         coordinator.register(webView: webView, ownerItemId: ownerItemId)
         return coordinator.createPopupWebView(

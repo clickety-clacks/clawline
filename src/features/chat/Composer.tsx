@@ -20,6 +20,13 @@ import {
 } from "../../protocol/upload-api";
 import { prepareOutboundAttachments } from "./outboundAttachments";
 import { projectComposerSendState } from "./chatSendState";
+import {
+  keyboardIntentFromEvent,
+  routeKeyboardCommand,
+  useKeyboardOwnershipContribution,
+  useKeyboardOwnershipStore,
+  type KeyboardSurfaceRecord
+} from "./keyboardCommandRouter";
 
 interface ComposerAttachmentDraft {
   file: File;
@@ -51,6 +58,7 @@ export function Composer({
     displayTitle: string;
   } | null>(null);
   const [highlightedMentionIndex, setHighlightedMentionIndex] = useState(0);
+  const [composerFocused, setComposerFocused] = useState(false);
   const fileInputId = useId();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const mentionOptionRefs = useRef<Record<string, HTMLButtonElement | null>>({});
@@ -86,6 +94,35 @@ export function Composer({
     filteredMentionStreams[
       Math.min(highlightedMentionIndex, filteredMentionStreams.length - 1)
     ];
+  const keyboardOwnershipStore = useKeyboardOwnershipStore();
+  const keyboardRecords = useMemo<KeyboardSurfaceRecord[]>(() => {
+    const records: KeyboardSurfaceRecord[] = [
+      {
+        surfaceId: "composer",
+        surfaceKind: "composer",
+        visible: true,
+        active: true,
+        focusedHint: composerFocused,
+        commandFamilies: ["textEditing"]
+      }
+    ];
+    if (mentionPickerVisible) {
+      records.push({
+        surfaceId: "mention-picker",
+        surfaceKind: "mention-picker",
+        parentSurfaceId: "composer",
+        visible: true,
+        active: true,
+        focusedHint: composerFocused,
+        commandFamilies:
+          filteredMentionStreams.length > 0
+            ? ["pickerNavigation", "pickerAccept"]
+            : ["pickerNavigation"]
+      });
+    }
+    return records;
+  }, [composerFocused, filteredMentionStreams.length, mentionPickerVisible]);
+  useKeyboardOwnershipContribution("composer", { records: keyboardRecords });
 
   const sendState = projectComposerSendState({
     activeStreamDisplayName,
@@ -317,8 +354,13 @@ export function Composer({
   }
 
   function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    const routed = keyboardIntentFromEvent(event);
     if (mentionPickerVisible) {
-      if (event.key === "ArrowDown") {
+      if (
+        routed?.intent === "pickerNavigateDown" &&
+        routeKeyboardCommand(routed.intent, keyboardOwnershipStore).ownerSurfaceId ===
+          "mention-picker"
+      ) {
         event.preventDefault();
         if (filteredMentionStreams.length > 0) {
           setHighlightedMentionIndex((current) =>
@@ -328,7 +370,11 @@ export function Composer({
         return;
       }
 
-      if (event.key === "ArrowUp") {
+      if (
+        routed?.intent === "pickerNavigateUp" &&
+        routeKeyboardCommand(routed.intent, keyboardOwnershipStore).ownerSurfaceId ===
+          "mention-picker"
+      ) {
         event.preventDefault();
         if (filteredMentionStreams.length > 0) {
           setHighlightedMentionIndex((current) => Math.max(current - 1, 0));
@@ -336,17 +382,16 @@ export function Composer({
         return;
       }
 
-      if (event.key === "Tab") {
+      if (
+        routed?.intent === "pickerAccept" &&
+        routeKeyboardCommand(routed.intent, keyboardOwnershipStore).ownerSurfaceId ===
+          "mention-picker"
+      ) {
         event.preventDefault();
         resolveHighlightedMention();
         return;
       }
 
-      if (event.key === "Enter" && highlightedMentionStream) {
-        event.preventDefault();
-        resolveHighlightedMention();
-        return;
-      }
     }
 
     if (
@@ -361,27 +406,39 @@ export function Composer({
       return;
     }
 
-    if (event.key === "Escape") {
+    if (
+      routed?.intent === "textCancel" &&
+      routeKeyboardCommand(routed.intent, keyboardOwnershipStore).ownerSurfaceId ===
+        "composer"
+    ) {
       event.preventDefault();
       event.currentTarget.blur();
       return;
     }
 
-    if (event.key === "Enter" && (event.shiftKey || event.ctrlKey)) {
+    if (
+      routed?.intent === "textSubmit" &&
+      routeKeyboardCommand(routed.intent, keyboardOwnershipStore).ownerSurfaceId ===
+        "mention-picker"
+    ) {
       event.preventDefault();
-      const textarea = event.currentTarget;
-      const start = textarea.selectionStart;
-      const end = textarea.selectionEnd;
-      const nextDraft = draft.slice(0, start) + "\n" + draft.slice(end);
-      setDraft(nextDraft);
-      requestAnimationFrame(() => {
-        textarea.selectionStart = start + 1;
-        textarea.selectionEnd = start + 1;
-      });
+      resolveHighlightedMention();
       return;
     }
 
-    if (event.key === "Enter" && !event.shiftKey && !event.ctrlKey) {
+    if (
+      routed?.intent === "textModifiedNewline" &&
+      routeKeyboardCommand(routed.intent, keyboardOwnershipStore).ownerSurfaceId ===
+        "composer"
+    ) {
+      return;
+    }
+
+    if (
+      routed?.intent === "textSubmit" &&
+      routeKeyboardCommand(routed.intent, keyboardOwnershipStore).ownerSurfaceId ===
+        "composer"
+    ) {
       event.preventDefault();
       void submit();
     }
@@ -527,6 +584,8 @@ export function Composer({
             enterKeyHint="send"
             id="composer-input"
             onChange={(event) => setDraft(event.target.value)}
+            onBlur={() => setComposerFocused(false)}
+            onFocus={() => setComposerFocused(true)}
             onKeyDown={handleComposerKeyDown}
             onPaste={(event) => {
               const files = Array.from(event.clipboardData?.files ?? []);

@@ -40,6 +40,140 @@ struct PromptFocusShortcutActivationTests {
         )
     }
 
+    @Test("T344 notification gesture ownership locks to vertical scroll only after vertical dominance")
+    func notificationGestureOwnershipLocksToVerticalScrollOnlyAfterVerticalDominance() {
+        #expect(
+            CrossChatNotificationGestureAxisLock.ownership(
+                for: CGSize(width: 0, height: CrossChatNotificationGestureAxisLock.minimumDistance)
+            ) == .verticalScroll
+        )
+        #expect(
+            CrossChatNotificationGestureAxisLock.ownership(
+                for: CGSize(width: 8, height: -32)
+            ) == .verticalScroll
+        )
+        #expect(
+            CrossChatNotificationGestureAxisLock.ownership(
+                for: CGSize(width: 24, height: 24)
+            ) == .none
+        )
+        #expect(
+            CrossChatNotificationGestureAxisLock.ownership(
+                for: CGSize(width: 0, height: CrossChatNotificationGestureAxisLock.minimumDistance - 1)
+            ) == .none
+        )
+    }
+
+    @Test("T344 notification gesture ownership locks to horizontal swipe only after horizontal dominance")
+    func notificationGestureOwnershipLocksToHorizontalSwipeOnlyAfterHorizontalDominance() {
+        #expect(
+            CrossChatNotificationGestureAxisLock.ownership(
+                for: CGSize(width: CrossChatNotificationGestureAxisLock.minimumDistance, height: 0)
+            ) == .horizontalSwipe
+        )
+        #expect(
+            CrossChatNotificationGestureAxisLock.ownership(
+                for: CGSize(width: -40, height: 12)
+            ) == .horizontalSwipe
+        )
+        #expect(
+            CrossChatNotificationGestureAxisLock.ownership(
+                for: CGSize(width: 18, height: 2)
+            ) == .none
+        )
+        #expect(
+            CrossChatNotificationGestureAxisLock.ownership(
+                for: CGSize(width: 28, height: 36)
+            ) != .horizontalSwipe
+        )
+    }
+
+    @Test("T344 vertical-owned notification drag cannot complete as horizontal dock or dismiss")
+    func verticalOwnedNotificationDragCannotCompleteAsHorizontalDockOrDismiss() {
+        let threshold: CGFloat = 44
+
+        #expect(
+            CrossChatNotificationGestureAxisLock.allowsBubbleSwipeCompletion(
+                activeLock: .verticalScroll,
+                finalTranslation: CGSize(width: threshold + 20, height: 24),
+                completionThreshold: threshold
+            ) == false
+        )
+        #expect(
+            CrossChatNotificationGestureAxisLock.allowsBubbleSwipeCompletion(
+                activeLock: .horizontalSwipe,
+                finalTranslation: CGSize(width: -(threshold + 20), height: 12),
+                completionThreshold: threshold
+            )
+        )
+        #expect(
+            CrossChatNotificationGestureAxisLock.allowsBubbleSwipeCompletion(
+                activeLock: nil,
+                finalTranslation: CGSize(width: threshold + 20, height: 12),
+                completionThreshold: threshold
+            )
+        )
+        #expect(
+            CrossChatNotificationGestureAxisLock.allowsBubbleSwipeCompletion(
+                activeLock: nil,
+                finalTranslation: CGSize(width: threshold - 1, height: 4),
+                completionThreshold: threshold
+            ) == false
+        )
+    }
+
+    @Test("T355 docked notification left swipe restores stack instead of dismissing")
+    @MainActor
+    func dockedNotificationLeftSwipeRestoresStackInsteadOfDismissing() {
+        let dockedLeftSwipe = CrossChatNotificationBubbleSwipeCompletion.effect(
+            activeLock: .horizontalSwipe,
+            finalTranslation: CGSize(width: -64, height: 4),
+            completionThreshold: 44,
+            isCollapsed: true
+        )
+
+        #expect(dockedLeftSwipe == .restoreDock)
+        #expect(dockedLeftSwipe?.restoresDock == true)
+        #expect(dockedLeftSwipe?.dismissesNotification == false)
+        #expect(
+            CrossChatNotificationBubbleSwipeCompletion.effect(
+                activeLock: .verticalScroll,
+                finalTranslation: CGSize(width: -64, height: 4),
+                completionThreshold: 44,
+                isCollapsed: true
+            ) == nil
+        )
+        #expect(
+            CrossChatNotificationBubbleSwipeCompletion.effect(
+                activeLock: .horizontalSwipe,
+                finalTranslation: CGSize(width: -64, height: 4),
+                completionThreshold: 44,
+                isCollapsed: false
+            ) == .dismiss
+        )
+    }
+
+    @Test("T355 notification right swipe preserves dock and collapsed preview behavior")
+    @MainActor
+    func notificationRightSwipePreservesDockAndCollapsedPreviewBehavior() {
+        #expect(
+            CrossChatNotificationBubbleSwipeCompletion.effect(
+                activeLock: .horizontalSwipe,
+                finalTranslation: CGSize(width: 64, height: 4),
+                completionThreshold: 44,
+                isCollapsed: false
+            ) == .dock
+        )
+        #expect(
+            CrossChatNotificationBubbleSwipeCompletion.effect(
+                activeLock: .horizontalSwipe,
+                finalTranslation: CGSize(width: 64, height: 4),
+                completionThreshold: 44,
+                isCollapsed: true
+            ) == .clearCollapsedPreview
+        )
+    }
+
     @Test("T307 notification reply input presents Send return key and five-line cap")
     @MainActor
     func notificationReplyInputUsesSendReturnKeyAndFiveLineCap() {
@@ -97,6 +231,202 @@ struct PromptFocusShortcutActivationTests {
                 font: font
             )
         )
+    }
+
+    @Test("T342 main prompt input exposes modified Return newline hardware shortcuts")
+    @MainActor
+    func mainPromptInputExposesModifiedReturnNewlineHardwareShortcuts() {
+        let textView = PastableTextView(frame: .zero, textContainer: nil)
+
+        assertModifiedReturnCommands(
+            in: textView.keyCommands,
+            action: Selector(("didPressModifiedReturn:"))
+        )
+        #expect(
+            textView.keyCommands?.contains { command in
+                (command.input == "\r" || command.input == "\n")
+                    && command.modifierFlags.isEmpty
+                    && command.action == Selector(("didPressModifiedReturn:"))
+            } == false
+        )
+    }
+
+    @Test("T342 main prompt modified Return inserts newline at caret")
+    @MainActor
+    func mainPromptModifiedReturnInsertsNewlineAtCaret() {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 120))
+        let textView = PastableTextView(frame: CGRect(x: 0, y: 0, width: 320, height: 44), textContainer: nil)
+        textView.keyboardOwnershipStore = KeyboardOwnershipSceneFactory.chatScene(
+            visibleNotificationSourceChatIds: [],
+            mentionPickerVisible: false,
+            composerFocused: true,
+            notificationReplyFocusedSourceChatId: nil,
+            actionMenuSourceChatId: nil
+        )
+        window.addSubview(textView)
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+
+        textView.text = "abcd"
+        textView.selectedRange = NSRange(location: 2, length: 0)
+        #expect(textView.becomeFirstResponder())
+
+        textView.perform(
+            Selector(("didPressModifiedReturn:")),
+            with: UIKeyCommand(input: "\r", modifierFlags: [.control], action: Selector(("didPressModifiedReturn:")))
+        )
+        #expect(textView.text == "ab\ncd")
+        #expect(textView.selectedRange == NSRange(location: 3, length: 0))
+
+        textView.perform(
+            Selector(("didPressModifiedReturn:")),
+            with: UIKeyCommand(input: "\n", modifierFlags: [.shift], action: Selector(("didPressModifiedReturn:")))
+        )
+        #expect(textView.text == "ab\n\ncd")
+        #expect(textView.selectedRange == NSRange(location: 4, length: 0))
+    }
+
+    @Test("T342 reply input exposes modified Return newline hardware shortcuts")
+    @MainActor
+    func replyInputExposesModifiedReturnNewlineHardwareShortcuts() {
+        let textView = NotificationReplyUITextView()
+
+        assertModifiedReturnCommands(
+            in: textView.keyCommands,
+            action: Selector(("didPressModifiedReturn:"))
+        )
+        #expect(
+            textView.keyCommands?.contains { command in
+                (command.input == "\r" || command.input == "\n")
+                    && command.modifierFlags.isEmpty
+                    && command.action == Selector(("didPressModifiedReturn:"))
+            } == false
+        )
+    }
+
+    @Test("T342 reply input modified Return inserts newline at caret")
+    @MainActor
+    func replyInputModifiedReturnInsertsNewlineAtCaret() {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 120))
+        let textView = NotificationReplyUITextView(frame: CGRect(x: 0, y: 0, width: 320, height: 44), textContainer: nil)
+        let sourceChatId = "reply-source"
+        textView.sourceChatId = sourceChatId
+        textView.keyboardOwnershipStore = KeyboardOwnershipSceneFactory.chatScene(
+            visibleNotificationSourceChatIds: [sourceChatId],
+            mentionPickerVisible: false,
+            composerFocused: false,
+            notificationReplySourceChatIds: [sourceChatId],
+            notificationReplyFocusedSourceChatId: sourceChatId,
+            actionMenuSourceChatId: nil
+        )
+        window.addSubview(textView)
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true }
+
+        textView.text = "reply"
+        textView.selectedRange = NSRange(location: 2, length: 0)
+        #expect(textView.becomeFirstResponder())
+
+        textView.perform(
+            Selector(("didPressModifiedReturn:")),
+            with: UIKeyCommand(input: "\r", modifierFlags: [.control], action: Selector(("didPressModifiedReturn:")))
+        )
+        #expect(textView.text == "re\nply")
+        #expect(textView.selectedRange == NSRange(location: 3, length: 0))
+
+        textView.perform(
+            Selector(("didPressModifiedReturn:")),
+            with: UIKeyCommand(input: "\n", modifierFlags: [.shift], action: Selector(("didPressModifiedReturn:")))
+        )
+        #expect(textView.text == "re\n\nply")
+        #expect(textView.selectedRange == NSRange(location: 4, length: 0))
+    }
+
+    @Test("T342 main prompt software Return delegate path stays submit because Shift-Return is not distinguishable")
+    @MainActor
+    func mainPromptSoftwareReturnDelegatePathStaysSubmitBecauseShiftReturnIsNotDistinguishable() {
+        var attributedText = NSAttributedString(string: "draft")
+        var calculatedHeight: CGFloat = 44
+        var selectionRange = NSRange(location: 0, length: 0)
+        var pendingInsertions: [PendingAttachment] = []
+        var submitCount = 0
+        let editor = RichTextEditor(
+            attributedText: Binding(get: { attributedText }, set: { attributedText = $0 }),
+            calculatedHeight: Binding(get: { calculatedHeight }, set: { calculatedHeight = $0 }),
+            selectionRange: Binding(get: { selectionRange }, set: { selectionRange = $0 }),
+            pendingInsertions: Binding(get: { pendingInsertions }, set: { pendingInsertions = $0 }),
+            fontScaleChangeSequence: 0,
+            resetToken: 0,
+            focusTrigger: 0,
+            isEditable: true,
+            tintColor: .systemBlue,
+            onFocusChange: { _ in },
+            onSubmit: { submitCount += 1 },
+            notificationVisibleCount: 0,
+            keyboardOwnershipStore: KeyboardOwnershipSceneFactory.chatScene(
+                visibleNotificationSourceChatIds: [],
+                mentionPickerVisible: false,
+                composerFocused: true,
+                notificationReplyFocusedSourceChatId: nil,
+                actionMenuSourceChatId: nil
+            )
+        )
+        let coordinator = RichTextEditor.Coordinator(parent: editor)
+        let textView = UITextView()
+        textView.text = "draft"
+
+        let shouldChange = coordinator.textView(
+            textView,
+            shouldChangeTextIn: NSRange(location: 5, length: 0),
+            replacementText: "\n"
+        )
+
+        #expect(!shouldChange)
+        #expect(submitCount == 1)
+        #expect(textView.text == "draft")
+    }
+
+    @Test("T342 reply software Return delegate path stays submit because Shift-Return is not distinguishable")
+    @MainActor
+    func replySoftwareReturnDelegatePathStaysSubmitBecauseShiftReturnIsNotDistinguishable() {
+        var text = "reply"
+        var measuredHeight: CGFloat = 20
+        var submitCount = 0
+        let sourceChatId = "reply-source"
+        let keyboardOwnershipStore = KeyboardOwnershipSceneFactory.chatScene(
+            visibleNotificationSourceChatIds: [sourceChatId],
+            mentionPickerVisible: false,
+            composerFocused: false,
+            notificationReplySourceChatIds: [sourceChatId],
+            notificationReplyFocusedSourceChatId: sourceChatId,
+            actionMenuSourceChatId: nil
+        )
+        let input = NotificationReplyTextInput(
+            sourceChatId: sourceChatId,
+            text: Binding(get: { text }, set: { text = $0 }),
+            measuredHeight: Binding(get: { measuredHeight }, set: { measuredHeight = $0 }),
+            font: UIFont.systemFont(ofSize: 15),
+            textColor: .label,
+            tintColor: .systemBlue,
+            visibleNotificationCount: 0,
+            keyboardOwnershipStore: keyboardOwnershipStore,
+            onSubmit: { submitCount += 1 },
+            onCancel: {},
+            onFocusChange: { _ in }
+        )
+        let coordinator = NotificationReplyTextInput.Coordinator(parent: input)
+        let textView = UITextView()
+        textView.text = "reply"
+
+        let shouldChange = coordinator.textView(
+            textView,
+            shouldChangeTextIn: NSRange(location: 5, length: 0),
+            replacementText: "\n"
+        )
+
+        #expect(!shouldChange)
+        #expect(submitCount == 1)
+        #expect(textView.text == "reply")
     }
 
     @Test("No-text prompt focus shortcuts keep Cmd-L out of the unmodified host")
@@ -205,10 +535,10 @@ struct PromptFocusShortcutActivationTests {
         )
         #expect(
             ChatAppCommandShortcut.notificationScrollKeyCommandSpecs(notificationVisibleCount: 0).map(\.action) == [
-                .scrollDown,
-                .scrollUp,
-                .scrollChatDown,
-                .scrollChatUp
+                .scrollNotificationDown,
+                .scrollNotificationUp,
+                .scrollNotificationDown,
+                .scrollNotificationUp
             ]
         )
         #expect(
@@ -259,51 +589,29 @@ struct PromptFocusShortcutActivationTests {
         #expect(firstCommandShiftK?.action == #selector(UIResponder.clawlineScrollNotificationUpCommand(_:)))
     }
 
-    @Test("Text input priority is limited to visible notification-owned shortcuts")
+    @Test("Text input bridge exposure follows router notification ownership")
     @MainActor
-    func textInputPriorityIsLimitedToVisibleNotificationOwnedShortcuts() {
-        #expect(
-            ChatAppCommandShortcut.prioritizesTextInputBaseCommand(
-                input: "j",
-                modifierFlags: [.command],
-                notificationVisibleCount: 0
-            ) == false
+    func textInputBridgeExposureFollowsRouterNotificationOwnership() {
+        let transcriptOnlyStore = KeyboardOwnershipSceneFactory.chatScene(
+            visibleNotificationSourceChatIds: [],
+            mentionPickerVisible: false,
+            composerFocused: true,
+            notificationReplyFocusedSourceChatId: nil,
+            actionMenuSourceChatId: nil
         )
-        #expect(
-            ChatAppCommandShortcut.prioritizesTextInputBaseCommand(
-                input: "j",
-                modifierFlags: [.command],
-                notificationVisibleCount: 2
-            )
+        let notificationStore = KeyboardOwnershipSceneFactory.chatScene(
+            visibleNotificationSourceChatIds: ["notification-0", "notification-1"],
+            mentionPickerVisible: false,
+            composerFocused: true,
+            notificationReplyFocusedSourceChatId: nil,
+            actionMenuSourceChatId: nil
         )
-        #expect(
-            ChatAppCommandShortcut.prioritizesTextInputBaseCommand(
-                input: "k",
-                modifierFlags: [.command, .shift],
-                notificationVisibleCount: 2
-            )
-        )
-        #expect(
-            ChatAppCommandShortcut.prioritizesTextInputBaseCommand(
-                input: "1",
-                modifierFlags: [.command, .shift, .alternate],
-                notificationVisibleCount: 2
-            )
-        )
-        #expect(
-            ChatAppCommandShortcut.prioritizesTextInputBaseCommand(
-                input: "l",
-                modifierFlags: [.command],
-                notificationVisibleCount: 2
-            ) == false
-        )
-        #expect(
-            ChatAppCommandShortcut.prioritizesTextInputBaseCommand(
-                input: "1",
-                modifierFlags: [.command, .control],
-                notificationVisibleCount: 2
-            ) == false
-        )
+        #expect(KeyboardCommandRouter.route(intent: .transcriptBubbleScrollForward, store: transcriptOnlyStore).outcome == .ignored)
+        assertRoute(.transcriptBubbleScrollForward, in: notificationStore, isHandledBy: .notificationBubble("notification-0"), rule: "PR-04")
+        assertRoute(.transcriptChatScrollBackward, in: notificationStore, isHandledBy: .notificationBubble("notification-0"), rule: "PR-04")
+        assertRoute(.notificationAssignedDismiss(1), in: notificationStore, isHandledBy: .notificationBubble("notification-1"), rule: "PR-03")
+        assertRoute(.focusPromptInput, in: notificationStore, isHandledBy: .transcript, rule: "PR-07")
+        #expect(KeyboardCommandBridge.intent(input: "1", modifierFlags: [.command, .control]) == nil)
     }
 
     @Test("Prompt text input reports responder focus transitions")
@@ -325,24 +633,6 @@ struct PromptFocusShortcutActivationTests {
         #expect(didFocus)
         #expect(didRelease)
         #expect(reportedFocusStates == [true, false])
-    }
-
-    @Test("Shortcut routing separates app commands from no-text responder keys")
-    func shortcutRoutingSeparatesAppCommandsFromNoTextResponderKeys() {
-        #expect(ChatShortcutRouting.owner(input: "l", modifierFlags: [.command, .shift]) == .appCommand)
-        #expect(ChatShortcutRouting.owner(input: "h", modifierFlags: [.command, .shift]) == .appCommand)
-        #expect(ChatShortcutRouting.owner(input: ";", modifierFlags: [.command]) == .appCommand)
-        #expect(ChatShortcutRouting.owner(input: "l", modifierFlags: [.command]) == .appCommand)
-        #expect(ChatShortcutRouting.owner(input: "j", modifierFlags: [.command]) == .appCommand)
-        #expect(ChatShortcutRouting.owner(input: "k", modifierFlags: [.command]) == .appCommand)
-        #expect(ChatShortcutRouting.owner(input: "j", modifierFlags: [.command, .shift]) == .appCommand)
-        #expect(ChatShortcutRouting.owner(input: "k", modifierFlags: [.command, .shift]) == .appCommand)
-        #expect(ChatShortcutRouting.owner(input: "h", modifierFlags: [.command]) == .textInput)
-        #expect(ChatShortcutRouting.owner(input: "/", modifierFlags: [.command]) == .textInput)
-        #expect(ChatShortcutRouting.owner(input: "/", modifierFlags: []) == .noTextResponder)
-        #expect(ChatShortcutRouting.owner(input: ";", modifierFlags: []) == .noTextResponder)
-        #expect(ChatShortcutRouting.owner(input: " ", modifierFlags: []) == .noTextResponder)
-        #expect(ChatShortcutRouting.owner(input: "\r", modifierFlags: []) == .noTextResponder)
     }
 
     @Test("Visible bubble content scroller targets all visible top-level vertical scroll views")
@@ -419,27 +709,18 @@ struct PromptFocusShortcutActivationTests {
         #expect(scrollView.contentOffset.y == 0)
     }
 
-    @Test("Scroll command responders post distinct bubble and chat notifications")
+    @Test("Scroll command responders post distinct normalized router intents")
     @MainActor
     func scrollCommandRespondersPostDistinctBubbleAndChatNotifications() {
         let center = NotificationCenter.default
-        let recorder = ScrollCommandNotificationRecorder()
-        let names: [Notification.Name] = [
-            .clawlineScrollDownCommand,
-            .clawlineScrollUpCommand,
-            .clawlineScrollChatDownCommand,
-            .clawlineScrollChatUpCommand
-        ]
-        names.forEach { name in
-            center.addObserver(
-                recorder,
-                selector: #selector(ScrollCommandNotificationRecorder.record(_:)),
-                name: name,
-                object: nil
-            )
+        var posted: [KeyboardCommandIntent] = []
+        let token = center.addObserver(forName: .clawlineKeyboardCommandIntent, object: nil, queue: nil) { notification in
+            if let intent = notification.object as? KeyboardCommandIntent {
+                posted.append(intent)
+            }
         }
         defer {
-            center.removeObserver(recorder)
+            center.removeObserver(token)
         }
 
         let responder = UIResponder()
@@ -472,31 +753,26 @@ struct PromptFocusShortcutActivationTests {
             )
         )
 
-        #expect(recorder.postedNames == [
-            .clawlineScrollDownCommand,
-            .clawlineScrollUpCommand,
-            .clawlineScrollChatDownCommand,
-            .clawlineScrollChatUpCommand
+        #expect(posted == [
+            .transcriptBubbleScrollForward,
+            .transcriptBubbleScrollBackward,
+            .transcriptChatScrollForward,
+            .transcriptChatScrollBackward
         ])
     }
 
-    @Test("Notification number responders post menu reply and dismiss notifications")
+    @Test("Notification number responder posts normalized router intents")
     @MainActor
-    func notificationNumberRespondersPostMenuReplyAndDismissNotifications() {
+    func notificationNumberResponderPostsNormalizedRouterIntents() {
         let center = NotificationCenter.default
-        var posted: [(Notification.Name, Int?)] = []
-        let names: [Notification.Name] = [
-            .clawlineOpenNotificationActionMenuCommand,
-            .clawlineReplyNotificationCommand,
-            .clawlineDismissNotificationCommand
-        ]
-        let tokens = names.map { name in
-            center.addObserver(forName: name, object: nil, queue: nil) { notification in
-                posted.append((name, notification.object as? Int))
+        var posted: [KeyboardCommandIntent] = []
+        let token = center.addObserver(forName: .clawlineKeyboardCommandIntent, object: nil, queue: nil) { notification in
+            if let intent = notification.object as? KeyboardCommandIntent {
+                posted.append(intent)
             }
         }
         defer {
-            tokens.forEach(center.removeObserver)
+            center.removeObserver(token)
         }
 
         let responder = UIResponder()
@@ -522,12 +798,47 @@ struct PromptFocusShortcutActivationTests {
             )
         )
 
-        #expect(posted.map(\.0) == [
-            .clawlineOpenNotificationActionMenuCommand,
-            .clawlineReplyNotificationCommand,
-            .clawlineDismissNotificationCommand
+        #expect(posted == [
+            .notificationAssignedOpen(3),
+            .notificationAssignedReply(3),
+            .notificationAssignedDismiss(3)
         ])
-        #expect(posted.map(\.1) == [3, 3, 3])
+    }
+
+    @Test("Notification scroll responders post notification scroll intents")
+    @MainActor
+    func notificationScrollRespondersPostNotificationScrollIntents() {
+        let center = NotificationCenter.default
+        var posted: [KeyboardCommandIntent] = []
+        let token = center.addObserver(forName: .clawlineKeyboardCommandIntent, object: nil, queue: nil) { notification in
+            if let intent = notification.object as? KeyboardCommandIntent {
+                posted.append(intent)
+            }
+        }
+        defer {
+            center.removeObserver(token)
+        }
+
+        let responder = UIResponder()
+        responder.clawlineScrollNotificationDownCommand(
+            UIKeyCommand(
+                input: "j",
+                modifierFlags: [.command, .shift],
+                action: #selector(UIResponder.clawlineScrollNotificationDownCommand(_:))
+            )
+        )
+        responder.clawlineScrollNotificationUpCommand(
+            UIKeyCommand(
+                input: "k",
+                modifierFlags: [.command, .shift],
+                action: #selector(UIResponder.clawlineScrollNotificationUpCommand(_:))
+            )
+        )
+
+        #expect(posted == [
+            .notificationScrollForward,
+            .notificationScrollBackward
+        ])
     }
 
     @Test("No-text composed printable typing activates prompt insertion")
@@ -548,197 +859,97 @@ struct PromptFocusShortcutActivationTests {
         #expect(PromptFocusTypingActivation.promptInsertionText(from: "") == nil)
     }
 
-    @Test("Keyboard bubble scroll shortcuts only enable when chat content can receive commands")
-    func keyboardBubbleScrollShortcutsOnlyEnableWhenChatContentCanReceiveCommands() {
-        #expect(
-            ChatKeyboardScrollRouting.isEnabled(
-                platformSupportsKeyboardNavigation: true,
-                streamPopupRoute: .closed,
-                activeSheetPresented: false,
-                photosPickerPresented: false,
-                fileImporterPresented: false
-            )
-        )
-        #expect(
-            !ChatKeyboardScrollRouting.isEnabled(
-                platformSupportsKeyboardNavigation: false,
-                streamPopupRoute: .closed,
-                activeSheetPresented: false,
-                photosPickerPresented: false,
-                fileImporterPresented: false
-            )
-        )
-        #expect(
-            !ChatKeyboardScrollRouting.isEnabled(
-                platformSupportsKeyboardNavigation: true,
-                streamPopupRoute: .popup(searchFocus: .none),
-                activeSheetPresented: false,
-                photosPickerPresented: false,
-                fileImporterPresented: false
-            )
-        )
-        #expect(
-            !ChatKeyboardScrollRouting.isEnabled(
-                platformSupportsKeyboardNavigation: true,
-                streamPopupRoute: .closed,
-                activeSheetPresented: true,
-                photosPickerPresented: false,
-                fileImporterPresented: false
-            )
-        )
-        #expect(
-            !ChatKeyboardScrollRouting.isEnabled(
-                platformSupportsKeyboardNavigation: true,
-                streamPopupRoute: .closed,
-                activeSheetPresented: false,
-                photosPickerPresented: true,
-                fileImporterPresented: false
-            )
-        )
-        #expect(
-            !ChatKeyboardScrollRouting.isEnabled(
-                platformSupportsKeyboardNavigation: true,
-                streamPopupRoute: .closed,
-                activeSheetPresented: false,
-                photosPickerPresented: false,
-                fileImporterPresented: true
-            )
-        )
-    }
-
     @Test("Visible notifications own Cmd-J/K and Cmd-Shift-J/K before text-field focus blocks")
     @MainActor
     func visibleNotificationsOwnScrollShortcutsBeforeTextFieldFocusBlocks() {
-        #expect(
-            ChatKeyboardScrollRouting.route(
-                command: .scrollDown,
-                isEnabled: true,
-                hasVisibleNotifications: true,
-                firstResponderBlocksKeyboardScroll: true
-            ) == .notificationDown
+        let store = KeyboardOwnershipSceneFactory.chatScene(
+            visibleNotificationSourceChatIds: ["notification-0"],
+            mentionPickerVisible: false,
+            composerFocused: true,
+            notificationReplyFocusedSourceChatId: nil,
+            actionMenuSourceChatId: nil
         )
+        assertRoute(.transcriptBubbleScrollForward, in: store, isHandledBy: .notificationBubble("notification-0"), rule: "PR-04")
+        assertRoute(.transcriptBubbleScrollBackward, in: store, isHandledBy: .notificationBubble("notification-0"), rule: "PR-04")
+        assertRoute(.transcriptChatScrollForward, in: store, isHandledBy: .notificationBubble("notification-0"), rule: "PR-04")
+        assertRoute(.transcriptChatScrollBackward, in: store, isHandledBy: .notificationBubble("notification-0"), rule: "PR-04")
+    }
+
+    @Test("Visible notifications expose global scroll shortcuts outside focused command ownership")
+    func visibleNotificationsExposeGlobalScrollShortcutsOutsideFocusedCommandOwnership() {
+        #expect(CrossChatNotificationGlobalShortcut.scrollSpecs(visibleNotificationCount: 0).isEmpty)
         #expect(
-            ChatKeyboardScrollRouting.route(
-                command: .scrollUp,
-                isEnabled: true,
-                hasVisibleNotifications: true,
-                firstResponderBlocksKeyboardScroll: true
-            ) == .notificationUp
+            CrossChatNotificationGlobalShortcut.scrollSpecs(visibleNotificationCount: 2) == [
+                .init(input: "j", modifiers: .command, action: .scrollDown),
+                .init(input: "k", modifiers: .command, action: .scrollUp),
+                .init(input: "j", modifiers: [.command, .shift], action: .scrollDown),
+                .init(input: "k", modifiers: [.command, .shift], action: .scrollUp),
+            ]
         )
-        #expect(
-            ChatKeyboardScrollRouting.route(
-                command: .scrollChatDown,
-                isEnabled: true,
-                hasVisibleNotifications: true,
-                firstResponderBlocksKeyboardScroll: true
-            ) == .notificationDown
-        )
-        #expect(
-            ChatKeyboardScrollRouting.route(
-                command: .scrollChatUp,
-                isEnabled: true,
-                hasVisibleNotifications: true,
-                firstResponderBlocksKeyboardScroll: true
-            ) == .notificationUp
-        )
+    }
+
+    @Test("T351 notification overlay host reports viewport width, not motion overflow width")
+    func notificationOverlayHostReportsViewportWidthNotMotionOverflowWidth() {
+        #expect(CrossChatNotificationGeometry.layoutHostWidth(maxContainerWidth: 393) == 393)
+        #expect(CrossChatNotificationGeometry.layoutHostWidth(maxContainerWidth: 0) == 0)
+        #expect(CrossChatNotificationGeometry.layoutHostWidth(maxContainerWidth: -10) == 0)
     }
 
     @Test("Notification reply field keeps notification number and scroll shortcuts above text focus")
     @MainActor
     func notificationReplyFieldKeepsNotificationNumberAndScrollShortcutsAboveTextFocus() {
-        #expect(
-            CrossChatNotificationKeyPrecedence.replyFieldAction(
-                characters: "3",
-                modifiers: .command,
-                visibleNotificationCount: 4
-            ) == .openMenu(3)
+        let store = KeyboardOwnershipSceneFactory.chatScene(
+            visibleNotificationSourceChatIds: ["notification-0", "notification-1", "notification-2", "notification-3"],
+            mentionPickerVisible: false,
+            composerFocused: false,
+            notificationReplySourceChatIds: ["notification-0"],
+            notificationReplyFocusedSourceChatId: "notification-0",
+            actionMenuSourceChatId: nil
         )
-        #expect(
-            CrossChatNotificationKeyPrecedence.replyFieldAction(
-                characters: "#",
-                modifiers: [.command, .shift],
-                visibleNotificationCount: 4
-            ) == .reply(3)
-        )
-        #expect(
-            CrossChatNotificationKeyPrecedence.replyFieldAction(
-                characters: "#",
-                modifiers: [.command, .shift, .option],
-                visibleNotificationCount: 4
-            ) == .dismiss(3)
-        )
-        #expect(
-            CrossChatNotificationKeyPrecedence.replyFieldAction(
-                characters: "1",
-                modifiers: .command,
-                visibleNotificationCount: 4
-            ) == .openMenu(1)
-        )
-        #expect(
-            CrossChatNotificationKeyPrecedence.replyFieldAction(
-                characters: "j",
-                modifiers: .command,
-                visibleNotificationCount: 4
-            ) == .scrollDown
-        )
-        #expect(
-            CrossChatNotificationKeyPrecedence.replyFieldAction(
-                characters: "k",
-                modifiers: [.command, .shift],
-                visibleNotificationCount: 4
-            ) == .scrollUp
-        )
-        #expect(
-            CrossChatNotificationKeyPrecedence.replyFieldAction(
-                characters: "3",
-                modifiers: [.command, .control],
-                visibleNotificationCount: 4
-            ) == nil
-        )
-        #expect(
-            CrossChatNotificationKeyPrecedence.replyFieldAction(
-                characters: "4",
-                modifiers: .command,
-                visibleNotificationCount: 4
-            ) == nil
-        )
+        assertRoute(.notificationAssignedOpen(3), in: store, isHandledBy: .notificationBubble("notification-3"), rule: "PR-03")
+        assertRoute(.notificationAssignedReply(3), in: store, isHandledBy: .notificationBubble("notification-3"), rule: "PR-03")
+        assertRoute(.notificationAssignedDismiss(3), in: store, isHandledBy: .notificationBubble("notification-3"), rule: "PR-03")
+        assertRoute(.notificationAssignedOpen(1), in: store, isHandledBy: .notificationBubble("notification-1"), rule: "PR-03")
+        assertRoute(.notificationScrollForward, in: store, isHandledBy: .notificationBubble("notification-0"), rule: "PR-04")
+        assertRoute(.notificationScrollBackward, in: store, isHandledBy: .notificationBubble("notification-0"), rule: "PR-04")
+        #expect(KeyboardCommandBridge.intent(input: "3", modifierFlags: [.command, .control]) == nil)
+        #expect(KeyboardCommandRouter.route(intent: .notificationAssignedOpen(4), store: store).outcome == .fallthroughToDefault)
+
+        let textView = NotificationReplyUITextView()
+        textView.visibleNotificationCount = 4
+        textView.keyboardOwnershipStore = store
+        let firstCommandJ = textView.keyCommands?.first { command in
+            command.input == "j" && command.modifierFlags == [.command]
+        }
+        let firstCommandShiftK = textView.keyCommands?.first { command in
+            command.input == "k" && command.modifierFlags == [.command, .shift]
+        }
+
+        #expect(firstCommandJ?.action == #selector(UIResponder.clawlineScrollNotificationDownCommand(_:)))
+        #expect(firstCommandShiftK?.action == #selector(UIResponder.clawlineScrollNotificationUpCommand(_:)))
     }
 
     @Test("Transcript and chat scroll receive only unclaimed scroll shortcuts")
     @MainActor
     func transcriptAndChatScrollReceiveOnlyUnclaimedScrollShortcuts() {
-        #expect(
-            ChatKeyboardScrollRouting.route(
-                command: .scrollDown,
-                isEnabled: true,
-                hasVisibleNotifications: false,
-                firstResponderBlocksKeyboardScroll: false
-            ) == .bubbleDown
+        let transcriptStore = KeyboardOwnershipSceneFactory.chatScene(
+            visibleNotificationSourceChatIds: [],
+            mentionPickerVisible: false,
+            composerFocused: false,
+            notificationReplyFocusedSourceChatId: nil,
+            actionMenuSourceChatId: nil
         )
-        #expect(
-            ChatKeyboardScrollRouting.route(
-                command: .scrollChatDown,
-                isEnabled: true,
-                hasVisibleNotifications: false,
-                firstResponderBlocksKeyboardScroll: false
-            ) == .chatDown
+        let composerFocusedStore = KeyboardOwnershipSceneFactory.chatScene(
+            visibleNotificationSourceChatIds: [],
+            mentionPickerVisible: false,
+            composerFocused: true,
+            notificationReplyFocusedSourceChatId: nil,
+            actionMenuSourceChatId: nil
         )
-        #expect(
-            ChatKeyboardScrollRouting.route(
-                command: .scrollDown,
-                isEnabled: true,
-                hasVisibleNotifications: false,
-                firstResponderBlocksKeyboardScroll: true
-            ) == .none
-        )
-        #expect(
-            ChatKeyboardScrollRouting.route(
-                command: .scrollChatDown,
-                isEnabled: true,
-                hasVisibleNotifications: false,
-                firstResponderBlocksKeyboardScroll: true
-            ) == .none
-        )
+        assertRoute(.transcriptBubbleScrollForward, in: transcriptStore, isHandledBy: .transcript, rule: "PR-07")
+        assertRoute(.transcriptChatScrollForward, in: transcriptStore, isHandledBy: .transcript, rule: "PR-07")
+        #expect(KeyboardCommandRouter.route(intent: .transcriptBubbleScrollForward, store: composerFocusedStore).outcome == .ignored)
+        assertRoute(.transcriptChatScrollForward, in: composerFocusedStore, isHandledBy: .transcript, rule: "PR-07")
     }
 
     @Test("Chat keyboard navigation follows stream order without wrapping")
@@ -847,6 +1058,36 @@ private func makeVerticalScrollView(frame: CGRect, contentHeight: CGFloat) -> UI
     scrollView.isScrollEnabled = true
     scrollView.contentSize = CGSize(width: frame.width, height: contentHeight)
     return scrollView
+}
+
+private func assertModifiedReturnCommands(in commands: [UIKeyCommand]?, action: Selector) {
+    let commandInputs = ["\r", "\n"]
+    let modifierFlags: [UIKeyModifierFlags] = [.control, .shift]
+
+    for input in commandInputs {
+        for flags in modifierFlags {
+            #expect(
+                commands?.contains { command in
+                    command.input == input
+                        && command.modifierFlags == flags
+                        && command.action == action
+                } == true
+            )
+        }
+    }
+}
+
+@MainActor
+private func assertRoute(
+    _ intent: KeyboardCommandIntent,
+    in store: KeyboardOwnershipStore,
+    isHandledBy surfaceId: KeyboardSurfaceId,
+    rule: String,
+    sourceLocation: SourceLocation = #_sourceLocation
+) {
+    let decision = KeyboardCommandRouter.route(intent: intent, store: store)
+    #expect(decision.outcome == .handled(surfaceId), sourceLocation: sourceLocation)
+    #expect(decision.priorityRule == rule, sourceLocation: sourceLocation)
 }
 
 private final class ScrollCommandNotificationRecorder: NSObject {

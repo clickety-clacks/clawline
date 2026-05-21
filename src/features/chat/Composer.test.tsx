@@ -19,6 +19,7 @@ import type { StreamRecord } from "../../runtime/chat/chatDomainStore";
 import { TransportMachineProvider } from "../../runtime/transport/transportMachine";
 import type { SessionProvisioningState } from "../streams/provisioning";
 import { Composer } from "./Composer";
+import { KeyboardOwnershipProvider } from "./keyboardCommandRouter";
 
 function renderComposer({
   phase = "live" as const,
@@ -75,11 +76,13 @@ function renderComposer({
       <AuthSessionStoreProvider value={authStore}>
         <ChatDomainStoreProvider value={chatStore}>
           <TransportMachineProvider value={transportStore}>
-            <Composer
-              provisioningState={input.provisioningState}
-              sessionKey={input.sessionKey}
-              streams={currentStreams}
-            />
+            <KeyboardOwnershipProvider>
+              <Composer
+                provisioningState={input.provisioningState}
+                sessionKey={input.sessionKey}
+                streams={currentStreams}
+              />
+            </KeyboardOwnershipProvider>
           </TransportMachineProvider>
         </ChatDomainStoreProvider>
       </AuthSessionStoreProvider>
@@ -142,6 +145,7 @@ describe("Composer", () => {
     });
 
     textarea.focus();
+    fireEvent.focus(textarea);
     expect(textarea).toHaveFocus();
 
     fireEvent.keyDown(textarea, { key: "Escape" });
@@ -408,7 +412,10 @@ describe("Composer", () => {
     const { sendMessage } = renderComposer({ streams });
     const textarea = screen.getByLabelText("Message");
 
+    textarea.focus();
+    fireEvent.focus(textarea);
     fireEvent.change(textarea, { target: { value: "@" } });
+    await screen.findByRole("listbox", { name: "Mention destination" });
     fireEvent.keyDown(textarea, { key: "ArrowDown" });
     fireEvent.keyDown(textarea, { key: "Enter" });
 
@@ -480,6 +487,7 @@ describe("Composer", () => {
     const { sendMessage } = renderComposer({ streams });
     const textarea = screen.getByLabelText("Message");
 
+    fireEvent.focus(textarea);
     fireEvent.change(textarea, { target: { value: "@side normal text" } });
     fireEvent.keyDown(textarea, { key: "Enter" });
 
@@ -491,6 +499,17 @@ describe("Composer", () => {
         sessionKey: "agent:main:clawline:user_1:main"
       });
     });
+  });
+
+  it("lets modified Enter stay in the composer text path without submitting", () => {
+    const { sendMessage } = renderComposer();
+    const textarea = screen.getByLabelText("Message");
+
+    fireEvent.focus(textarea);
+    fireEvent.change(textarea, { target: { value: "line one" } });
+
+    expect(fireEvent.keyDown(textarea, { key: "Enter", shiftKey: true })).toBe(true);
+    expect(sendMessage).not.toHaveBeenCalled();
   });
 
   it("reports cross-chat send failure in the initiating composer without echoing into the current chat", async () => {
@@ -666,10 +685,12 @@ describe("Composer", () => {
         files: [new File(["upload"], "notes.txt", { type: "text/plain" })]
       }
     });
-    fireEvent.change(screen.getByLabelText("Message"), {
+    const textarea = screen.getByLabelText("Message");
+    fireEvent.focus(textarea);
+    fireEvent.change(textarea, {
       target: { value: "Attachment send" }
     });
-    fireEvent.keyDown(screen.getByLabelText("Message"), { key: "Enter" });
+    fireEvent.keyDown(textarea, { key: "Enter" });
 
     await waitFor(() => {
       expect(resolveUpload).toBeDefined();

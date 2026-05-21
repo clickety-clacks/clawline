@@ -749,6 +749,8 @@ describe("ChatRoute", () => {
       screen.getByLabelText("Side Thread notification").querySelector(".cross-chat-notification-entries")
     ).toBeNull();
     fireEvent.change(replyField, { target: { value: "Reply from here" } });
+    expect(fireEvent.keyDown(replyField, { key: "Enter", shiftKey: true })).toBe(true);
+    expect(sendMessage).not.toHaveBeenCalled();
     fireEvent.keyDown(replyField, { key: "Enter" });
 
     await waitFor(() => {
@@ -1493,6 +1495,9 @@ describe("ChatRoute", () => {
       "/chat/agent:main:clawline:user_1:main"
     );
     expect(screen.getByLabelText("Side Thread notification")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("menu", { name: "Actions for Side Thread notification" })
+    ).not.toBeInTheDocument();
   });
 
   it("scrolls the active or top visible notification with Cmd-J and Cmd-K", async () => {

@@ -39,6 +39,7 @@ struct Message: Identifiable, Equatable, Codable {
     let clientMessageId: String?
     let replyToMessageId: String?
     let replyToClientMessageId: String?
+    var deliveryState: DeliveryState
 
     init(id: String,
          role: Role,
@@ -51,7 +52,8 @@ struct Message: Identifiable, Equatable, Codable {
          sender: String? = nil,
          clientMessageId: String? = nil,
          replyToMessageId: String? = nil,
-         replyToClientMessageId: String? = nil) {
+         replyToClientMessageId: String? = nil,
+         deliveryState: DeliveryState = .normal) {
         self.id = id
         self.role = role
         self.content = content
@@ -64,6 +66,7 @@ struct Message: Identifiable, Equatable, Codable {
         self.clientMessageId = clientMessageId
         self.replyToMessageId = replyToMessageId
         self.replyToClientMessageId = replyToClientMessageId
+        self.deliveryState = deliveryState
     }
 
     var stream: ChatStream {
@@ -90,6 +93,44 @@ struct Message: Identifiable, Equatable, Codable {
     enum Role: String, Codable {
         case user
         case assistant
+    }
+
+    enum DeliveryState: String, Codable {
+        case normal
+        case canceled
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case role
+        case content
+        case timestamp
+        case streaming
+        case attachments
+        case deviceId
+        case sessionKey
+        case sender
+        case clientMessageId
+        case replyToMessageId
+        case replyToClientMessageId
+        case deliveryState
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        role = try container.decode(Role.self, forKey: .role)
+        content = try container.decode(String.self, forKey: .content)
+        timestamp = try container.decode(Date.self, forKey: .timestamp)
+        streaming = try container.decode(Bool.self, forKey: .streaming)
+        attachments = try container.decode([Attachment].self, forKey: .attachments)
+        deviceId = try container.decodeIfPresent(String.self, forKey: .deviceId)
+        sessionKey = try container.decode(String.self, forKey: .sessionKey)
+        sender = try container.decodeIfPresent(String.self, forKey: .sender)
+        clientMessageId = try container.decodeIfPresent(String.self, forKey: .clientMessageId)
+        replyToMessageId = try container.decodeIfPresent(String.self, forKey: .replyToMessageId)
+        replyToClientMessageId = try container.decodeIfPresent(String.self, forKey: .replyToClientMessageId)
+        deliveryState = try container.decodeIfPresent(DeliveryState.self, forKey: .deliveryState) ?? .normal
     }
 }
 

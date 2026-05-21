@@ -22,6 +22,116 @@ struct StreamDeletedPayload: Codable, Equatable {
     let sessionKey: String
 }
 
+struct AgentProgressEvent: Codable, Equatable {
+    let type: String
+    let version: Int?
+    let sessionKey: String
+    let runId: String?
+    let messageId: String?
+    let seq: Int?
+    let timestamp: Date?
+    let state: String?
+    let event: AgentProgressItem?
+    let title: String?
+    let name: String?
+    let summary: String?
+    let progressText: String?
+
+    enum CodingKeys: String, CodingKey {
+        case type
+        case version
+        case sessionKey
+        case runId
+        case messageId
+        case seq
+        case timestamp
+        case state
+        case event
+        case title
+        case name
+        case summary
+        case progressText
+    }
+
+    init(type: String = "agent_progress",
+         version: Int? = nil,
+         sessionKey: String,
+         runId: String? = nil,
+         messageId: String? = nil,
+         seq: Int? = nil,
+         timestamp: Date? = nil,
+         state: String? = nil,
+         event: AgentProgressItem? = nil,
+         title: String? = nil,
+         name: String? = nil,
+         summary: String? = nil,
+         progressText: String? = nil) {
+        self.type = type
+        self.version = version
+        self.sessionKey = sessionKey
+        self.runId = runId
+        self.messageId = messageId
+        self.seq = seq
+        self.timestamp = timestamp
+        self.state = state
+        self.event = event
+        self.title = title
+        self.name = name
+        self.summary = summary
+        self.progressText = progressText
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        type = try container.decodeIfPresent(String.self, forKey: .type) ?? "agent_progress"
+        version = try container.decodeIfPresent(Int.self, forKey: .version)
+        sessionKey = try container.decode(String.self, forKey: .sessionKey)
+        runId = try container.decodeIfPresent(String.self, forKey: .runId)
+        messageId = try container.decodeIfPresent(String.self, forKey: .messageId)
+        seq = try container.decodeIfPresent(Int.self, forKey: .seq)
+        if let milliseconds = try container.decodeIfPresent(Double.self, forKey: .timestamp) {
+            timestamp = Date(timeIntervalSince1970: milliseconds / 1000)
+        } else {
+            timestamp = nil
+        }
+        state = try container.decodeIfPresent(String.self, forKey: .state)
+        event = try container.decodeIfPresent(AgentProgressItem.self, forKey: .event)
+        title = try container.decodeIfPresent(String.self, forKey: .title)
+        name = try container.decodeIfPresent(String.self, forKey: .name)
+        summary = try container.decodeIfPresent(String.self, forKey: .summary)
+        progressText = try container.decodeIfPresent(String.self, forKey: .progressText)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(type, forKey: .type)
+        try container.encodeIfPresent(version, forKey: .version)
+        try container.encode(sessionKey, forKey: .sessionKey)
+        try container.encodeIfPresent(runId, forKey: .runId)
+        try container.encodeIfPresent(messageId, forKey: .messageId)
+        try container.encodeIfPresent(seq, forKey: .seq)
+        if let timestamp {
+            try container.encode(timestamp.timeIntervalSince1970 * 1000, forKey: .timestamp)
+        }
+        try container.encodeIfPresent(state, forKey: .state)
+        try container.encodeIfPresent(event, forKey: .event)
+        try container.encodeIfPresent(title, forKey: .title)
+        try container.encodeIfPresent(name, forKey: .name)
+        try container.encodeIfPresent(summary, forKey: .summary)
+        try container.encodeIfPresent(progressText, forKey: .progressText)
+    }
+}
+
+struct AgentProgressItem: Codable, Equatable {
+    let kind: String?
+    let phase: String?
+    let status: String?
+    let title: String?
+    let name: String?
+    let summary: String?
+    let progressText: String?
+}
+
 
 struct StreamReadStatePayload: Codable, Equatable {
     let type: String

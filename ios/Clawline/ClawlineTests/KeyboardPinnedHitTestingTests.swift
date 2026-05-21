@@ -47,6 +47,13 @@ struct KeyboardPinnedHitTestingTests {
         #expect(KeyboardPinnedChromeEventRouting.scrollButtonHostReceivesEvents(hasView: true, isVisible: true))
     }
 
+    @Test("Pinned scroll-bottom host hides visually when suppressed")
+    func pinnedScrollBottomHostHidesVisuallyWhenSuppressed() {
+        #expect(KeyboardPinnedChromeEventRouting.scrollButtonHostIsHidden(hasView: false, isVisible: false))
+        #expect(KeyboardPinnedChromeEventRouting.scrollButtonHostIsHidden(hasView: true, isVisible: false))
+        #expect(KeyboardPinnedChromeEventRouting.scrollButtonHostIsHidden(hasView: true, isVisible: true) == false)
+    }
+
     @Test("Hidden scroll-bottom host does not intercept footer action taps")
     func hiddenScrollBottomHostDoesNotInterceptFooterActionTaps() throws {
         let container = UIView(frame: CGRect(x: 0, y: 0, width: 320, height: 180))

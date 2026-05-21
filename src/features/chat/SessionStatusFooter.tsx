@@ -120,8 +120,9 @@ export function footerItems(status?: SessionStatusPayload | null): FooterItem[] 
       options: fastOptions.length > 0 ? fastOptions : [{ title: fastText, isCurrent: true }],
       text: fastText,
       unsupportedReason: fastControl.reason
-    }
-  ];
+    },
+    authModeFooterItem(display.authMode)
+  ].filter((item): item is FooterItem => item != null);
 }
 
 function capability(
@@ -303,6 +304,18 @@ function fastModeText(
     return "Fast Unknown";
   }
   return fastMode ? "Fast on" : "Fast off";
+}
+
+function authModeFooterItem(authMode: string | null | undefined): FooterItem | null {
+  switch (authMode?.trim().toLowerCase()) {
+    case "oauth":
+      return { text: "OAUTH", action: undefined, options: [{ title: "OAUTH", isCurrent: true }] };
+    case "api_key":
+    case "api-key":
+      return { text: "API KEY", action: undefined, options: [{ title: "API KEY", isCurrent: true }] };
+    default:
+      return null;
+  }
 }
 
 function normalized(value?: string | null) {

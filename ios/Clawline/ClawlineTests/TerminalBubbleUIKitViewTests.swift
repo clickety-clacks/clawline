@@ -130,6 +130,70 @@ struct TerminalBubbleUIKitViewTests {
         #expect(view.backgroundColor != .clear)
     }
 
+    @Test("T349: terminal reconnect control does not route through bubble expand tap")
+    func terminalReconnectControlDoesNotRouteThroughBubbleExpandTap() {
+        let descriptor = sampleDescriptor()
+        let message = Message(
+            id: "message-terminal-reconnect",
+            role: .assistant,
+            content: "",
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: "agent:main:clawline:mike:dm"
+        )
+        let presentation = MessagePresentation(
+            parts: [.terminalSession(descriptor)],
+            wordCount: 0,
+            hasTextualContent: false,
+            isEmojiOnly: false,
+            hasMediaOnly: false,
+            detectedURLs: [],
+            detectedURLCount: 0,
+            hasSingleURL: false
+        )
+        let bubble = MessageBubbleUIKitView(frame: CGRect(x: 0, y: 0, width: 360, height: 1))
+
+        bubble.configure(
+            message: message,
+            presentation: presentation,
+            sizeClass: .short,
+            metrics: ChatFlowTheme.Metrics(isCompact: false),
+            maxWidth: 360,
+            truncationHeightOverride: 240,
+            bubbleSizingV2: nil,
+            showsHeader: true,
+            paddingScale: 1,
+            minWidthOverride: nil,
+            maxWidthOverride: nil,
+            useContinuousCorners: true,
+            isDark: false,
+            onRequestExpand: nil,
+            onRequestLayout: nil,
+            onInteractiveCallback: nil
+        )
+        let measured = bubble.systemLayoutSizeFitting(
+            CGSize(width: 360, height: UIView.layoutFittingCompressedSize.height),
+            withHorizontalFittingPriority: .required,
+            verticalFittingPriority: .fittingSizeLevel
+        )
+        bubble.frame = CGRect(origin: .zero, size: measured)
+        bubble.layoutIfNeeded()
+
+        let reconnectButton = allSubviews(in: bubble)
+            .compactMap { $0 as? UIButton }
+            .first { $0.currentTitle == "Reconnect" }
+        let terminalView = allSubviews(in: bubble)
+            .compactMap { $0 as? FocusableTerminalView }
+            .first
+
+        #expect(reconnectButton != nil)
+        #expect(terminalView != nil)
+        #expect(bubble.shouldAllowBubbleExpandTap(from: reconnectButton) == false)
+        #expect(bubble.shouldAllowBubbleExpandTap(from: terminalView) == true)
+    }
+
     private func sampleDescriptor() -> TerminalSessionDescriptor {
         TerminalSessionDescriptor(
             version: 1,

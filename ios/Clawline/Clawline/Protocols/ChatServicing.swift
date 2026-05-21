@@ -32,6 +32,7 @@ enum ConnectionState: Equatable {
 enum ChatServiceEvent: Equatable {
     case messageError(messageId: String?, code: String, message: String?)
     case messageAcked(id: String)
+    case agentProgress(AgentProgressEvent)
     case connectionInterrupted(reason: String?)
     case userInfo(ChatUserInfo)
     case typingStateChanged(isTyping: Bool, sessionKey: String)

@@ -19,6 +19,13 @@ import { generateUuidV4 } from "../../runtime/shared/uuid";
 import { useTransportMachine } from "../../runtime/transport/transportMachine";
 import { getSessionProvisioningState } from "../streams/provisioning";
 import { projectComposerSendState } from "./chatSendState";
+import {
+  keyboardIntentFromEvent,
+  routeKeyboardCommand,
+  useKeyboardOwnershipContribution,
+  useKeyboardOwnershipStore,
+  type KeyboardSurfaceRecord
+} from "./keyboardCommandRouter";
 import { RichMessageBody } from "./RichMessageBody";
 
 const VISIBLE_NOTIFICATION_LIMIT = 10;
@@ -69,6 +76,9 @@ export function CrossChatNotificationOverlay() {
   const [actionMenuSourceChatId, setActionMenuSourceChatId] = useState<string | null>(
     null
   );
+  const [focusedReplySourceChatId, setFocusedReplySourceChatId] = useState<
+    string | null
+  >(null);
   const [actionMenuSelectedIndex, setActionMenuSelectedIndex] = useState(
     DEFAULT_NOTIFICATION_ACTION_MENU_INDEX
   );
@@ -88,6 +98,7 @@ export function CrossChatNotificationOverlay() {
   const bubbleRefsBySourceChatId = useRef<Record<string, HTMLElement | null>>({});
   const actionMenuRef = useRef<HTMLDivElement | null>(null);
   const sendingReplySourceChatIdsRef = useRef<Set<string>>(new Set());
+  const keyboardOwnershipStore = useKeyboardOwnershipStore();
   const baseOrderedBubbles = useMemo(
     () =>
       Object.values(notificationState.bubblesBySourceChatId).sort(
@@ -119,6 +130,77 @@ export function CrossChatNotificationOverlay() {
   );
   const overflowBubbles = orderedBubbles.slice(visibleCapacity);
   const visibleSourceChatIds = visibleBubbles.map((bubble) => bubble.sourceChatId);
+  const visibleKeyboardSignature = visibleBubbles
+    .map((bubble) => `${bubble.sourceChatId}:${bubble.replyMode ? "reply" : "closed"}`)
+    .join("\u0000");
+  const keyboardRecords = useMemo<KeyboardSurfaceRecord[]>(
+    () =>
+      visibleBubbles.flatMap((bubble) => {
+        const bubbleSurfaceId = `notification-bubble:${bubble.sourceChatId}`;
+        const records: KeyboardSurfaceRecord[] = [
+          {
+            surfaceId: bubbleSurfaceId,
+            surfaceKind: "notification-bubble",
+            visible: true,
+            active: true,
+            focusedHint: activeSourceChatId === bubble.sourceChatId,
+            commandFamilies: [
+              "notificationAssigned",
+              "notificationStack",
+              "notificationScroll"
+            ],
+            domainRef: bubble.sourceChatId
+          }
+        ];
+        if (bubble.replyMode) {
+          records.push({
+            surfaceId: `notification-reply:${bubble.sourceChatId}`,
+            surfaceKind: "notification-reply",
+            parentSurfaceId: bubbleSurfaceId,
+            visible: true,
+            active: true,
+            focusedHint: focusedReplySourceChatId === bubble.sourceChatId,
+            commandFamilies: ["textEditing"],
+            domainRef: bubble.sourceChatId
+          });
+        }
+        if (actionMenuSourceChatId === bubble.sourceChatId) {
+          records.push({
+            surfaceId: `notification-action-menu:${bubble.sourceChatId}`,
+            surfaceKind: "notification-action-menu",
+            parentSurfaceId: bubbleSurfaceId,
+            visible: true,
+            active: true,
+            focusedHint: true,
+            commandFamilies: ["menuNavigation"],
+            domainRef: bubble.sourceChatId
+          });
+        }
+        return records;
+      }),
+    [
+      actionMenuSourceChatId,
+      activeSourceChatId,
+      focusedReplySourceChatId,
+      visibleKeyboardSignature
+    ]
+  );
+  const notificationShortcutMap = useMemo(
+    () =>
+      Object.fromEntries(
+        visibleSourceChatIds
+          .slice(0, VISIBLE_NOTIFICATION_LIMIT)
+          .map((sourceChatId, index) => [
+            index,
+            `notification-bubble:${sourceChatId}`
+          ])
+      ),
+    [visibleKeyboardSignature]
+  );
+  useKeyboardOwnershipContribution("cross-chat-notifications", {
+    records: keyboardRecords,
+    notificationShortcutMap
+  });
   const hasActiveReply = orderedBubbles.some((bubble) => bubble.replyMode);
   const hasCollapsedPreview = previewingCollapsedSourceChatIds.size > 0;
   const notificationActivitySignaturesBySourceChatId = useMemo(
@@ -366,27 +448,48 @@ export function CrossChatNotificationOverlay() {
     }
   }, [actionMenuSourceChatId]);
 
-  // T307 keyboard ownership: notification command shortcuts are captured at the
-  // document boundary before focused text fields; plain composer/reply editing
-  // remains owned by those focused controls.
+  // Platform capture is a bridge only; ownership is resolved by the shared router.
   useEffect(() => {
     function handleKeyDown(event: globalThis.KeyboardEvent) {
-      if (event.ctrlKey || !event.metaKey) {
+      if (!event.metaKey && !event.ctrlKey) {
         return;
       }
 
-      const key = shortcutKeyFromEvent(event);
-      if (key === "\\" && !event.shiftKey && !event.altKey) {
-        event.preventDefault();
-        toggleNotificationDock();
+      const routed = keyboardIntentFromEvent(event);
+      if (!routed) {
+        return;
+      }
+      const route = routeKeyboardCommand(
+        routed.intent,
+        keyboardOwnershipStore,
+        routed.index
+      );
+
+      if (route.outcome !== "handled") {
         return;
       }
 
-      if ((key === "j" || key === "k") && !event.altKey) {
+      if (
+        routed.intent === "notificationDismissAll" ||
+        routed.intent === "notificationToggleDock" ||
+        routed.intent === "notificationScrollForward" ||
+        routed.intent === "notificationScrollBackward"
+      ) {
+        if (routed.intent === "notificationDismissAll") {
+          event.preventDefault();
+          clearNotificationsAndMarkSourcesRead();
+          return;
+        }
+        if (routed.intent === "notificationToggleDock") {
+          event.preventDefault();
+          toggleNotificationDock();
+          return;
+        }
         const targetSourceChatId =
-          activeSourceChatId && visibleSourceChatIds.includes(activeSourceChatId)
+          sourceChatIdFromNotificationSurfaceId(route.ownerSurfaceId) ??
+          (activeSourceChatId && visibleSourceChatIds.includes(activeSourceChatId)
             ? activeSourceChatId
-            : visibleSourceChatIds[0];
+            : visibleSourceChatIds[0]);
         if (!targetSourceChatId) {
           return;
         }
@@ -394,32 +497,24 @@ export function CrossChatNotificationOverlay() {
         if (hasCollapsedPreview) {
           restoreNotifications();
         }
-        scrollNotificationEntries(targetSourceChatId, key === "j" ? "down" : "up");
+        scrollNotificationEntries(
+          targetSourceChatId,
+          routed.intent === "notificationScrollForward" ? "down" : "up"
+        );
         return;
       }
 
-      if (key === "-" && !event.shiftKey && !event.altKey) {
-        event.preventDefault();
-        clearNotificationsAndMarkSourcesRead();
-        return;
-      }
-
-      const hotkeyIndex = hotkeyIndexFromKey(key);
-      if (hotkeyIndex === null) {
-        return;
-      }
-
-      const sourceChatId = visibleSourceChatIds[hotkeyIndex];
+      const sourceChatId = sourceChatIdFromNotificationSurfaceId(route.ownerSurfaceId);
       if (!sourceChatId) {
         return;
       }
 
-      if (event.shiftKey && event.altKey) {
+      if (routed.intent === "notificationAssignedDismiss") {
         event.preventDefault();
         setActionMenuSourceChatId(null);
         unpinReplySourceChatId(sourceChatId);
         dismissNotificationAndMarkSourceRead(sourceChatId);
-      } else if (event.shiftKey) {
+      } else if (routed.intent === "notificationAssignedReply") {
         event.preventDefault();
         setActionMenuSourceChatId(null);
         const bubble = visibleBubbles.find(
@@ -427,12 +522,16 @@ export function CrossChatNotificationOverlay() {
         );
         if (bubble?.replyMode) {
           unpinReplySourceChatId(sourceChatId);
+          setFocusedReplySourceChatId((current) =>
+            current === sourceChatId ? null : current
+          );
           notificationStore.closeCrossChatNotificationReply(sourceChatId);
         } else {
           pinReplySourceChatId(sourceChatId);
+          setFocusedReplySourceChatId(sourceChatId);
           notificationStore.openCrossChatNotificationReply(sourceChatId);
         }
-      } else if (!event.altKey) {
+      } else if (routed.intent === "notificationAssignedOpen") {
         event.preventDefault();
         if (isCollapsed || hasCollapsedPreview) {
           restoreNotifications();
@@ -456,7 +555,8 @@ export function CrossChatNotificationOverlay() {
     transportStore,
     visibleCapacity,
     visibleBubbles,
-    visibleSourceChatIds
+    visibleSourceChatIds,
+    keyboardOwnershipStore
   ]);
 
   if (visibleBubbles.length === 0 && renderedBubbles.length === 0) {
@@ -685,9 +785,13 @@ export function CrossChatNotificationOverlay() {
     setActionMenuSourceChatId(null);
     if (bubble.replyMode) {
       unpinReplySourceChatId(bubble.sourceChatId);
+      setFocusedReplySourceChatId((current) =>
+        current === bubble.sourceChatId ? null : current
+      );
       notificationStore.closeCrossChatNotificationReply(bubble.sourceChatId);
     } else {
       pinReplySourceChatId(bubble.sourceChatId);
+      setFocusedReplySourceChatId(bubble.sourceChatId);
       notificationStore.openCrossChatNotificationReply(bubble.sourceChatId);
     }
   }
@@ -705,9 +809,13 @@ export function CrossChatNotificationOverlay() {
       );
       if (bubble?.replyMode) {
         unpinReplySourceChatId(sourceChatId);
+        setFocusedReplySourceChatId((current) =>
+          current === sourceChatId ? null : current
+        );
         notificationStore.closeCrossChatNotificationReply(sourceChatId);
       } else {
         pinReplySourceChatId(sourceChatId);
+        setFocusedReplySourceChatId(sourceChatId);
         notificationStore.openCrossChatNotificationReply(sourceChatId);
       }
     } else {
@@ -720,7 +828,12 @@ export function CrossChatNotificationOverlay() {
     event: KeyboardEvent<HTMLDivElement>,
     sourceChatId: string
   ) {
-    if (event.key === "ArrowDown") {
+    const ownerSurfaceId = `notification-action-menu:${sourceChatId}`;
+    if (
+      event.key === "ArrowDown" &&
+      routeKeyboardCommand("menuNavigateDown", keyboardOwnershipStore).ownerSurfaceId ===
+        ownerSurfaceId
+    ) {
       event.preventDefault();
       setActionMenuSelectedIndex((current) =>
         Math.min(current + 1, NOTIFICATION_ACTION_MENU_ITEMS.length - 1)
@@ -728,19 +841,31 @@ export function CrossChatNotificationOverlay() {
       return;
     }
 
-    if (event.key === "ArrowUp") {
+    if (
+      event.key === "ArrowUp" &&
+      routeKeyboardCommand("menuNavigateUp", keyboardOwnershipStore).ownerSurfaceId ===
+        ownerSurfaceId
+    ) {
       event.preventDefault();
       setActionMenuSelectedIndex((current) => Math.max(current - 1, 0));
       return;
     }
 
-    if (event.key === "Enter") {
+    if (
+      event.key === "Enter" &&
+      routeKeyboardCommand("menuActivate", keyboardOwnershipStore).ownerSurfaceId ===
+        ownerSurfaceId
+    ) {
       event.preventDefault();
       selectActionMenuItem(sourceChatId, actionMenuSelectedIndex);
       return;
     }
 
-    if (event.key === "Escape") {
+    if (
+      event.key === "Escape" &&
+      routeKeyboardCommand("menuCancel", keyboardOwnershipStore).ownerSurfaceId ===
+        ownerSurfaceId
+    ) {
       event.preventDefault();
       setActionMenuSourceChatId(null);
     }
@@ -1099,15 +1224,39 @@ export function CrossChatNotificationOverlay() {
                     event.target.value
                   )
                 }
+                onBlur={() =>
+                  setFocusedReplySourceChatId((current) =>
+                    current === bubble.sourceChatId ? null : current
+                  )
+                }
+                onFocus={() => setFocusedReplySourceChatId(bubble.sourceChatId)}
                 onKeyDown={(event: KeyboardEvent<HTMLTextAreaElement>) => {
-                  if (event.key === "Escape") {
+                  const routed = keyboardIntentFromEvent(event);
+                  const ownerSurfaceId = `notification-reply:${bubble.sourceChatId}`;
+                  if (
+                    routed?.intent === "textCancel" &&
+                    routeKeyboardCommand(routed.intent, keyboardOwnershipStore)
+                      .ownerSurfaceId === ownerSurfaceId
+                  ) {
                     event.preventDefault();
                     notificationStore.closeCrossChatNotificationReply(bubble.sourceChatId);
                     return;
                   }
-                  if (event.key === "Enter" && !event.shiftKey) {
+                  if (
+                    routed?.intent === "textSubmit" &&
+                    routeKeyboardCommand(routed.intent, keyboardOwnershipStore)
+                      .ownerSurfaceId === ownerSurfaceId
+                  ) {
                     event.preventDefault();
                     activateReplySendButton(bubble, replySendState.sendAction);
+                    return;
+                  }
+                  if (
+                    routed?.intent === "textModifiedNewline" &&
+                    routeKeyboardCommand(routed.intent, keyboardOwnershipStore)
+                      .ownerSurfaceId === ownerSurfaceId
+                  ) {
+                    return;
                   }
                 }}
                 rows={1}
@@ -1381,25 +1530,8 @@ function selectVisibleBubblesWithPinnedReplies(
   );
 }
 
-function hotkeyIndexFromKey(key: string) {
-  if (!/^[0-9]$/.test(key)) {
-    return null;
-  }
-  return Number(key);
-}
-
-function shortcutKeyFromEvent(event: globalThis.KeyboardEvent) {
-  if (/^Digit[0-9]$/.test(event.code)) {
-    return event.code.slice("Digit".length);
-  }
-
-  if (/^Numpad[0-9]$/.test(event.code)) {
-    return event.code.slice("Numpad".length);
-  }
-
-  if (event.code === "Minus" || event.code === "NumpadSubtract") {
-    return "-";
-  }
-
-  return event.key.toLowerCase();
+function sourceChatIdFromNotificationSurfaceId(surfaceId: string | null) {
+  return surfaceId?.startsWith("notification-bubble:")
+    ? surfaceId.slice("notification-bubble:".length)
+    : null;
 }

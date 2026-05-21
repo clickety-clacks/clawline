@@ -875,16 +875,12 @@ struct PromptFocusShortcutActivationTests {
         assertRoute(.transcriptChatScrollBackward, in: store, isHandledBy: .notificationBubble("notification-0"), rule: "PR-04")
     }
 
-    @Test("Visible notifications expose global scroll shortcuts outside focused command ownership")
-    func visibleNotificationsExposeGlobalScrollShortcutsOutsideFocusedCommandOwnership() {
-        #expect(CrossChatNotificationGlobalShortcut.scrollSpecs(visibleNotificationCount: 0).isEmpty)
+    @Test("Visible notification scroll shortcuts stay on the central command bridge")
+    func visibleNotificationScrollShortcutsStayOnCentralCommandBridge() {
         #expect(
-            CrossChatNotificationGlobalShortcut.scrollSpecs(visibleNotificationCount: 2) == [
-                .init(input: "j", modifiers: .command, action: .scrollDown),
-                .init(input: "k", modifiers: .command, action: .scrollUp),
-                .init(input: "j", modifiers: [.command, .shift], action: .scrollDown),
-                .init(input: "k", modifiers: [.command, .shift], action: .scrollUp),
-            ]
+            !ChatAppCommandShortcut.keyCommandSpecs(notificationVisibleCount: 2).contains { spec in
+                spec.action == .scrollNotificationDown || spec.action == .scrollNotificationUp
+            }
         )
     }
 

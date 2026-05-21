@@ -7592,43 +7592,6 @@ private struct CrossChatNotificationActionMenuKeyBridge: UIViewRepresentable {
     }
 }
 
-enum CrossChatNotificationGlobalShortcut {
-    enum Action: Equatable {
-        case scrollDown
-        case scrollUp
-
-        var notificationName: Notification.Name {
-            switch self {
-            case .scrollDown:
-                return .clawlineScrollNotificationDownCommand
-            case .scrollUp:
-                return .clawlineScrollNotificationUpCommand
-            }
-        }
-    }
-
-    struct Spec: Equatable {
-        let input: Character
-        let modifiers: EventModifiers
-        let action: Action
-    }
-
-    static func scrollSpecs(visibleNotificationCount: Int) -> [Spec] {
-        KeyboardCommandBridge
-            .hiddenNotificationSwiftUIFallbackSpecs(visibleNotificationCount: visibleNotificationCount)
-            .compactMap { spec in
-                switch spec.intent {
-                case .notificationScrollForward:
-                    return Spec(input: spec.input, modifiers: spec.modifiers, action: .scrollDown)
-                case .notificationScrollBackward:
-                    return Spec(input: spec.input, modifiers: spec.modifiers, action: .scrollUp)
-                default:
-                    return nil
-                }
-            }
-    }
-}
-
 private struct CrossChatNotificationKeyboardShortcuts: View {
     let bubbles: [CrossChatNotificationBubble]
     let maxContainerHeight: CGFloat
@@ -7691,15 +7654,6 @@ private struct CrossChatNotificationKeyboardShortcuts: View {
                     }
                 }
                     .keyboardShortcut("\\", modifiers: .command)
-                ForEach(
-                    Array(CrossChatNotificationGlobalShortcut.scrollSpecs(visibleNotificationCount: visibleBubbles.count).enumerated()),
-                    id: \.offset
-                ) { _, spec in
-                    Button("") {
-                        routeScrollShortcut(spec)
-                    }
-                    .keyboardShortcut(KeyEquivalent(spec.input), modifiers: spec.modifiers)
-                }
             }
             .opacity(0.001)
             .frame(width: 1, height: 1)
@@ -7717,20 +7671,6 @@ private struct CrossChatNotificationKeyboardShortcuts: View {
                 .route(intent: intent, store: keyboardOwnershipStore)
                 .outcome else { return }
         action()
-    }
-
-    private func routeScrollShortcut(_ spec: CrossChatNotificationGlobalShortcut.Spec) {
-        let intent: KeyboardCommandIntent
-        switch spec.action {
-        case .scrollDown:
-            intent = .notificationScrollForward
-        case .scrollUp:
-            intent = .notificationScrollBackward
-        }
-        guard case .handled(.notificationBubble(_)) = KeyboardCommandRouter
-            .route(intent: intent, store: keyboardOwnershipStore)
-            .outcome else { return }
-        NotificationCenter.default.post(name: spec.action.notificationName, object: nil)
     }
 
     private func routeNotificationStackShortcut(

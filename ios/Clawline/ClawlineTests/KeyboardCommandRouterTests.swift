@@ -219,6 +219,70 @@ struct KeyboardCommandRouterTests {
         )
     }
 
+    @Test("T347-10 visible notifications own physical J/K scroll shortcuts through root bridge")
+    func visibleNotificationsOwnPhysicalScrollShortcutsThroughRootBridge() {
+        for composerFocused in [false, true] {
+            let store = KeyboardOwnershipSceneFactory.chatScene(
+                visibleNotificationSourceChatIds: ["n0"],
+                mentionPickerVisible: false,
+                composerFocused: composerFocused,
+                notificationReplyFocusedSourceChatId: nil,
+                actionMenuSourceChatId: nil
+            )
+
+            assertPhysicalShortcut(
+                input: "j",
+                modifiers: [.command],
+                in: store,
+                posts: .clawlineScrollNotificationDownCommand
+            )
+            assertPhysicalShortcut(
+                input: "k",
+                modifiers: [.command],
+                in: store,
+                posts: .clawlineScrollNotificationUpCommand
+            )
+            assertPhysicalShortcut(
+                input: "j",
+                modifiers: [.command, .shift],
+                in: store,
+                posts: .clawlineScrollNotificationDownCommand
+            )
+            assertPhysicalShortcut(
+                input: "k",
+                modifiers: [.command, .shift],
+                in: store,
+                posts: .clawlineScrollNotificationUpCommand
+            )
+        }
+    }
+
+    @Test("T347-10 no-notification physical shift J/K stays transcript owned across composer focus")
+    func noNotificationPhysicalShiftScrollStaysTranscriptOwnedAcrossComposerFocus() {
+        for composerFocused in [false, true] {
+            let store = KeyboardOwnershipSceneFactory.chatScene(
+                visibleNotificationSourceChatIds: [],
+                mentionPickerVisible: false,
+                composerFocused: composerFocused,
+                notificationReplyFocusedSourceChatId: nil,
+                actionMenuSourceChatId: nil
+            )
+
+            assertPhysicalShortcut(
+                input: "j",
+                modifiers: [.command, .shift],
+                in: store,
+                posts: .clawlineScrollChatDownCommand
+            )
+            assertPhysicalShortcut(
+                input: "k",
+                modifiers: [.command, .shift],
+                in: store,
+                posts: .clawlineScrollChatUpCommand
+            )
+        }
+    }
+
     @Test("T343 VG-07 adapters derive shortcut exposure from the central router vocabulary")
     func adaptersDeriveShortcutExposureFromCentralRouterVocabulary() {
         #expect(
@@ -268,7 +332,11 @@ struct KeyboardCommandRouterTests {
                 .notificationNumber
             ]
         )
-        #expect(CrossChatNotificationGlobalShortcut.scrollSpecs(visibleNotificationCount: 2).map(\.input) == ["j", "k", "j", "k"])
+        #expect(
+            !ChatAppCommandShortcut.keyCommandSpecs(notificationVisibleCount: 2).contains { spec in
+                spec.action == .scrollNotificationDown || spec.action == .scrollNotificationUp
+            }
+        )
     }
 
     @Test("T343 VG-07 registered command families gate surface ownership")
@@ -335,4 +403,25 @@ private func assertRoute(
     #expect(decision.outcome == .handled(surfaceId), sourceLocation: sourceLocation)
     #expect(decision.priorityRule == rule, sourceLocation: sourceLocation)
     #expect(decision.participatingSurfaces.contains(surfaceId), sourceLocation: sourceLocation)
+}
+
+@MainActor
+private func assertPhysicalShortcut(
+    input: String,
+    modifiers: UIKeyModifierFlags,
+    in store: KeyboardOwnershipStore,
+    posts expectedName: Notification.Name,
+    sourceLocation: SourceLocation = #_sourceLocation
+) {
+    let intent = KeyboardCommandBridge.intent(input: input, modifierFlags: modifiers)
+    #expect(intent != nil, sourceLocation: sourceLocation)
+    #expect(
+        intent.flatMap {
+            ChatRootKeyboardCommandDispatch.notificationName(
+                for: $0,
+                keyboardOwnershipStore: store
+            )
+        } == expectedName,
+        sourceLocation: sourceLocation
+    )
 }

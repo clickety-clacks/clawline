@@ -3087,16 +3087,11 @@ final class ChatViewModel: ChatViewModelHosting {
         }
         guard !candidateIds.isEmpty else { return nil }
 
-        if let sessionMessageList = sessionMessages[message.sessionKey] {
-            for candidateId in candidateIds {
-                if let resolved = sessionMessageList.first(where: { matchesReplyIdentifier(candidateId, message: $0) }) {
-                    return resolved
-                }
-            }
+        guard let sessionMessageList = sessionMessages[message.sessionKey] else {
+            return nil
         }
-
         for candidateId in candidateIds {
-            if let resolved = self.sessionMessages.values.lazy.flatMap({ $0 }).first(where: { matchesReplyIdentifier(candidateId, message: $0) }) {
+            if let resolved = sessionMessageList.first(where: { matchesReplyIdentifier(candidateId, message: $0) }) {
                 return resolved
             }
         }

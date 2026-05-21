@@ -116,6 +116,7 @@ final class T320ReplyIndicatorProofXCTest: XCTestCase {
         XCTAssertEqual(outgoingReplyReference?.clientMessageId, referenced.clientMessageId)
         XCTAssertEqual(outgoingReplyReference?.tokenLabel.contains("assistant:"), false)
     }
+
 }
 
 @MainActor

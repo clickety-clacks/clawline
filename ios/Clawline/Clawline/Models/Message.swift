@@ -73,6 +73,10 @@ struct Message: Identifiable, Equatable, Codable {
         SessionKey.stream(for: sessionKey)
     }
 
+    var hasStableReferenceIdentity: Bool {
+        id.hasPrefix("s_") || clientMessageId != nil
+    }
+
     var displayName: String {
         switch role {
         case .user:

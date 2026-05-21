@@ -2023,10 +2023,12 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
                 self.onInsertIntoPrompt?(message)
             })
         }
-        actions.append(UIAction(title: "Reply…", image: UIImage(systemName: "arrowshape.turn.up.left")) { [weak self] _ in
-            guard let self, let message = self.currentMessage else { return }
-            self.onReferenceMessage?(message)
-        })
+        if currentMessage.hasStableReferenceIdentity {
+            actions.append(UIAction(title: "Reply…", image: UIImage(systemName: "arrowshape.turn.up.left")) { [weak self] _ in
+                guard let self, let message = self.currentMessage else { return }
+                self.onReferenceMessage?(message)
+            })
+        }
         return actions.isEmpty ? nil : UIMenu(children: actions)
     }
 

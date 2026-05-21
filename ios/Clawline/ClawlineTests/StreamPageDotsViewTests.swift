@@ -7,6 +7,7 @@
 
 import Testing
 import CoreGraphics
+import Foundation
 import SwiftUI
 import UIKit
 @testable import Clawline
@@ -114,6 +115,74 @@ struct StreamPageDotsViewTests {
 
         #expect(targetWidth <= requestedWidth)
         #expect(measured.width <= requestedWidth + 1)
+    }
+
+    @Test("T278: dot indicator state matrix preserves wave overflow while containing blobs")
+    func dotIndicatorStateMatrixPreservesWaveOverflowWhileContainingBlobs() {
+        let restMetrics = StreamPageDotsView.scrubLayoutMetrics(
+            totalSessionCount: 40,
+            visibleDotCount: 11,
+            controlWidth: 190,
+            maxWidth: 190,
+            isScrubbing: false
+        )
+        let swipeMetrics = StreamPageDotsView.scrubLayoutMetrics(
+            totalSessionCount: 40,
+            visibleDotCount: 11,
+            controlWidth: 190,
+            maxWidth: 190,
+            isScrubbing: true
+        )
+        let waveScale = StreamPageDotsView.scrubMagnificationScale(
+            dotIndex: 10,
+            virtualIndex: 10,
+            metrics: swipeMetrics
+        )
+        let capsuleBounds = StreamPageDotsView.unreadEdgeBloomCapsuleBounds(capsuleWidth: 190)
+        let trailingBlobBounds = StreamPageDotsView.unreadEdgeBloomVisualBounds(
+            edge: .trailing,
+            layoutDirection: .leftToRight,
+            capsuleBounds: capsuleBounds,
+            colorScheme: .dark
+        )
+        let edgeUnreadDotCenter = StreamPageDotsView.dotCenterX(
+            for: 0,
+            totalSessionCount: 11,
+            visibleDotIndices: Array(0..<11),
+            fieldWidth: 190
+        )!
+        let edgeUnreadDotBounds = CGRect(
+            x: edgeUnreadDotCenter - 3.5,
+            y: (StreamPageDotsView.controlHeight / 2) - 3.5,
+            width: 7,
+            height: 7
+        )
+
+        #expect(restMetrics.scrubFieldWidth == 190)
+        #expect(swipeMetrics.scrubFieldWidth > restMetrics.scrubFieldWidth)
+        #expect(StreamPageDotsView.scrubMagnificationVerticalOffset(scale: waveScale) < -40)
+        #expect(edgeUnreadDotBounds.minX >= 0)
+        #expect(edgeUnreadDotBounds.maxX <= 190)
+        #expect(edgeUnreadDotBounds.minY >= 0)
+        #expect(edgeUnreadDotBounds.maxY <= StreamPageDotsView.controlHeight)
+        #expect(trailingBlobBounds.maxX <= capsuleBounds.maxX)
+        #expect(StreamPageDotsView.selectionRingIndex(activeIndex: 10, scrubCandidateIndex: nil, sessionCount: 40) == 10)
+        #expect(StreamPageDotsView.selectionRingIndex(activeIndex: 10, scrubCandidateIndex: 12, sessionCount: 40) == 12)
+        #expect(StreamPageDotsView.shouldCancelScrub(locationY: -24))
+    }
+
+    @Test("T278: source invariants preserve wave overflow and local blob containment")
+    func sourceInvariantsPreserveWaveOverflowAndLocalBlobContainment() throws {
+        let source = try Self.streamPageDotsSource()
+        let controlBodySource = try Self.sourceSection(
+            source,
+            from: "private var controlBody",
+            to: "private func dockChrome"
+        )
+
+        #expect(!controlBodySource.contains(".clipShape(Capsule())"))
+        #expect(source.contains("unreadEdgeBloomOverlay(capsuleBounds: capsuleBounds)"))
+        #expect(source.contains(".blur(radius: Self.unreadEdgeBloomBlurRadius(colorScheme: colorScheme))\n                    .mask(Capsule())"))
     }
 
     @Test("T257: scrub start maps touch position through the visible dot window")
@@ -522,6 +591,49 @@ struct StreamPageDotsViewTests {
         #expect(StreamPageDotsView.unreadEdgeBloomBlurRadius(colorScheme: .dark) == 4.5)
     }
 
+    @Test("T278: offscreen unread bloom is positioned inside the glass capsule")
+    func offscreenUnreadBloomStaysInsideCapsuleAfterBlur() {
+        let controlWidth = StreamPageDotsView.requiredControlWidth(
+            visibleDotCount: 11,
+            includesOverflowIndicators: true
+        )
+        let capsuleBounds = StreamPageDotsView.unreadEdgeBloomCapsuleBounds(capsuleWidth: controlWidth)
+        let cases: [(HorizontalEdge, LayoutDirection)] = [
+            (.leading, .leftToRight),
+            (.trailing, .leftToRight),
+            (.leading, .rightToLeft),
+            (.trailing, .rightToLeft)
+        ]
+
+        for (edge, direction) in cases {
+            let sourceFrame = StreamPageDotsView.unreadEdgeBloomSourceFrame(
+                edge: edge,
+                layoutDirection: direction,
+                capsuleBounds: capsuleBounds
+            )
+            let visualBounds = StreamPageDotsView.unreadEdgeBloomVisualBounds(
+                edge: edge,
+                layoutDirection: direction,
+                capsuleBounds: capsuleBounds,
+                colorScheme: .dark
+            )
+
+            #expect(sourceFrame.minX > capsuleBounds.minX)
+            #expect(sourceFrame.maxX < capsuleBounds.maxX)
+            #expect(visualBounds.minX >= capsuleBounds.minX)
+            #expect(visualBounds.maxX <= capsuleBounds.maxX)
+            #expect(visualBounds.minY >= capsuleBounds.minY)
+            #expect(visualBounds.maxY <= capsuleBounds.maxY)
+
+            let capsuleInset = Self.capsuleHorizontalInset(at: visualBounds.minY)
+            if sourceFrame.midX < capsuleBounds.midX {
+                #expect(visualBounds.minX >= capsuleBounds.minX + capsuleInset)
+            } else {
+                #expect(visualBounds.maxX <= capsuleBounds.maxX - capsuleInset)
+            }
+        }
+    }
+
     private struct RGB: Equatable {
         let red: CGFloat
         let green: CGFloat
@@ -544,5 +656,29 @@ struct StreamPageDotsViewTests {
 
     private static func rounded(_ value: CGFloat) -> CGFloat {
         (value * 100).rounded() / 100
+    }
+
+    private static func capsuleHorizontalInset(at y: CGFloat) -> CGFloat {
+        let radius = StreamPageDotsView.controlHeight / 2
+        let dy = abs(y - radius)
+        return radius - sqrt(max(0, (radius * radius) - (dy * dy)))
+    }
+
+    private static func streamPageDotsSource() throws -> String {
+        let testFileURL = URL(fileURLWithPath: #filePath)
+        let sourceURL = testFileURL
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Clawline/Views/Chat/StreamPageDotsView.swift")
+        return try String(contentsOf: sourceURL, encoding: .utf8)
+    }
+
+    private static func sourceSection(_ source: String, from startMarker: String, to endMarker: String) throws -> String {
+        guard let start = source.range(of: startMarker)?.lowerBound,
+              let end = source.range(of: endMarker, range: start..<source.endIndex)?.lowerBound else {
+            struct MissingSourceSection: Error {}
+            throw MissingSourceSection()
+        }
+        return String(source[start..<end])
     }
 }

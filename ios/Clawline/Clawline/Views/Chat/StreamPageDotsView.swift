@@ -12,6 +12,7 @@ import UIKit
 
 struct StreamPageDotsView: View {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.layoutDirection) private var layoutDirection
 
     let sessionKeys: [String]
     let activeSessionKey: String
@@ -45,6 +46,8 @@ struct StreamPageDotsView: View {
     static func unreadEdgeBloomOpacity(colorScheme: ColorScheme) -> Double {
         0.40
     }
+    private static let unreadEdgeBloomSourceSize = CGSize(width: 14, height: 9)
+    private static let unreadEdgeBloomBorderClearance: CGFloat = 9
 
     private var activeIndex: Int {
         sessionKeys.firstIndex(of: activeSessionKey) ?? 0
@@ -159,6 +162,66 @@ struct StreamPageDotsView: View {
             + (CGFloat(overflowCount) * overflowDotDiameter)
         let totalSpacing = CGFloat(max(0, elementCount - 1)) * dotSpacing
         return totalDotWidth + totalSpacing + (horizontalPadding * 2)
+    }
+
+    static func unreadEdgeBloomCapsuleBounds(capsuleWidth: CGFloat) -> CGRect {
+        CGRect(x: 0, y: 0, width: capsuleWidth, height: controlHeight)
+    }
+
+    static func unreadEdgeBloomSourceFrame(
+        edge: HorizontalEdge,
+        layoutDirection: LayoutDirection,
+        capsuleBounds: CGRect
+    ) -> CGRect {
+        let centerX = unreadEdgeBloomSourceCenterX(
+            edge: edge,
+            layoutDirection: layoutDirection,
+            capsuleBounds: capsuleBounds
+        )
+        return CGRect(
+            x: centerX - (unreadEdgeBloomSourceSize.width / 2),
+            y: capsuleBounds.midY - (unreadEdgeBloomSourceSize.height / 2),
+            width: unreadEdgeBloomSourceSize.width,
+            height: unreadEdgeBloomSourceSize.height
+        )
+    }
+
+    static func unreadEdgeBloomVisualBounds(
+        edge: HorizontalEdge,
+        layoutDirection: LayoutDirection,
+        capsuleBounds: CGRect,
+        colorScheme: ColorScheme
+    ) -> CGRect {
+        unreadEdgeBloomSourceFrame(
+            edge: edge,
+            layoutDirection: layoutDirection,
+            capsuleBounds: capsuleBounds
+        )
+        .insetBy(
+            dx: -unreadEdgeBloomBlurRadius(colorScheme: colorScheme),
+            dy: -unreadEdgeBloomBlurRadius(colorScheme: colorScheme)
+        )
+    }
+
+    private static func unreadEdgeBloomSourceCenterX(
+        edge: HorizontalEdge,
+        layoutDirection: LayoutDirection,
+        capsuleBounds: CGRect
+    ) -> CGFloat {
+        let nearLeadingEdgeCenter = capsuleBounds.minX
+            + unreadEdgeBloomBorderClearance
+            + (unreadEdgeBloomSourceSize.width / 2)
+        let nearTrailingEdgeCenter = capsuleBounds.maxX
+            - unreadEdgeBloomBorderClearance
+            - (unreadEdgeBloomSourceSize.width / 2)
+        switch (edge, layoutDirection) {
+        case (.leading, .leftToRight), (.trailing, .rightToLeft):
+            return nearLeadingEdgeCenter
+        case (.trailing, .leftToRight), (.leading, .rightToLeft):
+            return nearTrailingEdgeCenter
+        @unknown default:
+            return edge == .leading ? nearLeadingEdgeCenter : nearTrailingEdgeCenter
+        }
     }
 
     static func targetControlWidth(totalSessionCount: Int, maxWidth: CGFloat?) -> CGFloat? {
@@ -301,19 +364,20 @@ struct StreamPageDotsView: View {
             dotRow
                 .frame(width: scrubFieldWidth, height: Self.controlHeight, alignment: .center)
                 .frame(width: controlWidth, height: Self.controlHeight, alignment: .center)
-                .clipShape(Capsule())
                 .frame(maxHeight: .infinity, alignment: .bottom)
         }
         .frame(width: scrubFieldWidth, height: Self.minimumHitTargetHeight, alignment: .bottom)
     }
 
     private func dockChrome(controlWidth: CGFloat) -> some View {
-        Color.clear
-            .frame(width: controlWidth, height: Self.controlHeight)
+        let capsuleBounds = Self.unreadEdgeBloomCapsuleBounds(capsuleWidth: controlWidth)
+        return Color.clear
+            .frame(width: capsuleBounds.width, height: capsuleBounds.height)
             .background {
-                unreadEdgeBloomOverlay
-                    .mask(Capsule())
+                unreadEdgeBloomOverlay(capsuleBounds: capsuleBounds)
+                    .frame(width: capsuleBounds.width, height: capsuleBounds.height)
                     .blur(radius: Self.unreadEdgeBloomBlurRadius(colorScheme: colorScheme))
+                    .mask(Capsule())
                     .allowsHitTesting(false)
             }
 #if !os(visionOS)
@@ -592,27 +656,28 @@ struct StreamPageDotsView: View {
         }
     }
 
-    private var unreadEdgeBloomOverlay: some View {
+    private func unreadEdgeBloomOverlay(capsuleBounds: CGRect) -> some View {
         ZStack {
             if hasHiddenUnreadLeading {
-                edgeWarningBloom(edge: .leading)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                edgeWarningBloom(edge: .leading, capsuleBounds: capsuleBounds)
             }
             if hasHiddenUnreadTrailing {
-                edgeWarningBloom(edge: .trailing)
-                    .frame(maxWidth: .infinity, alignment: .trailing)
+                edgeWarningBloom(edge: .trailing, capsuleBounds: capsuleBounds)
             }
         }
+        .frame(width: capsuleBounds.width, height: capsuleBounds.height)
     }
 
-    private func edgeWarningBloom(edge: HorizontalEdge) -> some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(warningBloomColor.opacity(Self.unreadEdgeBloomOpacity(colorScheme: colorScheme)))
-                .frame(width: 18, height: 16)
-        }
-        .frame(width: 20, height: 18)
-        .offset(x: edge == .leading ? -4 : 4)
+    private func edgeWarningBloom(edge: HorizontalEdge, capsuleBounds: CGRect) -> some View {
+        let sourceFrame = Self.unreadEdgeBloomSourceFrame(
+            edge: edge,
+            layoutDirection: layoutDirection,
+            capsuleBounds: capsuleBounds
+        )
+        return RoundedRectangle(cornerRadius: 5, style: .continuous)
+            .fill(warningBloomColor.opacity(Self.unreadEdgeBloomOpacity(colorScheme: colorScheme)))
+            .frame(width: sourceFrame.width, height: sourceFrame.height)
+            .position(x: sourceFrame.midX, y: sourceFrame.midY)
     }
 
     static func scrubStartCandidateIndex(

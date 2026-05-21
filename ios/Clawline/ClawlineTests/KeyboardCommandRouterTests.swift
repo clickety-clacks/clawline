@@ -257,6 +257,70 @@ struct KeyboardCommandRouterTests {
         }
     }
 
+    @Test("T347-10 app command source dispatches visible notification scroll before transcript fallback")
+    func appCommandSourceDispatchesVisibleNotificationScrollBeforeTranscriptFallback() {
+        for composerFocused in [false, true] {
+            let store = KeyboardOwnershipSceneFactory.chatScene(
+                visibleNotificationSourceChatIds: ["n0"],
+                mentionPickerVisible: false,
+                composerFocused: composerFocused,
+                notificationReplyFocusedSourceChatId: nil,
+                actionMenuSourceChatId: nil
+            )
+
+            #expect(
+                ChatAppShortcutCommandDispatch.action(
+                    for: .transcriptBubbleScrollForward,
+                    keyboardOwnershipStore: store
+                ) == .scrollNotificationDown
+            )
+            #expect(
+                ChatAppShortcutCommandDispatch.action(
+                    for: .transcriptBubbleScrollBackward,
+                    keyboardOwnershipStore: store
+                ) == .scrollNotificationUp
+            )
+            #expect(
+                ChatAppShortcutCommandDispatch.action(
+                    for: .transcriptChatScrollForward,
+                    keyboardOwnershipStore: store
+                ) == .scrollNotificationDown
+            )
+            #expect(
+                ChatAppShortcutCommandDispatch.action(
+                    for: .transcriptChatScrollBackward,
+                    keyboardOwnershipStore: store
+                ) == .scrollNotificationUp
+            )
+        }
+    }
+
+    @Test("T347-10 app command source preserves no-notification transcript fallback")
+    func appCommandSourcePreservesNoNotificationTranscriptFallback() {
+        for composerFocused in [false, true] {
+            let store = KeyboardOwnershipSceneFactory.chatScene(
+                visibleNotificationSourceChatIds: [],
+                mentionPickerVisible: false,
+                composerFocused: composerFocused,
+                notificationReplyFocusedSourceChatId: nil,
+                actionMenuSourceChatId: nil
+            )
+
+            #expect(
+                ChatAppShortcutCommandDispatch.action(
+                    for: .transcriptBubbleScrollForward,
+                    keyboardOwnershipStore: store
+                ) == .postKeyboardIntent
+            )
+            #expect(
+                ChatAppShortcutCommandDispatch.action(
+                    for: .transcriptChatScrollForward,
+                    keyboardOwnershipStore: store
+                ) == .postKeyboardIntent
+            )
+        }
+    }
+
     @Test("T347-10 no-notification physical shift J/K stays transcript owned across composer focus")
     func noNotificationPhysicalShiftScrollStaysTranscriptOwnedAcrossComposerFocus() {
         for composerFocused in [false, true] {

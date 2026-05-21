@@ -650,11 +650,6 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
         _ = resignFirstResponder()
     }
 
-    @objc private func didPressModifiedReturn(_ sender: UIKeyCommand) {
-        guard canHandleInputShortcut else { return }
-        insertPlainText("\n")
-    }
-
     // MARK: - Paste action gating
 
     override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {

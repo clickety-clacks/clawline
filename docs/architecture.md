@@ -51,15 +51,17 @@ See `specs/clawline-session-status-control-api.md` for requirements, capability 
 
 ## Keyboard shortcut architecture
 
-Clawline shortcut behavior has two architecture documents:
+Clawline shortcut product truth is centralized in one architecture document:
 
-- `specs/t343-unified-keyboard-routing.html` — routing authority and precedence model. Platform bridges normalize key events; the unified router owns product policy.
-- `architecture/clawline-keyboard-shortcuts.html` — maintained user-facing shortcut inventory. Add new shortcuts there with source/authority notes instead of leaving them buried in ticket history.
+- `architecture/clawline-keyboard-shortcuts.html` — primary authority for user-facing shortcut behavior, conflicts, contexts, and precedence.
+- `specs/t343-unified-keyboard-routing.html` — implementation architecture for enforcing the shortcut contract through the unified router. Platform bridges normalize key events; the router enforces the product policy defined in the shortcut inventory.
+
+Ticket specs and tracker notes are provenance. Add or revise shortcuts in `architecture/clawline-keyboard-shortcuts.html` first, then update implementation/spec work to match.
 
 ## Detailed docs
 
 - `provider-architecture.md` — provider internals and request flow
 - `ios-architecture.md` — iOS app/service/view model architecture
 - `architecture/cross-chat-notification-overlay-design.html` — T307 notification overlay design for bubbles, docking, visible buttons, replies, hotkeys, and stack behavior
-- `architecture/clawline-keyboard-shortcuts.html` — central Clawline keyboard shortcut inventory and conflict notes
+- `architecture/clawline-keyboard-shortcuts.html` — primary Clawline keyboard shortcut authority and conflict notes
 - `specs/clawline-session-status-control-api.md` — session status/control API requirements, capability model, safety constraints, and client integration guidance

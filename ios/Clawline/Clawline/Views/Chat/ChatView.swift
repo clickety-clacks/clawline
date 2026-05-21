@@ -3113,6 +3113,7 @@ private struct KeyboardScrollCommandModifier: ViewModifier {
                 switch KeyboardCommandRouter.route(intent: .transcriptBubbleScrollForward, store: keyboardOwnershipStore).outcome {
                 case .handled(.notificationBubble(_)):
                     NotificationCenter.default.post(name: .clawlineScrollNotificationDownCommand, object: nil)
+                    onScrollDown()
                 case .handled(.transcript):
                     onScrollDown()
                 default:
@@ -3124,6 +3125,7 @@ private struct KeyboardScrollCommandModifier: ViewModifier {
                 switch KeyboardCommandRouter.route(intent: .transcriptBubbleScrollBackward, store: keyboardOwnershipStore).outcome {
                 case .handled(.notificationBubble(_)):
                     NotificationCenter.default.post(name: .clawlineScrollNotificationUpCommand, object: nil)
+                    onScrollUp()
                 case .handled(.transcript):
                     onScrollUp()
                 default:
@@ -3873,7 +3875,7 @@ enum ChatRootKeyboardCommandDispatch {
         case .handled(.transcript):
             return transcriptNotificationName(for: intent)
         case .handled(.notificationBubble(_)):
-            return notificationScrollName(for: intent)
+            return notificationOwnedNotificationName(for: intent)
         default:
             return nil
         }
@@ -3902,11 +3904,15 @@ enum ChatRootKeyboardCommandDispatch {
         }
     }
 
-    private static func notificationScrollName(for intent: KeyboardCommandIntent) -> Notification.Name? {
+    private static func notificationOwnedNotificationName(for intent: KeyboardCommandIntent) -> Notification.Name? {
         switch intent {
-        case .transcriptBubbleScrollForward, .transcriptChatScrollForward:
+        case .transcriptBubbleScrollForward:
+            return .clawlineScrollDownCommand
+        case .transcriptBubbleScrollBackward:
+            return .clawlineScrollUpCommand
+        case .notificationScrollForward:
             return .clawlineScrollNotificationDownCommand
-        case .transcriptBubbleScrollBackward, .transcriptChatScrollBackward:
+        case .notificationScrollBackward:
             return .clawlineScrollNotificationUpCommand
         default:
             return nil
@@ -7505,16 +7511,7 @@ private struct CrossChatNotificationActionMenuKeyBridge: UIViewRepresentable {
                         action: spec.action.selector
                     )
             }
-            let notificationScrollCommands = ChatAppCommandShortcut
-                .notificationScrollKeyCommandSpecs(notificationVisibleCount: visibleNotificationCount)
-                .map { spec in
-                    UIKeyCommand(
-                        input: spec.input,
-                        modifierFlags: spec.modifierFlags,
-                        action: spec.action.selector
-                    )
-            }
-            return menuCommands + notificationNumberCommands + notificationScrollCommands
+            return menuCommands + notificationNumberCommands
         }
 
         private func selector(for intent: KeyboardCommandIntent) -> Selector? {

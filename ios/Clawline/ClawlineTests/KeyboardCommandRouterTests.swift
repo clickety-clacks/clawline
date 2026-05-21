@@ -197,13 +197,13 @@ struct KeyboardCommandRouterTests {
             ChatRootKeyboardCommandDispatch.notificationName(
                 for: .transcriptBubbleScrollForward,
                 keyboardOwnershipStore: notificationStore
-            ) == .clawlineScrollNotificationDownCommand
+            ) == .clawlineScrollDownCommand
         )
         #expect(
             ChatRootKeyboardCommandDispatch.notificationName(
                 for: .transcriptChatScrollBackward,
                 keyboardOwnershipStore: notificationStore
-            ) == .clawlineScrollNotificationUpCommand
+            ) == .clawlineScrollChatUpCommand
         )
         #expect(
             ChatRootKeyboardCommandDispatch.notificationName(
@@ -219,8 +219,8 @@ struct KeyboardCommandRouterTests {
         )
     }
 
-    @Test("T347-10 visible notifications own physical J/K scroll shortcuts through root bridge")
-    func visibleNotificationsOwnPhysicalScrollShortcutsThroughRootBridge() {
+    @Test("Shortcut authority Cmd-J/K fan out through bubble scroll while Cmd-Shift-J/K stays transcript")
+    func shortcutAuthorityPhysicalScrollShortcutsUseCorrectRootBridge() {
         for composerFocused in [false, true] {
             let store = KeyboardOwnershipSceneFactory.chatScene(
                 visibleNotificationSourceChatIds: ["n0"],
@@ -234,31 +234,31 @@ struct KeyboardCommandRouterTests {
                 input: "j",
                 modifiers: [.command],
                 in: store,
-                posts: .clawlineScrollNotificationDownCommand
+                posts: .clawlineScrollDownCommand
             )
             assertPhysicalShortcut(
                 input: "k",
                 modifiers: [.command],
                 in: store,
-                posts: .clawlineScrollNotificationUpCommand
+                posts: .clawlineScrollUpCommand
             )
             assertPhysicalShortcut(
                 input: "j",
                 modifiers: [.command, .shift],
                 in: store,
-                posts: .clawlineScrollNotificationDownCommand
+                posts: .clawlineScrollChatDownCommand
             )
             assertPhysicalShortcut(
                 input: "k",
                 modifiers: [.command, .shift],
                 in: store,
-                posts: .clawlineScrollNotificationUpCommand
+                posts: .clawlineScrollChatUpCommand
             )
         }
     }
 
-    @Test("T347-10 app command source dispatches visible notification scroll before transcript fallback")
-    func appCommandSourceDispatchesVisibleNotificationScrollBeforeTranscriptFallback() {
+    @Test("Shortcut authority app command source leaves Cmd-J/K and Cmd-Shift-J/K on root fan-out path")
+    func appCommandSourceLeavesScrollShortcutsOnRootFanOutPath() {
         for composerFocused in [false, true] {
             let store = KeyboardOwnershipSceneFactory.chatScene(
                 visibleNotificationSourceChatIds: ["n0"],
@@ -272,25 +272,25 @@ struct KeyboardCommandRouterTests {
                 ChatAppShortcutCommandDispatch.action(
                     for: .transcriptBubbleScrollForward,
                     keyboardOwnershipStore: store
-                ) == .scrollNotificationDown
+                ) == .postKeyboardIntent
             )
             #expect(
                 ChatAppShortcutCommandDispatch.action(
                     for: .transcriptBubbleScrollBackward,
                     keyboardOwnershipStore: store
-                ) == .scrollNotificationUp
+                ) == .postKeyboardIntent
             )
             #expect(
                 ChatAppShortcutCommandDispatch.action(
                     for: .transcriptChatScrollForward,
                     keyboardOwnershipStore: store
-                ) == .scrollNotificationDown
+                ) == .postKeyboardIntent
             )
             #expect(
                 ChatAppShortcutCommandDispatch.action(
                     for: .transcriptChatScrollBackward,
                     keyboardOwnershipStore: store
-                ) == .scrollNotificationUp
+                ) == .postKeyboardIntent
             )
         }
     }
@@ -384,10 +384,8 @@ struct KeyboardCommandRouterTests {
         )
         #expect(
             ChatAppCommandShortcut.prioritizedTextInputKeyCommandSpecs(notificationVisibleCount: 2).map(\.action) == [
-                .scrollNotificationDown,
-                .scrollNotificationUp,
-                .scrollNotificationDown,
-                .scrollNotificationUp,
+                .scrollDown,
+                .scrollUp,
                 .notificationNumber,
                 .notificationNumber,
                 .notificationNumber,

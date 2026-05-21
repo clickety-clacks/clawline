@@ -173,13 +173,9 @@ enum ChatAppShortcutCommandDispatch {
         }
 
         switch intent {
-        case .transcriptBubbleScrollForward,
-             .transcriptChatScrollForward,
-             .notificationScrollForward:
+        case .notificationScrollForward:
             return .scrollNotificationDown
-        case .transcriptBubbleScrollBackward,
-             .transcriptChatScrollBackward,
-             .notificationScrollBackward:
+        case .notificationScrollBackward:
             return .scrollNotificationUp
         default:
             return .postKeyboardIntent

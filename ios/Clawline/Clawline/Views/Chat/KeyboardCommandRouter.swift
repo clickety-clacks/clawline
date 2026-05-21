@@ -325,9 +325,6 @@ enum KeyboardCommandRouter {
 
         case .transcriptChatScrollForward,
              .transcriptChatScrollBackward:
-            if let notification = reconciledStore.activeNotificationSurface(supporting: .notificationScroll) {
-                return decision(.handled(notification.surfaceId), "PR-04")
-            }
             if let transcript = reconciledStore.firstActiveSurface(kind: .transcript, supporting: .transcriptFallback) {
                 return decision(.handled(transcript.surfaceId), "PR-07")
             }
@@ -386,8 +383,6 @@ enum KeyboardCommandBridge {
     static let notificationScrollSpecs: [KeyCommandSpec] = [
         KeyCommandSpec(input: "j", modifierFlags: [.command], intent: .notificationScrollForward),
         KeyCommandSpec(input: "k", modifierFlags: [.command], intent: .notificationScrollBackward),
-        KeyCommandSpec(input: "j", modifierFlags: [.command, .shift], intent: .notificationScrollForward),
-        KeyCommandSpec(input: "k", modifierFlags: [.command, .shift], intent: .notificationScrollBackward),
         KeyCommandSpec(input: "-", modifierFlags: [.command], intent: .notificationDismissAll),
         KeyCommandSpec(input: "\\", modifierFlags: [.command], intent: .notificationToggleDock)
     ]
@@ -441,7 +436,9 @@ enum KeyboardCommandBridge {
                 $0.intent == .transcriptChatScrollForward || $0.intent == .transcriptChatScrollBackward
             }
         }
-        return notificationScrollSpecs + notificationNumberSpecs(visibleCount: notificationVisibleCount)
+        return transcriptScrollSpecs.filter {
+            $0.intent == .transcriptBubbleScrollForward || $0.intent == .transcriptBubbleScrollBackward
+        } + notificationNumberSpecs(visibleCount: notificationVisibleCount)
     }
 
     static func intent(input: String?, modifierFlags: UIKeyModifierFlags) -> KeyboardCommandIntent? {

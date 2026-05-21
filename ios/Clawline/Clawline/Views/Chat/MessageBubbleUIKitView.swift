@@ -29,6 +29,8 @@ struct MessageBubbleMetadataDebugState {
     let timestampAlpha: CGFloat
     let headerWidth: CGFloat
     let metadataNeededWidth: CGFloat
+    let replyIndicatorHidden: Bool
+    let replyIndicatorText: String?
 }
 
 private final class BubbleSafeAreaNeutralScrollView: UIScrollView {
@@ -430,6 +432,7 @@ final class MessageBubbleUIKitContainerView: UIView {
                    onInteractiveCallback: ((String, String, JSONValue?) -> Void)?,
                    onInsertIntoPrompt: ((Message) -> Void)?,
                    onReferenceMessage: ((Message) -> Void)?,
+                   replyReference: PendingMessageReference? = nil,
                    onResend: (() -> Void)?) {
         let metrics = ChatFlowTheme.Metrics(isCompact: isCompact)
         let sizeClass = MessageFlowRules.sizeClass(for: presentation)
@@ -455,12 +458,8 @@ final class MessageBubbleUIKitContainerView: UIView {
             onInteractiveCallback: onInteractiveCallback,
             onInsertIntoPrompt: onInsertIntoPrompt,
             onReferenceMessage: onReferenceMessage,
+            replyReference: replyReference,
             salientHighlightService: salientHighlightService
-
-
-
-
-
         )
         self.onResend = onResend
         self.onRequestLayout = onRequestLayout
@@ -530,6 +529,11 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
     private let senderLabel = UILabel()
     private let senderTimestampSpacer = UIView()
     private let timestampLabel = UILabel()
+    private let replyIndicatorContainer = UIView()
+    private let replyIndicatorChipView = UIView()
+    private let replyIndicatorStack = UIStackView()
+    private let replyIndicatorIconView = UIImageView()
+    private let replyIndicatorLabel = UILabel()
     private let headerMenuButton = UIButton(type: .custom)
     private let bodyLabel = UITextView()
     private let bodyTextContainer = UIView()
@@ -560,6 +564,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
     private var onReferenceMessage: ((Message) -> Void)?
     private var currentMessage: Message?
     private var currentCopyableReadableText: String?
+    private var currentReplyReference: PendingMessageReference?
 
     // Salient highlights are applied asynchronously and must be cancelable on cell reuse.
     private var salientTask: Task<Void, Never>?
@@ -739,6 +744,57 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         headerStack.addArrangedSubview(senderTimestampSpacer)
         headerStack.addArrangedSubview(timestampLabel)
         senderLabel.firstBaselineAnchor.constraint(equalTo: timestampLabel.firstBaselineAnchor).isActive = true
+
+        replyIndicatorContainer.translatesAutoresizingMaskIntoConstraints = false
+        replyIndicatorContainer.backgroundColor = .clear
+        replyIndicatorContainer.isHidden = true
+
+        replyIndicatorChipView.translatesAutoresizingMaskIntoConstraints = false
+        replyIndicatorChipView.backgroundColor = .secondarySystemFill
+        replyIndicatorChipView.layer.cornerRadius = 10
+        replyIndicatorChipView.layer.cornerCurve = .continuous
+        replyIndicatorChipView.clipsToBounds = true
+        replyIndicatorChipView.isAccessibilityElement = true
+        replyIndicatorChipView.accessibilityTraits = .staticText
+
+        replyIndicatorStack.translatesAutoresizingMaskIntoConstraints = false
+        replyIndicatorStack.axis = .horizontal
+        replyIndicatorStack.alignment = .center
+        replyIndicatorStack.spacing = 6
+        replyIndicatorStack.isLayoutMarginsRelativeArrangement = true
+        replyIndicatorStack.directionalLayoutMargins = NSDirectionalEdgeInsets(top: 6, leading: 10, bottom: 6, trailing: 10)
+
+        replyIndicatorIconView.translatesAutoresizingMaskIntoConstraints = false
+        replyIndicatorIconView.image = UIImage(systemName: "arrowshape.turn.up.left")
+        replyIndicatorIconView.tintColor = .label
+        replyIndicatorIconView.contentMode = .scaleAspectFit
+        replyIndicatorIconView.setContentHuggingPriority(.required, for: .horizontal)
+        replyIndicatorIconView.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        replyIndicatorLabel.numberOfLines = 1
+        replyIndicatorLabel.lineBreakMode = .byTruncatingTail
+        replyIndicatorLabel.font = UIFont.clawline(.timestamp)
+        replyIndicatorLabel.adjustsFontForContentSizeCategory = true
+        replyIndicatorLabel.textColor = .label
+        replyIndicatorLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        replyIndicatorLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+
+        replyIndicatorStack.addArrangedSubview(replyIndicatorIconView)
+        replyIndicatorStack.addArrangedSubview(replyIndicatorLabel)
+        replyIndicatorChipView.addSubview(replyIndicatorStack)
+        replyIndicatorContainer.addSubview(replyIndicatorChipView)
+        NSLayoutConstraint.activate([
+            replyIndicatorStack.leadingAnchor.constraint(equalTo: replyIndicatorChipView.leadingAnchor),
+            replyIndicatorStack.topAnchor.constraint(equalTo: replyIndicatorChipView.topAnchor),
+            replyIndicatorStack.trailingAnchor.constraint(equalTo: replyIndicatorChipView.trailingAnchor),
+            replyIndicatorStack.bottomAnchor.constraint(equalTo: replyIndicatorChipView.bottomAnchor),
+            replyIndicatorIconView.widthAnchor.constraint(equalToConstant: 12),
+            replyIndicatorIconView.heightAnchor.constraint(equalToConstant: 12),
+            replyIndicatorChipView.leadingAnchor.constraint(equalTo: replyIndicatorContainer.leadingAnchor),
+            replyIndicatorChipView.topAnchor.constraint(equalTo: replyIndicatorContainer.topAnchor),
+            replyIndicatorChipView.bottomAnchor.constraint(equalTo: replyIndicatorContainer.bottomAnchor),
+            replyIndicatorChipView.trailingAnchor.constraint(lessThanOrEqualTo: replyIndicatorContainer.trailingAnchor)
+        ])
         headerStack.isUserInteractionEnabled = true
         headerMenuButton.translatesAutoresizingMaskIntoConstraints = false
         headerMenuButton.backgroundColor = .clear
@@ -751,6 +807,9 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
             headerMenuButton.trailingAnchor.constraint(equalTo: headerStack.trailingAnchor),
             headerMenuButton.bottomAnchor.constraint(equalTo: headerStack.bottomAnchor)
         ])
+#if targetEnvironment(macCatalyst)
+        headerMenuButton.addInteraction(UIContextMenuInteraction(delegate: self))
+#endif
 
         bodyLabel.translatesAutoresizingMaskIntoConstraints = false
         UnifiedMarkdownRenderer.configureTextView(
@@ -787,6 +846,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         ])
 
         contentStack.addArrangedSubview(headerStack)
+        contentStack.addArrangedSubview(replyIndicatorContainer)
 
         // Dynamic content wrapper clips content for truncation
         dynamicContentWrapper.clipsToBounds = true
@@ -989,6 +1049,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
                    onInteractiveCallback: ((String, String, JSONValue?) -> Void)?,
                    onInsertIntoPrompt: ((Message) -> Void)? = nil,
                    onReferenceMessage: ((Message) -> Void)? = nil,
+                   replyReference: PendingMessageReference? = nil,
                    salientHighlightService: (any SalientHighlightServicing)? = nil) {
         assert(Thread.isMainThread)
         self.terminalConnectionPool = terminalConnectionPool
@@ -996,6 +1057,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         currentMessage = message
         currentMessageId = message.id
         currentCopyableReadableText = presentation.copyableReadableText
+        currentReplyReference = replyReference
         // Store for trait collection updates
         currentMessageRole = message.role
         currentMessageDeliveryState = message.deliveryState
@@ -1036,6 +1098,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         self.onInteractiveCallback = onInteractiveCallback
         self.onInsertIntoPrompt = onInsertIntoPrompt
         self.onReferenceMessage = onReferenceMessage
+        updateReplyIndicator()
         headerMenuButton.menu = messageContextMenu()
 
         // Use explicit isDark if provided, otherwise fall back to trait collection
@@ -1563,8 +1626,10 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         currentMessage = nil
         currentMessageId = nil
         currentCopyableReadableText = nil
+        currentReplyReference = nil
         onInsertIntoPrompt = nil
         onReferenceMessage = nil
+        updateReplyIndicator()
         headerMenuButton.menu = nil
         suppressExpandTapForLinkCards = false
         allowSwipeUpExpandForSingleLink = false
@@ -1859,9 +1924,16 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         let headerWidth: CGFloat = showsHeader
             ? (32 + headerStack.spacing + senderLabel.intrinsicContentSize.width)
             : 0
+        let replyWidth: CGFloat = replyIndicatorContainer.isHidden
+            ? 0
+            : replyIndicatorChipView.systemLayoutSizeFitting(
+                CGSize(width: maxWidth, height: UIView.layoutFittingCompressedSize.height),
+                withHorizontalFittingPriority: .fittingSizeLevel,
+                verticalFittingPriority: .fittingSizeLevel
+            ).width
         let contentWidth = maxWidth - (currentContentPaddingHorizontal * 2)
         let bodySize = bodyLabel.sizeThatFits(CGSize(width: contentWidth, height: .greatestFiniteMagnitude))
-        let contentMax = max(headerWidth, bodySize.width)
+        let contentMax = max(headerWidth, replyWidth, bodySize.width)
         return min(maxWidth, max(120, contentMax + (currentContentPaddingHorizontal * 2)))
     }
 
@@ -1951,7 +2023,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
                 self.onInsertIntoPrompt?(message)
             })
         }
-        actions.append(UIAction(title: "Reference message", image: UIImage(systemName: "quote.bubble")) { [weak self] _ in
+        actions.append(UIAction(title: "Reply…", image: UIImage(systemName: "arrowshape.turn.up.left")) { [weak self] _ in
             guard let self, let message = self.currentMessage else { return }
             self.onReferenceMessage?(message)
         })
@@ -2023,7 +2095,9 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
             timestampHidden: timestampLabel.isHidden,
             timestampAlpha: timestampLabel.textColor.cgColor.alpha,
             headerWidth: headerStack.bounds.width,
-            metadataNeededWidth: metadataNeededWidth()
+            metadataNeededWidth: metadataNeededWidth(),
+            replyIndicatorHidden: replyIndicatorContainer.isHidden,
+            replyIndicatorText: replyIndicatorLabel.text
         )
     }
 
@@ -2033,6 +2107,18 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
             + senderLabel.intrinsicContentSize.width
             + 8
             + timestampLabel.intrinsicContentSize.width
+    }
+
+    private func updateReplyIndicator() {
+        let shouldShow = currentMessage?.role == .user && currentReplyReference != nil
+        replyIndicatorContainer.isHidden = !shouldShow
+        replyIndicatorChipView.isHidden = !shouldShow
+        replyIndicatorLabel.text = currentReplyReference?.tokenLabel
+        if let tokenLabel = currentReplyReference?.tokenLabel {
+            replyIndicatorChipView.accessibilityLabel = "Reply to \(tokenLabel)"
+        } else {
+            replyIndicatorChipView.accessibilityLabel = nil
+        }
     }
 
     private func scheduleTimestampRefreshIfNeeded(now: Date) {
@@ -2986,6 +3072,7 @@ final class MessageBubbleUIKitCell: UICollectionViewCell {
                    onInteractiveCallback: ((String, String, JSONValue?) -> Void)?,
                    onInsertIntoPrompt: ((Message) -> Void)?,
                    onReferenceMessage: ((Message) -> Void)?,
+                   replyReference: PendingMessageReference? = nil,
                    onResend: (() -> Void)?) {
         messageId = message.id
         messageSnippet = String(message.content.prefix(80))
@@ -3012,6 +3099,7 @@ final class MessageBubbleUIKitCell: UICollectionViewCell {
             onInteractiveCallback: onInteractiveCallback,
             onInsertIntoPrompt: onInsertIntoPrompt,
             onReferenceMessage: onReferenceMessage,
+            replyReference: replyReference,
             onResend: onResend
         )
     }

@@ -3815,6 +3815,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             let truncationHeightOverrideV1: CGFloat?
             let bubbleHeightPolicyForConfigure: BubbleSizingV2.BubbleHeightPolicy
             let sendIndicatorState = viewModel.sendIndicatorState(for: message.id)
+            let replyReference = viewModel.replyReference(for: message)
             if self.bubbleSizingV2Enabled {
                 let plan = self.bubbleSizingV2Plan(
                     message: message,
@@ -3877,6 +3878,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 onReferenceMessage: { [weak self] message in
                     self?.onReferenceMessageInPrompt?(message)
                 },
+                replyReference: replyReference,
                 onResend: { [weak self] in
                     self?.viewModel?.resendFailedMessage(messageId: message.id)
                 }
@@ -4401,7 +4403,8 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             onRequestLayout: nil,
             onInteractiveCallback: nil,
             onInsertIntoPrompt: nil,
-            onReferenceMessage: nil
+            onReferenceMessage: nil,
+            replyReference: viewModel?.replyReference(for: message)
         )
         let effectiveMaxWidth = maxWidthOverride ?? maxWidth
         let preferredWidth: CGFloat
@@ -4681,7 +4684,8 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             onRequestLayout: nil,
             onInteractiveCallback: nil,
             onInsertIntoPrompt: nil,
-            onReferenceMessage: nil
+            onReferenceMessage: nil,
+            replyReference: viewModel?.replyReference(for: message)
         )
 
         let measuredBubbleWidth: CGFloat = {
@@ -4743,7 +4747,8 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             onRequestLayout: nil,
             onInteractiveCallback: nil,
             onInsertIntoPrompt: nil,
-            onReferenceMessage: nil
+            onReferenceMessage: nil,
+            replyReference: viewModel?.replyReference(for: message)
         )
         let target = CGSize(width: measuredBubbleWidth, height: UIView.layoutFittingCompressedSize.height)
         let measured1 = uiKitBubbleSizer.systemLayoutSizeFitting(
@@ -4787,7 +4792,8 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             onRequestLayout: nil,
             onInteractiveCallback: nil,
             onInsertIntoPrompt: nil,
-            onReferenceMessage: nil
+            onReferenceMessage: nil,
+            replyReference: viewModel?.replyReference(for: message)
         )
 
         let measured2 = uiKitBubbleSizer.systemLayoutSizeFitting(
@@ -5171,6 +5177,9 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         hasher.combine(message.content)
         hasher.combine(message.streaming)
         hasher.combine(viewModel?.sendIndicatorState(for: message.id))
+        hasher.combine(message.replyToMessageId)
+        hasher.combine(message.replyToClientMessageId)
+        hasher.combine(viewModel?.replyReferenceFingerprint(for: message))
         hasher.combine(message.attachments.count)
         for attachment in message.attachments {
             hasher.combine(attachment.id)

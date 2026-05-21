@@ -118,24 +118,44 @@ final class MessageReferenceTextAttachment: NSTextAttachment {
             .foregroundColor: UIColor.label,
             .paragraphStyle: paragraph
         ]
+        let iconSize: CGFloat = 12
+        let iconSpacing: CGFloat = 6
+        let horizontalPadding: CGFloat = 14
         let textSize = (label as NSString).boundingRect(
-            with: CGSize(width: Metrics.maxWidth - 28, height: Metrics.height),
+            with: CGSize(width: Metrics.maxWidth - (horizontalPadding * 2) - iconSize - iconSpacing, height: Metrics.height),
             options: [.usesLineFragmentOrigin, .usesFontLeading],
             attributes: attributes,
             context: nil
         ).size
-        let width = min(Metrics.maxWidth, max(84, ceil(textSize.width) + 28))
+        let width = min(Metrics.maxWidth, max(92, ceil(textSize.width) + (horizontalPadding * 2) + iconSize + iconSpacing))
         let size = CGSize(width: width, height: Metrics.height)
         return UIGraphicsImageRenderer(size: size).image { context in
             let rect = CGRect(origin: .zero, size: size)
             UIColor.secondarySystemFill.setFill()
             UIBezierPath(roundedRect: rect, cornerRadius: 10).fill()
-            UIColor.separator.setStroke()
-            let stroke = UIBezierPath(roundedRect: rect.insetBy(dx: 0.5, dy: 0.5), cornerRadius: 9.5)
-            stroke.lineWidth = 1
-            stroke.stroke()
-            let textRect = rect.insetBy(dx: 14, dy: 6)
-            (label as NSString).draw(with: textRect, options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine], attributes: attributes, context: nil)
+            if let symbol = UIImage(systemName: "arrowshape.turn.up.left")?.withConfiguration(
+                UIImage.SymbolConfiguration(pointSize: iconSize, weight: .semibold)
+            ) {
+                let iconRect = CGRect(
+                    x: horizontalPadding,
+                    y: floor((size.height - iconSize) / 2),
+                    width: iconSize,
+                    height: iconSize
+                )
+                symbol.withTintColor(.label, renderingMode: .alwaysOriginal).draw(in: iconRect)
+            }
+            let textRect = CGRect(
+                x: horizontalPadding + iconSize + iconSpacing,
+                y: 6,
+                width: rect.width - (horizontalPadding * 2) - iconSize - iconSpacing,
+                height: rect.height - 12
+            )
+            (label as NSString).draw(
+                with: textRect,
+                options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine],
+                attributes: attributes,
+                context: nil
+            )
             _ = context
         }
     }

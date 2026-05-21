@@ -193,6 +193,11 @@ final class ChatViewModel: ChatViewModelHosting {
         )
         emitPinpointLog(event: "connectionOwner_release", origin: reason)
     }
+#if DEBUG
+    static func resetConnectionOwnershipForTesting() {
+        currentConnectionOwnerId = nil
+    }
+#endif
     private(set) var messages: [Message] = []
     private(set) var streamsBySessionKey: [String: StreamSession] = [:]
     private(set) var orderedSessionKeys: [String] = []
@@ -694,6 +699,8 @@ final class ChatViewModel: ChatViewModelHosting {
         let content: String
         let attachments: [PendingAttachment]
         let references: [MessageReferenceContext]
+        let replyToMessageId: String?
+        let replyToClientMessageId: String?
         let sessionKey: String
         let crossChatNotificationReplySourceChatId: String?
     }
@@ -1587,6 +1594,8 @@ final class ChatViewModel: ChatViewModelHosting {
             return false
         }
         let referenceContexts = pendingReferences.map(MessageReferenceContext.init(reference:))
+        let replyToMessageId = pendingReferences.first?.messageId
+        let replyToClientMessageId = pendingReferences.first?.clientMessageId
 
         guard !text.isEmpty || !pendingAttachments.isEmpty else {
 #if DEBUG
@@ -1635,6 +1644,8 @@ final class ChatViewModel: ChatViewModelHosting {
                 content: text,
                 pendingAttachments: pendingAttachments,
                 references: referenceContexts,
+                replyToMessageId: replyToMessageId,
+                replyToClientMessageId: replyToClientMessageId,
                 sessionKey: outboundSessionKey
             )
             return true
@@ -1650,7 +1661,9 @@ final class ChatViewModel: ChatViewModelHosting {
                pendingProvisionedSend.content == text,
                pendingProvisionedSend.sessionKey == outboundSessionKey,
                pendingProvisionedSend.crossChatNotificationReplySourceChatId == nil,
-               pendingProvisionedSend.attachments.map(\.id) == pendingAttachmentIds {
+               pendingProvisionedSend.attachments.map(\.id) == pendingAttachmentIds,
+               pendingProvisionedSend.replyToMessageId == replyToMessageId,
+               pendingProvisionedSend.replyToClientMessageId == replyToClientMessageId {
                 return true
             }
             pendingProvisionedSend = PendingProvisionedSend(
@@ -1658,6 +1671,8 @@ final class ChatViewModel: ChatViewModelHosting {
                 content: text,
                 attachments: pendingAttachments,
                 references: referenceContexts,
+                replyToMessageId: replyToMessageId,
+                replyToClientMessageId: replyToClientMessageId,
                 sessionKey: outboundSessionKey,
                 crossChatNotificationReplySourceChatId: nil
             )
@@ -1677,6 +1692,8 @@ final class ChatViewModel: ChatViewModelHosting {
     private func beginSend(content: String,
                            pendingAttachments: [PendingAttachment],
                            references: [MessageReferenceContext],
+                           replyToMessageId: String? = nil,
+                           replyToClientMessageId: String? = nil,
                            sessionKey: String,
                            clientId: String? = nil,
                            clearInputOnSuccess: Bool = true,
@@ -1705,7 +1722,9 @@ final class ChatViewModel: ChatViewModelHosting {
             streaming: false,
             attachments: makeDisplayAttachments(from: pendingAttachments),
             deviceId: deviceId,
-            sessionKey: sessionKey
+            sessionKey: sessionKey,
+            replyToMessageId: replyToMessageId,
+            replyToClientMessageId: replyToClientMessageId
         )
         appendMessage(placeholder)
         pendingLocalMessages.append(PendingLocalMessage(id: clientId, sessionKey: sessionKey))
@@ -2542,9 +2561,27 @@ final class ChatViewModel: ChatViewModelHosting {
         guard let resolvedIndex = placeholderIndex else {
             return false
         }
+        let pendingMessage = pendingList[resolvedIndex]
+        let replyToMessageId = message.replyToMessageId ?? pendingMessage.replyToMessageId
+        let replyToClientMessageId = message.replyToClientMessageId ?? pendingMessage.replyToClientMessageId
+        let resolvedMessage = Message(
+            id: message.id,
+            role: message.role,
+            content: message.content,
+            timestamp: message.timestamp,
+            streaming: message.streaming,
+            attachments: message.attachments,
+            deviceId: message.deviceId,
+            sessionKey: message.sessionKey,
+            sender: message.sender,
+            clientMessageId: message.clientMessageId,
+            replyToMessageId: replyToMessageId,
+            replyToClientMessageId: replyToClientMessageId,
+            deliveryState: message.deliveryState
+        )
 
         if placeholderSessionKey == message.sessionKey {
-            pendingList[resolvedIndex] = message
+            pendingList[resolvedIndex] = resolvedMessage
             setMessages(pendingList, for: placeholderSessionKey)
         } else {
             pendingList.remove(at: resolvedIndex)
@@ -2555,7 +2592,7 @@ final class ChatViewModel: ChatViewModelHosting {
             }
             ensureSessionStorage(for: message.sessionKey)
             var targetList = sessionMessages[message.sessionKey] ?? []
-            targetList.append(message)
+            targetList.append(resolvedMessage)
             setMessages(targetList, for: message.sessionKey)
         }
         if activeClientMessageId == pending.id {
@@ -3022,6 +3059,54 @@ final class ChatViewModel: ChatViewModelHosting {
         return nil
     }
 
+    func replyReference(for message: Message) -> PendingMessageReference? {
+        guard message.role == .user else { return nil }
+        guard let referencedMessage = resolvedReplyTarget(for: message) else { return nil }
+        return PendingMessageReference(message: referencedMessage)
+    }
+
+    func replyReferenceFingerprint(for message: Message) -> Int {
+        guard let reference = replyReference(for: message) else { return 0 }
+        var hasher = Hasher()
+        hasher.combine(reference.sessionKey)
+        hasher.combine(reference.messageId)
+        hasher.combine(reference.messageRole.rawValue)
+        hasher.combine(reference.createdAt.timeIntervalSince1970)
+        hasher.combine(reference.clientMessageId)
+        hasher.combine(reference.preview)
+        return hasher.finalize()
+    }
+
+    private func resolvedReplyTarget(for message: Message) -> Message? {
+        let candidateIds = [
+            message.replyToMessageId,
+            message.replyToClientMessageId
+        ].compactMap { value -> String? in
+            let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return trimmed.isEmpty ? nil : trimmed
+        }
+        guard !candidateIds.isEmpty else { return nil }
+
+        if let sessionMessageList = sessionMessages[message.sessionKey] {
+            for candidateId in candidateIds {
+                if let resolved = sessionMessageList.first(where: { matchesReplyIdentifier(candidateId, message: $0) }) {
+                    return resolved
+                }
+            }
+        }
+
+        for candidateId in candidateIds {
+            if let resolved = self.sessionMessages.values.lazy.flatMap({ $0 }).first(where: { matchesReplyIdentifier(candidateId, message: $0) }) {
+                return resolved
+            }
+        }
+        return nil
+    }
+
+    private func matchesReplyIdentifier(_ identifier: String, message: Message) -> Bool {
+        message.id == identifier || message.clientMessageId == identifier
+    }
+
     private func makeDisplayAttachments(from pendingAttachments: [PendingAttachment]) -> [Attachment] {
         pendingAttachments.map { pending in
             let type: AttachmentType
@@ -3466,6 +3551,8 @@ final class ChatViewModel: ChatViewModelHosting {
                 content: pending.content,
                 pendingAttachments: pending.attachments,
                 references: pending.references,
+                replyToMessageId: pending.replyToMessageId,
+                replyToClientMessageId: pending.replyToClientMessageId,
                 sessionKey: pending.sessionKey,
                 clientId: pending.clientId,
                 clearInputOnSuccess: replySourceChatId == nil,

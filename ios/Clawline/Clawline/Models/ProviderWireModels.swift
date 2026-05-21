@@ -332,6 +332,7 @@ struct ClientMessagePayload: Codable, Equatable {
     let content: String
     let attachments: [WireAttachment]
     let sessionKey: String?
+    let references: [MessageReferenceContext]
 
     enum CodingKeys: String, CodingKey {
         case type
@@ -339,14 +340,21 @@ struct ClientMessagePayload: Codable, Equatable {
         case content
         case attachments
         case sessionKey
+        case references
     }
 
-    init(id: String, content: String, attachments: [WireAttachment], sessionKey: String?, type: String = "message") {
+    init(id: String,
+         content: String,
+         attachments: [WireAttachment],
+         sessionKey: String?,
+         references: [MessageReferenceContext] = [],
+         type: String = "message") {
         self.type = type
         self.id = id
         self.content = content
         self.attachments = attachments
         self.sessionKey = sessionKey
+        self.references = references
     }
 
     init(from decoder: Decoder) throws {
@@ -356,6 +364,7 @@ struct ClientMessagePayload: Codable, Equatable {
         self.content = try container.decode(String.self, forKey: .content)
         self.attachments = try container.decodeIfPresent([WireAttachment].self, forKey: .attachments) ?? []
         self.sessionKey = try container.decodeIfPresent(String.self, forKey: .sessionKey)
+        self.references = try container.decodeIfPresent([MessageReferenceContext].self, forKey: .references) ?? []
     }
 
     func encode(to encoder: Encoder) throws {
@@ -365,6 +374,55 @@ struct ClientMessagePayload: Codable, Equatable {
         try container.encode(content, forKey: .content)
         try container.encode(attachments, forKey: .attachments)
         try container.encodeIfPresent(sessionKey, forKey: .sessionKey)
+        try container.encode(references, forKey: .references)
+    }
+}
+
+struct MessageReferenceContext: Codable, Equatable {
+    let kind: String
+    let sessionKey: String
+    let messageId: String
+    let messageRole: Message.Role
+    let createdAt: Date
+    let clientMessageId: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case kind
+        case sessionKey
+        case messageId
+        case messageRole
+        case createdAt
+        case clientMessageId
+    }
+
+    init(reference: PendingMessageReference) {
+        self.kind = "message"
+        self.sessionKey = reference.sessionKey
+        self.messageId = reference.messageId
+        self.messageRole = reference.messageRole
+        self.createdAt = reference.createdAt
+        self.clientMessageId = reference.clientMessageId
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        kind = try container.decode(String.self, forKey: .kind)
+        sessionKey = try container.decode(String.self, forKey: .sessionKey)
+        messageId = try container.decode(String.self, forKey: .messageId)
+        messageRole = try container.decode(Message.Role.self, forKey: .messageRole)
+        let milliseconds = try container.decode(Double.self, forKey: .createdAt)
+        createdAt = Date(timeIntervalSince1970: milliseconds / 1000)
+        clientMessageId = try container.decodeIfPresent(String.self, forKey: .clientMessageId)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(kind, forKey: .kind)
+        try container.encode(sessionKey, forKey: .sessionKey)
+        try container.encode(messageId, forKey: .messageId)
+        try container.encode(messageRole, forKey: .messageRole)
+        try container.encode(createdAt.timeIntervalSince1970 * 1000, forKey: .createdAt)
+        try container.encodeIfPresent(clientMessageId, forKey: .clientMessageId)
     }
 }
 

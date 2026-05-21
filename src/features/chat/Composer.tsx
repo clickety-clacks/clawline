@@ -580,7 +580,7 @@ export function Composer({
             </span>
           ) : null}
           <textarea
-            aria-keyshortcuts="Enter,Shift+Enter,Escape"
+            aria-keyshortcuts="Enter,Shift+Enter,Control+Enter,Escape"
             enterKeyHint="send"
             id="composer-input"
             onChange={(event) => setDraft(event.target.value)}

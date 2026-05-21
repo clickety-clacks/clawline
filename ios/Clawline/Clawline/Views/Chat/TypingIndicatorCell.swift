@@ -94,6 +94,8 @@ final class TypingIndicatorCell: UICollectionViewCell {
             onRequestExpand: nil,
             onRequestLayout: nil,
             onInteractiveCallback: nil,
+            onInsertIntoPrompt: nil,
+            onReferenceMessage: nil,
             onResend: nil
         )
         containerView.setCenteredOverlayView(dotsView)

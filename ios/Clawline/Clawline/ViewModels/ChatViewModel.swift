@@ -472,9 +472,11 @@ final class ChatViewModel: ChatViewModelHosting {
     var inputContent: NSAttributedString = NSAttributedString() {
         didSet {
             pruneAttachmentData()
+            pruneMessageReferenceData()
         }
     }
     var attachmentData: [UUID: PendingAttachment] = [:]
+    private var messageReferenceData: [UUID: PendingMessageReference] = [:]
     private(set) var pendingAttachmentStageCount: Int = 0
     private var stagedAttachmentProtection: Set<UUID> = []
     private(set) var isSending: Bool = false
@@ -611,6 +613,7 @@ final class ChatViewModel: ChatViewModelHosting {
         let clientId: String
         let content: String
         let attachments: [PendingAttachment]
+        let references: [MessageReferenceContext]
         let sessionKey: String
         let crossChatNotificationReplySourceChatId: String?
     }
@@ -1432,6 +1435,7 @@ final class ChatViewModel: ChatViewModelHosting {
             beginSend(
                 content: text,
                 pendingAttachments: [],
+                references: [],
                 sessionKey: sourceChatId,
                 clearInputOnSuccess: false,
                 crossChatNotificationReplySourceChatId: sourceChatId,
@@ -1493,6 +1497,16 @@ final class ChatViewModel: ChatViewModelHosting {
         pruneAttachmentData()
         let (text, pendingIds) = sendContent.contentForSending()
         let pendingAttachments = pendingIds.compactMap { attachmentData[$0] }
+        let referenceIds = inputContent.pendingMessageReferenceIds()
+        let pendingReferences = referenceIds.compactMap { messageReferenceData[$0] }
+            guard pendingReferences.count == referenceIds.count else {
+#if DEBUG
+            recordImageSendDebugEvent(.sendResult, detail: "failure reason=missing_message_reference")
+#endif
+            toastManager.show("Referenced message is unavailable.")
+            return false
+        }
+        let referenceContexts = pendingReferences.map(MessageReferenceContext.init(reference:))
 
         guard !text.isEmpty || !pendingAttachments.isEmpty else {
 #if DEBUG
@@ -1537,7 +1551,12 @@ final class ChatViewModel: ChatViewModelHosting {
                 toastManager.show("Could not send; not connected.")
                 return false
             }
-            beginSend(content: text, pendingAttachments: pendingAttachments, sessionKey: outboundSessionKey)
+            beginSend(
+                content: text,
+                pendingAttachments: pendingAttachments,
+                references: referenceContexts,
+                sessionKey: outboundSessionKey
+            )
             return true
         case .waiting:
 #if DEBUG
@@ -1558,6 +1577,7 @@ final class ChatViewModel: ChatViewModelHosting {
                 clientId: nextClientMessageId(),
                 content: text,
                 attachments: pendingAttachments,
+                references: referenceContexts,
                 sessionKey: outboundSessionKey,
                 crossChatNotificationReplySourceChatId: nil
             )
@@ -1576,6 +1596,7 @@ final class ChatViewModel: ChatViewModelHosting {
 
     private func beginSend(content: String,
                            pendingAttachments: [PendingAttachment],
+                           references: [MessageReferenceContext],
                            sessionKey: String,
                            clientId: String? = nil,
                            clearInputOnSuccess: Bool = true,
@@ -1616,6 +1637,7 @@ final class ChatViewModel: ChatViewModelHosting {
                 clientId: clientId,
                 content: content,
                 pendingAttachments: pendingAttachments,
+                references: references,
                 sessionKey: sessionKey,
                 clearInputOnSuccess: clearInputOnSuccess,
                 onSuccess: onSuccess
@@ -1726,6 +1748,38 @@ final class ChatViewModel: ChatViewModelHosting {
             detail: "count=\(attachments.count) source=\(source)"
         )
 #endif
+    }
+
+    func insertMessageIntoPrompt(_ message: Message, selectionRange: NSRange) -> NSRange {
+        let insertion = NSAttributedString(
+            string: message.content,
+            attributes: [
+                .font: UIFont.clawline(.bodyText),
+                .foregroundColor: UIColor.label
+            ]
+        )
+        let mutable = NSMutableAttributedString(attributedString: inputContent)
+        let safeRange = Self.clampedRange(selectionRange, length: mutable.length)
+        mutable.replaceCharacters(in: safeRange, with: insertion)
+        inputContent = mutable
+        inputResetToken &+= 1
+        return NSRange(location: safeRange.location + insertion.length, length: 0)
+    }
+
+    func referenceMessageInPrompt(_ message: Message, selectionRange: NSRange) -> NSRange {
+        let reference = PendingMessageReference(message: message)
+        let attachment = MessageReferenceTextAttachment(reference: reference)
+        let token = NSMutableAttributedString(attachment: attachment)
+        token.append(NSAttributedString(string: " "))
+
+        let mutable = NSMutableAttributedString(attributedString: inputContent)
+        mutable.removeMessageReferences()
+        mutable.insert(token, at: 0)
+        messageReferenceData.removeAll()
+        messageReferenceData[reference.id] = reference
+        inputContent = mutable
+        inputResetToken &+= 1
+        return NSRange(location: token.length, length: 0)
     }
 
     func beginAttachmentStaging() {
@@ -2603,6 +2657,7 @@ final class ChatViewModel: ChatViewModelHosting {
     private func performSend(clientId: String,
                              content: String,
                              pendingAttachments: [PendingAttachment],
+                             references: [MessageReferenceContext],
                              sessionKey: String?,
                              clearInputOnSuccess: Bool = true,
                              onSuccess: (@MainActor (_ clientId: String) -> Void)? = nil) async {
@@ -2617,7 +2672,8 @@ final class ChatViewModel: ChatViewModelHosting {
                 id: clientId,
                 content: content,
                 attachments: wireAttachments,
-                sessionKey: sessionKey
+                sessionKey: sessionKey,
+                references: references
             )
             await MainActor.run {
 #if DEBUG
@@ -2707,7 +2763,8 @@ final class ChatViewModel: ChatViewModelHosting {
                 id: clientId,
                 content: content,
                 attachments: wireAttachments,
-                sessionKey: sessionKey
+                sessionKey: sessionKey,
+                references: []
             )
             await MainActor.run {
 #if DEBUG
@@ -2978,6 +3035,21 @@ final class ChatViewModel: ChatViewModelHosting {
         orphanedKeys.forEach { uploadedAssetIds.removeValue(forKey: $0) }
     }
 
+    private func pruneMessageReferenceData() {
+        guard !messageReferenceData.isEmpty else { return }
+        let referencedIds = Set(inputContent.pendingMessageReferenceIds())
+        messageReferenceData = messageReferenceData.filter { referencedIds.contains($0.key) }
+    }
+
+    private static func clampedRange(_ range: NSRange, length: Int) -> NSRange {
+        guard range.location != NSNotFound else {
+            return NSRange(location: length, length: 0)
+        }
+        let location = min(max(range.location, 0), length)
+        let safeLength = max(0, min(range.length, length - location))
+        return NSRange(location: location, length: safeLength)
+    }
+
     private func handleMemoryWarning() {
         presentationCache.removeAll()
         tableParseStates.removeAll()
@@ -2992,6 +3064,7 @@ final class ChatViewModel: ChatViewModelHosting {
     private func clearInput() {
         inputContent = NSAttributedString(string: "")
         attachmentData.removeAll()
+        messageReferenceData.removeAll()
         uploadedAssetIds.removeAll()
         stagedAttachmentProtection.removeAll()
         inputResetToken &+= 1
@@ -3371,6 +3444,7 @@ final class ChatViewModel: ChatViewModelHosting {
             beginSend(
                 content: pending.content,
                 pendingAttachments: pending.attachments,
+                references: pending.references,
                 sessionKey: pending.sessionKey,
                 clientId: pending.clientId,
                 clearInputOnSuccess: replySourceChatId == nil,

@@ -76,7 +76,8 @@ protocol ChatServicing: AnyObject {
         id: String,
         content: String,
         attachments: [WireAttachment],
-        sessionKey: String?
+        sessionKey: String?,
+        references: [MessageReferenceContext]
     ) async throws
 
     func sendInteractiveCallback(

@@ -410,7 +410,7 @@ final class MessageBubbleUIKitContainerView: UIView {
 
     func configure(message: Message,
                    presentation: MessagePresentation,
-                   failureReason: String?,
+                   sendIndicatorState: MessageSendIndicatorState?,
                    isCompact: Bool,
                    maxWidth: CGFloat,
                    bubbleHeightPolicy: BubbleSizingV2.BubbleHeightPolicy? = nil,
@@ -461,15 +461,22 @@ final class MessageBubbleUIKitContainerView: UIView {
         self.onResend = onResend
         self.onRequestLayout = onRequestLayout
 
-        if failureReason != nil {
+        switch sendIndicatorState {
+        case .pending:
             badgeView.isHidden = false
-            badgeView.configure(onResend: { [weak self] in
+            badgeView.configurePending()
+            bubbleBottomConstraint.constant = 0
+            badgeBottomConstraint.constant = -6
+            badgeTrailingConstraint.constant = -6
+        case .failed(_):
+            badgeView.isHidden = false
+            badgeView.configureFailure(onResend: { [weak self] in
                 self?.onResend?()
             })
             bubbleBottomConstraint.constant = 0
             badgeBottomConstraint.constant = -6
             badgeTrailingConstraint.constant = -6
-        } else {
+        case nil:
             badgeView.isHidden = true
             bubbleBottomConstraint.constant = 0
             badgeBottomConstraint.constant = 0
@@ -482,6 +489,7 @@ final class MessageBubbleUIKitContainerView: UIView {
         // reused cells from inheriting a non-zero contentOffset (GitHub #56).
         bubbleView.prepareForReuse()
         badgeView.isHidden = true
+        badgeView.prepareForReuse()
         onResend = nil
         onRequestLayout = nil
         bubbleBottomConstraint.constant = 0
@@ -498,7 +506,7 @@ final class MessageBubbleUIKitContainerView: UIView {
     }
 }
 
-final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
+final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecognizerDelegate {
     private static let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "BubbleTheme")
     static func timestampTextAlpha(isDark: Bool) -> CGFloat {
         isDark ? 0.76 : 0.68
@@ -552,6 +560,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
     private var currentSalientHighlights: SalientHighlights?
     private var currentMetrics = ChatFlowTheme.Metrics(isCompact: true)
     private var currentMessageRole: Message.Role = .assistant
+    private var currentMessageDeliveryState: Message.DeliveryState = .normal
     private var currentStream: ChatStream = .personal
     private var currentSizeClass: MessageSizeClass = .short
     private var explicitIsDarkOverride: Bool?
@@ -624,6 +633,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
         bubbleTap.cancelsTouchesInView = false
         bubbleTap.delaysTouchesBegan = false
         bubbleTap.delaysTouchesEnded = false
+        bubbleTap.delegate = self
         bubbleBackgroundView.addGestureRecognizer(bubbleTap)
         let bubbleSwipeUp = UISwipeGestureRecognizer(target: self, action: #selector(handleBubbleSwipeUp))
         bubbleSwipeUp.direction = .up
@@ -728,6 +738,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
         bodyTap.cancelsTouchesInView = false
         bodyTap.delaysTouchesBegan = false
         bodyTap.delaysTouchesEnded = false
+        bodyTap.delegate = self
         bodyLabel.addGestureRecognizer(bodyTap)
         if let longPress = bodyLabel.gestureRecognizers?.first(where: { $0 is UILongPressGestureRecognizer }) {
             bubbleTap.require(toFail: longPress)
@@ -956,6 +967,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
         currentMessageId = message.id
         // Store for trait collection updates
         currentMessageRole = message.role
+        currentMessageDeliveryState = message.deliveryState
         currentStream = message.stream
         explicitIsDarkOverride = isDark
         currentSizeClass = sizeClass
@@ -996,20 +1008,26 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
         let effectiveIsDark = isDark ?? (traitCollection.userInterfaceStyle == .dark)
         Self.logger.debug("configure: isDark=\(isDark.map { String($0) } ?? "nil", privacy: .public) effectiveIsDark=\(effectiveIsDark, privacy: .public) role=\(String(describing: message.role), privacy: .public)")
         let palette = ChatFlowUIKitTheme.palette(isDark: effectiveIsDark)
+        let isCanceled = message.deliveryState == .canceled
+        let contentColor = isCanceled ? ChatFlowUIKitTheme.canceledText(isDark: effectiveIsDark) : palette.ink
         let senderColor = (message.stream == .admin) ? palette.adminAccent : palette.warmBrown
         senderLabel.font = UIFont.clawline(.senderName)
         senderLabel.adjustsFontForContentSizeCategory = true
-        senderLabel.textColor = senderColor.withAlphaComponent(message.stream == .admin ? 1.0 : 0.7)
+        senderLabel.textColor = isCanceled
+            ? ChatFlowUIKitTheme.canceledText(isDark: effectiveIsDark).withAlphaComponent(0.78)
+            : senderColor.withAlphaComponent(message.stream == .admin ? 1.0 : 0.7)
         senderLabel.text = message.displayName
         timestampLabel.font = UIFont.clawline(.timestamp)
         timestampLabel.adjustsFontForContentSizeCategory = true
-        timestampLabel.textColor = palette.textMuted.withAlphaComponent(Self.timestampTextAlpha(isDark: palette.isDark))
+        timestampLabel.textColor = isCanceled
+            ? ChatFlowUIKitTheme.canceledText(isDark: effectiveIsDark).withAlphaComponent(Self.timestampTextAlpha(isDark: palette.isDark))
+            : palette.textMuted.withAlphaComponent(Self.timestampTextAlpha(isDark: palette.isDark))
         timestampLabel.textAlignment = message.role == .user ? .right : .left
         timestampDate = message.timestamp
         refreshTimestampDisplay()
         headerStack.isHidden = !showsHeader
         bodyLabel.linkTextAttributes = [
-            .foregroundColor: palette.ink,
+            .foregroundColor: contentColor,
             .underlineStyle: NSUnderlineStyle.single.rawValue
         ]
 
@@ -1036,7 +1054,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
         let markdownContent = UnifiedMarkdownRenderer.makeContent(
             presentation: presentation,
             baseFont: markdownStyle.baseFont,
-            inkColor: palette.ink,
+            inkColor: contentColor,
             lineSpacing: markdownStyle.lineSpacing,
             stripDetectedURLs: false,
             role: message.role,
@@ -1468,7 +1486,9 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
             dynamicContentHeightConstraint?.constant = max(44, effectiveTruncationHeight)
         }
 
-        let gradientColors = message.role == .user ? palette.bubbleSelfGradient : palette.bubbleOtherGradient
+        let gradientColors = isCanceled
+            ? ChatFlowUIKitTheme.canceledBubbleGradient(isDark: effectiveIsDark)
+            : (message.role == .user ? palette.bubbleSelfGradient : palette.bubbleOtherGradient)
         gradientLayer.colors = gradientColors.map { $0.cgColor }
         gradientLayer.startPoint = message.role == .user ? CGPoint(x: 0.0, y: 0.0) : CGPoint(x: 0.5, y: 0.0)
         gradientLayer.endPoint = message.role == .user ? CGPoint(x: 1.0, y: 1.0) : CGPoint(x: 0.5, y: 1.0)
@@ -1700,16 +1720,22 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
         let isDark = explicitIsDarkOverride ?? (traitCollection.userInterfaceStyle == .dark)
         Self.logger.debug("updateAppearanceColors: isDark=\(isDark, privacy: .public) role=\(String(describing: self.currentMessageRole), privacy: .public)")
         let palette = ChatFlowUIKitTheme.palette(isDark: isDark)
+        let isCanceled = currentMessageDeliveryState == .canceled
+        let contentColor = isCanceled ? ChatFlowUIKitTheme.canceledText(isDark: isDark) : palette.ink
 
         // Update sender label color
         let senderColor = (currentStream == .admin) ? palette.adminAccent : palette.warmBrown
-        senderLabel.textColor = senderColor.withAlphaComponent(currentStream == .admin ? 1.0 : 0.7)
-        timestampLabel.textColor = palette.textMuted.withAlphaComponent(Self.timestampTextAlpha(isDark: palette.isDark))
+        senderLabel.textColor = isCanceled
+            ? ChatFlowUIKitTheme.canceledText(isDark: isDark).withAlphaComponent(0.78)
+            : senderColor.withAlphaComponent(currentStream == .admin ? 1.0 : 0.7)
+        timestampLabel.textColor = isCanceled
+            ? ChatFlowUIKitTheme.canceledText(isDark: isDark).withAlphaComponent(Self.timestampTextAlpha(isDark: palette.isDark))
+            : palette.textMuted.withAlphaComponent(Self.timestampTextAlpha(isDark: palette.isDark))
 
         // Update body text color - must update attributed string since textColor is ignored for attributed text
         if let attributedText = bodyLabel.attributedText, attributedText.length > 0 {
             let mutable = NSMutableAttributedString(attributedString: attributedText)
-            mutable.addAttribute(.foregroundColor, value: palette.ink, range: NSRange(location: 0, length: mutable.length))
+            mutable.addAttribute(.foregroundColor, value: contentColor, range: NSRange(location: 0, length: mutable.length))
             if let highlights = currentSalientHighlights {
                 SalientHighlightApplier.apply(highlights, to: mutable, isDark: isDark)
             }
@@ -1722,7 +1748,9 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
         // Update gradient colors - force immediate update without animation
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        let gradientColors = currentMessageRole == .user ? palette.bubbleSelfGradient : palette.bubbleOtherGradient
+        let gradientColors = isCanceled
+            ? ChatFlowUIKitTheme.canceledBubbleGradient(isDark: isDark)
+            : (currentMessageRole == .user ? palette.bubbleSelfGradient : palette.bubbleOtherGradient)
         gradientLayer.colors = gradientColors.map { $0.cgColor }
         CATransaction.commit()
 
@@ -1818,6 +1846,24 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
         if dynamicContentScrollView.contentSize.height > dynamicContentScrollView.bounds.height + 1 {
             onRequestExpand?()
         }
+    }
+
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        shouldAllowBubbleExpandTap(from: touch.view)
+    }
+
+    func shouldAllowBubbleExpandTap(from touchedView: UIView?) -> Bool {
+        var view = touchedView
+        while let current = view {
+            if current is UIControl {
+                return false
+            }
+            if current === bubbleBackgroundView || current === bodyLabel {
+                return true
+            }
+            view = current.superview
+        }
+        return true
     }
 
     @objc private func handleBubbleSwipeUp() {
@@ -2570,6 +2616,7 @@ final class AvatarCircleView: UIView {
 
 final class MessageFailureBadgeView: UIView {
     private let button = UIButton(type: .system)
+    private let spinner = UIActivityIndicatorView(style: .medium)
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -2593,14 +2640,36 @@ final class MessageFailureBadgeView: UIView {
         button.showsMenuAsPrimaryAction = true
         button.accessibilityLabel = "Message failed to send. Tap for options."
         button.accessibilityTraits = [.button]
+
+        spinner.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(spinner)
+        NSLayoutConstraint.activate([
+            spinner.centerXAnchor.constraint(equalTo: button.centerXAnchor),
+            spinner.centerYAnchor.constraint(equalTo: button.centerYAnchor)
+        ])
+        spinner.hidesWhenStopped = true
+        spinner.isHidden = true
     }
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
-    func configure(onResend: @escaping () -> Void) {
+    func configurePending() {
         let isDark = traitCollection.userInterfaceStyle == .dark
+        button.isHidden = true
+        button.menu = nil
+        spinner.color = ChatFlowUIKitTheme.textMuted(isDark: isDark)
+        spinner.isHidden = false
+        spinner.startAnimating()
+        accessibilityLabel = "Message sending."
+    }
+
+    func configureFailure(onResend: @escaping () -> Void) {
+        let isDark = traitCollection.userInterfaceStyle == .dark
+        spinner.stopAnimating()
+        spinner.isHidden = true
+        button.isHidden = false
         button.tintColor = ChatFlowUIKitTheme.failureText(isDark: isDark)
         button.menu = UIMenu(
             options: .displayInline,
@@ -2610,6 +2679,15 @@ final class MessageFailureBadgeView: UIView {
                 }
             ]
         )
+        accessibilityLabel = nil
+    }
+
+    func prepareForReuse() {
+        spinner.stopAnimating()
+        spinner.isHidden = true
+        button.isHidden = false
+        button.menu = nil
+        accessibilityLabel = nil
     }
 }
 
@@ -2700,12 +2778,35 @@ enum ChatFlowUIKitTheme {
         palette(isDark: isDark).avatarGradient
     }
 
+    static func canceledBubbleGradient(isDark: Bool) -> [UIColor] {
+        if isDark {
+            return [
+                UIColor(red: 0.150, green: 0.154, blue: 0.161, alpha: 1),
+                UIColor(red: 0.112, green: 0.116, blue: 0.122, alpha: 1)
+            ]
+        }
+        return [
+            UIColor(red: 0.890, green: 0.898, blue: 0.902, alpha: 1),
+            UIColor(red: 0.850, green: 0.862, blue: 0.868, alpha: 1)
+        ]
+    }
+
+    static func canceledText(isDark: Bool) -> UIColor {
+        isDark
+            ? UIColor(red: 0.620, green: 0.640, blue: 0.660, alpha: 1)
+            : UIColor(red: 0.390, green: 0.420, blue: 0.445, alpha: 1)
+    }
+
     static func failureText(isDark: Bool) -> UIColor {
         palette(isDark: isDark).failureText
     }
 
     static func failureBackground(isDark: Bool) -> UIColor {
         palette(isDark: isDark).failureBackground
+    }
+
+    static func textMuted(isDark: Bool) -> UIColor {
+        palette(isDark: isDark).textMuted
     }
 }
 
@@ -2797,7 +2898,7 @@ final class MessageBubbleUIKitCell: UICollectionViewCell {
 
     func configure(message: Message,
                    presentation: MessagePresentation,
-                   failureReason: String?,
+                   sendIndicatorState: MessageSendIndicatorState?,
                    isCompact: Bool,
                    maxWidth: CGFloat,
                    bubbleHeightPolicy: BubbleSizingV2.BubbleHeightPolicy? = nil,
@@ -2821,7 +2922,7 @@ final class MessageBubbleUIKitCell: UICollectionViewCell {
         containerView.configure(
             message: message,
             presentation: presentation,
-            failureReason: failureReason,
+            sendIndicatorState: sendIndicatorState,
             isCompact: isCompact,
             maxWidth: maxWidth,
             bubbleHeightPolicy: bubbleHeightPolicy,

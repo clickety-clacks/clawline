@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Clawline Cross-Chat Notification Overlay Design</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --fg: var(--clawline-fg, #1f2729);
+      --muted: #637174;
+      --line: #cfd8d6;
+      --panel: rgba(255,255,255,0.72);
+      --panel-strong: rgba(255,255,255,0.9);
+      --accent: #0f6b6e;
+      --code: rgba(218,229,227,0.8);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --fg: var(--clawline-fg, #eef4f3);
+        --muted: #a6b4b6;
+        --line: #314144;
+        --panel: rgba(24,32,34,0.72);
+        --panel-strong: rgba(24,32,34,0.92);
+        --accent: #70c9bd;
+        --code: rgba(32,43,45,0.9);
+      }
+    }
+    html, body {
+      margin: 0;
+      background: transparent;
+      color: var(--fg);
+      font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      letter-spacing: 0;
+    }
+    main {
+      max-width: 1020px;
+      margin: 0 auto;
+      padding: 46px 22px 72px;
+    }
+    h1, h2, h3 {
+      line-height: 1.15;
+      letter-spacing: 0;
+    }
+    h1 {
+      margin: 0 0 8px;
+      font-size: clamp(2rem, 4vw, 3rem);
+    }
+    h2 {
+      margin: 42px 0 12px;
+      padding-top: 22px;
+      border-top: 1px solid var(--line);
+      font-size: 1.45rem;
+    }
+    h3 {
+      margin: 26px 0 8px;
+      font-size: 1.08rem;
+    }
+    p { margin: 10px 0; }
+    ul { padding-left: 1.25rem; }
+    li { margin: 7px 0; }
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.92em;
+      padding: 0.12rem 0.28rem;
+      border-radius: 6px;
+      background: var(--code);
+    }
+    .meta {
+      color: var(--muted);
+      margin-bottom: 28px;
+    }
+    .callout, .card {
+      border: 1px solid var(--line);
+      background: var(--panel);
+      border-radius: 8px;
+      backdrop-filter: blur(18px);
+    }
+    .callout {
+      border-left: 5px solid var(--accent);
+      padding: 14px 16px;
+      margin: 18px 0;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 12px;
+      margin: 16px 0;
+    }
+    .card { padding: 14px 16px; }
+    .card h3 { margin-top: 0; }
+    .matrix {
+      display: grid;
+      grid-template-columns: minmax(160px, 0.8fr) minmax(220px, 1.4fr) minmax(220px, 1.4fr);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+      background: var(--panel-strong);
+      margin: 16px 0;
+    }
+    .matrix div {
+      padding: 10px 12px;
+      border-right: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+    }
+    .matrix div:nth-child(3n) { border-right: 0; }
+    .matrix .head {
+      color: var(--accent);
+      font-weight: 700;
+    }
+    @media (max-width: 720px) {
+      .matrix { display: block; }
+      .matrix div { border-right: 0; }
+      .matrix .head { background: var(--panel); }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Cross-Chat Notification Overlay Design</h1>
+  <p class="meta">Clawline architecture/design source of truth for T307 notification bubbles, dock behavior, buttons, and hotkeys. Created 2026-05-16.</p>
+
+  <section class="callout">
+    <p><strong>Decision:</strong> cross-chat notifications are a volatile overlay for assistant output from other chat sessions. They never write into the current transcript, never replace visible controls with shortcut-only behavior, and always route replies/status to the associated source chat.</p>
+  </section>
+
+  <h2>Scope</h2>
+  <p>This document covers the notification overlay side of T307: bubble creation, stacking, docking, visible actions, reply mode, keyboard shortcuts, and navigation behavior. Prompt-field <code>@</code> mention routing remains defined by the T307 cross-chat spec, but the same routing invariant applies here: sends belong to the target chat, not the currently viewed chat.</p>
+
+  <h2>Product Invariants</h2>
+  <ul>
+    <li>Notifications are assistant-message-only. User, system, and tool messages do not create bubbles.</li>
+    <li>Notifications are volatile and in-memory. They do not persist across app relaunch, process restart, or session reset.</li>
+    <li>Each source chat has at most one notification bubble. Repeated assistant messages from that source append into the same bubble.</li>
+    <li>Notification replies are real sends to the notification's associated chat. They appear only in that chat and must drive that chat's normal pending/running/success/failure status path.</li>
+    <li>The current chat must not receive a local user row, synthetic status row, transcript echo, or dot/status color change for a cross-chat reply it did not receive.</li>
+    <li>Visible buttons are required. Hotkeys are accelerators, not substitutes for on-screen Dismiss and Reply controls.</li>
+  </ul>
+
+  <h2>Overlay Layering</h2>
+  <ul>
+    <li>The notification stack renders in its own overlay layer above the current chat transcript and composer.</li>
+    <li>The chat session name toast renders above notification bubbles.</li>
+    <li>Bubbles anchor near the upper-right safe visible area, leaving only normal safe-area/chrome margin. They should not start noticeably down the screen.</li>
+    <li>On compact screens, the stack must cap by actual available height. Ten visible bubbles is only the large-screen upper bound, not a hard count.</li>
+    <li>Layout must avoid incoherent overlap with the composer, transcript controls, or app chrome.</li>
+  </ul>
+
+  <h2>Bubble Content</h2>
+  <ul>
+    <li>A bubble represents one source chat and shows the source chat label, optional shortcut slot, latest assistant content, older accumulated content, and visible action buttons.</li>
+    <li>Newest content appears above older content inside the bubble. Older content is pushed downward and may move below the visible fold.</li>
+    <li>Streaming updates for the same assistant message update that message entry rather than creating repeated entries.</li>
+    <li>Short bubbles shrink vertically to fit content without excess bottom padding.</li>
+    <li>Long content scrolls inside the bubble's max-height area; transcript scroll must not be stolen.</li>
+    <li>The max height is tuned for device review: latest reduced cap was too short, so use about one third more than that reduced cap while still keeping long content internally scrollable.</li>
+    <li>Notification header chrome is compact, with reduced vertical padding above and below header content.</li>
+  </ul>
+
+  <h2>Stack And Overflow</h2>
+  <ul>
+    <li>The visible stack is ordered by notification recency, with updated source bubbles re-entering the ordering when new assistant output arrives.</li>
+    <li>When more bubbles exist than fit, the oldest visible bubble animates off-stack into hidden overflow. It is not dismissed.</li>
+    <li>Dismissed visible bubbles reveal hidden overflow bubbles according to the current stack ordering.</li>
+    <li>Navigating into a source chat dismisses only notifications associated with that chat. Unrelated notifications remain.</li>
+    <li><code>Cmd-minus</code> clears visible and hidden notification backlog.</li>
+  </ul>
+
+  <h2>Dock And Peek Mode</h2>
+  <ul>
+    <li>The notification stack supports a right-edge docked/peek mode.</li>
+    <li>Swiping notifications right collapses the whole stack off-screen to the right, leaving only left-edge peeks visible.</li>
+    <li>Tapping a peek or swiping left restores the full stack.</li>
+    <li><code>Cmd-\</code> toggles between normal visible placement and right-edge docked/peek mode using the same state transition as swipe collapse/restore.</li>
+    <li>New bubbles animate in from off-screen right. Leaving, dismissing, hiding, and docking animate toward off-screen right.</li>
+    <li>Docking is a display state, not dismissal. Hidden/docked bubbles retain their associated source chat and content until dismissed, cleared, navigated into, or reset.</li>
+  </ul>
+
+  <h2>Visible Controls</h2>
+  <div class="grid">
+    <section class="card">
+      <h3>Dismiss</h3>
+      <p>Icon-only control using SF Symbols/SF fonts on Apple platforms and the platform symbol system on Electron/web. Tapping removes that notification. Holding or long-pressing opens a standard confirmation dialog offering to clear all notifications.</p>
+    </section>
+    <section class="card">
+      <h3>Reply</h3>
+      <p>Icon-only toggle that opens an inline reply field inside the bubble. Tapping Reply again while active cancels reply mode. Escape also cancels without sending.</p>
+    </section>
+    <section class="card">
+      <h3>Body Tap</h3>
+      <p>Tapping notification content outside controls navigates to the notification's source chat and dismisses notifications for that source only.</p>
+    </section>
+  </div>
+
+  <h2>Reply Mode</h2>
+  <ul>
+    <li>Reply mode resizes the bubble to the reply interface instead of preserving the prior message-content height.</li>
+    <li>The inline reply field has a visible send button with a tappable hit target. Software keyboard Return on iOS submits the reply.</li>
+    <li>Accepted reply sends dismiss that notification after the send is accepted by the normal send path.</li>
+    <li>Reply sends appear only in the associated chat and update only that chat's status/dot color through the same source of truth as normal sends.</li>
+    <li>Failures use the existing send failure path for the reply UI without creating a current-chat transcript row.</li>
+  </ul>
+
+  <h2>Keyboard Shortcuts</h2>
+  <div class="matrix" role="table" aria-label="Notification shortcut matrix">
+    <div class="head">Shortcut</div>
+    <div class="head">Action</div>
+    <div class="head">Notes</div>
+    <div><code>Cmd-0</code>..<code>Cmd-9</code></div>
+    <div>Navigate to the matching visible notification's source chat.</div>
+    <div>Dismisses notifications for that source chat only through the navigation rule.</div>
+    <div><code>Cmd-Shift-0</code>..<code>Cmd-Shift-9</code></div>
+    <div>Open reply mode for the matching visible notification.</div>
+    <div>Equivalent to using the visible Reply button.</div>
+    <div><code>Cmd-Shift-Option-0</code>..<code>Cmd-Shift-Option-9</code></div>
+    <div>Dismiss the matching visible notification.</div>
+    <div>Equivalent to using the visible Dismiss button.</div>
+    <div><code>Cmd-\</code></div>
+    <div>Toggle stack dock/peek mode.</div>
+    <div>Must match swipe-right collapse and swipe-left/tap-peek restore behavior.</div>
+    <div><code>Cmd-J</code> / <code>Cmd-K</code></div>
+    <div>Scroll active/top notification's internal content.</div>
+    <div>Only when visible bubbles exist and focus is not in a composer or notification reply field.</div>
+    <div><code>Cmd-minus</code></div>
+    <div>Clear all visible and hidden notification backlog.</div>
+    <div>Clears overflow too, not only visible bubbles.</div>
+    <div><code>Escape</code></div>
+    <div>Cancel active reply mode.</div>
+    <div>Does not dismiss the bubble unless that becomes a separate explicit product decision.</div>
+  </div>
+
+  <h2>Shortcut Slot Assignment</h2>
+  <ul>
+    <li>Only visible notifications receive numeric shortcut slots.</li>
+    <li>Slots are reassigned as notifications appear, dismiss, hide, reveal, dock, or restore.</li>
+    <li>Shortcut numbers are shown only when hardware-keyboard shortcuts are available. On iOS/iPadOS, hide numbers unless a hardware keyboard is detected. On macOS/Catalyst, assume shortcuts are available unless platform state says otherwise.</li>
+    <li>If no bubble is explicitly active, <code>Cmd-J</code> and <code>Cmd-K</code> target the top visible notification. If that bubble has no scrollable overflow, do nothing and do not scroll the transcript.</li>
+  </ul>
+
+  <h2>Platform Presentation</h2>
+  <ul>
+    <li>Apple platforms should follow standard Liquid Glass presentation rules for notification chrome, controls, dialogs, and hit targets.</li>
+    <li>Controls remain visually clean and icon-only. Do not add visible background circles solely to enlarge hit targets.</li>
+    <li>Electron/web should use the nearest platform-native symbol system and preserve the same behavior model.</li>
+    <li>Animations should be spatially consistent: notifications enter from the right and leave/collapse toward the right.</li>
+  </ul>
+
+  <h2>Acceptance Checklist</h2>
+  <ul>
+    <li>Assistant output from another chat creates an upper-right bubble while viewing the current chat.</li>
+    <li>Repeated assistant output from the same source stays in one bubble with newest content above older content.</li>
+    <li>Short content shrinks; long content scrolls internally; compact screens show only what actually fits.</li>
+    <li>Dismiss and Reply are visible, icon-only, tappable controls.</li>
+    <li>Reply can be sent with the button or iOS software keyboard Return, can be canceled with Escape or active Reply toggle, and dismisses the notification after send acceptance.</li>
+    <li>Reply sends and cross-chat sends update the associated chat's normal status path and do not mutate the current chat's transcript/status.</li>
+    <li>Body tap navigates to source chat; source-chat navigation clears only that source's notifications.</li>
+    <li>Overflow hides without dismissal and reveals after visible dismissal.</li>
+    <li>Right-swipe and <code>Cmd-\</code> dock the stack into right-edge peeks; tap/switch restores it.</li>
+    <li>Number shortcuts navigate/reply/dismiss according to the matrix, and numbers display only when hardware-keyboard shortcuts are available.</li>
+    <li><code>Cmd-J</code>/<code>Cmd-K</code> scroll notification content without moving the transcript or changing notification order.</li>
+    <li>The chat session name toast renders above notification bubbles.</li>
+  </ul>
+
+  <h2>Source Documents</h2>
+  <ul>
+    <li><code>/Users/mike/shared-workspace/clawline/specs/t307-cross-chat-notifications.html</code></li>
+    <li><code>/Users/mike/.openclaw/workspace/tracking/T307.md</code></li>
+  </ul>
+</main>
+</body>
+</html>

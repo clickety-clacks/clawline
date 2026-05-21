@@ -34,6 +34,7 @@ export interface SessionStatusPayload {
     fallbackModels?: string[] | null;
     provider?: string | null;
     harness?: string | null;
+    authMode?: string | null;
     reasoningLevel?: string | null;
     thinkingLevel?: string | null;
     fastMode?: boolean | null;
@@ -56,6 +57,13 @@ export interface SessionStatusPayload {
 export interface SessionStatusCapability {
   supported: boolean;
   reason?: string | null;
+  options?: SessionStatusCapabilityOption[] | null;
+}
+
+export interface SessionStatusCapabilityOption {
+  title?: string | null;
+  value?: string | null;
+  enabled?: boolean | null;
 }
 
 export interface SessionStatusCapabilities {

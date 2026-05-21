@@ -1,4 +1,5 @@
 import Testing
+import SwiftUI
 import UIKit
 @testable import Clawline
 
@@ -364,6 +365,66 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
         #expect(!text.contains("AlphaBetaNested Beta OneNested Beta TwoGamma"))
     }
 
+    @Test("T340: hyphen unordered list renders as bullets in chat bubble markdown")
+    func t340_hyphenUnorderedListRendersAsBullets() {
+        let message = Message(
+            id: "t340",
+            role: .assistant,
+            content: """
+            Intro with **bold** and [link](https://example.com).
+            - Alpha `code`
+            - Beta
+            """,
+            timestamp: Date(),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: "agent:main:clawline:user:main"
+        )
+        var state = StreamingTableParseState()
+        let presentation = MessagePresentationBuilder.build(
+            from: message,
+            metrics: metrics,
+            streamingState: &state
+        )
+        let rendered = UnifiedMarkdownRenderer.render(plan: presentation.markdownRenderPlan, options: bubbleOptions())
+
+        guard case .attributedText(let attributed)? = rendered.first else {
+            Issue.record("Expected bubble markdown to render as attributed text")
+            return
+        }
+        let text = joinedText(from: rendered)
+
+        #expect(attributed.string.contains("Intro with bold and link."))
+        #expect(text.contains("• Alpha code"))
+        #expect(text.contains("• Beta"))
+        #expect(!text.contains("- Alpha"))
+        #expect(isBold("bold", in: attributed))
+        #expect(linkTarget("link", in: attributed)?.absoluteString == "https://example.com")
+    }
+
+    @Test("T340: hyphen bullet normalization preserves thematic breaks and indented literals")
+    func t340_hyphenBulletNormalizationStaysScoped() {
+        let markdown = """
+        - Bullet
+        - - -
+            - literal
+        """
+        let plan = MarkdownRenderPlan(
+            blocks: [.richText(markdownSource: markdown)],
+            plainTextForMetrics: markdown,
+            containsTextualContent: true,
+            isEmojiOnly: false
+        )
+        let rendered = UnifiedMarkdownRenderer.render(plan: plan, options: bubbleOptions())
+        let text = joinedText(from: rendered)
+
+        #expect(text.contains("• Bullet"))
+        #expect(text.contains("- - -"))
+        #expect(text.contains("    - literal"))
+        #expect(!text.contains("• literal"))
+    }
+
     @Test("T137: ordered list markers render as 1,2,3 instead of repeating 1")
     func t137_orderedListMarkersIncrement() {
         let markdown = """
@@ -379,6 +440,100 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
         #expect(text.contains("2. Second"))
         #expect(text.contains("3. Third"))
         #expect(containsInOrder(text, tokens: ["1. First", "2. Second", "3. Third"]))
+    }
+
+    @Test("T307 notification content uses the unified assistant markdown renderer")
+    func t307_notificationContentUsesUnifiedAssistantMarkdownRenderer() {
+        let rendered = CrossChatNotificationMarkdownRenderer.renderBlocks(
+            content: """
+            Side **notification** with [details](https://example.com)
+
+            ```swift
+            print("notification")
+            ```
+            """,
+            messageID: "t307_notification_markdown",
+            baseFont: UIFont.systemFont(ofSize: 15, weight: .regular),
+            inkColor: .secondaryLabel,
+            lineSpacing: 2,
+            isDark: false
+        )
+
+        #expect(sequence(for: rendered) == [.attributedText, .code])
+        let firstBlock = rendered.first
+        guard case .attributedText(let attributed) = firstBlock else {
+            Issue.record("Expected first notification block to be rendered attributed text")
+            return
+        }
+        #expect(attributed.string.contains("Side notification with details"))
+        #expect(isBold("notification", in: attributed))
+        #expect(linkTarget("details", in: attributed)?.absoluteString == "https://example.com")
+    }
+
+    @Test("T307 real notification bubble renders assistant markdown content")
+    @MainActor
+    func t307_realNotificationBubbleRendersAssistantMarkdownContent() throws {
+        let bubble = CrossChatNotificationBubble(
+            sourceChatId: "agent:main:clawline:user:s_markdown_notification",
+            sourceTitle: "Side Thread",
+            entries: [
+                CrossChatAssistantNotificationEntry(
+                    id: "s_markdown_entry",
+                    content: "Side **notification** with [details](https://example.com)",
+                    timestamp: Date()
+                )
+            ],
+            lastAssistantActivityAt: Date()
+        )
+        let host = UIHostingController(
+            rootView: CrossChatNotificationBubbleView(
+                bubble: bubble,
+                assignedNumber: 1,
+                visibleNotificationCount: 1,
+                showShortcutLabel: true,
+                maxBubbleHeight: 205,
+                maxBubbleWidth: 360,
+                bubbleCornerRadius: 18,
+                isSending: false,
+                canCancelSend: false,
+                canSendReply: false,
+                connectionState: .connected,
+                replyDraft: .constant(""),
+                onDismiss: {},
+                onReply: {},
+                onCancelReply: {},
+                onDismissAll: {},
+                onNavigate: {},
+                onSendReply: {},
+                onCancelSend: {},
+                onReconnect: {},
+                onActivate: {},
+                onReplyFocusChange: { _ in },
+                isActionMenuOpen: false,
+                actionMenuSelection: .goToChat,
+                onActionMenuSelectionChange: { _ in },
+                onActionMenuAction: { _ in },
+                onRegisterScrollView: { _ in },
+                isDismissSwipeActive: false,
+                isContentScrollLocked: false,
+                onContentScrollDragChanged: { _ in },
+                onContentScrollDragEnded: {}
+            )
+        )
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 420, height: 320))
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        host.view.frame = window.bounds
+        host.view.setNeedsLayout()
+        host.view.layoutIfNeeded()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.15))
+        host.view.layoutIfNeeded()
+
+        let textView = try #require(textViews(in: host.view).first { textView in
+            textView.attributedText.string.contains("Side notification with details")
+        })
+        #expect(isBold("notification", in: textView.attributedText))
+        #expect(linkTarget("details", in: textView.attributedText)?.absoluteString == "https://example.com")
     }
 
     private enum BlockType: Equatable {
@@ -458,5 +613,44 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
             searchStart = range.upperBound
         }
         return true
+    }
+
+    private func isBold(_ token: String, in attributed: NSAttributedString) -> Bool {
+        let range = (attributed.string as NSString).range(of: token)
+        guard range.location != NSNotFound else { return false }
+        var foundBold = false
+        attributed.enumerateAttribute(.font, in: range) { value, _, stop in
+            guard let font = value as? UIFont else { return }
+            if font.fontDescriptor.symbolicTraits.contains(.traitBold) {
+                foundBold = true
+                stop.pointee = true
+            }
+        }
+        if !foundBold {
+            attributed.enumerateAttribute(.inlinePresentationIntent, in: range) { value, _, stop in
+                if value != nil {
+                    foundBold = true
+                    stop.pointee = true
+                }
+            }
+        }
+        return foundBold
+    }
+
+    private func linkTarget(_ token: String, in attributed: NSAttributedString) -> URL? {
+        let range = (attributed.string as NSString).range(of: token)
+        guard range.location != NSNotFound else { return nil }
+        return attributed.attribute(.link, at: range.location, effectiveRange: nil) as? URL
+    }
+
+    private func textViews(in view: UIView) -> [UITextView] {
+        var result: [UITextView] = []
+        if let textView = view as? UITextView {
+            result.append(textView)
+        }
+        for subview in view.subviews {
+            result.append(contentsOf: textViews(in: subview))
+        }
+        return result
     }
 }

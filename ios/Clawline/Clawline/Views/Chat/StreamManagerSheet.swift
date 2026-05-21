@@ -14,7 +14,7 @@ struct StreamManagerSheet: View {
 
     @Bindable var viewModel: ChatViewModel
     let streams: [StreamSession]
-    let dotStatesBySession: [String: StreamDotState]
+    let dotStateLookup: StreamDotStateLookup
     let searchFocusRequestID: Int?
     let maxAvailableHeight: CGFloat
     let maxAvailableWidth: CGFloat
@@ -428,7 +428,7 @@ struct StreamManagerSheet: View {
             } label: {
                 HStack(spacing: 10) {
                     let isActive = stream.sessionKey == viewModel.uiSelectedSessionKey
-                    let dotState = dotStatesBySession[stream.sessionKey] ?? .inactive
+                    let dotState = dotStateLookup(stream.sessionKey)
                     Circle()
                         .fill(
                             StreamDotColor.resolve(

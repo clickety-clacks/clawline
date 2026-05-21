@@ -15,19 +15,47 @@ extension Notification.Name {
     static let clawlineScrollUpCommand = Notification.Name("clawline.scrollUpCommand")
     static let clawlineScrollChatDownCommand = Notification.Name("clawline.scrollChatDownCommand")
     static let clawlineScrollChatUpCommand = Notification.Name("clawline.scrollChatUpCommand")
+    static let clawlineScrollNotificationDownCommand = Notification.Name("clawline.scrollNotificationDownCommand")
+    static let clawlineScrollNotificationUpCommand = Notification.Name("clawline.scrollNotificationUpCommand")
+    static let clawlineToggleNotificationDockCommand = Notification.Name("clawline.toggleNotificationDockCommand")
+    static let clawlineOpenNotificationActionMenuCommand = Notification.Name("clawline.openNotificationActionMenuCommand")
+    static let clawlineReplyNotificationCommand = Notification.Name("clawline.replyNotificationCommand")
+    static let clawlineDismissNotificationCommand = Notification.Name("clawline.dismissNotificationCommand")
+    static let clawlineKeyboardCommandIntent = Notification.Name("clawline.keyboardCommandIntent")
 }
 
 struct CancelCurrentPromptCommand {
     let presentConfirmation: @MainActor () -> Void
 }
 
+struct CrossChatNotificationCommand {
+    let hasVisibleNotifications: Bool
+    let visibleCount: Int
+    let keyboardOwnershipStore: KeyboardOwnershipStore
+    let openActionMenu: @MainActor (Int) -> Void
+    let dismiss: @MainActor (Int) -> Void
+    let reply: @MainActor (Int) -> Void
+    let scrollDown: @MainActor () -> Void
+    let scrollUp: @MainActor () -> Void
+    let dismissAll: @MainActor () -> Void
+}
+
 private struct CancelCurrentPromptCommandKey: FocusedValueKey {
     typealias Value = CancelCurrentPromptCommand
+}
+
+private struct CrossChatNotificationCommandKey: FocusedValueKey {
+    typealias Value = CrossChatNotificationCommand
 }
 
 extension FocusedValues {
     var cancelCurrentPromptCommand: CancelCurrentPromptCommand? {
         get { self[CancelCurrentPromptCommandKey.self] }
         set { self[CancelCurrentPromptCommandKey.self] = newValue }
+    }
+
+    var crossChatNotificationCommand: CrossChatNotificationCommand? {
+        get { self[CrossChatNotificationCommandKey.self] }
+        set { self[CrossChatNotificationCommandKey.self] = newValue }
     }
 }

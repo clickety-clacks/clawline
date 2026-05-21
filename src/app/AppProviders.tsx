@@ -12,6 +12,10 @@ import {
   createChatDomainStore
 } from "../runtime/chat/chatDomainStore";
 import {
+  CrossChatNotificationStoreProvider,
+  createCrossChatNotificationStore
+} from "../runtime/chat/crossChatNotificationStore";
+import {
   TransportMachineProvider,
   createTransportMachine
 } from "../runtime/transport/transportMachine";
@@ -19,9 +23,11 @@ import {
 const authSessionStore = createAuthSessionStore();
 const settingsStore = createSettingsStore();
 const chatDomainStore = createChatDomainStore();
+const crossChatNotificationStore = createCrossChatNotificationStore();
 const transportMachine = createTransportMachine({
   authSessionStore,
-  chatDomainStore
+  chatDomainStore,
+  crossChatNotificationStore
 });
 
 export function AppProviders({ children }: { children: ReactNode }) {
@@ -29,9 +35,11 @@ export function AppProviders({ children }: { children: ReactNode }) {
     <SettingsStoreProvider value={settingsStore}>
       <AuthSessionStoreProvider value={authSessionStore}>
         <ChatDomainStoreProvider value={chatDomainStore}>
-          <TransportMachineProvider value={transportMachine}>
-            {children}
-          </TransportMachineProvider>
+          <CrossChatNotificationStoreProvider value={crossChatNotificationStore}>
+            <TransportMachineProvider value={transportMachine}>
+              {children}
+            </TransportMachineProvider>
+          </CrossChatNotificationStoreProvider>
         </ChatDomainStoreProvider>
       </AuthSessionStoreProvider>
     </SettingsStoreProvider>

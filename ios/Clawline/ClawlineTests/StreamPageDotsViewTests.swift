@@ -86,6 +86,36 @@ struct StreamPageDotsViewTests {
         )
     }
 
+
+    @Test("Expanded indicator host stays within requested width envelope")
+    func expandedIndicatorHostFitsRequestedWidth() {
+        let sessionKeys = (0..<40).map { "session-\($0)" }
+        let requestedWidth = CGFloat(220)
+        let targetWidth = StreamPageDotsView.renderedControlWidth(
+            totalSessionCount: sessionKeys.count,
+            maxWidth: requestedWidth
+        )
+
+        let view = StreamPageDotsView(
+            sessionKeys: sessionKeys,
+            activeSessionKey: sessionKeys[35],
+            dotStateLookup: StreamDotStateLookup { _ in .inactive },
+            maxWidth: requestedWidth,
+            onTap: {},
+            onScrubPreview: { _ in },
+            onScrubCommit: { _ in },
+            onScrubCancel: {},
+            onScrubCandidateHaptic: { _ in }
+        )
+
+        let host = UIHostingController(rootView: view)
+        host.view.backgroundColor = .clear
+        let measured = host.sizeThatFits(in: CGSize(width: requestedWidth, height: 200))
+
+        #expect(targetWidth <= requestedWidth)
+        #expect(measured.width <= requestedWidth + 1)
+    }
+
     @Test("T257: scrub start maps touch position through the visible dot window")
     func scrubStartMapsTouchPositionThroughVisibleWindow() {
         let visibleDotIndices = Array(15...25)

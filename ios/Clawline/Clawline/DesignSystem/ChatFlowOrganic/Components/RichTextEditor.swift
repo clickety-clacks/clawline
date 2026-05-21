@@ -12,6 +12,12 @@ import UniformTypeIdentifiers
 
 private let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "RichTextEditor")
 
+private extension UIKey {
+    var hasNoCommandModifiers: Bool {
+        modifierFlags.intersection([.command, .shift, .alternate, .control]).isEmpty
+    }
+}
+
 struct RichTextEditor: UIViewRepresentable {
     @Binding var attributedText: NSAttributedString
     @Binding var calculatedHeight: CGFloat
@@ -26,7 +32,14 @@ struct RichTextEditor: UIViewRepresentable {
     var onFocusChange: (Bool) -> Void
     var onTextEditActivity: (() -> Void)?
     var onSubmit: (() -> Void)?
+    var handlesMentionPickerKeyCommands: Bool = false
+    var mentionPickerHasCompletion: Bool = false
+    var onMentionPickerTab: (() -> Void)?
+    var onMentionPickerMoveUp: (() -> Void)?
+    var onMentionPickerMoveDown: (() -> Void)?
     var onPasteImages: (([UIImage]) -> Void)?
+    var notificationVisibleCount: Int = 0
+    var keyboardOwnershipStore = KeyboardOwnershipStore()
     var trailingPadding: CGFloat = 20
 
     func makeUIView(context: Context) -> PastableTextView {
@@ -42,6 +55,12 @@ struct RichTextEditor: UIViewRepresentable {
         textView.onResponderFocusChange = { isFocused in
             coordinator.parent.onFocusChange(isFocused)
         }
+        textView.handlesMentionPickerKeyCommands = handlesMentionPickerKeyCommands
+        textView.notificationVisibleCount = notificationVisibleCount
+        textView.keyboardOwnershipStore = keyboardOwnershipStore
+        textView.onMentionPickerTab = { coordinator.parent.onMentionPickerTab?() }
+        textView.onMentionPickerMoveUp = { coordinator.parent.onMentionPickerMoveUp?() }
+        textView.onMentionPickerMoveDown = { coordinator.parent.onMentionPickerMoveDown?() }
         textView.isScrollEnabled = false
         textView.backgroundColor = .clear
         textView.textContainerInset = UIEdgeInsets(top: 12, left: 20, bottom: 12, right: trailingPadding)
@@ -83,6 +102,12 @@ struct RichTextEditor: UIViewRepresentable {
         textView.onResponderFocusChange = { isFocused in
             coordinator.parent.onFocusChange(isFocused)
         }
+        textView.handlesMentionPickerKeyCommands = handlesMentionPickerKeyCommands
+        textView.notificationVisibleCount = notificationVisibleCount
+        textView.keyboardOwnershipStore = keyboardOwnershipStore
+        textView.onMentionPickerTab = { coordinator.parent.onMentionPickerTab?() }
+        textView.onMentionPickerMoveUp = { coordinator.parent.onMentionPickerMoveUp?() }
+        textView.onMentionPickerMoveDown = { coordinator.parent.onMentionPickerMoveDown?() }
 
         let isComposing = textView.markedTextRange != nil
         let resetRequested = resetToken != context.coordinator.lastResetToken
@@ -165,8 +190,8 @@ struct RichTextEditor: UIViewRepresentable {
         func textViewDidChange(_ textView: UITextView) {
             guard !isUpdatingFromSwiftUI else { return }
             isApplyingLocalEdit = true
-            parent.onTextEditActivity?()
             parent.attributedText = textView.attributedText
+            parent.onTextEditActivity?()
             setSelectionRange(textView.selectedRange)
             updateHeight(for: textView, allowAutoScroll: true)
             ensureCaretVisible(in: textView)
@@ -188,7 +213,17 @@ struct RichTextEditor: UIViewRepresentable {
                       shouldChangeTextIn range: NSRange,
                       replacementText text: String) -> Bool {
             if text == "\n" {
-                parent.onSubmit?()
+                // UIKit's software-keyboard text delegate reports only the replacement text,
+                // so Return and software Shift-Return are not distinguishable here. Hardware
+                // modified Return is handled by keyCommands before this submit path.
+                switch KeyboardCommandRouter.route(intent: .textSubmit, store: parent.keyboardOwnershipStore).outcome {
+                case .handled(.mentionPicker):
+                    parent.onMentionPickerTab?()
+                case .handled(.composer):
+                    parent.onSubmit?()
+                default:
+                    return true
+                }
                 return false
             }
             return true
@@ -346,6 +381,12 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
     var onPasteImages: (([UIImage]) -> Void)?
     var onLayout: ((CGFloat) -> Void)?
     var onResponderFocusChange: ((Bool) -> Void)?
+    var handlesMentionPickerKeyCommands = false
+    var notificationVisibleCount = 0
+    var keyboardOwnershipStore = KeyboardOwnershipStore()
+    var onMentionPickerTab: (() -> Void)?
+    var onMentionPickerMoveUp: (() -> Void)?
+    var onMentionPickerMoveDown: (() -> Void)?
     var isInputEnabled: Bool = true {
         didSet {
             guard oldValue != isInputEnabled else { return }
@@ -406,21 +447,132 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
             UIKeyCommand(input: "k", modifierFlags: [.control], action: #selector(didPressCtrlK)),
             UIKeyCommand(input: "c", modifierFlags: [.control], action: #selector(didPressCtrlC))
         ]
-        let appCommandShortcuts = ChatAppCommandShortcut.keyCommandSpecs.map { spec in
+        let appCommandShortcuts = ChatAppCommandShortcut
+            .prioritizedTextInputKeyCommandSpecs(notificationVisibleCount: notificationVisibleCount)
+            .map { spec in
             UIKeyCommand(
                 input: spec.input,
                 modifierFlags: spec.modifierFlags,
                 action: spec.action.selector
             )
         }
+        let prioritizedAppCommandShortcuts = appCommandShortcuts.filter {
+            guard let intent = KeyboardCommandBridge.intent(input: $0.input, modifierFlags: $0.modifierFlags) else {
+                return false
+            }
+            guard case .handled(.notificationBubble(_)) = KeyboardCommandRouter
+                .route(intent: intent, store: keyboardOwnershipStore)
+                .outcome else { return false }
+            return true
+        }
+        let deferredAppCommandShortcuts = appCommandShortcuts.filter { command in
+            !prioritizedAppCommandShortcuts.contains { prioritized in
+                prioritized.input == command.input
+                    && prioritized.modifierFlags == command.modifierFlags
+                    && prioritized.action == command.action
+            }
+        }
         let inputReleaseCommands = [
             UIKeyCommand(input: UIKeyCommand.inputEscape, modifierFlags: [], action: #selector(didPressEscape))
         ]
-        return inputReleaseCommands + base + emacsCommands + appCommandShortcuts
+        let modifiedReturnCommands = KeyboardCommandBridge.textInputSpecs.compactMap { spec -> UIKeyCommand? in
+            guard spec.intent == .textModifiedNewline else { return nil }
+            return UIKeyCommand(
+                input: spec.input,
+                modifierFlags: spec.modifierFlags,
+                action: #selector(didPressModifiedReturn)
+            )
+        }
+        let mentionPickerCommands: [UIKeyCommand] = handlesMentionPickerKeyCommands
+            ? KeyboardCommandBridge.pickerSpecs.compactMap { spec in
+                guard let selector = mentionPickerSelector(for: spec.intent) else { return nil }
+                return UIKeyCommand(
+                    input: spec.input,
+                    modifierFlags: spec.modifierFlags,
+                    action: selector
+                )
+            }
+            : []
+        return mentionPickerCommands
+            + prioritizedAppCommandShortcuts
+            + inputReleaseCommands
+            + modifiedReturnCommands
+            + base
+            + emacsCommands
+            + deferredAppCommandShortcuts
+    }
+
+    private func mentionPickerSelector(for intent: KeyboardCommandIntent) -> Selector? {
+        switch intent {
+        case .pickerAccept:
+            return #selector(didPressMentionPickerTab)
+        case .pickerNavigateUp:
+            return #selector(didPressMentionPickerUp)
+        case .pickerNavigateDown:
+            return #selector(didPressMentionPickerDown)
+        default:
+            return nil
+        }
     }
 
     private var canHandleInputShortcut: Bool {
         isInputEnabled && isFirstResponder
+    }
+
+    @objc private func didPressMentionPickerTab(_ sender: UIKeyCommand) {
+        guard canHandleInputShortcut, routes(.pickerAccept) else { return }
+        onMentionPickerTab?()
+    }
+
+    @objc private func didPressMentionPickerUp(_ sender: UIKeyCommand) {
+        guard canHandleInputShortcut, routes(.pickerNavigateUp) else { return }
+        onMentionPickerMoveUp?()
+    }
+
+    @objc private func didPressMentionPickerDown(_ sender: UIKeyCommand) {
+        guard canHandleInputShortcut, routes(.pickerNavigateDown) else { return }
+        onMentionPickerMoveDown?()
+    }
+
+    @objc private func didPressModifiedReturn(_ sender: UIKeyCommand) {
+        guard canHandleInputShortcut,
+              case .handled(.composer) = KeyboardCommandRouter
+                .route(intent: .textModifiedNewline, store: keyboardOwnershipStore)
+                .outcome else { return }
+        insertPlainText("\n")
+    }
+
+    override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        guard canHandleInputShortcut else {
+            super.pressesBegan(presses, with: event)
+            return
+        }
+
+        for press in presses {
+            guard let key = press.key, key.hasNoCommandModifiers else { continue }
+            switch key.keyCode {
+            case .keyboardUpArrow:
+                guard routes(.pickerNavigateUp) else { break }
+                onMentionPickerMoveUp?()
+                return
+            case .keyboardDownArrow:
+                guard routes(.pickerNavigateDown) else { break }
+                onMentionPickerMoveDown?()
+                return
+            default:
+                continue
+            }
+        }
+
+        super.pressesBegan(presses, with: event)
+    }
+
+    private func routes(_ intent: KeyboardCommandIntent) -> Bool {
+        guard handlesMentionPickerKeyCommands,
+              case .handled(.mentionPicker) = KeyboardCommandRouter
+                .route(intent: intent, store: keyboardOwnershipStore)
+                .outcome else { return false }
+        return true
     }
 
     @objc private func didPressCtrlA(_ sender: UIKeyCommand) {

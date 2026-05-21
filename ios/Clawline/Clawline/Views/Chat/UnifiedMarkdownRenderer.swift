@@ -38,6 +38,13 @@ enum UnifiedMarkdownRenderer {
     private static let markOpenSentinel = "\u{F0000}"
     private static let markCloseSentinel = "\u{F0001}"
     private static let markdownLinkBoundaryTokens = [markOpenSentinel, markCloseSentinel]
+    private static let attributedMarkdownCache: NSCache<NSString, NSAttributedString> = {
+        let cache = NSCache<NSString, NSAttributedString>()
+        cache.countLimit = 512
+        cache.totalCostLimit = 4 * 1024 * 1024
+        return cache
+    }()
+    private static let attributedMarkdownCacheMaxSourceLength = 20_000
 
     static func makeOptions(
         baseFont: UIFont,
@@ -197,9 +204,23 @@ enum UnifiedMarkdownRenderer {
             options: .regularExpression
         ) != nil
         let shouldUseInlineListParsing = hasOrderedListSyntax || hasUnorderedListSyntax
-        let markdownForRender = hasOrderedListSyntax
-            ? normalizeOrderedListMarkers(in: parsedMarkdown)
-            : parsedMarkdown
+        var markdownForRender = parsedMarkdown
+        if hasOrderedListSyntax {
+            markdownForRender = normalizeOrderedListMarkers(in: markdownForRender)
+        }
+        if hasUnorderedListSyntax {
+            markdownForRender = normalizeHyphenUnorderedListMarkers(in: markdownForRender)
+        }
+        let cacheKey = attributedMarkdownCacheKey(
+            markdown: markdownForRender,
+            baseFont: baseFont,
+            inkColor: inkColor,
+            lineSpacing: lineSpacing,
+            markHighlightColor: markHighlightColor
+        )
+        if let cached = attributedMarkdownCache.object(forKey: cacheKey as NSString) {
+            return NSAttributedString(attributedString: cached)
+        }
 
         // Prefer full parsing (block syntax like headings), but keep list separators intact.
         let attributed: AttributedString
@@ -217,11 +238,12 @@ enum UnifiedMarkdownRenderer {
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineSpacing = lineSpacing
         paragraph.alignment = .left
+        let immutableParagraph = paragraph.copy() as? NSParagraphStyle ?? paragraph
 
         let nsAttributed = NSMutableAttributedString(attributed)
         let fullRange = NSRange(location: 0, length: nsAttributed.length)
         nsAttributed.addAttribute(.foregroundColor, value: inkColor, range: fullRange)
-        nsAttributed.addAttribute(.paragraphStyle, value: paragraph, range: fullRange)
+        nsAttributed.addAttribute(.paragraphStyle, value: immutableParagraph, range: fullRange)
 
         nsAttributed.enumerateAttribute(.font, in: fullRange, options: []) { value, range, _ in
             guard let existingFont = value as? UIFont else {
@@ -229,7 +251,19 @@ enum UnifiedMarkdownRenderer {
                 return
             }
 
-            let traits = existingFont.fontDescriptor.symbolicTraits
+            var traits = existingFont.fontDescriptor.symbolicTraits
+            let inlineIntent = nsAttributed.attribute(.inlinePresentationIntent, at: range.location, effectiveRange: nil) as? NSNumber
+            if let rawIntent = inlineIntent?.uintValue {
+                if (rawIntent & InlinePresentationIntent.stronglyEmphasized.rawValue) != 0 {
+                    traits.insert(.traitBold)
+                }
+                if (rawIntent & InlinePresentationIntent.emphasized.rawValue) != 0 {
+                    traits.insert(.traitItalic)
+                }
+                if (rawIntent & InlinePresentationIntent.code.rawValue) != 0 {
+                    traits.insert(.traitMonoSpace)
+                }
+            }
             let size = baseFont.pointSize
             var newFont = UIFont(descriptor: baseFont.fontDescriptor, size: size)
 
@@ -260,7 +294,48 @@ enum UnifiedMarkdownRenderer {
             applyMarkHighlights(nsAttributed: nsAttributed, color: markHighlightColor)
         }
 
-        return nsAttributed
+        let rendered = NSAttributedString(attributedString: nsAttributed)
+        if markdownForRender.count <= attributedMarkdownCacheMaxSourceLength {
+            attributedMarkdownCache.setObject(
+                rendered,
+                forKey: cacheKey as NSString,
+                cost: attributedMarkdownCacheCost(markdown: markdownForRender, rendered: rendered)
+            )
+        }
+        return rendered
+    }
+
+    nonisolated private static func attributedMarkdownCacheKey(
+        markdown: String,
+        baseFont: UIFont,
+        inkColor: UIColor,
+        lineSpacing: CGFloat,
+        markHighlightColor: UIColor?
+    ) -> String {
+        [
+            markdown,
+            baseFont.fontDescriptor.postscriptName,
+            String(format: "%.3f", baseFont.pointSize),
+            String(format: "%.3f", lineSpacing),
+            colorCacheComponent(inkColor),
+            markHighlightColor.map(colorCacheComponent) ?? "nil"
+        ].joined(separator: "\u{1F}")
+    }
+
+    nonisolated private static func colorCacheComponent(_ color: UIColor) -> String {
+        var red: CGFloat = 0
+        var green: CGFloat = 0
+        var blue: CGFloat = 0
+        var alpha: CGFloat = 0
+        let identity = "\(type(of: color))|\(String(describing: color))"
+        guard color.getRed(&red, green: &green, blue: &blue, alpha: &alpha) else {
+            return identity
+        }
+        return identity + "|" + String(format: "%.5f,%.5f,%.5f,%.5f", red, green, blue, alpha)
+    }
+
+    nonisolated private static func attributedMarkdownCacheCost(markdown: String, rendered: NSAttributedString) -> Int {
+        (markdown.utf16.count + rendered.string.utf16.count) * 2
     }
 
     private static func baseAttributes(baseFont: UIFont, inkColor: UIColor, lineSpacing: CGFloat) -> [NSAttributedString.Key: Any] {
@@ -593,6 +668,54 @@ enum UnifiedMarkdownRenderer {
         }
 
         return normalized.joined(separator: "\n")
+    }
+
+    private static func normalizeHyphenUnorderedListMarkers(in markdown: String) -> String {
+        let linePattern = #"^([ \t]{0,3})(-)([ \t]+)(.*)$"#
+        guard let regex = try? NSRegularExpression(pattern: linePattern) else { return markdown }
+
+        let lines = markdown.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        var normalized: [String] = []
+        normalized.reserveCapacity(lines.count)
+
+        var inFence = false
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~") {
+                inFence.toggle()
+                normalized.append(line)
+                continue
+            }
+
+            guard !inFence else {
+                normalized.append(line)
+                continue
+            }
+
+            let nsLine = line as NSString
+            let range = NSRange(location: 0, length: nsLine.length)
+            guard let match = regex.firstMatch(in: line, options: [], range: range),
+                  match.range.location != NSNotFound else {
+                normalized.append(line)
+                continue
+            }
+
+            let prefix = nsLine.substring(with: match.range(at: 1))
+            let spacing = nsLine.substring(with: match.range(at: 3))
+            let content = nsLine.substring(with: match.range(at: 4))
+            if isHyphenThematicBreakContent(content) {
+                normalized.append(line)
+                continue
+            }
+            normalized.append("\(prefix)•\(spacing)\(content)")
+        }
+
+        return normalized.joined(separator: "\n")
+    }
+
+    private static func isHyphenThematicBreakContent(_ content: String) -> Bool {
+        let compact = content.filter { $0 != " " && $0 != "\t" }
+        return compact.count >= 2 && compact.allSatisfy { $0 == "-" }
     }
 
     private static func orderedListContextKey(prefix: String, delimiter: String) -> String {

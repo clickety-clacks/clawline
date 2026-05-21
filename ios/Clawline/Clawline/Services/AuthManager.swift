@@ -29,7 +29,13 @@ final class AuthManager: AuthManaging {
         static let isAdmin = "auth.isAdmin"
     }
 
-    init(storage: UserDefaults = .standard, secureStore: SecureStoring = KeychainSecureStore()) {
+    init(storage: UserDefaults = .standard) {
+        self.storage = storage
+        self.secureStore = KeychainSecureStore()
+        loadStoredCredentials()
+    }
+
+    init(storage: UserDefaults, secureStore: SecureStoring) {
         self.storage = storage
         self.secureStore = secureStore
         loadStoredCredentials()

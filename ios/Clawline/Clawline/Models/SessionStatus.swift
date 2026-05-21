@@ -21,11 +21,36 @@ struct SessionStatus: Decodable, Equatable {
         let fallbackModels: [String]?
         let provider: String?
         let harness: String?
+        let authMode: String?
         let reasoningLevel: String?
         let thinkingLevel: String?
         let fastMode: Bool?
         let mode: String?
         let verbosity: String?
+
+        init(
+            model: String?,
+            fallbackModels: [String]?,
+            provider: String?,
+            harness: String?,
+            authMode: String? = nil,
+            reasoningLevel: String?,
+            thinkingLevel: String?,
+            fastMode: Bool?,
+            mode: String?,
+            verbosity: String?
+        ) {
+            self.model = model
+            self.fallbackModels = fallbackModels
+            self.provider = provider
+            self.harness = harness
+            self.authMode = authMode
+            self.reasoningLevel = reasoningLevel
+            self.thinkingLevel = thinkingLevel
+            self.fastMode = fastMode
+            self.mode = mode
+            self.verbosity = verbosity
+        }
     }
 
     struct Run: Decodable, Equatable {
@@ -77,6 +102,19 @@ struct SessionStatus: Decodable, Equatable {
     struct Capability: Decodable, Equatable {
         let supported: Bool
         let reason: String?
+        let options: [Option]?
+
+        init(supported: Bool, reason: String?, options: [Option]? = nil) {
+            self.supported = supported
+            self.reason = reason
+            self.options = options
+        }
+
+        struct Option: Decodable, Equatable {
+            let title: String?
+            let value: String?
+            let enabled: Bool?
+        }
     }
 
     struct ModelCatalog: Decodable, Equatable {

@@ -1,0 +1,358 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>T306 Live Agent Progress Recon</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f7f7f4;
+      --fg: #1d2528;
+      --muted: #5f6f73;
+      --line: #cfd8d6;
+      --panel: #ffffff;
+      --accent: #176b6b;
+      --warn: #8a5400;
+      --code: #eef3f2;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #101516;
+        --fg: #eef4f3;
+        --muted: #a8b6b8;
+        --line: #304043;
+        --panel: #182022;
+        --accent: #6ec7bc;
+        --warn: #e2b45e;
+        --code: #202b2d;
+      }
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--fg);
+      font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    main {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 48px 22px 72px;
+    }
+
+    h1, h2, h3 {
+      line-height: 1.15;
+      letter-spacing: 0;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: clamp(2rem, 4vw, 3rem);
+    }
+
+    h2 {
+      margin-top: 42px;
+      padding-top: 22px;
+      border-top: 1px solid var(--line);
+      font-size: 1.45rem;
+    }
+
+    h3 {
+      margin-top: 28px;
+      font-size: 1.1rem;
+    }
+
+    p {
+      margin: 10px 0;
+    }
+
+    ul, ol {
+      padding-left: 1.3rem;
+    }
+
+    li {
+      margin: 7px 0;
+    }
+
+    code, pre {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.92em;
+      background: var(--code);
+      border-radius: 6px;
+    }
+
+    code {
+      padding: 0.12rem 0.28rem;
+    }
+
+    pre {
+      overflow-x: auto;
+      padding: 14px 16px;
+      border: 1px solid var(--line);
+    }
+
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      margin: 16px 0;
+      background: var(--panel);
+    }
+
+    th, td {
+      border: 1px solid var(--line);
+      padding: 10px 12px;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      color: var(--accent);
+      font-weight: 700;
+    }
+
+    .meta {
+      color: var(--muted);
+      margin-bottom: 28px;
+    }
+
+    .callout {
+      border: 1px solid var(--line);
+      border-left: 5px solid var(--accent);
+      background: var(--panel);
+      padding: 14px 16px;
+      margin: 18px 0;
+      border-radius: 8px;
+    }
+
+    .warning {
+      border-left-color: var(--warn);
+    }
+
+    .decision {
+      font-weight: 700;
+    }
+  </style>
+</head>
+<body>
+<main>
+  <h1>T306 Live Agent Progress Recon</h1>
+  <p class="meta">Product and architecture reconnaissance for native Clawline live current-turn progress. Prepared 2026-05-14.</p>
+
+  <section class="callout">
+    <p class="decision">Decision: native Clawline should align to upstream protocol v4 chat/progress semantics for current-prompt activity UI, not Task Ledger, as the primary source for "what the agent is doing now."</p>
+    <p>The first implementation should add an additive provider-to-native live progress event stream for Clawline sessions, then render a compact current-turn progress surface in the native clients. Existing session status/control APIs should remain snapshots for busy state, model/mode, queue depth, and control actions. Full upstream merge is directionally useful but must be handled as a dedicated merge cycle, not as a quick patch dependency for T306.</p>
+  </section>
+
+  <h2>Scope</h2>
+  <ul>
+    <li>This is recon only. No provider, iOS, web, deploy, or GitHub issue changes were made.</li>
+    <li>The requested upstream-merge recon report path <code>/Users/mike/.openclaw/workspace/rebase-reports/latest-upstream-merge-recon-2026-05-14.md</code> was still not readable on this machine when rechecked. The supplied rebase findings are incorporated below.</li>
+    <li>The goal is current interactive prompt progress. Background task state and Task Ledger remain separate surfaces.</li>
+  </ul>
+
+  <h2>Sources Checked</h2>
+  <ul>
+    <li>Clawline invariants mirror: <code>/Users/mike/shared-workspace/clawline/implementation_details/clawline-invariants.md</code>. The canonical <code>specs/clawline-invariants.md</code> path was absent.</li>
+    <li>Native Clawline code: <code>ProviderWireModels.swift</code>, <code>ProviderChatService.swift</code>, <code>ChatServicing.swift</code>, <code>SessionStatus.swift</code>, <code>ChatViewModel.swift</code>, <code>MessageFlowCollectionView.swift</code>, <code>TypingIndicatorCell.swift</code>.</li>
+    <li>Clawline provider extension: <code>/Users/mike/src/clawdbot/extensions/clawline/src/runtime/server.ts</code>.</li>
+    <li>OpenClaw upstream source/docs: <code>docs/concepts/streaming.md</code>, <code>src/infra/agent-events.ts</code>, <code>src/gateway/server-chat.ts</code>, <code>src/gateway/protocol/schema/agent.ts</code>, <code>src/auto-reply/get-reply-options.types.ts</code>, <code>src/auto-reply/reply/agent-runner-execution.ts</code>, <code>extensions/codex/src/app-server/event-projector.ts</code>, and <code>src/plugin-sdk/channel-streaming.ts</code>.</li>
+    <li>Flynn-provided upstream-merge recon constraints: upstream verdict conditional yes; latest stable upstream <code>v2026.5.12</code> at <code>0358f3dda46dc17d3263e403f6ca895c4d0f749c</code>; fork <code>origin/main</code> at <code>6fbbb1188a71657e658639e981f0a08b8665dfe5</code>; dry-run found 38 conflict paths and about 8,967 staged changed paths.</li>
+  </ul>
+
+  <h2>Upstream Merge Recon Implications</h2>
+  <ul>
+    <li>The merge verdict is a conditional yes, but the scale means it is a full dedicated upstream-merge cycle. T306 should not assume a quick merge or patch-on-current-fork path.</li>
+    <li>The stable upstream target is <code>v2026.5.12</code> at <code>0358f3dda46dc17d3263e403f6ca895c4d0f749c</code>; the fork baseline is <code>origin/main</code> at <code>6fbbb1188a71657e658639e981f0a08b8665dfe5</code>.</li>
+    <li>The dry run found 38 conflict paths and roughly 8,967 staged changed paths. Product architecture should therefore specify the desired upstream-aligned contract first, then let the merge cycle decide whether the implementation lands by direct backport, post-merge adoption, or a compatibility shim.</li>
+    <li>For T306 direction, prefer upstream protocol v4 chat semantics: <code>deltaText</code>/<code>replace</code> content updates with <code>seq</code>, <code>final</code>, and <code>error</code> run framing, plus tool/progress event semantics for current-prompt activity. Task Ledger remains background-task support and is not enough alone for current-turn UX.</li>
+  </ul>
+
+  <h2>Available Upstream APIs</h2>
+  <h3>Normal Interactive Turns</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>Surface</th>
+        <th>What It Provides</th>
+        <th>Fit For Native Current-Turn Progress</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Protocol v4 chat stream</td>
+        <td><code>deltaText</code> and <code>replace</code> content updates with <code>seq</code>, <code>final</code>, and <code>error</code> framing keyed by run/session.</td>
+        <td>Use for assistant content and run framing. Do not repurpose text deltas as progress, or progress will pollute transcript semantics.</td>
+      </tr>
+      <tr>
+        <td>Agent event bus</td>
+        <td><code>AgentEventPayload</code> with <code>runId</code>, <code>seq</code>, <code>stream</code>, <code>ts</code>, optional <code>sessionKey</code>, and typed data for lifecycle, tool, item, plan, approval, command output, patch, compaction, thinking, and custom streams.</td>
+        <td>Best upstream source. It already models the agent's live work and can be projected into a stable native protocol.</td>
+      </tr>
+      <tr>
+        <td>Gateway session event frames</td>
+        <td><code>agent</code>, tool/progress, and session lifecycle broadcasts for run/session subscribers.</td>
+        <td>Useful when the Clawline provider can subscribe through Gateway-level streaming. It gives run/session routing, event ordering, and current-prompt activity semantics.</td>
+      </tr>
+      <tr>
+        <td>Reply callbacks</td>
+        <td><code>onReasoningStream</code>, <code>onToolStart</code>, <code>onItemEvent</code>, <code>onPlanUpdate</code>, <code>onApprovalEvent</code>, <code>onCommandOutput</code>, <code>onPatchSummary</code>, <code>onCompactionStart</code>, and partial/final reply callbacks.</td>
+        <td>Best local seam for the Clawline provider's existing dispatch path. Other channel extensions already use these callbacks for progress previews.</td>
+      </tr>
+      <tr>
+        <td>Channel progress draft formatting</td>
+        <td>Normalization helpers for tool/item/plan/approval/command-output/patch progress lines.</td>
+        <td>Useful as a reference for compact labels, but native should not inherit channel-specific rendering or delay behavior.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>Background Tasks</h3>
+  <p>OpenClaw has a separate background-task path. <code>AgentInternalEventSchema</code> includes <code>task_completion</code> events with sources such as subagent, cron, video generation, and music generation. There are also subagent registry and command surfaces that track active or linked task runs.</p>
+  <p>That path is valuable for Task Ledger and asynchronous task completion, but it is not the primary API for showing progress for the current user prompt. Mixing background task state into current-turn progress would create ambiguous UI: a user would not know whether a status line is about the prompt they just sent or a separate child/background job.</p>
+
+  <h2>Current Clawline State</h2>
+  <ul>
+    <li>The Clawline provider dispatch path creates an <code>activeSessionRuns</code> entry and exposes it through <code>/api/session-status</code>. The status payload has run state, run ID, message ID, started time, queue depth, model/mode display, capabilities, and model catalog. It has no live item/plan/tool progress.</li>
+    <li>The provider emits only a coarse generic <code>event</code> with <code>event: "activity"</code> around dispatch. Native maps this to typing state.</li>
+    <li>The provider's <code>createReplyDispatcherWithTyping</code> usage does not attach the existing upstream progress callbacks for item, plan, approval, command-output, patch, compaction, or reasoning progress.</li>
+    <li>Native <code>ProviderWireModels.swift</code> has no typed live progress payload. <code>ProviderChatService</code> ignores unknown socket message types and only recognizes the generic <code>activity</code> event.</li>
+    <li><code>ChatServicing</code> exposes message, service, and lifecycle streams, plus status fetching. It has no progress event stream.</li>
+    <li><code>ChatViewModel</code> polls/schedules status refresh on selected session changes, auth changes, assistant commits, typing transitions, terminal events, and cancellation. That helps state convergence but is not live progress.</li>
+    <li>The message list footer renders session display/status controls. There is no current-turn progress lane. Existing typing UI can only show busy/typing, not what the agent is doing.</li>
+    <li>The client feature set currently advertises <code>terminal_bubbles_v1</code>; there is no <code>live_agent_progress_v1</code> feature gate.</li>
+  </ul>
+
+  <section class="callout warning">
+    <p><strong>Important gap:</strong> upstream already has the progress information, but Clawline currently collapses it to a boolean activity signal plus a status snapshot. The minimum useful change is a projection/transport gap, not a Task Ledger feature.</p>
+  </section>
+
+  <h2>Recommended Minimal Architecture</h2>
+  <h3>1. Provider Progress Projector</h3>
+  <p>Add a small Clawline provider projector at the dispatch seam. It should consume upstream reply callbacks first because that is the seam the current Clawline provider already owns for inbound native messages. If/when the dedicated upstream merge lands protocol v4 in the fork, the same native protocol should be fed from protocol v4 chat framing plus tool/progress event frames.</p>
+  <p>The projector should normalize source events into user-safe progress events. It should not reconstruct layout or native presentation. The provider owns event projection; native owns rendering.</p>
+
+  <h3>2. Additive Socket Protocol</h3>
+  <p>Send additive websocket payloads to subscribed native sessions. Unknown types are already non-fatal in the current native client, so this can be introduced without disrupting older clients. Prefer a feature gate such as <code>live_agent_progress_v1</code> before broad emission.</p>
+  <p>Align the content-message side with upstream protocol v4 where possible: assistant text should be represented as ordered <code>deltaText</code>/<code>replace</code> updates and closed by <code>final</code> or <code>error</code>. Progress should remain a sibling event stream, not a special assistant message.</p>
+  <pre><code>{
+  "type": "agent_progress",
+  "version": 1,
+  "sessionKey": "agent:main:clawline:flynn:main",
+  "runId": "s_...",
+  "messageId": "client-message-id",
+  "seq": 12,
+  "timestamp": 1778800000000,
+  "state": "running",
+  "event": {
+    "kind": "item",
+    "phase": "start",
+    "status": "running",
+    "title": "Reading files",
+    "summary": "Reading files"
+  }
+}</code></pre>
+  <p>Use a single event stream plus a native reducer rather than sending final UI layout. Optional reconnect support can add a volatile <code>progress_snapshot</code> later, either in <code>auth_result</code>/<code>session_info</code> or a new status-adjacent endpoint. The first implementation can fall back to <code>/api/session-status</code> showing "Running" after reconnect.</p>
+
+  <h3>3. Projection Rules</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>Upstream Event</th>
+        <th>Native Projection</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Run <code>seq</code>/<code>final</code>/<code>error</code> framing</td>
+        <td>Order current-run updates, clear progress on <code>final</code>, and show a failed/interrupted state on <code>error</code>.</td>
+      </tr>
+      <tr>
+        <td>Tool start/update/end</td>
+        <td>Compact label plus optional safe tool name. Hide raw args by default.</td>
+      </tr>
+      <tr>
+        <td>Item start/update/end</td>
+        <td>Primary current work item. Use <code>progressText</code>, <code>title</code>, or <code>summary</code> in that order.</td>
+      </tr>
+      <tr>
+        <td>Plan update</td>
+        <td>Optional expanded progress details. Do not replace the transcript or assistant message stream.</td>
+      </tr>
+      <tr>
+        <td>Approval requested/resolved</td>
+        <td>Show waiting/blocked state tied to the current run. Do not invent approval controls beyond existing approved flows.</td>
+      </tr>
+      <tr>
+        <td>Command output</td>
+        <td>Show command running/finished state. Do not stream raw output in compact mode.</td>
+      </tr>
+      <tr>
+        <td>Patch summary</td>
+        <td>Show concise file-change summary if safe for the session.</td>
+      </tr>
+      <tr>
+        <td>Compaction</td>
+        <td>Show a short pause/progress label only while active.</td>
+      </tr>
+      <tr>
+        <td>Assistant <code>deltaText</code>/<code>replace</code></td>
+        <td>Keep in message streaming. Do not duplicate as progress.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>4. Native Service and State</h3>
+  <ul>
+    <li>Add <code>AgentProgressEvent</code> to the wire model, and keep it sibling to any protocol v4 message delta/final/error models.</li>
+    <li>Add a progress async stream or service event in <code>ChatServicing</code>/<code>ProviderChatService</code>.</li>
+    <li>Reduce events in <code>ChatViewModel</code> by <code>sessionKey</code> and <code>runId</code>. Use upstream <code>seq</code> defensively for both content and progress; tolerate gaps, repeats, and stale events.</li>
+    <li>Clear progress on assistant final, lifecycle end/error, cancellation, selected-session teardown, or stale timeout.</li>
+    <li>Do not persist volatile progress as chat history and do not advance replay cursors from progress events.</li>
+  </ul>
+
+  <h3>5. Native UI</h3>
+  <p>Start with one compact current-turn surface for the selected stream: a work strip or enriched typing/progress indicator near the message flow/composer. Show one current label and, if expanded, the latest few items. The session footer should continue to own model/status/control metadata, not step-by-step progress.</p>
+
+  <h2>What To Implement First</h2>
+  <ol>
+    <li>Define the native contract around upstream protocol v4 semantics: ordered chat <code>deltaText</code>/<code>replace</code> plus <code>final</code>/<code>error</code>, and sibling tool/progress events for current-prompt activity.</li>
+    <li>Add provider-side live progress projection from the Clawline dispatch callbacks into an additive <code>agent_progress</code> websocket event while the full upstream merge cycle remains separate.</li>
+    <li>Add native decode, service stream, reducer, and a minimal current-turn UI surface.</li>
+    <li>Add focused tests: provider mapping tests, Swift decode/reducer tests, and one UI behavior test showing progress appears during a run and clears on final/error.</li>
+    <li>Add reconnect fallback using current <code>/api/session-status</code>. Only add a retained progress snapshot if testing shows reconnect UX is too thin.</li>
+  </ol>
+  <p>Do not start with Task Ledger. Do not start by expanding <code>SessionStatus</code> into a progress timeline. Status/control is a snapshot API; current-turn progress is a live event stream. Do not make T306 contingent on completing the 38-conflict-path upstream merge, but keep the protocol pointed at that upstream destination.</p>
+
+  <h2>Risks</h2>
+  <ul>
+    <li><strong>Event ordering and loss:</strong> upstream live events may be dropped for slow subscribers or missed by late clients. Native must treat progress as best-effort and reconstruct only current display state, not authoritative history.</li>
+    <li><strong>Merge scale:</strong> the upstream merge is conditional yes but large: 38 conflict paths and about 8,967 staged changed paths. Treat merge sequencing as a project risk, not an implementation detail for a quick T306 patch.</li>
+    <li><strong>Privacy and command detail:</strong> raw tool args, command output, paths, or approval reasons can expose sensitive data. Default to compact sanitized labels and make raw detail an explicit later decision.</li>
+    <li><strong>Protocol drift:</strong> local Gateway broadcasts include session routing fields, while the agent schema may lag what is actually sent. Protocol v4 adoption should be explicit and tested rather than inferred from current fork behavior.</li>
+    <li><strong>Transcript pollution:</strong> progress must never be stored as assistant messages or replayed as chat history.</li>
+    <li><strong>Double rendering:</strong> assistant text streaming and progress status must remain separate. The Codex app-server path intentionally suppresses intermediate assistant messages until final selection, so progress should describe work, not partial answers.</li>
+    <li><strong>Multi-device routing:</strong> session key subscriptions remain the routing truth. The bridge must only emit to provisioned/adopted Clawline streams that are subscribed to the target session.</li>
+    <li><strong>Runtime variability:</strong> Codex app-server emits rich item/plan events; other agent runtimes may only provide lifecycle/tool/assistant signals. The UI must handle sparse streams gracefully.</li>
+    <li><strong>Feature negotiation:</strong> older clients ignore unknown types today, but a feature flag still reduces log noise and lets the provider avoid unnecessary emissions.</li>
+  </ul>
+
+  <h2>Open Questions</h2>
+  <ul>
+    <li>Should native initially receive only compact labels, or should it also receive safe structured details for a future expanded view?</li>
+    <li>Should reconnect snapshot state be in-memory only, or should the provider expose a small volatile endpoint? Recommendation: in-memory only, if needed after first UI testing.</li>
+    <li>Should the same <code>agent_progress</code> protocol be wired into the web Clawline client immediately, or should native ship first and web follow once the protocol stabilizes?</li>
+    <li>Should T306 land as a compatibility bridge before the full upstream merge, or wait for the dedicated upstream merge cycle and then implement directly against protocol v4? Recommendation: define the protocol now; implementation sequencing should follow merge ownership and schedule.</li>
+    <li>Should reasoning progress be hidden entirely by default? Recommendation: do not show raw reasoning; use explicit item/tool/plan labels first.</li>
+  </ul>
+
+  <h2>Architecture Boundary</h2>
+  <p>The provider should emit resolved progress facts, not UI layout intent. Native presentation owns placement, truncation, expansion, animation, and accessibility. This keeps one source of truth for event semantics and avoids leaking provider/channel rendering decisions into the app.</p>
+
+  <h2>Conclusion</h2>
+  <p>Clawline does not need Task Ledger as the primary current-turn progress API. The upstream system already has live per-run progress via protocol v4 chat framing, tool/progress events, agent events, and reply callbacks. The lowest-risk product path is an additive progress event from the Clawline provider, a native reducer keyed by session/run/sequence, and a compact UI surface that clears on <code>final</code> or shows failure on <code>error</code>. The full upstream merge remains a separate dedicated cycle.</p>
+</main>
+</body>
+</html>

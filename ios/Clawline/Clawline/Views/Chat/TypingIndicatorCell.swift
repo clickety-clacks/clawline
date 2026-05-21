@@ -83,7 +83,7 @@ final class TypingIndicatorCell: UICollectionViewCell {
         containerView.configure(
             message: message,
             presentation: presentation,
-            failureReason: nil,
+            sendIndicatorState: nil,
             isCompact: isCompact,
             maxWidth: maxWidth,
             showsHeader: showsHeader,

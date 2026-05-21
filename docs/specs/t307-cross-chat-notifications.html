@@ -1,0 +1,558 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>T307 Cross-Chat Mentions and Notifications</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: transparent;
+      --fg: var(--clawline-fg, #1d2528);
+      --muted: #5f6f73;
+      --line: #cfd8d6;
+      --panel: #ffffff;
+      --accent: #176b6b;
+      --warn: #8a5400;
+      --code: #eef3f2;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: transparent;
+        --fg: var(--clawline-fg, #eef4f3);
+        --muted: #a8b6b8;
+        --line: #304043;
+        --panel: #182022;
+        --accent: #6ec7bc;
+        --warn: #e2b45e;
+        --code: #202b2d;
+      }
+    }
+
+    body {
+      margin: 0;
+      background: transparent;
+      color: var(--fg);
+      font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    main {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 48px 22px 72px;
+    }
+
+    h1, h2, h3 {
+      line-height: 1.15;
+      letter-spacing: 0;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: clamp(2rem, 4vw, 3rem);
+    }
+
+    h2 {
+      margin-top: 42px;
+      padding-top: 22px;
+      border-top: 1px solid var(--line);
+      font-size: 1.45rem;
+    }
+
+    h3 {
+      margin-top: 28px;
+      font-size: 1.1rem;
+    }
+
+    p {
+      margin: 10px 0;
+    }
+
+    ul, ol {
+      padding-left: 1.3rem;
+    }
+
+    li {
+      margin: 7px 0;
+    }
+
+    code, pre {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.92em;
+      background: var(--code);
+      border-radius: 6px;
+    }
+
+    code {
+      padding: 0.12rem 0.28rem;
+    }
+
+    pre {
+      overflow-x: auto;
+      padding: 14px 16px;
+      border: 1px solid var(--line);
+    }
+
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      margin: 16px 0;
+      background: var(--panel);
+    }
+
+    th, td {
+      border: 1px solid var(--line);
+      padding: 10px 12px;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      color: var(--accent);
+      font-weight: 700;
+    }
+
+    .meta {
+      color: var(--muted);
+      margin-bottom: 28px;
+    }
+
+    .callout {
+      border: 1px solid var(--line);
+      border-left: 5px solid var(--accent);
+      background: var(--panel);
+      padding: 14px 16px;
+      margin: 18px 0;
+      border-radius: 8px;
+    }
+
+    .warning {
+      border-left-color: var(--warn);
+    }
+
+    .decision {
+      font-weight: 700;
+    }
+  </style>
+</head>
+<body>
+<main>
+  <h1>T307 Cross-Chat Mentions and Notifications</h1>
+  <p class="meta">Product and architecture specification for Clawline prompt-field cross-chat sends and cross-chat assistant notification overlay. Prepared 2026-05-14.</p>
+
+  <section class="callout">
+    <p class="decision">Decision: Clawline should support explicit leading mention chips that route a prompt to another chat session, plus a volatile per-session notification overlay for assistant messages arriving from other chats.</p>
+    <p>The feature has two linked surfaces: a prompt composer picker that resolves <code>@</code> into a destination session, and an overlay layer that summarizes assistant output from non-current chat streams without writing anything into the current transcript.</p>
+  </section>
+
+  <h2>Source Notes</h2>
+  <ul>
+    <li>The tracker path <code>/Users/mike/.openclaw/workspace/tracking/T307.md</code> now exists and is the active T307 tracking file. Earlier drafts predated tracker creation; current product corrections must be reflected in both this source spec and the tracker.</li>
+    <li>The canonical invariants path named in agent instructions, <code>/Users/mike/shared-workspace/clawline/specs/clawline-invariants.md</code>, is absent. The available mirror <code>/Users/mike/shared-workspace/clawline/implementation_details/clawline-invariants.md</code> was consulted.</li>
+    <li>The requirements in the task prompt are treated as the source of truth for this spec. No implementation code was changed.</li>
+  </ul>
+
+  <h2>Goals</h2>
+  <ul>
+    <li>Let a user send a prompt from the current chat composer to another existing chat session by resolving a leading <code>@</code> mention into a chat-session token.</li>
+    <li>Keep cross-chat sends out of the current chat transcript. The user message and resulting assistant activity belong only to the destination chat, while the initiating chat may show a transient confirmation toast.</li>
+    <li>Show volatile, session-only notifications over the current chat UI when assistant messages arrive from other chat streams.</li>
+    <li>Keep notification actions discoverable with visible buttons while allowing physical-keyboard shortcuts for fast dismissal and reply.</li>
+  </ul>
+
+  <h2>Non-Goals</h2>
+  <ul>
+    <li>No persistent notification inbox, history, badge count, or cross-launch restoration.</li>
+    <li>No global broadcast mentions, multi-destination sends, or arbitrary inline mentions inside the middle of a prompt.</li>
+    <li>No unresolved-picker submission. While the mention picker is open and has a highlighted completion, <code>Enter</code>/<code>Return</code> accepts that completion just like <code>Tab</code>.</li>
+    <li>No current-chat echo, placeholder transcript row, or synthetic system message for a cross-chat send. The only current-chat acknowledgement is the required transient confirmation toast.</li>
+    <li>No routing fallback that canonicalizes Clawline sessions into <code>agent:main:main</code>. Clawline session keys remain structurally distinct per the session-routing invariant.</li>
+  </ul>
+
+  <h2>Terminology</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Term</th>
+        <th>Meaning</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Current chat</td>
+        <td>The chat session whose transcript and composer are currently visible.</td>
+      </tr>
+      <tr>
+        <td>Destination chat</td>
+        <td>The chat session selected by a resolved mention chip. It receives the cross-chat prompt.</td>
+      </tr>
+      <tr>
+        <td>Source chat</td>
+        <td>The chat session that produced an incoming assistant message represented by a notification bubble.</td>
+      </tr>
+      <tr>
+        <td>Resolved mention chip</td>
+        <td>A composer token representing one concrete destination chat session. It is not plain text and carries the destination session identity.</td>
+      </tr>
+      <tr>
+        <td>Notification bubble</td>
+        <td>The overlay surface for one source chat. At most one bubble exists per source chat.</td>
+      </tr>
+      <tr>
+        <td>Visible stack</td>
+        <td>The upper-right set of bubbles currently rendered over the chat UI. It is capped at about ten bubbles.</td>
+      </tr>
+      <tr>
+        <td>Overflow backlog</td>
+        <td>Notification bubbles that exist but are temporarily hidden because the visible stack is at capacity. Overflow is not dismissal.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>Prompt-Field Cross-Chat Send</h2>
+  <h3>Composer State</h3>
+  <ul>
+    <li>The picker opens only when the prompt starts with <code>@</code> and no resolved mention chip is already present.</li>
+    <li>The picker lists chat sessions excluding the current chat. The current chat must not be selectable through filtering or keyboard navigation.</li>
+    <li>With only the leading <code>@</code> and no filter text, the picker shows all eligible chat sessions except the current chat. If more eligible sessions exist than fit in the visible popup, the popup list must be internally scrollable so every match can be reached and selected without moving the composer, transcript, or surrounding chat chrome.</li>
+    <li>The mention completion popup is an active composer selection surface laid out directly above the prompt input text box with only a small touch-safe gap, including when the software keyboard is visible. It must not leave a large dead band between the picker bottom and composer/SBB area. It must layer above the dots/status indicator and other passive chat chrome; dots must not reserve spacer height, push it away from the composer, cover it, clip it, or occlude completion rows. When the popup/chat-list is visible, SBB hides instead of remaining visible underneath or visually competing with the active picker surface.</li>
+    <li>The dots/status indicator keeps its press-and-hold Mac-Dock-style wave/elevation affordance. During the hold animation, dots may rise visually above the indicator and must not be clipped by the indicator's own bounds or by an invisible/floating crop box introduced for popup or notification layering. Popup and notification z-order fixes must preserve this overflow behavior.</li>
+    <li>Typing characters after the leading <code>@</code> filters the session list. Filtering should match user-visible session labels and may also match stable session identifiers if those are already shown elsewhere in Clawline.</li>
+    <li>The picker maintains a single highlighted selection when at least one filtered result exists.</li>
+    <li><code>ArrowDown</code> and <code>ArrowUp</code> move the highlighted selection through filtered results while the picker is open and composer focus remains active. These keys must not move the text cursor, scroll unrelated UI, or leave the picker inactive. Wrapping only if that is already the platform convention for comparable Clawline pickers.</li>
+    <li>On the native spatial/visionOS app only, the <code>@</code> mention picker must render on a spatial overlay plane above the dots/status indicator and above the chat/root plane. The required behavior is visible layering: the dots indicator must not occlude or visually sit in front of the picker. This spatial z-offset rule must not change iOS, Catalyst, or Web picker layering except where shared code is refactored without visible behavior drift.</li>
+    <li><code>Tab</code> converts the highlighted session into a resolved mention chip and leaves focus in the composer text field after the chip.</li>
+    <li><code>Enter</code>/<code>Return</code> converts the highlighted session into a resolved mention chip using the same selection semantics as <code>Tab</code> while the picker is open. It must not submit the composer while a selectable completion is highlighted.</li>
+    <li>The resolved mention chip must visibly show the selected chat name, including multi-word names such as <code>Clawline Watch</code>. It must not clip or hide a wrapped second word while leaving blank trailing space. If available width is constrained, truncation must be intentional and readable, not accidental line clipping.</li>
+    <li>Normal <code>Enter</code>/<code>Return</code> prompt submission resumes after the mention picker is closed or after the selected completion has been resolved into a chip.</li>
+    <li>Deleting the resolved chip returns the composer to normal current-chat routing. Re-typing a leading <code>@</code> can reopen the picker.</li>
+  </ul>
+
+  <h3>Submit Semantics</h3>
+  <ul>
+    <li>If a resolved mention chip is present, only text after the chip is submitted, and it is submitted to the destination chat represented by the chip.</li>
+    <li>The submitted text must be trimmed only according to the existing composer submission rules. This spec does not add new validation or sanitization rules.</li>
+    <li>The cross-chat user message appears only in the destination chat transcript. It does not appear locally in the current chat as a user message, status row, system row, or copy.</li>
+    <li>After the cross-chat prompt is accepted for dispatch, the current chat shows the same kind of transient toast used for chat-name feedback, with copy equivalent to <code>Sent to [Chat Name]</code>.</li>
+    <li>The destination chat receives the prompt through the same routing contract as if the user had navigated there and submitted it directly, except that the initiating UI remains on the current chat.</li>
+    <li>The destination chat's dot/status color must update from the same pending, active, accepted, failed, and completed send state source of truth used for normal prompts submitted from that chat. The currently viewed chat must not change dot/status color as if it received a local prompt.</li>
+    <li>If the destination chat later produces assistant output while the user is still viewing another chat, that assistant output is eligible for the cross-chat notification overlay.</li>
+  </ul>
+
+  <h3>Picker Empty and Error States</h3>
+  <ul>
+    <li>If filtering produces no eligible sessions, the picker shows an empty state. With no selectable completion highlighted, <code>Enter</code>/<code>Return</code> follows the existing normal composer behavior.</li>
+    <li>If the destination session disappears after chip resolution and before submit, the composer must fail through the existing send-error pathway without creating a local transcript message. The spec does not require a new recovery UI.</li>
+    <li>If cross-chat send fails after dispatch, failure reporting belongs to the send pathway for the initiating composer, but no current-chat transcript row is created.</li>
+  </ul>
+
+  <h2>Incoming Notification Behavior</h2>
+  <h3>Spatial Transcript Scroll Hit Testing</h3>
+  <ul>
+    <li>On the native spatial/visionOS app only, the transcript scroll surface includes the transparent areas between message bubbles. Gaze-targeted scrolling over inter-bubble space must scroll the chat transcript the same way as scrolling over visible transcript content. Transparent gaps between messages must not become dead zones, and must not pass scroll input through to unrelated root-plane UI.</li>
+    <li>This spatial hit-testing rule must coexist with overlay ownership: interactive notification bubbles, notification controls, reply fields, the <code>@</code> mention picker, and action menus keep their own hit regions when present, but ordinary transparent transcript spacing remains owned by transcript scrolling.</li>
+  </ul>
+
+  <h3>Eligibility</h3>
+  <ul>
+    <li>Assistant messages from chat streams other than the current chat create or update notifications.</li>
+    <li>User, system, and tool messages do not create notifications.</li>
+    <li>Assistant messages for the current chat do not create overlay notifications while that chat is current.</li>
+    <li>Notification state is volatile and session-only. It is held in memory and discarded on app restart, process death, or explicit in-app session reset.</li>
+  </ul>
+
+  <h3>Bubble Aggregation</h3>
+  <ul>
+    <li>Each source chat has at most one notification bubble.</li>
+    <li>When a new assistant message arrives from a source chat with no existing bubble, create a bubble for that source chat.</li>
+    <li>When additional assistant messages arrive from the same source chat, append them into that bubble with newest content above older content. Older content is pushed down and may move below the visible portion of the bubble.</li>
+    <li>Assistant-message notification content should render the same safe Markdown/rich-text subset used by normal assistant chat bubbles where appropriate for the compact notification surface. Markdown rendering must not degrade to raw/plain text unless the source content is plain text, and it must preserve sanitization, compact sizing, internal scroll behavior, notification action hit targets, and a default body text color with slightly stronger contrast than the current deployed notification body text in both light and dark modes.</li>
+    <li>Current product failure to correct: notification content is still not parsing Markdown/rich text in the deployed verification surface. Any fix must prove Markdown parsing in real notification bubbles on the same platform surfaces as normal assistant chat bubbles, not only in isolated sample/demo content.</li>
+    <li>Streaming updates for the same assistant message update that message entry rather than creating repeated entries. Implementations should key by the most stable available assistant message or run identifier.</li>
+    <li>The bubble's ordering timestamp updates when its source chat receives a new assistant message.</li>
+  </ul>
+
+  <h3>Overlay Layer and Stack</h3>
+  <ul>
+    <li>Notifications render in the upper-right over the current chat UI on their own presentation layer.</li>
+    <li>On the native spatial/visionOS app only, cross-chat notification bubbles use the same spatial z-offset as the <code>@</code> mention picker: above the root/chat plane so notifications visibly float above the chat plane and are not occluded by dots/status chrome or other root-plane UI. This is a spatial presentation invariant, not a global z-order change for iOS, Catalyst, or Web.</li>
+    <li>The overlay layer receives the current chat identity and resolved overlay bounds. It may validate bounds, position bubbles, animate stack changes, and route hit regions, but it must not reconstruct chat layout or pane topology.</li>
+    <li>Each bubble has a maximum height equal to 80% of the current notification max-height target as of the 2026-05-17 sizing refinement, and shrinks vertically to fit shorter content with intentional bottom padding below rendered assistant-message content. The content bottom padding should be more generous than the current deployed build, but must not recreate the old oversized blank lower area.</li>
+    <li>Short-content notifications must resolve the whole bubble to actual header, message content, action chrome, and intended padding. A short message must not reserve max-height body space, stale scroll-container height, inherited min-height, or blank lower area; max height applies only as a cap for long/overflowing content.</li>
+    <li>Each bubble resolves its actual width from available overlay space. On non-compact screen sizes, the maximum notification width should be about one quarter wider than the current implemented/target notification width. On compact screens, notification width must remain fit-bound inside the safe visible area, avoid covering the composer in an incoherent way, and never use a fixed desktop/tablet width that clips controls or text. Compact notification placement must leave a left-side screen margin from the notification card to the screen edge equal to twice the normal chat bubble's left-side screen margin, while preserving the corrected external right-side margin. On larger screens, bubbles may use that wider comfortable cap but should still read as compact notifications, not full transcript cards.</li>
+    <li>Notification bubble readable text, including header/body/action-menu-relevant inline labels where applicable, should be about 2pt larger than the current deployed sizing while preserving compact layout, max-height/scroll behavior, and unclipped controls/text.</li>
+    <li>When a notification bubble's resolved height changes because content arrives, content becomes shorter, reply mode opens/closes, controls change, or layout constraints change, the bubble animates to the new height instead of snapping or leaving stale reserved space.</li>
+    <li>The notification header must stay visually compact, with reduced vertical padding above and below the header content.</li>
+    <li>The visible notification stack anchors at the upper-right safe visible area with only appropriate safe-area/chrome margin. It must not start noticeably down from the top unless viewport chrome or safe-area insets require that offset. In normal undocked placement, notification bubbles keep a visible right-side breathing gap from the screen/safe-area edge equal to roughly half the normal chat transcript side padding. This is external margin between the outside of the notification card and the screen/safe edge, not extra internal padding inside the card. Docked/peek placement is the exception: docked peeks still anchor to the actual right edge with only the intended peek visible.</li>
+    <li>Swiping the notification stack or an individual visible notification bubble to the right collapses all current notification bubbles off-screen to the right, leaving their left edges peeking from the right edge as a notification-present affordance. This is not dismissal; visible and overflow notification state remains intact. The gesture hit target belongs to the notification stack/bubbles, not to the general chat background or transcript surface. The peek should expose enough pixels to be clearly intentional, about one third less than the current deployed/target peek amount while still clearly reading as a notification affordance. During a left-swipe-to-dismiss gesture on a notification, the visible close icon/X should highlight red as the destructive dismiss action becomes active, and return to its normal state if the gesture is canceled. The destructive red must be the same Clawline theme red semantic color used for red status-indicator dots. As the dismiss action becomes active, do not only tint the X; add a delayed blurred red color wash/halo behind or around the close control, in the same visual language as the ascend/send button halo but themed red. Canceling the swipe restores the normal non-destructive state. During left/right drag, dock, reveal, and dismiss motion, the notification frame, material, contents, shadows, blur, halo, and destructive feedback wash must not be clipped into a rectangular overlay/container. The whole notification surface may overflow its layout frame over the chat area while preserving hit testing, stack ordering, toast/menu layering, and the internal clipped green accent geometry.</li>
+    <li>Each notification bubble has a Clawline theme-green accent underlay/color connection indicator on the inside left side of the bubble, underneath the Liquid Glass material rather than painted as an opaque line on top of it. The underlay is clipped by the bubble's rounded shape and must not render as an external line outside the bubble. It should use 40% opacity through the glass, with a saturated resolved green so it remains legible as a deliberate notification edge. It should remain thicker than the original thin bar while being slightly smaller than the current deployed indicator if that deployed size visually dominates the notification. The accent remains visible when the stack is docked/peeked so the collapsed affordance reads as a notification edge rather than an arbitrary glass sliver. The accent must use the same Clawline theme/design-system green semantic token across iOS, Catalyst, and Web; arbitrary red, pink, blue, accent-warm, system accent, or other platform-specific fallback colors are incorrect.</li>
+    <li>The notification accent is also an interaction affordance. A direct gesture on the accent/left-edge gutter of a visible notification must remain supported for reply-toggle interaction where the platform has enough precise pointer/touch affordance to make it reliable. This gesture belongs to the notification bubble/accent region only; it must not be attached to the empty chat background, and it must not interfere with the horizontal dock/restore/dismiss gestures.</li>
+    <li>In collapsed/peek mode, tapping the peeking notification edges or swiping those peeks/bubbles left expands the stack back to its normal visible positions. A left-swipe/drag on empty chat background must not undock notifications; restore should require direct interaction with the notification peek/stack affordance or the explicit keyboard toggle.</li>
+    <li>When a new notification arrives while the stack is collapsed/peeked, only that newly arriving or updated notification bubble receives a visible normal-position preview for about 5 seconds before returning to collapsed/peeked state. Existing unrelated docked notifications remain docked/peeked; the whole stack must not undock unless the user explicitly expands or interacts with it. Multiple arrivals reset or extend the preview window only for the affected incoming/updated bubbles so each newly arriving or newly updated source bubble gets its own roughly 5 seconds of visibility. This is a preview affordance, not a dismissal or a permanent mode change.</li>
+    <li>The 5-second preview requirement applies on real docked/peeked surfaces: a newly arriving or updated notification must visibly reveal itself for the preview window, not remain hidden in docked state, and not force unrelated docked notifications to reveal.</li>
+    <li>Normal/undocked notification bubbles do not auto-dismiss on a timer. They persist until an explicit dismissal, source-chat navigation dismissal, valid clear-all, source deletion or unavailability, app/view teardown, or another source-truth dismissal path. The roughly 5-second timer belongs only to the docked/peek preview reveal window and must not delete notification state or remove a normally visible notification.</li>
+    <li>Notification motion uses a single cross-platform motion contract by behavior type. Duration is 0.30 seconds across iOS, Catalyst, and Web. Enter/reveal animations use an ease-out curve. Leave/dismiss/hide/collapse animations use an ease-in curve. Bubble height changes, including transitions between message-content mode and the reply interface, use ease-in-out. Platform-native animation APIs are fine, but platform-local springs or ad hoc CSS timings must not create visibly different motion semantics for the same notification behavior.</li>
+    <li>Notification bubbles animate in from off-screen right when they appear and animate toward off-screen right when they leave, collapse, or are dismissed, while preserving fit-based stacking and overflow semantics. When a new or updated bubble becomes the top notification, the previously top notification and any displaced visible bubbles animate downward into their new stack positions rather than jumping or snapping.</li>
+    <li>Dismissal animation semantics apply to every dismissal path on Catalyst, iOS, and Web: visible Dismiss button, keyboard direct dismissal, action-menu/popup Dismiss, clear-all, and platform equivalents. Keyboard or popup dismissal must not instantly remove a notification without the same visible exit/collapse animation used by pointer/button dismissal, except during app teardown or full view destruction.</li>
+    <li>When bubble content exceeds the per-bubble maximum height, the bubble content area scrolls inside that bubble.</li>
+    <li>When reply mode is open, the bubble resizes around the reply interface rather than preserving the prior message-content height; the reply controls and text field must determine the active bubble height while remaining usable on compact screens. The notification reply field is multi-line: it grows with typed content up to five visible text lines, then vertically scrolls inside the reply field instead of continuing to grow the bubble. The bottom padding beneath the reply text field should match the left-side gap between the reply text field and the green accent/color bar.</li>
+    <li>The notification reply row is horizontally constrained inside the notification bubble. When typed reply text overruns the field width, it wraps to the next line and grows vertically under the existing five-line/scroll rule. The text field must not expand horizontally, widen the notification bubble, or push the send button off-screen; the send button remains pinned, visible, and tappable on the right.</li>
+    <li>The visible stack capacity is fit-based, with ten as the upper bound only when the available viewport height can show ten usable bubbles.</li>
+    <li>Visible bubbles are ordered by most recent source-chat assistant activity, newest at the top.</li>
+    <li>A notification bubble with an active reply field is interaction-pinned: it must not be reordered, pushed into overflow, collapsed out from under the user, or otherwise shuffled by newer incoming notifications while the user is typing or editing that reply. Implementations may move the replying bubble into a stable interaction lane outside the normal stack, or pin it in place within the stack, but the active reply field must remain spatially stable until reply mode is canceled, sent, dismissed, or the user navigates away.</li>
+    <li>When a new or updated bubble would exceed visible capacity, the oldest visible bubble animates off-stack into overflow. It is not dismissed and remains in volatile notification state.</li>
+    <li>When visible bubbles are dismissed and overflow exists, hidden bubbles return to the visible stack according to the same most-recent-activity ordering.</li>
+  </ul>
+
+  <h3>Navigation Dismissal</h3>
+  <ul>
+    <li>On a navigation transition from one current chat to another, dismiss notifications whose source chat is the newly current chat.</li>
+    <li>Chat navigation must preserve keyboard visibility/focus state. Moving between chats, including normal chat switching and notification body/action navigation to a source chat, must not focus the composer or a notification reply field and must not summon the software keyboard when the keyboard was not already intentionally active. This is V307-25.</li>
+    <li>The navigation dismissal target is that chat only. Do not globally clear notifications for unrelated chats.</li>
+    <li>Dismissal on navigation applies to both visible and hidden overflow bubbles associated with that source chat.</li>
+  </ul>
+
+  <h2>Actions and Keyboard Behavior</h2>
+  <h3>Visible Controls</h3>
+  <ul>
+    <li>Each notification bubble has visible iconic Dismiss and Reply buttons.</li>
+    <li>Keyboard shortcuts may actuate those actions, but shortcuts do not replace visible buttons.</li>
+    <li>Dismiss removes the bubble for that source chat from volatile notification state, including all accumulated assistant message entries in that bubble.</li>
+    <li>Long-pressing or holding the dismiss control opens a standard platform confirmation dialog offering to clear all notifications, including hidden overflow backlog.</li>
+    <li>Reply toggles a small multi-line text field inside the bubble. The reply field is scoped to that bubble's source chat, wraps long text within the available row width, grows up to five visible lines, and then scrolls vertically within the field for longer drafts. It must never claim extra horizontal width or displace the send button.</li>
+    <li>When reply mode is open, the Reply button is visually active/highlighted. Tapping Reply again exits reply mode and returns the bubble to its normal content state without sending or dismissing.</li>
+    <li>Tapping the notification body outside controls navigates to that notification's source chat.</li>
+  </ul>
+
+  <h3>Reply Field</h3>
+  <ul>
+    <li><code>Enter</code> / Return in the reply field sends the reply to the bubble's source chat, including the iOS software keyboard submit key.</li>
+    <li>On iOS/iPadOS, focusing a notification reply text field must present the software keyboard with the same <strong>Send</strong> return-key label/submit affordance used by the normal prompt input. Showing a generic <strong>Return</strong> key while editing a notification reply is incorrect; this is V307-24.</li>
+    <li><code>Escape</code> cancels reply mode and returns the bubble to its normal action state without dismissing it.</li>
+    <li>Tapping the active Reply button also cancels reply mode and returns the bubble to its normal action state without dismissing it.</li>
+    <li>Replies appear only in the target/source chat transcript. They do not appear locally in the current chat transcript.</li>
+    <li>The notification reply send control must visually and behaviorally match the normal composer send control state language on the notification surface. When the reply draft is sendable, the paper-plane send button must include the same Clawline theme-green halo/ring/accent treatment as the normal composer send button, scaled only as needed for the compact notification reply row. A bare paper-plane glyph without the green halo is incorrect.</li>
+    <li>When the notification reply send control visually indicates ready/sendable, tapping it must be accepted immediately, move through the same accepted/sending feedback semantics as the normal composer send button, and submit exactly once to the notification's source chat. A ready-looking green send button must not ignore taps, silently no-op, duplicate the reply, or wait through unexplained latency before sending. If connection or transport state prevents immediate acceptance, the control must show that state instead of appearing ready.</li>
+    <li>While the user is typing in a notification reply field, that bubble is pinned for interaction stability and is excluded from normal recency reordering/overflow movement caused by other notifications. New content for that same source may update the bubble, but it must not move the reply field out from under the user's focus.</li>
+    <li>After a successful reply send is accepted, the reply field closes and the notification bubble is dismissed.</li>
+    <li>A notification reply send must update the associated source chat's dot/status color from the same send state source of truth used for normal prompts submitted from that chat. The currently viewed chat must not change dot/status color as if it received a local prompt.</li>
+    <li>If a reply send fails, use the existing send-error pathway for the reply control. Do not create a current-chat transcript row.</li>
+  </ul>
+
+  <h3>Hotkeys</h3>
+  <ul>
+    <li>Keyboard handling must have an explicit ownership model rather than per-shortcut patches. While notifications, the notification action menu, the composer mention picker, composer text editing, reply-field text editing, and transcript scrolling coexist, each key event must resolve through a documented precedence order so fixes do not regress adjacent keyboard paths.</li>
+    <li>Required precedence for relevant keys: an open notification action menu owns its arrow keys and Return/Enter; an open composer mention picker owns its arrow keys and mention-accept Return/Enter; assigned notification number shortcuts <code>Cmd-0</code> through <code>Cmd-9</code>, <code>Cmd-Shift-0</code> through <code>Cmd-Shift-9</code>, and <code>Cmd-Shift-Option-0</code> through <code>Cmd-Shift-Option-9</code> always win anywhere in the app while their target notification exists, regardless of whether focus is in the composer, a reply field, a menu, or another UI surface; visible notifications own explicitly listed notification shortcuts including <code>Cmd-J</code>/<code>Cmd-K</code>/<code>Cmd-Shift-J</code>/<code>Cmd-Shift-K</code>; focused reply fields own their plain text-entry keys including plain Return send and Escape cancel; focused composer owns normal text editing and normal submit keys; transcript/chat scrolling receives only unclaimed keys. Platform bridges must preserve this product ordering even when UIKit/AppKit/Web focus would normally deliver the event to a text field first.</li>
+    <li>Visible notifications show shortcut labels prepended with the Command symbol, for example <code>⌘1</code> / <code>Cmd-1</code>, not a bare index. The shortcut indicator on the notification box renders as normal-weight inline text only: not bold, not a pill, not a badge/chip.</li>
+    <li><code>Cmd-0</code> through <code>Cmd-9</code> open a lightweight action menu for the assigned notification. The default highlighted action at the top is always <strong>Go to Chat…</strong>, followed by <strong>Reply…</strong>, then <strong>Dismiss</strong>. The menu layers above the notification stack so notification bubbles cannot overlap or obscure any part of it. The menu itself must have visible Liquid Glass/platform menu material, contrast, and separation; it must not appear transparent, flat, or visually merged into the notification bubble behind it. The menu surface must size to its action rows plus normal platform padding, must not stretch into a full-height/right-side panel or occupy the entire right side of the window, and must be horizontally center-aligned with the notification stack/bubble column it belongs to.</li>
+    <li>The assigned number shortcuts are global notification commands while assigned. For example, if a visible notification owns <code>Cmd-3</code>, pressing <code>Cmd-3</code> must open that notification's action menu from any focus context, not only when the notification stack itself is focused or already open.</li>
+    <li>The action menu's Reply and Dismiss rows show their direct shortcuts on the trailing/right side using standard platform shortcut indicators/glyphs. On SwiftUI/Apple surfaces this should use the native shortcut presentation with symbols, e.g. Reply shows <code>⇧⌘#</code> and Dismiss shows <code>⌥⇧⌘#</code>, not spelled-out modifier words.</li>
+    <li>The notification action menu supports arrow-key navigation and Return/Enter activation on the actual focused platform surface; pressing <code>Cmd-#</code> then Return/Enter should quickly navigate to the source chat via the default <strong>Go to Chat…</strong> item. On iOS/iPadOS hardware keyboards, these keys must be captured by the menu while it is open rather than leaking to the underlying composer/transcript.</li>
+    <li><code>Cmd-Shift-0</code> through <code>Cmd-Shift-9</code> toggle reply mode for the matching visible notification. If the target notification is not already in reply mode, the shortcut opens reply mode and focuses its reply field. If the same target notification is already in reply mode, pressing the same shortcut exits/cancels reply mode without sending, navigating, or dismissing the notification.</li>
+    <li><code>Cmd-Shift-Option-0</code> through <code>Cmd-Shift-Option-9</code> remain direct dismiss shortcuts for the matching visible notification.</li>
+    <li>The number assignment follows the visible stack order. The top visible bubble receives the first assigned number, then assignment proceeds downward through the visible stack.</li>
+    <li><code>Cmd-minus</code> dismisses all notifications, including hidden overflow backlog.</li>
+    <li><code>Cmd-\</code> toggles the notification stack between normal visible placement and the right-edge docked/peek state. It uses the same state transition and animation as swiping the stack right to dock and swiping/tapping left-edge peeks to restore.</li>
+    <li>When visible notification bubbles exist, <code>Cmd-J</code> and <code>Cmd-K</code> scroll the currently active visible notification bubble's internal scroll area using the same directional convention as the existing on-screen chat-bubble scroll behavior. These shortcuts are global notification shortcuts while notifications are visible: they must work when focus is in the composer, in a notification reply text field, in another non-text UI surface, or nowhere obvious at all.</li>
+    <li><code>Cmd-Shift-J</code> and <code>Cmd-Shift-K</code> follow the same always-available notification-bubble scroll rule when visible notifications exist. A state where these shortcuts sometimes work and later stop working during the same app/runtime session is a regression, not an acceptable fallback. This deployed eezo failure is tracked as V307-36.</li>
+    <li>If no notification bubble has an explicit active/hovered/focused state, <code>Cmd-J</code> and <code>Cmd-K</code> target the top visible notification bubble. If the targeted notification has no overflow scrollable content, the shortcut is a no-op and must not steal or synthesize transcript scroll.</li>
+    <li>Hotkeys are reassigned whenever bubbles enter, leave, reorder, overflow, or return from overflow.</li>
+    <li>The assigned shortcut number is visible only when the platform reports that hardware-keyboard shortcuts are available. On iOS/iPadOS, treat a connected hardware keyboard as detectable runtime state; without that signal, hide the number indicator. On macOS/Catalyst, hardware-keyboard shortcuts are assumed available unless the platform explicitly reports otherwise.</li>
+    <li>Shortcut handling must not intercept existing text editing behavior while focus is inside a normal composer or notification reply text field unless the shortcut is explicitly listed in this spec. Assigned notification number shortcuts are explicitly listed and therefore override text-field focus.</li>
+  </ul>
+
+  <h2>State Model</h2>
+  <h3>Composer State</h3>
+  <pre><code>ComposerCrossChatState {
+  currentChatId: ChatSessionId
+  leadingMentionQuery: String?
+  pickerVisible: Bool
+  filteredSessionIds: [ChatSessionId]
+  highlightedSessionId: ChatSessionId?
+  resolvedMention: ResolvedMention?
+}
+
+ResolvedMention {
+  destinationChatId: ChatSessionId
+  displayTitle: String
+}</code></pre>
+
+  <h3>Notification State</h3>
+  <pre><code>CrossChatNotificationStore {
+  currentChatId: ChatSessionId
+  bubblesBySourceChatId: Map&lt;ChatSessionId, NotificationBubble&gt;
+  visibleSourceChatIds: [ChatSessionId]
+  overflowSourceChatIds: [ChatSessionId]
+}
+
+NotificationBubble {
+  sourceChatId: ChatSessionId
+  sourceTitle: String
+  entriesNewestFirst: [AssistantNotificationEntry]
+  lastAssistantActivityAt: Instant
+  replyDraft: String
+  replyMode: Bool
+  assignedHotkeyNumber: Int?
+}
+
+AssistantNotificationEntry {
+  assistantMessageId: String
+  contentPreview: String
+  updatedAt: Instant
+  final: Bool
+}</code></pre>
+
+  <p>The store is intentionally volatile. It should live at the UI/session coordination layer that observes chat stream events and current-chat navigation, not in transcript persistence.</p>
+
+  <h2>Event and Routing Semantics</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Event</th>
+        <th>Required Handling</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Composer text starts with <code>@</code></td>
+        <td>Open session picker with all eligible sessions except current chat, filtered by text after <code>@</code>.</td>
+      </tr>
+      <tr>
+        <td><code>Tab</code> in picker</td>
+        <td>Resolve highlighted session into a chip and keep composer focus after the chip.</td>
+      </tr>
+      <tr>
+        <td><code>Enter</code> in composer</td>
+        <td>Submit normally. Route to destination chat only if a resolved mention chip exists; otherwise route to current chat.</td>
+      </tr>
+      <tr>
+        <td>Assistant message from non-current chat</td>
+        <td>Create or update that source chat's notification bubble. Do not modify the current transcript.</td>
+      </tr>
+      <tr>
+        <td>User, system, or tool message from non-current chat</td>
+        <td>Do not create or update notification bubbles.</td>
+      </tr>
+      <tr>
+        <td>Navigate to chat</td>
+        <td>Dismiss notifications whose source is the newly current chat. Preserve notifications for all unrelated chats.</td>
+      </tr>
+      <tr>
+        <td>Dismiss bubble</td>
+        <td>Remove that source chat bubble from visible or overflow state, then promote overflow bubbles if capacity allows.</td>
+      </tr>
+      <tr>
+        <td>Reply from bubble</td>
+        <td>Send reply only to that bubble's source chat. Do not create local current-chat transcript output. Update that source chat's dot/status color like a normal send, and dismiss the bubble after accepted send.</td>
+      </tr>
+      <tr>
+        <td><code>Cmd-minus</code></td>
+        <td>Dismiss all visible and overflow notification bubbles.</td>
+      </tr>
+      <tr>
+        <td><code>Cmd-\</code></td>
+        <td>Toggle the notification stack between normal visible placement and right-edge docked/peek mode using the same behavior as the swipe dock/restore interaction.</td>
+      </tr>
+      <tr>
+        <td><code>Cmd-J</code> / <code>Cmd-K</code> / <code>Cmd-Shift-J</code> / <code>Cmd-Shift-K</code> with visible notifications</td>
+        <td>Always scroll the active visible notification bubble's internal content area using the existing chat-bubble scroll direction convention, including when focus is in the composer or a notification reply field; default to the top visible bubble when no bubble is active.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>Visual and Platform Rules</h2>
+  <ul>
+    <li>Notification bubbles and buttons follow Apple standard Liquid Glass rules on Apple platforms. Use platform glass materials and native button affordances rather than custom frosted approximations where available.</li>
+    <li>Buttons are iconic. Use SF Symbols and SF fonts on iOS, iPadOS, and macOS where available. Electron and web implementations use the platform's equivalent symbol system or the existing Clawline icon system.</li>
+    <li>Icon buttons may have enlarged invisible hit regions, but must not add visible background circles or change the cleaner icon-only appearance solely to enlarge tap targets.</li>
+    <li>Bubble content must remain readable above the chat UI in light and dark modes. The overlay should preserve enough contrast without introducing a separate full-screen scrim.</li>
+    <li>Bubble hit regions include visible controls, the reply field, and notification-body navigation to the source chat. The overlay should not steal scroll, selection, or composer input outside bubble bounds.</li>
+    <li>The visible stack should animate insertions, removals, overflow movement, and promotion from overflow in a way that preserves source-chat identity. Animation is presentational only and does not change routing semantics.</li>
+    <li>Layout is resolved by the owning chat screen. The notification layer receives resolved safe-area-aware bounds and must not infer split orientation, pane topology, or chat layout intent.</li>
+  </ul>
+
+  <h2>Edge Cases</h2>
+  <ul>
+    <li>If the current chat is the only chat session, typing <code>@</code> opens an empty picker because there are no eligible destination sessions.</li>
+    <li>If a source chat is deleted or becomes unavailable, dismiss its notification bubble from both visible and overflow state.</li>
+    <li>If a visible bubble receives a new assistant message, it moves according to most-recent-activity ordering and receives a freshly assigned hotkey number based on its new visible position.</li>
+    <li>If an overflow bubble receives new assistant content, it may re-enter the visible stack if it becomes one of the most recent bubbles; the oldest visible bubble then overflows.</li>
+    <li>If a bubble is in reply mode and another assistant message arrives from the same source chat, the new content is inserted above older content without clearing the reply draft.</li>
+    <li>If a bubble in reply mode overflows due to stack pressure, reply mode should close and preserve no draft. Overflow bubbles are not interactive while hidden.</li>
+    <li>If the user navigates to a source chat while its bubble has an unsent reply draft, navigation dismissal cancels the draft and dismisses the bubble.</li>
+    <li>If the hardware-keyboard availability signal changes while notifications are visible, number indicators update without changing bubble order.</li>
+    <li>If an assistant message contains attachments or rich content, the notification uses the same safe preview policy already used for compact transcript previews. This spec does not introduce new attachment rendering.</li>
+  </ul>
+
+  <h2>Test Plan</h2>
+  <h3>Composer and Routing</h3>
+  <ul>
+    <li>Typing <code>@</code> at the start of the prompt opens the picker; typing <code>@</code> later in the prompt does not.</li>
+    <li>The picker excludes the current chat and filters as characters are typed after <code>@</code>.</li>
+    <li><code>ArrowUp</code> and <code>ArrowDown</code> change selection without submitting.</li>
+    <li><code>Tab</code> resolves the selected chat into a chip.</li>
+    <li><code>Enter</code> with an unresolved picker submits normal text to the current chat.</li>
+    <li><code>Enter</code> with a resolved chip sends only the post-chip text to the destination chat and creates no current-chat transcript row.</li>
+  </ul>
+
+  <h3>Notification Store</h3>
+  <ul>
+    <li>Assistant messages from non-current chats create bubbles; user, system, and tool messages do not.</li>
+    <li>Multiple assistant messages from one source chat aggregate into one bubble newest-first.</li>
+    <li>Streaming updates for one assistant message update one entry rather than appending duplicates.</li>
+    <li>More than visible capacity pushes the oldest visible bubble into overflow without dismissing it.</li>
+    <li>Dismissing visible bubbles promotes overflow bubbles back into the visible stack.</li>
+    <li><code>Cmd-minus</code> clears visible and overflow bubbles.</li>
+    <li>App restart clears all notification state.</li>
+  </ul>
+
+  <h3>Actions and Navigation</h3>
+  <ul>
+    <li>Tapping the notification body navigates to that bubble's source chat.</li>
+    <li>Pressing <code>Cmd-0</code> through <code>Cmd-9</code> for the assigned visible bubble opens the action menu with <strong>Go to Chat…</strong> selected by default; Return/Enter activates it and navigates to that bubble's source chat.</li>
+    <li>The action menu visually exposes the direct accelerators for Reply and Dismiss on the right side using the platform-standard shortcut indicator style and modifier symbols: Reply is <code>⇧⌘#</code>; Dismiss is <code>⌥⇧⌘#</code>.</li>
+    <li>Reply button and <code>Cmd-Shift-0</code> through <code>Cmd-Shift-9</code> toggle the assigned bubble's reply field: first activation opens reply mode, second activation closes/cancels it without sending.</li>
+    <li>Dismiss button and <code>Cmd-Shift-Option-0</code> through <code>Cmd-Shift-Option-9</code> remove the assigned visible bubble.</li>
+    <li>Reply button toggles reply mode and visibly indicates the active state while the reply field is open.</li>
+    <li><code>Cmd-\</code> toggles notification docking on the right edge, matching the swipe-left/swipe-right dock and restore behavior.</li>
+    <li>When the stack is docked/collapsed, every newly arriving or newly updated notification gets a roughly 5-second visible preview before the stack re-collapses, unless the user manually expands or interacts with the stack.</li>
+    <li>With one or more visible notifications, <code>Cmd-J</code>, <code>Cmd-K</code>, <code>Cmd-Shift-J</code>, and <code>Cmd-Shift-K</code> always scroll long notification content inside the active/top bubble without scrolling the transcript or changing notification order, including while the composer or notification reply text field is focused and while the prompt is unfocused.</li>
+    <li><code>Enter</code> in a notification reply field sends only to the source chat; <code>Escape</code>, tapping the active Reply button, or pressing the same <code>Cmd-Shift-#</code> reply shortcut again cancels reply mode.</li>
+    <li>Tapping notification content outside controls navigates to the source chat.</li>
+    <li>Long-press or hold on a notification dismiss control presents a standard confirmation dialog offering to clear all notifications.</li>
+    <li>Cross-chat mention sends and notification replies update the target/source chat dot/status color exactly like normal sends from that chat, without falsely updating the current chat.</li>
+    <li>Navigate to a source chat and verify only notifications associated with the newly current chat are dismissed.</li>
+    <li>Navigate between unrelated chats and verify unrelated notifications persist.</li>
+  </ul>
+
+  <h3>Visual and Platform</h3>
+  <ul>
+    <li>Verify upper-right overlay placement on compact iPhone, iPad split view, macOS/Catalyst, and Electron/web surfaces where applicable.</li>
+    <li>Verify Liquid Glass materials and SF Symbol buttons on Apple platforms.</li>
+    <li>Verify no overlay hit region blocks composer typing, transcript scroll, or chat selection outside bubble bounds.</li>
+    <li>Verify number indicators appear when hardware-keyboard shortcuts are available and are hidden when iOS/iPadOS has no connected hardware keyboard.</li>
+  </ul>
+
+  <h2>Implementation Risks</h2>
+  <ul>
+    <li>Routing leakage: cross-chat sends must not create local transcript rows or synthetic current-chat events. Tests should assert destination-only transcript mutation.</li>
+    <li>Session identity drift: mention chips and notification bubbles must carry stable chat session identities, not display titles or canonicalized main-session aliases.</li>
+    <li>Duplicate streaming entries: assistant stream deltas can look like many messages unless keyed by stable message or run identity.</li>
+    <li>Overlay ownership creep: the overlay must not reconstruct split layout or pane topology. It should consume resolved safe-area bounds from the owning screen.</li>
+    <li>Shortcut collisions: command-number shortcuts may conflict with platform or app-level navigation commands. Implementation should register them only while visible notification bubbles exist and should release/reassign them on stack changes.</li>
+    <li>Overflow ambiguity: hidden overflow bubbles are active notification state, not dismissed state. Dismiss-all and navigation dismissal must include overflow.</li>
+    <li>Reply focus: keyboard handling must distinguish composer focus from notification reply focus so <code>Enter</code> and <code>Escape</code> do the scoped action only in the reply field.</li>
+  </ul>
+
+  <h2>Implementation Handoff</h2>
+  <ul>
+    <li>Implement the prompt picker, resolved mention chip, destination-only routing, notification store, overlay rendering, visible/overflow stack behavior, visible controls, reply mode, and required shortcuts exactly as specified here.</li>
+    <li>Do not add persistence, global inbox behavior, extra validation, delayed reminders, unread badges, multi-target sends, or current-chat transcript echoes unless this spec is updated first.</li>
+    <li>Keep notification state separate from transcript persistence. Transcript persistence remains owned by the destination/source chat streams.</li>
+    <li>Use native platform materials and symbol systems for buttons. Web/Electron should use the closest existing Clawline icon system equivalent.</li>
+    <li>Open question for implementation discovery: identify the exact current Clawline session-list API and stable assistant message identity source. This spec requires stable identities but does not prescribe the concrete type name.</li>
+  </ul>
+</main>
+</body>
+</html>

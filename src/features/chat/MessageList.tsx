@@ -199,18 +199,20 @@ export function MessageList({
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
         event.preventDefault();
+        event.stopPropagation();
         setCancelPromptOpen(false);
         return;
       }
 
       if (event.key === "Enter") {
         event.preventDefault();
+        event.stopPropagation();
         void confirmCancelCurrentPrompt();
       }
     }
 
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
+    window.addEventListener("keydown", handleKeyDown, { capture: true });
+    return () => window.removeEventListener("keydown", handleKeyDown, { capture: true });
   }, [isCancelPromptOpen]);
 
   useEffect(() => {

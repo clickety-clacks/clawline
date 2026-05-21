@@ -22,6 +22,7 @@
   --color-text-secondary: #d4c4b0;
   --color-text-dim: #8b8078;
   --color-accent: #7ba376;
+  --color-notification-accent: #7ba376;
   --color-accent-soft: linear-gradient(135deg, #2d3b2a 0%, #243322 100%);
   --color-accent-warm: #e07a5f;
   --color-mark-assistant: rgb(217, 175, 98);
@@ -139,6 +140,7 @@ html[data-appearance="light"] {
   --color-text-secondary: #5c4a3d;
   --color-text-dim: #a69b8d;
   --color-accent: #8fa68a;
+  --color-notification-accent: #8fa68a;
   --color-accent-soft: linear-gradient(135deg, #b8ceaf 0%, #c8d9c0 100%);
   --color-accent-warm: #c4785c;
   --color-mark-assistant: rgb(158, 62, 28);
@@ -1393,6 +1395,17 @@ html[data-appearance="light"] body::before {
   width: min(54rem, 100%);
 }
 
+.composer-sent-toast {
+  justify-self: center;
+  padding: 0.42rem 0.72rem;
+  border: 1px solid color-mix(in srgb, var(--color-border-strong) 70%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-panel-glass-strong) 88%, transparent);
+  color: var(--color-text);
+  font-size: 0.86rem;
+  box-shadow: 0 10px 28px var(--color-glass-shadow-soft);
+}
+
 .composer-attachment-chip {
   display: flex;
   align-items: center;
@@ -1515,6 +1528,7 @@ html[data-appearance="light"] body::before {
 }
 
 .composer-input-field {
+  position: relative;
   min-width: 0;
   display: flex;
   align-items: center;
@@ -1539,6 +1553,469 @@ html[data-appearance="light"] body::before {
 .composer-input-field textarea {
   flex: 1 1 auto;
   line-height: 1.45;
+}
+
+.composer-mention-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  max-width: min(18rem, 70%);
+  min-height: 1.85rem;
+  margin-right: 0.55rem;
+  padding: 0.22rem 0.28rem 0.22rem 0.7rem;
+  border: 1px solid color-mix(in srgb, var(--color-accent) 42%, var(--color-border-strong));
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at 50% 18%, var(--color-glass-specular-soft) 0%, transparent 46%),
+    color-mix(in srgb, var(--color-accent) 18%, var(--color-panel-glass-strong));
+  color: var(--color-text);
+  box-shadow: inset 0 1px 0 var(--color-glass-specular-soft);
+}
+
+.composer-mention-chip span {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.88rem;
+  font-weight: 650;
+}
+
+.composer-mention-remove,
+.cross-chat-notification-icon-button {
+  display: grid;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--color-border-strong) 74%, transparent);
+  border-radius: 999px;
+  background:
+    radial-gradient(circle at 50% 18%, var(--color-glass-specular-soft) 0%, transparent 48%),
+    var(--color-panel-glass);
+  color: var(--color-text);
+}
+
+.composer-mention-remove {
+  width: 1.4rem;
+  height: 1.4rem;
+  padding: 0;
+}
+
+.composer-mention-picker {
+  position: absolute;
+  left: 0.7rem;
+  right: 0.7rem;
+  bottom: calc(100% + 0.28rem);
+  display: grid;
+  gap: 0.25rem;
+  max-height: 16rem;
+  overflow: auto;
+  padding: 0.45rem;
+  border: 1px solid color-mix(in srgb, var(--color-border-strong) 74%, var(--color-glass-specular) 26%);
+  border-radius: 1.1rem;
+  background:
+    linear-gradient(180deg, var(--color-glass-specular-soft), transparent 44%),
+    color-mix(in srgb, var(--color-panel-glass-strong) 92%, var(--color-panel));
+  box-shadow:
+    0 18px 44px var(--color-glass-shadow),
+    inset 0 1px 0 var(--color-glass-specular-soft);
+  backdrop-filter: blur(24px) saturate(190%);
+  -webkit-backdrop-filter: blur(24px) saturate(190%);
+  overscroll-behavior: contain;
+  z-index: 36;
+}
+
+.composer-mention-option,
+.composer-mention-empty {
+  width: 100%;
+  min-width: 0;
+  padding: 0.58rem 0.7rem;
+  border: 1px solid transparent;
+  border-radius: 0.75rem;
+  background: transparent;
+  color: var(--color-text);
+  text-align: left;
+}
+
+.composer-mention-option {
+  display: grid;
+  gap: 0.1rem;
+}
+
+.composer-mention-option span,
+.composer-mention-option small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-mention-option span {
+  font-weight: 700;
+}
+
+.composer-mention-option small,
+.composer-mention-empty {
+  color: var(--color-text-dim);
+  font-size: 0.78rem;
+}
+
+.composer-mention-option--active {
+  border-color: color-mix(in srgb, var(--color-accent) 34%, var(--color-border-strong));
+  background: color-mix(in srgb, var(--color-accent) 20%, transparent);
+}
+
+.cross-chat-notification-overlay {
+  --notification-bubble-radius: 1.15rem;
+  --notification-peek-width: var(--notification-bubble-radius);
+  --notification-undocked-right-inset: calc(var(--message-bubble-padding-horizontal) / 2);
+  --notification-motion-duration: 300ms;
+  --notification-motion-reveal: cubic-bezier(0, 0, 0.2, 1);
+  --notification-motion-hide: cubic-bezier(0.4, 0, 1, 1);
+  --notification-motion-resize: cubic-bezier(0.4, 0, 0.2, 1);
+  position: fixed;
+  top: calc(0.9rem + env(safe-area-inset-top, 0px));
+  right: calc(var(--notification-undocked-right-inset) + env(safe-area-inset-right, 0px));
+  z-index: 7;
+  display: grid;
+  justify-items: end;
+  gap: 0.55rem;
+  width: min(
+    35.9375rem,
+    calc(100% - var(--notification-undocked-right-inset) - var(--notification-undocked-right-inset))
+  );
+  pointer-events: none;
+  transform: translateX(0);
+  transition:
+    transform var(--notification-motion-duration) var(--notification-motion-reveal),
+    opacity var(--notification-motion-duration) var(--notification-motion-reveal);
+}
+
+.cross-chat-notification-overlay--collapsed {
+  transform: translateX(0);
+  transition:
+    transform var(--notification-motion-duration) var(--notification-motion-hide),
+    opacity var(--notification-motion-duration) var(--notification-motion-hide);
+}
+
+.cross-chat-notification-peek {
+  position: absolute;
+  top: 0;
+  right: calc(0px - var(--notification-undocked-right-inset) - env(safe-area-inset-right, 0px));
+  bottom: 0;
+  z-index: 30;
+  width: var(--notification-peek-width);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+.cross-chat-notification-bubble {
+  --notification-drag-offset: 0px;
+  interpolate-size: allow-keywords;
+  position: relative;
+  align-self: start;
+  justify-self: end;
+  width: min(35.9375rem, 100%);
+  height: auto;
+  max-height: min(16rem, 36vh);
+  display: grid;
+  grid-template-rows: auto auto auto;
+  align-content: start;
+  gap: 0.55rem;
+  overflow: hidden;
+  padding: 0.58rem 0.75rem 0.65rem calc(var(--notification-bubble-radius) + 0.75rem);
+  border: 1px solid color-mix(in srgb, var(--color-border-strong) 76%, var(--color-glass-specular) 24%);
+  border-radius: var(--notification-bubble-radius);
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--color-notification-accent) 30%, transparent)
+        0 var(--notification-bubble-radius),
+      transparent var(--notification-bubble-radius)
+    ),
+    linear-gradient(180deg, var(--color-glass-specular-soft), transparent 44%),
+    color-mix(in srgb, var(--color-panel-glass-strong) 90%, var(--color-panel));
+  color: var(--color-text);
+  box-shadow:
+    0 8px 18px rgba(0, 0, 0, 0.16),
+    0 18px 46px var(--color-glass-shadow),
+    0 3px 14px var(--color-glass-shadow-soft),
+    inset 0 1px 0 var(--color-glass-specular-soft);
+  backdrop-filter: blur(26px) saturate(190%);
+  -webkit-backdrop-filter: blur(26px) saturate(190%);
+  pointer-events: auto;
+  transition:
+    height var(--notification-motion-duration) var(--notification-motion-resize),
+    max-height var(--notification-motion-duration) var(--notification-motion-resize),
+    transform var(--notification-motion-duration) var(--notification-motion-reveal),
+    opacity var(--notification-motion-duration) var(--notification-motion-reveal);
+  animation: cross-chat-notification-enter var(--notification-motion-duration) var(--notification-motion-reveal) both;
+}
+
+.cross-chat-notification-bubble--dragging {
+  transform: translateX(var(--notification-drag-offset));
+  transition:
+    height var(--notification-motion-duration) var(--notification-motion-resize),
+    max-height var(--notification-motion-duration) var(--notification-motion-resize),
+    opacity var(--notification-motion-duration) var(--notification-motion-reveal);
+}
+
+.cross-chat-notification-bubble--replying {
+  padding-top: 0.46rem;
+  padding-bottom: 0.58rem;
+}
+
+.cross-chat-notification-bubble::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: var(--notification-bubble-radius);
+  pointer-events: none;
+}
+
+.cross-chat-notification-bubble--exiting {
+  pointer-events: none;
+  animation: cross-chat-notification-exit var(--notification-motion-duration) var(--notification-motion-hide) both;
+}
+
+.cross-chat-notification-bubble--collapsed {
+  transform: translateX(calc(100% - var(--notification-peek-width) + var(--notification-undocked-right-inset) + env(safe-area-inset-right, 0px) + var(--notification-drag-offset)));
+  pointer-events: none;
+  transition:
+    height var(--notification-motion-duration) var(--notification-motion-resize),
+    max-height var(--notification-motion-duration) var(--notification-motion-resize),
+    transform var(--notification-motion-duration) var(--notification-motion-hide),
+    opacity var(--notification-motion-duration) var(--notification-motion-hide);
+}
+
+.cross-chat-notification-header,
+.cross-chat-notification-actions,
+.cross-chat-notification-title,
+.cross-chat-notification-reply {
+  display: flex;
+  align-items: center;
+}
+
+.cross-chat-notification-header {
+  justify-content: space-between;
+  gap: 0.75rem;
+  cursor: pointer;
+}
+
+.cross-chat-notification-title {
+  min-width: 0;
+  gap: 0.45rem;
+}
+
+.cross-chat-notification-title strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 1.025rem;
+}
+
+.cross-chat-notification-title kbd {
+  display: inline;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font: 400 0.945rem/1 var(--font-body);
+}
+
+.cross-chat-notification-actions {
+  flex: 0 0 auto;
+  gap: 0.35rem;
+}
+
+.cross-chat-notification-icon-button {
+  width: 1.9rem;
+  height: 1.9rem;
+  padding: 0;
+}
+
+.cross-chat-notification-icon-button--active {
+  color: var(--color-accent);
+}
+
+.cross-chat-notification-entries {
+  display: grid;
+  gap: 0.38rem;
+  min-height: 0;
+  max-height: calc(min(16rem, 36vh) - 4.7rem);
+  overflow: auto;
+  padding-bottom: 0.57rem;
+  cursor: pointer;
+  overscroll-behavior: contain;
+}
+
+.cross-chat-notification-markdown {
+  gap: 0.38rem;
+  color: color-mix(in srgb, var(--color-text-secondary) 72%, var(--color-text) 28%);
+  font-size: 0.985rem;
+  line-height: 1.35;
+}
+
+.cross-chat-notification-markdown p,
+.cross-chat-notification-markdown ul,
+.cross-chat-notification-markdown ol,
+.cross-chat-notification-markdown blockquote {
+  margin: 0;
+}
+
+.cross-chat-notification-markdown pre {
+  padding: 0.55rem;
+  border-radius: 0.65rem;
+}
+
+.cross-chat-notification-markdown table {
+  font-size: 0.92em;
+}
+
+.cross-chat-notification-markdown,
+.cross-chat-notification-markdown p,
+.cross-chat-notification-markdown li {
+  overflow-wrap: anywhere;
+}
+
+.cross-chat-notification-reply {
+  position: relative;
+  gap: 0.4rem;
+}
+
+.cross-chat-notification-reply textarea {
+  flex: 1 1 auto;
+  field-sizing: content;
+  min-width: 0;
+  min-height: 2.1rem;
+  max-height: calc(5 * 1.25em + 0.9rem);
+  overflow-y: auto;
+  resize: none;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid color-mix(in srgb, var(--color-border-strong) 72%, transparent);
+  border-radius: 0.75rem;
+  background: color-mix(in srgb, var(--color-panel-glass) 86%, transparent);
+  color: var(--color-text);
+  font: 400 0.985rem/1.25 var(--font-body);
+}
+
+.cross-chat-notification-reply .field-error {
+  position: absolute;
+  left: 0;
+  top: 100%;
+  margin: 0.2rem 0 0;
+  font-size: 0.885rem;
+}
+
+.cross-chat-notification-send.composer-circle-button {
+  flex: 0 0 auto;
+  width: 2.4rem;
+  height: 2.4rem;
+}
+
+.cross-chat-notification-send.composer-circle-button svg {
+  width: 0.95rem;
+  height: 0.95rem;
+}
+
+.cross-chat-notification-send.composer-circle-button span {
+  font-size: 1rem;
+}
+
+.cross-chat-notification-action-menu-layer {
+  position: absolute;
+  left: 50%;
+  z-index: 120;
+  width: min(16rem, 100%);
+  transform: translateX(-50%);
+  pointer-events: auto;
+  isolation: isolate;
+}
+
+.cross-chat-notification-action-menu {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: 0.18rem;
+  min-width: 11rem;
+  padding: 0.28rem;
+  border: 1px solid color-mix(in srgb, var(--color-border-strong) 86%, var(--color-glass-specular) 14%);
+  border-radius: 0.8rem;
+  background:
+    linear-gradient(180deg, var(--color-glass-specular), transparent 46%),
+    linear-gradient(180deg, color-mix(in srgb, var(--color-glass-tint) 70%, var(--color-panel)), rgba(255, 255, 255, 0.01)),
+    color-mix(in srgb, var(--color-panel) 88%, var(--color-panel-glass-strong));
+  box-shadow:
+    0 22px 52px var(--color-glass-shadow),
+    0 8px 22px var(--color-glass-shadow-soft),
+    inset 0 1px 0 var(--color-glass-specular);
+  backdrop-filter: blur(30px) saturate(210%);
+  -webkit-backdrop-filter: blur(30px) saturate(210%);
+  outline: none;
+}
+
+.cross-chat-notification-action-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  justify-content: space-between;
+  width: 100%;
+  min-width: 0;
+  padding: 0.48rem 0.58rem;
+  border: 1px solid transparent;
+  border-radius: 0.55rem;
+  background: transparent;
+  color: var(--color-text);
+  font: 650 0.945rem/1.15 var(--font-body);
+  text-align: left;
+}
+
+.cross-chat-notification-action-menu-item span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cross-chat-notification-action-menu-item kbd {
+  flex: 0 0 auto;
+  color: var(--color-text-dim);
+  font: 500 0.875rem/1 var(--font-body);
+}
+
+.cross-chat-notification-action-menu-item--active {
+  border-color: color-mix(in srgb, var(--color-notification-accent) 56%, var(--color-border-strong));
+  background: color-mix(in srgb, var(--color-notification-accent) 24%, var(--color-panel-glass-strong));
+}
+
+@keyframes cross-chat-notification-enter {
+  from {
+    opacity: 0;
+    transform: translateX(calc(100% + 2rem));
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes cross-chat-notification-exit {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+
+  to {
+    opacity: 0;
+    transform: translateX(calc(100% + 2rem));
+  }
 }
 
 .session-popover-backdrop {

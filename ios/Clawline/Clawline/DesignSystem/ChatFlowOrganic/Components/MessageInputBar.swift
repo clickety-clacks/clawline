@@ -59,6 +59,7 @@ struct MessageInputBar: View {
     var resetToken: Int
     let canSend: Bool
     let isSending: Bool
+    let canCancelSend: Bool
     let isStagingAttachments: Bool
     let connectionStateStore: SendButtonConnectionStateStore
     let focusTrigger: Int
@@ -67,14 +68,23 @@ struct MessageInputBar: View {
     /// Keyboard visibility state owned by parent view to survive geometry changes.
     let isKeyboardVisible: Bool
     @Binding var isAttachmentMenuPresented: Bool
+    var resolvedMentionTitle: String? = nil
     let onSend: () -> Void
     let onCancel: () -> Void
     let onReconnect: () -> Void
     let onAdd: () -> Void
+    var onRemoveResolvedMention: (() -> Void)? = nil
     let attachmentMenuContent: () -> AnyView
     let onFocusChange: (Bool) -> Void
     let onTextEditActivity: () -> Void
+    var handlesMentionPickerKeyCommands: Bool = false
+    var mentionPickerHasCompletion: Bool = false
+    var onMentionPickerTab: (() -> Void)?
+    var onMentionPickerMoveUp: (() -> Void)?
+    var onMentionPickerMoveDown: (() -> Void)?
     var onPasteImages: (([UIImage]) -> Void)?
+    var notificationVisibleCount: Int = 0
+    var keyboardOwnershipStore = KeyboardOwnershipStore()
 
     @State private var editorHeight: CGFloat = 44
     @State private var cachedMaxBarWidth: CGFloat?
@@ -349,7 +359,16 @@ struct MessageInputBar: View {
                 onSubmitRequested: handleEditorSubmitIntent,
                 onFocusChange: onFocusChange,
                 onTextEditActivity: onTextEditActivity,
+                resolvedMentionTitle: resolvedMentionTitle,
+                onRemoveResolvedMention: onRemoveResolvedMention,
+                handlesMentionPickerKeyCommands: handlesMentionPickerKeyCommands,
+                mentionPickerHasCompletion: mentionPickerHasCompletion,
+                onMentionPickerTab: onMentionPickerTab,
+                onMentionPickerMoveUp: onMentionPickerMoveUp,
+                onMentionPickerMoveDown: onMentionPickerMoveDown,
                 onPasteImages: onPasteImages,
+                notificationVisibleCount: notificationVisibleCount,
+                keyboardOwnershipStore: keyboardOwnershipStore,
                 placeholderText: placeholderText,
                 isLightModeForInputBar: isLightModeForInputBar,
                 visionOSBorderColor: visionOSBorderColor
@@ -357,6 +376,7 @@ struct MessageInputBar: View {
 
             MessageSendControl(
                 isSending: isSending,
+                canCancelSend: canCancelSend,
                 canSend: canSend,
                 isStagingAttachments: isStagingAttachments,
                 connectionState: connectionState,
@@ -403,7 +423,16 @@ private struct MessageEditorChrome: View {
     let onSubmitRequested: () -> Void
     let onFocusChange: (Bool) -> Void
     let onTextEditActivity: () -> Void
+    var resolvedMentionTitle: String?
+    var onRemoveResolvedMention: (() -> Void)?
+    var handlesMentionPickerKeyCommands: Bool = false
+    var mentionPickerHasCompletion: Bool = false
+    var onMentionPickerTab: (() -> Void)?
+    var onMentionPickerMoveUp: (() -> Void)?
+    var onMentionPickerMoveDown: (() -> Void)?
     var onPasteImages: (([UIImage]) -> Void)?
+    var notificationVisibleCount: Int = 0
+    var keyboardOwnershipStore = KeyboardOwnershipStore()
     let placeholderText: String
     let isLightModeForInputBar: Bool
     let visionOSBorderColor: Color
@@ -430,40 +459,76 @@ private struct MessageEditorChrome: View {
     }
 
     var body: some View {
-        ZStack(alignment: .leading) {
-            RichTextEditor(
-                attributedText: $content,
-                calculatedHeight: $editorHeight,
-                selectionRange: $selectionRange,
-                pendingInsertions: $pendingInsertions,
-                fontScaleChangeSequence: fontScaleChangeSequence,
-                resetToken: resetToken,
-                focusTrigger: focusTrigger,
-                isEditable: true,
-                tintColor: chrome.tintColor,
-                textColor: chrome.textColor,
-                onFocusChange: onFocusChange,
-                onTextEditActivity: onTextEditActivity,
-                onSubmit: {
-                    onSubmitRequested()
-                },
-                onPasteImages: onPasteImages,
-                trailingPadding: 20
-            )
-            .opacity(editorOpacity)
+        HStack(spacing: 6) {
+            if let resolvedMentionTitle {
+                HStack(spacing: 6) {
+                    Text(resolvedMentionTitle)
+                        .font(.clawline(.secondaryLabel).weight(.semibold))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Button(action: {
+                        onRemoveResolvedMention?()
+                    }) {
+                        Image(systemName: "xmark")
+                            .font(.clawline(.secondaryLabel).weight(.bold))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Remove mention")
+                }
+                .foregroundStyle(isLightModeForInputBar ? ChatFlowTheme.ink(.light) : .white)
+                .padding(.leading, 12)
+                .padding(.trailing, 8)
+                .padding(.vertical, 7)
+                .background(
+                    Capsule()
+                        .fill(Color.primary.opacity(isLightModeForInputBar ? 0.10 : 0.18))
+                )
+                .padding(.leading, 8)
+                .frame(maxWidth: 170)
+            }
 
-            if content.length == 0 {
-                Text(placeholderText)
-                    .font(.clawline(.bodyText))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .minimumScaleFactor(0.7)
-                    .foregroundColor(placeholderColor)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-                    .frame(maxHeight: .infinity, alignment: .center)
-                    .padding(.leading, 20)
-                    .padding(.trailing, 20)
-                    .allowsHitTesting(false)
+            ZStack(alignment: .leading) {
+                RichTextEditor(
+                    attributedText: $content,
+                    calculatedHeight: $editorHeight,
+                    selectionRange: $selectionRange,
+                    pendingInsertions: $pendingInsertions,
+                    fontScaleChangeSequence: fontScaleChangeSequence,
+                    resetToken: resetToken,
+                    focusTrigger: focusTrigger,
+                    isEditable: true,
+                    tintColor: chrome.tintColor,
+                    textColor: chrome.textColor,
+                    onFocusChange: onFocusChange,
+                    onTextEditActivity: onTextEditActivity,
+                    onSubmit: {
+                        onSubmitRequested()
+                    },
+                    handlesMentionPickerKeyCommands: handlesMentionPickerKeyCommands,
+                    mentionPickerHasCompletion: mentionPickerHasCompletion,
+                    onMentionPickerTab: onMentionPickerTab,
+                    onMentionPickerMoveUp: onMentionPickerMoveUp,
+                    onMentionPickerMoveDown: onMentionPickerMoveDown,
+                    onPasteImages: onPasteImages,
+                    notificationVisibleCount: notificationVisibleCount,
+                    keyboardOwnershipStore: keyboardOwnershipStore,
+                    trailingPadding: 20
+                )
+                .opacity(editorOpacity)
+
+                if content.length == 0 {
+                    Text(placeholderText)
+                        .font(.clawline(.bodyText))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .minimumScaleFactor(0.7)
+                        .foregroundColor(placeholderColor)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+                        .frame(maxHeight: .infinity, alignment: .center)
+                        .padding(.leading, 20)
+                        .padding(.trailing, 20)
+                        .allowsHitTesting(false)
+                }
             }
         }
         .frame(height: inputHeight)
@@ -482,7 +547,7 @@ private struct MessageEditorChrome: View {
     }
 }
 
-private struct MessageSendControl: View {
+struct MessageSendControl: View {
     private enum BubbleVisualState: Equatable {
         case ghost
         case active
@@ -491,6 +556,7 @@ private struct MessageSendControl: View {
     }
 
     let isSending: Bool
+    let canCancelSend: Bool
     let canSend: Bool
     let isStagingAttachments: Bool
     let connectionState: SendButtonConnectionState
@@ -507,7 +573,7 @@ private struct MessageSendControl: View {
     private var isStagingSendGate: Bool {
         connectionState == .connected && isStagingAttachments && !isSending && !canSend
     }
-    private var sendActionEnabled: Bool { isSending || canSend || isDisconnected }
+    private var sendActionEnabled: Bool { (isSending && canCancelSend) || canSend || isDisconnected }
     private var sendIconColor: Color { .white }
     private let reconnectPulseDuration: TimeInterval = 0.8
     private var drawsDisabledSendButtonBacking: Bool {
@@ -569,7 +635,9 @@ private struct MessageSendControl: View {
     var body: some View {
         Button(action: {
             if isSending {
-                onCancel()
+                if canCancelSend {
+                    onCancel()
+                }
                 return
             }
             switch connectionState {
@@ -627,7 +695,9 @@ private struct MessageSendControl: View {
         .accessibilityLabel(
             isReconnecting ? "Reconnecting" :
                 (isStagingSendGate ? "Staging attachments" :
-                    (isDisconnected ? "Disconnected. Tap to reconnect." : "Send message"))
+                    (isDisconnected ? "Disconnected. Tap to reconnect." :
+                        (isSending && canCancelSend ? "Cancel send" :
+                            (isSending ? "Sending message" : "Send message"))))
         )
         .accessibilityIdentifier("send_button")
         .id("send-button")
@@ -652,6 +722,7 @@ private struct MessageSendControl: View {
                 resetToken: 0,
                 canSend: true,
                 isSending: false,
+                canCancelSend: false,
                 isStagingAttachments: false,
                 connectionStateStore: connectionStateStore,
                 focusTrigger: 0,

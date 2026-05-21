@@ -2,6 +2,7 @@ import type {
   SessionControlAction,
   SessionStatusCapabilities,
   SessionStatusCapability,
+  SessionStatusCapabilityOption,
   SessionStatusPayload
 } from "../../protocol/stream-api";
 
@@ -98,6 +99,8 @@ export function footerItems(status?: SessionStatusPayload | null): FooterItem[] 
     hasThinkingValue: thinkingValue != null
   });
   const fastControl = fastModeControlAction(capabilities);
+  const fastText = fastModeText(display.fastMode, fastControl.action, fastControl.reason);
+  const fastOptions = fastModeOptions(display.fastMode, fastControl.action, fastControl.options);
 
   return [
     {
@@ -108,17 +111,18 @@ export function footerItems(status?: SessionStatusPayload | null): FooterItem[] 
     },
     {
       action: levelControl.action,
-      options: levelOptions(thinkingValue ?? reasoningValue, levelControl.action),
+      options: levelOptions(thinkingValue ?? reasoningValue, levelControl.action, levelControl.options),
       text: `Thinking ${thinkingValue ?? reasoningValue ?? "Unknown"}`,
       unsupportedReason: levelControl.reason
     },
     {
       action: fastControl.action,
-      options: fastModeOptions(display.fastMode, fastControl.action),
-      text: fastModeText(display.fastMode),
+      options: fastOptions.length > 0 ? fastOptions : [{ title: fastText, isCurrent: true }],
+      text: fastText,
       unsupportedReason: fastControl.reason
-    }
-  ];
+    },
+    authModeFooterItem(display.authMode)
+  ].filter((item): item is FooterItem => item != null);
 }
 
 function capability(
@@ -128,12 +132,14 @@ function capability(
   if (capabilityValue) {
     return {
       isSupported: capabilityValue.supported,
-      reason: capabilityValue.reason
+      reason: capabilityValue.reason,
+      options: capabilityValue.options ?? null
     };
   }
   return {
     isSupported: legacySupported,
-    reason: null
+    reason: null,
+    options: null
   };
 }
 
@@ -141,7 +147,7 @@ function modelOptions(status: SessionStatusPayload): FooterOption[] {
   const current = normalized(status.display?.model);
   if (status.modelCatalog?.available === true) {
     return (status.modelCatalog.models ?? []).map((model) => {
-      const title = normalized(model.alias) ?? normalized(model.name) ?? normalized(model.ref) ?? model.ref;
+      const title = normalized(model.name) ?? normalized(model.ref) ?? normalized(model.alias) ?? model.ref;
       return {
         title,
         value: model.ref,
@@ -179,24 +185,48 @@ function levelControlAction({
     capabilities.canChangeReasoning === true
   );
   if (hasThinkingValue && thinkingCapability.isSupported) {
-    return { action: "set_thinking" as const, reason: null };
+    return { action: "set_thinking" as const, reason: null, options: thinkingCapability.options };
   }
   if (hasReasoningValue && reasoningCapability.isSupported) {
-    return { action: "set_reasoning" as const, reason: null };
+    return { action: "set_reasoning" as const, reason: null, options: reasoningCapability.options };
   }
   if (thinkingCapability.isSupported) {
-    return { action: "set_thinking" as const, reason: null };
+    return { action: "set_thinking" as const, reason: null, options: thinkingCapability.options };
   }
   if (reasoningCapability.isSupported) {
-    return { action: "set_reasoning" as const, reason: null };
+    return { action: "set_reasoning" as const, reason: null, options: reasoningCapability.options };
   }
   return {
     action: undefined,
-    reason: thinkingCapability.reason ?? reasoningCapability.reason
+    reason: thinkingCapability.reason ?? reasoningCapability.reason,
+    options: null
   };
 }
 
-function levelOptions(current: string | null, action?: SessionControlAction): FooterOption[] {
+function capabilityOptions(options: SessionStatusCapabilityOption[] | null | undefined): FooterOption[] | null {
+  if (!options || options.length === 0) {
+    return null;
+  }
+  return options.map((option) => ({
+    title: normalized(option.title) ?? normalized(option.value) ?? (option.enabled === true ? "On" : option.enabled === false ? "Off" : ""),
+    value: normalized(option.value) ?? undefined,
+    enabled: typeof option.enabled === "boolean" ? option.enabled : undefined,
+    isCurrent: false
+  })).filter((option) => option.title.length > 0);
+}
+
+function levelOptions(
+  current: string | null,
+  action?: SessionControlAction,
+  providerOptions?: SessionStatusCapabilityOption[] | null
+): FooterOption[] {
+  const options = capabilityOptions(providerOptions);
+  if (options) {
+    return options.map((option) => ({
+      ...option,
+      isCurrent: option.value === current
+    }));
+  }
   const levels = action === "set_reasoning"
     ? ["off", "on", "stream"]
     : action === "set_thinking"
@@ -216,18 +246,33 @@ function fastModeControlAction(capabilities: SessionStatusCapabilities) {
   );
   const modeCapability = capability(capabilities.setMode, false);
   if (fastCapability.isSupported) {
-    return { action: "set_fast_mode" as const, reason: null };
+    return { action: "set_fast_mode" as const, reason: null, options: fastCapability.options };
   }
   if (modeCapability.isSupported) {
-    return { action: "set_mode" as const, reason: null };
+    return { action: "set_mode" as const, reason: null, options: modeCapability.options };
   }
   return {
     action: undefined,
-    reason: fastCapability.reason ?? modeCapability.reason
+    reason: fastCapability.reason ?? modeCapability.reason,
+    options: null
   };
 }
 
-function fastModeOptions(current: boolean | null | undefined, action?: SessionControlAction) {
+function fastModeOptions(
+  current: boolean | null | undefined,
+  action?: SessionControlAction,
+  providerOptions?: SessionStatusCapabilityOption[] | null
+) {
+  const options = capabilityOptions(providerOptions);
+  if (options) {
+    return options.map((option) => ({
+      ...option,
+      isCurrent:
+        typeof option.enabled === "boolean"
+          ? option.enabled === current
+          : option.value === (current === true ? "fast" : current === false ? "normal" : undefined)
+    }));
+  }
   if (action === "set_mode") {
     return [
       { title: "On", value: "fast", isCurrent: current === true },
@@ -247,11 +292,30 @@ function fastModeOptions(current: boolean | null | undefined, action?: SessionCo
   ];
 }
 
-function fastModeText(fastMode: boolean | null | undefined) {
+function fastModeText(
+  fastMode: boolean | null | undefined,
+  action?: SessionControlAction,
+  unsupportedReason?: string | null
+) {
+  if (!action && fastMode == null && unsupportedReason) {
+    return "Fast unavailable";
+  }
   if (fastMode == null) {
     return "Fast Unknown";
   }
   return fastMode ? "Fast on" : "Fast off";
+}
+
+function authModeFooterItem(authMode: string | null | undefined): FooterItem | null {
+  switch (authMode?.trim().toLowerCase()) {
+    case "oauth":
+      return { text: "OAUTH", action: undefined, options: [{ title: "OAUTH", isCurrent: true }] };
+    case "api_key":
+    case "api-key":
+      return { text: "API KEY", action: undefined, options: [{ title: "API KEY", isCurrent: true }] };
+    default:
+      return null;
+  }
 }
 
 function normalized(value?: string | null) {

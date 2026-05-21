@@ -8,6 +8,7 @@ import {
   type StreamDotState,
   useChatDomainStore
 } from "../../runtime/chat/chatDomainStore";
+import { useCrossChatNotificationStore } from "../../runtime/chat/crossChatNotificationStore";
 import { useTransportMachine } from "../../runtime/transport/transportMachine";
 import {
   createStreamApiClient,
@@ -20,13 +21,13 @@ import {
   useChatSessionCoordinator,
   useChatSessionInteractionCoordinator
 } from "./useChatSessionCoordinator";
-import { useChatKeyboardShortcuts } from "./useChatKeyboardShortcuts";
 
 export function ChatRoute() {
   const navigate = useNavigate();
   const params = useParams();
   const { state: authState } = useAuthSessionStore();
   const { state: chatState, store: chatStore } = useChatDomainStore();
+  const { store: notificationStore } = useCrossChatNotificationStore();
   const { state: transportState, store: transportStore } = useTransportMachine();
   const [sessionStatusBySessionKey, setSessionStatusBySessionKey] = useState<
     Record<string, SessionStatusPayload>
@@ -181,25 +182,11 @@ export function ChatRoute() {
     coordinator.requestSessionSwitch(sessionKey, source);
     navigate(`/chat/${sessionKey}`);
   };
-  const focusPromptInput = useCallback(() => {
-    document.getElementById("composer-input")?.focus({ preventScroll: true });
-  }, []);
-  const openSessionListFromShortcut = useCallback(() => {
-    coordinator.openSessionList();
-  }, [coordinator]);
-
   const interactionCoordinator = useChatSessionInteractionCoordinator({
     activeSessionKey,
     onSelectSession: handleSelectSession,
     orderedSessionKeys: chatState.streams.map((stream) => stream.sessionKey)
   });
-  useChatKeyboardShortcuts({
-    canOpenSessionList: chatState.streams.length > 0,
-    isShortcutSurfaceBlocked: coordinator.isSessionListOpen || coordinator.isStreamManagerOpen,
-    onFocusPromptInput: focusPromptInput,
-    onOpenSessionList: openSessionListFromShortcut
-  });
-
   const applySessionControl = useCallback(
     async (
       sessionKey: string,
@@ -260,6 +247,7 @@ export function ChatRoute() {
     });
 
     const lastReadMessageId = chatStore.markSessionRead(activeSessionKey);
+    notificationStore.dismissCrossChatNotification(activeSessionKey);
     if (
       lastReadMessageId &&
       chatState.provisionedSessionKeys.includes(activeSessionKey)
@@ -271,6 +259,7 @@ export function ChatRoute() {
     chatState.firstUnreadMessageIdBySessionKey,
     chatState.provisionedSessionKeys,
     chatStore,
+    notificationStore,
     transportStore
   ]);
 
@@ -296,6 +285,7 @@ export function ChatRoute() {
         chatLayoutStyle={interactionCoordinator.layoutStyle}
         keyboardInset={interactionCoordinator.keyboardInset}
         isSessionListOpen={coordinator.isSessionListOpen}
+        isStreamManagerOpen={coordinator.isStreamManagerOpen}
         onCloseSessionList={coordinator.closeSessionList}
         onChatPanelTouchCancel={interactionCoordinator.handleChatPanelTouchCancel}
         onChatPanelTouchEnd={interactionCoordinator.handleChatPanelTouchEnd}

@@ -1291,9 +1291,10 @@ describe("MessageList rich rendering", () => {
   });
 
   it("opens typing cancellation with Cmd-period and dismisses with Escape", async () => {
+    const onCancelCurrentPrompt = vi.fn();
     renderMessageListWithProps({
       messages: [makeMessage(1)],
-      onCancelCurrentPrompt: vi.fn(),
+      onCancelCurrentPrompt,
       sessionKey: "agent:main:clawline:flynn:main",
       sessionStatus: {
         sessionKey: "agent:main:clawline:flynn:main",
@@ -1311,6 +1312,13 @@ describe("MessageList rich rendering", () => {
 
     fireEvent.keyDown(window, { key: "Escape" });
     expect(screen.queryByTestId("typing-cancel-popover")).not.toBeInTheDocument();
+
+    fireEvent.keyDown(window, { key: ".", metaKey: true });
+    expect(await screen.findByTestId("typing-cancel-popover")).toBeInTheDocument();
+
+    screen.getByRole("button", { name: "Assistant is typing. Cancel current prompt" }).focus();
+    fireEvent.keyDown(window, { key: "Enter" });
+    expect(onCancelCurrentPrompt).toHaveBeenCalledWith("agent:main:clawline:flynn:main");
   });
 
   it("renders interactive session footer controls from session status", async () => {
@@ -1336,7 +1344,8 @@ describe("MessageList rich rendering", () => {
           models: [
             {
               ref: "openai/gpt-5.5",
-              name: "gpt-5.5"
+              name: "gpt-5.5",
+              alias: "gpt"
             },
             {
               ref: "openai/gpt-5.4",
@@ -1348,8 +1357,10 @@ describe("MessageList rich rendering", () => {
     });
 
     expect(await screen.findByTestId("session-status-footer")).toBeInTheDocument();
+    const modelControl = screen.getByLabelText("gpt-5.5") as HTMLSelectElement;
+    expect(modelControl.options[0]?.textContent).toBe("✓ gpt-5.5");
 
-    fireEvent.change(screen.getByLabelText("gpt-5.5"), {
+    fireEvent.change(modelControl, {
       target: { value: "1" }
     });
 
@@ -1382,5 +1393,117 @@ describe("MessageList rich rendering", () => {
     const fastModeControl = await screen.findByLabelText("Fast off");
     expect(fastModeControl).toBeDisabled();
     expect(fastModeControl).toHaveTextContent("Off");
+  });
+
+  it("uses provider-supplied footer control options", async () => {
+    const onSessionControlSelected = vi.fn();
+    renderMessageListWithProps({
+      messages: [makeMessage(1)],
+      onSessionControlSelected,
+      sessionKey: "agent:main:clawline:flynn:main",
+      sessionStatus: {
+        sessionKey: "agent:main:clawline:flynn:main",
+        display: {
+          model: "gpt-5.5",
+          thinkingLevel: "medium",
+          fastMode: null
+        },
+        capabilities: {
+          setModel: { supported: true },
+          setThinking: {
+            supported: true,
+            options: [
+              { title: "low", value: "low" },
+              { title: "medium", value: "medium" },
+              { title: "xhigh", value: "xhigh" }
+            ]
+          },
+          setFastMode: {
+            supported: false,
+            reason: "codex_fast_mode_not_supported_by_session_control"
+          }
+        },
+        modelCatalog: {
+          available: true,
+          models: [
+            {
+              ref: "openai/gpt-5.5",
+              name: "gpt-5.5"
+            }
+          ]
+        }
+      }
+    });
+
+    const thinkingControl = await screen.findByLabelText("Thinking medium");
+    expect(thinkingControl).toHaveTextContent("low");
+    expect(thinkingControl).toHaveTextContent("medium");
+    expect(thinkingControl).toHaveTextContent("xhigh");
+    expect(thinkingControl).not.toHaveTextContent("adaptive");
+
+    fireEvent.change(thinkingControl, {
+      target: { value: "2" }
+    });
+    expect(onSessionControlSelected).toHaveBeenCalledWith(
+      "agent:main:clawline:flynn:main",
+      "set_thinking",
+      "xhigh",
+      undefined
+    );
+
+    const fastModeControl = screen.getByLabelText("Fast unavailable");
+    expect(fastModeControl).toBeDisabled();
+    expect(fastModeControl).toHaveTextContent("Fast unavailable");
+    expect(fastModeControl).toHaveAttribute(
+      "title",
+      "codex_fast_mode_not_supported_by_session_control"
+    );
+  });
+
+  it("renders sanitized auth mode as the right-most footer item", async () => {
+    renderMessageListWithProps({
+      messages: [makeMessage(1)],
+      sessionKey: "agent:main:clawline:flynn:main",
+      sessionStatus: {
+        sessionKey: "agent:main:clawline:flynn:main",
+        display: {
+          model: "gpt-5.5",
+          thinkingLevel: "medium",
+          fastMode: true,
+          authMode: "api_key"
+        },
+        capabilities: {
+          setModel: { supported: false },
+          setThinking: { supported: false },
+          setFastMode: { supported: false }
+        }
+      }
+    });
+
+    const footer = await screen.findByTestId("session-status-footer");
+    expect(footer).toHaveAccessibleName("gpt-5.5 · Thinking medium · Fast on · API KEY");
+    const authControl = screen.getByLabelText("API KEY");
+    expect(authControl).toBeDisabled();
+    expect(authControl).toHaveTextContent("API KEY");
+  });
+
+  it("hides unknown auth mode in the footer", async () => {
+    renderMessageListWithProps({
+      messages: [makeMessage(1)],
+      sessionKey: "agent:main:clawline:flynn:main",
+      sessionStatus: {
+        sessionKey: "agent:main:clawline:flynn:main",
+        display: {
+          fastMode: false,
+          authMode: "unknown"
+        },
+        capabilities: {
+          setFastMode: { supported: false }
+        }
+      }
+    });
+
+    expect(await screen.findByLabelText("Fast off")).toBeInTheDocument();
+    expect(screen.queryByLabelText("UNKNOWN")).not.toBeInTheDocument();
   });
 });

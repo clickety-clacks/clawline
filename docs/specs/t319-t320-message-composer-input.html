@@ -1,0 +1,529 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>T319/T320 Message Composer Input</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: transparent;
+      --fg: var(--clawline-fg, #1d2528);
+      --muted: #5f6f73;
+      --line: #cfd8d6;
+      --panel: #ffffff;
+      --accent: #176b6b;
+      --warn: #8a5400;
+      --code: #eef3f2;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: transparent;
+        --fg: var(--clawline-fg, #eef4f3);
+        --muted: #a8b6b8;
+        --line: #304043;
+        --panel: #182022;
+        --accent: #6ec7bc;
+        --warn: #e2b45e;
+        --code: #202b2d;
+      }
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--fg);
+      font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    main {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 48px 22px 72px;
+    }
+
+    h1,
+    h2,
+    h3 {
+      line-height: 1.15;
+      letter-spacing: 0;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: clamp(2rem, 4vw, 3rem);
+    }
+
+    h2 {
+      margin-top: 42px;
+      padding-top: 22px;
+      border-top: 1px solid var(--line);
+      font-size: 1.45rem;
+    }
+
+    h3 {
+      margin-top: 28px;
+      font-size: 1.1rem;
+    }
+
+    p {
+      margin: 10px 0;
+    }
+
+    ul,
+    ol {
+      padding-left: 1.3rem;
+    }
+
+    li {
+      margin: 7px 0;
+    }
+
+    code,
+    pre {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.92em;
+      background: var(--code);
+      border-radius: 6px;
+    }
+
+    code {
+      padding: 0.12rem 0.28rem;
+    }
+
+    pre {
+      overflow-x: auto;
+      padding: 14px 16px;
+      border: 1px solid var(--line);
+    }
+
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      margin: 16px 0;
+      background: var(--panel);
+    }
+
+    th,
+    td {
+      border: 1px solid var(--line);
+      padding: 10px 12px;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      color: var(--accent);
+      font-weight: 700;
+    }
+
+    .meta {
+      color: var(--muted);
+      margin-bottom: 28px;
+    }
+
+    .callout {
+      border: 1px solid var(--line);
+      border-left: 5px solid var(--accent);
+      background: var(--panel);
+      padding: 14px 16px;
+      margin: 18px 0;
+      border-radius: 8px;
+    }
+
+    .warning {
+      border-left-color: var(--warn);
+    }
+
+    .decision {
+      font-weight: 700;
+    }
+  </style>
+</head>
+<body>
+<main>
+  <h1>T319/T320 Message Composer Input</h1>
+  <p class="meta">Self-contained Clawline product and technical specification for modified Enter behavior, Catalyst message-bubble context menus, and structured composer message references. Prepared 2026-05-17 from T319 and T320 tracker text supplied by Flynn.</p>
+
+  <section class="callout">
+    <p class="decision">Decision: modified Enter is composer text editing, plain Enter remains prompt submit, and message references are visible composer tokens backed by structured message identity rather than pasted quoted text.</p>
+    <p>T319 and T320 are specified together because both features affect the prompt composer submission boundary. The implementation must preserve the distinction between visible prompt text, local composer UI tokens, and structured reference context sent with the prompt.</p>
+  </section>
+
+  <h2>Source Notes</h2>
+  <ul>
+    <li>The source ticket text for T319 and T320 was supplied in the agent prompt on 2026-05-17 after the local ticket files were unavailable to this spec agent.</li>
+    <li>The requested Clawline invariant path <code>/Users/mike/shared-workspace/clawline/specs/clawline-invariants.md</code> was absent. The available canonical mirror <code>/Users/mike/shared-workspace/clawline/implementation_details/clawline-invariants.md</code> was consulted.</li>
+    <li>This spec is grounded in Flynn's requested behavior and the supplied ticket text, not in current implementation behavior.</li>
+    <li>No app source, deploy state, merge state, branch state, or runtime configuration is in scope for this spec task.</li>
+  </ul>
+
+  <h2>Goals</h2>
+  <ul>
+    <li>Make prompt composer keyboard behavior match standard multiline input semantics: <code>Shift+Enter</code> and <code>Ctrl+Enter</code> insert a newline into the prompt composer, while plain <code>Enter</code>/<code>Return</code> submits the prompt.</li>
+    <li>Add a Catalyst chat-bubble/title-area context menu opened by mouse or trackpad right-click and by tapping the title-bar area of a chat bubble.</li>
+    <li>Expose <strong>Insert into prompt</strong> only for user bubbles/messages; it inserts the user message contents into the prompt composer as editable prompt text.</li>
+    <li>Expose <strong>Reference message</strong> / quote behavior that adds a visible composer reference token, lets the user type additional prompt text, and sends the typed prompt plus structured referenced-message identity.</li>
+    <li>Ensure reference/quote behavior does not paste the referenced message body into visible prompt text.</li>
+    <li>Define enough cross-platform behavior for Web, Catalyst, iOS, and iPadOS implementation checks so platform-specific text controls do not diverge.</li>
+  </ul>
+
+  <h2>Non-Goals</h2>
+  <ul>
+    <li>No implementation, source-code edit, deployment, merge, rebase, or cleanup work is part of this spec.</li>
+    <li>No change to plain <code>Enter</code>/<code>Return</code> prompt submission.</li>
+    <li>No new message sanitization, security filtering, permissions model, or legacy compatibility layer beyond the behavior explicitly specified here.</li>
+    <li>No hidden prompt-text quoting by copying the referenced message body into the user's prompt draft.</li>
+    <li>No requirement for context menus on every platform. The product scope named by Flynn is Catalyst; other platforms receive compatibility notes and proof expectations where relevant.</li>
+    <li>No transcript mutation when a message is merely referenced. Referencing a message affects the composer draft and the outgoing send context only.</li>
+  </ul>
+
+  <h2>Terminology</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Term</th>
+        <th>Meaning</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Prompt composer</td>
+        <td>The bottom input surface where the user types a prompt before sending it to the current Clawline session.</td>
+      </tr>
+      <tr>
+        <td>Plain Enter</td>
+        <td><code>Enter</code> or <code>Return</code> with no modifier that this spec names as text-editing behavior.</td>
+      </tr>
+      <tr>
+        <td>Modified Enter</td>
+        <td><code>Shift+Enter</code> or <code>Ctrl+Enter</code>. For this spec, both are text-editing newline insertion gestures inside the prompt composer.</td>
+      </tr>
+      <tr>
+        <td>User bubble/message</td>
+        <td>A transcript bubble/message authored by the user. Only this class of message can expose <strong>Insert into prompt</strong>.</td>
+      </tr>
+      <tr>
+        <td>Reference token</td>
+        <td>A visible composer UI element representing one referenced transcript message. It is not plain prompt text and carries structured reference identity for submit.</td>
+      </tr>
+      <tr>
+        <td>Reference context</td>
+        <td>Structured non-visible send payload data identifying the referenced message and its session so the provider/LLM can resolve the reference without the composer pasting message text.</td>
+      </tr>
+      <tr>
+        <td>Bubble title area</td>
+        <td>The header/title strip or equivalent top affordance inside a chat bubble that can open the Catalyst context menu by tap.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>Product Requirements</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Requirement</th>
+        <th>Applies To</th>
+        <th>Proof</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>R1</td>
+        <td>Plain <code>Enter</code>/<code>Return</code> in the focused prompt composer submits the prompt through the existing prompt send path.</td>
+        <td>Prompt composer</td>
+        <td>A non-empty draft sends when plain Enter is pressed, with no inserted newline before submission.</td>
+      </tr>
+      <tr>
+        <td>R2</td>
+        <td><code>Shift+Enter</code> in the focused prompt composer inserts a newline at the current cursor/selection position and does not submit.</td>
+        <td>Prompt composer</td>
+        <td>Draft becomes multiline, composer remains focused, transcript does not receive a new local user message.</td>
+      </tr>
+      <tr>
+        <td>R3</td>
+        <td><code>Ctrl+Enter</code> in the focused prompt composer inserts a newline at the current cursor/selection position and does not submit.</td>
+        <td>Prompt composer</td>
+        <td>Same proof as R2, using Ctrl instead of Shift.</td>
+      </tr>
+      <tr>
+        <td>R4</td>
+        <td>Modified Enter replaces the selected text range with a newline using normal text-editor selection semantics.</td>
+        <td>Prompt composer</td>
+        <td>Select text in the composer, press modified Enter, and verify one newline replaces the selected range.</td>
+      </tr>
+      <tr>
+        <td>R5</td>
+        <td>Catalyst right-click on a chat bubble or its title area opens the message context menu for that message.</td>
+        <td>Catalyst</td>
+        <td>Mouse and trackpad secondary click both open a menu anchored to the targeted bubble/title area.</td>
+      </tr>
+      <tr>
+        <td>R6</td>
+        <td>Catalyst tap on the bubble title area opens the same message context menu for that message.</td>
+        <td>Catalyst</td>
+        <td>Tapping the title area opens the menu without changing selection, scrolling unexpectedly, or submitting composer text.</td>
+      </tr>
+      <tr>
+        <td>R7</td>
+        <td><strong>Insert into prompt</strong> appears only when the menu target is a user bubble/message.</td>
+        <td>Catalyst menu</td>
+        <td>User messages show the item; assistant, tool, terminal, status, progress, and non-user messages do not show it.</td>
+      </tr>
+      <tr>
+        <td>R8</td>
+        <td>Activating <strong>Insert into prompt</strong> inserts that user message's visible text contents into the prompt composer as editable draft text.</td>
+        <td>User messages</td>
+        <td>Composer text changes; focus moves to or remains in the composer; no send occurs until the user submits.</td>
+      </tr>
+      <tr>
+        <td>R9</td>
+        <td>The reference/quote action adds a visible reference token to the composer and does not paste the referenced message body into visible prompt text.</td>
+        <td>Eligible transcript messages</td>
+        <td>Composer displays a token naming or summarizing the reference target; the text editor body contains only user-typed or inserted prompt text.</td>
+      </tr>
+      <tr>
+        <td>R10</td>
+        <td>Submitting with a reference token sends the prompt text plus structured referenced-message identity.</td>
+        <td>Send path</td>
+        <td>Outgoing payload includes typed prompt text and reference context containing stable message/session identity.</td>
+      </tr>
+      <tr>
+        <td>R11</td>
+        <td>Removing a reference token before submit removes that reference from outgoing structured context.</td>
+        <td>Prompt composer</td>
+        <td>Submit after removal carries no identity for the removed reference.</td>
+      </tr>
+      <tr>
+        <td>R12</td>
+        <td>The send path must preserve Clawline session identity and must not canonicalize referenced or active Clawline sessions into <code>agent:main:main</code>.</td>
+        <td>Reference context and send routing</td>
+        <td>Payload/session inspection shows structurally distinct Clawline session keys are retained.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>T319 Keyboard Contract</h2>
+  <p>The prompt composer has one submission key and two specified newline gestures. This contract applies only while focus is inside the prompt composer text editor. Other focused controls keep their existing behavior unless a separate Clawline spec assigns them composer-equivalent text editing behavior.</p>
+  <table>
+    <thead>
+      <tr>
+        <th>Input</th>
+        <th>Required Behavior</th>
+        <th>Must Not</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>Enter</code>/<code>Return</code></td>
+        <td>Submit the current prompt using the existing send eligibility and failure paths.</td>
+        <td>Insert a newline as its primary behavior.</td>
+      </tr>
+      <tr>
+        <td><code>Shift+Enter</code></td>
+        <td>Insert one newline into the prompt draft at the current insertion point or selected range.</td>
+        <td>Submit, blur the composer, create a transcript message, or create a placeholder send.</td>
+      </tr>
+      <tr>
+        <td><code>Ctrl+Enter</code></td>
+        <td>Insert one newline into the prompt draft at the current insertion point or selected range.</td>
+        <td>Submit, blur the composer, create a transcript message, or create a placeholder send.</td>
+      </tr>
+    </tbody>
+  </table>
+  <p>When a mention picker, command palette, native context menu, or other explicitly modal surface owns Enter under another Clawline spec, that surface keeps its own documented precedence while it is open. Outside such an owning surface, the prompt composer behavior above is authoritative.</p>
+
+  <h2>T320 Context Menu Contract</h2>
+  <h3>Open Gestures</h3>
+  <ul>
+    <li>On Catalyst, mouse right-click on a chat bubble or bubble title area opens the context menu for that bubble's message.</li>
+    <li>On Catalyst, trackpad secondary click on a chat bubble or bubble title area opens the same menu.</li>
+    <li>On Catalyst, tap in the title-bar area of a chat bubble opens the same menu.</li>
+    <li>The menu target is the message associated with the bubble/title area that received the gesture. The compositor/presentation layer may route hit regions against resolved bubble rectangles, but it must not reconstruct message layout topology from higher-level intent.</li>
+  </ul>
+
+  <h3>Menu Items</h3>
+  <table>
+    <thead>
+      <tr>
+        <th>Item</th>
+        <th>Visibility</th>
+        <th>Action</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>Insert into prompt</strong></td>
+        <td>User bubbles/messages only.</td>
+        <td>Insert the targeted user message contents into the prompt composer as editable text. The action does not submit.</td>
+      </tr>
+      <tr>
+        <td><strong>Reference message</strong></td>
+        <td>Transcript messages that have stable identity and can be represented in reference context.</td>
+        <td>Add a visible composer reference token backed by structured identity for the targeted message. The action does not paste message body text into the prompt and does not submit.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <p>The ticket names reference/quote behavior. Product behavior is specified as <strong>Reference message</strong> unless implementation already uses a shorter visible label such as <strong>Quote</strong>; the required behavior is the token and structured identity contract, not the exact English label.</p>
+
+  <h2>Composer Reference UX</h2>
+  <ul>
+    <li>After <strong>Reference message</strong>, the composer shows a visible token before or near the prompt text editing area. The token must be visually distinct from typed prompt text.</li>
+    <li>The token should identify the target enough for the user to understand what will be referenced, such as role/author and a short message locator or compact preview. The preview must not become submitted prompt text.</li>
+    <li>The user can continue typing prompt text after adding the token.</li>
+    <li>The user can submit a prompt with one or more reference tokens if the implementation supports multiple tokens. If implementation chooses single-reference behavior for this pass, adding a second reference must replace the first or be explicitly blocked in UI; silent duplicate or hidden references are not allowed.</li>
+    <li>The user can remove a reference token before submit. Removed tokens must not remain in the outgoing structured context.</li>
+    <li>Composer focus should move to or remain in the prompt text editor after either <strong>Insert into prompt</strong> or <strong>Reference message</strong>, so the user can keep typing.</li>
+    <li>Sending with only a reference token and no prompt text is allowed only if the existing composer send eligibility permits non-text context sends. If current send eligibility requires prompt text, this spec does not add a new empty-text send rule.</li>
+  </ul>
+
+  <h2>Data and Context Contract</h2>
+  <p>The core distinction is that reference tokens are UI and reference context is structured data. The referenced message text must not be copied into the visible prompt body as the mechanism for giving the LLM context.</p>
+  <pre><code>{
+  "promptText": "User typed text from the composer",
+  "references": [
+    {
+      "kind": "message",
+      "sessionKey": "agent:main:clawline:flynn:s_...",
+      "streamId": "stable stream/session identifier when distinct from sessionKey",
+      "messageId": "stable transcript message identifier",
+      "messageRole": "user | assistant | tool | system | terminal | status",
+      "createdAt": "message creation timestamp if available",
+      "clientMessageId": "local/offline identity if distinct from messageId"
+    }
+  ]
+}</code></pre>
+  <ul>
+    <li><code>promptText</code> contains only the actual composer text the user typed or inserted through text-editing actions such as <strong>Insert into prompt</strong>.</li>
+    <li><code>references</code> contains one entry per visible reference token present at submit time.</li>
+    <li><code>sessionKey</code> is required. Clawline session keys must remain structurally distinct and must not be collapsed to <code>agent:main:main</code>.</li>
+    <li><code>messageId</code> is required when the transcript has a stable message identifier. If the local model differentiates provider message ID from local client message ID, preserve both rather than overwriting one with the other.</li>
+    <li><code>messageRole</code> is required for downstream context assembly and menu visibility checks.</li>
+    <li>The context assembler may resolve the referenced message body downstream using this identity, but the composer must not implement reference behavior by pasting hidden or visible quoted text into <code>promptText</code>.</li>
+    <li>If the referenced message no longer exists at submit time, use the existing send-error pathway or block submission with an inline composer error. Do not silently send a prompt whose visible token claims a reference that is absent from structured context.</li>
+  </ul>
+
+  <h2>Platform Notes</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Platform</th>
+        <th>Required Notes</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Catalyst</td>
+        <td>Primary T320 scope. Must support right-click, trackpad secondary click, and title-area tap for context menu opening. Must validate hardware keyboard modified Enter behavior in the prompt composer.</td>
+      </tr>
+      <tr>
+        <td>iPadOS</td>
+        <td>Must validate hardware keyboard behavior for plain Enter, Shift+Enter, and Ctrl+Enter in the prompt composer. Pointer/trackpad secondary click may share Catalyst code paths if available, but this spec does not require new iPadOS context-menu gestures beyond avoiding divergence where code is shared.</td>
+      </tr>
+      <tr>
+        <td>iOS</td>
+        <td>Must not regress software-keyboard composer behavior. Hardware keyboard validation is required where supported by test devices/simulators. T320 Catalyst context-menu gestures are not required on touch-only iPhone surfaces.</td>
+      </tr>
+      <tr>
+        <td>Web</td>
+        <td>Must validate the same prompt composer key contract if the web composer shares product behavior. Browser defaults that use Ctrl+Enter for submit must be overridden for Clawline composer focus because this spec defines Ctrl+Enter as newline.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>UX States and Edge Cases</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>State</th>
+        <th>Expected Behavior</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Empty composer, modified Enter</td>
+        <td>Insert a newline according to text-editor behavior. Existing placeholder/height behavior may update, but no send occurs.</td>
+      </tr>
+      <tr>
+        <td>Text selected in composer, modified Enter</td>
+        <td>Replace the selected text with one newline. Do not append at the end unless normal platform selection behavior would do so.</td>
+      </tr>
+      <tr>
+        <td>Composer disconnected or not provisioned</td>
+        <td>Modified Enter remains local text editing. Plain Enter continues to use the existing disabled/send-error gating and must not create optimistic placeholders before readiness.</td>
+      </tr>
+      <tr>
+        <td>Menu opened for assistant/tool/status message</td>
+        <td>Do not show <strong>Insert into prompt</strong>. Show reference action only if the message has stable identity usable for reference context.</td>
+      </tr>
+      <tr>
+        <td>Menu opened for user message</td>
+        <td>Show <strong>Insert into prompt</strong> and the reference action when stable identity exists.</td>
+      </tr>
+      <tr>
+        <td>Reference token added, user edits prompt</td>
+        <td>Token remains attached to the draft until removed or submitted. Text edits do not mutate token identity.</td>
+      </tr>
+      <tr>
+        <td>Reference token removed</td>
+        <td>Token disappears from UI and its identity is removed from pending send context.</td>
+      </tr>
+      <tr>
+        <td>Draft submitted with reference token</td>
+        <td>Outgoing send contains prompt text plus structured reference context. Transcript display may show the sent prompt according to existing message rendering rules, but must not pretend quoted text was typed by the user.</td>
+      </tr>
+      <tr>
+        <td>Referenced message deleted or unavailable before submit</td>
+        <td>Submission must not silently drop the reference. Either block with a visible composer error or use the existing send-error pathway.</td>
+      </tr>
+      <tr>
+        <td>Context menu opens while composer has unsent draft</td>
+        <td>Existing draft is preserved. <strong>Insert into prompt</strong> inserts into the current draft using normal insertion/selection behavior; reference action adds a token without replacing text.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>Architecture Boundaries</h2>
+  <ul>
+    <li>The composer owns draft text, reference-token UI state, and the pending send context assembled from those tokens.</li>
+    <li>The transcript/message bubble surface owns menu targeting and message identity lookup for the targeted bubble.</li>
+    <li>The send pipeline receives resolved prompt text and structured references. It must not infer references by parsing visible prompt text.</li>
+    <li>The presentation/compositor layer may validate bounds, transform coordinate spaces, host surfaces, and route hit regions against provided bubble/title rectangles. It must not reconstruct pane layout or message topology from layout intent.</li>
+    <li>The implementation must preserve the existing Clawline send readiness invariant: no optimistic local placeholder should be created before transport and active-session provisioning gates allow send.</li>
+  </ul>
+
+  <h2>Implementation Handoff</h2>
+  <ul>
+    <li>Implement exactly the specified T319/T320 behavior. Do not add additional validation, hidden prompt rewriting, new routing fallback, or broad context-menu actions unless Flynn updates this spec.</li>
+    <li>Use the existing composer send path for plain Enter and final prompt submit. The spec changes the key handling for modified Enter, not the send architecture.</li>
+    <li>Use stable transcript/session identity for references. If the current model lacks a stable identity for a message class, hide or disable reference action for that class rather than inventing unstable identity.</li>
+    <li>Keep <strong>Insert into prompt</strong> eligibility role-based: user messages only.</li>
+    <li>Keep reference/quote semantically separate from insertion: insert copies user message text into the prompt; reference creates a token and structured context.</li>
+  </ul>
+
+  <h2>Proof Gates</h2>
+  <ol>
+    <li>Artifact gate: this HTML spec renders as a standalone document and includes goals, non-goals, requirement matrix, platform notes, data/context contract, UX states, edge cases, and implementation handoff.</li>
+    <li>Keyboard gate: automated or manual tests prove plain Enter submits, Shift+Enter inserts newline, and Ctrl+Enter inserts newline in the prompt composer on relevant Web, Catalyst, iOS, and iPadOS paths.</li>
+    <li>No-submit gate: pressing Shift+Enter or Ctrl+Enter creates no transcript user message, no optimistic placeholder, and no outbound send.</li>
+    <li>Catalyst menu gate: mouse right-click, trackpad secondary click, and title-area tap open the message context menu for the targeted bubble.</li>
+    <li>Eligibility gate: <strong>Insert into prompt</strong> appears for user messages and does not appear for non-user messages.</li>
+    <li>Insertion gate: selecting <strong>Insert into prompt</strong> inserts user message contents into the composer as editable text and leaves send under user control.</li>
+    <li>Reference UI gate: selecting reference/quote creates a visible composer token without pasting referenced message body into prompt text.</li>
+    <li>Reference payload gate: submitting with a token sends structured reference context including session identity and message identity alongside prompt text.</li>
+    <li>Removal gate: removing a token before submit removes its identity from outgoing context.</li>
+    <li>Session invariant gate: active and referenced Clawline session keys remain structurally distinct and are not canonicalized into <code>agent:main:main</code>.</li>
+  </ol>
+
+  <h2>Open Questions</h2>
+  <ul>
+    <li>Should the visible menu label be <strong>Reference message</strong>, <strong>Quote message</strong>, or another product string? This spec treats the behavior as authoritative and the exact label as product-copy follow-up.</li>
+    <li>Should multiple simultaneous reference tokens be supported in the first implementation pass? If not, the implementation must make single-reference behavior explicit by replacing or visibly blocking additional references.</li>
+    <li>What exact downstream wire/schema field names should carry reference context if an existing Clawline envelope already has a preferred extension point? The semantic contract in this spec is required regardless of field names.</li>
+  </ul>
+</main>
+</body>
+</html>

@@ -16,6 +16,29 @@ enum SendButtonConnectionState: Equatable {
     case disconnected
 }
 
+struct CrossChatAssistantNotificationEntry: Identifiable, Equatable {
+    let id: String
+    var content: String
+    var timestamp: Date
+}
+
+struct CrossChatNotificationBubble: Identifiable, Equatable {
+    var id: String { sourceChatId }
+    let sourceChatId: String
+    var sourceTitle: String
+    var entries: [CrossChatAssistantNotificationEntry]
+    var lastAssistantActivityAt: Date
+    var isReplying: Bool = false
+    var replyDraft: String = ""
+}
+
+typealias CrossChatNotificationDismissAnimator = (_ updates: @escaping () -> Void) -> Void
+
+enum MessageSendIndicatorState: Equatable, Hashable {
+    case pending
+    case failed(String)
+}
+
 protocol ChatViewModelHosting: AnyObject {
     func handleSceneDidBecomeActive()
 }
@@ -111,6 +134,9 @@ final class ChatViewModel: ChatViewModelHosting {
     private(set) var streamDotStateBySession: [String: StreamDotState] = [:]
     private(set) var lastReadMessageIdBySession: [String: String] = [:]
     private(set) var streamTailStateBySession: [String: StreamTailState] = [:]
+    private(set) var crossChatNotificationBubblesBySourceChatId: [String: CrossChatNotificationBubble] = [:]
+    var crossChatNotificationDismissAnimator: CrossChatNotificationDismissAnimator?
+    private var unavailableCrossChatNotificationSourceIds: Set<String> = []
     private var syntheticSessionKeys: Set<String> = []
     private var didRestoreActiveSessionKey = false
 
@@ -214,6 +240,7 @@ final class ChatViewModel: ChatViewModelHosting {
 
     func requestStreamSwitch(to sessionKey: String, source: StreamSwitchSource) {
         guard orderedSessionKeys.contains(sessionKey) else { return }
+        dismissCrossChatNotification(sourceChatId: sessionKey)
 
         // Step 1-2: stream-switch intent + epoch bump.
         uiSwitchEpoch &+= 1
@@ -277,6 +304,7 @@ final class ChatViewModel: ChatViewModelHosting {
         guard orderedSessionKeys.contains(sessionKey) else { return }
         guard engineActiveSessionKey != sessionKey else { return }
         applyActiveSessionKey(sessionKey)
+        dismissCrossChatNotification(sourceChatId: sessionKey)
         markSessionRead(sessionKey, preferServerTail: true)
         // Keep intent selection coherent for non-switch engine mutations (bootstrap/deletion fallback).
         // Stream-switch path still writes uiSelectedSessionKey explicitly before this runs.
@@ -450,6 +478,7 @@ final class ChatViewModel: ChatViewModelHosting {
     private(set) var pendingAttachmentStageCount: Int = 0
     private var stagedAttachmentProtection: Set<UUID> = []
     private(set) var isSending: Bool = false
+    private(set) var sendIndicatorRevision: Int = 0
     private(set) var isAssistantTyping: Bool = false
     private(set) var typingSessionKey: String?
     private(set) var liveProgressBySessionKey: [String: LiveAgentProgress] = [:]
@@ -457,8 +486,10 @@ final class ChatViewModel: ChatViewModelHosting {
     private(set) var sendButtonConnectionState: SendButtonConnectionState = .disconnected
     private(set) var inputResetToken: Int = 0
     private(set) var sendTask: Task<Void, Never>?
+    var canCancelSend: Bool { isSending && !activeSendHasReachedTransport }
     /// Tracks if typing indicator was visible when a message arrives (for morph transition).
     private(set) var shouldMorphTypingIndicator: Bool = false
+    private var typingIndicatorMorphTargetMessageIdBySessionKey: [String: String] = [:]
     private var isRetired = false
 
     private var temporarySendButtonOverride: SendButtonConnectionState?
@@ -510,6 +541,9 @@ final class ChatViewModel: ChatViewModelHosting {
     private var connectionStableTask: Task<Void, Never>?
     private let stableConnectionInterval: Duration = .seconds(5)
     private var activeClientMessageId: String?
+    private var activeCrossChatNotificationReplySourceChatId: String?
+    private var activeSendHasReachedTransport = false
+    private var crossChatNotificationReplySourceByClientMessageId: [String: String] = [:]
     private var messageFailures: [String: MessageFailure] = [:]
     private var presentationCache: [PresentationCacheKey: PresentationCacheEntry] = [:]
     private var tableParseStates: [String: StreamingTableParseState] = [:]
@@ -574,15 +608,21 @@ final class ChatViewModel: ChatViewModelHosting {
     }
 
     private struct PendingProvisionedSend {
+        let clientId: String
         let content: String
         let attachments: [PendingAttachment]
         let sessionKey: String
+        let crossChatNotificationReplySourceChatId: String?
     }
 
     private struct PendingHistoryResetReplay {
         let epoch: Int
         let cursorBackedSessionKeys: Set<String>
         var messagesBySessionKey: [String: [Message]] = [:]
+    }
+
+    private func bumpSendIndicatorRevision() {
+        sendIndicatorRevision &+= 1
     }
 
 #if DEBUG
@@ -1040,7 +1080,7 @@ final class ChatViewModel: ChatViewModelHosting {
         hasActivatedLifecycleOwnership = false
         clearSessionStatusRefreshes()
         stopObservingLifecycle(origin: "prepareForReplacement")
-        cancelSend()
+        cancelSendForTeardown()
         guard isConnectionOwner else { return }
         Task { await lifecycleCoordinator.disconnectRequested() }
         chatService.disconnect()
@@ -1133,7 +1173,7 @@ final class ChatViewModel: ChatViewModelHosting {
 
     private func validateTextByteLimitForSend(_ text: String) -> Bool {
         let textBytes = text.lengthOfBytes(using: .utf8)
-        guard textBytes <= Self.providerMaxTextMessageBytes else {
+        guard isTextWithinSendByteLimit(text) else {
 #if DEBUG
             recordImageSendDebugEvent(
                 .sendResult,
@@ -1146,6 +1186,14 @@ final class ChatViewModel: ChatViewModelHosting {
         return true
     }
 
+    private func isTextWithinSendByteLimit(_ text: String) -> Bool {
+        text.lengthOfBytes(using: .utf8) <= Self.providerMaxTextMessageBytes
+    }
+
+    private func nextClientMessageId() -> String {
+        "c_\(UUID().uuidString)"
+    }
+
     var canCancelCurrentPrompt: Bool {
         currentInFlightPromptSessionKey != nil
     }
@@ -1153,7 +1201,49 @@ final class ChatViewModel: ChatViewModelHosting {
     func canCancelVisibleTypingPrompt(in sessionKey: String) -> Bool {
         let normalizedSessionKey = sessionKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalizedSessionKey.isEmpty else { return false }
-        return isAssistantTyping && typingSessionKey == normalizedSessionKey
+        return shouldShowTypingIndicator(in: normalizedSessionKey)
+    }
+
+    func shouldShowTypingIndicator(in sessionKey: String) -> Bool {
+        let normalizedSessionKey = sessionKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedSessionKey.isEmpty else { return false }
+        if isAssistantTyping, typingSessionKey == normalizedSessionKey {
+            return true
+        }
+        guard let status = sessionStatusBySessionKey[normalizedSessionKey] else { return false }
+        switch status.run.state {
+        case .running, .queued:
+            return true
+        case .idle, .unknown:
+            return false
+        }
+    }
+
+    func typingIndicatorMorphTargetMessageId(in sessionKey: String) -> String? {
+        let normalizedSessionKey = sessionKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedSessionKey.isEmpty else { return nil }
+        return typingIndicatorMorphTargetMessageIdBySessionKey[normalizedSessionKey]
+    }
+
+    func consumeTypingIndicatorMorphTargetMessageId(_ messageId: String?, in sessionKey: String) {
+        let normalizedSessionKey = sessionKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedSessionKey.isEmpty,
+              let messageId,
+              typingIndicatorMorphTargetMessageIdBySessionKey[normalizedSessionKey] == messageId else {
+            return
+        }
+        typingIndicatorMorphTargetMessageIdBySessionKey.removeValue(forKey: normalizedSessionKey)
+        shouldMorphTypingIndicator = !typingIndicatorMorphTargetMessageIdBySessionKey.isEmpty
+    }
+
+    private func clearTypingIndicatorMorphTarget(for sessionKey: String) {
+        typingIndicatorMorphTargetMessageIdBySessionKey.removeValue(forKey: sessionKey)
+        shouldMorphTypingIndicator = !typingIndicatorMorphTargetMessageIdBySessionKey.isEmpty
+    }
+
+    private func clearAllTypingIndicatorMorphTargets() {
+        typingIndicatorMorphTargetMessageIdBySessionKey.removeAll()
+        shouldMorphTypingIndicator = false
     }
 
     func canCancelCurrentPrompt(in sessionKey: String) -> Bool {
@@ -1238,15 +1328,155 @@ final class ChatViewModel: ChatViewModelHosting {
         }
     }
 
-    func send() {
+    var crossChatNotificationBubbles: [CrossChatNotificationBubble] {
+        crossChatNotificationBubblesBySourceChatId.values.sorted {
+            if $0.lastAssistantActivityAt == $1.lastAssistantActivityAt {
+                return $0.sourceChatId < $1.sourceChatId
+            }
+            return $0.lastAssistantActivityAt > $1.lastAssistantActivityAt
+        }
+    }
+
+    func dismissCrossChatNotification(sourceChatId: String, markSourceRead: Bool = true) {
+        if markSourceRead {
+            markSessionRead(sourceChatId, preferServerTail: true)
+        }
+        animateCrossChatNotificationDismissal {
+            self.crossChatNotificationBubblesBySourceChatId.removeValue(forKey: sourceChatId)
+        }
+    }
+
+    func dismissAllCrossChatNotifications() {
+        for sourceChatId in crossChatNotificationBubblesBySourceChatId.keys {
+            markSessionRead(sourceChatId, preferServerTail: true)
+        }
+        animateCrossChatNotificationDismissal {
+            self.crossChatNotificationBubblesBySourceChatId.removeAll()
+        }
+    }
+
+    private func animateCrossChatNotificationDismissal(_ updates: @escaping () -> Void) {
+        guard let crossChatNotificationDismissAnimator else {
+            updates()
+            return
+        }
+        crossChatNotificationDismissAnimator(updates)
+    }
+
+    func openCrossChatNotificationReply(sourceChatId: String) {
+        guard var bubble = crossChatNotificationBubblesBySourceChatId[sourceChatId] else { return }
+        bubble.isReplying = true
+        crossChatNotificationBubblesBySourceChatId[sourceChatId] = bubble
+        closeOverflowingCrossChatNotificationReplies()
+    }
+
+    func toggleCrossChatNotificationReply(sourceChatId: String) {
+        guard let bubble = crossChatNotificationBubblesBySourceChatId[sourceChatId] else { return }
+        if bubble.isReplying {
+            closeCrossChatNotificationReply(sourceChatId: sourceChatId)
+        } else {
+            openCrossChatNotificationReply(sourceChatId: sourceChatId)
+        }
+    }
+
+    func closeCrossChatNotificationReply(sourceChatId: String) {
+        guard var bubble = crossChatNotificationBubblesBySourceChatId[sourceChatId] else { return }
+        bubble.isReplying = false
+        bubble.replyDraft = ""
+        crossChatNotificationBubblesBySourceChatId[sourceChatId] = bubble
+    }
+
+    func setCrossChatNotificationReplyDraft(sourceChatId: String, draft: String) {
+        guard var bubble = crossChatNotificationBubblesBySourceChatId[sourceChatId] else { return }
+        bubble.replyDraft = draft
+        crossChatNotificationBubblesBySourceChatId[sourceChatId] = bubble
+    }
+
+    func isSendingCrossChatNotificationReply(sourceChatId: String) -> Bool {
+        isSending && activeCrossChatNotificationReplySourceChatId == sourceChatId
+    }
+
+    func canImmediatelySendCrossChatNotificationReply(sourceChatId: String) -> Bool {
+        guard !isSending else { return false }
+        guard let bubble = crossChatNotificationBubblesBySourceChatId[sourceChatId] else { return false }
+        let text = bubble.replyDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, isTextWithinSendByteLimit(text) else { return false }
+        guard streamsBySessionKey[sourceChatId] != nil else { return false }
+        guard transportSendButtonConnectionState == .connected else { return false }
+
+        switch sendProvisioningState(for: sourceChatId) {
+        case .ready:
+            return true
+        case .waiting, .unavailable:
+            return false
+        }
+    }
+
+    func sendCrossChatNotificationReply(sourceChatId: String) {
         guard !isSending else { return }
-        let referencedIds = Set(inputContent.pendingAttachmentIds())
+        guard let bubble = crossChatNotificationBubblesBySourceChatId[sourceChatId] else { return }
+        let text = bubble.replyDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        guard streamsBySessionKey[sourceChatId] != nil else {
+            toastManager.show("This stream is unavailable. Switch streams and try again.")
+            return
+        }
+        guard validateTextByteLimitForSend(text) else { return }
+
+        switch sendProvisioningState(for: sourceChatId) {
+        case .ready:
+            guard transportSendButtonConnectionState == .connected else {
+                toastManager.show("Could not send; not connected.")
+                return
+            }
+            beginSend(
+                content: text,
+                pendingAttachments: [],
+                sessionKey: sourceChatId,
+                clearInputOnSuccess: false,
+                crossChatNotificationReplySourceChatId: sourceChatId,
+                onSuccess: { [weak self] _ in
+                    self?.dismissCrossChatNotification(sourceChatId: sourceChatId)
+                }
+            )
+        case .waiting:
+            return
+        case .unavailable:
+            toastManager.show("This stream is unavailable. Switch streams and try again.")
+        }
+    }
+
+    func send() {
+        _ = sendResolved(destinationSessionKey: nil)
+    }
+
+    @discardableResult
+    func sendCrossChatMention(to destinationSessionKey: String) -> Bool {
+        let routedContent = inputContent.contentAfterCrossChatMentionAttachment() ?? inputContent
+        let didDispatch = sendResolved(
+            destinationSessionKey: destinationSessionKey,
+            sourceContent: routedContent
+        )
+        if didDispatch {
+            clearInput()
+        }
+        return didDispatch
+    }
+
+    @discardableResult
+    private func sendResolved(
+        destinationSessionKey: String?,
+        sourceContent: NSAttributedString? = nil
+    ) -> Bool {
+        guard !isSending else { return false }
+        let sendContent = sourceContent ?? inputContent
+        let referencedIds = Set(sendContent.pendingAttachmentIds())
 #if DEBUG
         let transportSnapshot = sendTransportSnapshot()
         imageSendLastTransportSnapshot = transportSnapshot
         recordImageSendDebugEvent(
             .sendTapped,
-            detail: "textLen=\(inputContent.length) attachmentCount=\(referencedIds.count) \(transportSnapshot)"
+            detail: "textLen=\(sendContent.length) attachmentCount=\(referencedIds.count) \(transportSnapshot)"
         )
 #endif
         let stagedOnly = attachmentData.keys.filter { !referencedIds.contains($0) }
@@ -1258,37 +1488,43 @@ final class ChatViewModel: ChatViewModelHosting {
             )
 #endif
             toastManager.show("Finishing attachment…")
-            return
+            return false
         }
         pruneAttachmentData()
-        let (text, pendingIds) = inputContent.contentForSending()
+        let (text, pendingIds) = sendContent.contentForSending()
         let pendingAttachments = pendingIds.compactMap { attachmentData[$0] }
 
         guard !text.isEmpty || !pendingAttachments.isEmpty else {
 #if DEBUG
             recordImageSendDebugEvent(.sendResult, detail: "failure reason=empty_input")
 #endif
-            return
+            return false
         }
 
         if !validateTextByteLimitForSend(text) {
-            return
+            return false
         }
 
-        if pendingAttachments.isEmpty && handleSlashCommand(text) {
-            return
+        let crossChatDestination = destinationSessionKey?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if crossChatDestination == nil, pendingAttachments.isEmpty && handleSlashCommand(text) {
+            return true
         }
 
         ensureDefaultActiveSessionIfNeeded()
-        let outboundSessionKey = engineActiveSessionKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let outboundSessionKey = crossChatDestination ?? engineActiveSessionKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !outboundSessionKey.isEmpty else {
 #if DEBUG
             recordImageSendDebugEvent(.sendResult, detail: "failure reason=no_stream_selected")
 #endif
             toastManager.show("No stream selected.")
-            return
+            return false
         }
-
+        if crossChatDestination != nil, streamsBySessionKey[outboundSessionKey] == nil {
+#if DEBUG
+            recordImageSendDebugEvent(.sendResult, detail: "failure reason=cross_chat_destination_unavailable")
+#endif
+            return false
+        }
         switch sendProvisioningState(for: outboundSessionKey) {
         case .ready:
             guard transportSendButtonConnectionState == .connected else {
@@ -1299,9 +1535,10 @@ final class ChatViewModel: ChatViewModelHosting {
                 )
 #endif
                 toastManager.show("Could not send; not connected.")
-                return
+                return false
             }
             beginSend(content: text, pendingAttachments: pendingAttachments, sessionKey: outboundSessionKey)
+            return true
         case .waiting:
 #if DEBUG
             recordImageSendDebugEvent(
@@ -1309,11 +1546,22 @@ final class ChatViewModel: ChatViewModelHosting {
                 detail: "queued reason=provisioning_waiting \(sendTransportSnapshot())"
             )
 #endif
+            let pendingAttachmentIds = pendingAttachments.map(\.id)
+            if let pendingProvisionedSend,
+               pendingProvisionedSend.content == text,
+               pendingProvisionedSend.sessionKey == outboundSessionKey,
+               pendingProvisionedSend.crossChatNotificationReplySourceChatId == nil,
+               pendingProvisionedSend.attachments.map(\.id) == pendingAttachmentIds {
+                return true
+            }
             pendingProvisionedSend = PendingProvisionedSend(
+                clientId: nextClientMessageId(),
                 content: text,
                 attachments: pendingAttachments,
-                sessionKey: outboundSessionKey
+                sessionKey: outboundSessionKey,
+                crossChatNotificationReplySourceChatId: nil
             )
+            return true
         case .unavailable:
 #if DEBUG
             recordImageSendDebugEvent(
@@ -1322,15 +1570,23 @@ final class ChatViewModel: ChatViewModelHosting {
             )
 #endif
             toastManager.show("This stream is unavailable. Switch streams and try again.")
+            return false
         }
     }
 
     private func beginSend(content: String,
                            pendingAttachments: [PendingAttachment],
                            sessionKey: String,
-                           clearInputOnSuccess: Bool = true) {
-        let clientId = "c_\(UUID().uuidString)"
+                           clientId: String? = nil,
+                           clearInputOnSuccess: Bool = true,
+                           crossChatNotificationReplySourceChatId: String? = nil,
+                           onSuccess: (@MainActor (_ clientId: String) -> Void)? = nil) {
+        let clientId = clientId ?? nextClientMessageId()
         activeClientMessageId = clientId
+        activeCrossChatNotificationReplySourceChatId = crossChatNotificationReplySourceChatId
+        if let crossChatNotificationReplySourceChatId {
+            crossChatNotificationReplySourceByClientMessageId[clientId] = crossChatNotificationReplySourceChatId
+        }
 #if DEBUG
         recordImageSendDebugEvent(
             .sendDispatched,
@@ -1339,6 +1595,7 @@ final class ChatViewModel: ChatViewModelHosting {
 #endif
 
         isSending = true  // Set immediately to prevent double-tap race condition
+        activeSendHasReachedTransport = false
         let placeholder = Message(
             id: clientId,
             role: .user,
@@ -1351,6 +1608,8 @@ final class ChatViewModel: ChatViewModelHosting {
         )
         appendMessage(placeholder)
         pendingLocalMessages.append(PendingLocalMessage(id: clientId, sessionKey: sessionKey))
+        scheduleSessionStatusRefresh(for: sessionKey, reason: "sendDispatched")
+        bumpSendIndicatorRevision()
 
         sendTask = Task { [weak self] in
             await self?.performSend(
@@ -1358,7 +1617,8 @@ final class ChatViewModel: ChatViewModelHosting {
                 content: content,
                 pendingAttachments: pendingAttachments,
                 sessionKey: sessionKey,
-                clearInputOnSuccess: clearInputOnSuccess
+                clearInputOnSuccess: clearInputOnSuccess,
+                onSuccess: onSuccess
             )
         }
     }
@@ -1407,9 +1667,12 @@ final class ChatViewModel: ChatViewModelHosting {
         ackedPendingLocalMessageIDs.remove(messageId)
         pendingLocalMessages.append(PendingLocalMessage(id: clientId, sessionKey: sessionKey))
         messageFailures.removeValue(forKey: messageId)
+        bumpSendIndicatorRevision()
 
         isSending = true
         activeClientMessageId = clientId
+        activeCrossChatNotificationReplySourceChatId = nil
+        activeSendHasReachedTransport = false
 
         sendTask = Task { [weak self] in
             await self?.performRetrySend(
@@ -1422,13 +1685,33 @@ final class ChatViewModel: ChatViewModelHosting {
     }
 
     func cancelSend() {
+        cancelActiveSend(shouldGhostOnlyBeforeTransport: true)
+    }
+
+    private func cancelSendForTeardown() {
+        cancelActiveSend(shouldGhostOnlyBeforeTransport: false)
+    }
+
+    private func cancelActiveSend(shouldGhostOnlyBeforeTransport: Bool) {
         guard isSending else { return }
+        if shouldGhostOnlyBeforeTransport, activeSendHasReachedTransport {
+            return
+        }
+        let canceledClientMessageId = activeClientMessageId
+        let shouldGhost = !activeSendHasReachedTransport
         sendTask?.cancel()
         sendTask = nil
-        if let activeClientMessageId {
-            removePlaceholder(withId: activeClientMessageId)
+        if let canceledClientMessageId {
+            if shouldGhost {
+                markLocalMessageCanceled(id: canceledClientMessageId)
+            } else {
+                removePlaceholder(withId: canceledClientMessageId)
+            }
+            crossChatNotificationReplySourceByClientMessageId.removeValue(forKey: canceledClientMessageId)
         }
         activeClientMessageId = nil
+        activeCrossChatNotificationReplySourceChatId = nil
+        activeSendHasReachedTransport = false
         isSending = false
     }
 
@@ -1466,7 +1749,7 @@ final class ChatViewModel: ChatViewModelHosting {
     }
 
     func logout() {
-        cancelSend()
+        cancelSendForTeardown()
         observationStartupTask?.cancel()
         observationStartupTask = nil
         activationTask?.cancel()
@@ -1508,15 +1791,19 @@ final class ChatViewModel: ChatViewModelHosting {
         syntheticSessionKeys = []
         pendingLocalMessages.removeAll()
         ackedPendingLocalMessageIDs.removeAll()
+        bumpSendIndicatorRevision()
         isAssistantTyping = false
         typingSessionKey = nil
         clearAllLiveProgress()
         shouldMorphTypingIndicator = false
+        clearAllTypingIndicatorMorphTargets()
         connectionStableTask?.cancel()
         connectionStableTask = nil
         restoredSessionKeys.removeAll()
         forceReReadGenerationBySession.removeAll()
         restoredStreamMetadataForUserId = nil
+        crossChatNotificationBubblesBySourceChatId.removeAll()
+        unavailableCrossChatNotificationSourceIds.removeAll()
         resetSessionProvisioningState(clearPendingSend: true)
         clearMessageCache()
         clearStreamMetadataCache()
@@ -1746,9 +2033,13 @@ final class ChatViewModel: ChatViewModelHosting {
            isAssistantTyping,
            typingSessionKey == message.sessionKey {
             shouldMorphTypingIndicator = true
+            typingIndicatorMorphTargetMessageIdBySessionKey[message.sessionKey] = resolvedMessage.id
             isAssistantTyping = false
             self.typingSessionKey = nil
-        } else {
+        } else if message.role == .assistant,
+                  typingIndicatorMorphTargetMessageIdBySessionKey[message.sessionKey] == message.id {
+            clearTypingIndicatorMorphTarget(for: message.sessionKey)
+        } else if typingIndicatorMorphTargetMessageIdBySessionKey.isEmpty {
             shouldMorphTypingIndicator = false
         }
 
@@ -1760,7 +2051,9 @@ final class ChatViewModel: ChatViewModelHosting {
         if resolvedMessage.role == .assistant,
            !resolvedMessage.streaming,
            let replyToMessageId = normalizedServerEventID(resolvedMessage.replyToMessageId) {
-            messageFailures.removeValue(forKey: replyToMessageId)
+            if messageFailures.removeValue(forKey: replyToMessageId) != nil {
+                bumpSendIndicatorRevision()
+            }
         }
 
         ensureSessionStorage(for: resolvedMessage.sessionKey)
@@ -1782,9 +2075,66 @@ final class ChatViewModel: ChatViewModelHosting {
            resolvedMessage.id.hasPrefix("s_") {
             markSessionRead(resolvedMessage.sessionKey)
         }
+        applyCrossChatAssistantNotificationIfNeeded(for: resolvedMessage)
         maybeTriggerAssistantIncomingHaptic(for: resolvedMessage, didAppendNewMessage: didAppendNewMessage)
 
         resolveAssetAttachmentsIfNeeded(for: resolvedMessage)
+    }
+
+    private func applyCrossChatAssistantNotificationIfNeeded(for message: Message) {
+        guard message.role == .assistant else { return }
+        guard streamsBySessionKey[message.sessionKey] != nil else { return }
+        guard !unavailableCrossChatNotificationSourceIds.contains(message.sessionKey) else { return }
+        guard !hasReceivedSessionProvisioning || isLocallySendableSessionKey(message.sessionKey) else { return }
+        let visibleSessionKey = uiSelectedSessionKey.isEmpty ? engineActiveSessionKey : uiSelectedSessionKey
+        guard message.sessionKey != visibleSessionKey else { return }
+
+        let title = stream(for: message.sessionKey)?.displayName
+            ?? message.sender
+            ?? message.sessionKey
+        let entry = CrossChatAssistantNotificationEntry(
+            id: message.id,
+            content: message.content,
+            timestamp: message.timestamp
+        )
+        var bubble = crossChatNotificationBubblesBySourceChatId[message.sessionKey] ?? CrossChatNotificationBubble(
+            sourceChatId: message.sessionKey,
+            sourceTitle: title,
+            entries: [],
+            lastAssistantActivityAt: message.timestamp
+        )
+        bubble.sourceTitle = title
+        if let existingIndex = bubble.entries.firstIndex(where: { $0.id == message.id }) {
+            bubble.entries.remove(at: existingIndex)
+        }
+        bubble.entries.insert(entry, at: 0)
+        bubble.lastAssistantActivityAt = message.timestamp
+        crossChatNotificationBubblesBySourceChatId[message.sessionKey] = bubble
+        closeOverflowingCrossChatNotificationReplies()
+    }
+
+    func closeOverflowingCrossChatNotificationReplies(visibleCapacity: Int = 10) {
+        let capacity = max(0, visibleCapacity)
+        let overflowSourceChatIds = crossChatNotificationBubbles.dropFirst(capacity).map(\.sourceChatId)
+        closeCrossChatNotificationReplies(sourceChatIds: overflowSourceChatIds)
+    }
+
+    func closeOverflowingCrossChatNotificationReplies(visibleSourceChatIds: Set<String>) {
+        let overflowSourceChatIds = crossChatNotificationBubblesBySourceChatId.keys.filter {
+            !visibleSourceChatIds.contains($0)
+        }
+        closeCrossChatNotificationReplies(sourceChatIds: overflowSourceChatIds)
+    }
+
+    private func closeCrossChatNotificationReplies(sourceChatIds: some Sequence<String>) {
+        for sourceChatId in sourceChatIds {
+            guard var bubble = crossChatNotificationBubblesBySourceChatId[sourceChatId] else { continue }
+            guard !bubble.isReplying else { continue }
+            guard bubble.isReplying || !bubble.replyDraft.isEmpty else { continue }
+            bubble.isReplying = false
+            bubble.replyDraft = ""
+            crossChatNotificationBubblesBySourceChatId[sourceChatId] = bubble
+        }
     }
 
     private func shouldSuppressInteractiveCallbackEcho(_ message: Message) -> Bool {
@@ -1829,6 +2179,7 @@ final class ChatViewModel: ChatViewModelHosting {
         pendingLocalMessages.removeAll()
         ackedPendingLocalMessageIDs.removeAll()
         messageFailures.removeAll()
+        bumpSendIndicatorRevision()
         let cursorBackedSessionKeys = Set(chatService.replayCursorSnapshot().keys)
         chatService.clearReplayCursors()
         clearMessageCache()
@@ -2039,6 +2390,7 @@ final class ChatViewModel: ChatViewModelHosting {
 
         let pending = pendingLocalMessages.remove(at: pendingIndex)
         ackedPendingLocalMessageIDs.remove(pending.id)
+        bumpSendIndicatorRevision()
         var placeholderSessionKey = pending.sessionKey
         ensureSessionStorage(for: placeholderSessionKey)
         var pendingList = sessionMessages[placeholderSessionKey] ?? []
@@ -2074,6 +2426,11 @@ final class ChatViewModel: ChatViewModelHosting {
         }
         if activeClientMessageId == pending.id {
             activeClientMessageId = nil
+            activeCrossChatNotificationReplySourceChatId = nil
+            activeSendHasReachedTransport = false
+        }
+        if let replySourceChatId = crossChatNotificationReplySourceByClientMessageId.removeValue(forKey: pending.id) {
+            dismissCrossChatNotification(sourceChatId: replySourceChatId)
         }
         messageFailures.removeValue(forKey: pending.id)
         return true
@@ -2126,7 +2483,9 @@ final class ChatViewModel: ChatViewModelHosting {
             pendingLocalMessages.remove(at: pendingIndex)
         }
         ackedPendingLocalMessageIDs.remove(id)
+        bumpSendIndicatorRevision()
         messageFailures.removeValue(forKey: id)
+        bumpSendIndicatorRevision()
     }
 
     private func handleLifecycleOutput(_ output: ConnectionLifecycleOutput) {
@@ -2206,8 +2565,14 @@ final class ChatViewModel: ChatViewModelHosting {
         }
         pendingLocalMessages.removeAll()
         ackedPendingLocalMessageIDs.removeAll()
+        for id in pendingIds {
+            crossChatNotificationReplySourceByClientMessageId.removeValue(forKey: id)
+        }
+        bumpSendIndicatorRevision()
         if let activeClientMessageId, pendingIds.contains(activeClientMessageId) {
             self.activeClientMessageId = nil
+            self.activeCrossChatNotificationReplySourceChatId = nil
+            self.activeSendHasReachedTransport = false
             self.isSending = false
         }
     }
@@ -2215,28 +2580,39 @@ final class ChatViewModel: ChatViewModelHosting {
     private func markPendingMessagesFailedForUnscopedMessageError(code: String, message: String?) {
         guard !pendingLocalMessages.isEmpty else { return }
         let pendingIds = Set(pendingLocalMessages.map(\.id))
-        for id in pendingIds {
+        let failedIds = pendingIds.subtracting(ackedPendingLocalMessageIDs)
+        for id in failedIds {
             messageFailures[id] = MessageFailure(code: code, message: message)
         }
-        pendingLocalMessages.removeAll()
-        ackedPendingLocalMessageIDs.removeAll()
-        if let activeClientMessageId, pendingIds.contains(activeClientMessageId) {
-            self.activeClientMessageId = nil
+        pendingLocalMessages.removeAll { failedIds.contains($0.id) }
+        ackedPendingLocalMessageIDs.subtract(failedIds)
+        for id in failedIds {
+            crossChatNotificationReplySourceByClientMessageId.removeValue(forKey: id)
         }
-        self.isSending = false
+        if !failedIds.isEmpty {
+            bumpSendIndicatorRevision()
+        }
+        if let activeClientMessageId, failedIds.contains(activeClientMessageId) {
+            self.activeClientMessageId = nil
+            self.activeCrossChatNotificationReplySourceChatId = nil
+            self.activeSendHasReachedTransport = false
+            self.isSending = false
+        }
     }
 
     private func performSend(clientId: String,
                              content: String,
                              pendingAttachments: [PendingAttachment],
                              sessionKey: String?,
-                             clearInputOnSuccess: Bool = true) async {
+                             clearInputOnSuccess: Bool = true,
+                             onSuccess: (@MainActor (_ clientId: String) -> Void)? = nil) async {
         defer { sendTask = nil }
         var didStartChatSend = false
         do {
             let wireAttachments = try await buildWireAttachments(from: pendingAttachments, content: content)
             try Task.checkCancellation()
             didStartChatSend = true
+            activeSendHasReachedTransport = true
             try await chatService.send(
                 id: clientId,
                 content: content,
@@ -2250,17 +2626,27 @@ final class ChatViewModel: ChatViewModelHosting {
                 if clearInputOnSuccess {
                     clearInput()
                 }
+                onSuccess?(clientId)
                 isSending = false
                 activeClientMessageId = nil
+                activeCrossChatNotificationReplySourceChatId = nil
+                activeSendHasReachedTransport = false
             }
         } catch is CancellationError {
             await MainActor.run {
 #if DEBUG
                 self.recordImageSendDebugEvent(.sendResult, detail: "failure localId=\(clientId) reason=cancelled")
 #endif
-                removePlaceholder(withId: clientId)
+                if activeSendHasReachedTransport {
+                    removePlaceholder(withId: clientId)
+                } else {
+                    markLocalMessageCanceled(id: clientId)
+                }
+                crossChatNotificationReplySourceByClientMessageId.removeValue(forKey: clientId)
                 isSending = false
                 activeClientMessageId = nil
+                activeCrossChatNotificationReplySourceChatId = nil
+                activeSendHasReachedTransport = false
             }
         } catch let attachmentError as AttachmentError {
             await MainActor.run {
@@ -2276,8 +2662,11 @@ final class ChatViewModel: ChatViewModelHosting {
                     code: "upload_failed_retryable",
                     message: nil
                 )
+                crossChatNotificationReplySourceByClientMessageId.removeValue(forKey: clientId)
                 isSending = false
                 activeClientMessageId = nil
+                activeCrossChatNotificationReplySourceChatId = nil
+                activeSendHasReachedTransport = false
             }
         } catch {
             await MainActor.run {
@@ -2294,8 +2683,11 @@ final class ChatViewModel: ChatViewModelHosting {
                     code: "queue_failed",
                     message: nil
                 )
+                crossChatNotificationReplySourceByClientMessageId.removeValue(forKey: clientId)
                 isSending = false
                 activeClientMessageId = nil
+                activeCrossChatNotificationReplySourceChatId = nil
+                activeSendHasReachedTransport = false
             }
         }
     }
@@ -2310,6 +2702,7 @@ final class ChatViewModel: ChatViewModelHosting {
             let wireAttachments = try await buildWireAttachments(from: attachments, content: content)
             try Task.checkCancellation()
             didStartChatSend = true
+            activeSendHasReachedTransport = true
             try await chatService.send(
                 id: clientId,
                 content: content,
@@ -2322,15 +2715,23 @@ final class ChatViewModel: ChatViewModelHosting {
 #endif
                 isSending = false
                 activeClientMessageId = nil
+                activeCrossChatNotificationReplySourceChatId = nil
+                activeSendHasReachedTransport = false
             }
         } catch is CancellationError {
             await MainActor.run {
 #if DEBUG
                 self.recordImageSendDebugEvent(.sendResult, detail: "failure localId=\(clientId) reason=cancelled retry=1")
 #endif
-                removePlaceholder(withId: clientId)
+                if activeSendHasReachedTransport {
+                    removePlaceholder(withId: clientId)
+                } else {
+                    markLocalMessageCanceled(id: clientId)
+                }
                 isSending = false
                 activeClientMessageId = nil
+                activeCrossChatNotificationReplySourceChatId = nil
+                activeSendHasReachedTransport = false
             }
         } catch let attachmentError as AttachmentError {
             await MainActor.run {
@@ -2348,6 +2749,8 @@ final class ChatViewModel: ChatViewModelHosting {
                 )
                 isSending = false
                 activeClientMessageId = nil
+                activeCrossChatNotificationReplySourceChatId = nil
+                activeSendHasReachedTransport = false
             }
         } catch {
             await MainActor.run {
@@ -2366,6 +2769,8 @@ final class ChatViewModel: ChatViewModelHosting {
                 )
                 isSending = false
                 activeClientMessageId = nil
+                activeCrossChatNotificationReplySourceChatId = nil
+                activeSendHasReachedTransport = false
             }
         }
     }
@@ -2592,6 +2997,10 @@ final class ChatViewModel: ChatViewModelHosting {
         inputResetToken &+= 1
     }
 
+    func refreshInputEditorContent() {
+        inputResetToken &+= 1
+    }
+
     func presentation(for message: Message, metrics: ChatFlowTheme.Metrics) -> MessagePresentation {
         let key = PresentationCacheKey(messageID: message.id, isCompact: metrics.isCompact)
         let fingerprint = presentationFingerprint(for: message)
@@ -2646,6 +3055,17 @@ final class ChatViewModel: ChatViewModelHosting {
         liveProgress(for: sessionKey)?.summary
     }
 
+    func sendIndicatorState(for messageId: String) -> MessageSendIndicatorState? {
+        if let failure = failureMessage(for: messageId) {
+            return .failed(failure)
+        }
+        guard pendingLocalMessages.contains(where: { $0.id == messageId }),
+              !ackedPendingLocalMessageIDs.contains(messageId) else {
+            return nil
+        }
+        return .pending
+    }
+
     private func handle(serviceEvent: ChatServiceEvent) {
         switch serviceEvent {
         case .messageError(let messageId, let code, let message):
@@ -2657,6 +3077,9 @@ final class ChatViewModel: ChatViewModelHosting {
                 messageId: messageId,
                 reason: "messageErrorTerminal"
             )
+            if let messageId, ackedPendingLocalMessageIDs.contains(messageId) {
+                return
+            }
             if shouldShowMessageErrorToast(code: code) {
                 let resolved = userFacingMessage(for: code, fallback: message)
                 toastManager.show(resolved)
@@ -2668,19 +3091,32 @@ final class ChatViewModel: ChatViewModelHosting {
             }
             clearLiveProgress(messageId: messageId)
             messageFailures[messageId] = MessageFailure(code: code, message: message)
+            crossChatNotificationReplySourceByClientMessageId.removeValue(forKey: messageId)
             if let pendingIndex = pendingLocalMessages.firstIndex(where: { $0.id == messageId }) {
                 pendingLocalMessages.remove(at: pendingIndex)
             }
             ackedPendingLocalMessageIDs.remove(messageId)
+            bumpSendIndicatorRevision()
             if activeClientMessageId == messageId {
                 activeClientMessageId = nil
+                activeCrossChatNotificationReplySourceChatId = nil
+                activeSendHasReachedTransport = false
             }
             isSending = false
         case .messageAcked(let messageId):
+            if let sessionKey = localMessageSessionKey(for: messageId) {
+                scheduleSessionStatusRefresh(for: sessionKey, reason: "messageAcked")
+            }
             ackedPendingLocalMessageIDs.insert(messageId)
             messageFailures.removeValue(forKey: messageId)
+            if let replySourceChatId = crossChatNotificationReplySourceByClientMessageId.removeValue(forKey: messageId) {
+                dismissCrossChatNotification(sourceChatId: replySourceChatId)
+            }
+            bumpSendIndicatorRevision()
             if activeClientMessageId == messageId {
                 activeClientMessageId = nil
+                activeCrossChatNotificationReplySourceChatId = nil
+                activeSendHasReachedTransport = false
                 isSending = false
             }
         case .agentProgress(let progress):
@@ -2931,10 +3367,14 @@ final class ChatViewModel: ChatViewModelHosting {
         switch sendProvisioningState(for: pending.sessionKey) {
         case .ready:
             pendingProvisionedSend = nil
+            let replySourceChatId = pending.crossChatNotificationReplySourceChatId
             beginSend(
                 content: pending.content,
                 pendingAttachments: pending.attachments,
-                sessionKey: pending.sessionKey
+                sessionKey: pending.sessionKey,
+                clientId: pending.clientId,
+                clearInputOnSuccess: replySourceChatId == nil,
+                crossChatNotificationReplySourceChatId: replySourceChatId
             )
         case .waiting:
             break
@@ -2963,12 +3403,14 @@ final class ChatViewModel: ChatViewModelHosting {
             isAssistantTyping = false
             typingSessionKey = nil
             clearAllLiveProgress()
+            clearAllTypingIndicatorMorphTargets()
             auth.refreshAdminStatusFromToken()
             attemptPendingProvisionedSendIfPossible()
         case .connecting, .reconnecting:
             isAssistantTyping = false
             typingSessionKey = nil
             clearAllLiveProgress()
+            clearAllTypingIndicatorMorphTargets()
         case .disconnected, .failed:
             connectionStableTask?.cancel()
             connectionStableTask = nil
@@ -2977,6 +3419,7 @@ final class ChatViewModel: ChatViewModelHosting {
             isAssistantTyping = false
             typingSessionKey = nil
             clearAllLiveProgress()
+            clearAllTypingIndicatorMorphTargets()
         }
     }
 
@@ -3003,6 +3446,15 @@ final class ChatViewModel: ChatViewModelHosting {
 
     private func replaceAccessibleSessionKeys(with sessionKeys: [String]) {
         let normalized = normalizeSessionKeyList(sessionKeys)
+        let available = Set(normalized)
+        unavailableCrossChatNotificationSourceIds.subtract(available)
+        unavailableCrossChatNotificationSourceIds.formUnion(accessibleSessionKeys.subtracting(available))
+        let unavailableNotificationSourceChatIds = crossChatNotificationBubblesBySourceChatId.keys.filter {
+            !available.contains($0)
+        }
+        for sourceChatId in unavailableNotificationSourceChatIds {
+            dismissCrossChatNotification(sourceChatId: sourceChatId, markSourceRead: false)
+        }
         accessibleSessionKeyOrder = normalized
         accessibleSessionKeys = Set(normalized)
     }
@@ -3014,8 +3466,10 @@ final class ChatViewModel: ChatViewModelHosting {
     }
 
     private func removeAccessibleSessionKey(_ sessionKey: String) {
+        unavailableCrossChatNotificationSourceIds.insert(sessionKey)
         accessibleSessionKeys.remove(sessionKey)
         accessibleSessionKeyOrder.removeAll { $0 == sessionKey }
+        dismissCrossChatNotification(sourceChatId: sessionKey, markSourceRead: false)
     }
 
     private func replaceTrackableSessions(with sessions: [TrackableSession]) {
@@ -3402,20 +3856,6 @@ final class ChatViewModel: ChatViewModelHosting {
             if detectionMessages.count != streamMessages.count {
                 setMessages(detectionMessages, for: sessionKey)
             }
-            let assistantFinalReplyIds = Set(detectionMessages.compactMap { message -> String? in
-                guard message.role == .assistant, !message.streaming else { return nil }
-                return normalizedServerEventID(message.replyToMessageId)
-            })
-            for message in detectionMessages {
-                guard message.role == .user,
-                      normalizedServerEventID(message.id) != nil,
-                      let clientMessageId = message.clientMessageId?.trimmingCharacters(in: .whitespacesAndNewlines),
-                      !clientMessageId.isEmpty,
-                      !assistantFinalReplyIds.contains(message.id) else {
-                    continue
-                }
-                messageFailures[message.id] = MessageFailure(code: "missing_final", message: nil)
-            }
         }
     }
 
@@ -3537,7 +3977,10 @@ final class ChatViewModel: ChatViewModelHosting {
         streamsBySessionKey = byKey
         let validSessionKeys = Set(byKey.keys)
         let removedSessionKeys = previousSessionKeys.subtracting(validSessionKeys)
+        unavailableCrossChatNotificationSourceIds.subtract(validSessionKeys)
+        unavailableCrossChatNotificationSourceIds.formUnion(removedSessionKeys)
         for sessionKey in removedSessionKeys {
+            dismissCrossChatNotification(sourceChatId: sessionKey, markSourceRead: false)
             sessionMessages.removeValue(forKey: sessionKey)
             lastReadMessageIdBySession.removeValue(forKey: sessionKey)
             streamTailStateBySession.removeValue(forKey: sessionKey)
@@ -3547,6 +3990,9 @@ final class ChatViewModel: ChatViewModelHosting {
             let removedIDs = Set(pendingLocalMessages.filter { $0.sessionKey == sessionKey }.map(\.id))
             pendingLocalMessages.removeAll { $0.sessionKey == sessionKey }
             ackedPendingLocalMessageIDs.subtract(removedIDs)
+            if !removedIDs.isEmpty {
+                bumpSendIndicatorRevision()
+            }
             chatService.setReplayCursor(nil, for: sessionKey)
             persistLastReadMessageId(nil, for: sessionKey)
             persistMessages([], for: sessionKey)
@@ -3569,6 +4015,7 @@ final class ChatViewModel: ChatViewModelHosting {
     }
 
     private func applyStreamUpsert(_ stream: StreamSession) {
+        unavailableCrossChatNotificationSourceIds.remove(stream.sessionKey)
         streamsBySessionKey[stream.sessionKey] = stream
         syntheticSessionKeys.remove(stream.sessionKey)
         recalculateOrderedSessionKeys()
@@ -3581,6 +4028,7 @@ final class ChatViewModel: ChatViewModelHosting {
     }
 
     private func applyStreamDeletion(sessionKey: String) {
+        unavailableCrossChatNotificationSourceIds.insert(sessionKey)
         streamsBySessionKey.removeValue(forKey: sessionKey)
         syntheticSessionKeys.remove(sessionKey)
         recalculateOrderedSessionKeys()
@@ -3596,11 +4044,15 @@ final class ChatViewModel: ChatViewModelHosting {
         let removedIDs = Set(pendingLocalMessages.filter { $0.sessionKey == sessionKey }.map(\.id))
         pendingLocalMessages.removeAll { $0.sessionKey == sessionKey }
         ackedPendingLocalMessageIDs.subtract(removedIDs)
+        if !removedIDs.isEmpty {
+            bumpSendIndicatorRevision()
+        }
         if typingSessionKey == sessionKey {
             typingSessionKey = nil
             isAssistantTyping = false
         }
         clearLiveProgress(sessionKey: sessionKey, runId: nil, messageId: nil)
+        clearTypingIndicatorMorphTarget(for: sessionKey)
 
         if engineActiveSessionKey == sessionKey {
             let fallback = streamMainSessionKey().flatMap { orderedSessionKeys.contains($0) ? $0 : nil }
@@ -3639,6 +4091,7 @@ final class ChatViewModel: ChatViewModelHosting {
     }
 
     private func applyDeletedStreamMutation(sessionKey: String) {
+        dismissCrossChatNotification(sourceChatId: sessionKey, markSourceRead: false)
         if pendingUntrackRecovery?.sessionKey == sessionKey || streamsBySessionKey[sessionKey]?.adopted == true {
             unlinkTrackedSession(sessionKey: sessionKey)
             return
@@ -3647,6 +4100,7 @@ final class ChatViewModel: ChatViewModelHosting {
     }
 
     private func unlinkTrackedSession(sessionKey: String) {
+        unavailableCrossChatNotificationSourceIds.insert(sessionKey)
         streamsBySessionKey.removeValue(forKey: sessionKey)
         syntheticSessionKeys.remove(sessionKey)
         sessionStatusBySessionKey.removeValue(forKey: sessionKey)
@@ -3658,6 +4112,7 @@ final class ChatViewModel: ChatViewModelHosting {
             isAssistantTyping = false
         }
         clearLiveProgress(sessionKey: sessionKey, runId: nil, messageId: nil)
+        clearTypingIndicatorMorphTarget(for: sessionKey)
 
         if engineActiveSessionKey == sessionKey {
             let fallback = streamMainSessionKey().flatMap { orderedSessionKeys.contains($0) ? $0 : nil }
@@ -3857,6 +4312,23 @@ final class ChatViewModel: ChatViewModelHosting {
         ackedPendingLocalMessageIDs.remove(id)
     }
 
+    private func markLocalMessageCanceled(id: String) {
+        for sessionKey in Array(sessionMessages.keys) {
+            var list = sessionMessages[sessionKey] ?? []
+            guard let index = list.firstIndex(where: { $0.id == id }) else { continue }
+            list[index].deliveryState = .canceled
+            list[index].streaming = false
+            setMessages(list, for: sessionKey)
+            break
+        }
+        if let pendingIndex = pendingLocalMessages.firstIndex(where: { $0.id == id }) {
+            pendingLocalMessages.remove(at: pendingIndex)
+        }
+        ackedPendingLocalMessageIDs.remove(id)
+        messageFailures.removeValue(forKey: id)
+        bumpSendIndicatorRevision()
+    }
+
     private func isNoReply(code: String, message: String?) -> Bool {
         let normalizedCode = code.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if normalizedCode == "no_reply" || normalizedCode == "no-reply" || normalizedCode.hasPrefix("no_reply") {
@@ -3889,9 +4361,16 @@ final class ChatViewModel: ChatViewModelHosting {
             resolvedSessionKey = pendingLocalMessages[pendingIndex].sessionKey
             pendingLocalMessages.remove(at: pendingIndex)
             ackedPendingLocalMessageIDs.remove(messageId)
+            bumpSendIndicatorRevision()
         }
         if let messageId, activeClientMessageId == messageId {
             activeClientMessageId = nil
+            activeCrossChatNotificationReplySourceChatId = nil
+            activeSendHasReachedTransport = false
+        }
+        if let messageId,
+           let replySourceChatId = crossChatNotificationReplySourceByClientMessageId.removeValue(forKey: messageId) {
+            dismissCrossChatNotification(sourceChatId: replySourceChatId)
         }
         isSending = false
 
@@ -3931,6 +4410,16 @@ final class ChatViewModel: ChatViewModelHosting {
         for sessionKey in sessionKeys {
             scheduleSessionStatusRefresh(for: sessionKey, reason: reason)
         }
+    }
+
+    private func localMessageSessionKey(for messageId: String) -> String? {
+        if let pending = pendingLocalMessages.first(where: { $0.id == messageId }) {
+            return pending.sessionKey
+        }
+        if let (_, sessionKey, _) = findMessage(id: messageId) {
+            return sessionKey
+        }
+        return nil
     }
 
     private func trimPresentationCache() {

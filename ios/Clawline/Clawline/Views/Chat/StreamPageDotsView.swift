@@ -15,7 +15,7 @@ struct StreamPageDotsView: View {
 
     let sessionKeys: [String]
     let activeSessionKey: String
-    let dotStatesBySession: [String: StreamDotState]
+    let dotStateLookup: StreamDotStateLookup
     let maxWidth: CGFloat?
     let onTap: () -> Void
     let onScrubPreview: (String) -> Void
@@ -114,14 +114,14 @@ struct StreamPageDotsView: View {
         guard let firstVisibleIndex = visibleDotIndices.first, firstVisibleIndex > 0 else {
             return false
         }
-        return sessionKeys[..<firstVisibleIndex].contains { dotStatesBySession[$0] == .unread }
+        return sessionKeys[..<firstVisibleIndex].contains { dotStateLookup($0) == .unread }
     }
 
     private var hasHiddenUnreadTrailing: Bool {
         guard let lastVisibleIndex = visibleDotIndices.last, lastVisibleIndex < sessionKeys.count - 1 else {
             return false
         }
-        return sessionKeys[(lastVisibleIndex + 1)...].contains { dotStatesBySession[$0] == .unread }
+        return sessionKeys[(lastVisibleIndex + 1)...].contains { dotStateLookup($0) == .unread }
     }
 
     private var warningBloomColor: Color {
@@ -300,6 +300,8 @@ struct StreamPageDotsView: View {
 
             dotRow
                 .frame(width: scrubFieldWidth, height: Self.controlHeight, alignment: .center)
+                .frame(width: controlWidth, height: Self.controlHeight, alignment: .center)
+                .clipShape(Capsule())
                 .frame(maxHeight: .infinity, alignment: .bottom)
         }
         .frame(width: scrubFieldWidth, height: Self.minimumHitTargetHeight, alignment: .bottom)
@@ -426,7 +428,7 @@ struct StreamPageDotsView: View {
             onScrubCandidateHaptic(
                 Self.scrubCandidateHapticStyle(
                     isActive: candidateIndex == activeIndex,
-                    dotState: dotStatesBySession[sessionKey] ?? .inactive
+                    dotState: dotStateLookup(sessionKey)
                 )
             )
         }
@@ -504,18 +506,18 @@ struct StreamPageDotsView: View {
             scrubCandidateIndex: scrubCandidateIndex,
             sessionCount: sessionKeys.count
         )
-        return HStack(spacing: 7) {
+        return HStack(spacing: Self.dotSpacing) {
             if showsLeadingOverflow {
                 Circle()
                     .fill(StreamDotColor.inactive(colorScheme: colorScheme))
-                    .frame(width: 4, height: 4)
+                    .frame(width: Self.overflowDotDiameter, height: Self.overflowDotDiameter)
             }
             ForEach(visibleDotIndices, id: \.self) { index in
                 let sessionKey = sessionKeys[index]
                 let isActive = index == activeIndex
                 let isCandidate = index == scrubCandidateIndex
                 let showsSelectionRing = index == selectionRingIndex
-                let dotState = dotStatesBySession[sessionKey] ?? .inactive
+                let dotState = dotStateLookup(sessionKey)
                 let scale = Self.scrubMagnificationScale(
                     dotIndex: index,
                     virtualIndex: scrubVirtualIndex,
@@ -546,7 +548,7 @@ struct StreamPageDotsView: View {
             if showsTrailingOverflow {
                 Circle()
                     .fill(StreamDotColor.inactive(colorScheme: colorScheme))
-                    .frame(width: 4, height: 4)
+                    .frame(width: Self.overflowDotDiameter, height: Self.overflowDotDiameter)
             }
         }
         .fixedSize(horizontal: true, vertical: false)

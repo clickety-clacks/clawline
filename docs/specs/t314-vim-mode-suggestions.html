@@ -1,0 +1,483 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>T314 Vim Mode Next-Step Suggestions</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: transparent;
+      --fg: var(--clawline-fg, #1d2528);
+      --muted: #5f6f73;
+      --line: #cfd8d6;
+      --panel: #ffffff;
+      --accent: #176b6b;
+      --warn: #8a5400;
+      --code: #eef3f2;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: transparent;
+        --fg: var(--clawline-fg, #eef4f3);
+        --muted: #a8b6b8;
+        --line: #304043;
+        --panel: #182022;
+        --accent: #6ec7bc;
+        --warn: #e2b45e;
+        --code: #202b2d;
+      }
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--fg);
+      font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    main {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 48px 22px 72px;
+    }
+
+    h1, h2, h3 {
+      line-height: 1.15;
+      letter-spacing: 0;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: clamp(2rem, 4vw, 3rem);
+    }
+
+    h2 {
+      margin-top: 42px;
+      padding-top: 22px;
+      border-top: 1px solid var(--line);
+      font-size: 1.45rem;
+    }
+
+    h3 {
+      margin-top: 28px;
+      font-size: 1.1rem;
+    }
+
+    p {
+      margin: 10px 0;
+    }
+
+    ul, ol {
+      padding-left: 1.3rem;
+    }
+
+    li {
+      margin: 7px 0;
+    }
+
+    code, pre {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.92em;
+      background: var(--code);
+      border-radius: 6px;
+    }
+
+    code {
+      padding: 0.12rem 0.28rem;
+    }
+
+    pre {
+      overflow-x: auto;
+      padding: 14px 16px;
+      border: 1px solid var(--line);
+    }
+
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      margin: 16px 0;
+      background: var(--panel);
+    }
+
+    th, td {
+      border: 1px solid var(--line);
+      padding: 10px 12px;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      color: var(--accent);
+      font-weight: 700;
+    }
+
+    .meta {
+      color: var(--muted);
+      margin-bottom: 28px;
+    }
+
+    .callout {
+      border: 1px solid var(--line);
+      border-left: 5px solid var(--accent);
+      background: var(--panel);
+      padding: 14px 16px;
+      margin: 18px 0;
+      border-radius: 8px;
+    }
+
+    .warning {
+      border-left-color: var(--warn);
+    }
+
+    .decision {
+      font-weight: 700;
+    }
+  </style>
+</head>
+<body>
+<main>
+  <h1>T314 Vim Mode Next-Step Suggestions</h1>
+  <p class="meta">Product and architecture specification for local Foundation Model next-step suggestions over visible Clawline assistant-message bubbles. Prepared 2026-05-16; revised 2026-05-17.</p>
+
+  <section class="callout">
+    <p class="decision">Decision: <code>Cmd-F</code> enters transient vim mode over currently visible assistant-message bubbles only. Lettered suggestions render near their source bubbles, typing a valid assigned letter immediately hands that suggestion prompt to the normal current-chat send path and exits vim mode, and <code>Esc</code> exits without side effects.</p>
+    <p>Vim mode is a keyboard-only "vim hint" layer. It snapshots visible assistant-message bubble content and resolved bubble rectangles, asks the platform-local Foundation Model for concise next-step prompts, assigns unique letters, and renders non-persistent overlays. No suggestion context leaves the device before the user selects a suggestion.</p>
+  </section>
+
+  <h2>Source Notes</h2>
+  <ul>
+    <li>The requested tracker path <code>/Users/mike/.openclaw/workspace/tracking/T314.md</code> was checked first and is absent on this machine. The local tracking directory currently contains <code>T269.md</code> and <code>T292.md</code>, but no <code>T314.md</code>.</li>
+    <li>The canonical invariants path named in agent instructions, <code>/Users/mike/shared-workspace/clawline/specs/clawline-invariants.md</code>, is absent. The available mirror <code>/Users/mike/shared-workspace/clawline/implementation_details/clawline-invariants.md</code> was consulted.</li>
+    <li>The task prompt is treated as the source of truth. No source code, deploy repo, worktree, or deployment changes are part of this spec task.</li>
+    <li>Engram source <code>e4240c47-24ca-48b1-bd56-63f50218dbd6</code> was queried with <code>engram peek</code>; it returned no readable content in this environment and did not affect the spec.</li>
+  </ul>
+
+  <h2>Goals</h2>
+  <ul>
+    <li>Let a physical-keyboard user press <code>Cmd-F</code> from chat transcript context to enter vim mode for local next-step suggestions over assistant-message bubbles that are currently visible in the active chat.</li>
+    <li>Use the platform-local Foundation Model to generate concise prompt suggestions from visible assistant-message bubble text only.</li>
+    <li>Render each suggestion as a compact lettered hint near the assistant-message bubble that produced it.</li>
+    <li>Submit the selected suggestion by typing its assigned letter, using the same prompt submission route as a normal current-chat prompt.</li>
+    <li>Exit cleanly on <code>Esc</code>, navigation, unsupported local model state, timeout/error, no valid candidates, or source-visibility invalidation.</li>
+  </ul>
+
+  <h2>Non-Goals</h2>
+  <ul>
+    <li>No remote model calls, provider-side suggestion generation, analytics upload, cross-device sync, or persistent suggestion history.</li>
+    <li>No suggestions from user, system, tool, terminal, status, typing, progress, composer, notification, hidden, offscreen, or previously visible bubbles.</li>
+    <li>No transcript mutation, draft insertion, or composer text replacement until the user types a valid suggestion letter.</li>
+    <li>No multi-letter chords, tap/click selection, touch-only entry UI, mouse-only selection requirement, or suggestion editing surface in this v1 feature.</li>
+    <li>No new routing contract. Selected suggestions submit through the existing current-chat prompt pathway.</li>
+    <li>No platform fallback that uses a non-local model when the local Foundation Model is unavailable.</li>
+  </ul>
+
+  <h2>Terminology</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Term</th>
+        <th>Meaning</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Vim mode</td>
+        <td>The externally named transient keyboard-capture feature entered by <code>Cmd-F</code> from transcript/chat context and exited by <code>Esc</code> or mode-ending events.</td>
+      </tr>
+      <tr>
+        <td>Suggestion mode</td>
+        <td>Internal state terminology that may be used in implementation code for vim mode. Product UI and user-facing references use "vim mode".</td>
+      </tr>
+      <tr>
+        <td>Source bubble</td>
+        <td>One eligible assistant-message transcript bubble that was visible when vim mode entered.</td>
+      </tr>
+      <tr>
+        <td>Visible assistant-message bubble</td>
+        <td>An assistant-message transcript bubble whose resolved cell/content rectangle intersects the active transcript viewport at mode entry and is not hidden behind another presentation surface.</td>
+      </tr>
+      <tr>
+        <td>Suggestion hint</td>
+        <td>A compact overlay containing one unique letter and one concise prompt suggestion.</td>
+      </tr>
+      <tr>
+        <td>Prompt submission route</td>
+        <td>The same current-chat send path used when the user types text into the composer and submits it normally.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>Mode Lifecycle</h2>
+  <ol>
+    <li>User presses <code>Cmd-F</code> while the active chat transcript can receive global chat shortcuts. If focus is in a composer or any text-editing field, native <code>Cmd-F</code> behavior for that field wins and vim mode is not requested.</li>
+    <li>If vim mode is already active, <code>Cmd-F</code> is ignored for v1. It does not regenerate, cancel/restart, submit, or change the active hint set.</li>
+    <li>The chat screen captures a snapshot of eligible visible assistant-message bubbles: stable message identity, bounded rendered visible text excerpt, and resolved bubble rectangle in the owning screen coordinate space.</li>
+    <li>If the snapshot has no eligible sources, Clawline does not call the local model and does not enter vim mode.</li>
+    <li>Before generation, Clawline checks <code>SystemLanguageModel.default.availability</code>. If the local model is unavailable, disabled, downloading, rate-limited, or otherwise not ready, Clawline does not enter vim mode and performs no remote fallback.</li>
+    <li>The local suggestion service creates a fresh <code>LanguageModelSession</code> for each vim-mode request. The request receives only the bounded captured text excerpts and message identifiers needed to associate results back to source bubbles.</li>
+    <li>Generation runs as bounded, cancellable async work outside cell configuration. Cell configure/reuse may expose already-rendered text and resolved rectangles to the snapshot path, but it must never start Foundation Model generation.</li>
+    <li>When local generation returns valid candidates, the reducer filters invalid, empty, duplicate, and unassociated suggestions, assigns unique letters, enters active vim mode, and renders hints near source bubbles.</li>
+    <li>If generation errors, times out, is cancelled, or returns no valid candidates, Clawline remains out of vim mode or exits the request path without transcript/provider/gateway/analytics/replay/notification-store writes.</li>
+    <li>Typing a valid assigned letter immediately hands that suggestion as the next prompt to the current chat send pipeline and exits vim mode immediately. Send acceptance or failure is then handled only by the normal send UI.</li>
+    <li><code>Esc</code>, chat navigation, source bubble disappearance, or local-generation failure exits vim mode without submitting anything.</li>
+  </ol>
+
+  <h2>Eligibility</h2>
+  <h3>Eligible Sources</h3>
+  <ul>
+    <li>Only assistant-message transcript bubbles in the current chat are eligible.</li>
+    <li>A bubble is eligible only if it is currently visible in the active transcript viewport when <code>Cmd-F</code> is pressed.</li>
+    <li>Visibility is determined from resolved rectangles owned by the chat screen or message list layout. The suggestion overlay receives resolved source rectangles and must not reconstruct scroll position, split orientation, pane topology, or message layout intent.</li>
+    <li>Streaming assistant-message bubbles are eligible only when they already expose visible assistant text. Empty typing indicators, progress strips, and placeholders are not eligible.</li>
+    <li>Assistant-message bubbles with no text extractable for local generation are not eligible. Attachments or rich content may contribute only text already exposed by the existing transcript preview/extraction policy.</li>
+  </ul>
+
+  <h3>Ineligible Sources</h3>
+  <ul>
+    <li>User, system, tool, terminal, status, typing, progress, composer, notification, cross-chat overlay, and any other non-assistant-message surfaces are ineligible.</li>
+    <li>Assistant-message bubbles outside the current viewport are ineligible even if they are in the current transcript data source.</li>
+    <li>Assistant-message bubbles from other chats are ineligible. This feature does not inspect hidden chats or cross-chat notification state.</li>
+    <li>Bubbles hidden by navigation, filtering, redaction, modal presentation, or cell reuse at mode entry are ineligible.</li>
+  </ul>
+
+  <h3>Snapshot Semantics</h3>
+  <ul>
+    <li>Eligibility is snapshot-based. Scrolling after mode entry does not add new sources or remove generated suggestions by itself.</li>
+    <li>If the source bubble set is structurally invalidated by chat navigation, transcript reload, message deletion, or selected-session change, vim mode exits.</li>
+    <li>If an eligible streaming assistant-message bubble receives more text after the snapshot, the active suggestion request does not incorporate the new text. Because <code>Cmd-F</code> is ignored while vim mode is active in v1, the user must exit and re-enter mode to request fresh suggestions.</li>
+  </ul>
+
+  <h2>Local Foundation Model and Privacy</h2>
+  <ul>
+    <li>Suggestion generation runs only through the platform-local Foundation Model facility available to the Clawline client process.</li>
+    <li>Availability is checked with <code>SystemLanguageModel.default.availability</code> before issuing generation. Any unavailable, disabled, downloading, rate-limited, unsupported, timeout, cancellation, or error state keeps vim mode out or exits it with no side effects.</li>
+    <li>Each vim-mode request uses a fresh <code>LanguageModelSession</code>. Clawline does not reuse a session for later vim-mode requests and does not maintain a persistent suggestion cache.</li>
+    <li>The provider, gateway, OpenClaw runtime, remote model APIs, analytics, replay, transcript persistence, and notification-store paths do not receive source-bubble text, prompt templates, suggestion candidates, mode telemetry, failure telemetry, or generation state before the user selects a suggestion.</li>
+    <li>The local model prompt includes only bounded rendered visible assistant-message bubble text excerpts required for current suggestion generation, the source message identifiers needed for local association, and the instruction to produce concise next-step prompts.</li>
+    <li>Suggestions are volatile UI state. They are not written to transcript storage, replay logs, provider status, analytics, cross-chat notification stores, or sync state.</li>
+    <li>When the user types a valid suggestion letter, only the selected suggestion text is submitted through the normal current-chat prompt pathway. At that point it has the same privacy and routing semantics as a user-authored prompt.</li>
+    <li>If the local Foundation Model is unavailable, disabled, downloading, rate-limited, times out, is cancelled, or returns an error, Clawline exits or stays out of vim mode with no side effects. It must not fall back to a remote model.</li>
+  </ul>
+
+  <h2>Suggestion Generation Contract</h2>
+  <ul>
+    <li>The local generation request groups text by source bubble. The model should produce zero or more concise next-step prompt candidates per source bubble.</li>
+    <li>Each suggestion should be written as a prompt the user could send directly, not as an explanation of why the suggestion exists.</li>
+    <li>Suggestions should be short enough to scan in an overlay. Target one line; allow wrapping only when the platform cannot fit a complete useful prompt otherwise.</li>
+    <li>Suggestions must preserve source association. If the model cannot associate a candidate to a source bubble, discard that candidate.</li>
+    <li>Duplicate or near-duplicate candidates in the same active mode are collapsed before letter assignment. Empty candidates and candidates associated with no source bubble are discarded.</li>
+    <li>The prompt input is bounded rendered visible text from the snapshot, not the full transcript, hidden cell content, provider payloads, message metadata, or offscreen transcript state.</li>
+    <li>Generation work is cancellable and bounded by an implementation-defined timeout. Cancellation, timeout, or error discards candidates and performs no writes.</li>
+    <li>Generation must never be started from cell configure/reuse. The cell path may participate only by exposing already-rendered visible text and resolved rectangles to the snapshot owner.</li>
+    <li>The generation layer returns suggested prompt text only. It does not return overlay coordinates, typography, animation, hit regions, routing destinations, or submission commands.</li>
+  </ul>
+
+  <pre><code>SuggestionModeSource {
+  messageId: String
+  sourceIndex: Int
+  visibleTextExcerpt: String
+  sourceRect: ResolvedRect
+}
+
+SuggestionCandidate {
+  messageId: String
+  promptText: String
+}</code></pre>
+
+  <h2>Suggestion Placement</h2>
+  <ul>
+    <li>The owning chat screen resolves source bubble rectangles and viewport bounds. The suggestion overlay receives those resolved rectangles.</li>
+    <li>Each hint renders visually near its source bubble, preferring the trailing edge of the assistant-message bubble on wide layouts and a safe below-or-above edge on compact layouts.</li>
+    <li>Hints must stay within the resolved visible viewport and safe-area bounds. If preferred placement would clip, the overlay may flip to the other side of the source bubble or stack hints along the nearest visible edge.</li>
+    <li>Multiple hints for one source bubble stack together in source order with stable spacing and must not cover the letter labels of other hints.</li>
+    <li>Hints from adjacent bubbles may compact vertically but must preserve clear source association. A connector line is optional; proximity and ordering must be sufficient without requiring one.</li>
+    <li>The overlay must not move transcript cells, resize bubbles, alter scroll position, or reserve layout space. It is a presentation layer above the transcript.</li>
+    <li>Tap/click selection is not part of v1. Visible hints are keyboard-selected only by assigned letters.</li>
+  </ul>
+
+  <section class="callout warning">
+    <p><strong>Geometry boundary:</strong> message layout owns source rectangles. The suggestion overlay may validate bounds, transform coordinate spaces, place hints, and route hit regions against provided rectangles. It must not infer pane topology, split direction, orientation, scroll math, or transcript layout intent.</p>
+  </section>
+
+  <h2>Unique-Letter Assignment</h2>
+  <ul>
+    <li>Letters are unique within one active vim mode.</li>
+    <li>The assignment pool is lowercase <code>a</code> through <code>z</code>. The display may render uppercase letter badges if that matches platform style, but typed lowercase and uppercase forms select the same hint.</li>
+    <li>Assignment order follows visible source bubble order from top to bottom, then suggestion order within each source bubble.</li>
+    <li>If more than 26 valid suggestions are generated, only the first 26 by assignment order are shown. Extra candidates are discarded for that active mode.</li>
+    <li>Letters are frozen after assignment. They are not reassigned while the same vim mode remains active, even if overlays animate or the transcript receives streaming updates.</li>
+    <li>Invalid candidates, empty candidates, duplicates, and candidates whose source bubble is no longer in the snapshot are removed before letters are assigned.</li>
+  </ul>
+
+  <h2>Focus and Keyboard Semantics</h2>
+  <h3>Entering Mode</h3>
+  <ul>
+    <li><code>Cmd-F</code> enters vim mode only when the current chat transcript is active and focus is not inside a text-editing field.</li>
+    <li>If focus is inside the composer, a notification reply field, a search field, or another text editor, <code>Cmd-F</code> keeps the existing native text-editing meaning for that field and does not enter vim mode.</li>
+    <li>If a modal, sheet, confirmation dialog, system permission prompt, or blocking overlay is active, <code>Cmd-F</code> does not enter vim mode.</li>
+    <li>Re-pressing <code>Cmd-F</code> while vim mode is already active is ignored for v1. It must not regenerate suggestions, cancel/restart the request, clear active hints, or submit anything.</li>
+  </ul>
+
+  <h3>Active Mode</h3>
+  <ul>
+    <li>While active, vim mode captures unmodified letter keys that match assigned letters.</li>
+    <li>Typing an assigned letter immediately hands the associated suggestion prompt to the existing current-chat send pipeline and exits vim mode immediately. Send acceptance/failure is handled by the normal send UI after vim mode exits.</li>
+    <li>Typing an unassigned letter is a no-op and keeps vim mode active.</li>
+    <li><code>Esc</code> exits vim mode before transcript/chat scroll handling. It does not submit, change composer text, or mutate transcript state.</li>
+    <li>Pointer/touch selection of hints is intentionally absent in v1.</li>
+    <li>Existing global shortcuts not listed here should either keep their existing app-level behavior if they do not conflict with mode capture, or be ignored while the mode is active. They must not submit a suggestion unless they resolve to an assigned letter selection.</li>
+    <li>Text input focus should return to the same chat-level focus owner that was active before mode entry unless a valid letter selection has handed off to the normal prompt submission flow.</li>
+  </ul>
+
+  <h2>Prompt Submission Routing</h2>
+  <ul>
+    <li>A selected suggestion submits as a user prompt to the current chat session, using the existing current-chat prompt submission route.</li>
+    <li>The selected suggestion is not submitted to the source bubble's historical run, another chat, the provider as metadata, or any special suggestion endpoint.</li>
+    <li>The resulting user message appears in the current chat transcript exactly as a normal submitted prompt would.</li>
+    <li>Current chat dot/status, send state, queueing, cancellation, and failure behavior are owned by the existing send pipeline.</li>
+    <li>If the user navigates to another chat before pressing a letter, vim mode exits. A letter typed after navigation cannot submit against the previous chat snapshot.</li>
+    <li>If the normal send pipeline rejects or fails the selected suggestion after handoff, the existing prompt send-error pathway handles the failure. Vim mode has already exited and must not create a separate transcript row or retry path.</li>
+  </ul>
+
+  <h2>Failure States</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>State</th>
+        <th>Required Behavior</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>No eligible visible assistant-message bubbles</td>
+        <td>Do not call the local model. Remain out of vim mode with no side effects and no transcript/provider/gateway/analytics/replay/notification-store writes.</td>
+      </tr>
+      <tr>
+        <td>Local Foundation Model unavailable</td>
+        <td>Do not fall back to remote generation. Remain out of or exit vim mode with no side effects and no writes.</td>
+      </tr>
+      <tr>
+        <td>Local generation times out, is cancelled, or errors</td>
+        <td>Clear pending UI, discard partial candidates, and remain out of or exit vim mode without transcript/provider/gateway/analytics/replay/notification-store writes.</td>
+      </tr>
+      <tr>
+        <td>Local generation returns no valid candidates</td>
+        <td>Render no hints and remain out of or exit vim mode with no side effects. No remote fallback and no writes.</td>
+      </tr>
+      <tr>
+        <td>Source snapshot invalidated</td>
+        <td>Discard active suggestions and exit mode.</td>
+      </tr>
+      <tr>
+        <td>Assigned letter selected while send is unavailable</td>
+        <td>Hand the selected prompt to the existing send pipeline, exit vim mode immediately, and display whatever existing send-unavailable failure state the send pipeline produces. Do not invent a second failure system.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>Platform Differences</h2>
+  <ul>
+    <li>On macOS and Catalyst, <code>Cmd-F</code> is the primary entry shortcut when focus is in the chat transcript and not in text editing. The feature intentionally uses the app-level chat shortcut in that focus state rather than opening global text find.</li>
+    <li>On iPadOS with a hardware keyboard, <code>Cmd-F</code>, letter selection, and <code>Esc</code> follow the same semantics as macOS/Catalyst.</li>
+    <li>On iPhone or iPad without a hardware keyboard, this spec does not require a touch-only entry surface. Existing UI may omit the feature or expose it later through a separate spec.</li>
+    <li>On platforms without the required local Foundation Model API, vim mode is unavailable. Web/Electron must not use a remote substitute under this spec.</li>
+    <li>Hints use native platform typography and materials where available. Apple platforms should use SF fonts and platform materials consistent with the surrounding Clawline UI.</li>
+    <li>Accessibility labels for hints identify the assigned letter and suggestion text. v1 does not add pointer/touch activation or a separate accessibility activation route; selection is by keyboard letter.</li>
+  </ul>
+
+  <h2>State Model</h2>
+  <pre><code>SuggestionModeState {
+  activeChatId: ChatSessionId
+  modeId: UUID
+  phase: inactive | collectingSources | checkingAvailability | generating | showing
+  sources: [SuggestionModeSource]
+  hints: [SuggestionHint]
+  priorFocusOwner: FocusOwner?
+}
+
+SuggestionHint {
+  letter: Character
+  messageId: String
+  promptText: String
+  sourceRect: ResolvedRect
+  placement: ResolvedHintPlacement
+}</code></pre>
+
+  <p>The state is volatile UI state. It belongs with chat screen coordination and presentation, not transcript persistence, provider status, analytics, notification stores, or replay state. A selected assigned letter exits vim mode before the existing send pipeline owns send progress or failure state.</p>
+
+  <h2>Proof Gates</h2>
+  <h3>Eligibility Checks</h3>
+  <ul>
+    <li>Given mixed visible transcript items, only visible assistant-message bubbles become suggestion sources.</li>
+    <li>Given hidden/offscreen assistant-message bubbles, no source is created for them.</li>
+    <li>Given user, system, tool, terminal, status, typing, progress, composer, notification, or other non-assistant-message surfaces, no source is created for them.</li>
+    <li>Given no eligible visible assistant-message bubbles, the local model is not called and vim mode is not entered.</li>
+  </ul>
+
+  <h3>Reducer and Letter Checks</h3>
+  <ul>
+    <li>Given duplicate, empty, or unassociated model candidates, the reducer discards them before letter assignment.</li>
+    <li>Given more than 26 candidates, only 26 hints render and each has a unique letter.</li>
+    <li>Given an assigned letter, the reducer hands exactly that prompt to the existing current-chat send pipeline and exits vim mode immediately.</li>
+    <li>Given an unassigned letter, the reducer performs no send action and keeps vim mode active.</li>
+    <li>Given a snapshot invalidation event, vim mode exits and clears hints.</li>
+  </ul>
+
+  <h3>Local Model and Privacy Checks</h3>
+  <ul>
+    <li>Availability is checked through <code>SystemLanguageModel.default.availability</code> before generation.</li>
+    <li>Each vim-mode request creates a fresh <code>LanguageModelSession</code>; no persistent suggestion cache is read or written.</li>
+    <li>The generation request includes only bounded rendered visible text from eligible assistant-message bubbles and the minimum local association identifiers.</li>
+    <li>Generation runs as bounded, cancellable async work and is never started from cell configure/reuse.</li>
+    <li>Instrumentation or tests verify that entering, generating, failing, timing out, or producing no candidates performs no provider, gateway, analytics, replay, notification-store, or remote model request/write.</li>
+    <li>Only the selected suggestion text is sent to the provider, and only after the user types an assigned letter and the existing send pipeline owns the prompt.</li>
+    <li>Unselected suggestions are absent from transcript storage, replay logs, provider status, analytics, notification state, and sync state.</li>
+  </ul>
+
+  <h3>Keyboard and Routing Checks</h3>
+  <ul>
+    <li><code>Cmd-F</code> enters vim mode from chat transcript focus and does not enter vim mode from composer/text-field focus, where native <code>Cmd-F</code> remains available.</li>
+    <li><code>Cmd-F</code> while vim mode is active is ignored and does not regenerate.</li>
+    <li><code>Esc</code> exits vim mode before transcript/chat scroll handling, without changing composer text or transcript state.</li>
+    <li>Typing an assigned letter submits exactly that hint's prompt through the normal current-chat send route and exits vim mode immediately.</li>
+    <li>Typing an unassigned letter does not submit and keeps mode active.</li>
+    <li>Navigating chats before letter selection exits mode and prevents stale snapshot submission.</li>
+    <li>Tap/click selection is absent for v1.</li>
+  </ul>
+
+  <h3>Placement Checks</h3>
+  <ul>
+    <li>Hints render near their source bubbles on compact iPhone, iPad split view with hardware keyboard, macOS/Catalyst, and any supported web/Electron surface that has local-model support.</li>
+    <li>Hints stay within safe visible bounds and do not move transcript layout or scroll position.</li>
+    <li>Adjacent source bubbles with multiple hints remain readable and preserve source association.</li>
+    <li>The overlay consumes resolved source rectangles and does not reconstruct pane topology, split direction, orientation, scroll math, or transcript layout intent.</li>
+  </ul>
+
+  <h3>Integration and Build Checks</h3>
+  <ul>
+    <li>The implementation builds successfully for the target Clawline app configuration before handoff.</li>
+    <li>Automated or instrumented checks prove no provider/gateway/transcript/analytics/replay/notification-store write occurs on vim-mode entry, generation, failure, timeout, cancellation, or no-candidate results.</li>
+    <li>Existing current-chat send UI owns send acceptance, send failure, queueing, and unavailable states after assigned-letter handoff.</li>
+  </ul>
+
+  <h3>Simulator or Manual Proof</h3>
+  <ul>
+    <li>At least one simulator or manual run demonstrates visible assistant-only suggestions: visible assistant-message bubbles receive hints, while visible user/system/tool/terminal/status/typing/progress/composer/notification surfaces do not.</li>
+    <li>The same proof demonstrates assigned-letter submission into the existing current-chat send pipeline and immediate vim-mode exit.</li>
+    <li>The proof records the environment, visible source setup, assigned letter pressed, and resulting normal send UI behavior.</li>
+  </ul>
+
+  <h2>Implementation Handoff</h2>
+  <ul>
+    <li>Implement only the local vim mode described here: <code>Cmd-F</code> entry from transcript/chat context, visible assistant-message bubble snapshot, local Foundation Model generation, unique lettered overlays, assigned-letter submission, ignored active-mode <code>Cmd-F</code>, and <code>Esc</code> exit.</li>
+    <li>Use <code>SystemLanguageModel.default.availability</code>, a fresh <code>LanguageModelSession</code> per vim-mode request, bounded rendered visible text, no persistent suggestion cache, bounded/cancellable async work, and no generation from cell configure/reuse.</li>
+    <li>Do not add remote fallback, persistent suggestion history, tap/click selection, touch-only entry UI, cross-chat suggestions, transcript annotations, extra routing APIs, analytics/replay/notification-store writes, or provider-side generation unless this spec is updated first.</li>
+    <li>Respect the geometry boundary: the chat/message layout layer owns resolved source rectangles; the suggestion overlay consumes resolved rectangles and owns only presentation and hit regions.</li>
+    <li>Use the existing current-chat prompt submission route. Do not create a special suggestion send path, special send failure path, or delayed vim-mode exit tied to send acceptance.</li>
+    <li>Implementation discovery still needs to identify the existing transcript rendered-text extraction helper and the exact current-chat send entry point to reuse. If either reuse point is ambiguous, ask for spec clarification rather than inventing a parallel path.</li>
+  </ul>
+</main>
+</body>
+</html>

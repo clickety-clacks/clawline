@@ -53,4 +53,5 @@ See `specs/clawline-session-status-control-api.md` for requirements, capability 
 
 - `provider-architecture.md` — provider internals and request flow
 - `ios-architecture.md` — iOS app/service/view model architecture
-- `specs/clawline-session-status-control-api.md` — session status/control API requirements
+- `architecture/cross-chat-notification-overlay-design.html` — T307 notification overlay design for bubbles, docking, visible buttons, replies, hotkeys, and stack behavior
+- `specs/clawline-session-status-control-api.md` — session status/control API requirements, capability model, safety constraints, and client integration guidance

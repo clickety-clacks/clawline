@@ -337,4 +337,21 @@ struct ChatLayoutCoordinatorTests {
         #expect(abs(after.barHeight - 88) <= 0.5)
         #expect(abs(after.listBottomInset - before.listBottomInset) <= 0.5)
     }
+
+    @Test("T354 notification visibility refreshes keyboard geometry")
+    @MainActor
+    func notificationVisibilityParticipatesInKeyboardGeometryRefreshKey() {
+        let hidden = ChatKeyboardGeometryRefreshKey(
+            size: CGSize(width: 1024, height: 1366),
+            safeAreaBottom: 24,
+            notificationVisibleCount: 0
+        )
+        let visible = ChatKeyboardGeometryRefreshKey(
+            size: CGSize(width: 1024, height: 1366),
+            safeAreaBottom: 24,
+            notificationVisibleCount: 1
+        )
+
+        #expect(hidden != visible)
+    }
 }

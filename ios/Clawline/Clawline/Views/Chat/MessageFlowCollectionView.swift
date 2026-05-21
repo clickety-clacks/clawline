@@ -272,6 +272,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         viewBounds: CGRect,
         windowBounds: CGRect?,
         viewOriginInWindow: CGPoint?,
+        preservesHorizontallyConstrainedHostWidth: Bool = true,
         tolerance: CGFloat = 1
     ) -> CGRect {
         guard let windowBounds, let viewOriginInWindow else {
@@ -279,10 +280,13 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         }
 
         let isHorizontallyConstrained = viewBounds.width < windowBounds.width - tolerance
+        let width = preservesHorizontallyConstrainedHostWidth && isHorizontallyConstrained
+            ? viewBounds.width
+            : windowBounds.width
         return CGRect(
             x: 0,
             y: -viewOriginInWindow.y,
-            width: isHorizontallyConstrained ? viewBounds.width : windowBounds.width,
+            width: width,
             height: windowBounds.height
         )
     }
@@ -1147,16 +1151,30 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
 
-        // iOS: Extend vertically to fill the entire screen, ignoring top/bottom safe areas.
+        // Native iOS/iPadOS: Extend vertically to fill the entire screen, ignoring top/bottom safe areas.
         // SwiftUI's UIViewControllerRepresentable doesn't respect .ignoresSafeArea() for UIKit views,
         // so we manually extend the collection view against window bounds. Keep the collection view
         // within its host width when SwiftUI has already constrained that host for landscape safe areas.
+        //
+        // Catalyst: Preserve the historical full-window width behavior; T357's containment is native iOS/iPadOS-only.
         //
         // visionOS: In a spatial window this "counter-positioning" can create a layout feedback loop
         // (window position/size <-> view origin <-> collectionView frame), visible as the chat list
         // flapping vertically when content reaches the bottom. Use the normal view bounds instead.
         #if os(visionOS)
             collectionView.frame = view.bounds
+        #elseif targetEnvironment(macCatalyst)
+            let targetFrame = Self.targetCollectionFrame(
+                viewBounds: view.bounds,
+                windowBounds: view.window?.bounds,
+                viewOriginInWindow: view.window.map { view.convert(CGPoint.zero, to: $0) },
+                preservesHorizontallyConstrainedHostWidth: false
+            )
+
+            // Only update if significantly different to avoid layout loops
+            if Self.shouldUpdateCollectionFrame(current: collectionView.frame, target: targetFrame) {
+                collectionView.frame = targetFrame
+            }
         #else
             let targetFrame = Self.targetCollectionFrame(
                 viewBounds: view.bounds,

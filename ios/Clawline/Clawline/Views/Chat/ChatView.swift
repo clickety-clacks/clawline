@@ -1020,11 +1020,17 @@ struct ChatView: View {
             .filter(\.isReplying)
             .map(\.sourceChatId)
         let notificationShortcutVisibleCount = keyboardVisibleNotificationSourceChatIds.count
-        let transcriptTrailingNotificationClearance = CrossChatNotificationGeometry.transcriptTrailingClearance(
-            isCompactLandscape: isCompactLayout && isLandscape,
-            isNotificationDocked: isCrossChatNotificationStackDocked,
-            visibleNotificationCount: notificationShortcutVisibleCount
-        )
+        let transcriptTrailingNotificationClearance: CGFloat = {
+#if os(iOS) && !targetEnvironment(macCatalyst)
+            return CrossChatNotificationGeometry.transcriptTrailingClearance(
+                isCompactLandscape: isCompactLayout && isLandscape,
+                isNotificationDocked: isCrossChatNotificationStackDocked,
+                visibleNotificationCount: notificationShortcutVisibleCount
+            )
+#else
+            return 0
+#endif
+        }()
         let keyboardOwnershipStore = KeyboardOwnershipSceneFactory.chatScene(
             visibleNotificationSourceChatIds: keyboardVisibleNotificationSourceChatIds,
             mentionPickerVisible: isMentionPickerVisible,

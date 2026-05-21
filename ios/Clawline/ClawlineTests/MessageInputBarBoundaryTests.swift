@@ -153,6 +153,18 @@ struct MessageInputBarBoundaryTests {
         #expect(targetFrame == CGRect(x: 0, y: 0, width: 874, height: 402))
     }
 
+    @Test("T357 Catalyst frame calculation preserves historical full-window width")
+    func catalystFrameCalculationPreservesHistoricalFullWindowWidth() {
+        let targetFrame = MessageFlowCollectionViewController.targetCollectionFrame(
+            viewBounds: CGRect(x: 0, y: 0, width: 750, height: 402),
+            windowBounds: CGRect(x: 0, y: 0, width: 874, height: 402),
+            viewOriginInWindow: CGPoint(x: 62, y: 0),
+            preservesHorizontallyConstrainedHostWidth: false
+        )
+
+        #expect(targetFrame == CGRect(x: 0, y: 0, width: 874, height: 402))
+    }
+
     @Test("T357 docked landscape notification reserves trailing transcript clearance")
     func dockedLandscapeNotificationReservesTrailingTranscriptClearance() {
         let clearance = CrossChatNotificationGeometry.transcriptTrailingClearance(
@@ -186,6 +198,20 @@ struct MessageInputBarBoundaryTests {
             isNotificationDocked: true,
             visibleNotificationCount: 0
         ) == 0)
+    }
+
+    @Test("T357 transcript notification clearance is scoped to native iOS")
+    func transcriptNotificationClearanceIsScopedToNativeIOS() throws {
+        let chatViewPath = URL(filePath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appending(path: "Clawline/Views/Chat/ChatView.swift")
+        let source = try String(contentsOf: chatViewPath, encoding: .utf8)
+        let pattern = #"#if os\(iOS\) && !targetEnvironment\(macCatalyst\)[\s\S]*?transcriptTrailingClearance\([\s\S]*?#else[\s\S]*?return 0[\s\S]*?#endif"#
+        let range = NSRange(source.startIndex..<source.endIndex, in: source)
+        let regex = try NSRegularExpression(pattern: pattern)
+
+        #expect(regex.firstMatch(in: source, range: range) != nil)
     }
 
     @Test("Notification collapsed offset preserves portrait peek with no trailing inset")

@@ -138,6 +138,8 @@ struct StreamPageDotsViewTests {
             virtualIndex: 10,
             metrics: swipeMetrics
         )
+        let waveBounds = StreamPageDotsView.dotWaveVisualBounds(scale: waveScale)
+        let capsuleTopY = StreamPageDotsView.waveRenderHeight - StreamPageDotsView.controlHeight
         let capsuleBounds = StreamPageDotsView.unreadEdgeBloomCapsuleBounds(capsuleWidth: 190)
         let trailingBlobBounds = StreamPageDotsView.unreadEdgeBloomVisualBounds(
             edge: .trailing,
@@ -161,6 +163,9 @@ struct StreamPageDotsViewTests {
         #expect(restMetrics.scrubFieldWidth == 190)
         #expect(swipeMetrics.scrubFieldWidth > restMetrics.scrubFieldWidth)
         #expect(StreamPageDotsView.scrubMagnificationVerticalOffset(scale: waveScale) < -40)
+        #expect(waveBounds.minY >= 0)
+        #expect(waveBounds.minY < capsuleTopY)
+        #expect(waveBounds.maxY < capsuleTopY)
         #expect(edgeUnreadDotBounds.minX >= 0)
         #expect(edgeUnreadDotBounds.maxX <= 190)
         #expect(edgeUnreadDotBounds.minY >= 0)
@@ -181,6 +186,9 @@ struct StreamPageDotsViewTests {
         )
 
         #expect(!controlBodySource.contains(".clipShape(Capsule())"))
+        #expect(!controlBodySource.contains(".frame(width: controlWidth, height: Self.controlHeight"))
+        #expect(controlBodySource.contains(".frame(width: scrubFieldWidth, height: Self.waveRenderHeight, alignment: .bottom)"))
+        #expect(controlBodySource.contains(".frame(width: scrubFieldWidth, height: Self.minimumHitTargetHeight, alignment: .bottom)"))
         #expect(source.contains("unreadEdgeBloomOverlay(capsuleBounds: capsuleBounds)"))
         #expect(source.contains(".blur(radius: Self.unreadEdgeBloomBlurRadius(colorScheme: colorScheme))\n                    .mask(Capsule())"))
     }

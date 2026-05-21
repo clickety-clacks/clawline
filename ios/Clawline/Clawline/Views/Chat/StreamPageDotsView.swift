@@ -37,6 +37,7 @@ struct StreamPageDotsView: View {
     private static let dotSpacing: CGFloat = 7
     private static let horizontalPadding: CGFloat = 12
     private static let minimumHitTargetHeight: CGFloat = 44
+    static let waveRenderHeight: CGFloat = 80
     private static let scrubTapSuppressionDuration: TimeInterval = 0.45
     private static let scrubWaveLiftPerScalePoint: CGFloat = 20
     static let controlHeight: CGFloat = 23
@@ -310,7 +311,7 @@ struct StreamPageDotsView: View {
     var body: some View {
         controlBody
         .contentShape(Rectangle())
-        .overlay {
+        .overlay(alignment: .bottom) {
             gestureLayer
         }
         .onDisappear {
@@ -362,8 +363,7 @@ struct StreamPageDotsView: View {
                 .frame(maxHeight: .infinity, alignment: .bottom)
 
             dotRow
-                .frame(width: scrubFieldWidth, height: Self.controlHeight, alignment: .center)
-                .frame(width: controlWidth, height: Self.controlHeight, alignment: .center)
+                .frame(width: scrubFieldWidth, height: Self.waveRenderHeight, alignment: .bottom)
                 .frame(maxHeight: .infinity, alignment: .bottom)
         }
         .frame(width: scrubFieldWidth, height: Self.minimumHitTargetHeight, alignment: .bottom)
@@ -557,11 +557,13 @@ struct StreamPageDotsView: View {
 
     private var dotRow: some View {
         let fieldWidth = scrubMetrics.scrubFieldWidth
-        return ZStack {
+        return ZStack(alignment: .bottom) {
             dotRowDots
+                .frame(height: Self.controlHeight, alignment: .center)
+                .frame(maxHeight: .infinity, alignment: .bottom)
             selectionRingOverlay(fieldWidth: fieldWidth)
         }
-        .frame(width: fieldWidth, height: Self.controlHeight)
+        .frame(width: fieldWidth, height: Self.waveRenderHeight, alignment: .bottom)
     }
 
     private var dotRowDots: some View {
@@ -650,7 +652,7 @@ struct StreamPageDotsView: View {
             }
             .frame(width: Self.dotDiameter, height: Self.dotDiameter)
             .scaleEffect(scale)
-            .position(x: centerX, y: (Self.controlHeight / 2) + verticalOffset)
+            .position(x: centerX, y: Self.dotWaveRestingCenterY + verticalOffset)
             .zIndex(scale + 1)
             .allowsHitTesting(false)
         }
@@ -886,6 +888,21 @@ struct StreamPageDotsView: View {
     static func scrubMagnificationVerticalOffset(scale: CGFloat) -> CGFloat {
         guard scale > 1 else { return 0 }
         return -(scale - 1) * scrubWaveLiftPerScalePoint
+    }
+
+    static var dotWaveRestingCenterY: CGFloat {
+        waveRenderHeight - (controlHeight / 2)
+    }
+
+    static func dotWaveVisualBounds(scale: CGFloat) -> CGRect {
+        let diameter = dotDiameter * scale
+        let centerY = dotWaveRestingCenterY + scrubMagnificationVerticalOffset(scale: scale)
+        return CGRect(
+            x: 0,
+            y: centerY - (diameter / 2),
+            width: diameter,
+            height: diameter
+        )
     }
 }
 

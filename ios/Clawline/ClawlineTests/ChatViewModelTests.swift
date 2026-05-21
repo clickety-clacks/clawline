@@ -1129,6 +1129,187 @@ struct ChatViewModelTests {
         #expect(references.first?["createdAt"] as? Double == 1_700_000_000_000)
     }
 
+    @Test("Reply reference resolves echoed client-visible identity for transcript indicator")
+    @MainActor
+    func replyReferenceResolvesEchoedClientVisibleIdentityForTranscriptIndicator() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.activate(origin: "test.replyReferenceResolvesEchoedClientVisibleIdentityForTranscriptIndicator")
+        await viewModel.onAppear()
+        let personalStream = makeStreamSession(
+            sessionKey: personalSessionKey,
+            displayName: "Personal",
+            kind: "main",
+            orderIndex: 0,
+            isBuiltIn: true
+        )
+        chatService.streams = [personalStream]
+        chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
+        chatService.emitServiceEvent(
+            .sessionInfo(
+                SessionInfo(
+                    userId: "user",
+                    isAdmin: false,
+                    dmScope: "dm",
+                    sessionKeys: [personalSessionKey]
+                )
+            )
+        )
+        viewModel.setActiveSessionKeyForTesting(personalSessionKey)
+        for _ in 0..<50 {
+            if viewModel.activeSessionKey == personalSessionKey {
+                break
+            }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let referenced = Message(
+            id: "s_reference_echo",
+            role: .assistant,
+            content: "This is a very long referenced message that should truncate in the outgoing bubble chip.",
+            timestamp: Date(timeIntervalSince1970: 1_700_000_100),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: personalSessionKey,
+            clientMessageId: "c_reference_echo"
+        )
+        try emitServerMessage(referenced, via: chatService)
+        try await Task.sleep(for: .milliseconds(10))
+
+        let replied = Message(
+            id: "s_reply_echo",
+            role: .user,
+            content: "Got it.",
+            timestamp: Date(timeIntervalSince1970: 1_700_000_200),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: personalSessionKey,
+            replyToClientMessageId: "c_reference_echo"
+        )
+
+        let replyReference = viewModel.replyReference(for: replied)
+        let tokenLabel = try #require(replyReference?.tokenLabel)
+        #expect(replyReference?.sessionKey == personalSessionKey)
+        #expect(replyReference?.messageId == referenced.id)
+        #expect(replyReference?.clientMessageId == "c_reference_echo")
+        #expect(tokenLabel.hasSuffix("…"))
+        #expect(tokenLabel.contains("This is a very long referenced message"))
+        #expect(tokenLabel.contains("assistant:") == false)
+        #expect(tokenLabel.contains("user:") == false)
+        #expect(tokenLabel.contains("tool:") == false)
+    }
+
+    @Test("Accepted reply send echoes reply token metadata onto the outgoing user bubble")
+    @MainActor
+    func acceptedReplySendEchoesReplyTokenMetadataOntoOutgoingBubble() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.activate(origin: "test.acceptedReplySendEchoesReplyTokenMetadataOntoOutgoingBubble")
+        await viewModel.onAppear()
+        let personalStream = makeStreamSession(
+            sessionKey: personalSessionKey,
+            displayName: "Personal",
+            kind: "main",
+            orderIndex: 0,
+            isBuiltIn: true
+        )
+        chatService.streams = [personalStream]
+        chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
+        chatService.emitServiceEvent(
+            .sessionInfo(
+                SessionInfo(
+                    userId: "user",
+                    isAdmin: false,
+                    dmScope: "dm",
+                    sessionKeys: [personalSessionKey]
+                )
+            )
+        )
+        try await setReadyToSend(chatService: chatService, viewModel: viewModel)
+        viewModel.setActiveSessionKeyForTesting(personalSessionKey)
+        for _ in 0..<50 {
+            if viewModel.activeSessionKey == personalSessionKey {
+                break
+            }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let referenced = Message(
+            id: "s_reply_target",
+            role: .assistant,
+            content: "The reply target that should be echoed in the outgoing bubble.",
+            timestamp: Date(timeIntervalSince1970: 1_700_000_300),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: personalSessionKey,
+            clientMessageId: "c_reply_target"
+        )
+        try emitServerMessage(referenced, via: chatService)
+        try await Task.sleep(for: .milliseconds(10))
+
+        viewModel.inputContent = NSAttributedString(string: "Replying now")
+        _ = viewModel.referenceMessageInPrompt(referenced, selectionRange: NSRange(location: 0, length: 0))
+        viewModel.send()
+
+        try await Task.sleep(for: .milliseconds(10))
+        let optimisticOutgoing = try #require(await MainActor.run { viewModel.messages.last })
+        #expect(optimisticOutgoing.role == .user)
+        #expect(optimisticOutgoing.replyToMessageId == referenced.id)
+        #expect(optimisticOutgoing.replyToClientMessageId == referenced.clientMessageId)
+
+        try emitServerMessage(
+            Message(
+                id: "s_reply_echo",
+                role: .user,
+                content: "Replying now",
+                timestamp: Date(timeIntervalSince1970: 1_700_000_350),
+                streaming: false,
+                attachments: [],
+                deviceId: "device",
+                sessionKey: personalSessionKey,
+                clientMessageId: optimisticOutgoing.id
+            ),
+            via: chatService
+        )
+        try await Task.sleep(for: .milliseconds(10))
+
+        let outgoing = try #require(await MainActor.run { viewModel.messages.last })
+        #expect(outgoing.role == .user)
+        #expect(outgoing.replyToMessageId == referenced.id)
+        #expect(outgoing.replyToClientMessageId == referenced.clientMessageId)
+        let outgoingReplyReference = viewModel.replyReference(for: outgoing)
+        #expect(outgoingReplyReference?.messageId == referenced.id)
+        #expect(outgoingReplyReference?.clientMessageId == referenced.clientMessageId)
+        #expect(outgoingReplyReference?.tokenLabel.contains("assistant:") == false)
+    }
+
     @Test("Composer exposes modified Return as local newline key commands")
     @MainActor
     func composerModifiedReturnKeyCommands() {
@@ -5377,7 +5558,7 @@ struct ChatViewModelTests {
 }
 
 @MainActor
-private final class TestAuthManager: AuthManaging {
+final class TestAuthManager: AuthManaging {
     var isAuthenticated: Bool = false
     var currentUserId: String?
     var token: String?
@@ -5402,7 +5583,7 @@ private final class TestAuthManager: AuthManaging {
 
     func refreshAdminStatusFromToken() {}
 }
-private final class TestChatService: ChatServicing {
+final class TestChatService: ChatServicing {
     private var messageContinuation: AsyncStream<Message>.Continuation?
     private var stateContinuation: AsyncStream<ConnectionState>.Continuation?
     private var eventContinuation: AsyncStream<ChatServiceEvent>.Continuation?
@@ -5751,6 +5932,26 @@ private func setReadyToSend(chatService: TestChatService, viewModel: ChatViewMod
     try await Task.sleep(for: .milliseconds(20))
 }
 
+@MainActor
+private func emitServerMessage(_ message: Message, via chatService: TestChatService, epoch: Int = 1) throws {
+    let payload = ServerMessagePayload(
+        id: message.id,
+        role: message.role,
+        sender: message.sender,
+        content: message.content,
+        timestamp: message.timestamp,
+        streaming: message.streaming,
+        deviceId: message.deviceId,
+        sessionKey: message.sessionKey,
+        attachments: message.attachments,
+        clientMessageId: message.clientMessageId,
+        replyToMessageId: message.replyToMessageId,
+        replyToClientMessageId: message.replyToClientMessageId
+    )
+    let data = try JSONEncoder().encode(payload)
+    chatService.emitLifecycleEvent(.init(epoch: epoch, payload: .serverMessage(data: data)))
+}
+
 private func requireLastSentId(_ chatService: TestChatService) async throws -> String {
     for _ in 0..<50 {
         if let id = chatService.lastSentId {
@@ -5914,6 +6115,6 @@ private func makeSessionStatus(
     )
 }
 
-private struct TestDevice: DeviceIdentifying {
+struct TestDevice: DeviceIdentifying {
     let deviceId: String = "device"
 }

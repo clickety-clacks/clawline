@@ -156,8 +156,10 @@ struct PendingMessageReference: Identifiable, Equatable, Codable {
     }
 
     var tokenLabel: String {
-        let label = messageRole == .user ? "You" : "Assistant"
-        guard !preview.isEmpty else { return label }
-        return "\(label): \(String(preview.prefix(48)))"
+        guard !preview.isEmpty else { return "Reply" }
+        if preview.count <= 48 {
+            return preview
+        }
+        return "\(String(preview.prefix(48)))…"
     }
 }

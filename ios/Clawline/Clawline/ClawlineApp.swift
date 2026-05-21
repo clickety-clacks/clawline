@@ -49,16 +49,20 @@ struct ClawlineApp: App {
 
     var body: some Scene {
         WindowGroup {
-            @Bindable var settingsManager = settingsManager
-            RootView(uploadService: uploadService)
-                .environment(authManager)
-                .environment(\.connectionService, connectionService)
-                .environment(\.deviceIdentifier, deviceIdentifier)
-                .environment(\.chatService, chatService)
-                .environment(\.settingsManager, settingsManager)
-                .sheet(isPresented: $settingsManager.isSettingsPresented) {
-                    SettingsView(settings: settingsManager)
-                }
+            if isRunningUnitTests {
+                Color.clear
+            } else {
+                @Bindable var settingsManager = settingsManager
+                RootView(uploadService: uploadService)
+                    .environment(authManager)
+                    .environment(\.connectionService, connectionService)
+                    .environment(\.deviceIdentifier, deviceIdentifier)
+                    .environment(\.chatService, chatService)
+                    .environment(\.settingsManager, settingsManager)
+                    .sheet(isPresented: $settingsManager.isSettingsPresented) {
+                        SettingsView(settings: settingsManager)
+                    }
+            }
         }
         .commands {
             ClawlineAppCommands(settingsManager: settingsManager)
@@ -142,5 +146,11 @@ private func setHostingBackgroundsClear(in view: UIView) {
     for subview in view.subviews {
         setHostingBackgroundsClear(in: subview)
     }
+}
+#endif
+
+#if DEBUG
+private var isRunningUnitTests: Bool {
+    ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
 }
 #endif

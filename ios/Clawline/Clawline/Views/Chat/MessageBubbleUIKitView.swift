@@ -530,9 +530,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
     private let senderLabel = UILabel()
     private let senderTimestampSpacer = UIView()
     private let timestampLabel = UILabel()
-#if targetEnvironment(macCatalyst)
     private let headerMenuButton = UIButton(type: .custom)
-#endif
     private let bodyLabel = UITextView()
     private let bodyTextContainer = UIView()
     private let fadeView = TruncationFadeView()
@@ -741,11 +739,11 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         headerStack.addArrangedSubview(senderTimestampSpacer)
         headerStack.addArrangedSubview(timestampLabel)
         senderLabel.firstBaselineAnchor.constraint(equalTo: timestampLabel.firstBaselineAnchor).isActive = true
-#if targetEnvironment(macCatalyst)
         headerStack.isUserInteractionEnabled = true
         headerMenuButton.translatesAutoresizingMaskIntoConstraints = false
         headerMenuButton.backgroundColor = .clear
         headerMenuButton.showsMenuAsPrimaryAction = true
+        headerMenuButton.accessibilityIdentifier = "message_bubble_header_menu_button"
         headerStack.addSubview(headerMenuButton)
         NSLayoutConstraint.activate([
             headerMenuButton.leadingAnchor.constraint(equalTo: headerStack.leadingAnchor),
@@ -753,7 +751,6 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
             headerMenuButton.trailingAnchor.constraint(equalTo: headerStack.trailingAnchor),
             headerMenuButton.bottomAnchor.constraint(equalTo: headerStack.bottomAnchor)
         ])
-#endif
 
         bodyLabel.translatesAutoresizingMaskIntoConstraints = false
         UnifiedMarkdownRenderer.configureTextView(
@@ -1039,9 +1036,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         self.onInteractiveCallback = onInteractiveCallback
         self.onInsertIntoPrompt = onInsertIntoPrompt
         self.onReferenceMessage = onReferenceMessage
-#if targetEnvironment(macCatalyst)
         headerMenuButton.menu = messageContextMenu()
-#endif
 
         // Use explicit isDark if provided, otherwise fall back to trait collection
         let effectiveIsDark = isDark ?? (traitCollection.userInterfaceStyle == .dark)
@@ -1570,9 +1565,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         currentCopyableReadableText = nil
         onInsertIntoPrompt = nil
         onReferenceMessage = nil
-#if targetEnvironment(macCatalyst)
         headerMenuButton.menu = nil
-#endif
         suppressExpandTapForLinkCards = false
         allowSwipeUpExpandForSingleLink = false
         timestampDate = nil
@@ -1944,7 +1937,6 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         fileTapHandlers[ObjectIdentifier(view)]?()
     }
 
-#if targetEnvironment(macCatalyst)
     private func messageContextMenu() -> UIMenu? {
         guard let currentMessage else { return nil }
         var actions: [UIMenuElement] = []
@@ -1965,7 +1957,6 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         })
         return actions.isEmpty ? nil : UIMenu(children: actions)
     }
-#endif
 
     @available(iOS 17.0, macCatalyst 17.0, visionOS 1.0, *)
     func textView(
@@ -2601,7 +2592,6 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
     }
 }
 
-#if targetEnvironment(macCatalyst)
 extension MessageBubbleUIKitView: UIContextMenuInteractionDelegate {
     func contextMenuInteraction(
         _ interaction: UIContextMenuInteraction,
@@ -2613,7 +2603,6 @@ extension MessageBubbleUIKitView: UIContextMenuInteractionDelegate {
         }
     }
 }
-#endif
 
 final class AvatarCircleView: UIView {
     private let label = UILabel()

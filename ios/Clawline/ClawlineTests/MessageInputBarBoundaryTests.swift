@@ -153,6 +153,41 @@ struct MessageInputBarBoundaryTests {
         #expect(targetFrame == CGRect(x: 0, y: 0, width: 874, height: 402))
     }
 
+    @Test("T357 docked landscape notification reserves trailing transcript clearance")
+    func dockedLandscapeNotificationReservesTrailingTranscriptClearance() {
+        let clearance = CrossChatNotificationGeometry.transcriptTrailingClearance(
+            isCompactLandscape: true,
+            isNotificationDocked: true,
+            visibleNotificationCount: 1
+        )
+        let insets = MessageFlowCollectionViewController.flowSectionInset(
+            containerPadding: 12,
+            trailingContentInset: clearance
+        )
+
+        #expect(clearance == CrossChatNotificationGeometry.collapsedPeekWidth)
+        #expect(insets == UIEdgeInsets(top: 12, left: 12, bottom: 12, right: 30))
+    }
+
+    @Test("T357 transcript clearance is inactive outside docked compact landscape")
+    func transcriptClearanceIsInactiveOutsideDockedCompactLandscape() {
+        #expect(CrossChatNotificationGeometry.transcriptTrailingClearance(
+            isCompactLandscape: false,
+            isNotificationDocked: true,
+            visibleNotificationCount: 1
+        ) == 0)
+        #expect(CrossChatNotificationGeometry.transcriptTrailingClearance(
+            isCompactLandscape: true,
+            isNotificationDocked: false,
+            visibleNotificationCount: 1
+        ) == 0)
+        #expect(CrossChatNotificationGeometry.transcriptTrailingClearance(
+            isCompactLandscape: true,
+            isNotificationDocked: true,
+            visibleNotificationCount: 0
+        ) == 0)
+    }
+
     @Test("Notification collapsed offset preserves portrait peek with no trailing inset")
     func notificationCollapsedOffsetPreservesPortraitPeekWithNoTrailingInset() {
         let stackWidth = CGFloat(361)

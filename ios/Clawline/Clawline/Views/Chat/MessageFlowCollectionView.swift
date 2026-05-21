@@ -128,6 +128,7 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
     var isInputActive: Bool
     var isTypingActive: Bool
     var truncationBottomInset: CGFloat
+    var trailingContentInset: CGFloat = 0
     var firstUnreadMessageId: String?
     var unreadCount: Int
     var onExpand: ((Message) -> Void)?
@@ -165,6 +166,7 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
             isTypingActive: isTypingActive,
             topInset: topInset,
             truncationBottomInset: truncationBottomInset,
+            trailingContentInset: trailingContentInset,
             firstUnreadMessageId: firstUnreadMessageId,
             unreadCount: unreadCount,
             onExpand: onExpand,
@@ -199,6 +201,7 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
             isTypingActive: isTypingActive,
             topInset: topInset,
             truncationBottomInset: truncationBottomInset,
+            trailingContentInset: trailingContentInset,
             firstUnreadMessageId: firstUnreadMessageId,
             unreadCount: unreadCount,
             onExpand: onExpand,
@@ -232,6 +235,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         let isTypingActive: Bool
         let topInset: CGFloat
         let truncationBottomInset: CGFloat
+        let trailingContentInset: CGFloat
         let firstUnreadMessageId: String?
         let unreadCount: Int
         let onExpand: ((Message) -> Void)?
@@ -280,6 +284,15 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             y: -viewOriginInWindow.y,
             width: isHorizontallyConstrained ? viewBounds.width : windowBounds.width,
             height: windowBounds.height
+        )
+    }
+
+    static func flowSectionInset(containerPadding: CGFloat, trailingContentInset: CGFloat) -> UIEdgeInsets {
+        UIEdgeInsets(
+            top: containerPadding,
+            left: containerPadding,
+            bottom: containerPadding,
+            right: containerPadding + max(0, trailingContentInset)
         )
     }
 
@@ -411,6 +424,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     private var sessionStatus: SessionStatus?
     private var topInset: CGFloat = 0
     private var truncationBottomInset: CGFloat = 0
+    private var trailingContentInset: CGFloat = 0
     private var lastBoundsSize: CGSize = .zero
     private var lastMeasurementContentWidth: CGFloat?
     private var lastMeasurementMetricsFingerprint: Int?
@@ -1175,6 +1189,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 isTypingActive: isTypingActive,
                 topInset: topInset,
                 truncationBottomInset: truncationBottomInset,
+                trailingContentInset: trailingContentInset,
                 firstUnreadMessageId: firstUnreadMessageId,
                 unreadCount: unreadCount,
                 onExpand: onExpand,
@@ -2023,6 +2038,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             isTypingActive: isTypingActive,
             topInset: topInset,
             truncationBottomInset: truncationBottomInset,
+            trailingContentInset: trailingContentInset,
             firstUnreadMessageId: firstUnreadMessageId,
             unreadCount: unreadCount,
             onExpand: onExpand,
@@ -2067,6 +2083,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 isTypingActive: request.isTypingActive,
                 topInset: request.topInset,
                 truncationBottomInset: request.truncationBottomInset,
+                trailingContentInset: request.trailingContentInset,
                 firstUnreadMessageId: request.firstUnreadMessageId,
                 unreadCount: request.unreadCount,
                 onExpand: request.onExpand,
@@ -2139,6 +2156,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
               self.isInputActive == request.isInputActive,
               self.currentSendIndicatorRevision == request.sendIndicatorRevision,
               abs(self.topInset - request.topInset) <= 0.5,
+              abs(self.trailingContentInset - max(0, request.trailingContentInset)) <= 0.5,
               self.firstUnreadMessageId == request.firstUnreadMessageId,
               self.unreadCount == request.unreadCount else {
             return false
@@ -2164,6 +2182,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         isTypingActive: Bool,
         topInset: CGFloat,
         truncationBottomInset: CGFloat,
+        trailingContentInset: CGFloat = 0,
         firstUnreadMessageId: String?,
         unreadCount: Int,
         onExpand: ((Message) -> Void)? = nil,
@@ -2190,6 +2209,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             isTypingActive: isTypingActive,
             topInset: topInset,
             truncationBottomInset: truncationBottomInset,
+            trailingContentInset: trailingContentInset,
             firstUnreadMessageId: firstUnreadMessageId,
             unreadCount: unreadCount,
             onExpand: onExpand,
@@ -2247,6 +2267,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         self.onInsertMessageIntoPrompt = onInsertMessageIntoPrompt
         self.onReferenceMessageInPrompt = onReferenceMessageInPrompt
         self.allowsTransparentWindowBackground = allowsTransparentWindowBackground
+        let nextTrailingContentInset = max(0, request.trailingContentInset)
 
         // Handle appearance change from SwiftUI colorScheme
         if let isDark = isDark, currentIsDark != isDark {
@@ -2296,9 +2317,11 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             || didFontScaleChange
             || self.isCompact != isCompact
             || self.topInset != topInset
+            || self.trailingContentInset != nextTrailingContentInset
             || previousSessionKey != sessionKey
         self.isCompact = isCompact
         self.topInset = topInset
+        self.trailingContentInset = nextTrailingContentInset
 
         if isOffscreenSession {
             return
@@ -3946,11 +3969,9 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         flowLayout.minimumInteritemSpacing = metrics.flowGap
         flowLayout.minimumLineSpacing = metrics.flowGap
         // Section inset is just for padding - content insets handle safe areas
-        flowLayout.sectionInset = UIEdgeInsets(
-            top: metrics.containerPadding,
-            left: metrics.containerPadding,
-            bottom: metrics.containerPadding,
-            right: metrics.containerPadding
+        flowLayout.sectionInset = Self.flowSectionInset(
+            containerPadding: metrics.containerPadding,
+            trailingContentInset: trailingContentInset
         )
         // Content insets allow scrolling under safe areas while resting below them
         // Top inset = safe area (status bar) so content can scroll under it

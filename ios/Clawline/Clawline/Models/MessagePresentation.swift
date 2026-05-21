@@ -141,6 +141,58 @@ struct MessagePresentation: Equatable {
     }
 }
 
+extension MessagePresentation {
+    var copyableReadableText: String? {
+        let components = markdownRenderPlan.blocks.compactMap { block -> String? in
+            switch block {
+            case .richText(let markdownSource):
+                return copyablePlainText(fromMarkdown: markdownSource)
+            case .code(_, let code):
+                let trimmed = code.trimmingCharacters(in: .whitespacesAndNewlines)
+                return trimmed.isEmpty ? nil : trimmed
+            case .table(let model):
+                let text = copyablePlainText(from: model)
+                return text.isEmpty ? nil : text
+            }
+        }
+
+        let text = components
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty ? nil : text
+    }
+
+    private func copyablePlainText(fromMarkdown source: String) -> String {
+        if let attributed = try? AttributedString(
+            markdown: source,
+            options: .init(interpretedSyntax: .full)
+        ) {
+            return NSAttributedString(attributed).string.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return source.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func copyablePlainText(from model: TableModel) -> String {
+        var lines: [String] = []
+        if let header = model.header {
+            let headerText = header.map(\.plainText).joined(separator: "\t")
+            if !headerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                lines.append(headerText)
+            }
+        }
+        for row in model.rows {
+            let rowText = row.cells.map(\.plainText).joined(separator: "\t")
+            if !rowText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                lines.append(rowText)
+            }
+        }
+        return lines
+            .joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
 enum MessagePart: Equatable {
     case text(String)
     case markdown(String)

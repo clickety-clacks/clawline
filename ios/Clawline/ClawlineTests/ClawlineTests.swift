@@ -141,6 +141,23 @@ struct ClawlineTests {
         #expect(regex.firstMatch(in: source, range: range) != nil)
     }
 
+    @Test("T320: corner indicators stay Spatial-only")
+    func cornerIndicatorsStaySpatialOnly() throws {
+        let appPath = URL(filePath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appending(path: "Clawline/ClawlineApp.swift")
+        let appSource = try String(contentsOf: appPath, encoding: .utf8)
+        #expect(!appSource.contains("ClawlineWindowCornerIndicators"))
+
+        let spatialAppPath = URL(filePath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appending(path: "Clawline Spatial/Clawline_SpatialApp.swift")
+        let spatialAppSource = try String(contentsOf: spatialAppPath, encoding: .utf8)
+        #expect(spatialAppSource.contains("ClawlineWindowCornerIndicators"))
+    }
+
     @Test("T294: Spatial typing indicator exposes a concrete tap control")
     func spatialTypingIndicatorHasConcreteTapControl() throws {
         let sourcePath = URL(filePath: #filePath)

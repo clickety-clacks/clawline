@@ -2037,6 +2037,16 @@ struct ChatView: View {
         )
     }
 
+    private func insertMessageIntoPrompt(_ message: Message) {
+        selectionRange = viewModel.insertMessageIntoPrompt(message, selectionRange: selectionRange)
+        focusRequestID &+= 1
+    }
+
+    private func referenceMessageInPrompt(_ message: Message) {
+        selectionRange = viewModel.referenceMessageInPrompt(message, selectionRange: selectionRange)
+        focusRequestID &+= 1
+    }
+
     private func messageList(topInset: CGFloat,
                              truncationBottomInset: CGFloat,
                              sessionKey: String) -> some View {
@@ -2079,6 +2089,12 @@ struct ChatView: View {
                     value: value,
                     enabled: enabled
                 )
+            },
+            onInsertMessageIntoPrompt: { message in
+                insertMessageIntoPrompt(message)
+            },
+            onReferenceMessageInPrompt: { message in
+                referenceMessageInPrompt(message)
             }
         )
         // We manage keyboard avoidance manually inside the collection view.
@@ -4958,7 +4974,11 @@ private final class PreviewChatService: ChatServicing {
     func setReplayCursor(_ cursor: String?, for sessionKey: String) {}
     func seedReplayCursorIfMissing(_ cursor: String?, for sessionKey: String) {}
     func clearReplayCursors() {}
-    func send(id: String, content: String, attachments: [WireAttachment], sessionKey: String?) async throws {}
+    func send(id: String,
+              content: String,
+              attachments: [WireAttachment],
+              sessionKey: String?,
+              references: [MessageReferenceContext]) async throws {}
     func sendInteractiveCallback(sourceMessageId: String, action: String, data: JSONValue?) async throws {}
     func publishReadState(sessionKey: String, lastReadMessageId: String) async throws {}
     func fetchStreams() async throws -> [StreamSession] { [] }

@@ -428,6 +428,8 @@ final class MessageBubbleUIKitContainerView: UIView {
                    onRequestExpand: (() -> Void)?,
                    onRequestLayout: ((String) -> Void)?,
                    onInteractiveCallback: ((String, String, JSONValue?) -> Void)?,
+                   onInsertIntoPrompt: ((Message) -> Void)?,
+                   onReferenceMessage: ((Message) -> Void)?,
                    onResend: (() -> Void)?) {
         let metrics = ChatFlowTheme.Metrics(isCompact: isCompact)
         let sizeClass = MessageFlowRules.sizeClass(for: presentation)
@@ -451,6 +453,8 @@ final class MessageBubbleUIKitContainerView: UIView {
             onRequestExpand: onRequestExpand,
             onRequestLayout: onRequestLayout,
             onInteractiveCallback: onInteractiveCallback,
+            onInsertIntoPrompt: onInsertIntoPrompt,
+            onReferenceMessage: onReferenceMessage,
             salientHighlightService: salientHighlightService
 
 
@@ -526,6 +530,9 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
     private let senderLabel = UILabel()
     private let senderTimestampSpacer = UIView()
     private let timestampLabel = UILabel()
+#if targetEnvironment(macCatalyst)
+    private let headerMenuButton = UIButton(type: .custom)
+#endif
     private let bodyLabel = UITextView()
     private let bodyTextContainer = UIView()
     private let fadeView = TruncationFadeView()
@@ -551,6 +558,10 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
     private var onRequestExpand: (() -> Void)?
     private var onRequestLayout: ((String) -> Void)?
     private var onInteractiveCallback: ((String, String, JSONValue?) -> Void)?
+    private var onInsertIntoPrompt: ((Message) -> Void)?
+    private var onReferenceMessage: ((Message) -> Void)?
+    private var currentMessage: Message?
+    private var currentCopyableReadableText: String?
 
     // Salient highlights are applied asynchronously and must be cancelable on cell reuse.
     private var salientTask: Task<Void, Never>?
@@ -641,6 +652,9 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         bubbleSwipeUp.delaysTouchesBegan = false
         bubbleSwipeUp.delaysTouchesEnded = false
         bubbleBackgroundView.addGestureRecognizer(bubbleSwipeUp)
+#if targetEnvironment(macCatalyst)
+        bubbleBackgroundView.addInteraction(UIContextMenuInteraction(delegate: self))
+#endif
         addSubview(bubbleBackgroundView)
         maxWidthConstraint = bubbleBackgroundView.widthAnchor.constraint(lessThanOrEqualToConstant: 320)
         minWidthConstraint = bubbleBackgroundView.widthAnchor.constraint(greaterThanOrEqualToConstant: 120)
@@ -727,6 +741,19 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         headerStack.addArrangedSubview(senderTimestampSpacer)
         headerStack.addArrangedSubview(timestampLabel)
         senderLabel.firstBaselineAnchor.constraint(equalTo: timestampLabel.firstBaselineAnchor).isActive = true
+#if targetEnvironment(macCatalyst)
+        headerStack.isUserInteractionEnabled = true
+        headerMenuButton.translatesAutoresizingMaskIntoConstraints = false
+        headerMenuButton.backgroundColor = .clear
+        headerMenuButton.showsMenuAsPrimaryAction = true
+        headerStack.addSubview(headerMenuButton)
+        NSLayoutConstraint.activate([
+            headerMenuButton.leadingAnchor.constraint(equalTo: headerStack.leadingAnchor),
+            headerMenuButton.topAnchor.constraint(equalTo: headerStack.topAnchor),
+            headerMenuButton.trailingAnchor.constraint(equalTo: headerStack.trailingAnchor),
+            headerMenuButton.bottomAnchor.constraint(equalTo: headerStack.bottomAnchor)
+        ])
+#endif
 
         bodyLabel.translatesAutoresizingMaskIntoConstraints = false
         UnifiedMarkdownRenderer.configureTextView(
@@ -740,6 +767,9 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         bodyTap.delaysTouchesEnded = false
         bodyTap.delegate = self
         bodyLabel.addGestureRecognizer(bodyTap)
+#if targetEnvironment(macCatalyst)
+        bodyLabel.addInteraction(UIContextMenuInteraction(delegate: self))
+#endif
         if let longPress = bodyLabel.gestureRecognizers?.first(where: { $0 is UILongPressGestureRecognizer }) {
             bubbleTap.require(toFail: longPress)
             bodyTap.require(toFail: longPress)
@@ -960,11 +990,15 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
                    onRequestExpand: (() -> Void)?,
                    onRequestLayout: ((String) -> Void)?,
                    onInteractiveCallback: ((String, String, JSONValue?) -> Void)?,
+                   onInsertIntoPrompt: ((Message) -> Void)? = nil,
+                   onReferenceMessage: ((Message) -> Void)? = nil,
                    salientHighlightService: (any SalientHighlightServicing)? = nil) {
         assert(Thread.isMainThread)
         self.terminalConnectionPool = terminalConnectionPool
         let isMessageReuse = (currentMessageId != nil && currentMessageId != message.id)
+        currentMessage = message
         currentMessageId = message.id
+        currentCopyableReadableText = presentation.copyableReadableText
         // Store for trait collection updates
         currentMessageRole = message.role
         currentMessageDeliveryState = message.deliveryState
@@ -1003,6 +1037,11 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         self.onRequestExpand = onRequestExpand
         self.onRequestLayout = onRequestLayout
         self.onInteractiveCallback = onInteractiveCallback
+        self.onInsertIntoPrompt = onInsertIntoPrompt
+        self.onReferenceMessage = onReferenceMessage
+#if targetEnvironment(macCatalyst)
+        headerMenuButton.menu = messageContextMenu()
+#endif
 
         // Use explicit isDark if provided, otherwise fall back to trait collection
         let effectiveIsDark = isDark ?? (traitCollection.userInterfaceStyle == .dark)
@@ -1526,7 +1565,14 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
     }
 
     func prepareForReuse() {
+        currentMessage = nil
         currentMessageId = nil
+        currentCopyableReadableText = nil
+        onInsertIntoPrompt = nil
+        onReferenceMessage = nil
+#if targetEnvironment(macCatalyst)
+        headerMenuButton.menu = nil
+#endif
         suppressExpandTapForLinkCards = false
         allowSwipeUpExpandForSingleLink = false
         timestampDate = nil
@@ -1897,6 +1943,29 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         guard let view = recognizer.view else { return }
         fileTapHandlers[ObjectIdentifier(view)]?()
     }
+
+#if targetEnvironment(macCatalyst)
+    private func messageContextMenu() -> UIMenu? {
+        guard let currentMessage else { return nil }
+        var actions: [UIMenuElement] = []
+        if let copyableReadableText = currentCopyableReadableText {
+            actions.append(UIAction(title: "Copy to Clipboard", image: UIImage(systemName: "doc.on.doc")) { _ in
+                UIPasteboard.general.string = copyableReadableText
+            })
+        }
+        if currentMessage.role == .user {
+            actions.append(UIAction(title: "Insert into prompt", image: UIImage(systemName: "text.insert")) { [weak self] _ in
+                guard let self, let message = self.currentMessage else { return }
+                self.onInsertIntoPrompt?(message)
+            })
+        }
+        actions.append(UIAction(title: "Reference message", image: UIImage(systemName: "quote.bubble")) { [weak self] _ in
+            guard let self, let message = self.currentMessage else { return }
+            self.onReferenceMessage?(message)
+        })
+        return actions.isEmpty ? nil : UIMenu(children: actions)
+    }
+#endif
 
     @available(iOS 17.0, macCatalyst 17.0, visionOS 1.0, *)
     func textView(
@@ -2532,6 +2601,20 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
     }
 }
 
+#if targetEnvironment(macCatalyst)
+extension MessageBubbleUIKitView: UIContextMenuInteractionDelegate {
+    func contextMenuInteraction(
+        _ interaction: UIContextMenuInteraction,
+        configurationForMenuAtLocation location: CGPoint
+    ) -> UIContextMenuConfiguration? {
+        guard let menu = messageContextMenu() else { return nil }
+        return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { _ in
+            menu
+        }
+    }
+}
+#endif
+
 final class AvatarCircleView: UIView {
     private let label = UILabel()
     private let gradientLayer = CAGradientLayer()
@@ -2912,6 +2995,8 @@ final class MessageBubbleUIKitCell: UICollectionViewCell {
                    onRequestExpand: (() -> Void)?,
                    onRequestLayout: ((String) -> Void)?,
                    onInteractiveCallback: ((String, String, JSONValue?) -> Void)?,
+                   onInsertIntoPrompt: ((Message) -> Void)?,
+                   onReferenceMessage: ((Message) -> Void)?,
                    onResend: (() -> Void)?) {
         messageId = message.id
         messageSnippet = String(message.content.prefix(80))
@@ -2936,6 +3021,8 @@ final class MessageBubbleUIKitCell: UICollectionViewCell {
             onRequestExpand: onRequestExpand,
             onRequestLayout: guardedRequestLayout,
             onInteractiveCallback: onInteractiveCallback,
+            onInsertIntoPrompt: onInsertIntoPrompt,
+            onReferenceMessage: onReferenceMessage,
             onResend: onResend
         )
     }

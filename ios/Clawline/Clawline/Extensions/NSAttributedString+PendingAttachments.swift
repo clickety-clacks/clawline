@@ -27,6 +27,16 @@ extension NSAttributedString {
         return ids
     }
 
+    func pendingMessageReferenceIds() -> [UUID] {
+        var ids: [UUID] = []
+        let range = NSRange(location: 0, length: length)
+        enumerateAttribute(.attachment, in: range) { value, _, _ in
+            guard let attachment = value as? MessageReferenceTextAttachment else { return }
+            ids.append(attachment.referenceId)
+        }
+        return ids
+    }
+
     func textForSending() -> String {
         string.replacingOccurrences(of: Self.attachmentReplacement, with: " ")
     }
@@ -45,6 +55,14 @@ extension NSMutableAttributedString {
                 deleteCharacters(in: range)
                 stop.pointee = true
             }
+        }
+    }
+
+    func removeMessageReferences() {
+        let fullRange = NSRange(location: 0, length: length)
+        enumerateAttribute(.attachment, in: fullRange, options: .reverse) { value, range, _ in
+            guard value is MessageReferenceTextAttachment else { return }
+            deleteCharacters(in: range)
         }
     }
 }

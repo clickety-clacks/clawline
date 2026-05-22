@@ -21,6 +21,7 @@ struct KeyboardCommandRouterTests {
         #expect(KeyboardCommandBridge.intent(input: "#", modifierFlags: [.command, .shift, .alternate]) == .notificationAssignedDismiss(3))
         #expect(KeyboardCommandBridge.intent(input: "-", modifierFlags: [.command]) == .notificationDismissAll)
         #expect(KeyboardCommandBridge.intent(input: "\\", modifierFlags: [.command]) == .notificationToggleDock)
+        #expect(KeyboardCommandBridge.intent(input: "/", modifierFlags: [.command]) == .openStreamPopup)
         #expect(KeyboardCommandBridge.intent(input: "\r", modifierFlags: [.control]) == .textModifiedNewline)
         #expect(KeyboardCommandBridge.intent(input: UIKeyCommand.inputUpArrow, modifierFlags: []) == .menuNavigateUp)
         #expect(KeyboardCommandBridge.intent(input: "\t", modifierFlags: []) == .pickerAccept)

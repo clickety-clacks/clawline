@@ -378,6 +378,7 @@ enum KeyboardCommandBridge {
 
     static let navigationSpecs: [KeyCommandSpec] = [
         KeyCommandSpec(input: "l", modifierFlags: [.command], intent: .focusPromptInput),
+        KeyCommandSpec(input: "/", modifierFlags: [.command], intent: .openStreamPopup),
         KeyCommandSpec(input: ";", modifierFlags: [.command], intent: .openStreamPopup),
         KeyCommandSpec(input: "h", modifierFlags: [.command, .shift], intent: .navigatePreviousStream),
         KeyCommandSpec(input: "l", modifierFlags: [.command, .shift], intent: .navigateNextStream)

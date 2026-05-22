@@ -3074,12 +3074,18 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         if materializationStateBySessionKey[incomingSessionKey] == nil {
             prepareIncomingStateOnSwitch(sessionKey: incomingSessionKey, allowTailStage: true)
         } else {
+            let persistedState = loadPersistedScrollState(for: incomingSessionKey)
             let previousPendingState = readState(for: incomingSessionKey).pendingScrollRestoreState
             let previousRestorePhase = readState(for: incomingSessionKey).restorePhase
             mutateState(for: incomingSessionKey) { state in
                 state.pendingScrollRestoreState = nil
                 state.restorePhase = .none
                 state.suspendScrollPersistenceUntilRestoreConfirmed = false
+                if let persistedState, !persistedState.atBottom {
+                    state.sbbState = state.unreadCount > 0 ? .scrolledUpUnread : .scrolledUp
+                } else if persistedState?.atBottom == true {
+                    state.sbbState = .atBottom
+                }
             }
             let newState = readState(for: incomingSessionKey)
             if previousPendingState != newState.pendingScrollRestoreState {
@@ -4897,11 +4903,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     }
 
     func scrollToBottom(animated: Bool) {
-        guard let lastMessageId,
-              dataSource.indexPath(for: lastMessageId) != nil
-        else {
-            return
-        }
+        let lastMessageAnchorExists = lastMessageId.flatMap { dataSource.indexPath(for: $0) } != nil
         collectionView.layoutIfNeeded()
         let contentInset = collectionView.contentInset
         // Scroll to the bottom of the content (includes section insets/padding).
@@ -4916,7 +4918,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             currentY: collectionView.contentOffset.y,
             targetY: clampedY,
             animated: animated,
-            reason: "restingContentHeight=\(formatScrollRestore(restingBottomContentHeight())) insetBottom=\(formatScrollRestore(contentInset.bottom))"
+            reason: "restingContentHeight=\(formatScrollRestore(restingBottomContentHeight())) insetBottom=\(formatScrollRestore(contentInset.bottom)) fallback=\(Self.shouldFallbackToAbsoluteBottom(lastMessageId: lastMessageId, hasMessageAnchor: lastMessageAnchorExists))"
         )
         // If we're already at (or extremely near) the bottom, don't re-set contentOffset.
         if abs(collectionView.contentOffset.y - clampedY) <= 0.5 {
@@ -5018,6 +5020,34 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         if !animated {
             refreshLastKnownScrollSnapshot(sessionKey: sessionKey)
         }
+    }
+
+    func scrollToMessageCenteredIfMaterialized(messageId: String, animated: Bool) -> Bool {
+        guard let sessionKey = callbackSessionKey(),
+              let indexPath = dataSource.indexPath(for: messageId)
+        else {
+            return false
+        }
+        collectionView.layoutIfNeeded()
+
+        let contentInset = collectionView.contentInset
+        let visibleHeight = collectionView.bounds.height - contentInset.top - contentInset.bottom
+        guard visibleHeight > 0 else { return false }
+
+        guard let attrs = collectionView.layoutAttributesForItem(at: indexPath) else {
+            collectionView.scrollToItem(at: indexPath, at: .centeredVertically, animated: animated)
+            return true
+        }
+
+        let targetOffsetY = attrs.center.y - (visibleHeight / 2) - contentInset.top
+        let minY = -contentInset.top
+        let maxY = collectionView.contentSize.height - collectionView.bounds.height + contentInset.bottom
+        let clampedY = max(minY, min(targetOffsetY, maxY))
+        collectionView.setContentOffset(CGPoint(x: 0, y: clampedY), animated: animated)
+        if !animated {
+            refreshLastKnownScrollSnapshot(sessionKey: sessionKey)
+        }
+        return true
     }
 
     func isNearBottom(extraMargin: CGFloat) -> Bool {

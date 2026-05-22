@@ -777,8 +777,13 @@ export function CrossChatNotificationOverlay() {
     }
     setActionMenuSourceChatId(null);
     unpinReplySourceChatId(sourceChatId);
-    dismissNotificationAndMarkSourceRead(sourceChatId);
-    navigate(`/chat/${sourceChatId}`);
+    markNotificationSourceRead(sourceChatId);
+    navigate(`/chat/${sourceChatId}`, {
+      state: {
+        preserveCrossChatNotificationSourceChatId: sourceChatId
+      }
+    });
+    forceDockNotificationsAfterNavigation();
   }
 
   function handleReplyButtonClick(bubble: CrossChatNotificationBubble) {
@@ -875,6 +880,11 @@ export function CrossChatNotificationOverlay() {
     if (hasActiveReply) {
       return;
     }
+    clearAllCollapsedRevealPreviews();
+    setIsCollapsed(true);
+  }
+
+  function forceDockNotificationsAfterNavigation() {
     clearAllCollapsedRevealPreviews();
     setIsCollapsed(true);
   }

@@ -107,6 +107,7 @@ struct ChatViewModelTests {
         )
         defer { viewModel.onDisappear() }
 
+        await viewModel.activate(origin: "test.notificationNavigationCanPreserveNotificationContent")
         await viewModel.onAppear()
         chatService.emitServiceEvent(.streamSnapshot(streams))
         try await setReadyToSend(chatService: chatService, viewModel: viewModel)
@@ -175,9 +176,9 @@ struct ChatViewModelTests {
         #expect(viewModel.messages.isEmpty)
     }
 
-    @Test("T307 assistant notifications are assistant-only and dismiss on source navigation")
+    @Test("T375 notification navigation can preserve notification content")
     @MainActor
-    func assistantNotificationsAreAssistantOnlyAndDismissOnNavigation() async throws {
+    func notificationNavigationCanPreserveNotificationContent() async throws {
         resetChatPersistence()
         let auth = TestAuthManager()
         auth.storeCredentials(token: "jwt", userId: "user")
@@ -199,46 +200,22 @@ struct ChatViewModelTests {
         )
         defer { viewModel.onDisappear() }
 
+        await viewModel.activate(origin: "test.notificationNavigationCanPreserveNotificationContent")
         await viewModel.onAppear()
         chatService.emitServiceEvent(.streamSnapshot(streams))
         try await setConnected(chatService: chatService, viewModel: viewModel)
+        for _ in 0..<50 {
+            if viewModel.stream(for: sourceSessionKey) != nil { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        try #require(viewModel.stream(for: sourceSessionKey))
 
-        chatService.emit(
-            Message(
-                id: "u_other",
-                role: .user,
-                content: "user echo",
-                timestamp: Date(),
-                streaming: false,
-                attachments: [],
-                deviceId: nil,
-                sessionKey: sourceSessionKey
-            )
-        )
-        chatService.emit(
-            Message(
-                id: "s_first",
-                role: .assistant,
-                content: "older",
-                timestamp: Date(timeIntervalSince1970: 10),
-                streaming: false,
-                attachments: [],
-                deviceId: nil,
-                sessionKey: sourceSessionKey
-            )
-        )
-        chatService.emit(
-            Message(
-                id: "s_second",
-                role: .assistant,
-                content: "newer",
-                timestamp: Date(timeIntervalSince1970: 11),
-                streaming: false,
-                attachments: [],
-                deviceId: nil,
-                sessionKey: sourceSessionKey
-            )
-        )
+        let userPayload = #"{"type":"message","id":"u_other","role":"user","content":"user echo","timestamp":9000,"streaming":false,"sessionKey":"\#(sourceSessionKey)","attachments":[]}"#
+        chatService.emitLifecycleEvent(.init(epoch: 1, payload: .serverMessage(data: Data(userPayload.utf8))))
+        let firstPayload = #"{"type":"message","id":"s_first","role":"assistant","content":"older","timestamp":10000,"streaming":false,"sessionKey":"\#(sourceSessionKey)","attachments":[]}"#
+        chatService.emitLifecycleEvent(.init(epoch: 1, payload: .serverMessage(data: Data(firstPayload.utf8))))
+        let secondPayload = #"{"type":"message","id":"s_second","role":"assistant","content":"newer","timestamp":11000,"streaming":false,"sessionKey":"\#(sourceSessionKey)","attachments":[]}"#
+        chatService.emitLifecycleEvent(.init(epoch: 1, payload: .serverMessage(data: Data(secondPayload.utf8))))
 
         for _ in 0..<50 {
             if viewModel.crossChatNotificationBubbles.first?.entries.count == 2 { break }
@@ -247,6 +224,15 @@ struct ChatViewModelTests {
         let bubble = try #require(viewModel.crossChatNotificationBubbles.first)
         #expect(bubble.sourceChatId == sourceSessionKey)
         #expect(bubble.entries.map(\.content) == ["newer", "older"])
+
+        viewModel.requestStreamSwitch(
+            to: sourceSessionKey,
+            source: .programmatic,
+            preserveCrossChatNotification: true
+        )
+        #expect(viewModel.uiSelectedSessionKey == sourceSessionKey)
+        #expect(viewModel.crossChatNotificationBubbles.map(\.sourceChatId) == [sourceSessionKey])
+        #expect(viewModel.crossChatNotificationBubbles.first?.entries.map(\.content) == ["newer", "older"])
 
         viewModel.requestStreamSwitch(to: sourceSessionKey, source: .programmatic)
         #expect(viewModel.crossChatNotificationBubbles.isEmpty)

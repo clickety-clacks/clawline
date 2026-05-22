@@ -175,6 +175,7 @@ final class ChatViewModel: ChatViewModelHosting {
     private var pendingEngineActivationTask: Task<Void, Never>?
     private var pendingEngineActivationTarget: String?
     private var pendingEngineActivationEpoch: Int?
+    private var pendingEngineActivationPreservesCrossChatNotification: Bool = false
     private var engineActivationInFlightSessionKey: String?
     private var isPagerInteracting: Bool = false
     // Render policy seam:
@@ -238,9 +239,15 @@ final class ChatViewModel: ChatViewModelHosting {
         }
     }
 
-    func requestStreamSwitch(to sessionKey: String, source: StreamSwitchSource) {
+    func requestStreamSwitch(
+        to sessionKey: String,
+        source: StreamSwitchSource,
+        preserveCrossChatNotification: Bool = false
+    ) {
         guard orderedSessionKeys.contains(sessionKey) else { return }
-        dismissCrossChatNotification(sourceChatId: sessionKey)
+        if !preserveCrossChatNotification {
+            dismissCrossChatNotification(sourceChatId: sessionKey)
+        }
 
         // Step 1-2: stream-switch intent + epoch bump.
         uiSwitchEpoch &+= 1
@@ -255,6 +262,7 @@ final class ChatViewModel: ChatViewModelHosting {
         // Step 5: schedule candidate activation keyed by (target, epoch).
         pendingEngineActivationTarget = sessionKey
         pendingEngineActivationEpoch = epoch
+        pendingEngineActivationPreservesCrossChatNotification = preserveCrossChatNotification
         pendingEngineActivationTask?.cancel()
         pendingEngineActivationTask = nil
         StreamSwitchTiming.log("engine_activation_scheduled", sessionKey: sessionKey)
@@ -295,7 +303,7 @@ final class ChatViewModel: ChatViewModelHosting {
 
     // NOTE: keep this private.
     // Engine-active key mutation seam: all writes go through this method.
-    private func setEngineActiveSessionKey(_ sessionKey: String) {
+    private func setEngineActiveSessionKey(_ sessionKey: String, preserveCrossChatNotification: Bool = false) {
         StreamSwitchTiming.log("setEngineActiveSessionKey_enter", sessionKey: sessionKey)
         if sessionKey.isEmpty {
             engineActiveSessionKey = ""
@@ -304,7 +312,9 @@ final class ChatViewModel: ChatViewModelHosting {
         guard orderedSessionKeys.contains(sessionKey) else { return }
         guard engineActiveSessionKey != sessionKey else { return }
         applyActiveSessionKey(sessionKey)
-        dismissCrossChatNotification(sourceChatId: sessionKey)
+        if !preserveCrossChatNotification {
+            dismissCrossChatNotification(sourceChatId: sessionKey)
+        }
         markSessionRead(sessionKey, preferServerTail: true)
         // Keep intent selection coherent for non-switch engine mutations (bootstrap/deletion fallback).
         // Stream-switch path still writes uiSelectedSessionKey explicitly before this runs.
@@ -351,10 +361,13 @@ final class ChatViewModel: ChatViewModelHosting {
         guard orderedSessionKeys.contains(target) else {
             pendingEngineActivationTarget = nil
             pendingEngineActivationEpoch = nil
+            pendingEngineActivationPreservesCrossChatNotification = false
             return
         }
+        let preserveCrossChatNotification = pendingEngineActivationPreservesCrossChatNotification
         pendingEngineActivationTarget = nil
         pendingEngineActivationEpoch = nil
+        pendingEngineActivationPreservesCrossChatNotification = false
         pendingEngineActivationTask?.cancel()
         pendingEngineActivationTask = nil
 
@@ -366,7 +379,7 @@ final class ChatViewModel: ChatViewModelHosting {
         engineActivationStartedSequence &+= 1
         StreamSwitchTiming.log("engineActiveSessionKey_committed", sessionKey: target)
 
-        setEngineActiveSessionKey(target)
+        setEngineActiveSessionKey(target, preserveCrossChatNotification: preserveCrossChatNotification)
     }
 
     private func applyActiveSessionKey(_ sessionKey: String) {
@@ -384,6 +397,7 @@ final class ChatViewModel: ChatViewModelHosting {
         setUISelectedSessionKey("")
         pendingEngineActivationTarget = nil
         pendingEngineActivationEpoch = nil
+        pendingEngineActivationPreservesCrossChatNotification = false
         pendingEngineActivationTask?.cancel()
         pendingEngineActivationTask = nil
         engineActivationInFlightSessionKey = nil
@@ -399,6 +413,7 @@ final class ChatViewModel: ChatViewModelHosting {
         pendingEngineActivationTask = nil
         pendingEngineActivationTarget = nil
         pendingEngineActivationEpoch = nil
+        pendingEngineActivationPreservesCrossChatNotification = false
         engineActivationInFlightSessionKey = nil
         bindStreamSwitchCoordinatorIfNeeded()
     }

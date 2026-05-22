@@ -158,6 +158,25 @@ enum CrossChatMentionPickerLogic {
     }
 }
 
+enum SpatialViewportEdgeFadeMetrics {
+    static let topDistance: CGFloat = 56
+    static let bottomDistance: CGFloat = 160
+
+    struct Distances: Equatable {
+        let top: CGFloat
+        let bottom: CGFloat
+        let horizontal: CGFloat
+    }
+
+    static func distances(viewportSize: CGSize, horizontalGutter: CGFloat) -> Distances {
+        Distances(
+            top: min(topDistance, viewportSize.height / 2),
+            bottom: min(bottomDistance, viewportSize.height / 2),
+            horizontal: min(max(0, horizontalGutter), viewportSize.width / 2)
+        )
+    }
+}
+
 @MainActor
 @Observable
 final class StreamPopupRouteController {
@@ -1049,7 +1068,7 @@ struct ChatView: View {
         let rootLayer: AnyView = AnyView(ZStack(alignment: .top) {
             messageLayer
                 .compositingGroup()
-                .mask(messageViewportFadeMask(topInset: statusBarTopInset))
+                .mask(messageViewportFadeMask(topInset: statusBarTopInset, horizontalGutter: metrics.containerPadding))
 
             streamToastView(
                 inputBarTopFromScreenBottom: inputBarTopFromScreenBottom
@@ -1956,20 +1975,21 @@ struct ChatView: View {
     }
 
     @ViewBuilder
-    private func messageViewportFadeMask(topInset: CGFloat) -> some View {
+    private func messageViewportFadeMask(topInset: CGFloat, horizontalGutter: CGFloat) -> some View {
         #if os(visionOS)
-            spatialViewportEdgeFadeMask()
+            spatialViewportEdgeFadeMask(horizontalGutter: horizontalGutter)
         #else
             // #31: fade out message content behind the system status bar (mask, not overlay tint).
             statusBarFadeMask(topInset: topInset)
         #endif
     }
 
-    private func spatialViewportEdgeFadeMask() -> some View {
+    private func spatialViewportEdgeFadeMask(horizontalGutter: CGFloat) -> some View {
         GeometryReader { proxy in
-            let topFade = min(CGFloat(88), proxy.size.height / 2)
-            let bottomFade = min(CGFloat(120), proxy.size.height / 2)
-            let horizontalFade = min(CGFloat(44), proxy.size.width / 2)
+            let distances = SpatialViewportEdgeFadeMetrics.distances(
+                viewportSize: proxy.size,
+                horizontalGutter: horizontalGutter
+            )
 
             Rectangle()
                 .fill(Color.white)
@@ -1980,14 +2000,14 @@ struct ChatView: View {
                             startPoint: .top,
                             endPoint: .bottom
                         )
-                        .frame(height: topFade)
+                        .frame(height: distances.top)
                         Rectangle().fill(Color.white)
                         LinearGradient(
                             colors: [.white, .clear],
                             startPoint: .top,
                             endPoint: .bottom
                         )
-                        .frame(height: bottomFade)
+                        .frame(height: distances.bottom)
                     }
                 }
                 .mask {
@@ -1997,14 +2017,14 @@ struct ChatView: View {
                             startPoint: .leading,
                             endPoint: .trailing
                         )
-                        .frame(width: horizontalFade)
+                        .frame(width: distances.horizontal)
                         Rectangle().fill(Color.white)
                         LinearGradient(
                             colors: [.white, .clear],
                             startPoint: .leading,
                             endPoint: .trailing
                         )
-                        .frame(width: horizontalFade)
+                        .frame(width: distances.horizontal)
                     }
                 }
         }

@@ -431,6 +431,15 @@ export function Composer({
       routeKeyboardCommand(routed.intent, keyboardOwnershipStore).ownerSurfaceId ===
         "composer"
     ) {
+      event.preventDefault();
+      const textarea = event.currentTarget;
+      textarea.setRangeText(
+        "\n",
+        textarea.selectionStart,
+        textarea.selectionEnd,
+        "end"
+      );
+      setDraft(textarea.value);
       return;
     }
 

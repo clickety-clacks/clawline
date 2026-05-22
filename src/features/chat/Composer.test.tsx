@@ -508,8 +508,9 @@ describe("Composer", () => {
     fireEvent.focus(textarea);
     fireEvent.change(textarea, { target: { value: "line one" } });
 
-    expect(fireEvent.keyDown(textarea, { key: "Enter", shiftKey: true })).toBe(true);
+    expect(fireEvent.keyDown(textarea, { key: "Enter", shiftKey: true })).toBe(false);
     expect(sendMessage).not.toHaveBeenCalled();
+    expect(textarea).toHaveValue("line one\n");
   });
 
   it("reports cross-chat send failure in the initiating composer without echoing into the current chat", async () => {

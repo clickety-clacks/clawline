@@ -1441,6 +1441,8 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
                 ) { [weak self] in
                     self?.onRequestLayout?(message.id)
                 }
+                imageView.setContentCompressionResistancePriority(.required, for: .vertical)
+                imageView.setContentHuggingPriority(.required, for: .vertical)
                 dynamicContentStack.addArrangedSubview(imageView)
                 dynamicContentViews.append(imageView)
                 didRenderAttachments = true
@@ -2258,6 +2260,8 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         let height = min(maxHeight, maxWidth * aspectRatio)
         imageView.heightAnchor.constraint(equalToConstant: height).isActive = true
         imageView.widthAnchor.constraint(lessThanOrEqualToConstant: maxWidth).isActive = true
+        imageView.setContentCompressionResistancePriority(.required, for: .vertical)
+        imageView.setContentHuggingPriority(.required, for: .vertical)
         return imageView
     }
 
@@ -3147,6 +3151,8 @@ final class CodeBlockUIKitView: UIView {
     override init(frame: CGRect) {
         super.init(frame: frame)
         clipsToBounds = false
+        setContentCompressionResistancePriority(.required, for: .vertical)
+        setContentHuggingPriority(.required, for: .vertical)
     }
 
     required init?(coder: NSCoder) {
@@ -3174,6 +3180,8 @@ final class CodeBlockUIKitView: UIView {
         controller.view.backgroundColor = .clear
         controller.view.translatesAutoresizingMaskIntoConstraints = false
         controller.safeAreaRegions = []
+        controller.view.setContentCompressionResistancePriority(.required, for: .vertical)
+        controller.view.setContentHuggingPriority(.required, for: .vertical)
         addSubview(controller.view)
 
         NSLayoutConstraint.activate([

@@ -50,13 +50,13 @@ struct CodeBlockView: View {
                     Text(highlighted)
                         .font(.clawline(.secondaryLabel, design: .monospaced))
                         .lineSpacing(4)
-                        .fixedSize(horizontal: true, vertical: false)
+                        .fixedSize(horizontal: true, vertical: true)
                 } else {
                     Text(code)
                         .font(.clawline(.secondaryLabel, design: .monospaced))
                         .foregroundColor(plainTextColor)
                         .lineSpacing(4)
-                        .fixedSize(horizontal: true, vertical: false)
+                        .fixedSize(horizontal: true, vertical: true)
                 }
             }
             .scrollBounceBehavior(.basedOnSize)

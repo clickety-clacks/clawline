@@ -604,6 +604,75 @@ struct BubbleScrollTests {
         #expect(!textRuns.contains(where: { $0.contains("Title") && $0.contains("Tail paragraph.") }))
     }
 
+    @Test("T176: Code blocks keep visible height in bubble UIKit wrapper")
+    @MainActor
+    func codeBlockKeepsVisibleHeightInUIKitBubble() {
+        let codeBlock = CodeBlockUIKitView(frame: CGRect(x: 0, y: 0, width: 320, height: 1))
+        codeBlock.configure(language: "swift", code: "let value = 42\nprint(value)", isDark: true)
+
+        let measured = codeBlock.sizeThatFits(CGSize(width: 320, height: UIView.layoutFittingCompressedSize.height))
+
+        #expect(measured.height > 44)
+    }
+
+    @Test("T176: Mixed text and image assistant bubble preserves image height")
+    @MainActor
+    func mixedTextAndImageBubblePreservesImageHeight() throws {
+        let metrics = ChatFlowTheme.Metrics(isCompact: false)
+        let imageData = try #require(testPNGData(size: CGSize(width: 800, height: 600)))
+        let attachment = Attachment(
+            id: "mixed-image",
+            type: .image,
+            mimeType: "image/png",
+            data: imageData,
+            assetId: nil,
+            filename: "mixed.png",
+            size: imageData.count
+        )
+        let message = Message(
+            id: "mixed-text-image",
+            role: .assistant,
+            content: "Here is the screenshot you asked for.",
+            timestamp: Date(),
+            streaming: false,
+            attachments: [attachment],
+            deviceId: nil,
+            sessionKey: "server:personal"
+        )
+        let presentation = buildPresentation(message, metrics: metrics, enableLinkPreviews: false)
+        let sizeClass = MessageFlowRules.sizeClass(for: presentation)
+
+        let bubble = MessageBubbleUIKitView(frame: CGRect(x: 0, y: 0, width: 320, height: 1))
+        bubble.configure(
+            message: message,
+            presentation: presentation,
+            sizeClass: sizeClass,
+            metrics: metrics,
+            maxWidth: 320,
+            truncationHeightOverride: 240,
+            bubbleSizingV2: nil,
+            showsHeader: true,
+            paddingScale: 1,
+            minWidthOverride: nil,
+            maxWidthOverride: nil,
+            useContinuousCorners: true,
+            isDark: false,
+            onRequestExpand: nil,
+            onRequestLayout: nil,
+            onInteractiveCallback: nil
+        )
+        let measured = bubble.systemLayoutSizeFitting(
+            CGSize(width: 320, height: UIView.layoutFittingCompressedSize.height),
+            withHorizontalFittingPriority: .required,
+            verticalFittingPriority: .fittingSizeLevel
+        )
+        bubble.frame = CGRect(origin: .zero, size: measured)
+        bubble.layoutIfNeeded()
+
+        let imageView = try #require(imageViews(in: bubble).first { $0.accessibilityLabel == "Image attachment" })
+        #expect(imageView.bounds.height >= 209)
+    }
+
     // MARK: Helpers
 
     @MainActor
@@ -797,6 +866,26 @@ struct BubbleScrollTests {
             }
         }
         return nil
+    }
+
+    private func imageViews(in view: UIView) -> [UIImageView] {
+        var result: [UIImageView] = []
+        if let imageView = view as? UIImageView {
+            result.append(imageView)
+        }
+        for sub in view.subviews {
+            result.append(contentsOf: imageViews(in: sub))
+        }
+        return result
+    }
+
+    private func testPNGData(size: CGSize) -> Data? {
+        let renderer = UIGraphicsImageRenderer(size: size)
+        let image = renderer.image { context in
+            UIColor.systemBlue.setFill()
+            context.fill(CGRect(origin: .zero, size: size))
+        }
+        return image.pngData()
     }
 
     private struct ImmediateHighlightService: SalientHighlightServicing {

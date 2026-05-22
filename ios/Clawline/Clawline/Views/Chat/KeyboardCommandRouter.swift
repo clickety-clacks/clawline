@@ -232,6 +232,7 @@ struct KeyboardOwnershipStore: Equatable {
 struct KeyboardRouteDecision: Equatable {
     enum Outcome: Equatable {
         case handled(KeyboardSurfaceId)
+        case handledMany([KeyboardSurfaceId])
         case fallthroughToDefault
         case ignored
     }
@@ -242,6 +243,32 @@ struct KeyboardRouteDecision: Equatable {
     let participatingSurfaces: [KeyboardSurfaceId]
     let routeEpoch: Int
     let bridgeConsumedEvent: Bool
+}
+
+extension KeyboardRouteDecision.Outcome {
+    var handledSurfaceIds: [KeyboardSurfaceId] {
+        switch self {
+        case .handled(let surfaceId):
+            return [surfaceId]
+        case .handledMany(let surfaceIds):
+            return surfaceIds
+        case .fallthroughToDefault, .ignored:
+            return []
+        }
+    }
+
+    func containsHandledSurface(_ surfaceId: KeyboardSurfaceId) -> Bool {
+        handledSurfaceIds.contains(surfaceId)
+    }
+
+    var containsNotificationBubble: Bool {
+        handledSurfaceIds.contains { surfaceId in
+            if case .notificationBubble = surfaceId {
+                return true
+            }
+            return false
+        }
+    }
 }
 
 enum KeyboardCommandRouter {
@@ -312,23 +339,22 @@ enum KeyboardCommandRouter {
 
         case .transcriptBubbleScrollForward,
              .transcriptBubbleScrollBackward:
-            if let notification = reconciledStore.activeNotificationSurface(supporting: .notificationScroll) {
+            let transcript = reconciledStore.firstActiveSurface(kind: .transcript, supporting: .transcriptFallback)
+            let notification = reconciledStore.activeNotificationSurface(supporting: .notificationScroll)
+            let owners = [transcript?.surfaceId, notification?.surfaceId].compactMap { $0 }
+            if owners.count > 1 {
+                return decision(.handledMany(owners), "PR-04")
+            }
+            if let notification {
                 return decision(.handled(notification.surfaceId), "PR-04")
             }
-            if reconciledStore.firstActiveSurface(kind: .notificationReply, focusedOnly: true, supporting: .textEditing) != nil
-                || reconciledStore.firstActiveSurface(kind: .composer, focusedOnly: true, supporting: .textEditing) != nil {
-                return decision(.ignored, "PR-05/PR-06")
-            }
-            if let transcript = reconciledStore.firstActiveSurface(kind: .transcript, supporting: .transcriptFallback) {
+            if let transcript {
                 return decision(.handled(transcript.surfaceId), "PR-07")
             }
             return decision(.fallthroughToDefault, "PR-07")
 
         case .transcriptChatScrollForward,
              .transcriptChatScrollBackward:
-            if let notification = reconciledStore.activeNotificationSurface(supporting: .notificationScroll) {
-                return decision(.handled(notification.surfaceId), "PR-04")
-            }
             if let transcript = reconciledStore.firstActiveSurface(kind: .transcript, supporting: .transcriptFallback) {
                 return decision(.handled(transcript.surfaceId), "PR-07")
             }
@@ -393,8 +419,6 @@ enum KeyboardCommandBridge {
     static let notificationScrollSpecs: [KeyCommandSpec] = [
         KeyCommandSpec(input: "j", modifierFlags: [.command], intent: .notificationScrollForward),
         KeyCommandSpec(input: "k", modifierFlags: [.command], intent: .notificationScrollBackward),
-        KeyCommandSpec(input: "j", modifierFlags: [.command, .shift], intent: .notificationScrollForward),
-        KeyCommandSpec(input: "k", modifierFlags: [.command, .shift], intent: .notificationScrollBackward),
         KeyCommandSpec(input: "-", modifierFlags: [.command], intent: .notificationDismissAll),
         KeyCommandSpec(input: "\\", modifierFlags: [.command], intent: .notificationToggleDock)
     ]
@@ -444,16 +468,16 @@ enum KeyboardCommandBridge {
 
     static func prioritizedTextInputSpecs(notificationVisibleCount: Int) -> [KeyCommandSpec] {
         guard notificationVisibleCount > 0 else {
-            return transcriptScrollSpecs.filter {
-                $0.intent == .transcriptChatScrollForward || $0.intent == .transcriptChatScrollBackward
-            }
+            return transcriptScrollSpecs
         }
-        return notificationScrollSpecs + notificationNumberSpecs(visibleCount: notificationVisibleCount)
+        return transcriptScrollSpecs + notificationNumberSpecs(visibleCount: notificationVisibleCount)
     }
 
     static func hiddenNotificationSwiftUIFallbackSpecs(visibleNotificationCount: Int) -> [SwiftUIShortcutSpec] {
         guard visibleNotificationCount > 0 else { return [] }
-        return notificationScrollSpecs.compactMap { spec in
+        return notificationScrollSpecs
+            .filter { $0.intent == .notificationScrollForward || $0.intent == .notificationScrollBackward }
+            .compactMap { spec in
             guard let character = spec.input.first else { return nil }
             return SwiftUIShortcutSpec(
                 input: character,

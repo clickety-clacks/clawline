@@ -1691,10 +1691,11 @@ struct ChatView: View {
         _ intent: KeyboardCommandIntent,
         keyboardOwnershipStore: KeyboardOwnershipStore
     ) {
-        if let notificationName = ChatRootKeyboardCommandDispatch.notificationName(
+        let notificationNames = ChatRootKeyboardCommandDispatch.notificationNames(
             for: intent,
             keyboardOwnershipStore: keyboardOwnershipStore
-        ) {
+        )
+        for notificationName in notificationNames {
             NotificationCenter.default.post(name: notificationName, object: nil)
         }
     }
@@ -3110,31 +3111,25 @@ private struct KeyboardScrollCommandModifier: ViewModifier {
         content
             .onReceive(NotificationCenter.default.publisher(for: .clawlineScrollDownCommand)) { _ in
                 guard isEnabled else { return }
-                switch KeyboardCommandRouter.route(intent: .transcriptBubbleScrollForward, store: keyboardOwnershipStore).outcome {
-                case .handled(.notificationBubble(_)):
-                    NotificationCenter.default.post(name: .clawlineScrollNotificationDownCommand, object: nil)
-                case .handled(.transcript):
+                if KeyboardCommandRouter.route(
+                    intent: .transcriptBubbleScrollForward,
+                    store: keyboardOwnershipStore
+                ).outcome.containsHandledSurface(.transcript) {
                     onScrollDown()
-                default:
-                    break
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: .clawlineScrollUpCommand)) { _ in
                 guard isEnabled else { return }
-                switch KeyboardCommandRouter.route(intent: .transcriptBubbleScrollBackward, store: keyboardOwnershipStore).outcome {
-                case .handled(.notificationBubble(_)):
-                    NotificationCenter.default.post(name: .clawlineScrollNotificationUpCommand, object: nil)
-                case .handled(.transcript):
+                if KeyboardCommandRouter.route(
+                    intent: .transcriptBubbleScrollBackward,
+                    store: keyboardOwnershipStore
+                ).outcome.containsHandledSurface(.transcript) {
                     onScrollUp()
-                default:
-                    break
                 }
             }
             .onReceive(NotificationCenter.default.publisher(for: .clawlineScrollChatDownCommand)) { _ in
                 guard isEnabled else { return }
                 switch KeyboardCommandRouter.route(intent: .transcriptChatScrollForward, store: keyboardOwnershipStore).outcome {
-                case .handled(.notificationBubble(_)):
-                    NotificationCenter.default.post(name: .clawlineScrollNotificationDownCommand, object: nil)
                 case .handled(.transcript):
                     onScrollChatDown()
                 default:
@@ -3144,8 +3139,6 @@ private struct KeyboardScrollCommandModifier: ViewModifier {
             .onReceive(NotificationCenter.default.publisher(for: .clawlineScrollChatUpCommand)) { _ in
                 guard isEnabled else { return }
                 switch KeyboardCommandRouter.route(intent: .transcriptChatScrollBackward, store: keyboardOwnershipStore).outcome {
-                case .handled(.notificationBubble(_)):
-                    NotificationCenter.default.post(name: .clawlineScrollNotificationUpCommand, object: nil)
                 case .handled(.transcript):
                     onScrollChatUp()
                 default:
@@ -3864,19 +3857,31 @@ enum PromptFocusTypingActivation {
 }
 
 enum ChatRootKeyboardCommandDispatch {
+    static func notificationNames(
+        for intent: KeyboardCommandIntent,
+        keyboardOwnershipStore: KeyboardOwnershipStore
+    ) -> [Notification.Name] {
+        notificationNames(for: KeyboardCommandRouter.route(intent: intent, store: keyboardOwnershipStore))
+    }
+
     static func notificationName(
         for intent: KeyboardCommandIntent,
         keyboardOwnershipStore: KeyboardOwnershipStore
     ) -> Notification.Name? {
-        let route = KeyboardCommandRouter.route(intent: intent, store: keyboardOwnershipStore)
-        switch route.outcome {
-        case .handled(.transcript):
-            return transcriptNotificationName(for: intent)
-        case .handled(.notificationBubble(_)):
-            return notificationScrollName(for: intent)
-        default:
-            return nil
+        notificationNames(for: intent, keyboardOwnershipStore: keyboardOwnershipStore).first
+    }
+
+    private static func notificationNames(for route: KeyboardRouteDecision) -> [Notification.Name] {
+        var names: [Notification.Name] = []
+        if route.outcome.containsHandledSurface(.transcript),
+           let transcriptName = transcriptNotificationName(for: route.intent) {
+            names.append(transcriptName)
         }
+        if route.outcome.containsNotificationBubble,
+           let notificationName = notificationScrollName(for: route.intent) {
+            names.append(notificationName)
+        }
+        return names
     }
 
     private static func transcriptNotificationName(for intent: KeyboardCommandIntent) -> Notification.Name? {
@@ -3904,9 +3909,9 @@ enum ChatRootKeyboardCommandDispatch {
 
     private static func notificationScrollName(for intent: KeyboardCommandIntent) -> Notification.Name? {
         switch intent {
-        case .transcriptBubbleScrollForward, .transcriptChatScrollForward:
+        case .transcriptBubbleScrollForward, .notificationScrollForward:
             return .clawlineScrollNotificationDownCommand
-        case .transcriptBubbleScrollBackward, .transcriptChatScrollBackward:
+        case .transcriptBubbleScrollBackward, .notificationScrollBackward:
             return .clawlineScrollNotificationUpCommand
         default:
             return nil
@@ -3948,11 +3953,13 @@ extension UIResponder {
     }
 
     @objc func clawlineScrollNotificationDownCommand(_ sender: UIKeyCommand) {
-        NotificationCenter.default.post(name: .clawlineKeyboardCommandIntent, object: KeyboardCommandIntent.notificationScrollForward)
+        guard let intent = KeyboardCommandBridge.intent(input: sender.input, modifierFlags: sender.modifierFlags) else { return }
+        NotificationCenter.default.post(name: .clawlineKeyboardCommandIntent, object: intent)
     }
 
     @objc func clawlineScrollNotificationUpCommand(_ sender: UIKeyCommand) {
-        NotificationCenter.default.post(name: .clawlineKeyboardCommandIntent, object: KeyboardCommandIntent.notificationScrollBackward)
+        guard let intent = KeyboardCommandBridge.intent(input: sender.input, modifierFlags: sender.modifierFlags) else { return }
+        NotificationCenter.default.post(name: .clawlineKeyboardCommandIntent, object: intent)
     }
 
     @objc func clawlineNotificationNumberCommand(_ sender: UIKeyCommand) {
@@ -7148,10 +7155,8 @@ final class NotificationReplyUITextView: UITextView {
                 guard let intent = KeyboardCommandBridge.intent(input: $0.input, modifierFlags: $0.modifierFlags) else {
                     return false
                 }
-                guard case .handled(.notificationBubble(_)) = KeyboardCommandRouter
-                    .route(intent: intent, store: keyboardOwnershipStore)
-                    .outcome else { return false }
-                return true
+                let outcome = KeyboardCommandRouter.route(intent: intent, store: keyboardOwnershipStore).outcome
+                return outcome.containsNotificationBubble || outcome.containsHandledSurface(.transcript)
             }
             .map {
                 UIKeyCommand(
@@ -7597,12 +7602,12 @@ enum CrossChatNotificationGlobalShortcut {
         case scrollDown
         case scrollUp
 
-        var notificationName: Notification.Name {
+        var rootScrollIntent: KeyboardCommandIntent {
             switch self {
             case .scrollDown:
-                return .clawlineScrollNotificationDownCommand
+                return .transcriptBubbleScrollForward
             case .scrollUp:
-                return .clawlineScrollNotificationUpCommand
+                return .transcriptBubbleScrollBackward
             }
         }
     }
@@ -7720,17 +7725,13 @@ private struct CrossChatNotificationKeyboardShortcuts: View {
     }
 
     private func routeScrollShortcut(_ spec: CrossChatNotificationGlobalShortcut.Spec) {
-        let intent: KeyboardCommandIntent
-        switch spec.action {
-        case .scrollDown:
-            intent = .notificationScrollForward
-        case .scrollUp:
-            intent = .notificationScrollBackward
-        }
-        guard case .handled(.notificationBubble(_)) = KeyboardCommandRouter
-            .route(intent: intent, store: keyboardOwnershipStore)
-            .outcome else { return }
-        NotificationCenter.default.post(name: spec.action.notificationName, object: nil)
+        let decision = KeyboardCommandRouter.route(
+            intent: spec.action.rootScrollIntent,
+            store: keyboardOwnershipStore
+        )
+        guard decision.outcome.containsHandledSurface(.transcript)
+            || decision.outcome.containsNotificationBubble else { return }
+        NotificationCenter.default.post(name: .clawlineKeyboardCommandIntent, object: spec.action.rootScrollIntent)
     }
 
     private func routeNotificationStackShortcut(

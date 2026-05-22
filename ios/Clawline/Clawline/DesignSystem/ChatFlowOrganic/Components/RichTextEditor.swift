@@ -456,22 +456,6 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
                 action: spec.action.selector
             )
         }
-        let prioritizedAppCommandShortcuts = appCommandShortcuts.filter {
-            guard let intent = KeyboardCommandBridge.intent(input: $0.input, modifierFlags: $0.modifierFlags) else {
-                return false
-            }
-            guard case .handled(.notificationBubble(_)) = KeyboardCommandRouter
-                .route(intent: intent, store: keyboardOwnershipStore)
-                .outcome else { return false }
-            return true
-        }
-        let deferredAppCommandShortcuts = appCommandShortcuts.filter { command in
-            !prioritizedAppCommandShortcuts.contains { prioritized in
-                prioritized.input == command.input
-                    && prioritized.modifierFlags == command.modifierFlags
-                    && prioritized.action == command.action
-            }
-        }
         let inputReleaseCommands = [
             UIKeyCommand(input: "\r", modifierFlags: [.shift], action: #selector(didPressModifiedReturn)),
             UIKeyCommand(input: "\r", modifierFlags: [.control], action: #selector(didPressModifiedReturn)),
@@ -498,12 +482,11 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
             }
             : []
         return mentionPickerCommands
-            + prioritizedAppCommandShortcuts
+            + appCommandShortcuts
             + inputReleaseCommands
             + modifiedReturnCommands
             + base
             + emacsCommands
-            + deferredAppCommandShortcuts
     }
 
     private func mentionPickerSelector(for intent: KeyboardCommandIntent) -> Selector? {

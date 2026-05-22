@@ -1065,27 +1065,35 @@ struct ChatView: View {
                 inputBarTopFromScreenBottom: inputBarTopFromScreenBottom
             )
             .zIndex(40)
-            notificationOverlay(
-                viewModel: viewModel,
-                topMargin: notificationOverlayTopMargin,
-                maxContainerHeight: notificationOverlayMaxHeight,
-                maxContainerWidth: notificationOverlayMaxWidth,
-                trailingSafeAreaInset: geometry.safeAreaInsets.trailing,
-                normalTrailingMargin: notificationNormalTrailingMargin,
-                compactLeadingFitMargin: notificationCompactLeadingFitMargin,
-                measuredBubbleHeightsBySourceChatId: $crossChatNotificationMeasuredHeightsBySourceChatId,
-                actionMenuSourceChatId: $crossChatNotificationActionMenuSourceChatId,
-                focusedSourceChatId: $crossChatNotificationFocusedSourceChatId,
-                focusedReplySourceChatId: $crossChatNotificationFocusedReplySourceChatId,
-                keyboardOwnershipStore: keyboardOwnershipStore
-            )
-            .zIndex(20)
-            notificationKeyboardShortcutView(
-                viewModel: viewModel,
-                maxContainerHeight: notificationOverlayMaxHeight,
-                measuredHeightsBySourceChatId: crossChatNotificationMeasuredHeightsBySourceChatId,
-                keyboardOwnershipStore: keyboardOwnershipStore
-            )
+
+            Color.clear
+                .allowsHitTesting(false)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .overlay(alignment: .topTrailing) {
+                    notificationOverlay(
+                        viewModel: viewModel,
+                        topMargin: notificationOverlayTopMargin,
+                        maxContainerHeight: notificationOverlayMaxHeight,
+                        maxContainerWidth: notificationOverlayMaxWidth,
+                        trailingSafeAreaInset: geometry.safeAreaInsets.trailing,
+                        normalTrailingMargin: notificationNormalTrailingMargin,
+                        compactLeadingFitMargin: notificationCompactLeadingFitMargin,
+                        measuredBubbleHeightsBySourceChatId: $crossChatNotificationMeasuredHeightsBySourceChatId,
+                        actionMenuSourceChatId: $crossChatNotificationActionMenuSourceChatId,
+                        focusedSourceChatId: $crossChatNotificationFocusedSourceChatId,
+                        focusedReplySourceChatId: $crossChatNotificationFocusedReplySourceChatId,
+                        keyboardOwnershipStore: keyboardOwnershipStore
+                    )
+                }
+                .overlay(alignment: .topTrailing) {
+                    notificationKeyboardShortcutView(
+                        viewModel: viewModel,
+                        maxContainerHeight: notificationOverlayMaxHeight,
+                        measuredHeightsBySourceChatId: crossChatNotificationMeasuredHeightsBySourceChatId,
+                        keyboardOwnershipStore: keyboardOwnershipStore
+                    )
+                }
+                .zIndex(20)
         })
 
         let keyboardRoutedRootLayer: AnyView = AnyView(rootLayer
@@ -1609,7 +1617,7 @@ struct ChatView: View {
                 alignment: .topTrailing
             )
             .frame(
-                maxHeight: CrossChatNotificationOverlay.overlayHostHeight(
+                height: CrossChatNotificationGeometry.layoutHostHeight(
                     topMargin: topMargin,
                     maxContainerHeight: maxContainerHeight
                 ),
@@ -5346,6 +5354,10 @@ enum CrossChatNotificationMarkdownRenderer {
 enum CrossChatNotificationGeometry {
     static func layoutHostWidth(maxContainerWidth: CGFloat) -> CGFloat {
         max(0, maxContainerWidth)
+    }
+
+    static func layoutHostHeight(topMargin: CGFloat, maxContainerHeight: CGFloat) -> CGFloat {
+        max(0, topMargin) + max(0, maxContainerHeight) + 12
     }
 
     static func collapsedOffset(

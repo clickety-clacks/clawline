@@ -227,8 +227,10 @@ struct ClawlineTests {
         let defaults = UserDefaults.standard
         let previousKey = defaults.object(forKey: "soniox.apiKey")
         let previousStatus = defaults.object(forKey: "soniox.apiKeyStatus")
+        let previousProviderURL = ProviderBaseURLStore.baseURL
         defaults.removeObject(forKey: "soniox.apiKey")
         defaults.removeObject(forKey: "soniox.apiKeyStatus")
+        ProviderBaseURLStore.clearBaseURL()
         defer {
             if let previousKey {
                 defaults.set(previousKey, forKey: "soniox.apiKey")
@@ -240,10 +242,18 @@ struct ClawlineTests {
             } else {
                 defaults.removeObject(forKey: "soniox.apiKeyStatus")
             }
+            if let previousProviderURL {
+                ProviderBaseURLStore.setBaseURL(previousProviderURL)
+            } else {
+                ProviderBaseURLStore.clearBaseURL()
+            }
         }
 
         let sonioxKeyStore = SonioxKeyStore(verifier: AcceptingSonioxKeyVerifier())
-        let settings = SettingsManager(sonioxKeyStore: sonioxKeyStore)
+        let settings = SettingsManager(
+            sonioxKeyStore: sonioxKeyStore,
+            cartesiaKeyStore: CartesiaKeyStore(keychain: KeychainSecureStore(service: "ClawlineTests.sonioxSettings.\(UUID().uuidString)"))
+        )
         settings.sonioxAPIKey = "  iphone-soniox-key  "
 
         let suiteName = "ClawlineTests.sonioxWatchBridge"
@@ -281,14 +291,63 @@ struct ClawlineTests {
         #expect(clearedPayload?["sonioxApiKey"] as? String == "")
     }
 
+    @Test("Settings Cartesia key source is shared with Watch credential bridge")
+    @MainActor
+    func settingsCartesiaKeySourceFeedsWatchCredentialBridge() async {
+        let sonioxKeyStore = SonioxKeyStore(verifier: AcceptingSonioxKeyVerifier())
+        let cartesiaKeyStore = CartesiaKeyStore(keychain: KeychainSecureStore(service: "ClawlineTests.cartesiaSettings.\(UUID().uuidString)"))
+        let settings = SettingsManager(sonioxKeyStore: sonioxKeyStore, cartesiaKeyStore: cartesiaKeyStore)
+        settings.cartesiaAPIKey = "  iphone-cartesia-key  "
+        settings.cartesiaVoiceId = "  sonic-voice  "
+
+        let suiteName = "ClawlineTests.cartesiaWatchBridge"
+        let authDefaults = UserDefaults(suiteName: suiteName) ?? .standard
+        authDefaults.removePersistentDomain(forName: suiteName)
+        defer { authDefaults.removePersistentDomain(forName: suiteName) }
+        let authManager = AuthManager(storage: authDefaults, secureStore: InMemorySecureStore())
+        authManager.storeCredentials(token: "jwt", userId: "user")
+        let service = WatchConnectivityService(
+            authManager: authManager,
+            sonioxKeyStore: sonioxKeyStore,
+            cartesiaKeyStore: cartesiaKeyStore,
+            chatService: SpyChatService()
+        )
+
+        let reply = await service.handleTestMessage([
+            "type": "auth.refresh",
+            "requestId": "req-cartesia"
+        ])
+        let payload = reply["payload"] as? [String: Any]
+
+        #expect(cartesiaKeyStore.apiKeyForCredentialSync == "iphone-cartesia-key")
+        #expect(cartesiaKeyStore.voiceIdForCredentialSync == "sonic-voice")
+        #expect(payload?["cartesiaApiKey"] as? String == "iphone-cartesia-key")
+        #expect(payload?["cartesiaVoiceId"] as? String == "sonic-voice")
+
+        settings.cartesiaAPIKey = " "
+        settings.cartesiaVoiceId = ""
+        let clearedReply = await service.handleTestMessage([
+            "type": "auth.refresh",
+            "requestId": "req-cartesia-clear"
+        ])
+        let clearedPayload = clearedReply["payload"] as? [String: Any]
+
+        #expect(cartesiaKeyStore.apiKeyForCredentialSync == nil)
+        #expect(cartesiaKeyStore.voiceIdForCredentialSync == nil)
+        #expect(clearedPayload?["cartesiaApiKey"] as? String == "")
+        #expect(clearedPayload?["cartesiaVoiceId"] as? String == "")
+    }
+
     @Test("Soniox key clear is included in Watch credential push without provider auth")
     @MainActor
-    func sonioxClearPushDoesNotRequireProviderAuth() {
+    func credentialClearPushDoesNotRequireProviderAuthAndIncludesAllClearFields() {
         let defaults = UserDefaults.standard
         let previousKey = defaults.object(forKey: "soniox.apiKey")
         let previousStatus = defaults.object(forKey: "soniox.apiKeyStatus")
+        let previousProviderURL = ProviderBaseURLStore.baseURL
         defaults.removeObject(forKey: "soniox.apiKey")
         defaults.removeObject(forKey: "soniox.apiKeyStatus")
+        ProviderBaseURLStore.clearBaseURL()
         defer {
             if let previousKey {
                 defaults.set(previousKey, forKey: "soniox.apiKey")
@@ -299,6 +358,11 @@ struct ClawlineTests {
                 defaults.set(previousStatus, forKey: "soniox.apiKeyStatus")
             } else {
                 defaults.removeObject(forKey: "soniox.apiKeyStatus")
+            }
+            if let previousProviderURL {
+                ProviderBaseURLStore.setBaseURL(previousProviderURL)
+            } else {
+                ProviderBaseURLStore.clearBaseURL()
             }
         }
 
@@ -319,8 +383,23 @@ struct ClawlineTests {
         #expect(payload["type"] as? String == "credential_push")
         #expect(payload["pushedAt"] as? TimeInterval == 123)
         #expect(payload["sonioxApiKey"] as? String == "")
-        #expect(payload["token"] == nil)
-        #expect(payload["userId"] == nil)
+        #expect(payload["cartesiaApiKey"] as? String == "")
+        #expect(payload["cartesiaVoiceId"] as? String == "")
+        #expect(payload["token"] as? String == "")
+        #expect(payload["userId"] as? String == "")
+        #expect(payload["providerBaseURL"] is String)
+        #expect(PropertyListSerialization.propertyList(payload, isValidFor: .binary))
+    }
+
+    @Test("Watch credential push explicitly clears provider URL when none is configured")
+    func watchCredentialPayloadContainsProviderURLClearSemantic() throws {
+        let bridgePath = URL(filePath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appending(path: "Clawline/Services/WatchConnectivityService.swift")
+        let bridgeSource = try String(contentsOf: bridgePath, encoding: .utf8)
+
+        #expect(bridgeSource.contains(#""providerBaseURL": ProviderBaseURLStore.baseURL?.absoluteString ?? """#))
     }
 
     @Test("Clawline app wires one Soniox store into Settings and Watch connectivity")
@@ -337,9 +416,29 @@ struct ClawlineTests {
         let bridgeSource = try String(contentsOf: bridgePath, encoding: .utf8)
 
         #expect(appSource.contains("let sonioxKeyStore = SonioxKeyStore()"))
-        #expect(appSource.contains("SettingsManager(sonioxKeyStore: sonioxKeyStore)"))
+        #expect(appSource.contains("SettingsManager(sonioxKeyStore: sonioxKeyStore, cartesiaKeyStore: cartesiaKeyStore)"))
         #expect(appSource.contains("sonioxKeyStore: sonioxKeyStore"))
         #expect(bridgeSource.contains("sonioxKeyStore.keyForCredentialSync"))
+    }
+
+    @Test("Clawline app wires one Cartesia store into Settings and Watch connectivity")
+    func clawlineAppSharesCartesiaStoreBetweenSettingsAndWatchBridge() throws {
+        let appPath = URL(filePath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appending(path: "Clawline/ClawlineApp.swift")
+        let appSource = try String(contentsOf: appPath, encoding: .utf8)
+        let bridgePath = URL(filePath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appending(path: "Clawline/Services/WatchConnectivityService.swift")
+        let bridgeSource = try String(contentsOf: bridgePath, encoding: .utf8)
+
+        #expect(appSource.contains("let cartesiaKeyStore = CartesiaKeyStore"))
+        #expect(appSource.contains("SettingsManager(sonioxKeyStore: sonioxKeyStore, cartesiaKeyStore: cartesiaKeyStore)"))
+        #expect(appSource.contains("cartesiaKeyStore: cartesiaKeyStore"))
+        #expect(bridgeSource.contains("cartesiaKeyStore.apiKeyForCredentialSync"))
+        #expect(bridgeSource.contains("cartesiaKeyStore.voiceIdForCredentialSync"))
     }
 
 

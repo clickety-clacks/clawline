@@ -5,10 +5,14 @@ import Observation
 @Observable
 final class WatchConversationStore {
     private static var isDebugScenarioEnabled: Bool {
+#if DEBUG
         let processInfo = ProcessInfo.processInfo
         return processInfo.environment["WATCH_UI_TEST_SCENARIO"]?.isEmpty == false
             || processInfo.arguments.contains("-WATCH_UI_TEST_SCENARIO")
             || processInfo.arguments.contains { $0.hasPrefix("WATCH_UI_TEST_SCENARIO=") }
+#else
+        return false
+#endif
     }
     struct Entry: Identifiable, Equatable {
         let id: String

@@ -269,6 +269,42 @@ struct WatchConnectionPresentationStateTests {
         #expect(!WatchVoiceSession(credentialStore: credentials).canUseVoice)
     }
 
+    @Test("empty iPhone credential payload clears every stored Watch credential")
+    @MainActor
+    func emptyCredentialPayloadClearsStoredWatchCredentials() {
+        let credentials = WatchCredentialStore(keychain: WatchKeychainStore(service: "WatchTests.symmetricCredentialClear", accessGroup: nil))
+        credentials.clear()
+        credentials.apply(userInfo: [
+            "token": "watch-token",
+            "userId": "watch-user",
+            "providerBaseURL": "https://provider.example",
+            "sonioxApiKey": "watch-soniox-key",
+            "cartesiaApiKey": "watch-cartesia-key",
+            "cartesiaVoiceId": "watch-cartesia-voice"
+        ])
+        #expect(credentials.hasProviderCredentials)
+        #expect(credentials.sonioxApiKey == "watch-soniox-key")
+        #expect(credentials.cartesiaApiKey == "watch-cartesia-key")
+        #expect(credentials.cartesiaVoiceId == "watch-cartesia-voice")
+
+        credentials.apply(userInfo: [
+            "token": "",
+            "userId": " ",
+            "providerBaseURL": "",
+            "sonioxApiKey": "",
+            "cartesiaApiKey": " ",
+            "cartesiaVoiceId": ""
+        ])
+
+        #expect(credentials.providerToken == nil)
+        #expect(credentials.userId == nil)
+        #expect(credentials.providerBaseURL == nil)
+        #expect(credentials.sonioxApiKey == nil)
+        #expect(credentials.cartesiaApiKey == nil)
+        #expect(credentials.cartesiaVoiceId == nil)
+        #expect(!credentials.hasProviderCredentials)
+    }
+
     @Test("missing Soniox credential produces Clawline voice error instead of system input")
     @MainActor
     func missingSonioxCredentialShowsVoiceError() {
@@ -541,6 +577,84 @@ struct WatchConnectionPresentationStateTests {
         #expect(WatchProviderTransport.shouldTreatRelayRequestErrorAsConnectivityLoss(NSError(domain: WCErrorDomain, code: WCError.Code.notReachable.rawValue)))
         #expect(WatchProviderTransport.shouldTreatRelayRequestErrorAsConnectivityLoss(NSError(domain: WCErrorDomain, code: WCError.Code.deliveryFailed.rawValue)))
         #expect(!WatchProviderTransport.shouldTreatRelayRequestErrorAsConnectivityLoss(NSError(domain: WCErrorDomain, code: WCError.Code.payloadUnsupportedTypes.rawValue)))
+    }
+
+    @Test("relay request payloads omit nil optionals before WatchConnectivity transport")
+    @MainActor
+    func relayPayloadSanitizerOmitsNilOptionals() {
+        let sessionKey: String? = nil
+        let idempotencyKey: String? = nil
+        let data: String? = nil
+        let payload = WatchProviderTransport.propertyListPayload(from: [
+            "sessionKey": sessionKey as Any,
+            "idempotencyKey": idempotencyKey as Any,
+            "nested": [
+                "action": "tap",
+                "data": data as Any
+            ]
+        ])
+
+        #expect(payload["sessionKey"] == nil)
+        #expect(payload["idempotencyKey"] == nil)
+        let nested = payload["nested"] as? [String: Any]
+        #expect(nested?["action"] as? String == "tap")
+        #expect(nested?["data"] == nil)
+        #expect(PropertyListSerialization.propertyList(payload, isValidFor: .binary))
+    }
+
+    @Test("Watch UI test scenarios are debug-only and cannot replace production connectivity")
+    func watchUITestScenarioSeamIsDebugOnly() throws {
+        let sourcePath = URL(filePath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appending(path: "Clawline Watch Watch App/Clawline_WatchApp.swift")
+        let source = try String(contentsOf: sourcePath, encoding: .utf8)
+        let scenarioRange = try #require(source.range(of: "private struct WatchUITestScenario"))
+        let prefix = source[..<scenarioRange.lowerBound]
+
+        #expect(prefix.contains("#if DEBUG"))
+        #expect(source.contains("#endif\nprivate struct WatchUITestScenario") == false)
+        #expect(source.contains("#endif\n\nprivate struct WatchUITestScenario") == false)
+    }
+
+    @Test("Cartesia TTS missing credentials produce visible Clawline error instead of system speech")
+    @MainActor
+    func cartesiaMissingCredentialsShowVoiceError() {
+        let credentials = WatchCredentialStore(keychain: WatchKeychainStore(service: "WatchTests.cartesiaMissing", accessGroup: nil))
+        credentials.clear()
+        credentials.apply(userInfo: ["sonioxApiKey": "watch-soniox-key"])
+        let voiceSession = WatchVoiceSession(
+            credentialStore: credentials,
+            directInternetMonitor: FakeWatchDirectInternetMonitor(isAvailable: true),
+            audioSessionConfigurator: {}
+        )
+
+        voiceSession.handleResponse(text: "hello")
+
+        #expect(voiceSession.voiceState == .error)
+        #expect(voiceSession.errorMessage == "Cartesia voice is not synced to Watch yet. Open Clawline on iPhone and check voice playback settings.")
+    }
+
+    @Test("Cartesia TTS direct network absence produces visible Clawline error")
+    @MainActor
+    func cartesiaNetworkUnavailableShowsVoiceError() {
+        let credentials = WatchCredentialStore(keychain: WatchKeychainStore(service: "WatchTests.cartesiaNetwork", accessGroup: nil))
+        credentials.clear()
+        credentials.apply(userInfo: [
+            "sonioxApiKey": "watch-soniox-key",
+            "cartesiaApiKey": "watch-cartesia-key",
+            "cartesiaVoiceId": "watch-cartesia-voice"
+        ])
+        let voiceSession = WatchVoiceSession(
+            credentialStore: credentials,
+            directInternetMonitor: FakeWatchDirectInternetMonitor(isAvailable: false),
+            audioSessionConfigurator: {}
+        )
+
+        voiceSession.handleResponse(text: "hello")
+
+        #expect(voiceSession.voiceState == .error)
+        #expect(voiceSession.errorMessage == "Watch network is unavailable for Cartesia voice. Connect Watch to Wi-Fi or cellular and try again.")
     }
 
     @Test("phone reachability recovery uses relay fallback while probing or disconnected")

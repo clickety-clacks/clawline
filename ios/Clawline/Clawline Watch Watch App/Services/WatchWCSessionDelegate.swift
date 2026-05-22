@@ -48,12 +48,12 @@ final class WatchWCSessionDelegate: NSObject, WCSessionDelegate {
         Task { @MainActor [weak self] in
             if let type = message["type"] as? String, type == RelayMessageType.authRefresh {
                 let payload: [String: Any] = [
-                    "token": self?.credentialStore.providerToken as Any,
-                    "userId": self?.credentialStore.userId as Any,
-                    "providerBaseURL": self?.credentialStore.providerBaseURL?.absoluteString as Any,
-                    "sonioxApiKey": self?.credentialStore.sonioxApiKey as Any,
-                    "cartesiaApiKey": self?.credentialStore.cartesiaApiKey as Any,
-                    "cartesiaVoiceId": self?.credentialStore.cartesiaVoiceId as Any
+                    "token": self?.credentialStore.providerToken ?? "",
+                    "userId": self?.credentialStore.userId ?? "",
+                    "providerBaseURL": self?.credentialStore.providerBaseURL?.absoluteString ?? "",
+                    "sonioxApiKey": self?.credentialStore.sonioxApiKey ?? "",
+                    "cartesiaApiKey": self?.credentialStore.cartesiaApiKey ?? "",
+                    "cartesiaVoiceId": self?.credentialStore.cartesiaVoiceId ?? ""
                 ]
                 replyHandler([
                     "type": "auth.refresh.ack",

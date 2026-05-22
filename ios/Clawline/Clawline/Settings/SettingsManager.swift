@@ -25,6 +25,7 @@ final class SettingsManager {
     }
 
     let sonioxKeyStore: SonioxKeyStore
+    let cartesiaKeyStore: CartesiaKeyStore
 
     var trustSelfSignedCertificates: Bool {
         didSet { saveTrustSelfSignedCertificates() }
@@ -59,14 +60,25 @@ final class SettingsManager {
         sonioxKeyStore.ctaTitle
     }
 
+    var cartesiaAPIKey: String {
+        get { cartesiaKeyStore.editableAPIKey }
+        set { cartesiaKeyStore.editableAPIKey = newValue }
+    }
+
+    var cartesiaVoiceId: String {
+        get { cartesiaKeyStore.editableVoiceId }
+        set { cartesiaKeyStore.editableVoiceId = newValue }
+    }
+
     var isSettingsPresented: Bool = false
 
     private static let effectConfigKey = "backgroundEffectConfiguration"
     private static let appearanceModeKey = "appearanceMode"
     private static let lifecycleDebugOverlayEnabledKey = "debug.lifecycleOverlayEnabled"
 
-    init(sonioxKeyStore: SonioxKeyStore) {
+    init(sonioxKeyStore: SonioxKeyStore, cartesiaKeyStore: CartesiaKeyStore) {
         self.sonioxKeyStore = sonioxKeyStore
+        self.cartesiaKeyStore = cartesiaKeyStore
 
         if let data = UserDefaults.standard.data(forKey: Self.effectConfigKey),
            let config = try? JSONDecoder().decode(BackgroundEffectConfiguration.self, from: data) {
@@ -91,7 +103,7 @@ final class SettingsManager {
     }
 
     convenience init() {
-        self.init(sonioxKeyStore: SonioxKeyStore())
+        self.init(sonioxKeyStore: SonioxKeyStore(), cartesiaKeyStore: CartesiaKeyStore(keychain: KeychainSecureStore()))
     }
 
     private func save() {

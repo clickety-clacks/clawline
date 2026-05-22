@@ -101,27 +101,16 @@ final class WatchConnectivityService: NSObject, WatchConnectivityServicing {
     }
 
     func makeCredentialPushPayload(pushedAt: TimeInterval = Date().timeIntervalSince1970 * 1000) -> [String: Any] {
-        var userInfo: [String: Any] = [
+        let userInfo: [String: Any] = [
             "type": "credential_push",
             "pushedAt": pushedAt,
-            "sonioxApiKey": sonioxKeyStore.keyForCredentialSync ?? ""
+            "token": authManager.token ?? "",
+            "userId": authManager.currentUserId ?? "",
+            "providerBaseURL": ProviderBaseURLStore.baseURL?.absoluteString ?? "",
+            "sonioxApiKey": sonioxKeyStore.keyForCredentialSync ?? "",
+            "cartesiaApiKey": cartesiaKeyStore.apiKeyForCredentialSync ?? "",
+            "cartesiaVoiceId": cartesiaKeyStore.voiceIdForCredentialSync ?? ""
         ]
-
-        if let token = authManager.token {
-            userInfo["token"] = token
-        }
-        if let userId = authManager.currentUserId {
-            userInfo["userId"] = userId
-        }
-        if let providerURL = ProviderBaseURLStore.baseURL?.absoluteString {
-            userInfo["providerBaseURL"] = providerURL
-        }
-        if let key = cartesiaKeyStore.apiKey {
-            userInfo["cartesiaApiKey"] = key
-        }
-        if let id = cartesiaKeyStore.selectedVoiceId {
-            userInfo["cartesiaVoiceId"] = id
-        }
 
         return userInfo
     }
@@ -403,20 +392,14 @@ final class WatchConnectivityService: NSObject, WatchConnectivityServicing {
             return
         }
 
-        var payload: [String: Any] = [
+        let payload: [String: Any] = [
             "token": token,
-            "userId": userId
+            "userId": userId,
+            "providerBaseURL": ProviderBaseURLStore.baseURL?.absoluteString ?? "",
+            "sonioxApiKey": sonioxKeyStore.keyForCredentialSync ?? "",
+            "cartesiaApiKey": cartesiaKeyStore.apiKeyForCredentialSync ?? "",
+            "cartesiaVoiceId": cartesiaKeyStore.voiceIdForCredentialSync ?? ""
         ]
-        if let providerBaseURL = ProviderBaseURLStore.baseURL?.absoluteString {
-            payload["providerBaseURL"] = providerBaseURL
-        }
-        payload["sonioxApiKey"] = sonioxKeyStore.keyForCredentialSync ?? ""
-        if let cartesiaApiKey = cartesiaKeyStore.apiKey {
-            payload["cartesiaApiKey"] = cartesiaApiKey
-        }
-        if let cartesiaVoiceId = cartesiaKeyStore.selectedVoiceId {
-            payload["cartesiaVoiceId"] = cartesiaVoiceId
-        }
 
         replyHandler([
             "type": "auth.refresh.ack",

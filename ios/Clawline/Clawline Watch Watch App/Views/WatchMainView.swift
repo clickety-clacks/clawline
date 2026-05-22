@@ -537,6 +537,7 @@ struct WatchPagedHistory: Equatable {
 
 private enum WatchUITestMode {
     static var isEnabled: Bool {
+#if DEBUG
         let processInfo = ProcessInfo.processInfo
 #if WATCH_UI_SCENARIO_DIRECT || WATCH_UI_SCENARIO_RELAY || WATCH_UI_SCENARIO_RECONNECTING || WATCH_UI_SCENARIO_DISCONNECTED
         return true
@@ -544,6 +545,9 @@ private enum WatchUITestMode {
         return processInfo.environment["WATCH_UI_TEST_SCENARIO"]?.isEmpty == false
             || processInfo.arguments.contains("-WATCH_UI_TEST_SCENARIO")
             || processInfo.arguments.contains { $0.hasPrefix("WATCH_UI_TEST_SCENARIO=") }
+#endif
+#else
+        return false
 #endif
     }
 }

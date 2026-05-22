@@ -56,6 +56,26 @@ struct SettingsView: View {
                 }
 
                 Section {
+                    TextField("cartesia.apiKey", text: $settings.cartesiaAPIKey)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled(true)
+#if !os(visionOS)
+                        .keyboardType(.asciiCapable)
+#endif
+                        .font(.system(.subheadline, design: .monospaced))
+
+                    TextField("cartesia.voiceId", text: $settings.cartesiaVoiceId)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled(true)
+#if !os(visionOS)
+                        .keyboardType(.asciiCapable)
+#endif
+                        .font(.system(.subheadline, design: .monospaced))
+                } header: {
+                    Text("Voice Playback")
+                }
+
+                Section {
                     Toggle("Trust self-signed certificates", isOn: $settings.trustSelfSignedCertificates)
                     TextField("Pinned cert SHA-256 (optional)", text: $settings.pinnedLeafCertificateSHA256)
                         .textInputAutocapitalization(.never)

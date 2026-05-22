@@ -11,11 +11,19 @@ struct ClawlineCoreRuntimeServices {
 enum ClawlineCoreRuntimeServicesFactory {
     @MainActor
     static func make(authManager: AuthManager) -> ClawlineCoreRuntimeServices {
-        make(authManager: authManager, sonioxKeyStore: SonioxKeyStore())
+        make(
+            authManager: authManager,
+            sonioxKeyStore: SonioxKeyStore(),
+            cartesiaKeyStore: CartesiaKeyStore(keychain: KeychainSecureStore())
+        )
     }
 
     @MainActor
-    static func make(authManager: AuthManager, sonioxKeyStore: SonioxKeyStore) -> ClawlineCoreRuntimeServices {
+    static func make(
+        authManager: AuthManager,
+        sonioxKeyStore: SonioxKeyStore,
+        cartesiaKeyStore: CartesiaKeyStore
+    ) -> ClawlineCoreRuntimeServices {
         let device = DeviceIdentifier()
         let connector = URLSessionWebSocketConnector(connectTimeout: 20, resourceTimeout: 360)
         let connectionService = ProviderConnectionService(connector: connector)
@@ -30,11 +38,10 @@ enum ClawlineCoreRuntimeServicesFactory {
             auth: authManager,
             session: connector.tlsAwareURLSession
         )
-        let sharedKeychain = KeychainSecureStore()
         let watchConnectivityService = WatchConnectivityService(
             authManager: authManager,
             sonioxKeyStore: sonioxKeyStore,
-            cartesiaKeyStore: CartesiaKeyStore(keychain: sharedKeychain),
+            cartesiaKeyStore: cartesiaKeyStore,
             chatService: chatService
         )
         return ClawlineCoreRuntimeServices(

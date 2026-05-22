@@ -16,6 +16,7 @@ struct ClawlineApp: App {
     @State private var authManager: AuthManager
     @State private var settingsManager: SettingsManager
     @State private var sonioxKeyStore: SonioxKeyStore
+    @State private var cartesiaKeyStore: CartesiaKeyStore
     @State private var watchConnectivityService: WatchConnectivityService
 
     private let deviceIdentifier: any DeviceIdentifying
@@ -41,11 +42,14 @@ struct ClawlineApp: App {
         _authManager = State(initialValue: authManager)
         let sonioxKeyStore = SonioxKeyStore()
         _sonioxKeyStore = State(initialValue: sonioxKeyStore)
-        let settingsManager = SettingsManager(sonioxKeyStore: sonioxKeyStore)
+        let cartesiaKeyStore = CartesiaKeyStore(keychain: KeychainSecureStore())
+        _cartesiaKeyStore = State(initialValue: cartesiaKeyStore)
+        let settingsManager = SettingsManager(sonioxKeyStore: sonioxKeyStore, cartesiaKeyStore: cartesiaKeyStore)
         _settingsManager = State(initialValue: settingsManager)
         let coreServices = ClawlineCoreRuntimeServicesFactory.make(
             authManager: authManager,
-            sonioxKeyStore: sonioxKeyStore
+            sonioxKeyStore: sonioxKeyStore,
+            cartesiaKeyStore: cartesiaKeyStore
         )
         self.deviceIdentifier = coreServices.deviceIdentifier
         self.connectionService = coreServices.connectionService

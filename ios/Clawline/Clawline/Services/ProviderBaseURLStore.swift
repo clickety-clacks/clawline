@@ -21,6 +21,11 @@ enum ProviderBaseURLStore {
         UserDefaults.standard.set(url.absoluteString, forKey: key)
         NotificationCenter.default.post(name: .providerBaseURLDidChange, object: nil)
     }
+
+    static func clearBaseURL() {
+        UserDefaults.standard.removeObject(forKey: key)
+        NotificationCenter.default.post(name: .providerBaseURLDidChange, object: nil)
+    }
 }
 
 struct ProviderTLSPolicy: Equatable {

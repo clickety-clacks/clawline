@@ -36,6 +36,7 @@ struct Clawline_Watch_Watch_AppApp: App {
             }
         }
 
+#if DEBUG
         if let scenario = WatchUITestScenario.fromEnvironment() {
             scenario.apply(
                 credentialStore: credentialStore,
@@ -52,6 +53,16 @@ struct Clawline_Watch_Watch_AppApp: App {
         } else {
             self.wcSessionDelegate = nil
         }
+#else
+        if WCSession.isSupported() {
+            let delegate = WatchWCSessionDelegate(credentialStore: credentialStore, transport: transport)
+            self.wcSessionDelegate = delegate
+            WCSession.default.delegate = delegate
+            WCSession.default.activate()
+        } else {
+            self.wcSessionDelegate = nil
+        }
+#endif
     }
 
     var body: some Scene {
@@ -73,6 +84,7 @@ struct Clawline_Watch_Watch_AppApp: App {
 }
 
 
+#if DEBUG
 private struct WatchUITestScenario {
     let transportState: WatchProviderTransportState
     let streams: [StreamSession]
@@ -136,7 +148,6 @@ private struct WatchUITestScenario {
     }
 
     private static func nextScenarioForUITestFallback(processInfo: ProcessInfo) -> String? {
-#if DEBUG
         guard processInfo.environment["XCTestConfigurationFilePath"] != nil
             || processInfo.environment.keys.contains(where: { $0.localizedCaseInsensitiveContains("XCTest") }) else {
             return nil
@@ -148,9 +159,6 @@ private struct WatchUITestScenario {
         let index = defaults.integer(forKey: key)
         defaults.set(index + 1, forKey: key)
         return scenarios[index % scenarios.count]
-#else
-        return nil
-#endif
     }
 
     private static func scenarioFromLaunchArguments(_ arguments: [String]) -> String? {
@@ -171,3 +179,4 @@ private struct WatchUITestScenario {
         }
     }
 }
+#endif

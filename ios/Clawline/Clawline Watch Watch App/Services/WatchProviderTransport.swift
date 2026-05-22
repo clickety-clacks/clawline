@@ -7,6 +7,7 @@ import Network
 @Observable
 final class WatchProviderTransport: ChatServicing {
     private static var isDebugScenarioEnabled: Bool {
+#if DEBUG
         let processInfo = ProcessInfo.processInfo
 #if WATCH_UI_SCENARIO_DIRECT || WATCH_UI_SCENARIO_RELAY || WATCH_UI_SCENARIO_RECONNECTING || WATCH_UI_SCENARIO_DISCONNECTED
         return true
@@ -14,6 +15,9 @@ final class WatchProviderTransport: ChatServicing {
         return processInfo.environment["WATCH_UI_TEST_SCENARIO"]?.isEmpty == false
             || processInfo.arguments.contains("-WATCH_UI_TEST_SCENARIO")
             || processInfo.arguments.contains { $0.hasPrefix("WATCH_UI_TEST_SCENARIO=") }
+#endif
+#else
+        return false
 #endif
     }
     enum TransportError: Swift.Error, LocalizedError {
@@ -231,14 +235,18 @@ final class WatchProviderTransport: ChatServicing {
             }
         case .relay:
             do {
+                var payload: [String: Any] = [
+                    "id": id,
+                    "content": content,
+                    "attachments": try JSONEncoder().encodeToDictionary(attachments)
+                ]
+                if let sessionKey {
+                    payload["sessionKey"] = sessionKey
+                }
+
                 let _: [String: Any] = try await sendRelayRequest(
                     type: RelayMessageType.chatSend,
-                    payload: [
-                        "id": id,
-                        "content": content,
-                        "attachments": try JSONEncoder().encodeToDictionary(attachments),
-                        "sessionKey": sessionKey as Any
-                    ]
+                    payload: payload
                 )
                 eventBroadcaster.send(.messageAcked(id: id))
             } catch {
@@ -315,25 +323,28 @@ final class WatchProviderTransport: ChatServicing {
         switch transportState {
         case .direct:
             guard let websocketTask else { throw TransportError.notConnected }
-            let payload: [String: Any] = [
+            var payload: [String: Any] = [
                 "type": "interactive-callback",
                 "messageId": sourceMessageId,
-                "payload": [
-                    "action": action,
-                    "data": data?.anyValue as Any
-                ]
+                "payload": ["action": action]
             ]
+            if let data {
+                payload["payload"] = [
+                    "action": action,
+                    "data": data.anyValue
+                ]
+            }
             let text = try payload.toJSONString()
             try await websocketTask.send(.string(text))
         case .relay:
-            _ = try await sendRelayRequest(
-                type: RelayMessageType.chatCallback,
-                payload: [
-                    "sourceMessageId": sourceMessageId,
-                    "action": action,
-                    "data": data?.anyValue as Any
-                ]
-            )
+            var payload: [String: Any] = [
+                "sourceMessageId": sourceMessageId,
+                "action": action
+            ]
+            if let data {
+                payload["data"] = data.anyValue
+            }
+            _ = try await sendRelayRequest(type: RelayMessageType.chatCallback, payload: payload)
         case .probing, .disconnected:
             throw TransportError.notConnected
         }
@@ -408,10 +419,11 @@ final class WatchProviderTransport: ChatServicing {
 
     func deleteStream(sessionKey: String, idempotencyKey: String?) async throws -> String {
         if transportState == .relay {
-            let response = try await sendRelayRequest(
-                type: RelayMessageType.streamsDelete,
-                payload: ["sessionKey": sessionKey, "idempotencyKey": idempotencyKey as Any]
-            )
+            var payload: [String: Any] = ["sessionKey": sessionKey]
+            if let idempotencyKey {
+                payload["idempotencyKey"] = idempotencyKey
+            }
+            let response = try await sendRelayRequest(type: RelayMessageType.streamsDelete, payload: payload)
             guard let payload = response["payload"] as? [String: Any],
                   let deleted = payload["deletedKey"] as? String else {
                 throw TransportError.malformedReply
@@ -1081,7 +1093,7 @@ final class WatchProviderTransport: ChatServicing {
         let message: [String: Any] = [
             "type": type,
             "requestId": requestId,
-            "payload": payload
+            "payload": Self.propertyListPayload(from: payload)
         ]
 
         if !expectsReply {
@@ -1117,6 +1129,29 @@ final class WatchProviderTransport: ChatServicing {
     private func decodeJSONValue<T: Decodable>(_ value: Any, as type: T.Type) throws -> T {
         let data = try JSONSerialization.data(withJSONObject: value, options: [])
         return try JSONDecoder().decode(T.self, from: data)
+    }
+
+    static func propertyListPayload(from payload: [String: Any]) -> [String: Any] {
+        payload.compactMapValues { value in
+            propertyListValue(from: value)
+        }
+    }
+
+    private static func propertyListValue(from value: Any) -> Any? {
+        let mirror = Mirror(reflecting: value)
+        if mirror.displayStyle == .optional {
+            guard let child = mirror.children.first else { return nil }
+            return propertyListValue(from: child.value)
+        }
+
+        switch value {
+        case let dictionary as [String: Any]:
+            return propertyListPayload(from: dictionary)
+        case let array as [Any]:
+            return array.compactMap { propertyListValue(from: $0) }
+        default:
+            return value
+        }
     }
 }
 

@@ -43,6 +43,9 @@ final class WatchVoiceSession {
         case sonioxTimedOut
         case sonioxWebSocketFailure
         case sonioxStart
+        case missingCartesiaCredentials
+        case cartesiaNetworkUnavailable
+        case cartesiaStart
         case relayConnectivity
         case unexpected
 
@@ -62,6 +65,12 @@ final class WatchVoiceSession {
                 return "Soniox connection failed during startup. Try again from a stronger Watch network."
             case .sonioxStart:
                 return "Couldn't start Soniox dictation. Try again."
+            case .missingCartesiaCredentials:
+                return "Cartesia voice is not synced to Watch yet. Open Clawline on iPhone and check voice playback settings."
+            case .cartesiaNetworkUnavailable:
+                return "Watch network is unavailable for Cartesia voice. Connect Watch to Wi-Fi or cellular and try again."
+            case .cartesiaStart:
+                return "Couldn't start Cartesia voice playback. Try again."
             case .relayConnectivity:
                 return "Watch relay is reconnecting. Try again when iPhone is nearby."
             case .unexpected:
@@ -367,18 +376,14 @@ final class WatchVoiceSession {
         mode = nil
         audioLevel = 0
 
-        if !hasDirectInternet || credentialStore.cartesiaApiKey?.isEmpty != false {
-            phase = .speaking(contextId: "local_speech")
-            voiceState = .speaking
-            speakWithSystemVoice(text)
+        guard hasDirectInternet else {
+            transitionToVoiceError(kind: .cartesiaNetworkUnavailable)
             return
         }
 
-        guard let apiKey = credentialStore.cartesiaApiKey,
+        guard let apiKey = credentialStore.cartesiaApiKey, !apiKey.isEmpty,
               let voiceId = credentialStore.cartesiaVoiceId, !voiceId.isEmpty else {
-            phase = .speaking(contextId: "local_speech")
-            voiceState = .speaking
-            speakWithSystemVoice(text)
+            transitionToVoiceError(kind: .missingCartesiaCredentials)
             return
         }
 
@@ -413,7 +418,7 @@ final class WatchVoiceSession {
                     },
                     onError: { [weak self] error in
                         Task { @MainActor in
-                            self?.transitionToVoiceError(kind: .unexpected, error: error)
+                            self?.transitionToVoiceError(kind: .cartesiaStart, error: error)
                         }
                     }
                 )
@@ -424,7 +429,7 @@ final class WatchVoiceSession {
                 }
             } catch {
                 await MainActor.run {
-                    self.transitionToVoiceError(kind: .unexpected, error: error)
+                    self.transitionToVoiceError(kind: .cartesiaStart, error: error)
                 }
             }
         }
@@ -497,24 +502,6 @@ final class WatchVoiceSession {
 
         if clearQueue {
             responseQueue.removeAll()
-        }
-    }
-
-    private func speakWithSystemVoice(_ text: String) {
-        speechSynth.stopSpeaking(at: .immediate)
-
-        let utterance = AVSpeechUtterance(string: text)
-        utterance.voice = AVSpeechSynthesisVoice(language: "en-US")
-        utterance.rate = AVSpeechUtteranceDefaultSpeechRate
-
-        speechSynth.speak(utterance)
-
-        Task { [weak self] in
-            let approximateSeconds = max(1.0, Double(text.count) / 18.0)
-            try? await Task.sleep(for: .seconds(approximateSeconds))
-            await MainActor.run {
-                self?.handleTTSComplete()
-            }
         }
     }
 

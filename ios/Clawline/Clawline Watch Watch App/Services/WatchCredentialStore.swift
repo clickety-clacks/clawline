@@ -48,50 +48,64 @@ final class WatchCredentialStore {
     func apply(userInfo: [String: Any]) {
         var changed = false
 
-        if let token = userInfo["token"] as? String, providerToken != token {
-            providerToken = token
-            keychain.setString(token, forKey: Keys.token)
-            changed = true
-        }
-
-        if let userId = userInfo["userId"] as? String, self.userId != userId {
-            self.userId = userId
-            keychain.setString(userId, forKey: Keys.userId)
-            changed = true
-        }
-
-        if let baseURL = userInfo["providerBaseURL"] as? String,
-           let url = URL(string: baseURL), providerBaseURL != url {
-            providerBaseURL = url
-            keychain.setString(baseURL, forKey: Keys.providerBaseURL)
-            changed = true
-        }
-
-        if let soniox = userInfo["sonioxApiKey"] as? String {
-            let trimmed = soniox.trimmingCharacters(in: .whitespacesAndNewlines)
-            if trimmed.isEmpty {
-                if sonioxApiKey != nil {
-                    sonioxApiKey = nil
-                    keychain.removeValue(forKey: Keys.sonioxApiKey)
-                    changed = true
-                }
-            } else if sonioxApiKey != trimmed {
-                sonioxApiKey = trimmed
-                keychain.setString(trimmed, forKey: Keys.sonioxApiKey)
+        if let token = userInfo["token"] as? String {
+            let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
+            let result = applyCredential(trimmed, current: providerToken, key: Keys.token)
+            providerToken = result.value
+            if result.changed {
                 changed = true
             }
         }
 
-        if let cartesia = userInfo["cartesiaApiKey"] as? String, cartesiaApiKey != cartesia {
-            cartesiaApiKey = cartesia
-            keychain.setString(cartesia, forKey: Keys.cartesiaApiKey)
-            changed = true
+        if let userId = userInfo["userId"] as? String {
+            let trimmed = userId.trimmingCharacters(in: .whitespacesAndNewlines)
+            let result = applyCredential(trimmed, current: self.userId, key: Keys.userId)
+            self.userId = result.value
+            if result.changed {
+                changed = true
+            }
         }
 
-        if let voiceId = userInfo["cartesiaVoiceId"] as? String, cartesiaVoiceId != voiceId {
-            cartesiaVoiceId = voiceId
-            keychain.setString(voiceId, forKey: Keys.cartesiaVoiceId)
-            changed = true
+        if let baseURL = userInfo["providerBaseURL"] as? String {
+            let trimmed = baseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.isEmpty {
+                if providerBaseURL != nil {
+                    providerBaseURL = nil
+                    keychain.removeValue(forKey: Keys.providerBaseURL)
+                    changed = true
+                }
+            } else if let url = URL(string: trimmed), providerBaseURL != url {
+                providerBaseURL = url
+                keychain.setString(trimmed, forKey: Keys.providerBaseURL)
+                changed = true
+            }
+        }
+
+        if let soniox = userInfo["sonioxApiKey"] as? String {
+            let trimmed = soniox.trimmingCharacters(in: .whitespacesAndNewlines)
+            let result = applyCredential(trimmed, current: sonioxApiKey, key: Keys.sonioxApiKey)
+            sonioxApiKey = result.value
+            if result.changed {
+                changed = true
+            }
+        }
+
+        if let cartesia = userInfo["cartesiaApiKey"] as? String {
+            let trimmed = cartesia.trimmingCharacters(in: .whitespacesAndNewlines)
+            let result = applyCredential(trimmed, current: cartesiaApiKey, key: Keys.cartesiaApiKey)
+            cartesiaApiKey = result.value
+            if result.changed {
+                changed = true
+            }
+        }
+
+        if let voiceId = userInfo["cartesiaVoiceId"] as? String {
+            let trimmed = voiceId.trimmingCharacters(in: .whitespacesAndNewlines)
+            let result = applyCredential(trimmed, current: cartesiaVoiceId, key: Keys.cartesiaVoiceId)
+            cartesiaVoiceId = result.value
+            if result.changed {
+                changed = true
+            }
         }
 
         if changed {
@@ -115,6 +129,18 @@ final class WatchCredentialStore {
         keychain.removeValue(forKey: Keys.cartesiaVoiceId)
 
         onCredentialsChanged?()
+    }
+
+    private func applyCredential(_ value: String, current: String?, key: String) -> (value: String?, changed: Bool) {
+        if value.isEmpty {
+            guard current != nil else { return (nil, false) }
+            keychain.removeValue(forKey: key)
+            return (nil, true)
+        }
+
+        guard current != value else { return (current, false) }
+        keychain.setString(value, forKey: key)
+        return (value, true)
     }
 
 #if DEBUG

@@ -1046,16 +1046,48 @@ struct ChatView: View {
                 .ignoresSafeArea(.container, edges: [.top, .bottom])
         )
 
-        let rootLayer: AnyView = AnyView(ZStack(alignment: .top) {
+        let notificationBaseLayer: AnyView = AnyView(ZStack(alignment: .top) {
             messageLayer
                 .compositingGroup()
                 .mask(messageViewportFadeMask(topInset: statusBarTopInset))
+
+            toastBannerView(geometry: geometry, toastManager: toastManager)
+        })
+
+        let notificationLayer: AnyView = AnyView(notificationBaseLayer
+            .overlay(alignment: .topTrailing) {
+                notificationOverlay(
+                    viewModel: viewModel,
+                    topMargin: notificationOverlayTopMargin,
+                    maxContainerHeight: notificationOverlayMaxHeight,
+                    maxContainerWidth: notificationOverlayMaxWidth,
+                    trailingSafeAreaInset: geometry.safeAreaInsets.trailing,
+                    normalTrailingMargin: notificationNormalTrailingMargin,
+                    compactLeadingFitMargin: notificationCompactLeadingFitMargin,
+                    measuredBubbleHeightsBySourceChatId: $crossChatNotificationMeasuredHeightsBySourceChatId,
+                    actionMenuSourceChatId: $crossChatNotificationActionMenuSourceChatId,
+                    focusedSourceChatId: $crossChatNotificationFocusedSourceChatId,
+                    focusedReplySourceChatId: $crossChatNotificationFocusedReplySourceChatId,
+                    keyboardOwnershipStore: keyboardOwnershipStore
+                )
+            }
+            .overlay(alignment: .topTrailing) {
+                notificationKeyboardShortcutView(
+                    viewModel: viewModel,
+                    maxContainerHeight: notificationOverlayMaxHeight,
+                    measuredHeightsBySourceChatId: crossChatNotificationMeasuredHeightsBySourceChatId,
+                    keyboardOwnershipStore: keyboardOwnershipStore
+                )
+            }
+        )
+
+        let rootLayer: AnyView = AnyView(ZStack(alignment: .top) {
+            notificationLayer
 
             streamToastView(
                 inputBarTopFromScreenBottom: inputBarTopFromScreenBottom
             )
             .zIndex(30)
-            toastBannerView(geometry: geometry, toastManager: toastManager)
             mentionPickerOverlay(
                 streams: mentionPickerStreams,
                 currentSessionKey: mentionCurrentSessionKey,
@@ -1065,35 +1097,6 @@ struct ChatView: View {
                 inputBarTopFromScreenBottom: inputBarTopFromScreenBottom
             )
             .zIndex(40)
-
-            Color.clear
-                .allowsHitTesting(false)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .overlay(alignment: .topTrailing) {
-                    notificationOverlay(
-                        viewModel: viewModel,
-                        topMargin: notificationOverlayTopMargin,
-                        maxContainerHeight: notificationOverlayMaxHeight,
-                        maxContainerWidth: notificationOverlayMaxWidth,
-                        trailingSafeAreaInset: geometry.safeAreaInsets.trailing,
-                        normalTrailingMargin: notificationNormalTrailingMargin,
-                        compactLeadingFitMargin: notificationCompactLeadingFitMargin,
-                        measuredBubbleHeightsBySourceChatId: $crossChatNotificationMeasuredHeightsBySourceChatId,
-                        actionMenuSourceChatId: $crossChatNotificationActionMenuSourceChatId,
-                        focusedSourceChatId: $crossChatNotificationFocusedSourceChatId,
-                        focusedReplySourceChatId: $crossChatNotificationFocusedReplySourceChatId,
-                        keyboardOwnershipStore: keyboardOwnershipStore
-                    )
-                }
-                .overlay(alignment: .topTrailing) {
-                    notificationKeyboardShortcutView(
-                        viewModel: viewModel,
-                        maxContainerHeight: notificationOverlayMaxHeight,
-                        measuredHeightsBySourceChatId: crossChatNotificationMeasuredHeightsBySourceChatId,
-                        keyboardOwnershipStore: keyboardOwnershipStore
-                    )
-                }
-                .zIndex(20)
         })
 
         let keyboardRoutedRootLayer: AnyView = AnyView(rootLayer

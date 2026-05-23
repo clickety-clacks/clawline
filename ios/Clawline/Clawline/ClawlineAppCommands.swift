@@ -79,7 +79,7 @@ struct ClawlineAppCommands: Commands {
             Button("Open Streams") {
                 routeAppShortcut(.openStreamPopup)
             }
-            .keyboardShortcut(";", modifiers: .command)
+            .keyboardShortcut("/", modifiers: .command)
 
             Button("Previous Chat") {
                 routeAppShortcut(.navigatePreviousStream)

@@ -440,8 +440,8 @@ struct PromptFocusShortcutActivationTests {
         )
     }
 
-    @Test("App command shortcuts use Cmd-L focus, Cmd-semicolon, Cmd-Shift navigation, Cmd-J/K bubble scroll, and Cmd-Shift-J/K chat scroll")
-    func appCommandShortcutsUseCommandLFocusCommandSemicolonCommandShiftNavigationCommandJKBubbleScrollAndCommandShiftJKChatScroll() {
+    @Test("App command shortcuts use Cmd-L focus, Cmd-slash streams, Cmd-Shift navigation, Cmd-J/K bubble scroll, and Cmd-Shift-J/K chat scroll")
+    func appCommandShortcutsUseCommandLFocusCommandSlashStreamsCommandShiftNavigationCommandJKBubbleScrollAndCommandShiftJKChatScroll() {
         #expect(
             ChatAppCommandShortcut.keyCommandSpecs.contains { spec in
                 spec.input == "l"
@@ -451,7 +451,7 @@ struct PromptFocusShortcutActivationTests {
         )
         #expect(
             ChatAppCommandShortcut.keyCommandSpecs.contains { spec in
-                spec.input == ";"
+                spec.input == "/"
                     && spec.modifierFlags == [.command]
                     && spec.action.selector == #selector(UIResponder.clawlineOpenStreamPopupCommand(_:))
             }

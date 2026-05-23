@@ -310,6 +310,17 @@ struct StreamManagerSheet: View {
                         selectHighlightedStream()
                         return .handled
                     }
+                if !searchQuery.isEmpty {
+                    Button {
+                        searchQuery = ""
+                        focusSearchField()
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Clear stream filter")
+                }
             }
             .padding(.horizontal, 12)
             .frame(maxWidth: .infinity)

@@ -887,6 +887,14 @@ struct PromptFocusShortcutActivationTests {
         #expect(CrossChatNotificationGeometry.layoutHostWidth(maxContainerWidth: -10) == 0)
     }
 
+    @Test("T373 Spatial notification material uses adaptive tint and stronger accent")
+    func spatialNotificationMaterialUsesAdaptiveTintAndAccent() {
+        #expect(CrossChatNotificationMaterialStyle.accentOpacity(isSpatial: true) == 0.60)
+        #expect(CrossChatNotificationMaterialStyle.accentOpacity(isSpatial: false) == 0.40)
+        #expect(CrossChatNotificationMaterialStyle.spatialTintOpacity(for: .light) > CrossChatNotificationMaterialStyle.spatialTintOpacity(for: .dark))
+        #expect(CrossChatNotificationMaterialStyle.spatialBorderOpacity(for: .light) > CrossChatNotificationMaterialStyle.spatialBorderOpacity(for: .dark))
+    }
+
     @Test("Notification reply field keeps notification number and scroll shortcuts above text focus")
     @MainActor
     func notificationReplyFieldKeepsNotificationNumberAndScrollShortcutsAboveTextFocus() {

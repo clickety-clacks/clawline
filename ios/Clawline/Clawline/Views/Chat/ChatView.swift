@@ -6492,6 +6492,20 @@ private struct CrossChatNotificationBubbleHeightPreferenceKey: PreferenceKey {
     }
 }
 
+enum CrossChatNotificationMaterialStyle {
+    static func accentOpacity(isSpatial: Bool) -> Double {
+        isSpatial ? 0.60 : 0.40
+    }
+
+    static func spatialTintOpacity(for colorScheme: ColorScheme) -> Double {
+        colorScheme == .dark ? 0.34 : 0.46
+    }
+
+    static func spatialBorderOpacity(for colorScheme: ColorScheme) -> Double {
+        colorScheme == .dark ? 0.20 : 0.34
+    }
+}
+
 struct CrossChatNotificationBubbleView: View {
     let bubble: CrossChatNotificationBubble
     let assignedNumber: Int
@@ -6537,7 +6551,6 @@ struct CrossChatNotificationBubbleView: View {
     private let replyTopPadding: CGFloat = 3
     private let replyBottomPadding: CGFloat = 10
     private let notificationAccentWidth: CGFloat = 14
-    private let notificationAccentOpacity: Double = 0.40
     private let accentContentGap: CGFloat = 10
     private var accentReplyGestureWidth: CGFloat { notificationAccentWidth + accentContentGap }
     private let entriesBottomBreathingRoom: CGFloat = 8
@@ -6573,6 +6586,27 @@ struct CrossChatNotificationBubbleView: View {
 
     private var notificationAccentColor: Color {
         ChatFlowTheme.notificationAccent(colorScheme)
+    }
+
+    private var notificationAccentOpacity: Double {
+#if os(visionOS)
+        CrossChatNotificationMaterialStyle.accentOpacity(isSpatial: true)
+#else
+        CrossChatNotificationMaterialStyle.accentOpacity(isSpatial: false)
+#endif
+    }
+
+    private var notificationBorderColor: Color {
+#if os(visionOS)
+        Color.white.opacity(CrossChatNotificationMaterialStyle.spatialBorderOpacity(for: colorScheme))
+#else
+        Color.primary.opacity(0.08)
+#endif
+    }
+
+    private var spatialNotificationTintColor: Color {
+        (colorScheme == .dark ? Color.black : Color.white)
+            .opacity(CrossChatNotificationMaterialStyle.spatialTintOpacity(for: colorScheme))
     }
 
     private var notificationDismissActiveColor: Color {
@@ -6826,22 +6860,27 @@ struct CrossChatNotificationBubbleView: View {
             }
         }
         .onTapGesture(perform: onActivate)
-#if os(visionOS)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: bubbleCornerRadius, style: .continuous))
-#else
         .background(alignment: .leading) {
             Rectangle()
                 .fill(notificationAccentColor.opacity(notificationAccentOpacity))
                 .frame(width: notificationAccentWidth)
                 .allowsHitTesting(false)
         }
+#if os(visionOS)
+        .background {
+            let shape = RoundedRectangle(cornerRadius: bubbleCornerRadius, style: .continuous)
+            shape
+                .fill(spatialNotificationTintColor)
+                .background(.regularMaterial, in: shape)
+        }
+#else
         .glassEffect(.regular, in: RoundedRectangle(cornerRadius: bubbleCornerRadius, style: .continuous))
 #endif
         .clipShape(RoundedRectangle(cornerRadius: bubbleCornerRadius, style: .continuous))
         .shadow(color: Color.black.opacity(0.14), radius: 8, x: 0, y: 3)
         .overlay {
             RoundedRectangle(cornerRadius: bubbleCornerRadius, style: .continuous)
-                .strokeBorder(Color.primary.opacity(0.08), lineWidth: 0.5)
+                .strokeBorder(notificationBorderColor, lineWidth: 0.5)
                 .clipShape(RoundedRectangle(cornerRadius: bubbleCornerRadius, style: .continuous))
                 .allowsHitTesting(false)
         }

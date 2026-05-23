@@ -115,6 +115,48 @@ struct MessageInputBarBoundaryTests {
         ) == viewportWidth)
     }
 
+    @Test("Notification reply row preserves send tap target on narrow phone width")
+    func notificationReplyRowPreservesSendTapTargetOnNarrowPhoneWidth() {
+        let stackWidth = CrossChatNotificationGeometry.stackWidth(
+            maxContainerWidth: 320,
+            normalTrailingMargin: 6,
+            compactLeadingFitMargin: 24,
+            maxStackWidth: 562.5,
+            isCollapsed: false
+        )
+        let inputWidth = CrossChatNotificationGeometry.replyInputAvailableWidth(
+            stackWidth: stackWidth,
+            leadingPadding: 24,
+            trailingPadding: 12,
+            sendControlWidth: 44,
+            replyControlSpacing: 8
+        )
+
+        #expect(stackWidth == CGFloat(290))
+        #expect(inputWidth == CGFloat(202))
+    }
+
+    @Test("Notification reply row keeps send tap target when collapsed")
+    func notificationReplyRowKeepsSendTapTargetWhenCollapsed() {
+        let stackWidth = CrossChatNotificationGeometry.stackWidth(
+            maxContainerWidth: 320,
+            normalTrailingMargin: 6,
+            compactLeadingFitMargin: 24,
+            maxStackWidth: 562.5,
+            isCollapsed: true
+        )
+        let inputWidth = CrossChatNotificationGeometry.replyInputAvailableWidth(
+            stackWidth: stackWidth,
+            leadingPadding: 24,
+            trailingPadding: 12,
+            sendControlWidth: 44,
+            replyControlSpacing: 8
+        )
+
+        #expect(stackWidth == CGFloat(320))
+        #expect(inputWidth == CGFloat(232))
+    }
+
     @Test("Notification layout host keeps Ansible landscape safe area out of root width")
     func notificationLayoutHostKeepsAnsibleLandscapeSafeAreaOutOfRootWidth() {
         let viewportWidth = CGFloat(852)

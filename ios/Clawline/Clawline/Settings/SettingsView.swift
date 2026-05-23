@@ -11,6 +11,7 @@ import UIKit
 struct SettingsView: View {
     @Bindable var settings: SettingsManager
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.openURL) private var openURL
     @Environment(\.colorScheme) private var colorScheme
 
     private var previewBackgroundColor: Color {
@@ -34,6 +35,44 @@ struct SettingsView: View {
                     }
                 } header: {
                     Text("Background Effect")
+                }
+
+                Section {
+                    SonioxKeyConfigurationRow(
+                        keyText: $settings.sonioxAPIKey,
+                        status: settings.sonioxKeyStatus,
+                        actionTitle: settings.sonioxCTATitle,
+                        onAction: {
+                            Task {
+                                _ = await settings.handleSonioxPrimaryAction { url in
+                                    openURL(url)
+                                }
+                            }
+                        },
+                        placeholder: "soniox.apiKey"
+                    )
+                } header: {
+                    Text("Voice Dictation")
+                }
+
+                Section {
+                    TextField("cartesia.apiKey", text: $settings.cartesiaAPIKey)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled(true)
+#if !os(visionOS)
+                        .keyboardType(.asciiCapable)
+#endif
+                        .font(.system(.subheadline, design: .monospaced))
+
+                    TextField("cartesia.voiceId", text: $settings.cartesiaVoiceId)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled(true)
+#if !os(visionOS)
+                        .keyboardType(.asciiCapable)
+#endif
+                        .font(.system(.subheadline, design: .monospaced))
+                } header: {
+                    Text("Voice Playback")
                 }
 
                 Section {
@@ -164,4 +203,74 @@ struct SettingsView: View {
 
 #Preview {
     SettingsView(settings: SettingsManager())
+}
+
+private struct SonioxKeyConfigurationRow: View {
+    @Binding var keyText: String
+    let status: SonioxKeyVerificationStatus
+    let actionTitle: String
+    let onAction: () -> Void
+    var placeholder: String = "Soniox API Key"
+
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var statusColor: Color {
+        switch status {
+        case .invalid:
+            return ChatFlowTheme.connectionDisconnected(colorScheme)
+        case .validated:
+            return ChatFlowTheme.sage(colorScheme)
+        case .missing, .unverified, .validating:
+            return ChatFlowTheme.stone(colorScheme)
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                TextField(placeholder, text: $keyText)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled(true)
+#if !os(visionOS)
+                    .keyboardType(.asciiCapable)
+#endif
+                    .font(.system(.subheadline, design: .monospaced))
+                    .foregroundStyle(ChatFlowTheme.ink(colorScheme))
+                    .padding(.init(top: 10, leading: 14, bottom: 10, trailing: 14))
+                    .background(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(ChatFlowTheme.ink(colorScheme).opacity(0.06))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(ChatFlowTheme.ink(colorScheme).opacity(0.12), lineWidth: 1)
+                    )
+                    .textFieldStyle(.plain)
+
+                Button(action: onAction) {
+                    Group {
+                        if status == .validating {
+                            ProgressView()
+                                .controlSize(.small)
+                        } else {
+                            Text(actionTitle)
+                                .font(.subheadline.weight(.semibold))
+                        }
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(ChatFlowTheme.sage(colorScheme), in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .disabled(status == .validating)
+            }
+
+            if let statusText = status.inlineStatusText, status != .validating {
+                Text(statusText)
+                    .font(.caption)
+                    .foregroundStyle(statusColor)
+            }
+        }
+    }
 }

@@ -15,6 +15,9 @@ import Observation
 struct ClawlineApp: App {
     @State private var authManager: AuthManager
     @State private var settingsManager: SettingsManager
+    @State private var sonioxKeyStore: SonioxKeyStore
+    @State private var cartesiaKeyStore: CartesiaKeyStore
+    @State private var watchConnectivityService: WatchConnectivityService
 
     private let deviceIdentifier: any DeviceIdentifying
     private let connectionService: any ConnectionServicing
@@ -37,14 +40,25 @@ struct ClawlineApp: App {
         Self.configureDebugAdminIfNeeded(authManager: authManager)
 #endif
         _authManager = State(initialValue: authManager)
-        let settingsManager = SettingsManager()
+        let sonioxKeyStore = SonioxKeyStore()
+        _sonioxKeyStore = State(initialValue: sonioxKeyStore)
+        let cartesiaKeyStore = CartesiaKeyStore(keychain: KeychainSecureStore())
+        _cartesiaKeyStore = State(initialValue: cartesiaKeyStore)
+        let settingsManager = SettingsManager(sonioxKeyStore: sonioxKeyStore, cartesiaKeyStore: cartesiaKeyStore)
         _settingsManager = State(initialValue: settingsManager)
-        let coreServices = ClawlineCoreRuntimeServicesFactory.make(authManager: authManager)
+        let coreServices = ClawlineCoreRuntimeServicesFactory.make(
+            authManager: authManager,
+            sonioxKeyStore: sonioxKeyStore,
+            cartesiaKeyStore: cartesiaKeyStore
+        )
         self.deviceIdentifier = coreServices.deviceIdentifier
         self.connectionService = coreServices.connectionService
         let chatService = coreServices.chatService
         self.chatService = chatService
         self.uploadService = coreServices.uploadService
+        let watchConnectivityService = coreServices.watchConnectivityService
+        _watchConnectivityService = State(initialValue: watchConnectivityService)
+        watchConnectivityService.activate()
     }
 
     var body: some Scene {
@@ -59,6 +73,20 @@ struct ClawlineApp: App {
                 .sheet(isPresented: $settingsManager.isSettingsPresented) {
                     SettingsView(settings: settingsManager)
                 }
+                // Clear first responders before the app backgrounds.
+                // UITextView.becomeFirstResponder triggers a synchronous pasteboard XPC call
+                // (UIKeyboardStateManager.canInsertAdaptiveImageGlyph). If the device locks
+                // while that XPC is in-flight, the pasteboard daemon suspends, the call never
+                // returns, and the watchdog kills the app (0x8BADF00D).
+                // Calling endEditing(true) on every window during willResignActive ensures no
+                // UITextView holds focus or can gain focus during the background transition.
+                .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
+                    UIApplication.shared.connectedScenes
+                        .compactMap { $0 as? UIWindowScene }
+                        .flatMap { $0.windows }
+                        .forEach { $0.endEditing(true) }
+                }
+
         }
         .commands {
             ClawlineAppCommands(settingsManager: settingsManager)

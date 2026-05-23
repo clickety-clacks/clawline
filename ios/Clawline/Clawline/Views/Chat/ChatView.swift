@@ -919,7 +919,6 @@ struct ChatView: View {
                              viewModel: ChatViewModel,
                              toastManager: ToastManager) -> some View {
         @Bindable var viewModel = viewModel
-        let statusBarTopInset: CGFloat = geometry.safeAreaInsets.top
         let messageListTopInset = geometry.safeAreaInsets.top
         let isCompactLayout = horizontalSizeClass == .compact
         let metrics = ChatFlowTheme.Metrics(isCompact: isCompactLayout)
@@ -1077,12 +1076,15 @@ struct ChatView: View {
             )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .ignoresSafeArea(.container, edges: [.top, .bottom])
+                .softTopScrollEdgeEffect()
         )
 
         let notificationBaseLayer: AnyView = AnyView(ZStack(alignment: .top) {
             messageLayer
                 .compositingGroup()
                 .mask(messageViewportFadeMask(topInset: statusBarTopInset, horizontalGutter: metrics.containerPadding))
+
+            topChatSoftFade(topInset: geometry.safeAreaInsets.top)
 
             toastBannerView(geometry: geometry, toastManager: toastManager)
         })
@@ -2054,29 +2056,40 @@ struct ChatView: View {
     }
 
     @ViewBuilder
-    private func statusBarFadeMask(topInset: CGFloat) -> some View {
-        // #31 follow-up: reduce strength + height. This is a mask (not an overlay), so lower alpha
-        // means content remains partially visible behind the status bar instead of fully hidden.
-        if topInset <= 0 {
-            Rectangle().fill(Color.white)
-        } else {
-            let topAlpha: CGFloat = 0.25
-            let fullyHiddenHeight = topInset + 9
-            let fadeHeight: CGFloat = 23
-            VStack(spacing: 0) {
-                Rectangle()
-                    .fill(Color.white.opacity(topAlpha))
-                    .frame(height: fullyHiddenHeight)
-                LinearGradient(
-                    colors: [Color.white.opacity(topAlpha), Color.white],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-                .frame(height: fadeHeight)
-                Rectangle().fill(Color.white)
+    private func topChatSoftFade(topInset: CGFloat) -> some View {
+#if os(visionOS)
+        EmptyView()
+#else
+        // The visible chat scroller is UIKit-hosted, so SwiftUI's scrollEdgeEffectStyle
+        // has no rendered scroll edge here. Keep a minimal material fallback at the screen top.
+        let solidHeight = max(0, topInset + 3)
+        let fadeHeight: CGFloat = 14
+        let materialOpacity: CGFloat = 0.38
+        let edgeHeight = solidHeight + fadeHeight
+        Rectangle()
+            .fill(.ultraThinMaterial)
+            .opacity(materialOpacity)
+            .frame(height: edgeHeight)
+            .mask {
+                VStack(spacing: 0) {
+                    Rectangle()
+                        .fill(Color.white)
+                        .frame(height: solidHeight)
+                    LinearGradient(
+                        colors: [
+                            Color.white,
+                            Color.white.opacity(0.0)
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                    .frame(height: fadeHeight)
+                }
             }
-            .ignoresSafeArea(.container, edges: .top)
-        }
+        .ignoresSafeArea(.container, edges: .top)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+#endif
     }
 
     private func inputFieldWidthCap(containerWidth: CGFloat, bottomSafeAreaInset: CGFloat) -> CGFloat {
@@ -2902,6 +2915,21 @@ struct ChatView: View {
         }
     }
 
+}
+
+private extension View {
+    @ViewBuilder
+    func softTopScrollEdgeEffect() -> some View {
+#if os(visionOS)
+        self
+#else
+        if #available(iOS 26.0, macOS 26.0, *) {
+            self.scrollEdgeEffectStyle(.soft, for: .top)
+        } else {
+            self
+        }
+#endif
+    }
 }
 
 private struct VisionOSInputBarDepthOffset: ViewModifier {

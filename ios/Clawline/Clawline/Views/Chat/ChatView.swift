@@ -1643,7 +1643,12 @@ struct ChatView: View {
                     focusedReplySourceChatId: focusedReplySourceChatId,
                     keyboardOwnershipStore: keyboardOwnershipStore,
                     onNavigateToSource: { sourceChatId in
-                        selectStream(sourceChatId, source: .programmatic)
+                        selectStream(
+                            sourceChatId,
+                            source: .programmatic,
+                            preserveCrossChatNotification: true
+                        )
+                        isCrossChatNotificationStackDocked = true
                     }
                 )
                 .visionOSOverlayDepthOffset(spatialOverlayDepthOffset)
@@ -2379,9 +2384,17 @@ struct ChatView: View {
         )
     }
 
-    private func selectStream(_ sessionKey: String, source: ChatViewModel.StreamSwitchSource) {
+    private func selectStream(
+        _ sessionKey: String,
+        source: ChatViewModel.StreamSwitchSource,
+        preserveCrossChatNotification: Bool = false
+    ) {
         StreamSwitchTiming.log("selectStream_called", sessionKey: sessionKey)
-        viewModel.requestStreamSwitch(to: sessionKey, source: source)
+        viewModel.requestStreamSwitch(
+            to: sessionKey,
+            source: source,
+            preserveCrossChatNotification: preserveCrossChatNotification
+        )
     }
 
     private func previewScrubStream(_ sessionKey: String, viewModel: ChatViewModel) {

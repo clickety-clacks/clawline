@@ -806,9 +806,15 @@ describe("ChatRoute", () => {
     expect(screen.getByTestId("location")).toHaveTextContent(
       "/chat/agent:main:clawline:user_1:side"
     );
-    await waitFor(() => {
-      expect(screen.queryByLabelText("Side Thread notification")).toBeNull();
-    });
+    expect(screen.getByLabelText("Cross-chat notifications")).toHaveClass(
+      "cross-chat-notification-overlay--collapsed"
+    );
+    expect(screen.getByLabelText("Side Thread notification")).toBeInTheDocument();
+    expect(
+      view.notificationStore.getState().bubblesBySourceChatId[
+        "agent:main:clawline:user_1:side"
+      ]?.entriesNewestFirst.map((entry) => entry.contentPreview)
+    ).toEqual(["Side notification"]);
   });
 
   it("uses viewport-fit notification capacity with ten only as the upper bound", async () => {
@@ -1019,6 +1025,34 @@ describe("ChatRoute", () => {
     expect(fireEvent.keyDown(document.body, { key: "j", metaKey: true })).toBe(false);
     fireEvent.keyDown(document.body, { key: "\\", code: "Backslash", metaKey: true });
     expect(overlay).not.toHaveClass("cross-chat-notification-overlay--collapsed");
+  });
+
+  it("docks and preserves notifications after direct notification navigation", async () => {
+    const view = renderChatRoute("/chat/agent:main:clawline:user_1:main", {
+      initialMessages: [],
+      sessionKeys: [
+        "agent:main:clawline:user_1:main",
+        "agent:main:main",
+        "agent:main:clawline:user_1:side"
+      ]
+    });
+    applyAssistantNotification(view);
+
+    const overlay = await screen.findByLabelText("Cross-chat notifications");
+    expect(await screen.findByLabelText("Side Thread notification"))
+      .toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("Side Thread"));
+
+    expect(screen.getByTestId("location")).toHaveTextContent(
+      "/chat/agent:main:clawline:user_1:side"
+    );
+    expect(overlay).toHaveClass("cross-chat-notification-overlay--collapsed");
+    expect(
+      view.notificationStore.getState().bubblesBySourceChatId[
+        "agent:main:clawline:user_1:side"
+      ]?.entriesNewestFirst.map((entry) => entry.contentPreview)
+    ).toEqual(["Side notification"]);
   });
 
   it("temporarily reveals collapsed web notifications when new content arrives", async () => {
@@ -1356,6 +1390,14 @@ describe("ChatRoute", () => {
     expect(screen.getByTestId("location")).toHaveTextContent(
       "/chat/agent:main:clawline:user_1:side"
     );
+    expect(screen.getByLabelText("Cross-chat notifications")).toHaveClass(
+      "cross-chat-notification-overlay--collapsed"
+    );
+    expect(
+      navigateView.notificationStore.getState().bubblesBySourceChatId[
+        "agent:main:clawline:user_1:side"
+      ]?.entriesNewestFirst.map((entry) => entry.contentPreview)
+    ).toEqual(["Side notification"]);
     navigateView.unmount();
 
     const actionView = renderChatRoute("/chat/agent:main:clawline:user_1:main", {

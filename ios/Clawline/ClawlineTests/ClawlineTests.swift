@@ -172,6 +172,23 @@ struct ClawlineTests {
         #expect(regex.firstMatch(in: source, range: range) != nil)
     }
 
+    @Test("T127: Spatial chat viewport keeps 25 percent top and bottom insets")
+    func spatialChatViewportKeepsQuarterWindowInsets() throws {
+        let sourcePath = URL(filePath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appending(path: "Clawline/Views/Chat/ChatView.swift")
+        let source = try String(contentsOf: sourcePath, encoding: .utf8)
+        let range = NSRange(source.startIndex..<source.endIndex, in: source)
+        let spatialInsetPattern = #"(?s)static func spatialViewportInset\(windowHeight: CGFloat\) -> CGFloat \{\s*#if os\(visionOS\)\s*windowHeight \* 0\.25\s*#else\s*0\s*#endif\s*\}"#
+        let topInsetPattern = #"let messageListTopInset = geometry\.safeAreaInsets\.top \+ spatialViewportInset"#
+        let bottomInsetPattern = #"let bottomViewportClearance = pageIndicatorClearance \+ spatialViewportInset"#
+
+        #expect(try NSRegularExpression(pattern: spatialInsetPattern).firstMatch(in: source, range: range) != nil)
+        #expect(try NSRegularExpression(pattern: topInsetPattern).firstMatch(in: source, range: range) != nil)
+        #expect(try NSRegularExpression(pattern: bottomInsetPattern).firstMatch(in: source, range: range) != nil)
+    }
+
     @Test("T219: pairing shader is active only while pairing route is visible")
     func rootBackgroundShaderLifecycleFollowsPairingRoute() {
         #expect(RootBackgroundShaderLifecycle.isShaderActive(

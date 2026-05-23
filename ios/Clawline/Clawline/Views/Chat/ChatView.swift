@@ -319,6 +319,14 @@ struct ChatView: View {
 #endif
     }
 
+    private static func spatialViewportInset(windowHeight: CGFloat) -> CGFloat {
+#if os(visionOS)
+        windowHeight * 0.25
+#else
+        0
+#endif
+    }
+
     private var isKeyboardVisible: Bool {
         keyboardHeight > 0.5
     }
@@ -887,7 +895,8 @@ struct ChatView: View {
                              toastManager: ToastManager) -> some View {
         @Bindable var viewModel = viewModel
         let statusBarTopInset: CGFloat = geometry.safeAreaInsets.top
-        let messageListTopInset = geometry.safeAreaInsets.top
+        let spatialViewportInset = Self.spatialViewportInset(windowHeight: geometry.size.height)
+        let messageListTopInset = geometry.safeAreaInsets.top + spatialViewportInset
         let isCompactLayout = horizontalSizeClass == .compact
         let metrics = ChatFlowTheme.Metrics(isCompact: isCompactLayout)
         let resolvedInputHeight = max(inputBarHeight, MessageInputBarMetrics.minInputBarHeight)
@@ -901,6 +910,7 @@ struct ChatView: View {
             guard showsStreamPager else { return 0 }
             return floatingPageDotsBottomGap + StreamPageDotsView.controlHeight
         }()
+        let bottomViewportClearance = pageIndicatorClearance + spatialViewportInset
         let bottomFlowGap: CGFloat = isCompactLayout
             ? metrics.flowGap
             : ChatFlowTheme.Metrics(isCompact: false).flowGap
@@ -930,7 +940,7 @@ struct ChatView: View {
             belowBarGap: belowBarGap,
             flowGap: bottomInsetFlowGap,
             containerPadding: metrics.containerPadding,
-            pageIndicatorClearance: pageIndicatorClearance
+            pageIndicatorClearance: bottomViewportClearance
         )
         let insetLayout = layoutCoordinator.runtimeInsetLayoutState(
             inputs: layoutInputs,
@@ -948,7 +958,7 @@ struct ChatView: View {
         }()
         let truncationKeyboardHeight = cachedKeyboardHeight > 0.5 ? cachedKeyboardHeight : estimatedKeyboardHeight
         let truncationBottomInset = truncationKeyboardHeight + 12 + resolvedInputHeight
-            + pageIndicatorClearance + bottomInsetFlowGap - metrics.containerPadding
+            + bottomViewportClearance + bottomInsetFlowGap - metrics.containerPadding
         let layoutKey = ChatLayoutKey(
             revision: layoutRevision,
             keyboardHeight: keyboardHeight,
@@ -959,7 +969,7 @@ struct ChatView: View {
             belowBarGap: belowBarGap,
             flowGap: bottomInsetFlowGap,
             containerPadding: metrics.containerPadding,
-            pageIndicatorClearance: pageIndicatorClearance
+            pageIndicatorClearance: bottomViewportClearance
         )
         let keyboardGeometryRefreshKey = ChatKeyboardGeometryRefreshKey(
             size: geometry.size,

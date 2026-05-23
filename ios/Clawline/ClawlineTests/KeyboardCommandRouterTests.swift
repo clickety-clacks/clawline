@@ -195,16 +195,34 @@ struct KeyboardCommandRouterTests {
         )
 
         #expect(
+            KeyboardCommandRouter.route(
+                intent: .transcriptBubbleScrollForward,
+                store: notificationStore
+            ).outcome == .handledMany([
+                .transcript,
+                .notificationBubble("n0")
+            ])
+        )
+        #expect(
             ChatRootKeyboardCommandDispatch.notificationName(
                 for: .transcriptBubbleScrollForward,
                 keyboardOwnershipStore: notificationStore
-            ) == .clawlineScrollNotificationDownCommand
+            ) == .clawlineScrollDownCommand
+        )
+        #expect(
+            ChatRootKeyboardCommandDispatch.notificationNames(
+                for: .transcriptBubbleScrollForward,
+                keyboardOwnershipStore: notificationStore
+            ) == [
+                .clawlineScrollDownCommand,
+                .clawlineScrollNotificationDownCommand
+            ]
         )
         #expect(
             ChatRootKeyboardCommandDispatch.notificationName(
                 for: .transcriptChatScrollBackward,
                 keyboardOwnershipStore: notificationStore
-            ) == .clawlineScrollNotificationUpCommand
+            ) == .clawlineScrollChatUpCommand
         )
         #expect(
             ChatRootKeyboardCommandDispatch.notificationName(
@@ -216,7 +234,7 @@ struct KeyboardCommandRouterTests {
             ChatRootKeyboardCommandDispatch.notificationName(
                 for: .transcriptBubbleScrollForward,
                 keyboardOwnershipStore: composerStore
-            ) == nil
+            ) == .clawlineScrollDownCommand
         )
     }
 
@@ -251,16 +269,18 @@ struct KeyboardCommandRouterTests {
         )
         #expect(
             ChatAppCommandShortcut.prioritizedTextInputKeyCommandSpecs(notificationVisibleCount: 0).map(\.action) == [
+                .scrollDown,
+                .scrollUp,
                 .scrollChatDown,
                 .scrollChatUp
             ]
         )
         #expect(
             ChatAppCommandShortcut.prioritizedTextInputKeyCommandSpecs(notificationVisibleCount: 2).map(\.action) == [
-                .scrollNotificationDown,
-                .scrollNotificationUp,
-                .scrollNotificationDown,
-                .scrollNotificationUp,
+                .scrollDown,
+                .scrollUp,
+                .scrollChatDown,
+                .scrollChatUp,
                 .notificationNumber,
                 .notificationNumber,
                 .notificationNumber,
@@ -269,7 +289,7 @@ struct KeyboardCommandRouterTests {
                 .notificationNumber
             ]
         )
-        #expect(CrossChatNotificationGlobalShortcut.scrollSpecs(visibleNotificationCount: 2).map(\.input) == ["j", "k", "j", "k"])
+        #expect(CrossChatNotificationGlobalShortcut.scrollSpecs(visibleNotificationCount: 2).map(\.input) == ["j", "k"])
     }
 
     @Test("T343 VG-07 registered command families gate surface ownership")
@@ -333,7 +353,7 @@ private func assertRoute(
     sourceLocation: SourceLocation = #_sourceLocation
 ) {
     let decision = KeyboardCommandRouter.route(intent: intent, store: store)
-    #expect(decision.outcome == .handled(surfaceId), sourceLocation: sourceLocation)
+    #expect(decision.outcome.containsHandledSurface(surfaceId), sourceLocation: sourceLocation)
     #expect(decision.priorityRule == rule, sourceLocation: sourceLocation)
     #expect(decision.participatingSurfaces.contains(surfaceId), sourceLocation: sourceLocation)
 }

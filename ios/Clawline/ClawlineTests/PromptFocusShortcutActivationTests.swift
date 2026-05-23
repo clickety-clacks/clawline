@@ -534,17 +534,7 @@ struct PromptFocusShortcutActivationTests {
             }
         )
         #expect(
-            ChatAppCommandShortcut.notificationScrollKeyCommandSpecs(notificationVisibleCount: 0).map(\.action) == [
-                .scrollNotificationDown,
-                .scrollNotificationUp,
-                .scrollNotificationDown,
-                .scrollNotificationUp
-            ]
-        )
-        #expect(
             ChatAppCommandShortcut.notificationScrollKeyCommandSpecs(notificationVisibleCount: 2).map(\.action) == [
-                .scrollNotificationDown,
-                .scrollNotificationUp,
                 .scrollNotificationDown,
                 .scrollNotificationUp
             ]
@@ -572,9 +562,9 @@ struct PromptFocusShortcutActivationTests {
         #expect(firstEscapeCommand?.action == Selector(("didPressEscape:")))
     }
 
-    @Test("Prompt text input exposes notification scroll commands before base text-view commands")
+    @Test("Prompt text input exposes product scroll commands before base text-view commands")
     @MainActor
-    func promptTextInputExposesNotificationScrollCommandsBeforeBaseTextViewCommands() {
+    func promptTextInputExposesProductScrollCommandsBeforeBaseTextViewCommands() {
         let textView = PastableTextView(frame: .zero, textContainer: nil)
         textView.notificationVisibleCount = 2
 
@@ -585,8 +575,8 @@ struct PromptFocusShortcutActivationTests {
             command.input == "k" && command.modifierFlags == [.command, .shift]
         }
 
-        #expect(firstCommandJ?.action == #selector(UIResponder.clawlineScrollNotificationDownCommand(_:)))
-        #expect(firstCommandShiftK?.action == #selector(UIResponder.clawlineScrollNotificationUpCommand(_:)))
+        #expect(firstCommandJ?.action == #selector(UIResponder.clawlineScrollDownCommand(_:)))
+        #expect(firstCommandShiftK?.action == #selector(UIResponder.clawlineScrollChatUpCommand(_:)))
     }
 
     @Test("Text input bridge exposure follows router notification ownership")
@@ -606,9 +596,9 @@ struct PromptFocusShortcutActivationTests {
             notificationReplyFocusedSourceChatId: nil,
             actionMenuSourceChatId: nil
         )
-        #expect(KeyboardCommandRouter.route(intent: .transcriptBubbleScrollForward, store: transcriptOnlyStore).outcome == .ignored)
-        assertRoute(.transcriptBubbleScrollForward, in: notificationStore, isHandledBy: .notificationBubble("notification-0"), rule: "PR-04")
-        assertRoute(.transcriptChatScrollBackward, in: notificationStore, isHandledBy: .notificationBubble("notification-0"), rule: "PR-04")
+        assertRoute(.transcriptBubbleScrollForward, in: transcriptOnlyStore, isHandledBy: .transcript, rule: "PR-07")
+        assertRoute(.transcriptBubbleScrollForward, in: notificationStore, isHandledBy: .transcript, rule: "PR-04")
+        assertRoute(.transcriptChatScrollBackward, in: notificationStore, isHandledBy: .transcript, rule: "PR-07")
         assertRoute(.notificationAssignedDismiss(1), in: notificationStore, isHandledBy: .notificationBubble("notification-1"), rule: "PR-03")
         assertRoute(.focusPromptInput, in: notificationStore, isHandledBy: .transcript, rule: "PR-07")
         #expect(KeyboardCommandBridge.intent(input: "1", modifierFlags: [.command, .control]) == nil)
@@ -805,7 +795,7 @@ struct PromptFocusShortcutActivationTests {
         ])
     }
 
-    @Test("Notification scroll responders post notification scroll intents")
+    @Test("Notification scroll responders normalize physical Cmd-J/K through root fan-out intents")
     @MainActor
     func notificationScrollRespondersPostNotificationScrollIntents() {
         let center = NotificationCenter.default
@@ -823,21 +813,21 @@ struct PromptFocusShortcutActivationTests {
         responder.clawlineScrollNotificationDownCommand(
             UIKeyCommand(
                 input: "j",
-                modifierFlags: [.command, .shift],
+                modifierFlags: [.command],
                 action: #selector(UIResponder.clawlineScrollNotificationDownCommand(_:))
             )
         )
         responder.clawlineScrollNotificationUpCommand(
             UIKeyCommand(
                 input: "k",
-                modifierFlags: [.command, .shift],
+                modifierFlags: [.command],
                 action: #selector(UIResponder.clawlineScrollNotificationUpCommand(_:))
             )
         )
 
         #expect(posted == [
-            .notificationScrollForward,
-            .notificationScrollBackward
+            .transcriptBubbleScrollForward,
+            .transcriptBubbleScrollBackward
         ])
     }
 
@@ -859,9 +849,9 @@ struct PromptFocusShortcutActivationTests {
         #expect(PromptFocusTypingActivation.promptInsertionText(from: "") == nil)
     }
 
-    @Test("Visible notifications own Cmd-J/K and Cmd-Shift-J/K before text-field focus blocks")
+    @Test("Visible notifications keep Cmd-J/K fan-out while Cmd-Shift-J/K remains transcript-owned")
     @MainActor
-    func visibleNotificationsOwnScrollShortcutsBeforeTextFieldFocusBlocks() {
+    func visibleNotificationsKeepCommandJFanoutAndCommandShiftTranscriptOwnership() {
         let store = KeyboardOwnershipSceneFactory.chatScene(
             visibleNotificationSourceChatIds: ["notification-0"],
             mentionPickerVisible: false,
@@ -869,10 +859,12 @@ struct PromptFocusShortcutActivationTests {
             notificationReplyFocusedSourceChatId: nil,
             actionMenuSourceChatId: nil
         )
-        assertRoute(.transcriptBubbleScrollForward, in: store, isHandledBy: .notificationBubble("notification-0"), rule: "PR-04")
-        assertRoute(.transcriptBubbleScrollBackward, in: store, isHandledBy: .notificationBubble("notification-0"), rule: "PR-04")
-        assertRoute(.transcriptChatScrollForward, in: store, isHandledBy: .notificationBubble("notification-0"), rule: "PR-04")
-        assertRoute(.transcriptChatScrollBackward, in: store, isHandledBy: .notificationBubble("notification-0"), rule: "PR-04")
+        assertRoute(.transcriptBubbleScrollForward, in: store, isHandledBy: .transcript, rule: "PR-04")
+        assertRoute(.transcriptBubbleScrollBackward, in: store, isHandledBy: .transcript, rule: "PR-04")
+        assertRoute(.notificationScrollForward, in: store, isHandledBy: .notificationBubble("notification-0"), rule: "PR-04")
+        assertRoute(.notificationScrollBackward, in: store, isHandledBy: .notificationBubble("notification-0"), rule: "PR-04")
+        assertRoute(.transcriptChatScrollForward, in: store, isHandledBy: .transcript, rule: "PR-07")
+        assertRoute(.transcriptChatScrollBackward, in: store, isHandledBy: .transcript, rule: "PR-07")
     }
 
     @Test("Visible notifications expose global scroll shortcuts outside focused command ownership")
@@ -882,10 +874,10 @@ struct PromptFocusShortcutActivationTests {
             CrossChatNotificationGlobalShortcut.scrollSpecs(visibleNotificationCount: 2) == [
                 .init(input: "j", modifiers: .command, action: .scrollDown),
                 .init(input: "k", modifiers: .command, action: .scrollUp),
-                .init(input: "j", modifiers: [.command, .shift], action: .scrollDown),
-                .init(input: "k", modifiers: [.command, .shift], action: .scrollUp),
             ]
         )
+        #expect(CrossChatNotificationGlobalShortcut.Action.scrollDown.rootScrollIntent == .transcriptBubbleScrollForward)
+        #expect(CrossChatNotificationGlobalShortcut.Action.scrollUp.rootScrollIntent == .transcriptBubbleScrollBackward)
     }
 
     @Test("T351 notification overlay host reports viewport width, not motion overflow width")
@@ -921,12 +913,12 @@ struct PromptFocusShortcutActivationTests {
         let firstCommandJ = textView.keyCommands?.first { command in
             command.input == "j" && command.modifierFlags == [.command]
         }
-        let firstCommandShiftK = textView.keyCommands?.first { command in
-            command.input == "k" && command.modifierFlags == [.command, .shift]
+        let firstCommandShiftJ = textView.keyCommands?.first { command in
+            command.input == "j" && command.modifierFlags == [.command, .shift]
         }
 
-        #expect(firstCommandJ?.action == #selector(UIResponder.clawlineScrollNotificationDownCommand(_:)))
-        #expect(firstCommandShiftK?.action == #selector(UIResponder.clawlineScrollNotificationUpCommand(_:)))
+        #expect(firstCommandJ?.action == #selector(UIResponder.clawlineScrollDownCommand(_:)))
+        #expect(firstCommandShiftJ?.action == #selector(UIResponder.clawlineScrollChatDownCommand(_:)))
     }
 
     @Test("Transcript and chat scroll receive only unclaimed scroll shortcuts")
@@ -948,7 +940,7 @@ struct PromptFocusShortcutActivationTests {
         )
         assertRoute(.transcriptBubbleScrollForward, in: transcriptStore, isHandledBy: .transcript, rule: "PR-07")
         assertRoute(.transcriptChatScrollForward, in: transcriptStore, isHandledBy: .transcript, rule: "PR-07")
-        #expect(KeyboardCommandRouter.route(intent: .transcriptBubbleScrollForward, store: composerFocusedStore).outcome == .ignored)
+        assertRoute(.transcriptBubbleScrollForward, in: composerFocusedStore, isHandledBy: .transcript, rule: "PR-07")
         assertRoute(.transcriptChatScrollForward, in: composerFocusedStore, isHandledBy: .transcript, rule: "PR-07")
     }
 
@@ -1086,7 +1078,7 @@ private func assertRoute(
     sourceLocation: SourceLocation = #_sourceLocation
 ) {
     let decision = KeyboardCommandRouter.route(intent: intent, store: store)
-    #expect(decision.outcome == .handled(surfaceId), sourceLocation: sourceLocation)
+    #expect(decision.outcome.containsHandledSurface(surfaceId), sourceLocation: sourceLocation)
     #expect(decision.priorityRule == rule, sourceLocation: sourceLocation)
 }
 

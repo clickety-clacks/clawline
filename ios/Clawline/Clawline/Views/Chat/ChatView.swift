@@ -919,6 +919,7 @@ struct ChatView: View {
                              viewModel: ChatViewModel,
                              toastManager: ToastManager) -> some View {
         @Bindable var viewModel = viewModel
+        let statusBarTopInset: CGFloat = geometry.safeAreaInsets.top
         let messageListTopInset = geometry.safeAreaInsets.top
         let isCompactLayout = horizontalSizeClass == .compact
         let metrics = ChatFlowTheme.Metrics(isCompact: isCompactLayout)
@@ -2064,6 +2065,32 @@ struct ChatView: View {
                         .frame(width: distances.horizontal)
                     }
                 }
+        }
+    }
+
+    @ViewBuilder
+    private func statusBarFadeMask(topInset: CGFloat) -> some View {
+        // #31 follow-up: reduce strength + height. This is a mask (not an overlay), so lower alpha
+        // means content remains partially visible behind the status bar instead of fully hidden.
+        if topInset <= 0 {
+            Rectangle().fill(Color.white)
+        } else {
+            let topAlpha: CGFloat = 0.25
+            let fullyHiddenHeight = topInset + 9
+            let fadeHeight: CGFloat = 23
+            VStack(spacing: 0) {
+                Rectangle()
+                    .fill(Color.white.opacity(topAlpha))
+                    .frame(height: fullyHiddenHeight)
+                LinearGradient(
+                    colors: [Color.white.opacity(topAlpha), Color.white],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+                .frame(height: fadeHeight)
+                Rectangle().fill(Color.white)
+            }
+            .ignoresSafeArea(.container, edges: .top)
         }
     }
 

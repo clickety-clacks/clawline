@@ -261,7 +261,8 @@ final class WatchConnectivityService: NSObject, WatchConnectivityServicing {
                     id: clientId,
                     content: content,
                     attachments: attachments,
-                    sessionKey: sessionKey
+                    sessionKey: sessionKey,
+                    references: []
                 )
                 replyHandler([
                     "type": "chat.send.ack",
@@ -462,6 +463,8 @@ final class WatchConnectivityService: NSObject, WatchConnectivityServicing {
             dict["kind"] = "typingStateChanged"
             dict["isTyping"] = isTyping
             dict["sessionKey"] = sessionKey
+        case .agentProgress:
+            return nil
         case .streamSnapshot(let streams):
             dict["kind"] = "streamSnapshot"
             if let any = encodeToAny(streams) { dict["streams"] = any }

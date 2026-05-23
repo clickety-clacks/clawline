@@ -7658,16 +7658,7 @@ private struct CrossChatNotificationActionMenuKeyBridge: UIViewRepresentable {
                         action: spec.action.selector
                     )
             }
-            let notificationScrollCommands = ChatAppCommandShortcut
-                .notificationScrollKeyCommandSpecs(notificationVisibleCount: visibleNotificationCount)
-                .map { spec in
-                    UIKeyCommand(
-                        input: spec.input,
-                        modifierFlags: spec.modifierFlags,
-                        action: spec.action.selector
-                    )
-            }
-            return menuCommands + notificationNumberCommands + notificationScrollCommands
+            return menuCommands + notificationNumberCommands
         }
 
         private func selector(for intent: KeyboardCommandIntent) -> Selector? {
@@ -7844,15 +7835,6 @@ private struct CrossChatNotificationKeyboardShortcuts: View {
                     }
                 }
                     .keyboardShortcut("\\", modifiers: .command)
-                ForEach(
-                    Array(CrossChatNotificationGlobalShortcut.scrollSpecs(visibleNotificationCount: visibleBubbles.count).enumerated()),
-                    id: \.offset
-                ) { _, spec in
-                    Button("") {
-                        routeScrollShortcut(spec)
-                    }
-                    .keyboardShortcut(KeyEquivalent(spec.input), modifiers: spec.modifiers)
-                }
             }
             .opacity(0.001)
             .frame(width: 1, height: 1)

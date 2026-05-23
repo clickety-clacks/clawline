@@ -142,6 +142,43 @@ struct ClawlineAppCommands: Commands {
     }
 
     private func routeAppShortcut(_ intent: KeyboardCommandIntent) {
-        NotificationCenter.default.post(name: .clawlineKeyboardCommandIntent, object: intent)
+        switch ChatAppShortcutCommandDispatch.action(
+            for: intent,
+            keyboardOwnershipStore: routerStore()
+        ) {
+        case .postKeyboardIntent:
+            NotificationCenter.default.post(name: .clawlineKeyboardCommandIntent, object: intent)
+        case .scrollNotificationDown:
+            crossChatNotificationCommand?.scrollDown()
+        case .scrollNotificationUp:
+            crossChatNotificationCommand?.scrollUp()
+        }
+    }
+}
+
+enum ChatAppShortcutCommandDispatch {
+    enum Action: Equatable {
+        case postKeyboardIntent
+        case scrollNotificationDown
+        case scrollNotificationUp
+    }
+
+    static func action(
+        for intent: KeyboardCommandIntent,
+        keyboardOwnershipStore: KeyboardOwnershipStore
+    ) -> Action {
+        let route = KeyboardCommandRouter.route(intent: intent, store: keyboardOwnershipStore)
+        guard case .handled(.notificationBubble(_)) = route.outcome else {
+            return .postKeyboardIntent
+        }
+
+        switch intent {
+        case .notificationScrollForward:
+            return .scrollNotificationDown
+        case .notificationScrollBackward:
+            return .scrollNotificationUp
+        default:
+            return .postKeyboardIntent
+        }
     }
 }

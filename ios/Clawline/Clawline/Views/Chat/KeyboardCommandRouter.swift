@@ -5,7 +5,6 @@
 //  Created by Codex on 5/19/26.
 //
 
-import SwiftUI
 import UIKit
 
 enum KeyboardCommandIntent: Equatable {
@@ -389,12 +388,6 @@ enum KeyboardCommandBridge {
         let intent: KeyboardCommandIntent
     }
 
-    struct SwiftUIShortcutSpec: Equatable {
-        let input: Character
-        let modifiers: EventModifiers
-        let intent: KeyboardCommandIntent
-    }
-
     static let noTextInputSpecs: [KeyCommandSpec] = [
         KeyCommandSpec(input: "/", modifierFlags: [], intent: .openStreamPopup),
         KeyCommandSpec(input: ";", modifierFlags: [], intent: .openStreamPopup),
@@ -523,23 +516,6 @@ enum KeyboardCommandBridge {
         }
 
         return nil
-    }
-
-    static func eventModifiers(from modifierFlags: UIKeyModifierFlags) -> EventModifiers {
-        var modifiers = EventModifiers()
-        if modifierFlags.contains(.command) {
-            modifiers.insert(.command)
-        }
-        if modifierFlags.contains(.shift) {
-            modifiers.insert(.shift)
-        }
-        if modifierFlags.contains(.alternate) {
-            modifiers.insert(.option)
-        }
-        if modifierFlags.contains(.control) {
-            modifiers.insert(.control)
-        }
-        return modifiers
     }
 
     private static func shiftedNumberIndex(_ input: String) -> Int? {

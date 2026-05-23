@@ -238,6 +238,134 @@ struct KeyboardCommandRouterTests {
         )
     }
 
+    @Test("Shortcut authority Cmd-J/K fan out through bubble scroll while Cmd-Shift-J/K stays transcript")
+    func shortcutAuthorityPhysicalScrollShortcutsUseCorrectRootBridge() {
+        for composerFocused in [false, true] {
+            let store = KeyboardOwnershipSceneFactory.chatScene(
+                visibleNotificationSourceChatIds: ["n0"],
+                mentionPickerVisible: false,
+                composerFocused: composerFocused,
+                notificationReplyFocusedSourceChatId: nil,
+                actionMenuSourceChatId: nil
+            )
+
+            assertPhysicalShortcut(
+                input: "j",
+                modifiers: [.command],
+                in: store,
+                posts: .clawlineScrollDownCommand
+            )
+            assertPhysicalShortcut(
+                input: "k",
+                modifiers: [.command],
+                in: store,
+                posts: .clawlineScrollUpCommand
+            )
+            assertPhysicalShortcut(
+                input: "j",
+                modifiers: [.command, .shift],
+                in: store,
+                posts: .clawlineScrollChatDownCommand
+            )
+            assertPhysicalShortcut(
+                input: "k",
+                modifiers: [.command, .shift],
+                in: store,
+                posts: .clawlineScrollChatUpCommand
+            )
+        }
+    }
+
+    @Test("Shortcut authority app command source leaves Cmd-J/K and Cmd-Shift-J/K on root fan-out path")
+    func appCommandSourceLeavesScrollShortcutsOnRootFanOutPath() {
+        for composerFocused in [false, true] {
+            let store = KeyboardOwnershipSceneFactory.chatScene(
+                visibleNotificationSourceChatIds: ["n0"],
+                mentionPickerVisible: false,
+                composerFocused: composerFocused,
+                notificationReplyFocusedSourceChatId: nil,
+                actionMenuSourceChatId: nil
+            )
+
+            #expect(
+                ChatAppShortcutCommandDispatch.action(
+                    for: .transcriptBubbleScrollForward,
+                    keyboardOwnershipStore: store
+                ) == .postKeyboardIntent
+            )
+            #expect(
+                ChatAppShortcutCommandDispatch.action(
+                    for: .transcriptBubbleScrollBackward,
+                    keyboardOwnershipStore: store
+                ) == .postKeyboardIntent
+            )
+            #expect(
+                ChatAppShortcutCommandDispatch.action(
+                    for: .transcriptChatScrollForward,
+                    keyboardOwnershipStore: store
+                ) == .postKeyboardIntent
+            )
+            #expect(
+                ChatAppShortcutCommandDispatch.action(
+                    for: .transcriptChatScrollBackward,
+                    keyboardOwnershipStore: store
+                ) == .postKeyboardIntent
+            )
+        }
+    }
+
+    @Test("T347-10 app command source preserves no-notification transcript fallback")
+    func appCommandSourcePreservesNoNotificationTranscriptFallback() {
+        for composerFocused in [false, true] {
+            let store = KeyboardOwnershipSceneFactory.chatScene(
+                visibleNotificationSourceChatIds: [],
+                mentionPickerVisible: false,
+                composerFocused: composerFocused,
+                notificationReplyFocusedSourceChatId: nil,
+                actionMenuSourceChatId: nil
+            )
+
+            #expect(
+                ChatAppShortcutCommandDispatch.action(
+                    for: .transcriptBubbleScrollForward,
+                    keyboardOwnershipStore: store
+                ) == .postKeyboardIntent
+            )
+            #expect(
+                ChatAppShortcutCommandDispatch.action(
+                    for: .transcriptChatScrollForward,
+                    keyboardOwnershipStore: store
+                ) == .postKeyboardIntent
+            )
+        }
+    }
+
+    @Test("T347-10 no-notification physical shift J/K stays transcript owned across composer focus")
+    func noNotificationPhysicalShiftScrollStaysTranscriptOwnedAcrossComposerFocus() {
+        for composerFocused in [false, true] {
+            let store = KeyboardOwnershipSceneFactory.chatScene(
+                visibleNotificationSourceChatIds: [],
+                mentionPickerVisible: false,
+                composerFocused: composerFocused,
+                notificationReplyFocusedSourceChatId: nil,
+                actionMenuSourceChatId: nil
+            )
+
+            assertPhysicalShortcut(
+                input: "j",
+                modifiers: [.command, .shift],
+                in: store,
+                posts: .clawlineScrollChatDownCommand
+            )
+            assertPhysicalShortcut(
+                input: "k",
+                modifiers: [.command, .shift],
+                in: store,
+                posts: .clawlineScrollChatUpCommand
+            )
+        }
+    }
+
     @Test("T343 VG-07 adapters derive shortcut exposure from the central router vocabulary")
     func adaptersDeriveShortcutExposureFromCentralRouterVocabulary() {
         #expect(
@@ -290,6 +418,11 @@ struct KeyboardCommandRouterTests {
             ]
         )
         #expect(CrossChatNotificationGlobalShortcut.scrollSpecs(visibleNotificationCount: 2).map(\.input) == ["j", "k"])
+        #expect(
+            !ChatAppCommandShortcut.keyCommandSpecs(notificationVisibleCount: 2).contains { spec in
+                spec.action == .scrollNotificationDown || spec.action == .scrollNotificationUp
+            }
+        )
     }
 
     @Test("T343 VG-07 registered command families gate surface ownership")
@@ -356,4 +489,25 @@ private func assertRoute(
     #expect(decision.outcome.containsHandledSurface(surfaceId), sourceLocation: sourceLocation)
     #expect(decision.priorityRule == rule, sourceLocation: sourceLocation)
     #expect(decision.participatingSurfaces.contains(surfaceId), sourceLocation: sourceLocation)
+}
+
+@MainActor
+private func assertPhysicalShortcut(
+    input: String,
+    modifiers: UIKeyModifierFlags,
+    in store: KeyboardOwnershipStore,
+    posts expectedName: Notification.Name,
+    sourceLocation: SourceLocation = #_sourceLocation
+) {
+    let intent = KeyboardCommandBridge.intent(input: input, modifierFlags: modifiers)
+    #expect(intent != nil, sourceLocation: sourceLocation)
+    #expect(
+        intent.flatMap {
+            ChatRootKeyboardCommandDispatch.notificationName(
+                for: $0,
+                keyboardOwnershipStore: store
+            )
+        } == expectedName,
+        sourceLocation: sourceLocation
+    )
 }

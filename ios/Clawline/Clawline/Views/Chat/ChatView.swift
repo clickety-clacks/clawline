@@ -659,9 +659,7 @@ struct ChatView: View {
         let current = scrollButtonState(for: sessionKey)
         if current.unreadCount > 0 {
             if let firstUnread = current.firstUnreadMessageId {
-                let hasTarget = viewModel.messages(for: sessionKey).contains(where: { $0.id == firstUnread })
-                if hasTarget {
-                    layoutCoordinator.scrollToMessageCentered(messageId: firstUnread, sessionKey: sessionKey, animated: true)
+                if layoutCoordinator.scrollToMessageCenteredIfMaterialized(messageId: firstUnread, sessionKey: sessionKey, animated: true) {
                     layoutCoordinator.flashMessage(messageId: firstUnread, sessionKey: sessionKey, isUnreadTap: true)
                 } else {
                     layoutCoordinator.scrollToBottom(sessionKey: sessionKey, animated: true)

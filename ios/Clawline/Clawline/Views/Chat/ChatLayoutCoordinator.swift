@@ -187,6 +187,11 @@ final class ChatLayoutCoordinator {
         listViews[sessionKey]?.value?.scrollToMessageCentered(messageId: messageId, animated: animated)
     }
 
+    func scrollToMessageCenteredIfMaterialized(messageId: String, sessionKey: String, animated: Bool) -> Bool {
+        dispatchPrecondition(condition: .onQueue(.main))
+        return listViews[sessionKey]?.value?.scrollToMessageCenteredIfMaterialized(messageId: messageId, animated: animated) ?? false
+    }
+
     func flashMessage(messageId: String, sessionKey: String, isUnreadTap: Bool = false) {
         dispatchPrecondition(condition: .onQueue(.main))
         listViews[sessionKey]?.value?.requestFlashMessage(messageId: messageId, isUnreadTap: isUnreadTap)

@@ -141,6 +141,29 @@ struct MessageBubbleMetadataTests {
         #expect(state.replyIndicatorText?.contains("assistant:") == false)
     }
 
+    @Test("Reply token stays compact for long referenced previews")
+    func replyTokenStaysCompactForLongReferencedPreviews() {
+        let referenced = Message(
+            id: "s_long_reference",
+            role: .assistant,
+            content: """
+            This is a deliberately long referenced message preview that should be truncated so the composer token stays compact inside narrow widths.
+            """,
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: "server:personal",
+            clientMessageId: "c_long_reference"
+        )
+        let reference = PendingMessageReference(message: referenced)
+        let attachment = MessageReferenceTextAttachment(reference: reference)
+
+        #expect(attachment.bounds.width <= 160)
+        #expect(attachment.bounds.width >= 84)
+        #expect(reference.tokenLabel.contains("assistant:") == false)
+    }
+
     @Test("Bubble header title tap exposes Reply action on the real menu button")
     func bubbleHeaderTitleTapExposesReplyActionOnMenuButton() {
         let message = Message(

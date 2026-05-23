@@ -66,8 +66,12 @@ final class PendingTextAttachment: NSTextAttachment {
 final class MessageReferenceTextAttachment: NSTextAttachment {
     private enum Metrics {
         static let height: CGFloat = 30
-        static let maxWidth: CGFloat = 260
+        static let maxWidth: CGFloat = 160
+        static let minWidth: CGFloat = 84
         static let verticalOffset: CGFloat = -7
+        static let horizontalPadding: CGFloat = 12
+        static let iconSize: CGFloat = 12
+        static let iconSpacing: CGFloat = 5
     }
 
     let referenceId: UUID
@@ -118,36 +122,33 @@ final class MessageReferenceTextAttachment: NSTextAttachment {
             .foregroundColor: UIColor.label,
             .paragraphStyle: paragraph
         ]
-        let iconSize: CGFloat = 12
-        let iconSpacing: CGFloat = 6
-        let horizontalPadding: CGFloat = 14
         let textSize = (label as NSString).boundingRect(
-            with: CGSize(width: Metrics.maxWidth - (horizontalPadding * 2) - iconSize - iconSpacing, height: Metrics.height),
+            with: CGSize(width: Metrics.maxWidth - (Metrics.horizontalPadding * 2) - Metrics.iconSize - Metrics.iconSpacing, height: Metrics.height),
             options: [.usesLineFragmentOrigin, .usesFontLeading],
             attributes: attributes,
             context: nil
         ).size
-        let width = min(Metrics.maxWidth, max(92, ceil(textSize.width) + (horizontalPadding * 2) + iconSize + iconSpacing))
+        let width = min(Metrics.maxWidth, max(Metrics.minWidth, ceil(textSize.width) + (Metrics.horizontalPadding * 2) + Metrics.iconSize + Metrics.iconSpacing))
         let size = CGSize(width: width, height: Metrics.height)
         return UIGraphicsImageRenderer(size: size).image { context in
             let rect = CGRect(origin: .zero, size: size)
             UIColor.secondarySystemFill.setFill()
             UIBezierPath(roundedRect: rect, cornerRadius: 10).fill()
             if let symbol = UIImage(systemName: "arrowshape.turn.up.left")?.withConfiguration(
-                UIImage.SymbolConfiguration(pointSize: iconSize, weight: .semibold)
+                UIImage.SymbolConfiguration(pointSize: Metrics.iconSize, weight: .semibold)
             ) {
                 let iconRect = CGRect(
-                    x: horizontalPadding,
-                    y: floor((size.height - iconSize) / 2),
-                    width: iconSize,
-                    height: iconSize
+                    x: Metrics.horizontalPadding,
+                    y: floor((size.height - Metrics.iconSize) / 2),
+                    width: Metrics.iconSize,
+                    height: Metrics.iconSize
                 )
                 symbol.withTintColor(.label, renderingMode: .alwaysOriginal).draw(in: iconRect)
             }
             let textRect = CGRect(
-                x: horizontalPadding + iconSize + iconSpacing,
+                x: Metrics.horizontalPadding + Metrics.iconSize + Metrics.iconSpacing,
                 y: 6,
-                width: rect.width - (horizontalPadding * 2) - iconSize - iconSpacing,
+                width: rect.width - (Metrics.horizontalPadding * 2) - Metrics.iconSize - Metrics.iconSpacing,
                 height: rect.height - 12
             )
             (label as NSString).draw(

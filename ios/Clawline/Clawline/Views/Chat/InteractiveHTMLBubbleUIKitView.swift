@@ -28,6 +28,7 @@ final class InteractiveHTMLBubbleUIKitView: UIView {
     private var isInitialLoadInProgress = false
     private var heightLocked = false
     private var resizeUsed = false
+    private var webContentProcessReloadedAfterTermination = false
 
     private var callbackWindowStart: CFAbsoluteTime = 0
     private var callbackWindowCount: Int = 0
@@ -95,6 +96,7 @@ final class InteractiveHTMLBubbleUIKitView: UIView {
         isInitialLoadInProgress = false
         heightLocked = false
         resizeUsed = false
+        webContentProcessReloadedAfterTermination = false
         callbackWindowStart = 0
         callbackWindowCount = 0
         summaryLabel.isHidden = true
@@ -117,6 +119,7 @@ final class InteractiveHTMLBubbleUIKitView: UIView {
         self.isInitialLoadInProgress = true
         self.heightLocked = false
         self.resizeUsed = false
+        self.webContentProcessReloadedAfterTermination = false
         self.summaryLabel.isHidden = true
         self.errorLabel.isHidden = true
         self.placeholder.startAnimating()
@@ -281,6 +284,7 @@ private final class InteractiveHTMLWebKit: NSObject {
     private let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "InteractiveHTMLWebKit")
 
     private var cachedRuleList: WKContentRuleList?
+    private let processPool = WKProcessPool()
     private var compiling = false
     private var pending: [() -> Void] = []
 
@@ -329,6 +333,7 @@ private final class InteractiveHTMLWebKit: NSObject {
     private func makeWebView(ruleList: WKContentRuleList?, handler: WKScriptMessageHandler) -> WKWebView {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .nonPersistent()
+        configuration.processPool = processPool
 
         let userContent = WKUserContentController()
         userContent.removeAllUserScripts()
@@ -432,7 +437,17 @@ extension InteractiveHTMLBubbleUIKitView: WKNavigationDelegate, WKUIDelegate {
     }
 
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
-        showError("Content crashed.")
+        guard !webContentProcessReloadedAfterTermination else {
+            showError("Content crashed.")
+            return
+        }
+
+        webContentProcessReloadedAfterTermination = true
+        isInitialLoadInProgress = true
+        heightLocked = false
+        placeholder.startAnimating()
+        webView.alpha = 0
+        loadHTML(isDark: pendingIsDark)
     }
 
     func webView(_ webView: WKWebView,

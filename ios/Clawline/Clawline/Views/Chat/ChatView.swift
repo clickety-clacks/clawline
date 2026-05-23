@@ -1052,6 +1052,17 @@ struct ChatView: View {
             .filter(\.isReplying)
             .map(\.sourceChatId)
         let notificationShortcutVisibleCount = keyboardVisibleNotificationSourceChatIds.count
+        let transcriptTrailingNotificationClearance: CGFloat = {
+#if os(iOS) && !targetEnvironment(macCatalyst)
+            return CrossChatNotificationGeometry.transcriptTrailingClearance(
+                isCompactLandscape: isCompactLayout && isLandscape,
+                isNotificationDocked: isCrossChatNotificationStackDocked,
+                visibleNotificationCount: notificationShortcutVisibleCount
+            )
+#else
+            return 0
+#endif
+        }()
         let keyboardOwnershipStore = KeyboardOwnershipSceneFactory.chatScene(
             visibleNotificationSourceChatIds: keyboardVisibleNotificationSourceChatIds,
             mentionPickerVisible: isMentionPickerVisible,
@@ -1072,6 +1083,7 @@ struct ChatView: View {
             pagedStreamView(
                 topInset: messageListTopInset,
                 truncationBottomInset: truncationBottomInset,
+                trailingContentInset: transcriptTrailingNotificationClearance,
                 effectiveSessionKeys: effectiveSessionKeys
             )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -2113,6 +2125,7 @@ struct ChatView: View {
 
     private func messageList(topInset: CGFloat,
                              truncationBottomInset: CGFloat,
+                             trailingContentInset: CGFloat,
                              sessionKey: String) -> some View {
         let state = scrollButtonState(for: sessionKey)
         let list = MessageFlowCollectionView(
@@ -2124,6 +2137,7 @@ struct ChatView: View {
             isInputActive: isInputFocused,
             isTypingActive: isTypingActive,
             truncationBottomInset: truncationBottomInset,
+            trailingContentInset: trailingContentInset,
             firstUnreadMessageId: state.firstUnreadMessageId,
             unreadCount: state.unreadCount,
             onExpand: { message in
@@ -2210,6 +2224,7 @@ struct ChatView: View {
     private func pagedStreamView(
         topInset: CGFloat,
         truncationBottomInset: CGFloat,
+        trailingContentInset: CGFloat,
         effectiveSessionKeys: [String]
     ) -> some View {
         TabView(selection: streamBinding) {
@@ -2217,6 +2232,7 @@ struct ChatView: View {
                 messageList(
                     topInset: topInset,
                     truncationBottomInset: truncationBottomInset,
+                    trailingContentInset: trailingContentInset,
                     sessionKey: sessionKey
                 )
                     .contentShape(Rectangle())
@@ -2240,6 +2256,7 @@ struct ChatView: View {
             adjacentPagePrewarmShells(
                 topInset: topInset,
                 truncationBottomInset: truncationBottomInset,
+                trailingContentInset: trailingContentInset,
                 effectiveSessionKeys: effectiveSessionKeys
             )
             .frame(width: 0, height: 0)
@@ -2274,6 +2291,7 @@ struct ChatView: View {
     @ViewBuilder
     private func adjacentPagePrewarmShells(topInset: CGFloat,
                                            truncationBottomInset: CGFloat,
+                                           trailingContentInset: CGFloat,
                                            effectiveSessionKeys: [String]) -> some View {
         let prewarmKeys = adjacentPrewarmSessionKeys(effectiveSessionKeys: effectiveSessionKeys)
         ForEach(prewarmKeys, id: \.self) { sessionKey in
@@ -2287,6 +2305,7 @@ struct ChatView: View {
                 isInputActive: isInputFocused,
                 isTypingActive: isTypingActive,
                 truncationBottomInset: truncationBottomInset,
+                trailingContentInset: trailingContentInset,
                 firstUnreadMessageId: nil,
                 unreadCount: 0,
                 onExpand: nil,
@@ -5456,12 +5475,27 @@ enum CrossChatNotificationMarkdownRenderer {
 }
 
 enum CrossChatNotificationGeometry {
+    static let collapsedPeekWidth: CGFloat = 18
+
     static func layoutHostWidth(maxContainerWidth: CGFloat) -> CGFloat {
         max(0, maxContainerWidth)
     }
 
     static func layoutHostHeight(topMargin: CGFloat, maxContainerHeight: CGFloat) -> CGFloat {
         max(0, topMargin) + max(0, maxContainerHeight) + 12
+    }
+
+    static func transcriptTrailingClearance(
+        isCompactLandscape: Bool,
+        isNotificationDocked: Bool,
+        visibleNotificationCount: Int
+    ) -> CGFloat {
+        guard isCompactLandscape,
+              isNotificationDocked,
+              visibleNotificationCount > 0 else {
+            return 0
+        }
+        return collapsedPeekWidth
     }
 
     static func collapsedOffset(
@@ -5507,7 +5541,7 @@ private struct CrossChatNotificationOverlay: View {
     private static let bubbleSpacing: CGFloat = 10
     private static let maxStackWidth: CGFloat = 562.5
     private static let bubbleCornerRadius: CGFloat = 18
-    private static let collapsedPeekWidth: CGFloat = bubbleCornerRadius
+    private static let collapsedPeekWidth: CGFloat = CrossChatNotificationGeometry.collapsedPeekWidth
     private static let collapseSwipeThreshold: CGFloat = 44
     private static let dragPliabilityLimit: CGFloat = 82
     // Drag is rubber-banded to `dragPliabilityLimit`; the rest covers card corner,

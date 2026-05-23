@@ -128,6 +128,7 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
     var isInputActive: Bool
     var isTypingActive: Bool
     var truncationBottomInset: CGFloat
+    var trailingContentInset: CGFloat = 0
     var firstUnreadMessageId: String?
     var unreadCount: Int
     var onExpand: ((Message) -> Void)?
@@ -165,6 +166,7 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
             isTypingActive: isTypingActive,
             topInset: topInset,
             truncationBottomInset: truncationBottomInset,
+            trailingContentInset: trailingContentInset,
             firstUnreadMessageId: firstUnreadMessageId,
             unreadCount: unreadCount,
             onExpand: onExpand,
@@ -199,6 +201,7 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
             isTypingActive: isTypingActive,
             topInset: topInset,
             truncationBottomInset: truncationBottomInset,
+            trailingContentInset: trailingContentInset,
             firstUnreadMessageId: firstUnreadMessageId,
             unreadCount: unreadCount,
             onExpand: onExpand,
@@ -232,6 +235,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         let isTypingActive: Bool
         let topInset: CGFloat
         let truncationBottomInset: CGFloat
+        let trailingContentInset: CGFloat
         let firstUnreadMessageId: String?
         let unreadCount: Int
         let onExpand: ((Message) -> Void)?
@@ -262,6 +266,38 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             abs(current.minY - target.minY) > tolerance ||
             abs(current.width - target.width) > tolerance ||
             abs(current.height - target.height) > tolerance
+    }
+
+    static func targetCollectionFrame(
+        viewBounds: CGRect,
+        windowBounds: CGRect?,
+        viewOriginInWindow: CGPoint?,
+        preservesHorizontallyConstrainedHostWidth: Bool = true,
+        tolerance: CGFloat = 1
+    ) -> CGRect {
+        guard let windowBounds, let viewOriginInWindow else {
+            return viewBounds
+        }
+
+        let isHorizontallyConstrained = viewBounds.width < windowBounds.width - tolerance
+        let width = preservesHorizontallyConstrainedHostWidth && isHorizontallyConstrained
+            ? viewBounds.width
+            : windowBounds.width
+        return CGRect(
+            x: 0,
+            y: -viewOriginInWindow.y,
+            width: width,
+            height: windowBounds.height
+        )
+    }
+
+    static func flowSectionInset(containerPadding: CGFloat, trailingContentInset: CGFloat) -> UIEdgeInsets {
+        UIEdgeInsets(
+            top: containerPadding,
+            left: containerPadding,
+            bottom: containerPadding,
+            right: containerPadding + max(0, trailingContentInset)
+        )
     }
 
     private var collectionView: UICollectionView!
@@ -392,6 +428,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     private var sessionStatus: SessionStatus?
     private var topInset: CGFloat = 0
     private var truncationBottomInset: CGFloat = 0
+    private var trailingContentInset: CGFloat = 0
     private var lastBoundsSize: CGSize = .zero
     private var lastMeasurementContentWidth: CGFloat?
     private var lastMeasurementMetricsFingerprint: Int?
@@ -1114,32 +1151,40 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
 
-        // iOS: Extend the collection view to fill the entire screen, ignoring safe areas.
+        // Native iOS/iPadOS: Extend vertically to fill the entire screen, ignoring top/bottom safe areas.
         // SwiftUI's UIViewControllerRepresentable doesn't respect .ignoresSafeArea() for UIKit views,
-        // so we manually extend the collection view to window bounds.
+        // so we manually extend the collection view against window bounds. Keep the collection view
+        // within its host width when SwiftUI has already constrained that host for landscape safe areas.
+        //
+        // Catalyst: Preserve the historical full-window width behavior; T357's containment is native iOS/iPadOS-only.
         //
         // visionOS: In a spatial window this "counter-positioning" can create a layout feedback loop
         // (window position/size <-> view origin <-> collectionView frame), visible as the chat list
         // flapping vertically when content reaches the bottom. Use the normal view bounds instead.
         #if os(visionOS)
             collectionView.frame = view.bounds
+        #elseif targetEnvironment(macCatalyst)
+            let targetFrame = Self.targetCollectionFrame(
+                viewBounds: view.bounds,
+                windowBounds: view.window?.bounds,
+                viewOriginInWindow: view.window.map { view.convert(CGPoint.zero, to: $0) },
+                preservesHorizontallyConstrainedHostWidth: false
+            )
+
+            // Only update if significantly different to avoid layout loops
+            if Self.shouldUpdateCollectionFrame(current: collectionView.frame, target: targetFrame) {
+                collectionView.frame = targetFrame
+            }
         #else
-            if let window = view.window {
-                let windowBounds = window.bounds
-                let viewOriginInWindow = view.convert(CGPoint.zero, to: window)
+            let targetFrame = Self.targetCollectionFrame(
+                viewBounds: view.bounds,
+                windowBounds: view.window?.bounds,
+                viewOriginInWindow: view.window.map { view.convert(CGPoint.zero, to: $0) }
+            )
 
-                // Calculate frame that extends from top of screen to bottom
-                let extendedFrame = CGRect(
-                    x: 0,
-                    y: -viewOriginInWindow.y,
-                    width: windowBounds.width,
-                    height: windowBounds.height
-                )
-
-                // Only update if significantly different to avoid layout loops
-                if Self.shouldUpdateCollectionFrame(current: collectionView.frame, target: extendedFrame) {
-                    collectionView.frame = extendedFrame
-                }
+            // Only update if significantly different to avoid layout loops
+            if Self.shouldUpdateCollectionFrame(current: collectionView.frame, target: targetFrame) {
+                collectionView.frame = targetFrame
             }
         #endif
 
@@ -1172,6 +1217,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 isTypingActive: isTypingActive,
                 topInset: topInset,
                 truncationBottomInset: truncationBottomInset,
+                trailingContentInset: trailingContentInset,
                 firstUnreadMessageId: firstUnreadMessageId,
                 unreadCount: unreadCount,
                 onExpand: onExpand,
@@ -2020,6 +2066,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             isTypingActive: isTypingActive,
             topInset: topInset,
             truncationBottomInset: truncationBottomInset,
+            trailingContentInset: trailingContentInset,
             firstUnreadMessageId: firstUnreadMessageId,
             unreadCount: unreadCount,
             onExpand: onExpand,
@@ -2064,6 +2111,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 isTypingActive: request.isTypingActive,
                 topInset: request.topInset,
                 truncationBottomInset: request.truncationBottomInset,
+                trailingContentInset: request.trailingContentInset,
                 firstUnreadMessageId: request.firstUnreadMessageId,
                 unreadCount: request.unreadCount,
                 onExpand: request.onExpand,
@@ -2136,6 +2184,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
               self.isInputActive == request.isInputActive,
               self.currentSendIndicatorRevision == request.sendIndicatorRevision,
               abs(self.topInset - request.topInset) <= 0.5,
+              abs(self.trailingContentInset - max(0, request.trailingContentInset)) <= 0.5,
               self.firstUnreadMessageId == request.firstUnreadMessageId,
               self.unreadCount == request.unreadCount else {
             return false
@@ -2161,6 +2210,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         isTypingActive: Bool,
         topInset: CGFloat,
         truncationBottomInset: CGFloat,
+        trailingContentInset: CGFloat = 0,
         firstUnreadMessageId: String?,
         unreadCount: Int,
         onExpand: ((Message) -> Void)? = nil,
@@ -2187,6 +2237,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             isTypingActive: isTypingActive,
             topInset: topInset,
             truncationBottomInset: truncationBottomInset,
+            trailingContentInset: trailingContentInset,
             firstUnreadMessageId: firstUnreadMessageId,
             unreadCount: unreadCount,
             onExpand: onExpand,
@@ -2244,6 +2295,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         self.onInsertMessageIntoPrompt = onInsertMessageIntoPrompt
         self.onReferenceMessageInPrompt = onReferenceMessageInPrompt
         self.allowsTransparentWindowBackground = allowsTransparentWindowBackground
+        let nextTrailingContentInset = max(0, request.trailingContentInset)
 
         // Handle appearance change from SwiftUI colorScheme
         if let isDark = isDark, currentIsDark != isDark {
@@ -2293,9 +2345,11 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             || didFontScaleChange
             || self.isCompact != isCompact
             || self.topInset != topInset
+            || self.trailingContentInset != nextTrailingContentInset
             || previousSessionKey != sessionKey
         self.isCompact = isCompact
         self.topInset = topInset
+        self.trailingContentInset = nextTrailingContentInset
 
         if isOffscreenSession {
             return
@@ -3957,11 +4011,9 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         flowLayout.minimumInteritemSpacing = metrics.flowGap
         flowLayout.minimumLineSpacing = metrics.flowGap
         // Section inset is just for padding - content insets handle safe areas
-        flowLayout.sectionInset = UIEdgeInsets(
-            top: metrics.containerPadding,
-            left: metrics.containerPadding,
-            bottom: metrics.containerPadding,
-            right: metrics.containerPadding
+        flowLayout.sectionInset = Self.flowSectionInset(
+            containerPadding: metrics.containerPadding,
+            trailingContentInset: trailingContentInset
         )
         // Content insets allow scrolling under safe areas while resting below them
         // Top inset = safe area (status bar) so content can scroll under it

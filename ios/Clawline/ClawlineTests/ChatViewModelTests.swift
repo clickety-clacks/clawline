@@ -2478,6 +2478,47 @@ struct ChatViewModelTests {
         #expect(viewModel.inputContent.string.isEmpty)
     }
 
+    @Test("T157 image preparer downscales oversized image bytes")
+    @MainActor
+    func imagePreparerDownscalesOversizedImageBytes() throws {
+        let originalData = makeLargeJPEGData()
+        #expect(originalData.count > PendingAttachment.modelAwareMaxImageRawByteLimit)
+
+        let prepared = try ImageAttachmentPreparer.prepareForModel(data: originalData, mimeType: "image/jpeg")
+
+        #expect(prepared.mimeType == "image/jpeg")
+        #expect(prepared.data.count <= PendingAttachment.modelAwareMaxImageRawByteLimit)
+        #expect(prepared.data.count < originalData.count)
+    }
+
+    @Test("T157 image preparer leaves bounded image bytes unchanged")
+    @MainActor
+    func imagePreparerLeavesBoundedImageBytesUnchanged() throws {
+        let originalData = makeSmallJPEGData()
+        #expect(originalData.count <= PendingAttachment.modelAwareMaxImageRawByteLimit)
+
+        let prepared = try ImageAttachmentPreparer.prepareForModel(data: originalData, mimeType: "image/jpeg")
+
+        #expect(prepared.mimeType == "image/jpeg")
+        #expect(prepared.data == originalData)
+    }
+
+    @Test("T157 prepared image bytes fit inline transport attachment")
+    @MainActor
+    func preparedImageBytesFitInlineTransportAttachment() throws {
+        let oversized = makeLargeJPEGData()
+        let prepared = try ImageAttachmentPreparer.prepareForModel(data: oversized, mimeType: "image/jpeg")
+        let wireAttachment = WireAttachment.image(mimeType: prepared.mimeType, data: prepared.data)
+
+        guard case .image(let mimeType, let data) = wireAttachment else {
+            Issue.record("Expected prepared image transport attachment")
+            return
+        }
+        #expect(mimeType == "image/jpeg")
+        #expect(data.count <= PendingAttachment.modelAwareMaxImageRawByteLimit)
+        #expect(data.count < oversized.count)
+    }
+
     @Test("send during attachment staging gap does not prune and retries cleanly after token insertion")
     @MainActor
     func sendDuringAttachmentStagingGapDefersThenSucceeds() async throws {
@@ -5829,6 +5870,50 @@ private func makePendingAttachment(dataSize: Int, mimeType: String) -> PendingAt
         mimeType: mimeType,
         filename: nil
     )
+}
+
+private func makeSmallJPEGData() -> Data {
+    let renderer = UIGraphicsImageRenderer(size: CGSize(width: 64, height: 64))
+    let image = renderer.image { context in
+        UIColor.red.setFill()
+        context.fill(CGRect(x: 0, y: 0, width: 64, height: 64))
+    }
+    return image.jpegData(compressionQuality: 1) ?? Data()
+}
+
+private func makeLargeJPEGData(width: Int = 2_200, height: Int = 2_200) -> Data {
+    var seed: UInt32 = 0x157
+    var pixels = [UInt8](repeating: 0, count: width * height * 4)
+    for index in stride(from: 0, to: pixels.count, by: 4) {
+        seed = seed &* 1_664_525 &+ 1_013_904_223
+        pixels[index] = UInt8(truncatingIfNeeded: seed >> 16)
+        seed = seed &* 1_664_525 &+ 1_013_904_223
+        pixels[index + 1] = UInt8(truncatingIfNeeded: seed >> 16)
+        seed = seed &* 1_664_525 &+ 1_013_904_223
+        pixels[index + 2] = UInt8(truncatingIfNeeded: seed >> 16)
+        pixels[index + 3] = 255
+    }
+
+    let colorSpace = CGColorSpaceCreateDeviceRGB()
+    let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue)
+    let data = Data(pixels)
+    let provider = CGDataProvider(data: data as CFData)
+    let cgImage = provider.flatMap {
+        CGImage(
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bitsPerPixel: 32,
+            bytesPerRow: width * 4,
+            space: colorSpace,
+            bitmapInfo: bitmapInfo,
+            provider: $0,
+            decode: nil,
+            shouldInterpolate: false,
+            intent: .defaultIntent
+        )
+    }
+    return cgImage.flatMap { UIImage(cgImage: $0).jpegData(compressionQuality: 1) } ?? Data()
 }
 
 private func makeAttributedContent(with ids: [UUID]) -> NSAttributedString {

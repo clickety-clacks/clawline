@@ -125,6 +125,12 @@ struct ResolvedCrossChatMention: Equatable {
 }
 
 enum CrossChatMentionPickerLogic {
+    struct HighlightStyle: Equatable {
+        let fillOpacity: CGFloat
+        let strokeOpacity: CGFloat
+        let strokeLineWidth: CGFloat
+    }
+
     static func query(inputText: String, resolvedMention: ResolvedCrossChatMention?) -> String? {
         guard resolvedMention == nil else { return nil }
         guard inputText.hasPrefix("@") else { return nil }
@@ -155,6 +161,16 @@ enum CrossChatMentionPickerLogic {
         } ?? 0
         let nextIndex = min(max(currentIndex + step, 0), filteredStreams.count - 1)
         return filteredStreams[nextIndex].sessionKey
+    }
+
+    static func highlightStyle(isHighlighted: Bool, isSpatial: Bool) -> HighlightStyle {
+        guard isHighlighted else {
+            return HighlightStyle(fillOpacity: 0, strokeOpacity: 0, strokeLineWidth: 0)
+        }
+        if isSpatial {
+            return HighlightStyle(fillOpacity: 0.24, strokeOpacity: 0.40, strokeLineWidth: 1)
+        }
+        return HighlightStyle(fillOpacity: 0.12, strokeOpacity: 0, strokeLineWidth: 0)
     }
 }
 
@@ -5282,8 +5298,27 @@ private struct CrossChatMentionPickerView: View {
     }
 
     private func rowBackground(for stream: StreamSession) -> some View {
-        RoundedRectangle(cornerRadius: 12, style: .continuous)
-            .fill(stream.sessionKey == highlightedSessionKey ? Color.primary.opacity(0.12) : Color.clear)
+        let highlight = CrossChatMentionPickerLogic.highlightStyle(
+            isHighlighted: stream.sessionKey == highlightedSessionKey,
+            isSpatial: Self.isSpatialPlatform
+        )
+        return RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .fill(Color.primary.opacity(highlight.fillOpacity))
+            .overlay {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(
+                        Color.primary.opacity(highlight.strokeOpacity),
+                        lineWidth: highlight.strokeLineWidth
+                    )
+            }
+    }
+
+    private static var isSpatialPlatform: Bool {
+#if os(visionOS)
+        true
+#else
+        false
+#endif
     }
 
     @ViewBuilder

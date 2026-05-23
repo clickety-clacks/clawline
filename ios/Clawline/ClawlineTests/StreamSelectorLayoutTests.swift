@@ -171,6 +171,23 @@ struct StreamSelectorLayoutTests {
         #expect(CrossChatMentionPickerLogic.selectionAfterMoving(currentSessionKey: "s_2", filteredStreams: streams, step: 1) == "s_2")
     }
 
+    @Test("T361 Spatial mention picker selected row uses glass-visible highlight")
+    func spatialMentionPickerSelectedRowUsesGlassVisibleHighlight() {
+        let spatial = CrossChatMentionPickerLogic.highlightStyle(isHighlighted: true, isSpatial: true)
+        let nonSpatial = CrossChatMentionPickerLogic.highlightStyle(isHighlighted: true, isSpatial: false)
+        let unselected = CrossChatMentionPickerLogic.highlightStyle(isHighlighted: false, isSpatial: true)
+
+        #expect(spatial.fillOpacity > nonSpatial.fillOpacity)
+        #expect(spatial.strokeOpacity > 0)
+        #expect(spatial.strokeLineWidth > 0)
+        #expect(nonSpatial.fillOpacity == 0.12)
+        #expect(nonSpatial.strokeOpacity == 0)
+        #expect(nonSpatial.strokeLineWidth == 0)
+        #expect(unselected.fillOpacity == 0)
+        #expect(unselected.strokeOpacity == 0)
+        #expect(unselected.strokeLineWidth == 0)
+    }
+
     @Test("Short stream list uses content-driven height")
     func shortListUsesContentHeight() {
         let height = StreamSelectorLayout.containerHeight(

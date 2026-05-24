@@ -1965,8 +1965,25 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         defaultAction: UIAction
     ) -> UIAction? {
         UnifiedMarkdownRenderer.primaryActionForTextItem(textItem, defaultAction: defaultAction) { tappedURL in
+            if TextLinkURLTemplateRules.containsGeneratedLink(to: tappedURL, in: textView.attributedText) {
+                _ = ExternalWebContentPolicy.openGeneratedLinkBrowserSurface(for: tappedURL, from: textView)
+                return
+            }
             UIApplication.shared.open(tappedURL)
         }
+    }
+
+    func textView(
+        _ textView: UITextView,
+        shouldInteractWith URL: URL,
+        in characterRange: NSRange,
+        interaction: UITextItemInteraction
+    ) -> Bool {
+        guard TextLinkURLTemplateRules.isGeneratedLink(in: textView.attributedText, characterRange: characterRange) else {
+            return true
+        }
+        _ = ExternalWebContentPolicy.openGeneratedLinkBrowserSurface(for: URL, from: textView)
+        return false
     }
 
     private static func markdownStyle(

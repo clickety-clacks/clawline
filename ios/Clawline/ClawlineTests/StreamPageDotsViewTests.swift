@@ -190,7 +190,37 @@ struct StreamPageDotsViewTests {
         #expect(controlBodySource.contains(".frame(width: scrubFieldWidth, height: Self.waveRenderHeight, alignment: .bottom)"))
         #expect(controlBodySource.contains(".frame(width: scrubFieldWidth, height: Self.minimumHitTargetHeight, alignment: .bottom)"))
         #expect(source.contains("unreadEdgeBloomOverlay(capsuleBounds: capsuleBounds)"))
-        #expect(source.contains(".blur(radius: Self.unreadEdgeBloomBlurRadius(colorScheme: colorScheme))\n                    .mask(Capsule())"))
+        #expect(source.contains("EdgeWarningBloomShape("))
+        #expect(source.contains("containedActiveGlowOverlay(capsuleBounds: capsuleBounds)"))
+        #expect(source.contains("let showsForegroundGlow = Self.foregroundGlowEnabled("))
+    }
+
+    @Test("T278: at-rest foreground glow is contained separately from scrub wave glow")
+    func foregroundGlowOnlyEscapesDuringAcceptedScrubStates() {
+        #expect(
+            StreamPageDotsView.foregroundGlowEnabled(
+                isScrubbing: false,
+                isActive: true,
+                isCandidate: false,
+                showsSelectionRing: true
+            ) == false
+        )
+        #expect(
+            StreamPageDotsView.foregroundGlowEnabled(
+                isScrubbing: true,
+                isActive: true,
+                isCandidate: false,
+                showsSelectionRing: true
+            )
+        )
+        #expect(
+            StreamPageDotsView.foregroundGlowEnabled(
+                isScrubbing: true,
+                isActive: false,
+                isCandidate: false,
+                showsSelectionRing: false
+            ) == false
+        )
     }
 
     @Test("T257: scrub start maps touch position through the visible dot window")
@@ -591,16 +621,16 @@ struct StreamPageDotsViewTests {
         #expect(Self.rgb(color) == Self.rgb(ChatFlowTheme.unreadIndicator(.light)))
     }
 
-    @Test("Offscreen unread edge bloom is blurred behind the glass")
-    func offscreenUnreadEdgeBloomUsesBlur() {
+    @Test("Offscreen unread edge bloom uses an in-capsule edge band")
+    func offscreenUnreadEdgeBloomUsesContainedEdgeBand() {
         #expect(StreamPageDotsView.unreadEdgeBloomOpacity(colorScheme: .light) == 0.40)
         #expect(StreamPageDotsView.unreadEdgeBloomOpacity(colorScheme: .dark) == 0.40)
-        #expect(StreamPageDotsView.unreadEdgeBloomBlurRadius(colorScheme: .light) == 4.0)
-        #expect(StreamPageDotsView.unreadEdgeBloomBlurRadius(colorScheme: .dark) == 4.5)
+        #expect(StreamPageDotsView.unreadEdgeBloomBandWidth == 32)
+        #expect(StreamPageDotsView.containedActiveGlowEndRadius == 26)
     }
 
     @Test("T278: offscreen unread bloom is positioned inside the glass capsule")
-    func offscreenUnreadBloomStaysInsideCapsuleAfterBlur() {
+    func offscreenUnreadBloomTouchesCapsuleEdgeWithoutLeavingCapsule() {
         let controlWidth = StreamPageDotsView.requiredControlWidth(
             visibleDotCount: 11,
             includesOverflowIndicators: true
@@ -626,18 +656,18 @@ struct StreamPageDotsViewTests {
                 colorScheme: .dark
             )
 
-            #expect(sourceFrame.minX > capsuleBounds.minX)
-            #expect(sourceFrame.maxX < capsuleBounds.maxX)
             #expect(visualBounds.minX >= capsuleBounds.minX)
             #expect(visualBounds.maxX <= capsuleBounds.maxX)
             #expect(visualBounds.minY >= capsuleBounds.minY)
             #expect(visualBounds.maxY <= capsuleBounds.maxY)
+            #expect(sourceFrame == visualBounds)
 
-            let capsuleInset = Self.capsuleHorizontalInset(at: visualBounds.minY)
-            if sourceFrame.midX < capsuleBounds.midX {
-                #expect(visualBounds.minX >= capsuleBounds.minX + capsuleInset)
+            if StreamPageDotsView.physicalEdge(edge: edge, layoutDirection: direction) == .leading {
+                #expect(visualBounds.minX == capsuleBounds.minX)
+                #expect(visualBounds.maxX == capsuleBounds.minX + StreamPageDotsView.unreadEdgeBloomBandWidth)
             } else {
-                #expect(visualBounds.maxX <= capsuleBounds.maxX - capsuleInset)
+                #expect(visualBounds.maxX == capsuleBounds.maxX)
+                #expect(visualBounds.minX == capsuleBounds.maxX - StreamPageDotsView.unreadEdgeBloomBandWidth)
             }
         }
     }
@@ -664,12 +694,6 @@ struct StreamPageDotsViewTests {
 
     private static func rounded(_ value: CGFloat) -> CGFloat {
         (value * 100).rounded() / 100
-    }
-
-    private static func capsuleHorizontalInset(at y: CGFloat) -> CGFloat {
-        let radius = StreamPageDotsView.controlHeight / 2
-        let dy = abs(y - radius)
-        return radius - sqrt(max(0, (radius * radius) - (dy * dy)))
     }
 
     private static func streamPageDotsSource() throws -> String {

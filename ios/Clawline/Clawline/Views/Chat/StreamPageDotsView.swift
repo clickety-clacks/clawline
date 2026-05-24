@@ -47,8 +47,8 @@ struct StreamPageDotsView: View {
     static func unreadEdgeBloomOpacity(colorScheme: ColorScheme) -> Double {
         0.40
     }
-    private static let unreadEdgeBloomSourceSize = CGSize(width: 14, height: 9)
-    private static let unreadEdgeBloomBorderClearance: CGFloat = 9
+    static let unreadEdgeBloomBandWidth: CGFloat = 32
+    static let containedActiveGlowEndRadius: CGFloat = 26
 
     private var activeIndex: Int {
         sessionKeys.firstIndex(of: activeSessionKey) ?? 0
@@ -174,16 +174,11 @@ struct StreamPageDotsView: View {
         layoutDirection: LayoutDirection,
         capsuleBounds: CGRect
     ) -> CGRect {
-        let centerX = unreadEdgeBloomSourceCenterX(
+        unreadEdgeBloomVisualBounds(
             edge: edge,
             layoutDirection: layoutDirection,
-            capsuleBounds: capsuleBounds
-        )
-        return CGRect(
-            x: centerX - (unreadEdgeBloomSourceSize.width / 2),
-            y: capsuleBounds.midY - (unreadEdgeBloomSourceSize.height / 2),
-            width: unreadEdgeBloomSourceSize.width,
-            height: unreadEdgeBloomSourceSize.height
+            capsuleBounds: capsuleBounds,
+            colorScheme: .light
         )
     }
 
@@ -193,36 +188,36 @@ struct StreamPageDotsView: View {
         capsuleBounds: CGRect,
         colorScheme: ColorScheme
     ) -> CGRect {
-        unreadEdgeBloomSourceFrame(
+        let physicalEdge = physicalEdge(
             edge: edge,
-            layoutDirection: layoutDirection,
-            capsuleBounds: capsuleBounds
+            layoutDirection: layoutDirection
         )
-        .insetBy(
-            dx: -unreadEdgeBloomBlurRadius(colorScheme: colorScheme),
-            dy: -unreadEdgeBloomBlurRadius(colorScheme: colorScheme)
-        )
+        let width = min(unreadEdgeBloomBandWidth, capsuleBounds.width)
+        let x = physicalEdge == .leading ? capsuleBounds.minX : capsuleBounds.maxX - width
+        return CGRect(x: x, y: capsuleBounds.minY, width: width, height: capsuleBounds.height)
     }
 
-    private static func unreadEdgeBloomSourceCenterX(
+    static func physicalEdge(
         edge: HorizontalEdge,
-        layoutDirection: LayoutDirection,
-        capsuleBounds: CGRect
-    ) -> CGFloat {
-        let nearLeadingEdgeCenter = capsuleBounds.minX
-            + unreadEdgeBloomBorderClearance
-            + (unreadEdgeBloomSourceSize.width / 2)
-        let nearTrailingEdgeCenter = capsuleBounds.maxX
-            - unreadEdgeBloomBorderClearance
-            - (unreadEdgeBloomSourceSize.width / 2)
+        layoutDirection: LayoutDirection
+    ) -> HorizontalEdge {
         switch (edge, layoutDirection) {
         case (.leading, .leftToRight), (.trailing, .rightToLeft):
-            return nearLeadingEdgeCenter
+            return .leading
         case (.trailing, .leftToRight), (.leading, .rightToLeft):
-            return nearTrailingEdgeCenter
+            return .trailing
         @unknown default:
-            return edge == .leading ? nearLeadingEdgeCenter : nearTrailingEdgeCenter
+            return edge
         }
+    }
+
+    static func foregroundGlowEnabled(
+        isScrubbing: Bool,
+        isActive: Bool,
+        isCandidate: Bool,
+        showsSelectionRing: Bool
+    ) -> Bool {
+        isScrubbing && (isActive || isCandidate || showsSelectionRing)
     }
 
     static func targetControlWidth(totalSessionCount: Int, maxWidth: CGFloat?) -> CGFloat? {
@@ -374,11 +369,12 @@ struct StreamPageDotsView: View {
         return Color.clear
             .frame(width: capsuleBounds.width, height: capsuleBounds.height)
             .background {
-                unreadEdgeBloomOverlay(capsuleBounds: capsuleBounds)
-                    .frame(width: capsuleBounds.width, height: capsuleBounds.height)
-                    .blur(radius: Self.unreadEdgeBloomBlurRadius(colorScheme: colorScheme))
-                    .mask(Capsule())
-                    .allowsHitTesting(false)
+                ZStack {
+                    unreadEdgeBloomOverlay(capsuleBounds: capsuleBounds)
+                    containedActiveGlowOverlay(capsuleBounds: capsuleBounds)
+                }
+                .frame(width: capsuleBounds.width, height: capsuleBounds.height)
+                .allowsHitTesting(false)
             }
 #if !os(visionOS)
             .glassEffect(.regular.interactive(), in: Capsule())
@@ -584,6 +580,12 @@ struct StreamPageDotsView: View {
                 let isCandidate = index == scrubCandidateIndex
                 let showsSelectionRing = index == selectionRingIndex
                 let dotState = dotStateLookup(sessionKey)
+                let showsForegroundGlow = Self.foregroundGlowEnabled(
+                    isScrubbing: isScrubbing,
+                    isActive: isActive,
+                    isCandidate: isCandidate,
+                    showsSelectionRing: showsSelectionRing
+                )
                 let scale = Self.scrubMagnificationScale(
                     dotIndex: index,
                     virtualIndex: scrubVirtualIndex,
@@ -603,12 +605,12 @@ struct StreamPageDotsView: View {
                     .offset(y: verticalOffset)
                     .zIndex(scale)
                     .shadow(
-                        color: (isActive || isCandidate || showsSelectionRing) ? StreamDotColor.activeGlow(colorScheme: colorScheme) : .clear,
-                        radius: (isActive || isCandidate || showsSelectionRing) ? StreamDotColor.activeOuterGlowRadius(colorScheme: colorScheme) : 0
+                        color: showsForegroundGlow ? StreamDotColor.activeGlow(colorScheme: colorScheme) : .clear,
+                        radius: showsForegroundGlow ? StreamDotColor.activeOuterGlowRadius(colorScheme: colorScheme) : 0
                     )
                     .shadow(
-                        color: (isActive || isCandidate || showsSelectionRing) ? StreamDotColor.activeGlow(colorScheme: colorScheme) : .clear,
-                        radius: (isActive || isCandidate || showsSelectionRing) ? StreamDotColor.activeInnerGlowRadius(colorScheme: colorScheme) : 0
+                        color: showsForegroundGlow ? StreamDotColor.activeGlow(colorScheme: colorScheme) : .clear,
+                        radius: showsForegroundGlow ? StreamDotColor.activeInnerGlowRadius(colorScheme: colorScheme) : 0
                     )
             }
             if showsTrailingOverflow {
@@ -670,16 +672,53 @@ struct StreamPageDotsView: View {
         .frame(width: capsuleBounds.width, height: capsuleBounds.height)
     }
 
+    @ViewBuilder
+    private func containedActiveGlowOverlay(capsuleBounds: CGRect) -> some View {
+        if !isScrubbing,
+           let centerX = Self.dotCenterX(
+               for: activeIndex,
+               totalSessionCount: sessionKeys.count,
+               visibleDotIndices: visibleDotIndices,
+               fieldWidth: capsuleBounds.width
+           ) {
+            Capsule()
+                .fill(
+                    RadialGradient(
+                        colors: [
+                            StreamDotColor.activeGlow(colorScheme: colorScheme).opacity(colorScheme == .dark ? 0.28 : 0.22),
+                            StreamDotColor.activeGlow(colorScheme: colorScheme).opacity(colorScheme == .dark ? 0.14 : 0.10),
+                            .clear
+                        ],
+                        center: UnitPoint(
+                            x: min(1, max(0, centerX / max(capsuleBounds.width, 1))),
+                            y: 0.5
+                        ),
+                        startRadius: 1,
+                        endRadius: Self.containedActiveGlowEndRadius
+                    )
+                )
+                .frame(width: capsuleBounds.width, height: capsuleBounds.height)
+        }
+    }
+
     private func edgeWarningBloom(edge: HorizontalEdge, capsuleBounds: CGRect) -> some View {
-        let sourceFrame = Self.unreadEdgeBloomSourceFrame(
-            edge: edge,
-            layoutDirection: layoutDirection,
-            capsuleBounds: capsuleBounds
+        let physicalEdge = Self.physicalEdge(edge: edge, layoutDirection: layoutDirection)
+        return EdgeWarningBloomShape(
+            edge: physicalEdge,
+            bandWidth: Self.unreadEdgeBloomBandWidth
         )
-        return RoundedRectangle(cornerRadius: 5, style: .continuous)
-            .fill(warningBloomColor.opacity(Self.unreadEdgeBloomOpacity(colorScheme: colorScheme)))
-            .frame(width: sourceFrame.width, height: sourceFrame.height)
-            .position(x: sourceFrame.midX, y: sourceFrame.midY)
+        .fill(
+            LinearGradient(
+                colors: [
+                    warningBloomColor.opacity(Self.unreadEdgeBloomOpacity(colorScheme: colorScheme)),
+                    warningBloomColor.opacity(Self.unreadEdgeBloomOpacity(colorScheme: colorScheme) * 0.48),
+                    .clear
+                ],
+                startPoint: physicalEdge == .leading ? .leading : .trailing,
+                endPoint: physicalEdge == .leading ? .trailing : .leading
+            )
+        )
+        .frame(width: capsuleBounds.width, height: capsuleBounds.height)
     }
 
     static func scrubStartCandidateIndex(
@@ -903,6 +942,51 @@ struct StreamPageDotsView: View {
             width: diameter,
             height: diameter
         )
+    }
+}
+
+private struct EdgeWarningBloomShape: Shape {
+    let edge: HorizontalEdge
+    let bandWidth: CGFloat
+
+    func path(in rect: CGRect) -> Path {
+        let radius = rect.height / 2
+        let width = min(max(bandWidth, radius), rect.width)
+        var path = Path()
+
+        switch edge {
+        case .leading:
+            path.move(to: CGPoint(x: rect.minX + width, y: rect.minY))
+            path.addLine(to: CGPoint(x: rect.minX + radius, y: rect.minY))
+            path.addCurve(
+                to: CGPoint(x: rect.minX, y: rect.midY),
+                control1: CGPoint(x: rect.minX + (radius * 0.45), y: rect.minY),
+                control2: CGPoint(x: rect.minX, y: rect.minY + (radius * 0.45))
+            )
+            path.addCurve(
+                to: CGPoint(x: rect.minX + radius, y: rect.maxY),
+                control1: CGPoint(x: rect.minX, y: rect.maxY - (radius * 0.45)),
+                control2: CGPoint(x: rect.minX + (radius * 0.45), y: rect.maxY)
+            )
+            path.addLine(to: CGPoint(x: rect.minX + width, y: rect.maxY))
+        case .trailing:
+            path.move(to: CGPoint(x: rect.maxX - width, y: rect.minY))
+            path.addLine(to: CGPoint(x: rect.maxX - radius, y: rect.minY))
+            path.addCurve(
+                to: CGPoint(x: rect.maxX, y: rect.midY),
+                control1: CGPoint(x: rect.maxX - (radius * 0.45), y: rect.minY),
+                control2: CGPoint(x: rect.maxX, y: rect.minY + (radius * 0.45))
+            )
+            path.addCurve(
+                to: CGPoint(x: rect.maxX - radius, y: rect.maxY),
+                control1: CGPoint(x: rect.maxX, y: rect.maxY - (radius * 0.45)),
+                control2: CGPoint(x: rect.maxX - (radius * 0.45), y: rect.maxY)
+            )
+            path.addLine(to: CGPoint(x: rect.maxX - width, y: rect.maxY))
+        }
+
+        path.closeSubpath()
+        return path
     }
 }
 

@@ -3696,6 +3696,7 @@ final class ChatViewModel: ChatViewModelHosting {
                 fallbackModels: incoming.display.fallbackModels,
                 provider: incoming.display.provider,
                 harness: incoming.display.harness,
+                authMode: incoming.display.authMode,
                 reasoningLevel: resolvedReasoningLevel,
                 thinkingLevel: resolvedThinkingLevel,
                 fastMode: incoming.display.fastMode ?? cached.display.fastMode,

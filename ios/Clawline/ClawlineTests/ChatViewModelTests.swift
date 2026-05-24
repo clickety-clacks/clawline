@@ -4200,6 +4200,68 @@ struct ChatViewModelTests {
         #expect(status?.display.thinkingLevel == "high")
     }
 
+    @Test("Session status refresh keeps incoming auth mode when preserving sticky fields")
+    @MainActor
+    func sessionStatusRefreshKeepsIncomingAuthModeWhenPreservingStickyFields() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        chatService.streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+        ]
+        chatService.sessionStatusBySessionKey[personalSessionKey] = makeSessionStatus(
+            sessionKey: personalSessionKey,
+            state: .idle,
+            provider: "openai",
+            model: "gpt-5.5",
+            thinkingLevel: "high",
+            queueDepth: 0
+        )
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
+
+        for _ in 0..<50 {
+            if viewModel.sessionStatus(for: personalSessionKey)?.display.thinkingLevel == "high" {
+                break
+            }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        chatService.sessionStatusBySessionKey[personalSessionKey] = makeSessionStatus(
+            sessionKey: personalSessionKey,
+            state: .idle,
+            provider: "openai",
+            model: "gpt-5.5",
+            thinkingLevel: nil,
+            authMode: "oauth",
+            queueDepth: 0
+        )
+        chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
+
+        for _ in 0..<50 {
+            if viewModel.sessionStatus(for: personalSessionKey)?.display.authMode == "oauth" {
+                break
+            }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+
+        let status = viewModel.sessionStatus(for: personalSessionKey)
+        #expect(status?.display.authMode == "oauth")
+        #expect(status?.display.thinkingLevel == "high")
+    }
+
     @Test("Session control applies typed provider response without chat text")
     @MainActor
     func sessionControlAppliesTypedProviderResponse() async throws {
@@ -5937,6 +5999,7 @@ private func makeSessionStatus(
     model: String?,
     reasoningLevel: String? = nil,
     thinkingLevel: String?,
+    authMode: String? = nil,
     fastMode: Bool? = nil,
     queueDepth: Int,
     canCancelCurrentRun: Bool = false
@@ -5948,6 +6011,7 @@ private func makeSessionStatus(
             fallbackModels: nil,
             provider: provider,
             harness: nil,
+            authMode: authMode,
             reasoningLevel: reasoningLevel,
             thinkingLevel: thinkingLevel,
             fastMode: fastMode,

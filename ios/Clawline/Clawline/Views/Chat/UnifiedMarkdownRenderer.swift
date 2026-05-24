@@ -290,7 +290,7 @@ enum UnifiedMarkdownRenderer {
 
         annotateDetectedLinks(nsAttributed)
         sanitizeLinkAttributes(nsAttributed)
-        _ = TextLinkURLTemplateRules.applyDefaultRules(to: nsAttributed)
+        _ = TextLinkURLTemplateRules.applyConfiguredRules(to: nsAttributed)
         applyHeadingStyles(markdown: markdownForRender, nsAttributed: nsAttributed, baseFont: baseFont)
         if let markHighlightColor {
             applyMarkHighlights(nsAttributed: nsAttributed, color: markHighlightColor)

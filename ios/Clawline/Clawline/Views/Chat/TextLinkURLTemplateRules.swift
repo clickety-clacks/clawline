@@ -2,13 +2,13 @@ import Foundation
 import OSLog
 import UIKit
 
-struct TextLinkURLTemplateRule: Equatable {
-    let id: String
-    let enabled: Bool
-    let pattern: String
-    let urlTemplate: String
+struct TextLinkURLTemplateRule: Codable, Equatable, Identifiable {
+    var id: String
+    var enabled: Bool
+    var pattern: String
+    var urlTemplate: String
 
-    static let defaultJanus = TextLinkURLTemplateRule(
+    static let janusTrackerExample = TextLinkURLTemplateRule(
         id: "janus-ticket",
         enabled: true,
         pattern: #"\bT([0-9]+)\b"#,
@@ -29,7 +29,7 @@ struct TextLinkURLTemplateDiagnostic: Equatable {
 
 enum TextLinkURLTemplateRules {
     static let generatedRuleIDAttribute = NSAttributedString.Key("co.clicketyclacks.Clawline.generatedTextLinkRuleID")
-    static var defaultRules: [TextLinkURLTemplateRule] = [.defaultJanus] {
+    static var configuredRules: [TextLinkURLTemplateRule] = [] {
         didSet { configurationVersion += 1 }
     }
     static var diagnosticSink: ((TextLinkURLTemplateDiagnostic) -> Void)?
@@ -40,8 +40,8 @@ enum TextLinkURLTemplateRules {
         String(configurationVersion)
     }
 
-    static func applyDefaultRules(to attributed: NSMutableAttributedString) -> [TextLinkURLTemplateDiagnostic] {
-        apply(defaultRules, to: attributed)
+    static func applyConfiguredRules(to attributed: NSMutableAttributedString) -> [TextLinkURLTemplateDiagnostic] {
+        apply(configuredRules, to: attributed)
     }
 
     @discardableResult
@@ -84,6 +84,36 @@ enum TextLinkURLTemplateRules {
         return attributed.attribute(generatedRuleIDAttribute, at: characterRange.location, effectiveRange: nil) != nil
     }
 
+    static func validationMessage(for rule: TextLinkURLTemplateRule) -> String? {
+        guard rule.enabled else { return nil }
+        guard let regex = try? NSRegularExpression(pattern: rule.pattern) else {
+            return "Rule \(rule.id) has an invalid regex pattern."
+        }
+
+        for placeholder in placeholders(in: rule.urlTemplate) {
+            if placeholder == "match" || placeholder == "0" {
+                continue
+            }
+            guard let index = Int(placeholder), index <= regex.numberOfCaptureGroups else {
+                return "Rule \(rule.id) has an unresolved placeholder."
+            }
+        }
+
+        var sampleURLString = rule.urlTemplate
+        for placeholderMatch in placeholderMatches(in: rule.urlTemplate).reversed() {
+            sampleURLString = (sampleURLString as NSString).replacingCharacters(
+                in: placeholderMatch.range,
+                with: "T1135"
+            )
+        }
+        guard let url = URL(string: sampleURLString),
+              url.scheme != nil,
+              url.host != nil else {
+            return "Rule \(rule.id) does not generate an absolute URL."
+        }
+        return nil
+    }
+
     static func containsGeneratedLink(to url: URL, in attributed: NSAttributedString) -> Bool {
         let fullRange = NSRange(location: 0, length: attributed.length)
         var found = false
@@ -104,18 +134,6 @@ enum TextLinkURLTemplateRules {
             stop.pointee = true
         }
         return found
-    }
-
-    static func shouldOpenInInternalBrowser(_ url: URL) -> Bool {
-        guard url.scheme?.lowercased() == "https",
-              url.host?.lowercased() == "tars.tail4105e8.ts.net",
-              url.port == 19443,
-              url.path == "/tracker.html",
-              let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
-              let id = components.queryItems?.first(where: { $0.name == "id" })?.value else {
-            return false
-        }
-        return id.range(of: #"^T[0-9]+$"#, options: .regularExpression) != nil
     }
 
     private static func rangeIsUnlinked(_ range: NSRange, in attributed: NSAttributedString) -> Bool {
@@ -151,13 +169,8 @@ enum TextLinkURLTemplateRules {
         rule: TextLinkURLTemplateRule
     ) -> GeneratedURLResult {
         var output = rule.urlTemplate
-        let placeholderRegex = try? NSRegularExpression(pattern: #"\{([A-Za-z_][A-Za-z0-9_]*|[0-9]+)\}"#)
         let template = rule.urlTemplate as NSString
-        let matches = placeholderRegex?.matches(
-            in: rule.urlTemplate,
-            options: [],
-            range: NSRange(location: 0, length: template.length)
-        ) ?? []
+        let matches = placeholderMatches(in: rule.urlTemplate)
 
         for placeholderMatch in matches.reversed() {
             let key = template.substring(with: placeholderMatch.range(at: 1))
@@ -198,5 +211,20 @@ enum TextLinkURLTemplateRules {
         var allowed = CharacterSet.alphanumerics
         allowed.insert(charactersIn: "-._~")
         return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? ""
+    }
+
+    private static func placeholders(in template: String) -> [String] {
+        let nsTemplate = template as NSString
+        return placeholderMatches(in: template).map { nsTemplate.substring(with: $0.range(at: 1)) }
+    }
+
+    private static func placeholderMatches(in template: String) -> [NSTextCheckingResult] {
+        let placeholderRegex = try? NSRegularExpression(pattern: #"\{([A-Za-z_][A-Za-z0-9_]*|[0-9]+)\}"#)
+        let nsTemplate = template as NSString
+        return placeholderRegex?.matches(
+            in: template,
+            options: [],
+            range: NSRange(location: 0, length: nsTemplate.length)
+        ) ?? []
     }
 }

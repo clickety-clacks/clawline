@@ -5,10 +5,23 @@ import UIKit
 
 @Suite(.serialized)
 struct TextLinkURLTemplateRulesTests {
-    @Test("V1135-01: default Janus rule links T-number tokens")
+    @Test("V1135-01: fresh installs have no configured text link rules")
     @MainActor
-    func defaultJanusRuleLinksTicketTokens() throws {
-        let rendered = try #require(makeRendered("Fix T123 and T1135, not t1135, AT1135, or T1135abc."))
+    func freshInstallsHaveNoConfiguredTextLinkRules() throws {
+        let rendered = try withConfiguredRules([]) {
+            try #require(makeRendered("Fix T123 and T1135."))
+        }
+
+        #expect(linkTarget("T123", in: rendered) == nil)
+        #expect(linkTarget("T1135", in: rendered) == nil)
+    }
+
+    @Test("V1135-01: user-created Janus rule links T-number tokens")
+    @MainActor
+    func userCreatedJanusRuleLinksTicketTokens() throws {
+        let rendered = try withConfiguredRules([.janusTrackerExample]) {
+            try #require(makeRendered("Fix T123 and T1135, not t1135, AT1135, or T1135abc."))
+        }
 
         #expect(linkTarget("T123", in: rendered)?.absoluteString == "https://tars.tail4105e8.ts.net:19443/tracker.html?id=T123")
         #expect(linkTarget("T1135", in: rendered)?.absoluteString == "https://tars.tail4105e8.ts.net:19443/tracker.html?id=T1135")
@@ -39,7 +52,9 @@ struct TextLinkURLTemplateRulesTests {
     @Test("V1135-01: explicit links keep their markdown destinations")
     @MainActor
     func explicitLinksKeepTheirDestinations() throws {
-        let rendered = try #require(makeRendered("[T1135](https://example.com/original) and T123"))
+        let rendered = try withConfiguredRules([.janusTrackerExample]) {
+            try #require(makeRendered("[T1135](https://example.com/original) and T123"))
+        }
 
         #expect(linkTarget("T1135", in: rendered)?.absoluteString == "https://example.com/original")
         #expect(linkTarget("T123", in: rendered)?.absoluteString == "https://tars.tail4105e8.ts.net:19443/tracker.html?id=T123")
@@ -48,7 +63,9 @@ struct TextLinkURLTemplateRulesTests {
     @Test("V1135-01: explicit links to generated URLs are not treated as generated")
     @MainActor
     func explicitLinksToGeneratedURLsAreNotTreatedAsGenerated() throws {
-        let rendered = try #require(makeRendered("[ticket](https://tars.tail4105e8.ts.net:19443/tracker.html?id=T1135) and T1135"))
+        let rendered = try withConfiguredRules([.janusTrackerExample]) {
+            try #require(makeRendered("[ticket](https://tars.tail4105e8.ts.net:19443/tracker.html?id=T1135) and T1135"))
+        }
         let explicitRange = range("ticket", in: rendered)
         let generatedRange = range("T1135", in: rendered)
         let sharedURL = try #require(linkTarget("ticket", in: rendered))
@@ -89,18 +106,31 @@ struct TextLinkURLTemplateRulesTests {
         #expect(linkTarget("T1135", in: invalidURL) == nil)
     }
 
+    @Test("V1135-01: settings validation exposes visible invalid rule messages")
+    func settingsValidationExposesInvalidRuleMessages() {
+        let invalidPattern = TextLinkURLTemplateRule(id: "bad-pattern", enabled: true, pattern: #"("#, urlTemplate: "https://example.com/{match}")
+        let badPlaceholder = TextLinkURLTemplateRule(id: "bad-placeholder", enabled: true, pattern: #"T([0-9]+)"#, urlTemplate: "https://example.com/{2}")
+        let badURL = TextLinkURLTemplateRule(id: "bad-url", enabled: true, pattern: #"T([0-9]+)"#, urlTemplate: "not a url/{match}")
+        let valid = TextLinkURLTemplateRule.janusTrackerExample
+
+        #expect(TextLinkURLTemplateRules.validationMessage(for: invalidPattern)?.contains("bad-pattern") == true)
+        #expect(TextLinkURLTemplateRules.validationMessage(for: badPlaceholder)?.contains("bad-placeholder") == true)
+        #expect(TextLinkURLTemplateRules.validationMessage(for: badURL)?.contains("bad-url") == true)
+        #expect(TextLinkURLTemplateRules.validationMessage(for: valid) == nil)
+    }
+
     @Test("V1135-01: renderer path exposes invalid rule diagnostics")
     @MainActor
     func rendererPathExposesInvalidRuleDiagnostics() {
         var captured: [TextLinkURLTemplateDiagnostic] = []
-        let originalRules = TextLinkURLTemplateRules.defaultRules
+        let originalRules = TextLinkURLTemplateRules.configuredRules
         let originalSink = TextLinkURLTemplateRules.diagnosticSink
-        TextLinkURLTemplateRules.defaultRules = [
+        TextLinkURLTemplateRules.configuredRules = [
             TextLinkURLTemplateRule(id: "renderer-bad-pattern", enabled: true, pattern: #"("#, urlTemplate: "https://example.com/{match}")
         ]
         TextLinkURLTemplateRules.diagnosticSink = { captured.append($0) }
         defer {
-            TextLinkURLTemplateRules.defaultRules = originalRules
+            TextLinkURLTemplateRules.configuredRules = originalRules
             TextLinkURLTemplateRules.diagnosticSink = originalSink
         }
 
@@ -113,15 +143,18 @@ struct TextLinkURLTemplateRulesTests {
     @Test("V1135-01: transcript and notification renderers expose the same generated link")
     @MainActor
     func secondarySurfaceUsesSameGeneratedLink() throws {
-        let transcript = try #require(makeRendered("See T1135."))
-        let notificationBlocks = CrossChatNotificationMarkdownRenderer.renderBlocks(
-            content: "See T1135.",
-            messageID: "t1135_notification",
-            baseFont: .systemFont(ofSize: 15),
-            inkColor: .label,
-            lineSpacing: 0,
-            isDark: false
-        )
+        let (transcript, notificationBlocks) = try withConfiguredRules([.janusTrackerExample]) {
+            let transcript = try #require(makeRendered("See T1135."))
+            let notificationBlocks = CrossChatNotificationMarkdownRenderer.renderBlocks(
+                content: "See T1135.",
+                messageID: "t1135_notification",
+                baseFont: .systemFont(ofSize: 15),
+                inkColor: .label,
+                lineSpacing: 0,
+                isDark: false
+            )
+            return (transcript, notificationBlocks)
+        }
         guard case .attributedText(let notification) = notificationBlocks.first else {
             Issue.record("Expected attributed notification text")
             return
@@ -133,7 +166,9 @@ struct TextLinkURLTemplateRulesTests {
     @Test("V1135-01: generated text links suppress external text-view activation")
     @MainActor
     func generatedTextLinksSuppressExternalActivation() throws {
-        let rendered = try #require(makeRendered("See T1135 and https://example.com."))
+        let rendered = try withConfiguredRules([.janusTrackerExample]) {
+            try #require(makeRendered("See T1135 and https://example.com."))
+        }
         let textView = UITextView()
         textView.attributedText = rendered
         let bubble = MessageBubbleUIKitView()
@@ -153,7 +188,49 @@ struct TextLinkURLTemplateRulesTests {
         #expect(!bubble.textView(textView, shouldInteractWith: generatedURL, in: range("T1135", in: rendered), interaction: .invokeDefaultAction))
         #expect(bubble.textView(textView, shouldInteractWith: explicitURL, in: range("https://example.com", in: rendered), interaction: .invokeDefaultAction))
         #expect(openedGeneratedURL == generatedURL)
-        #expect(TextLinkURLTemplateRules.shouldOpenInInternalBrowser(generatedURL))
+    }
+
+    @Test("V1135-01: settings can add many rules and delete exactly one after confirmation")
+    @MainActor
+    func settingsCanManageTextLinkRules() {
+        let settings = SettingsManager()
+        let originalRules = settings.textLinkURLTemplateRules
+        defer { settings.textLinkURLTemplateRules = originalRules }
+        settings.textLinkURLTemplateRules = []
+
+        for index in 0..<12 {
+            settings.addTextLinkURLTemplateRule()
+            settings.textLinkURLTemplateRules[index].pattern = #"T\#(index)"#
+            settings.textLinkURLTemplateRules[index].urlTemplate = "https://example.com/\(index)/{match}"
+        }
+
+        let deletedID = settings.textLinkURLTemplateRules[5].id
+        let preservedID = settings.textLinkURLTemplateRules[6].id
+        settings.deleteTextLinkURLTemplateRule(id: deletedID)
+
+        #expect(settings.textLinkURLTemplateRules.count == 11)
+        #expect(!settings.textLinkURLTemplateRules.contains { $0.id == deletedID })
+        #expect(settings.textLinkURLTemplateRules.contains { $0.id == preservedID })
+        #expect(TextLinkURLTemplateRules.configuredRules == settings.textLinkURLTemplateRules)
+
+        settings.resetToDefaults()
+        #expect(settings.textLinkURLTemplateRules.count == 11)
+    }
+
+    @Test("V1135-01: settings UI exposes add, delete, and confirmation controls")
+    func settingsUIExposesRuleManagementControls() throws {
+        let sourcePath = URL(filePath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appending(path: "Clawline/Settings/SettingsView.swift")
+        let source = try String(contentsOf: sourcePath, encoding: .utf8)
+
+        #expect(source.contains("ForEach($settings.textLinkURLTemplateRules)"))
+        #expect(source.contains("Label(\"Add Text Link Rule\", systemImage: \"plus\")"))
+        #expect(source.contains("Image(systemName: \"xmark.circle\")"))
+        #expect(source.contains(".confirmationDialog("))
+        #expect(source.contains("settings.deleteTextLinkURLTemplateRule(id: rulePendingDeletion.id)"))
+        #expect(source.contains("TextLinkURLTemplateRules.validationMessage(for: rule)"))
     }
 
     private func makeRendered(_ markdown: String) -> NSAttributedString? {
@@ -188,5 +265,13 @@ struct TextLinkURLTemplateRulesTests {
     private func isInvalidGeneratedURL(_ kind: TextLinkURLTemplateDiagnostic.Kind?) -> Bool {
         if case .invalidGeneratedURL = kind { return true }
         return false
+    }
+
+    @MainActor
+    private func withConfiguredRules<T>(_ rules: [TextLinkURLTemplateRule], _ body: () throws -> T) rethrows -> T {
+        let originalRules = TextLinkURLTemplateRules.configuredRules
+        TextLinkURLTemplateRules.configuredRules = rules
+        defer { TextLinkURLTemplateRules.configuredRules = originalRules }
+        return try body()
     }
 }

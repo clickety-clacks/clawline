@@ -341,7 +341,7 @@ struct WatchConnectionPresentationStateTests {
         )
 
         voiceSession.startTap()
-        try await Task.sleep(for: .milliseconds(50))
+        try await waitForVoiceError(voiceSession)
 
         #expect(voiceSession.voiceState == .error)
         #expect(voiceSession.errorMessage == "Soniox connection failed during startup. Try again from a stronger Watch network.")
@@ -370,7 +370,7 @@ struct WatchConnectionPresentationStateTests {
         )
 
         voiceSession.startTap()
-        try await Task.sleep(for: .milliseconds(50))
+        try await waitForVoiceError(voiceSession)
 
         #expect(voiceSession.voiceState == .error)
         #expect(voiceSession.errorMessage == "Watch network is unavailable for Soniox. Connect Watch to Wi-Fi or cellular and try again.")
@@ -397,7 +397,7 @@ struct WatchConnectionPresentationStateTests {
         )
 
         voiceSession.startTap()
-        try await Task.sleep(for: .milliseconds(50))
+        try await waitForVoiceError(voiceSession)
 
         #expect(voiceSession.voiceState == .error)
         #expect(voiceSession.errorMessage == "Soniox connection timed out. Check the Watch network and try again.")
@@ -422,7 +422,7 @@ struct WatchConnectionPresentationStateTests {
         )
 
         voiceSession.startTap()
-        try await Task.sleep(for: .milliseconds(50))
+        try await waitForVoiceError(voiceSession)
 
         #expect(voiceSession.voiceState == .error)
         #expect(voiceSession.errorMessage == "Soniox rejected the synced key. Open Clawline on iPhone and check voice settings.")
@@ -715,6 +715,17 @@ struct WatchConnectionPresentationStateTests {
         #expect(!handler.contains("cancelCurrentSpeech(clearQueue: true)"))
     }
 
+}
+
+@MainActor
+private func waitForVoiceError(_ voiceSession: WatchVoiceSession, attempts: Int = 80) async throws {
+    for _ in 0..<attempts {
+        if voiceSession.voiceState == .error {
+            return
+        }
+        try await Task.sleep(for: .milliseconds(25))
+    }
+    Issue.record("Timed out waiting for voice error; current state: \(String(describing: voiceSession.voiceState))")
 }
 
 private final class FailingWatchVoiceStreamingClient: WatchVoiceStreaming {

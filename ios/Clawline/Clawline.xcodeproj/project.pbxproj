@@ -15,7 +15,7 @@
 		27ST00102F7B000000A1B2C3 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = 27ST00022F7B000000A1B2C3 /* SwiftTerm */; };
 		F679AC8CEBF54DF08B2AB80D /* HighlightSwift in Frameworks */ = {isa = PBXBuildFile; productRef = 27HL00022F1000000073BF45 /* HighlightSwift */; };
 		F67ST0102F7B000000A1B2C3 /* SwiftTerm in Frameworks */ = {isa = PBXBuildFile; productRef = 27ST00022F7B000000A1B2C3 /* SwiftTerm */; };
-		CCAA00012F0F24F30073BF45 /* Clawline Watch Watch App.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = 274F7BA82F0F24F20073BF45 /* Clawline Watch Watch App.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		CCAA00012F0F24F30073BF45 /* Clawline Watch Watch App.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = 274F7BA82F0F24F20073BF45 /* Clawline Watch Watch App.app */; platformFilter = ios; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -718,6 +718,7 @@
 		};
 		CCAA00042F0F24F30073BF45 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
+			platformFilter = ios;
 			target = 274F7BA72F0F24F20073BF45 /* Clawline Watch Watch App */;
 			targetProxy = CCAA00032F0F24F30073BF45 /* PBXContainerItemProxy */;
 		};

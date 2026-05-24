@@ -103,6 +103,128 @@ struct BubbleScrollTests {
         #expect(measurementDetectors.allSatisfy { $0.isEmpty })
     }
 
+    @Test("BubbleSizingV2 short bubbles honor the plan min width instead of the legacy 120pt floor")
+    @MainActor
+    func bubbleSizingV2ShortBubbleUsesPlanMinWidthConstraint() {
+        let metrics = ChatFlowTheme.Metrics(isCompact: false)
+        let message = Message(
+            id: "bubble-v2-min-width",
+            role: .assistant,
+            content: "Short",
+            timestamp: Date(),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: "server:personal"
+        )
+        let presentation = buildPresentation(message, metrics: metrics, enableLinkPreviews: false)
+        let sizeClass = MessageFlowRules.sizeClass(for: presentation)
+        let env = BubbleSizingV2.Environment(
+            containerWidth: 320,
+            containerHeight: 640,
+            singleLinkContainerHeight: 640,
+            topInset: 0,
+            bottomInset: 0,
+            truncationBottomInset: 0,
+            isVisionOS: false,
+            metricsFingerprint: BubbleSizingV2.metricsFingerprint(metrics: metrics, traitCollection: UITraitCollection())
+        )
+        let heightPolicy = BubbleSizingV2.BubbleHeightPolicy.resolve(
+            metrics: metrics,
+            env: env,
+            isSingleLinkPreview: false,
+            prefersScreenAwareHeightCap: false,
+            allowsOuterScroll: false
+        )
+        let planMaxWidth: CGFloat = 200
+        let planMinWidth: CGFloat = 40
+        let plan = BubbleSizingV2.Plan(
+            messageId: message.id,
+            presentationFingerprint: 1,
+            sizeClass: sizeClass,
+            isSingleLinkPreview: false,
+            isWide: false,
+            maxWidth: planMaxWidth,
+            minWidth: planMinWidth,
+            heightPolicy: heightPolicy,
+            allowsOuterScroll: false,
+            linkPreviewURL: nil
+        )
+        let layoutState = BubbleSizingV2.LayoutState(
+            plan: plan,
+            measurement: BubbleSizingV2.Measurement(
+                measuredCellSize: CGSize(width: planMaxWidth, height: 72),
+                measuredBubbleWidth: planMaxWidth,
+                contentHeight: 24,
+                chromeHeight: 48,
+                outerScrollEnabled: false,
+                outerScrollViewportHeight: heightPolicy.heightCap,
+                isFinal: true
+            ),
+            linkPreviewCacheKey: nil,
+            linkPreviewEstimatedHeight: nil,
+            linkPreviewMinHeight: 40,
+            linkPreviewMaxHeight: heightPolicy.heightCap
+        )
+
+        let bubble = MessageBubbleUIKitView(frame: CGRect(x: 0, y: 0, width: planMaxWidth, height: 1))
+        bubble.configure(
+            message: message,
+            presentation: presentation,
+            sizeClass: sizeClass,
+            metrics: metrics,
+            maxWidth: planMaxWidth,
+            bubbleHeightPolicy: heightPolicy,
+            bubbleSizingV2: layoutState,
+            showsHeader: false,
+            paddingScale: 1,
+            minWidthOverride: nil,
+            maxWidthOverride: nil,
+            useContinuousCorners: true,
+            isDark: false,
+            onRequestExpand: nil,
+            onRequestLayout: nil,
+            onInteractiveCallback: nil
+        )
+
+        let preferred = bubble.preferredWidth(maxWidth: planMaxWidth, minWidth: planMinWidth)
+        let measured = bubble.systemLayoutSizeFitting(
+            CGSize(width: preferred, height: UIView.layoutFittingCompressedSize.height),
+            withHorizontalFittingPriority: .required,
+            verticalFittingPriority: .fittingSizeLevel
+        )
+
+        #expect(preferred >= planMinWidth)
+        #expect(preferred < 120)
+        #expect(abs(measured.width - preferred) < 0.5)
+    }
+
+    @Test("BubbleSizingV2 live short-bubble remeasure keeps plan min width below legacy floor")
+    func bubbleSizingV2LiveRemeasureUsesPlanMinWidth() {
+        let abovePlanMin = MessageFlowCollectionViewController.enforcedLiveMeasuredWidth(
+            sizeClass: .short,
+            measuredWidth: 52,
+            maxWidth: 88,
+            minWidth: 40
+        )
+        let belowPlanMin = MessageFlowCollectionViewController.enforcedLiveMeasuredWidth(
+            sizeClass: .short,
+            measuredWidth: 20,
+            maxWidth: 88,
+            minWidth: 40
+        )
+        let mediumWidth = MessageFlowCollectionViewController.enforcedLiveMeasuredWidth(
+            sizeClass: .medium,
+            measuredWidth: 52,
+            maxWidth: 88,
+            minWidth: 40
+        )
+
+        #expect(abovePlanMin == 52)
+        #expect(belowPlanMin == 40)
+        #expect(mediumWidth == 88)
+    }
+
     @Test("T047/T046: Overflow-to-fit transition clears stale inner offset and fade state")
     @MainActor
     func overflowTransitionResetsOffsetAndFade() {

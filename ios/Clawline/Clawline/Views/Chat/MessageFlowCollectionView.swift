@@ -2340,6 +2340,18 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         return Array(messageIDs[next...])
     }
 
+    static func enforcedLiveMeasuredWidth(
+        sizeClass: MessageSizeClass,
+        measuredWidth: CGFloat,
+        maxWidth: CGFloat,
+        minWidth: CGFloat
+    ) -> CGFloat {
+        let effectiveMaxWidth = max(maxWidth, minWidth)
+        return (sizeClass == .short)
+            ? min(effectiveMaxWidth, max(minWidth, measuredWidth))
+            : effectiveMaxWidth
+    }
+
     static func shouldScheduleBottomFallbackAfterApply(
         hasAuthoritativeRestoreTarget: Bool,
         restorePhaseIsNone: Bool,
@@ -3848,7 +3860,10 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         if prefersWideWidth {
             preferredWidth = effectiveMaxWidth
         } else if sizeClass == .short {
-            preferredWidth = uiKitBubbleSizer.preferredWidth(maxWidth: effectiveMaxWidth)
+            preferredWidth = uiKitBubbleSizer.preferredWidth(
+                maxWidth: effectiveMaxWidth,
+                minWidth: minWidthOverride ?? 120
+            )
         } else {
             preferredWidth = effectiveMaxWidth
         }
@@ -4111,6 +4126,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             bubbleHeightPolicy: plan.heightPolicy,
             truncationHeightOverride: plan.heightPolicy.v1TruncationHeightOverride,
             showsHeader: showsHeader,
+            minWidthOverride: plan.minWidth,
             onRequestExpand: nil,
             onRequestLayout: nil,
             onInteractiveCallback: nil
@@ -4119,7 +4135,10 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         let measuredBubbleWidth: CGFloat = {
             if plan.isWide { return plan.maxWidth }
             if plan.sizeClass == .short {
-                let preferred = uiKitBubbleSizer.preferredWidth(maxWidth: plan.maxWidth)
+                let preferred = uiKitBubbleSizer.preferredWidth(
+                    maxWidth: plan.maxWidth,
+                    minWidth: plan.minWidth
+                )
                 return BubbleSizingV2.clamp(preferred, plan.minWidth, plan.maxWidth)
             }
             return plan.maxWidth
@@ -4171,6 +4190,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             truncationHeightOverride: plan.heightPolicy.v1TruncationHeightOverride,
             bubbleSizingV2: provisional1,
             showsHeader: showsHeader,
+            minWidthOverride: plan.minWidth,
             onRequestExpand: nil,
             onRequestLayout: nil,
             onInteractiveCallback: nil
@@ -4213,6 +4233,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             truncationHeightOverride: plan.heightPolicy.v1TruncationHeightOverride,
             bubbleSizingV2: provisional2,
             showsHeader: showsHeader,
+            minWidthOverride: plan.minWidth,
             onRequestExpand: nil,
             onRequestLayout: nil,
             onInteractiveCallback: nil
@@ -4966,28 +4987,46 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         let metrics = ChatFlowTheme.Metrics(isCompact: isCompact)
         let presentation = viewModel.presentation(for: message, metrics: metrics)
         let sizeClass = MessageFlowRules.sizeClass(for: presentation)
-        let maxWidth = maxItemWidth(
-            for: sizeClass,
-            message: message,
-            presentation: presentation,
-            metrics: metrics,
-            containerWidth: effectiveContentWidth(metrics: metrics)
-        )
         let env = bubbleSizingV2Environment(metrics: metrics)
-        let bubbleHeightPolicy = bubbleHeightPolicyForPresentation(
-            presentation: presentation,
-            metrics: metrics,
-            env: env,
-            allowsOuterScroll: sizeClass == .long
-        )
-        let minWidth: CGFloat = 120
+        let maxWidth: CGFloat
+        let minWidth: CGFloat
+        let bubbleHeightPolicy: BubbleSizingV2.BubbleHeightPolicy
+        if bubbleSizingV2Enabled {
+            let plan = bubbleSizingV2Plan(
+                message: message,
+                presentation: presentation,
+                metrics: metrics,
+                env: env,
+                showsHeader: !shouldHideHeader(for: message, presentation: presentation)
+            )
+            maxWidth = plan.maxWidth
+            minWidth = plan.minWidth
+            bubbleHeightPolicy = plan.heightPolicy
+        } else {
+            maxWidth = maxItemWidth(
+                for: sizeClass,
+                message: message,
+                presentation: presentation,
+                metrics: metrics,
+                containerWidth: effectiveContentWidth(metrics: metrics)
+            )
+            minWidth = 120
+            bubbleHeightPolicy = bubbleHeightPolicyForPresentation(
+                presentation: presentation,
+                metrics: metrics,
+                env: env,
+                allowsOuterScroll: sizeClass == .long
+            )
+        }
         // #63: Non-short bubbles should never shrink below their size-class max width.
         // Live-cell remeasurement is only needed to correct heights (e.g. link preview WKWebView).
         // Allow .short to remain content-fit; enforce stable widths for .medium/.long.
-        let effectiveMaxWidth = max(maxWidth, minWidth)
-        let enforcedWidth: CGFloat = (sizeClass == .short)
-            ? min(effectiveMaxWidth, max(minWidth, measuredSize.width))
-            : effectiveMaxWidth
+        let enforcedWidth = Self.enforcedLiveMeasuredWidth(
+            sizeClass: sizeClass,
+            measuredWidth: measuredSize.width,
+            maxWidth: maxWidth,
+            minWidth: minWidth
+        )
         let clamped = CGSize(
             // #63: Mirror the initial sizing path's width floor so a transient near-zero measurement
             // (e.g., from a 0pt-wide live cell) cannot permanently lock a bubble to an invalid width.

@@ -7885,6 +7885,12 @@ private struct CrossChatNotificationKeyboardShortcuts: View {
                         .keyboardShortcut(KeyEquivalent(Character("\(index)")), modifiers: [.command, .shift, .option])
                 }
                 Button("") {
+                    routeNotificationStackShortcut(.notificationDismissAll) {
+                        onDismissAll()
+                    }
+                }
+                    .keyboardShortcut("-", modifiers: [.command, .shift, .option])
+                Button("") {
                     routeNotificationStackShortcut(.notificationToggleDock) {
                         onToggleDock()
                     }

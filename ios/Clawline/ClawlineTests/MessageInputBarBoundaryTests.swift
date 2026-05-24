@@ -145,8 +145,20 @@ struct MessageInputBarBoundaryTests {
         ) == stackWidth - peekWidth)
     }
 
-    @Test("T357 transcript collection frame stays inside landscape safe-area host")
-    func transcriptCollectionFrameStaysInsideLandscapeSafeAreaHost() {
+    @Test("T357 transcript collection frame fills compact landscape window from safe-area host")
+    func transcriptCollectionFrameFillsCompactLandscapeWindowFromSafeAreaHost() {
+        let targetFrame = MessageFlowCollectionViewController.targetCollectionFrame(
+            viewBounds: CGRect(x: 0, y: 0, width: 750, height: 402),
+            windowBounds: CGRect(x: 0, y: 0, width: 874, height: 402),
+            viewOriginInWindow: CGPoint(x: 62, y: 0),
+            fillsHorizontallyConstrainedHostToWindow: true
+        )
+
+        #expect(targetFrame == CGRect(x: -62, y: 0, width: 874, height: 402))
+    }
+
+    @Test("T357 transcript collection frame preserves constrained host outside compact landscape fill")
+    func transcriptCollectionFramePreservesConstrainedHostOutsideCompactLandscapeFill() {
         let targetFrame = MessageFlowCollectionViewController.targetCollectionFrame(
             viewBounds: CGRect(x: 0, y: 0, width: 750, height: 402),
             windowBounds: CGRect(x: 0, y: 0, width: 874, height: 402),
@@ -177,6 +189,41 @@ struct MessageInputBarBoundaryTests {
         )
 
         #expect(targetFrame == CGRect(x: 0, y: 0, width: 874, height: 402))
+    }
+
+    @Test("T357 compact landscape pinned chrome uses physical width")
+    func compactLandscapePinnedChromeUsesPhysicalWidth() {
+        #expect(ChatLandscapeWidthGeometry.shouldFillWindowWidth(
+            viewSize: CGSize(width: 750, height: 402),
+            windowSize: CGSize(width: 874, height: 402),
+            isCompactLandscape: true
+        ))
+        #expect(ChatLandscapeWidthGeometry.physicalWidth(
+            containerWidth: 750,
+            leadingSafeAreaInset: 62,
+            trailingSafeAreaInset: 62,
+            isCompactLandscape: true
+        ) == 874)
+        #expect(ChatLandscapeWidthGeometry.horizontalOffset(
+            leadingSafeAreaInset: 62,
+            trailingSafeAreaInset: 62,
+            isCompactLandscape: true
+        ) == 0)
+    }
+
+    @Test("T357 asymmetric compact landscape chrome recenters to physical window")
+    func asymmetricCompactLandscapeChromeRecentersToPhysicalWindow() {
+        #expect(ChatLandscapeWidthGeometry.physicalWidth(
+            containerWidth: 750,
+            leadingSafeAreaInset: 44,
+            trailingSafeAreaInset: 80,
+            isCompactLandscape: true
+        ) == 874)
+        #expect(ChatLandscapeWidthGeometry.horizontalOffset(
+            leadingSafeAreaInset: 44,
+            trailingSafeAreaInset: 80,
+            isCompactLandscape: true
+        ) == 18)
     }
 
     @Test("T357 docked landscape notification reserves trailing transcript clearance")

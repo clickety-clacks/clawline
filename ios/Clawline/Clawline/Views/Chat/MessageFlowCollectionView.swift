@@ -273,6 +273,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         windowBounds: CGRect?,
         viewOriginInWindow: CGPoint?,
         preservesHorizontallyConstrainedHostWidth: Bool = true,
+        fillsHorizontallyConstrainedHostToWindow: Bool = false,
         tolerance: CGFloat = 1
     ) -> CGRect {
         guard let windowBounds, let viewOriginInWindow else {
@@ -280,6 +281,15 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         }
 
         let isHorizontallyConstrained = viewBounds.width < windowBounds.width - tolerance
+        if fillsHorizontallyConstrainedHostToWindow && isHorizontallyConstrained {
+            return CGRect(
+                x: -viewOriginInWindow.x,
+                y: -viewOriginInWindow.y,
+                width: windowBounds.width,
+                height: windowBounds.height
+            )
+        }
+
         let width = preservesHorizontallyConstrainedHostWidth && isHorizontallyConstrained
             ? viewBounds.width
             : windowBounds.width
@@ -1154,7 +1164,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         // Native iOS/iPadOS: Extend vertically to fill the entire screen, ignoring top/bottom safe areas.
         // SwiftUI's UIViewControllerRepresentable doesn't respect .ignoresSafeArea() for UIKit views,
         // so we manually extend the collection view against window bounds. Keep the collection view
-        // within its host width when SwiftUI has already constrained that host for landscape safe areas.
+        // aligned to physical window width in compact landscape so bubbles do not stop at the safe-area host.
         //
         // Catalyst: Preserve the historical full-window width behavior; T357's containment is native iOS/iPadOS-only.
         //
@@ -1179,7 +1189,13 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             let targetFrame = Self.targetCollectionFrame(
                 viewBounds: view.bounds,
                 windowBounds: view.window?.bounds,
-                viewOriginInWindow: view.window.map { view.convert(CGPoint.zero, to: $0) }
+                viewOriginInWindow: view.window.map { view.convert(CGPoint.zero, to: $0) },
+                fillsHorizontallyConstrainedHostToWindow: ChatLandscapeWidthGeometry.shouldFillWindowWidth(
+                    viewSize: view.bounds.size,
+                    windowSize: view.window?.bounds.size,
+                    isCompactLandscape: traitCollection.horizontalSizeClass == .compact
+                        && view.bounds.width > view.bounds.height
+                )
             )
 
             // Only update if significantly different to avoid layout loops
@@ -1203,7 +1219,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             hadPendingFullReconfigure: hadPendingFullReconfigure
         ) else {
 #if os(visionOS)
-            updateVisibleCellOpacity()
+            updateVisibleFooterAlpha()
 #endif
             return
         }

@@ -582,7 +582,14 @@ private final class SpyChatService: ChatServicing {
     func setReplayCursor(_ cursor: String?, for sessionKey: String) {}
     func seedReplayCursorIfMissing(_ cursor: String?, for sessionKey: String) {}
     func clearReplayCursors() {}
-    func send(id: String, content: String, attachments: [WireAttachment], sessionKey: String?) async throws {
+    func send(
+        id: String,
+        content: String,
+        attachments: [WireAttachment],
+        sessionKey: String?,
+        references: [MessageReferenceContext]
+    ) async throws {
+        _ = references
         sentMessages.append(SentMessage(id: id, content: content, attachments: attachments, sessionKey: sessionKey))
     }
     func sendInteractiveCallback(sourceMessageId: String, action: String, data: JSONValue?) async throws {}

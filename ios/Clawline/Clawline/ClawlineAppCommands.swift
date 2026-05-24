@@ -34,7 +34,6 @@ struct ClawlineAppCommands: Commands {
                 settingsManager.decreaseFontScale()
             }
             .keyboardShortcut("-", modifiers: .command)
-            .disabled(notificationCommandsActive)
 
             if notificationCommandsActive {
                 ForEach(0...9, id: \.self) { index in

@@ -420,7 +420,6 @@ enum KeyboardCommandBridge {
     static let notificationScrollSpecs: [KeyCommandSpec] = [
         KeyCommandSpec(input: "j", modifierFlags: [.command], intent: .notificationScrollForward),
         KeyCommandSpec(input: "k", modifierFlags: [.command], intent: .notificationScrollBackward),
-        KeyCommandSpec(input: "-", modifierFlags: [.command], intent: .notificationDismissAll),
         KeyCommandSpec(input: "\\", modifierFlags: [.command], intent: .notificationToggleDock)
     ]
 

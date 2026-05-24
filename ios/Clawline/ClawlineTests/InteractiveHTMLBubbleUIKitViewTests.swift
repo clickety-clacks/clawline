@@ -183,14 +183,17 @@ struct InteractiveHTMLBubbleUIKitViewTests {
             Issue.record("Expected WKWebView before process termination")
             return
         }
+        let lockedHeight = heightConstraintConstant(for: webView)
+        #expect(lockedHeight > 100)
 
         bubble.webViewWebContentProcessDidTerminate(webView)
         #expect(firstWebView(in: bubble) === webView)
         #expect(visibleLabelText(in: bubble)?.contains("Content crashed") != true)
 
         try await waitFor(timeout: .seconds(3), poll: .milliseconds(25)) {
-            webView.alpha >= 0.99 && heightConstraintConstant(for: webView) > 100
+            webView.alpha >= 0.99
         }
+        #expect(abs(heightConstraintConstant(for: webView) - lockedHeight) <= 0.5)
         let reloadedText = try await evaluateString(webView: webView, js: "document.body.innerText || ''")
         #expect(reloadedText.contains("Visible Content"))
 

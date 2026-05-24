@@ -381,7 +381,11 @@ extension InteractiveHTMLBubbleUIKitView: WKNavigationDelegate, WKUIDelegate {
             return
         }
 
-        guard !heightLocked else { return }
+        guard !heightLocked else {
+            isInitialLoadInProgress = false
+            webView.alpha = 1
+            return
+        }
         measureAndReveal(maxHeight: maxHeight)
     }
 
@@ -444,7 +448,6 @@ extension InteractiveHTMLBubbleUIKitView: WKNavigationDelegate, WKUIDelegate {
 
         webContentProcessReloadedAfterTermination = true
         isInitialLoadInProgress = true
-        heightLocked = false
         placeholder.startAnimating()
         webView.alpha = 0
         loadHTML(isDark: pendingIsDark)

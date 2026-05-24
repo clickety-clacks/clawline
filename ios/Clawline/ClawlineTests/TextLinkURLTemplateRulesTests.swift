@@ -190,6 +190,26 @@ struct TextLinkURLTemplateRulesTests {
         #expect(openedGeneratedURL == generatedURL)
     }
 
+    @Test("V1135-01: generated text link tap fallback resolves only generated links")
+    @MainActor
+    func generatedTextLinkTapFallbackResolvesOnlyGeneratedLinks() throws {
+        let rendered = try withConfiguredRules([.janusTrackerExample]) {
+            try #require(makeRendered("See T1135 and https://example.com."))
+        }
+        let textView = UITextView(frame: CGRect(x: 0, y: 0, width: 280, height: 44))
+        UnifiedMarkdownRenderer.configureTextView(textView, delegate: nil)
+        textView.attributedText = rendered
+        textView.layoutIfNeeded()
+
+        let generatedPoint = point(for: "T1135", in: rendered, textView: textView)
+        let explicitPoint = point(for: "https://example.com", in: rendered, textView: textView)
+        let generatedURL = try #require(linkTarget("T1135", in: rendered))
+
+        #expect(MessageBubbleUIKitView.generatedTextLinkURL(in: textView, at: generatedPoint) == generatedURL)
+        #expect(MessageBubbleUIKitView.generatedTextLinkURL(in: textView, at: explicitPoint) == nil)
+        #expect(MessageBubbleUIKitView.generatedTextLinkURL(in: textView, at: CGPoint(x: generatedPoint.x, y: generatedPoint.y + 24)) == nil)
+    }
+
     @Test("V1135-01: settings can add many rules and delete exactly one after confirmation")
     @MainActor
     func settingsCanManageTextLinkRules() {
@@ -250,6 +270,16 @@ struct TextLinkURLTemplateRulesTests {
 
     private func range(_ token: String, in attributed: NSAttributedString) -> NSRange {
         (attributed.string as NSString).range(of: token)
+    }
+
+    private func point(for token: String, in attributed: NSAttributedString, textView: UITextView) -> CGPoint {
+        let characterRange = range(token, in: attributed)
+        let glyphRange = textView.layoutManager.glyphRange(forCharacterRange: characterRange, actualCharacterRange: nil)
+        let rect = textView.layoutManager.boundingRect(forGlyphRange: glyphRange, in: textView.textContainer)
+        return CGPoint(
+            x: rect.midX + textView.textContainerInset.left,
+            y: rect.midY + textView.textContainerInset.top
+        )
     }
 
     private func isInvalidPattern(_ kind: TextLinkURLTemplateDiagnostic.Kind?) -> Bool {

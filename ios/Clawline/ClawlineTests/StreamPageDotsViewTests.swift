@@ -171,9 +171,69 @@ struct StreamPageDotsViewTests {
         #expect(edgeUnreadDotBounds.minY >= 0)
         #expect(edgeUnreadDotBounds.maxY <= StreamPageDotsView.controlHeight)
         #expect(trailingBlobBounds.maxX <= capsuleBounds.maxX)
+        #expect(trailingBlobBounds.minX == capsuleBounds.maxX - StreamPageDotsView.unreadEdgeBloomBandWidth)
+        #expect(trailingBlobBounds.width == StreamPageDotsView.unreadEdgeBloomBandWidth)
         #expect(StreamPageDotsView.selectionRingIndex(activeIndex: 10, scrubCandidateIndex: nil, sessionCount: 40) == 10)
         #expect(StreamPageDotsView.selectionRingIndex(activeIndex: 10, scrubCandidateIndex: 12, sessionCount: 40) == 12)
         #expect(StreamPageDotsView.shouldCancelScrub(locationY: -24))
+    }
+
+    @Test("T278: blob placement is anchored before containment")
+    func blobPlacementIsAnchoredBeforeContainment() {
+        let capsuleBounds = StreamPageDotsView.unreadEdgeBloomCapsuleBounds(capsuleWidth: 190)
+        let leadingLTR = StreamPageDotsView.unreadEdgeBloomVisualBounds(
+            edge: .leading,
+            layoutDirection: .leftToRight,
+            capsuleBounds: capsuleBounds,
+            colorScheme: .light
+        )
+        let trailingLTR = StreamPageDotsView.unreadEdgeBloomVisualBounds(
+            edge: .trailing,
+            layoutDirection: .leftToRight,
+            capsuleBounds: capsuleBounds,
+            colorScheme: .light
+        )
+        let leadingRTL = StreamPageDotsView.unreadEdgeBloomVisualBounds(
+            edge: .leading,
+            layoutDirection: .rightToLeft,
+            capsuleBounds: capsuleBounds,
+            colorScheme: .light
+        )
+        let visibleDotIndices = Array(0..<11)
+        let firstActiveCenter = StreamPageDotsView.containedActiveGlowCenterX(
+            activeIndex: 0,
+            totalSessionCount: 11,
+            visibleDotIndices: visibleDotIndices,
+            capsuleWidth: capsuleBounds.width
+        )
+        let lastActiveCenter = StreamPageDotsView.containedActiveGlowCenterX(
+            activeIndex: 10,
+            totalSessionCount: 11,
+            visibleDotIndices: visibleDotIndices,
+            capsuleWidth: capsuleBounds.width
+        )
+
+        #expect(leadingLTR.minX == capsuleBounds.minX)
+        #expect(leadingLTR.maxX == capsuleBounds.minX + StreamPageDotsView.unreadEdgeBloomBandWidth)
+        #expect(trailingLTR.minX == capsuleBounds.maxX - StreamPageDotsView.unreadEdgeBloomBandWidth)
+        #expect(trailingLTR.maxX == capsuleBounds.maxX)
+        #expect(leadingRTL == trailingLTR)
+        #expect(firstActiveCenter == StreamPageDotsView.dotCenterX(
+            for: 0,
+            totalSessionCount: 11,
+            visibleDotIndices: visibleDotIndices,
+            fieldWidth: capsuleBounds.width
+        ))
+        #expect(lastActiveCenter == StreamPageDotsView.dotCenterX(
+            for: 10,
+            totalSessionCount: 11,
+            visibleDotIndices: visibleDotIndices,
+            fieldWidth: capsuleBounds.width
+        ))
+        if let firstActiveCenter, let lastActiveCenter {
+            #expect(firstActiveCenter > capsuleBounds.minX)
+            #expect(lastActiveCenter < capsuleBounds.maxX)
+        }
     }
 
     @Test("T278: source invariants preserve wave overflow and local blob containment")
@@ -192,6 +252,8 @@ struct StreamPageDotsViewTests {
         #expect(source.contains("unreadEdgeBloomOverlay(capsuleBounds: capsuleBounds)"))
         #expect(source.contains("EdgeWarningBloomShape("))
         #expect(source.contains("containedActiveGlowOverlay(capsuleBounds: capsuleBounds)"))
+        #expect(source.contains("containedActiveGlowCenterX("))
+        #expect(!source.contains("min(1, max(0, centerX"))
         #expect(source.contains("let showsForegroundGlow = Self.foregroundGlowEnabled("))
     }
 

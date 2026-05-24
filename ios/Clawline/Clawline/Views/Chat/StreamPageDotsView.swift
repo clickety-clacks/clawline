@@ -220,6 +220,20 @@ struct StreamPageDotsView: View {
         isScrubbing && (isActive || isCandidate || showsSelectionRing)
     }
 
+    static func containedActiveGlowCenterX(
+        activeIndex: Int,
+        totalSessionCount: Int,
+        visibleDotIndices: [Int],
+        capsuleWidth: CGFloat
+    ) -> CGFloat? {
+        dotCenterX(
+            for: activeIndex,
+            totalSessionCount: totalSessionCount,
+            visibleDotIndices: visibleDotIndices,
+            fieldWidth: capsuleWidth
+        )
+    }
+
     static func targetControlWidth(totalSessionCount: Int, maxWidth: CGFloat?) -> CGFloat? {
         guard totalSessionCount > collapsedMaxVisibleDots, let maxWidth else { return nil }
         let collapsedWidth = requiredControlWidth(
@@ -675,11 +689,11 @@ struct StreamPageDotsView: View {
     @ViewBuilder
     private func containedActiveGlowOverlay(capsuleBounds: CGRect) -> some View {
         if !isScrubbing,
-           let centerX = Self.dotCenterX(
-               for: activeIndex,
+           let centerX = Self.containedActiveGlowCenterX(
+               activeIndex: activeIndex,
                totalSessionCount: sessionKeys.count,
                visibleDotIndices: visibleDotIndices,
-               fieldWidth: capsuleBounds.width
+               capsuleWidth: capsuleBounds.width
            ) {
             Capsule()
                 .fill(
@@ -690,7 +704,7 @@ struct StreamPageDotsView: View {
                             .clear
                         ],
                         center: UnitPoint(
-                            x: min(1, max(0, centerX / max(capsuleBounds.width, 1))),
+                            x: centerX / max(capsuleBounds.width, 1),
                             y: 0.5
                         ),
                         startRadius: 1,

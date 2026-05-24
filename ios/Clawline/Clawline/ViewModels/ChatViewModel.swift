@@ -1586,7 +1586,7 @@ final class ChatViewModel: ChatViewModelHosting {
         let pendingAttachments = pendingIds.compactMap { attachmentData[$0] }
         let referenceIds = inputContent.pendingMessageReferenceIds()
         let pendingReferences = referenceIds.compactMap { messageReferenceData[$0] }
-            guard pendingReferences.count == referenceIds.count else {
+        guard pendingReferences.count == referenceIds.count else {
 #if DEBUG
             recordImageSendDebugEvent(.sendResult, detail: "failure reason=missing_message_reference")
 #endif

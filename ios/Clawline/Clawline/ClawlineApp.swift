@@ -97,11 +97,6 @@ struct ClawlineApp: App {
     }
 }
 
-#if DEBUG
-private var isRunningUnitTests: Bool {
-    ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
-}
-#endif
 
 #if DEBUG
 private extension ClawlineApp {
@@ -182,8 +177,6 @@ private func setHostingBackgroundsClear(in view: UIView) {
 }
 #endif
 
-#if DEBUG
 private var isRunningUnitTests: Bool {
     ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
 }
-#endif

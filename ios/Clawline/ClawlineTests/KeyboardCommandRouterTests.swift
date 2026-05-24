@@ -21,7 +21,9 @@ struct KeyboardCommandRouterTests {
         #expect(KeyboardCommandBridge.intent(input: "#", modifierFlags: [.command, .shift, .alternate]) == .notificationAssignedDismiss(3))
         #expect(KeyboardCommandBridge.intent(input: "-", modifierFlags: [.command]) == .notificationDismissAll)
         #expect(KeyboardCommandBridge.intent(input: "\\", modifierFlags: [.command]) == .notificationToggleDock)
-        #expect(KeyboardCommandBridge.intent(input: "/", modifierFlags: [.command]) == .openStreamPopup)
+        #expect(KeyboardCommandBridge.intent(input: "/", modifierFlags: [.command]) == nil)
+        #expect(KeyboardCommandBridge.intent(input: ";", modifierFlags: [.command]) == .openStreamPopup)
+        #expect(KeyboardCommandBridge.intent(input: ";", modifierFlags: [.control]) == .openStreamPopup)
         #expect(KeyboardCommandBridge.intent(input: "\r", modifierFlags: [.control]) == .textModifiedNewline)
         #expect(KeyboardCommandBridge.intent(input: UIKeyCommand.inputUpArrow, modifierFlags: []) == .menuNavigateUp)
         #expect(KeyboardCommandBridge.intent(input: "\t", modifierFlags: []) == .pickerAccept)
@@ -207,15 +209,15 @@ struct KeyboardCommandRouterTests {
             ChatRootKeyboardCommandDispatch.notificationName(
                 for: .transcriptBubbleScrollForward,
                 keyboardOwnershipStore: notificationStore
-            ) == .clawlineScrollDownCommand
+            ) == .clawlineScrollNotificationDownCommand
         )
         #expect(
             ChatRootKeyboardCommandDispatch.notificationNames(
                 for: .transcriptBubbleScrollForward,
                 keyboardOwnershipStore: notificationStore
             ) == [
-                .clawlineScrollDownCommand,
-                .clawlineScrollNotificationDownCommand
+                .clawlineScrollNotificationDownCommand,
+                .clawlineScrollDownCommand
             ]
         )
         #expect(
@@ -253,25 +255,31 @@ struct KeyboardCommandRouterTests {
                 input: "j",
                 modifiers: [.command],
                 in: store,
-                posts: .clawlineScrollDownCommand
+                posts: [
+                    .clawlineScrollNotificationDownCommand,
+                    .clawlineScrollDownCommand
+                ]
             )
             assertPhysicalShortcut(
                 input: "k",
                 modifiers: [.command],
                 in: store,
-                posts: .clawlineScrollUpCommand
+                posts: [
+                    .clawlineScrollNotificationUpCommand,
+                    .clawlineScrollUpCommand
+                ]
             )
             assertPhysicalShortcut(
                 input: "j",
                 modifiers: [.command, .shift],
                 in: store,
-                posts: .clawlineScrollChatDownCommand
+                posts: [.clawlineScrollChatDownCommand]
             )
             assertPhysicalShortcut(
                 input: "k",
                 modifiers: [.command, .shift],
                 in: store,
-                posts: .clawlineScrollChatUpCommand
+                posts: [.clawlineScrollChatUpCommand]
             )
         }
     }
@@ -355,13 +363,13 @@ struct KeyboardCommandRouterTests {
                 input: "j",
                 modifiers: [.command, .shift],
                 in: store,
-                posts: .clawlineScrollChatDownCommand
+                posts: [.clawlineScrollChatDownCommand]
             )
             assertPhysicalShortcut(
                 input: "k",
                 modifiers: [.command, .shift],
                 in: store,
-                posts: .clawlineScrollChatUpCommand
+                posts: [.clawlineScrollChatUpCommand]
             )
         }
     }
@@ -397,6 +405,8 @@ struct KeyboardCommandRouterTests {
         )
         #expect(
             ChatAppCommandShortcut.prioritizedTextInputKeyCommandSpecs(notificationVisibleCount: 0).map(\.action) == [
+                .openStreamPopup,
+                .openStreamPopup,
                 .scrollDown,
                 .scrollUp,
                 .scrollChatDown,
@@ -405,6 +415,8 @@ struct KeyboardCommandRouterTests {
         )
         #expect(
             ChatAppCommandShortcut.prioritizedTextInputKeyCommandSpecs(notificationVisibleCount: 2).map(\.action) == [
+                .openStreamPopup,
+                .openStreamPopup,
                 .scrollDown,
                 .scrollUp,
                 .scrollChatDown,
@@ -496,18 +508,18 @@ private func assertPhysicalShortcut(
     input: String,
     modifiers: UIKeyModifierFlags,
     in store: KeyboardOwnershipStore,
-    posts expectedName: Notification.Name,
+    posts expectedNames: [Notification.Name],
     sourceLocation: SourceLocation = #_sourceLocation
 ) {
     let intent = KeyboardCommandBridge.intent(input: input, modifierFlags: modifiers)
     #expect(intent != nil, sourceLocation: sourceLocation)
     #expect(
-        intent.flatMap {
-            ChatRootKeyboardCommandDispatch.notificationName(
+        intent.map {
+            ChatRootKeyboardCommandDispatch.notificationNames(
                 for: $0,
                 keyboardOwnershipStore: store
             )
-        } == expectedName,
+        } == expectedNames,
         sourceLocation: sourceLocation
     )
 }

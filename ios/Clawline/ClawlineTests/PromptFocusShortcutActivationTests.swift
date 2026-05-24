@@ -440,8 +440,8 @@ struct PromptFocusShortcutActivationTests {
         )
     }
 
-    @Test("App command shortcuts use Cmd-L focus, Cmd-slash streams, Cmd-Shift navigation, Cmd-J/K bubble scroll, and Cmd-Shift-J/K chat scroll")
-    func appCommandShortcutsUseCommandLFocusCommandSlashStreamsCommandShiftNavigationCommandJKBubbleScrollAndCommandShiftJKChatScroll() {
+    @Test("App command shortcuts use Cmd-L focus, Cmd-semicolon streams, Cmd-Shift navigation, Cmd-J/K bubble scroll, and Cmd-Shift-J/K chat scroll")
+    func appCommandShortcutsUseCommandLFocusCommandSemicolonStreamsCommandShiftNavigationCommandJKBubbleScrollAndCommandShiftJKChatScroll() {
         #expect(
             ChatAppCommandShortcut.keyCommandSpecs.contains { spec in
                 spec.input == "l"
@@ -451,8 +451,15 @@ struct PromptFocusShortcutActivationTests {
         )
         #expect(
             ChatAppCommandShortcut.keyCommandSpecs.contains { spec in
-                spec.input == "/"
+                spec.input == ";"
                     && spec.modifierFlags == [.command]
+                    && spec.action.selector == #selector(UIResponder.clawlineOpenStreamPopupCommand(_:))
+            }
+        )
+        #expect(
+            ChatAppCommandShortcut.keyCommandSpecs.contains { spec in
+                spec.input == ";"
+                    && spec.modifierFlags == [.control]
                     && spec.action.selector == #selector(UIResponder.clawlineOpenStreamPopupCommand(_:))
             }
         )
@@ -583,6 +590,23 @@ struct PromptFocusShortcutActivationTests {
 
         #expect(firstCommandJ?.action == #selector(UIResponder.clawlineScrollDownCommand(_:)))
         #expect(firstCommandShiftK?.action == #selector(UIResponder.clawlineScrollChatUpCommand(_:)))
+    }
+
+    @Test("Prompt text input exposes Cmd-semicolon stream popup before base text-view commands")
+    @MainActor
+    func promptTextInputExposesCommandSemicolonStreamPopupBeforeBaseTextViewCommands() {
+        let textView = PastableTextView(frame: .zero, textContainer: nil)
+        textView.notificationVisibleCount = 0
+
+        let firstCommandSemicolon = textView.keyCommands?.first { command in
+            command.input == ";" && command.modifierFlags == [.command]
+        }
+        let firstControlSemicolon = textView.keyCommands?.first { command in
+            command.input == ";" && command.modifierFlags == [.control]
+        }
+
+        #expect(firstCommandSemicolon?.action == #selector(UIResponder.clawlineOpenStreamPopupCommand(_:)))
+        #expect(firstControlSemicolon?.action == #selector(UIResponder.clawlineOpenStreamPopupCommand(_:)))
     }
 
     @Test("Text input bridge exposure follows router notification ownership")

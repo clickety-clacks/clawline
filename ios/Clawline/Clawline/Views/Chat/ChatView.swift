@@ -4005,13 +4005,13 @@ enum ChatRootKeyboardCommandDispatch {
 
     private static func notificationNames(for route: KeyboardRouteDecision) -> [Notification.Name] {
         var names: [Notification.Name] = []
-        if route.outcome.containsHandledSurface(.transcript),
-           let transcriptName = transcriptNotificationName(for: route.intent) {
-            names.append(transcriptName)
-        }
         if route.outcome.containsNotificationBubble,
            let notificationName = notificationScrollName(for: route.intent) {
             names.append(notificationName)
+        }
+        if route.outcome.containsHandledSurface(.transcript),
+           let transcriptName = transcriptNotificationName(for: route.intent) {
+            names.append(transcriptName)
         }
         return names
     }

@@ -404,8 +404,8 @@ enum KeyboardCommandBridge {
 
     static let navigationSpecs: [KeyCommandSpec] = [
         KeyCommandSpec(input: "l", modifierFlags: [.command], intent: .focusPromptInput),
-        KeyCommandSpec(input: "/", modifierFlags: [.command], intent: .openStreamPopup),
         KeyCommandSpec(input: ";", modifierFlags: [.command], intent: .openStreamPopup),
+        KeyCommandSpec(input: ";", modifierFlags: [.control], intent: .openStreamPopup),
         KeyCommandSpec(input: "h", modifierFlags: [.command, .shift], intent: .navigatePreviousStream),
         KeyCommandSpec(input: "l", modifierFlags: [.command, .shift], intent: .navigateNextStream)
     ]
@@ -468,10 +468,13 @@ enum KeyboardCommandBridge {
     }
 
     static func prioritizedTextInputSpecs(notificationVisibleCount: Int) -> [KeyCommandSpec] {
-        guard notificationVisibleCount > 0 else {
-            return transcriptScrollSpecs
+        let textInputGlobalNavigationSpecs = navigationSpecs.filter {
+            $0.intent == .openStreamPopup && $0.input == ";"
         }
-        return transcriptScrollSpecs + notificationNumberSpecs(visibleCount: notificationVisibleCount)
+        guard notificationVisibleCount > 0 else {
+            return textInputGlobalNavigationSpecs + transcriptScrollSpecs
+        }
+        return textInputGlobalNavigationSpecs + transcriptScrollSpecs + notificationNumberSpecs(visibleCount: notificationVisibleCount)
     }
 
     static func hiddenNotificationSwiftUIFallbackSpecs(visibleNotificationCount: Int) -> [SwiftUIShortcutSpec] {

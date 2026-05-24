@@ -1025,9 +1025,11 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         let effectiveTruncationHeight = (hasLinkPreview && !isSingleLinkPreview)
             ? min(rawTruncationHeight, metrics.truncationHeight)
             : rawTruncationHeight
+        let effectiveMinWidth = bubbleSizingV2?.plan.minWidth ?? minWidthOverride ?? 120
+
         // Reset width constraints per size class.
         currentMetrics = metrics
-        minWidthConstraint.constant = minWidthOverride ?? 120
+        minWidthConstraint.constant = effectiveMinWidth
         maxWidthConstraint.constant = effectiveMaxWidth
         fixedWidthConstraint?.isActive = false
         fixedWidthConstraint = nil
@@ -1855,14 +1857,14 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         topHighlightLayer.setNeedsDisplay()
     }
 
-    func preferredWidth(maxWidth: CGFloat) -> CGFloat {
+    func preferredWidth(maxWidth: CGFloat, minWidth: CGFloat = 120) -> CGFloat {
         let headerWidth: CGFloat = showsHeader
             ? (32 + headerStack.spacing + senderLabel.intrinsicContentSize.width)
             : 0
         let contentWidth = maxWidth - (currentContentPaddingHorizontal * 2)
         let bodySize = bodyLabel.sizeThatFits(CGSize(width: contentWidth, height: .greatestFiniteMagnitude))
         let contentMax = max(headerWidth, bodySize.width)
-        return min(maxWidth, max(120, contentMax + (currentContentPaddingHorizontal * 2)))
+        return min(maxWidth, max(minWidth, contentMax + (currentContentPaddingHorizontal * 2)))
     }
 
     // Used by the V2 measurer to compute content vs chrome height without duplicating view-specific logic.

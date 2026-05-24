@@ -103,6 +103,70 @@ struct BubbleScrollTests {
         #expect(measurementDetectors.allSatisfy { $0.isEmpty })
     }
 
+    @Test("T340: real chat bubble renders hyphen markdown bullets")
+    @MainActor
+    func t340HyphenMarkdownBulletsRenderInMessageBubbleUIKitView() {
+        let metrics = ChatFlowTheme.Metrics(isCompact: false)
+        let message = Message(
+            id: "t340-bubble-render",
+            role: .assistant,
+            content: """
+            Intro with **bold** and [link](https://example.com).
+            - Alpha `code`
+            - Beta
+            """,
+            timestamp: Date(),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: "server:personal"
+        )
+        let presentation = buildPresentation(message, metrics: metrics, enableLinkPreviews: false)
+        let sizeClass = MessageFlowRules.sizeClass(for: presentation)
+        let bubble = MessageBubbleUIKitView(frame: CGRect(x: 0, y: 0, width: 360, height: 1))
+
+        bubble.configure(
+            message: message,
+            presentation: presentation,
+            sizeClass: sizeClass,
+            metrics: metrics,
+            maxWidth: 360,
+            truncationHeightOverride: 1000,
+            bubbleSizingV2: nil,
+            showsHeader: true,
+            paddingScale: 1,
+            minWidthOverride: nil,
+            maxWidthOverride: nil,
+            useContinuousCorners: true,
+            isDark: false,
+            onRequestExpand: nil,
+            onRequestLayout: nil,
+            onInteractiveCallback: nil
+        )
+        let measured = bubble.systemLayoutSizeFitting(
+            CGSize(width: 360, height: UIView.layoutFittingCompressedSize.height),
+            withHorizontalFittingPriority: .required,
+            verticalFittingPriority: .fittingSizeLevel
+        )
+        bubble.frame = CGRect(origin: .zero, size: measured)
+        bubble.setNeedsLayout()
+        bubble.layoutIfNeeded()
+
+        guard let attributed = textViews(in: bubble)
+            .compactMap(\.attributedText)
+            .first(where: { $0.string.contains("Alpha") && $0.string.contains("Beta") }) else {
+            Issue.record("Expected rendered chat bubble text view for T340 content")
+            return
+        }
+
+        #expect(attributed.string.contains("Intro with bold and link."))
+        #expect(attributed.string.contains("• Alpha code"))
+        #expect(attributed.string.contains("• Beta"))
+        #expect(!attributed.string.contains("- Alpha"))
+        #expect(isBold("bold", in: attributed))
+        #expect(linkTarget("link", in: attributed)?.absoluteString == "https://example.com")
+    }
+
     @Test("T233: Popup viewer keeps smaller images at 1:1 scale")
     func imagePopupInitialScaleKeepsSmallImagesAtActualSize() {
         let scale = ImagePopupViewerLayout.initialZoomScale(
@@ -785,6 +849,27 @@ struct BubbleScrollTests {
             result.append(contentsOf: textViews(in: sub))
         }
         return result
+    }
+
+    private func isBold(_ substring: String, in attributed: NSAttributedString) -> Bool {
+        let range = (attributed.string as NSString).range(of: substring)
+        guard range.location != NSNotFound,
+              let font = attributed.attribute(.font, at: range.location, effectiveRange: nil) as? UIFont else {
+            return false
+        }
+        return font.fontDescriptor.symbolicTraits.contains(.traitBold)
+    }
+
+    private func linkTarget(_ substring: String, in attributed: NSAttributedString) -> URL? {
+        let range = (attributed.string as NSString).range(of: substring)
+        guard range.location != NSNotFound else { return nil }
+        if let url = attributed.attribute(.link, at: range.location, effectiveRange: nil) as? URL {
+            return url
+        }
+        if let value = attributed.attribute(.link, at: range.location, effectiveRange: nil) as? String {
+            return URL(string: value)
+        }
+        return nil
     }
 
     private func firstWebView(in view: UIView) -> WKWebView? {

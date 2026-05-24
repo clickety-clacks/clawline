@@ -29,8 +29,16 @@ struct TextLinkURLTemplateDiagnostic: Equatable {
 
 enum TextLinkURLTemplateRules {
     static let generatedRuleIDAttribute = NSAttributedString.Key("co.clicketyclacks.Clawline.generatedTextLinkRuleID")
-    static let defaultRules: [TextLinkURLTemplateRule] = [.defaultJanus]
+    static var defaultRules: [TextLinkURLTemplateRule] = [.defaultJanus] {
+        didSet { configurationVersion += 1 }
+    }
+    static var diagnosticSink: ((TextLinkURLTemplateDiagnostic) -> Void)?
+    private static var configurationVersion = 0
     private static let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "TextLinkURLTemplateRules")
+
+    static var cacheKeyComponent: String {
+        String(configurationVersion)
+    }
 
     static func applyDefaultRules(to attributed: NSMutableAttributedString) -> [TextLinkURLTemplateDiagnostic] {
         apply(defaultRules, to: attributed)
@@ -126,7 +134,9 @@ enum TextLinkURLTemplateRules {
         ruleID: String,
         diagnostics: inout [TextLinkURLTemplateDiagnostic]
     ) {
-        diagnostics.append(TextLinkURLTemplateDiagnostic(ruleID: ruleID, kind: kind))
+        let diagnostic = TextLinkURLTemplateDiagnostic(ruleID: ruleID, kind: kind)
+        diagnostics.append(diagnostic)
+        diagnosticSink?(diagnostic)
         logger.error("text link URL template rule failed ruleID=\(ruleID, privacy: .public) kind=\(String(describing: kind), privacy: .public)")
     }
 

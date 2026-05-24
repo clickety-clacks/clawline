@@ -109,9 +109,9 @@ struct SelectableAttributedText: UIViewRepresentable {
             UnifiedMarkdownRenderer.primaryActionForTextItem(
                 textItem,
                 defaultAction: defaultAction,
-                openURL: { url in
-                    if TextLinkURLTemplateRules.containsGeneratedLink(to: url, in: textView.attributedText) {
-                        _ = ExternalWebContentPolicy.openGeneratedLinkBrowserSurface(for: url, from: textView)
+                openURL: { url, characterRange in
+                    if TextLinkURLTemplateRules.isGeneratedLink(in: textView.attributedText, characterRange: characterRange) {
+                        _ = GeneratedTextLinkActivationRouter.openGeneratedLink(url, textView)
                         return
                     }
                     self.onLinkTap(url)
@@ -128,7 +128,7 @@ struct SelectableAttributedText: UIViewRepresentable {
             guard TextLinkURLTemplateRules.isGeneratedLink(in: textView.attributedText, characterRange: characterRange) else {
                 return true
             }
-            _ = ExternalWebContentPolicy.openGeneratedLinkBrowserSurface(for: URL, from: textView)
+            _ = GeneratedTextLinkActivationRouter.openGeneratedLink(URL, textView)
             return false
         }
 

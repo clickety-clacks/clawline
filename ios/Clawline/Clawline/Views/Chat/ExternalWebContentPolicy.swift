@@ -79,6 +79,13 @@ enum ExternalWebContentPolicy {
     }
 }
 
+enum GeneratedTextLinkActivationRouter {
+    @MainActor
+    static var openGeneratedLink: (URL, UIView?) -> Bool = { url, view in
+        ExternalWebContentPolicy.openGeneratedLinkBrowserSurface(for: url, from: view)
+    }
+}
+
 extension UIView {
     var clawlineParentViewController: UIViewController? {
         var responder: UIResponder? = self

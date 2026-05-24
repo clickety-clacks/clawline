@@ -1964,9 +1964,9 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         primaryActionFor textItem: UITextItem,
         defaultAction: UIAction
     ) -> UIAction? {
-        UnifiedMarkdownRenderer.primaryActionForTextItem(textItem, defaultAction: defaultAction) { tappedURL in
-            if TextLinkURLTemplateRules.containsGeneratedLink(to: tappedURL, in: textView.attributedText) {
-                _ = ExternalWebContentPolicy.openGeneratedLinkBrowserSurface(for: tappedURL, from: textView)
+        UnifiedMarkdownRenderer.primaryActionForTextItem(textItem, defaultAction: defaultAction) { tappedURL, characterRange in
+            if TextLinkURLTemplateRules.isGeneratedLink(in: textView.attributedText, characterRange: characterRange) {
+                _ = GeneratedTextLinkActivationRouter.openGeneratedLink(tappedURL, textView)
                 return
             }
             UIApplication.shared.open(tappedURL)
@@ -1982,7 +1982,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         guard TextLinkURLTemplateRules.isGeneratedLink(in: textView.attributedText, characterRange: characterRange) else {
             return true
         }
-        _ = ExternalWebContentPolicy.openGeneratedLinkBrowserSurface(for: URL, from: textView)
+        _ = GeneratedTextLinkActivationRouter.openGeneratedLink(URL, textView)
         return false
     }
 

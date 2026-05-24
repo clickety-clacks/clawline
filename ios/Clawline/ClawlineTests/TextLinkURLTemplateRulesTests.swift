@@ -3,6 +3,7 @@ import Testing
 import UIKit
 @testable import Clawline
 
+@Suite(.serialized)
 struct TextLinkURLTemplateRulesTests {
     @Test("V1135-01: default Janus rule links T-number tokens")
     @MainActor
@@ -44,6 +45,19 @@ struct TextLinkURLTemplateRulesTests {
         #expect(linkTarget("T123", in: rendered)?.absoluteString == "https://tars.tail4105e8.ts.net:19443/tracker.html?id=T123")
     }
 
+    @Test("V1135-01: explicit links to generated URLs are not treated as generated")
+    @MainActor
+    func explicitLinksToGeneratedURLsAreNotTreatedAsGenerated() throws {
+        let rendered = try #require(makeRendered("[ticket](https://tars.tail4105e8.ts.net:19443/tracker.html?id=T1135) and T1135"))
+        let explicitRange = range("ticket", in: rendered)
+        let generatedRange = range("T1135", in: rendered)
+        let sharedURL = try #require(linkTarget("ticket", in: rendered))
+
+        #expect(linkTarget("T1135", in: rendered) == sharedURL)
+        #expect(!TextLinkURLTemplateRules.isGeneratedLink(in: rendered, characterRange: explicitRange))
+        #expect(TextLinkURLTemplateRules.isGeneratedLink(in: rendered, characterRange: generatedRange))
+    }
+
     @Test("V1135-01: invalid rules report visible diagnostics and do not create dead links")
     func invalidRulesReportDiagnostics() {
         let invalidPattern = NSMutableAttributedString(string: "T1135")
@@ -75,6 +89,27 @@ struct TextLinkURLTemplateRulesTests {
         #expect(linkTarget("T1135", in: invalidURL) == nil)
     }
 
+    @Test("V1135-01: renderer path exposes invalid rule diagnostics")
+    @MainActor
+    func rendererPathExposesInvalidRuleDiagnostics() {
+        var captured: [TextLinkURLTemplateDiagnostic] = []
+        let originalRules = TextLinkURLTemplateRules.defaultRules
+        let originalSink = TextLinkURLTemplateRules.diagnosticSink
+        TextLinkURLTemplateRules.defaultRules = [
+            TextLinkURLTemplateRule(id: "renderer-bad-pattern", enabled: true, pattern: #"("#, urlTemplate: "https://example.com/{match}")
+        ]
+        TextLinkURLTemplateRules.diagnosticSink = { captured.append($0) }
+        defer {
+            TextLinkURLTemplateRules.defaultRules = originalRules
+            TextLinkURLTemplateRules.diagnosticSink = originalSink
+        }
+
+        _ = makeRendered("Invalid configuration probe T1135.")
+
+        #expect(captured.first?.ruleID == "renderer-bad-pattern")
+        #expect(isInvalidPattern(captured.first?.kind))
+    }
+
     @Test("V1135-01: transcript and notification renderers expose the same generated link")
     @MainActor
     func secondarySurfaceUsesSameGeneratedLink() throws {
@@ -102,12 +137,22 @@ struct TextLinkURLTemplateRulesTests {
         let textView = UITextView()
         textView.attributedText = rendered
         let bubble = MessageBubbleUIKitView()
+        var openedGeneratedURL: URL?
+        let originalGeneratedLinkOpener = GeneratedTextLinkActivationRouter.openGeneratedLink
+        GeneratedTextLinkActivationRouter.openGeneratedLink = { url, _ in
+            openedGeneratedURL = url
+            return true
+        }
+        defer {
+            GeneratedTextLinkActivationRouter.openGeneratedLink = originalGeneratedLinkOpener
+        }
 
         let generatedURL = try #require(linkTarget("T1135", in: rendered))
         let explicitURL = try #require(linkTarget("https://example.com", in: rendered))
 
         #expect(!bubble.textView(textView, shouldInteractWith: generatedURL, in: range("T1135", in: rendered), interaction: .invokeDefaultAction))
         #expect(bubble.textView(textView, shouldInteractWith: explicitURL, in: range("https://example.com", in: rendered), interaction: .invokeDefaultAction))
+        #expect(openedGeneratedURL == generatedURL)
         #expect(TextLinkURLTemplateRules.shouldOpenInInternalBrowser(generatedURL))
     }
 

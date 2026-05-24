@@ -152,19 +152,28 @@ struct BubbleScrollTests {
         bubble.setNeedsLayout()
         bubble.layoutIfNeeded()
 
-        guard let attributed = textViews(in: bubble)
+        let attributedRuns = textViews(in: bubble)
             .compactMap(\.attributedText)
-            .first(where: { $0.string.contains("Alpha") && $0.string.contains("Beta") }) else {
+            .filter { !$0.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        let combinedText = attributedRuns.map(\.string).joined(separator: "\n")
+
+        guard let bulletRun = attributedRuns.first(where: { $0.string.contains("Alpha") && $0.string.contains("Beta") }) else {
             Issue.record("Expected rendered chat bubble text view for T340 content")
             return
         }
+        guard let introRun = attributedRuns.first(where: { $0.string.contains("Intro with bold and link.") }) else {
+            Issue.record("Expected rendered chat bubble prose text view for T340 content")
+            return
+        }
 
-        #expect(attributed.string.contains("Intro with bold and link."))
-        #expect(attributed.string.contains("• Alpha code"))
-        #expect(attributed.string.contains("• Beta"))
-        #expect(!attributed.string.contains("- Alpha"))
-        #expect(isBold("bold", in: attributed))
-        #expect(linkTarget("link", in: attributed)?.absoluteString == "https://example.com")
+        #expect(combinedText.contains("Intro with bold and link."))
+        #expect(combinedText.contains("• Alpha code"))
+        #expect(combinedText.contains("• Beta"))
+        #expect(!combinedText.contains("- Alpha"))
+        #expect(isBold("bold", in: introRun))
+        #expect(linkTarget("link", in: introRun)?.absoluteString == "https://example.com")
+        #expect(bulletRun.string.contains("• Alpha code"))
+        #expect(bulletRun.string.contains("• Beta"))
     }
 
     @Test("T233: Popup viewer keeps smaller images at 1:1 scale")

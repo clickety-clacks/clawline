@@ -99,6 +99,10 @@ enum ImagePopupViewerLayout {
         let vertical = max(0, (viewportSize.height - contentSize.height) / 2)
         return UIEdgeInsets(top: vertical, left: horizontal, bottom: vertical, right: horizontal)
     }
+
+    static func zoomedContentSize(imageSize: CGSize, zoomScale: CGFloat) -> CGSize {
+        CGSize(width: imageSize.width * zoomScale, height: imageSize.height * zoomScale)
+    }
 }
 
 private class MessageImageThumbnailView: UIImageView {
@@ -138,7 +142,7 @@ private class MessageImageThumbnailView: UIImageView {
     }
 }
 
-private final class ImagePopupViewerController: UIViewController, UIScrollViewDelegate, UIGestureRecognizerDelegate {
+final class ImagePopupViewerController: UIViewController, UIScrollViewDelegate, UIGestureRecognizerDelegate {
     private let image: UIImage
     private let popupView = UIView()
     private let scrollView = UIScrollView()
@@ -244,6 +248,13 @@ private final class ImagePopupViewerController: UIViewController, UIScrollViewDe
     }
 
     private func configureZoomScale() {
+        guard image.size.width > 0,
+              image.size.height > 0,
+              scrollView.bounds.width > 0,
+              scrollView.bounds.height > 0 else {
+            return
+        }
+
         let initialScale = ImagePopupViewerLayout.initialZoomScale(
             imageSize: image.size,
             viewportSize: scrollView.bounds.size
@@ -256,16 +267,15 @@ private final class ImagePopupViewerController: UIViewController, UIScrollViewDe
         } else if scrollView.zoomScale < initialScale {
             scrollView.zoomScale = initialScale
         }
-        scrollView.contentSize = image.size
+        scrollView.contentSize = ImagePopupViewerLayout.zoomedContentSize(
+            imageSize: image.size,
+            zoomScale: scrollView.zoomScale
+        )
     }
 
     private func centerImage() {
-        let contentSize = CGSize(
-            width: image.size.width * scrollView.zoomScale,
-            height: image.size.height * scrollView.zoomScale
-        )
         scrollView.contentInset = ImagePopupViewerLayout.centeredContentInset(
-            contentSize: contentSize,
+            contentSize: scrollView.contentSize,
             viewportSize: scrollView.bounds.size
         )
     }
@@ -287,6 +297,13 @@ private final class ImagePopupViewerController: UIViewController, UIScrollViewDe
         dismiss(animated: true)
     }
 }
+
+#if DEBUG
+extension ImagePopupViewerController {
+    var debugScrollView: UIScrollView { scrollView }
+    var debugImageView: UIImageView { imageView }
+}
+#endif
 
 private final class RemoteMessageImageView: MessageImageThumbnailView {
     private var task: URLSessionDataTask?

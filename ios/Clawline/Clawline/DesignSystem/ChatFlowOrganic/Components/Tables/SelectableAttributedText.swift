@@ -109,8 +109,27 @@ struct SelectableAttributedText: UIViewRepresentable {
             UnifiedMarkdownRenderer.primaryActionForTextItem(
                 textItem,
                 defaultAction: defaultAction,
-                openURL: onLinkTap
+                openURL: { url, characterRange in
+                    if TextLinkURLTemplateRules.isGeneratedLink(in: textView.attributedText, characterRange: characterRange) {
+                        _ = GeneratedTextLinkActivationRouter.openGeneratedLink(url, textView)
+                        return
+                    }
+                    self.onLinkTap(url)
+                }
             )
+        }
+
+        func textView(
+            _ textView: UITextView,
+            shouldInteractWith URL: URL,
+            in characterRange: NSRange,
+            interaction: UITextItemInteraction
+        ) -> Bool {
+            guard TextLinkURLTemplateRules.isGeneratedLink(in: textView.attributedText, characterRange: characterRange) else {
+                return true
+            }
+            _ = GeneratedTextLinkActivationRouter.openGeneratedLink(URL, textView)
+            return false
         }
 
         private func emitSelectionChange(_ hasSelection: Bool) {

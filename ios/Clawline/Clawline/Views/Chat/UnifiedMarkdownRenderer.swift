@@ -138,13 +138,13 @@ enum UnifiedMarkdownRenderer {
     static func primaryActionForTextItem(
         _ textItem: UITextItem,
         defaultAction: UIAction,
-        openURL: @escaping (URL) -> Void
+        openURL: @escaping (URL, NSRange) -> Void
     ) -> UIAction? {
         guard case .link(let url) = textItem.content else {
             return defaultAction
         }
         return UIAction { _ in
-            openURL(url)
+            openURL(url, textItem.range)
         }
     }
 
@@ -216,7 +216,8 @@ enum UnifiedMarkdownRenderer {
             baseFont: baseFont,
             inkColor: inkColor,
             lineSpacing: lineSpacing,
-            markHighlightColor: markHighlightColor
+            markHighlightColor: markHighlightColor,
+            textLinkRulesComponent: TextLinkURLTemplateRules.cacheKeyComponent
         )
         if let cached = attributedMarkdownCache.object(forKey: cacheKey as NSString) {
             return NSAttributedString(attributedString: cached)
@@ -289,6 +290,7 @@ enum UnifiedMarkdownRenderer {
 
         annotateDetectedLinks(nsAttributed)
         sanitizeLinkAttributes(nsAttributed)
+        _ = TextLinkURLTemplateRules.applyConfiguredRules(to: nsAttributed)
         applyHeadingStyles(markdown: markdownForRender, nsAttributed: nsAttributed, baseFont: baseFont)
         if let markHighlightColor {
             applyMarkHighlights(nsAttributed: nsAttributed, color: markHighlightColor)
@@ -310,7 +312,8 @@ enum UnifiedMarkdownRenderer {
         baseFont: UIFont,
         inkColor: UIColor,
         lineSpacing: CGFloat,
-        markHighlightColor: UIColor?
+        markHighlightColor: UIColor?,
+        textLinkRulesComponent: String
     ) -> String {
         [
             markdown,
@@ -318,7 +321,8 @@ enum UnifiedMarkdownRenderer {
             String(format: "%.3f", baseFont.pointSize),
             String(format: "%.3f", lineSpacing),
             colorCacheComponent(inkColor),
-            markHighlightColor.map(colorCacheComponent) ?? "nil"
+            markHighlightColor.map(colorCacheComponent) ?? "nil",
+            textLinkRulesComponent
         ].joined(separator: "\u{1F}")
     }
 

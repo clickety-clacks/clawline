@@ -13,6 +13,7 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
     @Environment(\.colorScheme) private var colorScheme
+    @State private var rulePendingDeletion: TextLinkURLTemplateRule?
 
     private var previewBackgroundColor: Color {
         colorScheme == .dark
@@ -87,6 +88,27 @@ struct SettingsView: View {
                     Text("When enabled, Clawline accepts self-signed TLS certificates for provider WebSocket connections. Add a SHA-256 leaf certificate fingerprint to pin a specific cert.")
                 }
 
+                Section {
+                    ForEach($settings.textLinkURLTemplateRules) { $rule in
+                        TextLinkURLTemplateRuleRow(
+                            rule: $rule,
+                            onDelete: {
+                                rulePendingDeletion = rule
+                            }
+                        )
+                    }
+
+                    Button {
+                        settings.addTextLinkURLTemplateRule()
+                    } label: {
+                        Label("Add Text Link Rule", systemImage: "plus")
+                    }
+                } header: {
+                    Text("Text Link Rules")
+                } footer: {
+                    Text("Use regex patterns and URL templates such as https://tars.tail4105e8.ts.net:19443/tracker.html?id={match}.")
+                }
+
 #if DEBUG
                 Section {
                     Toggle("Show lifecycle debug overlay", isOn: $settings.isLifecycleDebugOverlayEnabled)
@@ -149,6 +171,24 @@ struct SettingsView: View {
             }
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
+            .confirmationDialog(
+                "Delete text link rule?",
+                isPresented: deleteConfirmationBinding,
+                titleVisibility: .visible
+            ) {
+                Button("Delete Rule", role: .destructive) {
+                    if let rulePendingDeletion {
+                        settings.deleteTextLinkURLTemplateRule(id: rulePendingDeletion.id)
+                    }
+                    rulePendingDeletion = nil
+                }
+                Button("Cancel", role: .cancel) {
+                    rulePendingDeletion = nil
+                }
+            } message: {
+                let pattern = rulePendingDeletion?.pattern ?? ""
+                Text("This removes the rule for \(pattern.isEmpty ? "empty pattern" : pattern).")
+            }
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") {
@@ -199,10 +239,64 @@ struct SettingsView: View {
         .frame(height: 150)
         .clipShape(RoundedRectangle(cornerRadius: 12))
     }
+
+    private var deleteConfirmationBinding: Binding<Bool> {
+        Binding(
+            get: { rulePendingDeletion != nil },
+            set: { isPresented in
+                if !isPresented {
+                    rulePendingDeletion = nil
+                }
+            }
+        )
+    }
 }
 
 #Preview {
     SettingsView(settings: SettingsManager())
+}
+
+private struct TextLinkURLTemplateRuleRow: View {
+    @Binding var rule: TextLinkURLTemplateRule
+    let onDelete: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .center, spacing: 10) {
+                Toggle("Enabled", isOn: $rule.enabled)
+                Spacer(minLength: 8)
+                Button(action: onDelete) {
+                    Image(systemName: "xmark.circle")
+                        .imageScale(.large)
+                        .accessibilityLabel("Delete text link rule")
+                }
+                .buttonStyle(.borderless)
+            }
+
+            TextField("Regex pattern", text: $rule.pattern)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled(true)
+#if !os(visionOS)
+                .keyboardType(.asciiCapable)
+#endif
+                .font(.system(.subheadline, design: .monospaced))
+
+            TextField("URL template", text: $rule.urlTemplate)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled(true)
+#if !os(visionOS)
+                .keyboardType(.URL)
+#endif
+                .font(.system(.subheadline, design: .monospaced))
+
+            if let validationMessage = TextLinkURLTemplateRules.validationMessage(for: rule) {
+                Text(validationMessage)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+        }
+        .padding(.vertical, 4)
+    }
 }
 
 private struct SonioxKeyConfigurationRow: View {

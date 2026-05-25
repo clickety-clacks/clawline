@@ -758,7 +758,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
             delegate: self,
             enableDataDetectors: enableDataDetectors
         )
-        let bodyTap = UITapGestureRecognizer(target: self, action: #selector(handleBubbleTap))
+        let bodyTap = UITapGestureRecognizer(target: self, action: #selector(handleBodyTap(_:)))
         bodyTap.cancelsTouchesInView = false
         bodyTap.delaysTouchesBegan = false
         bodyTap.delaysTouchesEnded = false
@@ -1879,6 +1879,15 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         return max(0, measured.height)
     }
 
+    @objc private func handleBodyTap(_ recognizer: UITapGestureRecognizer) {
+        if recognizer.state == .ended,
+           let generatedURL = Self.generatedTextLinkURL(in: bodyLabel, at: recognizer.location(in: bodyLabel)) {
+            _ = GeneratedTextLinkActivationRouter.openGeneratedLink(generatedURL, bodyLabel)
+            return
+        }
+        handleBubbleTap()
+    }
+
     @objc private func handleBubbleTap() {
         if suppressExpandTapForLinkCards {
             return
@@ -1887,6 +1896,48 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         if dynamicContentScrollView.contentSize.height > dynamicContentScrollView.bounds.height + 1 {
             onRequestExpand?()
         }
+    }
+
+    static func generatedTextLinkURL(in textView: UITextView, at point: CGPoint) -> URL? {
+        guard let attributedText = textView.attributedText, attributedText.length > 0 else {
+            return nil
+        }
+
+        textView.layoutManager.ensureLayout(for: textView.textContainer)
+        let usedRect = textView.layoutManager.usedRect(for: textView.textContainer)
+        let location = CGPoint(
+            x: point.x - textView.textContainerInset.left + usedRect.origin.x,
+            y: point.y - textView.textContainerInset.top + usedRect.origin.y
+        )
+
+        var fraction: CGFloat = 0
+        let characterIndex = textView.layoutManager.characterIndex(
+            for: location,
+            in: textView.textContainer,
+            fractionOfDistanceBetweenInsertionPoints: &fraction
+        )
+        guard characterIndex < attributedText.length else {
+            return nil
+        }
+
+        var effectiveRange = NSRange(location: 0, length: 0)
+        guard let url = attributedText.attribute(.link, at: characterIndex, effectiveRange: &effectiveRange) as? URL,
+              effectiveRange.length > 0,
+              TextLinkURLTemplateRules.isGeneratedLink(in: attributedText, characterRange: effectiveRange) else {
+            return nil
+        }
+        let glyphRange = textView.layoutManager.glyphRange(
+            forCharacterRange: effectiveRange,
+            actualCharacterRange: nil
+        )
+        let glyphRect = textView.layoutManager.boundingRect(
+            forGlyphRange: glyphRange,
+            in: textView.textContainer
+        ).insetBy(dx: -2, dy: -4)
+        guard glyphRect.contains(location) else {
+            return nil
+        }
+        return url
     }
 
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
@@ -1966,9 +2017,26 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         primaryActionFor textItem: UITextItem,
         defaultAction: UIAction
     ) -> UIAction? {
-        UnifiedMarkdownRenderer.primaryActionForTextItem(textItem, defaultAction: defaultAction) { tappedURL in
+        UnifiedMarkdownRenderer.primaryActionForTextItem(textItem, defaultAction: defaultAction) { tappedURL, characterRange in
+            if TextLinkURLTemplateRules.isGeneratedLink(in: textView.attributedText, characterRange: characterRange) {
+                _ = GeneratedTextLinkActivationRouter.openGeneratedLink(tappedURL, textView)
+                return
+            }
             UIApplication.shared.open(tappedURL)
         }
+    }
+
+    func textView(
+        _ textView: UITextView,
+        shouldInteractWith URL: URL,
+        in characterRange: NSRange,
+        interaction: UITextItemInteraction
+    ) -> Bool {
+        guard TextLinkURLTemplateRules.isGeneratedLink(in: textView.attributedText, characterRange: characterRange) else {
+            return true
+        }
+        _ = GeneratedTextLinkActivationRouter.openGeneratedLink(URL, textView)
+        return false
     }
 
     private static func markdownStyle(

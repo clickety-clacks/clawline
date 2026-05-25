@@ -3837,6 +3837,7 @@ private final class PromptFocusShortcutView: UIView {
             isShortcutEnabled: isShortcutEnabled,
             isAlreadyFirstResponder: isFirstResponder,
             currentFirstResponderIsTextInput: window?.clawlineFirstResponder?.isClawlineTextInputResponder == true,
+            currentFirstResponderOwnsTerminalInput: window?.clawlineFirstResponder?.ownsClawlineTerminalInput == true,
             currentFirstResponderOwnsEmbeddedScroll: window?.clawlineFirstResponder?.ownsClawlineEmbeddedScrollInput == true,
             canRetryAfterTextInput: textInputRetryCount > 0
         ) {
@@ -4191,10 +4192,12 @@ enum PromptFocusShortcutActivation {
         isShortcutEnabled: Bool,
         isAlreadyFirstResponder: Bool,
         currentFirstResponderIsTextInput: Bool,
+        currentFirstResponderOwnsTerminalInput: Bool,
         currentFirstResponderOwnsEmbeddedScroll: Bool,
         canRetryAfterTextInput: Bool
     ) -> Action {
         guard isShortcutEnabled, !isAlreadyFirstResponder else { return .skip }
+        guard !currentFirstResponderOwnsTerminalInput else { return .skip }
         guard !currentFirstResponderOwnsEmbeddedScroll else { return .skip }
         guard !currentFirstResponderIsTextInput else {
             return canRetryAfterTextInput ? .retryAfterTextInputResigns : .skip
@@ -4208,6 +4211,17 @@ private extension UIResponder {
 
     var isClawlineTextInputResponder: Bool {
         self is UITextInput
+    }
+
+    var ownsClawlineTerminalInput: Bool {
+        var responder: UIResponder? = self
+        while let current = responder {
+            if current is FocusableTerminalView {
+                return true
+            }
+            responder = current.next
+        }
+        return false
     }
 
     var ownsClawlineEmbeddedScrollInput: Bool {

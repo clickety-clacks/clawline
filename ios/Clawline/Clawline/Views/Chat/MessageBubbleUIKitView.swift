@@ -3044,6 +3044,12 @@ enum ChatFlowUIKitTheme {
             : UIColor(red: 0.390, green: 0.420, blue: 0.445, alpha: 1)
     }
 
+    static func connectionReconnecting(isDark: Bool) -> UIColor {
+        isDark
+            ? UIColor(red: 0.92, green: 0.76, blue: 0.30, alpha: 1)
+            : UIColor(red: 0.89, green: 0.67, blue: 0.08, alpha: 1)
+    }
+
     static func failureText(isDark: Bool) -> UIColor {
         palette(isDark: isDark).failureText
     }

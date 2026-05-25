@@ -5797,6 +5797,7 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         let action: SessionControlAction?
         let options: [FooterOption]
         let unsupportedReason: String?
+        let textColor: UIColor?
     }
 
     private struct FooterOption {
@@ -5871,9 +5872,9 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
             stackView.removeArrangedSubview(view)
             view.removeFromSuperview()
         }
-        let items = Self.footerItems(for: status)
+        let items = Self.footerItems(for: status, isDark: isDark)
         for item in items {
-            stackView.addArrangedSubview(button(for: item, status: status, color: textColor, onSelect: onSelect))
+            stackView.addArrangedSubview(button(for: item, status: status, color: item.textColor ?? textColor, onSelect: onSelect))
         }
         accessibilityLabel = Self.footerText(for: status)
         accessibilityTraits = items.contains { $0.action != nil && !$0.options.isEmpty } ? .button : .staticText
@@ -5890,7 +5891,7 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         return parts.joined(separator: "  ·  ")
     }
 
-    private static func footerItems(for status: SessionStatus?) -> [FooterItem] {
+    private static func footerItems(for status: SessionStatus?, isDark: Bool = false) -> [FooterItem] {
         guard let status else { return [] }
         let display = status.display
         let capabilities = status.capabilities
@@ -5911,7 +5912,8 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
                 text: normalized(display.model) ?? "Unknown model",
                 action: modelCapability.isSupported ? .setModel : nil,
                 options: modelOptions(display: display, catalog: status.modelCatalog),
-                unsupportedReason: modelCapability.reason ?? "model_catalog_control_not_available"
+                unsupportedReason: modelCapability.reason ?? "model_catalog_control_not_available",
+                textColor: nil
             ),
             FooterItem(
                 text: "Thinking \(thinkingValue ?? reasoningValue ?? "Unknown")",
@@ -5921,7 +5923,8 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
                     action: levelControl.action,
                     providerOptions: levelControl.options
                 ),
-                unsupportedReason: levelControl.reason
+                unsupportedReason: levelControl.reason,
+                textColor: nil
             ),
             FooterItem(
                 text: fastModeText(display.fastMode, action: fastControl.action, unsupportedReason: fastControl.reason),
@@ -5931,9 +5934,10 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
                     action: fastControl.action,
                     providerOptions: fastControl.options
                 ),
-                unsupportedReason: fastControl.reason
+                unsupportedReason: fastControl.reason,
+                textColor: nil
             )
-        ] + authModeFooterItems(display.authMode)
+        ] + authModeFooterItems(display.authMode, isDark: isDark)
     }
 
     private static func capability(_ capability: SessionStatus.Capability?,
@@ -5964,6 +5968,13 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         configuration.baseForegroundColor = color
         configuration.background.strokeWidth = 0
         button.configuration = configuration
+        if item.textColor != nil {
+            button.configurationUpdateHandler = { button in
+                guard var updatedConfiguration = button.configuration else { return }
+                updatedConfiguration.baseForegroundColor = color
+                button.configuration = updatedConfiguration
+            }
+        }
         button.setContentHuggingPriority(.required, for: .horizontal)
         button.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
         let titleWidth = ceil((item.text as NSString).size(withAttributes: [.font: Self.footerFont]).width)
@@ -6151,7 +6162,7 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         return fastMode ? "Fast on" : "Fast off"
     }
 
-    private static func authModeFooterItems(_ authMode: String?) -> [FooterItem] {
+    private static func authModeFooterItems(_ authMode: String?, isDark: Bool) -> [FooterItem] {
         switch authMode?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
         case "oauth":
             return [
@@ -6159,7 +6170,8 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
                     text: "OAUTH",
                     action: nil,
                     options: [FooterOption(title: "OAUTH", value: nil, enabled: nil, isCurrent: true)],
-                    unsupportedReason: nil
+                    unsupportedReason: nil,
+                    textColor: ChatFlowUIKitTheme.palette(isDark: isDark).sage
                 )
             ]
         case "api_key", "api-key":
@@ -6168,7 +6180,8 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
                     text: "API KEY",
                     action: nil,
                     options: [FooterOption(title: "API KEY", value: nil, enabled: nil, isCurrent: true)],
-                    unsupportedReason: nil
+                    unsupportedReason: nil,
+                    textColor: ChatFlowUIKitTheme.connectionReconnecting(isDark: isDark)
                 )
             ]
         default:

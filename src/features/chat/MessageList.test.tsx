@@ -1485,6 +1485,35 @@ describe("MessageList rich rendering", () => {
     const authControl = screen.getByLabelText("API KEY");
     expect(authControl).toBeDisabled();
     expect(authControl).toHaveTextContent("API KEY");
+    expect(authControl).toHaveClass("session-status-footer-select--auth-api-key");
+  });
+
+  it("renders OAuth auth mode with the theme green footer color", async () => {
+    renderMessageListWithProps({
+      messages: [makeMessage(1)],
+      sessionKey: "agent:main:clawline:flynn:main",
+      sessionStatus: {
+        sessionKey: "agent:main:clawline:flynn:main",
+        display: {
+          model: "gpt-5.5",
+          thinkingLevel: "medium",
+          fastMode: true,
+          authMode: "oauth"
+        },
+        capabilities: {
+          setModel: { supported: false },
+          setThinking: { supported: false },
+          setFastMode: { supported: false }
+        }
+      }
+    });
+
+    const footer = await screen.findByTestId("session-status-footer");
+    expect(footer).toHaveAccessibleName("gpt-5.5 · Thinking medium · Fast on · OAUTH");
+    const authControl = screen.getByLabelText("OAUTH");
+    expect(authControl).toBeDisabled();
+    expect(authControl).toHaveTextContent("OAUTH");
+    expect(authControl).toHaveClass("session-status-footer-select--auth-oauth");
   });
 
   it("hides unknown auth mode in the footer", async () => {

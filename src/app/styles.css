@@ -825,6 +825,24 @@ html[data-appearance="light"] body::before {
   padding: 0 0.65rem;
 }
 
+.session-status-footer-control select.session-status-footer-select--auth-oauth {
+  color: var(--color-accent);
+}
+
+.session-status-footer-control select.session-status-footer-select--auth-oauth:disabled {
+  opacity: 1;
+  -webkit-text-fill-color: var(--color-accent);
+}
+
+.session-status-footer-control select.session-status-footer-select--auth-api-key {
+  color: var(--color-connection-reconnecting);
+}
+
+.session-status-footer-control select.session-status-footer-select--auth-api-key:disabled {
+  opacity: 1;
+  -webkit-text-fill-color: var(--color-connection-reconnecting);
+}
+
 .message-meta,
 .message-status {
   display: flex;

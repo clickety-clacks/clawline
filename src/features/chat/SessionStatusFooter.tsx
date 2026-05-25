@@ -17,6 +17,7 @@ interface FooterItem {
   action?: SessionControlAction;
   options: FooterOption[];
   text: string;
+  tone?: "auth-api-key" | "auth-oauth";
   unsupportedReason?: string | null;
 }
 
@@ -53,6 +54,7 @@ export function SessionStatusFooter({
           <span className="sr-only">{item.text}</span>
           <select
             aria-label={item.text}
+            className={item.tone ? `session-status-footer-select--${item.tone}` : undefined}
             disabled={!item.action || item.options.length === 0}
             onChange={(event) => {
               if (!item.action) {
@@ -309,10 +311,10 @@ function fastModeText(
 function authModeFooterItem(authMode: string | null | undefined): FooterItem | null {
   switch (authMode?.trim().toLowerCase()) {
     case "oauth":
-      return { text: "OAUTH", action: undefined, options: [{ title: "OAUTH", isCurrent: true }] };
+      return { text: "OAUTH", tone: "auth-oauth", action: undefined, options: [{ title: "OAUTH", isCurrent: true }] };
     case "api_key":
     case "api-key":
-      return { text: "API KEY", action: undefined, options: [{ title: "API KEY", isCurrent: true }] };
+      return { text: "API KEY", tone: "auth-api-key", action: undefined, options: [{ title: "API KEY", isCurrent: true }] };
     default:
       return null;
   }

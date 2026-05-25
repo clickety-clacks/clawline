@@ -212,6 +212,18 @@ struct StreamPageDotsViewTests {
             visibleDotIndices: visibleDotIndices,
             capsuleWidth: capsuleBounds.width
         )
+        let firstActiveGlowBounds = StreamPageDotsView.containedActiveGlowVisualBounds(
+            activeIndex: 0,
+            totalSessionCount: 11,
+            visibleDotIndices: visibleDotIndices,
+            capsuleBounds: capsuleBounds
+        )
+        let lastActiveGlowBounds = StreamPageDotsView.containedActiveGlowVisualBounds(
+            activeIndex: 10,
+            totalSessionCount: 11,
+            visibleDotIndices: visibleDotIndices,
+            capsuleBounds: capsuleBounds
+        )
 
         #expect(leadingLTR.minX == capsuleBounds.minX)
         #expect(leadingLTR.maxX == capsuleBounds.minX + StreamPageDotsView.unreadEdgeBloomBandWidth)
@@ -234,6 +246,56 @@ struct StreamPageDotsViewTests {
             #expect(firstActiveCenter > capsuleBounds.minX)
             #expect(lastActiveCenter < capsuleBounds.maxX)
         }
+        if let firstActiveGlowBounds, let lastActiveGlowBounds {
+            #expect(firstActiveGlowBounds.minX >= capsuleBounds.minX)
+            #expect(firstActiveGlowBounds.maxX <= capsuleBounds.maxX)
+            #expect(lastActiveGlowBounds.minX >= capsuleBounds.minX)
+            #expect(lastActiveGlowBounds.maxX <= capsuleBounds.maxX)
+        }
+    }
+
+    @Test("T278: at-rest active glow source rect stays inside capsule before drag")
+    func atRestActiveGlowSourceRectStaysInsideCapsuleBeforeDrag() {
+        let capsuleBounds = StreamPageDotsView.unreadEdgeBloomCapsuleBounds(capsuleWidth: 190)
+        let edgeVisibleDotIndices = Array(29..<40)
+        let activeCenter = StreamPageDotsView.containedActiveGlowCenterX(
+            activeIndex: 39,
+            totalSessionCount: 40,
+            visibleDotIndices: edgeVisibleDotIndices,
+            capsuleWidth: capsuleBounds.width
+        )
+        let activeGlowBounds = StreamPageDotsView.containedActiveGlowVisualBounds(
+            activeIndex: 39,
+            totalSessionCount: 40,
+            visibleDotIndices: edgeVisibleDotIndices,
+            capsuleBounds: capsuleBounds
+        )
+        let restMetrics = StreamPageDotsView.scrubLayoutMetrics(
+            totalSessionCount: 40,
+            visibleDotCount: edgeVisibleDotIndices.count,
+            controlWidth: capsuleBounds.width,
+            maxWidth: capsuleBounds.width,
+            isScrubbing: false
+        )
+        let waveMetrics = StreamPageDotsView.scrubLayoutMetrics(
+            totalSessionCount: 40,
+            visibleDotCount: edgeVisibleDotIndices.count,
+            controlWidth: capsuleBounds.width,
+            maxWidth: capsuleBounds.width,
+            isScrubbing: true
+        )
+
+        #expect(restMetrics.scrubFieldWidth == capsuleBounds.width)
+        #expect(waveMetrics.scrubFieldWidth > restMetrics.scrubFieldWidth)
+        #expect(activeCenter != nil)
+        #expect(activeGlowBounds != nil)
+        if let activeCenter, let activeGlowBounds {
+            #expect(activeCenter < capsuleBounds.maxX)
+            #expect(activeGlowBounds.minX >= capsuleBounds.minX)
+            #expect(activeGlowBounds.maxX <= capsuleBounds.maxX)
+            #expect(activeGlowBounds.height == capsuleBounds.height)
+            #expect(activeGlowBounds.contains(CGPoint(x: activeCenter, y: capsuleBounds.midY)))
+        }
     }
 
     @Test("T278: source invariants preserve wave overflow and local blob containment")
@@ -253,6 +315,7 @@ struct StreamPageDotsViewTests {
         #expect(source.contains("EdgeWarningBloomShape("))
         #expect(source.contains("containedActiveGlowOverlay(capsuleBounds: capsuleBounds)"))
         #expect(source.contains("containedActiveGlowCenterX("))
+        #expect(source.contains("containedActiveGlowVisualBounds("))
         #expect(!source.contains("min(1, max(0, centerX"))
         #expect(source.contains("let showsForegroundGlow = Self.foregroundGlowEnabled("))
     }

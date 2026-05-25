@@ -49,6 +49,7 @@ struct StreamPageDotsView: View {
     }
     static let unreadEdgeBloomBandWidth: CGFloat = 32
     static let containedActiveGlowEndRadius: CGFloat = 26
+    static let containedActiveGlowMaxWidth: CGFloat = containedActiveGlowEndRadius * 2
 
     private var activeIndex: Int {
         sessionKeys.firstIndex(of: activeSessionKey) ?? 0
@@ -231,6 +232,34 @@ struct StreamPageDotsView: View {
             totalSessionCount: totalSessionCount,
             visibleDotIndices: visibleDotIndices,
             fieldWidth: capsuleWidth
+        )
+    }
+
+    static func containedActiveGlowVisualBounds(
+        activeIndex: Int,
+        totalSessionCount: Int,
+        visibleDotIndices: [Int],
+        capsuleBounds: CGRect
+    ) -> CGRect? {
+        guard let centerX = containedActiveGlowCenterX(
+            activeIndex: activeIndex,
+            totalSessionCount: totalSessionCount,
+            visibleDotIndices: visibleDotIndices,
+            capsuleWidth: capsuleBounds.width
+        ) else {
+            return nil
+        }
+
+        let width = min(containedActiveGlowMaxWidth, capsuleBounds.width)
+        let minX = min(
+            max(centerX - (width / 2), capsuleBounds.minX),
+            capsuleBounds.maxX - width
+        )
+        return CGRect(
+            x: minX,
+            y: capsuleBounds.minY,
+            width: width,
+            height: capsuleBounds.height
         )
     }
 
@@ -689,29 +718,39 @@ struct StreamPageDotsView: View {
     @ViewBuilder
     private func containedActiveGlowOverlay(capsuleBounds: CGRect) -> some View {
         if !isScrubbing,
+           let activeGlowBounds = Self.containedActiveGlowVisualBounds(
+               activeIndex: activeIndex,
+               totalSessionCount: sessionKeys.count,
+               visibleDotIndices: visibleDotIndices,
+               capsuleBounds: capsuleBounds
+           ),
            let centerX = Self.containedActiveGlowCenterX(
                activeIndex: activeIndex,
                totalSessionCount: sessionKeys.count,
                visibleDotIndices: visibleDotIndices,
                capsuleWidth: capsuleBounds.width
            ) {
-            Capsule()
-                .fill(
-                    RadialGradient(
-                        colors: [
-                            StreamDotColor.activeGlow(colorScheme: colorScheme).opacity(colorScheme == .dark ? 0.28 : 0.22),
-                            StreamDotColor.activeGlow(colorScheme: colorScheme).opacity(colorScheme == .dark ? 0.14 : 0.10),
-                            .clear
-                        ],
-                        center: UnitPoint(
-                            x: centerX / max(capsuleBounds.width, 1),
-                            y: 0.5
-                        ),
-                        startRadius: 1,
-                        endRadius: Self.containedActiveGlowEndRadius
+            ZStack(alignment: .topLeading) {
+                Capsule()
+                    .fill(
+                        RadialGradient(
+                            colors: [
+                                StreamDotColor.activeGlow(colorScheme: colorScheme).opacity(colorScheme == .dark ? 0.28 : 0.22),
+                                StreamDotColor.activeGlow(colorScheme: colorScheme).opacity(colorScheme == .dark ? 0.14 : 0.10),
+                                .clear
+                            ],
+                            center: UnitPoint(
+                                x: (centerX - activeGlowBounds.minX) / max(activeGlowBounds.width, 1),
+                                y: 0.5
+                            ),
+                            startRadius: 1,
+                            endRadius: Self.containedActiveGlowEndRadius
+                        )
                     )
-                )
-                .frame(width: capsuleBounds.width, height: capsuleBounds.height)
+                    .frame(width: activeGlowBounds.width, height: activeGlowBounds.height)
+                    .offset(x: activeGlowBounds.minX, y: activeGlowBounds.minY)
+            }
+            .frame(width: capsuleBounds.width, height: capsuleBounds.height)
         }
     }
 

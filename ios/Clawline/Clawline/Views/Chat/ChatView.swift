@@ -5707,6 +5707,29 @@ enum CrossChatNotificationGeometry {
         return collapsedPeekWidth
     }
 
+    static func stackWidth(
+        maxContainerWidth: CGFloat,
+        normalTrailingMargin: CGFloat,
+        compactLeadingFitMargin: CGFloat,
+        maxStackWidth: CGFloat,
+        isCollapsed: Bool
+    ) -> CGFloat {
+        let externalHorizontalMargin = isCollapsed
+            ? 0
+            : normalTrailingMargin + compactLeadingFitMargin
+        return min(maxStackWidth, max(0, maxContainerWidth - externalHorizontalMargin))
+    }
+
+    static func replyInputAvailableWidth(
+        stackWidth: CGFloat,
+        leadingPadding: CGFloat,
+        trailingPadding: CGFloat,
+        sendControlWidth: CGFloat,
+        replyControlSpacing: CGFloat
+    ) -> CGFloat {
+        max(0, stackWidth - leadingPadding - trailingPadding - sendControlWidth - replyControlSpacing)
+    }
+
     static func collapsedOffset(
         stackWidth: CGFloat,
         collapsedPeekWidth: CGFloat,
@@ -5863,10 +5886,13 @@ private struct CrossChatNotificationOverlay: View {
     }
 
     private var stackWidth: CGFloat {
-        let externalHorizontalMargin = isCollapsed
-            ? 0
-            : normalTrailingMargin + compactLeadingFitMargin
-        return min(Self.maxStackWidth, max(0, maxContainerWidth - externalHorizontalMargin))
+        CrossChatNotificationGeometry.stackWidth(
+            maxContainerWidth: maxContainerWidth,
+            normalTrailingMargin: normalTrailingMargin,
+            compactLeadingFitMargin: compactLeadingFitMargin,
+            maxStackWidth: Self.maxStackWidth,
+            isCollapsed: isCollapsed
+        )
     }
 
     private var motionContainerWidth: CGFloat {

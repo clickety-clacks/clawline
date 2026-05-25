@@ -470,6 +470,66 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
         #expect(linkTarget("details", in: attributed)?.absoluteString == "https://example.com")
     }
 
+    @Test("T1133 notification render cache reuses rendered markdown across body passes")
+    @MainActor
+    func t1133_notificationRenderCacheReusesRenderedMarkdownAcrossBodyPasses() {
+        let cache = CrossChatNotificationRenderedEntryCache()
+        let baseFont = UIFont.systemFont(ofSize: 15, weight: .regular)
+        let inkColor = UIColor.secondaryLabel
+        var renderCallCount = 0
+        let entries = [
+            CrossChatAssistantNotificationEntry(
+                id: "t1133_entry",
+                content: "Cached **notification**",
+                timestamp: Date()
+            )
+        ]
+
+        let renderer: CrossChatNotificationRenderedEntryCache.RenderBlocks = { content, _, _, _, _, _ in
+            renderCallCount += 1
+            return [.attributedText(NSAttributedString(string: content))]
+        }
+
+        let first = cache.entries(
+            for: entries,
+            baseFont: baseFont,
+            inkColor: inkColor,
+            lineSpacing: 2,
+            isDark: false,
+            renderBlocks: renderer
+        )
+        let second = cache.entries(
+            for: entries,
+            baseFont: baseFont,
+            inkColor: inkColor,
+            lineSpacing: 2,
+            isDark: false,
+            renderBlocks: renderer
+        )
+
+        #expect(renderCallCount == 1)
+        #expect(first.first?.id == "t1133_entry")
+        #expect(second.first?.id == "t1133_entry")
+
+        let changedEntries = [
+            CrossChatAssistantNotificationEntry(
+                id: "t1133_entry",
+                content: "Changed **notification**",
+                timestamp: Date()
+            )
+        ]
+        _ = cache.entries(
+            for: changedEntries,
+            baseFont: baseFont,
+            inkColor: inkColor,
+            lineSpacing: 2,
+            isDark: false,
+            renderBlocks: renderer
+        )
+
+        #expect(renderCallCount == 2)
+    }
+
     @Test("T307 real notification bubble renders assistant markdown content")
     @MainActor
     func t307_realNotificationBubbleRendersAssistantMarkdownContent() throws {

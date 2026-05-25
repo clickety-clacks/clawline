@@ -1023,6 +1023,7 @@ struct PromptFocusShortcutActivationTests {
                 isShortcutEnabled: true,
                 isAlreadyFirstResponder: false,
                 currentFirstResponderIsTextInput: false,
+                currentFirstResponderOwnsTerminalInput: false,
                 currentFirstResponderOwnsEmbeddedScroll: false,
                 canRetryAfterTextInput: true
             ) == .activate
@@ -1032,6 +1033,7 @@ struct PromptFocusShortcutActivationTests {
                 isShortcutEnabled: true,
                 isAlreadyFirstResponder: false,
                 currentFirstResponderIsTextInput: true,
+                currentFirstResponderOwnsTerminalInput: false,
                 currentFirstResponderOwnsEmbeddedScroll: false,
                 canRetryAfterTextInput: false
             ) == .skip
@@ -1041,6 +1043,7 @@ struct PromptFocusShortcutActivationTests {
                 isShortcutEnabled: false,
                 isAlreadyFirstResponder: false,
                 currentFirstResponderIsTextInput: false,
+                currentFirstResponderOwnsTerminalInput: false,
                 currentFirstResponderOwnsEmbeddedScroll: false,
                 canRetryAfterTextInput: true
             ) == .skip
@@ -1050,6 +1053,7 @@ struct PromptFocusShortcutActivationTests {
                 isShortcutEnabled: true,
                 isAlreadyFirstResponder: true,
                 currentFirstResponderIsTextInput: false,
+                currentFirstResponderOwnsTerminalInput: false,
                 currentFirstResponderOwnsEmbeddedScroll: false,
                 canRetryAfterTextInput: true
             ) == .skip
@@ -1063,7 +1067,22 @@ struct PromptFocusShortcutActivationTests {
                 isShortcutEnabled: true,
                 isAlreadyFirstResponder: false,
                 currentFirstResponderIsTextInput: false,
+                currentFirstResponderOwnsTerminalInput: false,
                 currentFirstResponderOwnsEmbeddedScroll: true,
+                canRetryAfterTextInput: true
+            ) == .skip
+        )
+    }
+
+    @Test("Prompt focus shortcut does not steal focus from terminal input")
+    func promptFocusShortcutDoesNotStealFocusFromTerminalInput() {
+        #expect(
+            PromptFocusShortcutActivation.action(
+                isShortcutEnabled: true,
+                isAlreadyFirstResponder: false,
+                currentFirstResponderIsTextInput: false,
+                currentFirstResponderOwnsTerminalInput: true,
+                currentFirstResponderOwnsEmbeddedScroll: false,
                 canRetryAfterTextInput: true
             ) == .skip
         )
@@ -1076,6 +1095,7 @@ struct PromptFocusShortcutActivationTests {
                 isShortcutEnabled: true,
                 isAlreadyFirstResponder: false,
                 currentFirstResponderIsTextInput: true,
+                currentFirstResponderOwnsTerminalInput: false,
                 currentFirstResponderOwnsEmbeddedScroll: false,
                 canRetryAfterTextInput: true
             ) == .retryAfterTextInputResigns

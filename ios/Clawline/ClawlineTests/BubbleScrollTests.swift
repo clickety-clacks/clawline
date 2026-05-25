@@ -318,6 +318,41 @@ struct BubbleScrollTests {
         #expect(scale == 0.5)
     }
 
+    @Test("T233: Popup viewer uses fit-scaled content size for oversized images")
+    func imagePopupUsesFitScaledContentSizeForOversizedImages() {
+        let imageSize = CGSize(width: 1200, height: 900)
+        let viewportSize = CGSize(width: 600, height: 500)
+        let scale = ImagePopupViewerLayout.initialZoomScale(
+            imageSize: imageSize,
+            viewportSize: viewportSize
+        )
+        let contentSize = ImagePopupViewerLayout.zoomedContentSize(
+            imageSize: imageSize,
+            zoomScale: scale
+        )
+
+        #expect(contentSize.width == 600)
+        #expect(contentSize.height == 450)
+        #expect(contentSize.width <= viewportSize.width)
+        #expect(contentSize.height <= viewportSize.height)
+    }
+
+    @Test("T233: Popup viewer uses natural content size for smaller images")
+    func imagePopupUsesNaturalContentSizeForSmallerImages() {
+        let imageSize = CGSize(width: 320, height: 200)
+        let scale = ImagePopupViewerLayout.initialZoomScale(
+            imageSize: imageSize,
+            viewportSize: CGSize(width: 700, height: 500)
+        )
+        let contentSize = ImagePopupViewerLayout.zoomedContentSize(
+            imageSize: imageSize,
+            zoomScale: scale
+        )
+
+        #expect(scale == 1)
+        #expect(contentSize == imageSize)
+    }
+
     @Test("T233: Popup viewer centers content that is smaller than viewport")
     func imagePopupCentersSmallerScaledContent() {
         let insets = ImagePopupViewerLayout.centeredContentInset(
@@ -329,6 +364,38 @@ struct BubbleScrollTests {
         #expect(insets.right == 150)
         #expect(insets.top == 125)
         #expect(insets.bottom == 125)
+    }
+
+    @Test("T233: Popup viewer defers initial fit scale until viewport has bounds")
+    @MainActor
+    func imagePopupViewerDefersInitialFitScaleUntilViewportHasBounds() {
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: 1200, height: 900))
+        let image = renderer.image { context in
+            UIColor.red.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 1200, height: 900))
+        }
+        let controller = ImagePopupViewerController(image: image)
+        controller.loadViewIfNeeded()
+
+        controller.view.frame = CGRect(x: 0, y: 0, width: 0, height: 0)
+        controller.view.setNeedsLayout()
+        controller.view.layoutIfNeeded()
+
+        controller.view.frame = CGRect(x: 0, y: 0, width: 636, height: 536)
+        controller.view.setNeedsLayout()
+        controller.view.layoutIfNeeded()
+        let viewportSize = controller.debugScrollView.bounds.size
+        let expectedScale = ImagePopupViewerLayout.initialZoomScale(
+            imageSize: image.size,
+            viewportSize: viewportSize
+        )
+
+        #expect(viewportSize.width > 0)
+        #expect(viewportSize.height > 0)
+        #expect(expectedScale < 1)
+        #expect(abs(controller.debugScrollView.zoomScale - expectedScale) < 0.001)
+        #expect(controller.debugScrollView.contentSize.width <= viewportSize.width + 0.5)
+        #expect(controller.debugScrollView.contentSize.height <= viewportSize.height + 0.5)
     }
 
     @Test("T047/T046: Overflow-to-fit transition clears stale inner offset and fade state")

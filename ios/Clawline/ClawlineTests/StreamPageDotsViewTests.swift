@@ -549,6 +549,34 @@ struct StreamPageDotsViewTests {
         #expect(routeController.route == .closed)
     }
 
+    @Test("T1136 stream popup search focus follows software keyboard visibility")
+    func streamPopupSearchFocusFollowsSoftwareKeyboardVisibility() {
+        #expect(StreamPopupFocusHandoff.shouldFocusSearchOnOpen(isSoftwareKeyboardVisible: true))
+        #expect(StreamPopupFocusHandoff.shouldFocusSearchOnOpen(isSoftwareKeyboardVisible: false) == false)
+    }
+
+    @Test("T1136 stream popup restores composer only for displaced focus while keyboard remains visible")
+    func streamPopupRestoresComposerOnlyForDisplacedFocusWhileKeyboardVisible() {
+        #expect(
+            StreamPopupFocusHandoff.shouldRestoreComposerOnClose(
+                didDisplaceComposerFocus: true,
+                isSoftwareKeyboardVisible: true
+            )
+        )
+        #expect(
+            StreamPopupFocusHandoff.shouldRestoreComposerOnClose(
+                didDisplaceComposerFocus: true,
+                isSoftwareKeyboardVisible: false
+            ) == false
+        )
+        #expect(
+            StreamPopupFocusHandoff.shouldRestoreComposerOnClose(
+                didDisplaceComposerFocus: false,
+                isSoftwareKeyboardVisible: true
+            ) == false
+        )
+    }
+
     @Test("Active dots override unread styling")
     func activeKindWinsPrecedence() {
         let kind = StreamDotColor.kind(

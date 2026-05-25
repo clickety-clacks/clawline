@@ -43,6 +43,13 @@ final class SettingsManager {
         didSet { saveLifecycleDebugOverlayEnabled() }
     }
 
+    var textLinkURLTemplateRules: [TextLinkURLTemplateRule] {
+        didSet {
+            saveTextLinkURLTemplateRules()
+            TextLinkURLTemplateRules.configuredRules = textLinkURLTemplateRules
+        }
+    }
+
     private(set) var fontScaleChangeSequence: Int = 0
     private(set) var fontScaleToastSequence: Int = 0
     private var pendingFontScaleToastMessage: String?
@@ -75,6 +82,7 @@ final class SettingsManager {
     private static let effectConfigKey = "backgroundEffectConfiguration"
     private static let appearanceModeKey = "appearanceMode"
     private static let lifecycleDebugOverlayEnabledKey = "debug.lifecycleOverlayEnabled"
+    private static let textLinkURLTemplateRulesKey = "textLinkURLTemplateRules"
 
     init(sonioxKeyStore: SonioxKeyStore, cartesiaKeyStore: CartesiaKeyStore) {
         self.sonioxKeyStore = sonioxKeyStore
@@ -99,7 +107,14 @@ final class SettingsManager {
         let initialFontScale = AppFontScale.persistedValue()
         self.fontScale = initialFontScale
         self.isLifecycleDebugOverlayEnabled = UserDefaults.standard.bool(forKey: Self.lifecycleDebugOverlayEnabledKey)
+        if let data = UserDefaults.standard.data(forKey: Self.textLinkURLTemplateRulesKey),
+           let rules = try? JSONDecoder().decode([TextLinkURLTemplateRule].self, from: data) {
+            self.textLinkURLTemplateRules = rules
+        } else {
+            self.textLinkURLTemplateRules = []
+        }
         AppFontScale.useActiveValue(initialFontScale)
+        TextLinkURLTemplateRules.configuredRules = textLinkURLTemplateRules
     }
 
     convenience init() {
@@ -133,6 +148,12 @@ final class SettingsManager {
             isLifecycleDebugOverlayEnabled,
             forKey: Self.lifecycleDebugOverlayEnabledKey
         )
+    }
+
+    private func saveTextLinkURLTemplateRules() {
+        if let data = try? JSONEncoder().encode(textLinkURLTemplateRules) {
+            UserDefaults.standard.set(data, forKey: Self.textLinkURLTemplateRulesKey)
+        }
     }
 
     func resetToDefaults() {
@@ -182,6 +203,21 @@ final class SettingsManager {
 
     func resetFontScale() {
         applyFontScale(AppFontScale.defaultValue)
+    }
+
+    func addTextLinkURLTemplateRule() {
+        textLinkURLTemplateRules.append(
+            TextLinkURLTemplateRule(
+                id: "text-link-\(UUID().uuidString)",
+                enabled: true,
+                pattern: "",
+                urlTemplate: ""
+            )
+        )
+    }
+
+    func deleteTextLinkURLTemplateRule(id: String) {
+        textLinkURLTemplateRules.removeAll { $0.id == id }
     }
 
     func consumePendingFontScaleToastMessage() -> String? {

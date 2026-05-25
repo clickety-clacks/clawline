@@ -242,6 +242,19 @@ final class StreamPopupRouteController {
     }
 }
 
+enum StreamPopupFocusHandoff {
+    static func shouldFocusSearchOnOpen(isSoftwareKeyboardVisible: Bool) -> Bool {
+        isSoftwareKeyboardVisible
+    }
+
+    static func shouldRestoreComposerOnClose(
+        didDisplaceComposerFocus: Bool,
+        isSoftwareKeyboardVisible: Bool
+    ) -> Bool {
+        didDisplaceComposerFocus && isSoftwareKeyboardVisible
+    }
+}
+
 struct ChatView: View {
     private static var t217DiagnosticBuild: String {
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"
@@ -282,6 +295,7 @@ struct ChatView: View {
     @State private var photoPickerItems: [PhotosPickerItem] = []
     @State private var focusRequestID = 0
     @State private var shouldRestoreFocusAfterPicker = false
+    @State private var shouldRestoreFocusAfterStreamPopup = false
     @State private var scrollButtonStateBySessionKey: [String: ScrollButtonState] = [:]
     @State private var scrollButtonDragTranslation: CGFloat = 0
     @State private var scrollButtonIsDragging = false
@@ -815,7 +829,7 @@ struct ChatView: View {
             )
             viewModel.onDisappear(origin: "ChatView.onDisappear[\(chatViewTraceId)] scene=\(String(describing: scenePhase))")
             resetScrollButtonInteractionState()
-            streamPopupRouteController.closePopup()
+            closeStreamPopup(restoreComposerFocusIfNeeded: false)
 #if DEBUG
             lifecycleDebugOverlayDismissTask?.cancel()
             lifecycleDebugOverlayDismissTask = nil
@@ -834,7 +848,7 @@ struct ChatView: View {
         .handleStreamPopupCommand(
             hasStreams: !viewModel.orderedStreams.isEmpty,
             onOpen: {
-                streamPopupRouteController.openPopup(focusSearch: true)
+                openStreamPopupFromKeyboardCommand()
             }
         )
         .handleStreamNavigationCommands(
@@ -1311,7 +1325,7 @@ struct ChatView: View {
                 isEnabled: promptFocusShortcutEnabled,
                 hasStreams: !effectiveSessionKeys.isEmpty,
                 onOpenStreamPopup: {
-                    streamPopupRouteController.openPopup(focusSearch: true)
+                    openStreamPopupFromKeyboardCommand()
                 },
                 onFocusRequested: {
                     focusRequestID &+= 1
@@ -2434,12 +2448,16 @@ struct ChatView: View {
             onCancelScrub: {
                 streamToastManager.hide()
             },
-            onPrepareForTrackPicker: {
-                prepareForAttachmentPicker()
+            onOpenPopup: {
+                openStreamPopupForCurrentKeyboardState()
+            },
+            onClosePopup: {
+                closeStreamPopup()
             },
             onTrackPickerDismiss: {
                 restoreFocusIfNeeded()
-            }
+            },
+            onRequestTrackPicker: presentTrackPickerFromStreamPopup
         )
     }
 
@@ -2656,6 +2674,47 @@ struct ChatView: View {
         if !focused {
             clearTypingActivity()
         }
+    }
+
+    @MainActor
+    private func openStreamPopupForCurrentKeyboardState() {
+        openStreamPopup(
+            focusSearch: StreamPopupFocusHandoff.shouldFocusSearchOnOpen(
+                isSoftwareKeyboardVisible: isKeyboardVisible
+            )
+        )
+    }
+
+    @MainActor
+    private func openStreamPopupFromKeyboardCommand() {
+        openStreamPopup(focusSearch: true)
+    }
+
+    @MainActor
+    private func openStreamPopup(focusSearch: Bool) {
+        shouldRestoreFocusAfterStreamPopup = isKeyboardVisible && isInputFocused
+        streamPopupRouteController.openPopup(focusSearch: focusSearch)
+    }
+
+    @MainActor
+    private func closeStreamPopup(restoreComposerFocusIfNeeded: Bool = true) {
+        let shouldRestoreComposer = restoreComposerFocusIfNeeded
+            && StreamPopupFocusHandoff.shouldRestoreComposerOnClose(
+                didDisplaceComposerFocus: shouldRestoreFocusAfterStreamPopup,
+                isSoftwareKeyboardVisible: isKeyboardVisible
+            )
+        shouldRestoreFocusAfterStreamPopup = false
+        streamPopupRouteController.closePopup()
+        if shouldRestoreComposer {
+            focusRequestID &+= 1
+        }
+    }
+
+    @MainActor
+    private func presentTrackPickerFromStreamPopup() {
+        shouldRestoreFocusAfterStreamPopup = false
+        prepareForAttachmentPicker()
+        streamPopupRouteController.presentTrackPicker()
     }
 
     private func deviceCornerRadius() -> CGFloat {
@@ -3016,8 +3075,10 @@ private struct StreamPopupTrigger: View {
     let onPreviewScrubStream: (String) -> Void
     let onCommitScrubStream: (String) -> Void
     let onCancelScrub: () -> Void
-    let onPrepareForTrackPicker: () -> Void
+    let onOpenPopup: () -> Void
+    let onClosePopup: () -> Void
     let onTrackPickerDismiss: () -> Void
+    let onRequestTrackPicker: () -> Void
 
     var body: some View {
         StreamPageDotsView(
@@ -3026,7 +3087,7 @@ private struct StreamPopupTrigger: View {
             dotStateLookup: dotStateLookup,
             maxWidth: maxWidth,
             onTap: {
-                routeController.openPopup(focusSearch: false)
+                onOpenPopup()
             },
             onScrubPreview: onPreviewScrubStream,
             onScrubCommit: onCommitScrubStream,
@@ -3058,12 +3119,11 @@ private struct StreamPopupTrigger: View {
                 maxAvailableHeight: maxAvailableHeight,
                 maxAvailableWidth: maxAvailableWidth,
                 onSelectStream: { sessionKey in
-                    routeController.closePopup()
+                    onClosePopup()
                     onSelectStream(sessionKey)
                 },
                 onRequestTrackPicker: {
-                    onPrepareForTrackPicker()
-                    routeController.presentTrackPicker()
+                    onRequestTrackPicker()
                 },
                 onConsumeSearchFocusRequest: {
                     routeController.consumeSearchFocusRequest()
@@ -3093,9 +3153,9 @@ private struct StreamPopupTrigger: View {
             get: { routeController.isPopupPresented },
             set: { isPresented in
                 if isPresented {
-                    routeController.openPopup(focusSearch: false)
+                    onOpenPopup()
                 } else {
-                    routeController.closePopup()
+                    onClosePopup()
                 }
             }
         )

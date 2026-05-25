@@ -6773,24 +6773,33 @@ private struct NotificationScrollViewResolver: UIViewRepresentable {
         func resolve() {
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
-                var view: UIView? = self.superview
-                while let current = view {
-                    if let scrollView = current as? UIScrollView {
-                        self.onResolve?(scrollView)
-                        scrollView.clawlineClampNotificationContentOffset()
-                        DispatchQueue.main.async { [weak scrollView] in
-                            scrollView?.clawlineClampNotificationContentOffset()
-                        }
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak scrollView] in
-                            scrollView?.clawlineClampNotificationContentOffset()
-                        }
-                        return
-                    }
-                    view = current.superview
+                guard let scrollView = NotificationScrollViewLookup.resolve(from: self) else {
+                    self.onResolve?(nil)
+                    return
                 }
-                self.onResolve?(nil)
+                self.onResolve?(scrollView)
+                scrollView.clawlineClampNotificationContentOffset()
+                DispatchQueue.main.async { [weak scrollView] in
+                    scrollView?.clawlineClampNotificationContentOffset()
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak scrollView] in
+                    scrollView?.clawlineClampNotificationContentOffset()
+                }
             }
         }
+    }
+}
+
+enum NotificationScrollViewLookup {
+    static func resolve(from view: UIView) -> UIScrollView? {
+        var current = view.superview
+        while let candidate = current {
+            if let scrollView = candidate as? UIScrollView {
+                return scrollView
+            }
+            current = candidate.superview
+        }
+        return nil
     }
 }
 
@@ -7070,6 +7079,9 @@ struct CrossChatNotificationBubbleView: View {
                         ScrollView(.vertical) {
                             notificationEntriesContent(renderedEntries)
                                 .padding(.bottom, entriesBottomBreathingRoom)
+                                .background(
+                                    NotificationScrollViewResolver(onResolve: onRegisterScrollView)
+                                )
                         }
                         .frame(height: resolvedEntriesHeight ?? contentMaxHeight, alignment: .top)
                         .scrollIndicators(.visible)
@@ -7082,9 +7094,6 @@ struct CrossChatNotificationBubbleView: View {
                                 .onEnded { _ in
                                     onContentScrollDragEnded()
                                 }
-                        )
-                        .background(
-                            NotificationScrollViewResolver(onResolve: onRegisterScrollView)
                         )
                     } else {
                         notificationEntriesContent(renderedEntries)

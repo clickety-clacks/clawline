@@ -910,6 +910,36 @@ struct PromptFocusShortcutActivationTests {
         #expect(CrossChatNotificationGlobalShortcut.Action.scrollUp.rootScrollIntent == .transcriptBubbleScrollBackward)
     }
 
+    @Test("Notification scroll resolver finds ancestor scroll view")
+    @MainActor
+    func notificationScrollResolverFindsAncestorScrollView() {
+        let scrollView = UIScrollView()
+        let content = UIView()
+        let resolver = UIView()
+
+        scrollView.addSubview(content)
+        content.addSubview(resolver)
+
+        #expect(NotificationScrollViewLookup.resolve(from: resolver) === scrollView)
+    }
+
+    @Test("Notification scroll resolver does not bind sibling scroll view")
+    @MainActor
+    func notificationScrollResolverDoesNotBindSiblingScrollView() {
+        let localHost = UIView()
+        let scrollView = UIScrollView()
+        let scrollContent = UIView()
+        let resolverContainer = UIView()
+        let resolver = UIView()
+
+        localHost.addSubview(scrollView)
+        scrollView.addSubview(scrollContent)
+        localHost.addSubview(resolverContainer)
+        resolverContainer.addSubview(resolver)
+
+        #expect(NotificationScrollViewLookup.resolve(from: resolver) == nil)
+    }
+
     @Test("T351 notification overlay host reports viewport width, not motion overflow width")
     func notificationOverlayHostReportsViewportWidthNotMotionOverflowWidth() {
         #expect(CrossChatNotificationGeometry.layoutHostWidth(maxContainerWidth: 393) == 393)

@@ -5501,6 +5501,114 @@ enum CrossChatNotificationMarkdownRenderer {
     }
 }
 
+struct CrossChatRenderedNotificationEntry: Identifiable {
+    let id: String
+    let renderedBlocks: [RenderedMarkdownBlock]
+}
+
+@MainActor
+final class CrossChatNotificationRenderedEntryCache {
+    typealias RenderBlocks = @MainActor (
+        _ content: String,
+        _ messageID: String,
+        _ baseFont: UIFont,
+        _ inkColor: UIColor,
+        _ lineSpacing: CGFloat,
+        _ isDark: Bool
+    ) -> [RenderedMarkdownBlock]
+
+    private struct CacheKey: Hashable {
+        let id: String
+        let content: String
+        let fontName: String
+        let fontSize: CGFloat
+        let inkColor: String
+        let lineSpacing: CGFloat
+        let isDark: Bool
+    }
+
+    private var cachedEntries: [CacheKey: CrossChatRenderedNotificationEntry] = [:]
+
+    func entries(
+        for sourceEntries: [CrossChatAssistantNotificationEntry],
+        baseFont: UIFont,
+        inkColor: UIColor,
+        lineSpacing: CGFloat,
+        isDark: Bool
+    ) -> [CrossChatRenderedNotificationEntry] {
+        entries(
+            for: sourceEntries,
+            baseFont: baseFont,
+            inkColor: inkColor,
+            lineSpacing: lineSpacing,
+            isDark: isDark,
+            renderBlocks: { content, messageID, baseFont, inkColor, lineSpacing, isDark in
+                CrossChatNotificationMarkdownRenderer.renderBlocks(
+                    content: content,
+                    messageID: messageID,
+                    baseFont: baseFont,
+                    inkColor: inkColor,
+                    lineSpacing: lineSpacing,
+                    isDark: isDark
+                )
+            }
+        )
+    }
+
+    func entries(
+        for sourceEntries: [CrossChatAssistantNotificationEntry],
+        baseFont: UIFont,
+        inkColor: UIColor,
+        lineSpacing: CGFloat,
+        isDark: Bool,
+        renderBlocks: RenderBlocks
+    ) -> [CrossChatRenderedNotificationEntry] {
+        let keys = sourceEntries.map { entry in
+            CacheKey(
+                id: entry.id,
+                content: entry.content,
+                fontName: baseFont.fontDescriptor.postscriptName,
+                fontSize: baseFont.pointSize,
+                inkColor: Self.colorCacheComponent(inkColor),
+                lineSpacing: lineSpacing,
+                isDark: isDark
+            )
+        }
+        let liveKeys = Set(keys)
+        cachedEntries = cachedEntries.filter { liveKeys.contains($0.key) }
+        return zip(sourceEntries, keys).map { entry, key in
+            if let cachedEntry = cachedEntries[key] {
+                return cachedEntry
+            }
+            let renderedEntry = CrossChatRenderedNotificationEntry(
+                id: entry.id,
+                renderedBlocks: renderBlocks(
+                    entry.content,
+                    entry.id,
+                    baseFont,
+                    inkColor,
+                    lineSpacing,
+                    isDark
+                )
+            )
+            cachedEntries[key] = renderedEntry
+            return renderedEntry
+        }
+    }
+
+    private static func colorCacheComponent(_ color: UIColor) -> String {
+        var red: CGFloat = 0
+        var green: CGFloat = 0
+        var blue: CGFloat = 0
+        var alpha: CGFloat = 0
+        let identity = "\(type(of: color))|\(String(describing: color))"
+        guard color.getRed(&red, green: &green, blue: &blue, alpha: &alpha) else {
+            return identity
+        }
+        return identity + "|" + String(format: "%.5f,%.5f,%.5f,%.5f", red, green, blue, alpha)
+    }
+}
+
 enum CrossChatNotificationGeometry {
     static let collapsedPeekWidth: CGFloat = 18
 
@@ -6642,6 +6750,7 @@ struct CrossChatNotificationBubbleView: View {
     let onContentScrollDragChanged: (CGSize) -> Void
     let onContentScrollDragEnded: () -> Void
     @Environment(\.colorScheme) private var colorScheme
+    @State private var renderedEntriesCache = CrossChatNotificationRenderedEntryCache()
     @State private var isClearAllConfirmationPresented = false
     @State private var measuredEntriesHeight: CGFloat = 0
     @State private var measuredReplyFieldHeight: CGFloat = 0
@@ -6747,6 +6856,16 @@ struct CrossChatNotificationBubbleView: View {
         return max(minimumHeight, measuredReplyFieldHeight)
     }
 
+    private var renderedNotificationEntries: [CrossChatRenderedNotificationEntry] {
+        renderedEntriesCache.entries(
+            for: bubble.entries,
+            baseFont: notificationUIFont(.secondaryLabel),
+            inkColor: notificationBodyInkColor,
+            lineSpacing: 2,
+            isDark: colorScheme == .dark
+        )
+    }
+
     private func activateReplySendControl() {
         guard !isSending else { return }
         switch connectionState {
@@ -6761,6 +6880,7 @@ struct CrossChatNotificationBubbleView: View {
     }
 
     var body: some View {
+        let renderedEntries = renderedNotificationEntries
         VStack(alignment: .leading, spacing: bubble.isReplying ? 4 : normalContentSpacing) {
             HStack(spacing: 8) {
                 if showShortcutLabel {
@@ -6833,7 +6953,7 @@ struct CrossChatNotificationBubbleView: View {
 
             if !bubble.isReplying {
                 ZStack(alignment: .topLeading) {
-                    notificationEntriesContent()
+                    notificationEntriesContent(renderedEntries)
                         .fixedSize(horizontal: false, vertical: true)
                         .background(
                             GeometryReader { proxy in
@@ -6848,7 +6968,7 @@ struct CrossChatNotificationBubbleView: View {
 
                     if entriesNeedScroll {
                         ScrollView(.vertical) {
-                            notificationEntriesContent()
+                            notificationEntriesContent(renderedEntries)
                                 .padding(.bottom, entriesBottomBreathingRoom)
                         }
                         .frame(height: resolvedEntriesHeight ?? contentMaxHeight, alignment: .top)
@@ -6867,7 +6987,7 @@ struct CrossChatNotificationBubbleView: View {
                             NotificationScrollViewResolver(onResolve: onRegisterScrollView)
                         )
                     } else {
-                        notificationEntriesContent()
+                        notificationEntriesContent(renderedEntries)
                             .padding(.bottom, entriesBottomBreathingRoom)
                             .background(
                                 NotificationScrollViewResolver { _ in
@@ -7013,19 +7133,11 @@ struct CrossChatNotificationBubbleView: View {
     }
 
     @ViewBuilder
-    private func notificationEntriesContent() -> some View {
+    private func notificationEntriesContent(_ entries: [CrossChatRenderedNotificationEntry]) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            ForEach(bubble.entries) { entry in
-                let renderedBlocks = CrossChatNotificationMarkdownRenderer.renderBlocks(
-                    content: entry.content,
-                    messageID: entry.id,
-                    baseFont: notificationUIFont(.secondaryLabel),
-                    inkColor: notificationBodyInkColor,
-                    lineSpacing: 2,
-                    isDark: colorScheme == .dark
-                )
+            ForEach(entries) { entry in
                 VStack(alignment: .leading, spacing: 6) {
-                    ForEach(Array(renderedBlocks.enumerated()), id: \.offset) { _, block in
+                    ForEach(Array(entry.renderedBlocks.enumerated()), id: \.offset) { _, block in
                         notificationMarkdownBlock(block)
                     }
                 }

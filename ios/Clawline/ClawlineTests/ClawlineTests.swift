@@ -589,6 +589,7 @@ private final class SpyChatService: ChatServicing {
         sessionKey: String?,
         references: [MessageReferenceContext]
     ) async throws {
+        _ = references
         sentMessages.append(SentMessage(id: id, content: content, attachments: attachments, sessionKey: sessionKey))
     }
     func sendInteractiveCallback(sourceMessageId: String, action: String, data: JSONValue?) async throws {}

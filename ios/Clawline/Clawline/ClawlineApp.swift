@@ -17,7 +17,7 @@ struct ClawlineApp: App {
     @State private var settingsManager: SettingsManager
     @State private var sonioxKeyStore: SonioxKeyStore
     @State private var cartesiaKeyStore: CartesiaKeyStore
-    @State private var watchConnectivityService: WatchConnectivityService
+    @State private var watchConnectivityService: any WatchConnectivityServicing
 
     private let deviceIdentifier: any DeviceIdentifying
     private let connectionService: any ConnectionServicing

@@ -1851,6 +1851,8 @@ struct ChatView: View {
         let sessionKey = viewModel.uiSelectedSessionKey
         let effectiveSessionKeys = effectiveStreams.map(\.sessionKey)
         let state = scrollButtonState(for: sessionKey)
+        let isCompactLayout = horizontalSizeClass == .compact
+        let isLandscape = geometry.size.width > geometry.size.height
         let scrollButtonView: AnyView = AnyView(
             scrollButtonControl(
                 state: state,
@@ -1873,6 +1875,18 @@ struct ChatView: View {
                 )
             )
 
+        let pinnedSurfaceWidth = ChatLandscapeWidthGeometry.physicalWidth(
+            containerWidth: geometry.size.width,
+            leadingSafeAreaInset: geometry.safeAreaInsets.leading,
+            trailingSafeAreaInset: geometry.safeAreaInsets.trailing,
+            isCompactLandscape: isCompactLayout && isLandscape
+        )
+        let pinnedSurfaceOffset = ChatLandscapeWidthGeometry.horizontalOffset(
+            leadingSafeAreaInset: geometry.safeAreaInsets.leading,
+            trailingSafeAreaInset: geometry.safeAreaInsets.trailing,
+            isCompactLandscape: isCompactLayout && isLandscape
+        )
+
 #if os(visionOS)
         let pinnedScrollButtonView: AnyView? = nil
         let pinnedScrollButtonIsVisible = false
@@ -1892,10 +1906,10 @@ struct ChatView: View {
         let pinnedScrollButtonGap: CGFloat = floatingScrollButtonBottomGap
         let pinnedScrollButtonHorizontalOffset = scrollButtonHorizontalOffset(
             for: scrollButtonDetent,
-            containerWidth: geometry.size.width
+            containerWidth: pinnedSurfaceWidth
         )
         let pinnedScrollButtonMaxHorizontalOffset = scrollButtonMaxHorizontalOffset(
-            containerWidth: geometry.size.width
+            containerWidth: pinnedSurfaceWidth
         )
         let pinnedScrollButtonSettleStartOffset = scrollButtonSettleStartOffset
         let pinnedScrollButtonHorizontalAnimationToken = scrollButtonSettleAnimationToken
@@ -1903,7 +1917,7 @@ struct ChatView: View {
             handleScrollButtonDragEnded(
                 translationWidth: translationWidth,
                 predictedTranslationWidth: predictedTranslationWidth,
-                containerWidth: geometry.size.width
+                containerWidth: pinnedSurfaceWidth
             )
         }
         let pinnedPageDotsView: AnyView? = pageDotsView
@@ -2008,6 +2022,8 @@ struct ChatView: View {
                 isCompact: horizontalSizeClass == .compact
             )
         }
+        .frame(width: pinnedSurfaceWidth)
+        .offset(x: pinnedSurfaceOffset)
         .visionOSInputBarDepthOffset()
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         .ignoresSafeArea(.container, edges: .bottom)
@@ -5736,6 +5752,39 @@ enum CrossChatNotificationGeometry {
         trailingSafeAreaInset: CGFloat
     ) -> CGFloat {
         max(0, stackWidth - collapsedPeekWidth + max(0, trailingSafeAreaInset))
+    }
+}
+
+enum ChatLandscapeWidthGeometry {
+    static func shouldFillWindowWidth(
+        viewSize: CGSize,
+        windowSize: CGSize?,
+        isCompactLandscape: Bool,
+        tolerance: CGFloat = 1
+    ) -> Bool {
+        guard let windowSize else { return false }
+        return isCompactLandscape
+            && viewSize.width > viewSize.height
+            && viewSize.width < windowSize.width - tolerance
+    }
+
+    static func physicalWidth(
+        containerWidth: CGFloat,
+        leadingSafeAreaInset: CGFloat,
+        trailingSafeAreaInset: CGFloat,
+        isCompactLandscape: Bool
+    ) -> CGFloat {
+        guard isCompactLandscape else { return containerWidth }
+        return containerWidth + max(0, leadingSafeAreaInset) + max(0, trailingSafeAreaInset)
+    }
+
+    static func horizontalOffset(
+        leadingSafeAreaInset: CGFloat,
+        trailingSafeAreaInset: CGFloat,
+        isCompactLandscape: Bool
+    ) -> CGFloat {
+        guard isCompactLandscape else { return 0 }
+        return (max(0, trailingSafeAreaInset) - max(0, leadingSafeAreaInset)) / 2
     }
 }
 

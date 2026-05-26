@@ -255,6 +255,20 @@ enum StreamPopupFocusHandoff {
     }
 }
 
+enum StreamSwitchKeyboardFocusPolicy {
+    static func shouldRestoreComposerAfterSwitch(
+        wasSoftwareKeyboardVisible: Bool
+    ) -> Bool {
+        wasSoftwareKeyboardVisible
+    }
+}
+
+enum StreamPagerKeyboardDismissPolicy {
+    static func apply(to scrollView: UIScrollView) {
+        scrollView.keyboardDismissMode = .none
+    }
+}
+
 struct ChatView: View {
     private static var t217DiagnosticBuild: String {
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"
@@ -296,6 +310,8 @@ struct ChatView: View {
     @State private var focusRequestID = 0
     @State private var shouldRestoreFocusAfterPicker = false
     @State private var shouldRestoreFocusAfterStreamPopup = false
+    @State private var streamSwitchComposerFocusRestore: StreamSwitchComposerFocusRestore?
+    @State private var streamSwitchComposerFocusRestoreToken = 0
     @State private var scrollButtonStateBySessionKey: [String: ScrollButtonState] = [:]
     @State private var scrollButtonDragTranslation: CGFloat = 0
     @State private var scrollButtonIsDragging = false
@@ -351,6 +367,11 @@ struct ChatView: View {
 
     private let streamToastMinimumBusySeconds: TimeInterval = 0.45
     private let typingActivitySettleDelay: Duration = .milliseconds(180)
+
+    private struct StreamSwitchComposerFocusRestore: Equatable {
+        let sessionKey: String
+        let token: Int
+    }
 
     private var shouldInvalidateLayoutRevisionOnInputBarHeightChange: Bool {
 #if os(visionOS)
@@ -1244,6 +1265,7 @@ struct ChatView: View {
         }
         .onChange(of: viewModel.engineActivationCompletedSequence) { _, _ in
             guard let completedSessionKey = viewModel.lastEngineActivationSessionKey else { return }
+            restoreComposerFocusAfterCompletedStreamSwitchIfNeeded(for: completedSessionKey)
             guard streamToastManager.isVisible, streamToastManager.sessionKey == completedSessionKey else { return }
             scheduleStreamToastBusyClear()
         }
@@ -2483,6 +2505,13 @@ struct ChatView: View {
         preserveCrossChatNotification: Bool = false
     ) {
         StreamSwitchTiming.log("selectStream_called", sessionKey: sessionKey)
+        if StreamSwitchKeyboardFocusPolicy.shouldRestoreComposerAfterSwitch(
+            wasSoftwareKeyboardVisible: isKeyboardVisible
+        ) {
+            armComposerFocusRestoreAfterStreamSwitch(for: sessionKey)
+        } else {
+            streamSwitchComposerFocusRestore = nil
+        }
         viewModel.requestStreamSwitch(
             to: sessionKey,
             source: source,
@@ -2690,6 +2719,21 @@ struct ChatView: View {
         if !focused {
             clearTypingActivity()
         }
+    }
+
+    private func armComposerFocusRestoreAfterStreamSwitch(for sessionKey: String) {
+        streamSwitchComposerFocusRestoreToken &+= 1
+        streamSwitchComposerFocusRestore = StreamSwitchComposerFocusRestore(
+            sessionKey: sessionKey,
+            token: streamSwitchComposerFocusRestoreToken
+        )
+    }
+
+    private func restoreComposerFocusAfterCompletedStreamSwitchIfNeeded(for sessionKey: String) {
+        guard let restore = streamSwitchComposerFocusRestore else { return }
+        guard restore.sessionKey == sessionKey else { return }
+        focusRequestID &+= 1
+        streamSwitchComposerFocusRestore = nil
     }
 
     @MainActor
@@ -5089,6 +5133,7 @@ private final class StreamPagerProbeView: UIView {
             oldPan.removeTarget(self, action: #selector(handlePagerPan(_:)))
         }
         observedPagerScrollView = pagerScrollView
+        StreamPagerKeyboardDismissPolicy.apply(to: pagerScrollView)
         pagerScrollView.panGestureRecognizer.addTarget(self, action: #selector(handlePagerPan(_:)))
     }
 

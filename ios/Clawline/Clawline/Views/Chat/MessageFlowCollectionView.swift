@@ -5890,7 +5890,7 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         }
         let items = Self.footerItems(for: status, isDark: isDark)
         for item in items {
-            stackView.addArrangedSubview(button(for: item, status: status, color: item.textColor ?? textColor, onSelect: onSelect))
+            stackView.addArrangedSubview(footerView(for: item, status: status, color: item.textColor ?? textColor, onSelect: onSelect))
         }
         accessibilityLabel = Self.footerText(for: status)
         accessibilityTraits = items.contains { $0.action != nil && !$0.options.isEmpty } ? .button : .staticText
@@ -5972,12 +5972,30 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         return (legacySupported, nil, nil)
     }
 
-    private func button(
+    private func footerView(
         for item: FooterItem,
         status: SessionStatus?,
         color: UIColor,
         onSelect: (@MainActor (String, SessionControlAction, String?, Bool?) -> Void)?
-    ) -> UIButton {
+    ) -> UIView {
+        if item.action == nil, let textColor = item.textColor {
+            let label = UILabel()
+            label.text = item.text
+            label.font = Self.footerFont
+            label.textColor = textColor
+            label.adjustsFontForContentSizeCategory = true
+            label.lineBreakMode = .byTruncatingTail
+            label.textAlignment = .center
+            label.isAccessibilityElement = true
+            label.accessibilityLabel = item.text
+            label.accessibilityTraits = .staticText
+            label.setContentHuggingPriority(.required, for: .horizontal)
+            label.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+            let titleWidth = ceil((item.text as NSString).size(withAttributes: [.font: Self.footerFont]).width)
+            label.widthAnchor.constraint(greaterThanOrEqualToConstant: max(44, titleWidth + 8)).isActive = true
+            return label
+        }
+
         let button = FooterButton(type: .system)
         var configuration = UIButton.Configuration.plain()
         configuration.contentInsets = NSDirectionalEdgeInsets(top: 2, leading: 4, bottom: 2, trailing: 4)
@@ -5988,13 +6006,6 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         configuration.baseForegroundColor = color
         configuration.background.strokeWidth = 0
         button.configuration = configuration
-        if item.textColor != nil {
-            button.configurationUpdateHandler = { button in
-                guard var updatedConfiguration = button.configuration else { return }
-                updatedConfiguration.baseForegroundColor = color
-                button.configuration = updatedConfiguration
-            }
-        }
         button.setContentHuggingPriority(.required, for: .horizontal)
         button.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
         let titleWidth = ceil((item.text as NSString).size(withAttributes: [.font: Self.footerFont]).width)

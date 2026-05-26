@@ -133,6 +133,7 @@ final class ChatViewModel: ChatViewModelHosting {
     private let instanceId = UUID().uuidString
     @MainActor
     private static var currentConnectionOwnerId: String?
+    static let missingReplyVisibleIdMessage = "Please update to the newest Clawline fork to reply to this message."
     private static let providerMaxTextMessageBytes = 65_536
     private static let liveProgressStaleTimeout: Duration = .seconds(120)
     private static let richDocumentMimeTypesNeedingPayload: Set<String> = [
@@ -1593,8 +1594,15 @@ final class ChatViewModel: ChatViewModelHosting {
             toastManager.show("Referenced message is unavailable.")
             return false
         }
-        let referenceContexts = pendingReferences.map(MessageReferenceContext.init(reference:))
-        let replyToMessageId = pendingReferences.first?.messageId
+        let referenceContexts = pendingReferences.compactMap(MessageReferenceContext.init(reference:))
+        guard referenceContexts.count == pendingReferences.count else {
+#if DEBUG
+            recordImageSendDebugEvent(.sendResult, detail: "failure reason=missing_llm_visible_message_id")
+#endif
+            toastManager.show(ChatViewModel.missingReplyVisibleIdMessage)
+            return false
+        }
+        let replyToMessageId = pendingReferences.first?.llmVisibleMessageId
         let replyToClientMessageId = pendingReferences.first?.clientMessageId
 
         guard !text.isEmpty || !pendingAttachments.isEmpty else {
@@ -1866,6 +1874,10 @@ final class ChatViewModel: ChatViewModelHosting {
     }
 
     func referenceMessageInPrompt(_ message: Message, selectionRange: NSRange) -> NSRange {
+        guard message.hasStableReferenceIdentity else {
+            toastManager.show(Self.missingReplyVisibleIdMessage)
+            return selectionRange
+        }
         let reference = PendingMessageReference(message: message)
         let attachment = MessageReferenceTextAttachment(reference: reference)
         let token = NSMutableAttributedString(attachment: attachment)
@@ -3069,7 +3081,7 @@ final class ChatViewModel: ChatViewModelHosting {
         guard let reference = replyReference(for: message) else { return 0 }
         var hasher = Hasher()
         hasher.combine(reference.sessionKey)
-        hasher.combine(reference.messageId)
+        hasher.combine(reference.llmVisibleMessageId)
         hasher.combine(reference.messageRole.rawValue)
         hasher.combine(reference.createdAt.timeIntervalSince1970)
         hasher.combine(reference.clientMessageId)

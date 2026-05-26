@@ -46,6 +46,7 @@ export function applyServerMessage(
     const updated = {
       ...currentMessages[existingIndex],
       content: message.content,
+      llmVisibleMessageId: message.llmVisibleMessageId,
       streaming: message.streaming,
       timestamp: message.timestamp,
       sender: message.sender,
@@ -90,6 +91,7 @@ export function applyServerMessage(
       const replacement: ChatMessageRecord = {
         ...optimistic,
         id: message.id,
+        llmVisibleMessageId: message.llmVisibleMessageId,
         timestamp: message.timestamp,
         streaming: message.streaming,
         sender: message.sender,
@@ -125,6 +127,7 @@ export function applyServerMessage(
 
   const nextMessage: ChatMessageRecord = {
     id: message.id,
+    llmVisibleMessageId: message.llmVisibleMessageId,
     role: message.role,
     content: message.content,
     timestamp: message.timestamp,

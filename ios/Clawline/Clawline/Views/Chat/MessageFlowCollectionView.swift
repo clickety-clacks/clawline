@@ -2451,7 +2451,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         if showTypingIndicator {
             snapshot.appendItems([TypingIndicatorCell.itemId])
         }
-        if !snapshotMessageIds.isEmpty, SessionMetadataFooterCell.footerText(for: sessionStatus) != nil {
+        if SessionMetadataFooterCell.shouldAppendFooter(after: snapshotItemIds, status: sessionStatus) {
             snapshot.appendItems([SessionMetadataFooterCell.itemId])
         }
         StreamSwitchTiming.log("snapshot_build_end", sessionKey: effectiveSessionKey)
@@ -5659,7 +5659,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         if viewModel.shouldShowTypingIndicator(in: effectiveSessionKey) {
             snapshot.appendItems([TypingIndicatorCell.itemId])
         }
-        if !snapshotMessages.isEmpty, SessionMetadataFooterCell.footerText(for: sessionStatus) != nil {
+        if SessionMetadataFooterCell.shouldAppendFooter(after: desiredItemIds, status: sessionStatus) {
             snapshot.appendItems([SessionMetadataFooterCell.itemId])
         }
         applyDiffableSnapshot(snapshot, animatingDifferences: false) { [weak self] in
@@ -5901,6 +5901,10 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         return ceil(actionRegionHeight + topPadding + bottomPadding)
     }
 
+    static func shouldAppendFooter(after itemIds: [String], status: SessionStatus?) -> Bool {
+        !itemIds.isEmpty && footerText(for: status) != nil
+    }
+
     static func footerText(for status: SessionStatus?) -> String? {
         let parts = footerItems(for: status).map(\.text)
         guard !parts.isEmpty else { return nil }
@@ -5925,7 +5929,7 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         let fastControl = fastModeControlAction(capabilities: capabilities)
         return [
             FooterItem(
-                text: normalized(display.model) ?? "Unknown model",
+                text: displayModelText(display: display, catalog: status.modelCatalog),
                 action: modelCapability.isSupported ? .setModel : nil,
                 options: modelOptions(display: display, catalog: status.modelCatalog),
                 unsupportedReason: modelCapability.reason ?? "model_catalog_control_not_available",
@@ -6039,10 +6043,25 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         }
     }
 
+    private static func displayModelText(display: SessionStatus.Display,
+                                         catalog: SessionStatus.ModelCatalog?) -> String {
+        let current = normalized(display.model)
+        if catalog?.available == true,
+           let match = catalog?.models.compactMap({ model -> String? in
+               let option = modelCatalogOption(model, current: current)
+               return option.isCurrent ? option.title : nil
+           }).first {
+            return match
+        }
+        return current ?? "Unknown model"
+    }
+
     private static func modelCatalogOption(_ model: SessionStatus.ModelCatalog.Model,
                                            current: String?) -> (title: String, isCurrent: Bool) {
         let title = normalized(model.name) ?? normalized(model.ref) ?? normalized(model.alias) ?? model.ref
-        let isCurrent = current == normalized(model.id) || current == normalized(model.ref)
+        let isCurrent = current == normalized(model.id)
+            || current == normalized(model.ref)
+            || current == title
         return (title, isCurrent)
     }
 

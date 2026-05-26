@@ -172,6 +172,23 @@ struct SessionMetadataFooterHitTestingTests {
         #expect(apiKeyForeground.isEqual(ChatFlowUIKitTheme.connectionReconnecting(isDark: false)))
     }
 
+    @Test("Footer model label prefers matching catalog display name")
+    func footerModelLabelPrefersMatchingCatalogDisplayName() throws {
+        let status = try decodedStatus(
+            displayModel: "qwen3.6-35b-a3b",
+            catalogName: "Qwen 3.6 35B-A3B Q4_K_M (gibson)"
+        )
+
+        #expect(SessionMetadataFooterCell.footerText(for: status) == "Qwen 3.6 35B-A3B Q4_K_M (gibson)  ·  Thinking high  ·  Fast off")
+    }
+
+    @Test("Footer appends when rendered items and footer-capable status are present")
+    func footerAppendsWhenRenderedItemsAndFooterCapableStatusArePresent() {
+        #expect(SessionMetadataFooterCell.shouldAppendFooter(after: ["message-1"], status: makeStatus()))
+        #expect(SessionMetadataFooterCell.shouldAppendFooter(after: [], status: makeStatus()) == false)
+        #expect(SessionMetadataFooterCell.shouldAppendFooter(after: ["message-1"], status: nil) == false)
+    }
+
     @Test("Popup selectors mark current item with checkmark image instead of text")
     func popupSelectorsMarkCurrentItemWithCheckmarkImageInsteadOfText() throws {
         let cell = makeConfiguredCell()
@@ -256,6 +273,48 @@ private func makeStatus(authMode: String? = nil) -> SessionStatus {
         ),
         modelCatalog: nil
     )
+}
+
+@MainActor
+private func decodedStatus(displayModel: String, catalogName: String) throws -> SessionStatus {
+    let json = """
+    {
+      "sessionKey": "agent:heimdal:main",
+      "display": {
+        "model": "\(displayModel)",
+        "provider": "gibson",
+        "thinkingLevel": "high",
+        "fastMode": false
+      },
+      "run": {
+        "state": "idle"
+      },
+      "capabilities": {
+        "setModel": {
+          "supported": true
+        },
+        "setThinking": {
+          "supported": true
+        },
+        "setFastMode": {
+          "supported": true
+        }
+      },
+      "modelCatalog": {
+        "available": true,
+        "models": [
+          {
+            "id": "\(displayModel)",
+            "provider": "gibson",
+            "ref": "gibson/\(displayModel)",
+            "name": "\(catalogName)",
+            "alias": "qwen"
+          }
+        ]
+      }
+    }
+    """
+    return try JSONDecoder().decode(SessionStatus.self, from: Data(json.utf8))
 }
 
 private func allSubviews(in view: UIView) -> [UIView] {

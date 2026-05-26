@@ -108,7 +108,7 @@ export function footerItems(status?: SessionStatusPayload | null): FooterItem[] 
     {
       action: modelCapability.isSupported ? "set_model" : undefined,
       options: modelOptions(status),
-      text: normalized(display.model) ?? "Unknown model",
+      text: displayModelText(status),
       unsupportedReason: modelCapability.reason ?? "model_catalog_control_not_available"
     },
     {
@@ -170,6 +170,20 @@ function modelOptions(status: SessionStatusPayload): FooterOption[] {
     value: model,
     isCurrent: model === current
   }));
+}
+
+function displayModelText(status: SessionStatusPayload): string {
+  const current = normalized(status.display?.model);
+  if (status.modelCatalog?.available === true) {
+    const match = (status.modelCatalog.models ?? []).find((model) => {
+      const title = normalized(model.name) ?? normalized(model.ref) ?? normalized(model.alias) ?? model.ref;
+      return current === normalized(model.id) || current === normalized(model.ref) || current === title;
+    });
+    if (match) {
+      return normalized(match.name) ?? normalized(match.ref) ?? normalized(match.alias) ?? match.ref;
+    }
+  }
+  return current ?? "Unknown model";
 }
 
 function levelControlAction({

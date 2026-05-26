@@ -7110,31 +7110,17 @@ struct CrossChatNotificationBubbleView: View {
             }
 
             if !bubble.isReplying {
-                ZStack(alignment: .topLeading) {
-                    notificationEntriesContent(renderedEntries)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .background(
-                            GeometryReader { proxy in
-                                Color.clear.preference(
-                                    key: CrossChatNotificationEntriesHeightPreferenceKey.self,
-                                    value: proxy.size.height
-                                )
-                            }
-                        )
-                        .hidden()
-                        .allowsHitTesting(false)
-
+                Group {
                     if entriesNeedScroll {
                         ScrollView(.vertical) {
-                            notificationEntriesContent(renderedEntries)
-                                .padding(.bottom, entriesBottomBreathingRoom)
-                                .background(
-                                    NotificationScrollViewResolver(onResolve: onRegisterScrollView)
-                                )
+                            measuredNotificationEntriesContent(renderedEntries)
                         }
                         .frame(height: resolvedEntriesHeight ?? contentMaxHeight, alignment: .top)
                         .scrollIndicators(.visible)
                         .scrollDisabled(isContentScrollLocked)
+                        .background(
+                            NotificationScrollViewResolver(onResolve: onRegisterScrollView)
+                        )
                         .simultaneousGesture(
                             DragGesture(minimumDistance: CrossChatNotificationGestureAxisLock.minimumDistance)
                                 .onChanged { value in
@@ -7145,20 +7131,22 @@ struct CrossChatNotificationBubbleView: View {
                                 }
                         )
                     } else {
-                        notificationEntriesContent(renderedEntries)
-                            .padding(.bottom, entriesBottomBreathingRoom)
-                            .background(
-                                NotificationScrollViewResolver { _ in
-                                    onRegisterScrollView(nil)
-                                }
-                            )
+                        measuredNotificationEntriesContent(renderedEntries)
+                            .onAppear {
+                                onRegisterScrollView(nil)
+                            }
                     }
                 }
-                .frame(height: resolvedEntriesHeight, alignment: .top)
+                .frame(height: entriesNeedScroll ? resolvedEntriesHeight : nil, alignment: .top)
                 .frame(maxHeight: contentMaxHeight, alignment: .top)
                 .contentShape(Rectangle())
                 .onTapGesture(perform: onNavigate)
                 .clipped()
+                .onChange(of: entriesNeedScroll) { _, needsScroll in
+                    if !needsScroll {
+                        onRegisterScrollView(nil)
+                    }
+                }
                 .onPreferenceChange(CrossChatNotificationEntriesHeightPreferenceKey.self) { height in
                     guard abs(measuredEntriesHeight - height) > 0.5 else { return }
                     withAnimation(resizeAnimation) {
@@ -7288,6 +7276,20 @@ struct CrossChatNotificationBubbleView: View {
             Button("Clear All Notifications", role: .destructive, action: onDismissAll)
             Button("Cancel", role: .cancel) {}
         }
+    }
+
+    @ViewBuilder
+    private func measuredNotificationEntriesContent(_ entries: [CrossChatRenderedNotificationEntry]) -> some View {
+        notificationEntriesContent(entries)
+            .padding(.bottom, entriesBottomBreathingRoom)
+            .background(
+                GeometryReader { proxy in
+                    Color.clear.preference(
+                        key: CrossChatNotificationEntriesHeightPreferenceKey.self,
+                        value: proxy.size.height
+                    )
+                }
+            )
     }
 
     @ViewBuilder

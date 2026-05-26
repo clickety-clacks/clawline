@@ -987,6 +987,33 @@ struct ChatView: View {
         let inputBarTopFromScreenBottom = insetLayout.inputBarTopFromScreenBottom
         let cachedKeyboardHeight = max(layoutInputs.effectiveKeyboardInset, lastNonZeroKeyboardHeight)
         let isLandscape = geometry.size.width > geometry.size.height
+#if os(iOS) && !targetEnvironment(macCatalyst)
+        let nativeWindowSize = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first(where: { $0.activationState == .foregroundActive })?
+            .windows
+            .first(where: \.isKeyWindow)?
+            .bounds
+            .size
+#else
+        let nativeWindowSize: CGSize? = nil
+#endif
+        let isNativeWindowLandscape = nativeWindowSize.map { $0.width > $0.height } ?? false
+        let isCompactLandscape = isCompactLayout && (isLandscape || isNativeWindowLandscape)
+        let chatSurfaceWidth = ChatLandscapeWidthGeometry.physicalWidth(
+            containerWidth: geometry.size.width,
+            leadingSafeAreaInset: geometry.safeAreaInsets.leading,
+            trailingSafeAreaInset: geometry.safeAreaInsets.trailing,
+            isCompactLandscape: isCompactLandscape,
+            nativeWindowWidth: nativeWindowSize?.width
+        )
+        let chatSurfaceOffset = ChatLandscapeWidthGeometry.horizontalOffset(
+            containerWidth: geometry.size.width,
+            leadingSafeAreaInset: geometry.safeAreaInsets.leading,
+            trailingSafeAreaInset: geometry.safeAreaInsets.trailing,
+            isCompactLandscape: isCompactLandscape,
+            nativeWindowWidth: nativeWindowSize?.width
+        )
         let estimatedKeyboardHeight: CGFloat = {
             if horizontalSizeClass == .regular {
                 return isLandscape ? 300 : 360
@@ -1070,7 +1097,7 @@ struct ChatView: View {
         let transcriptTrailingNotificationClearance: CGFloat = {
 #if os(iOS) && !targetEnvironment(macCatalyst)
             return CrossChatNotificationGeometry.transcriptTrailingClearance(
-                isCompactLandscape: isCompactLayout && isLandscape,
+                isCompactLandscape: isCompactLandscape,
                 isNotificationDocked: isCrossChatNotificationStackDocked,
                 visibleNotificationCount: notificationShortcutVisibleCount
             )
@@ -1101,6 +1128,8 @@ struct ChatView: View {
                 trailingContentInset: transcriptTrailingNotificationClearance,
                 effectiveSessionKeys: effectiveSessionKeys
             )
+                .frame(width: chatSurfaceWidth)
+                .offset(x: chatSurfaceOffset)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .ignoresSafeArea(.container, edges: [.top, .bottom])
                 .softTopScrollEdgeEffect()
@@ -1853,6 +1882,19 @@ struct ChatView: View {
         let state = scrollButtonState(for: sessionKey)
         let isCompactLayout = horizontalSizeClass == .compact
         let isLandscape = geometry.size.width > geometry.size.height
+#if os(iOS) && !targetEnvironment(macCatalyst)
+        let nativeWindowSize = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first(where: { $0.activationState == .foregroundActive })?
+            .windows
+            .first(where: \.isKeyWindow)?
+            .bounds
+            .size
+#else
+        let nativeWindowSize: CGSize? = nil
+#endif
+        let isNativeWindowLandscape = nativeWindowSize.map { $0.width > $0.height } ?? false
+        let isCompactLandscape = isCompactLayout && (isLandscape || isNativeWindowLandscape)
         let scrollButtonView: AnyView = AnyView(
             scrollButtonControl(
                 state: state,
@@ -1879,12 +1921,15 @@ struct ChatView: View {
             containerWidth: geometry.size.width,
             leadingSafeAreaInset: geometry.safeAreaInsets.leading,
             trailingSafeAreaInset: geometry.safeAreaInsets.trailing,
-            isCompactLandscape: isCompactLayout && isLandscape
+            isCompactLandscape: isCompactLandscape,
+            nativeWindowWidth: nativeWindowSize?.width
         )
         let pinnedSurfaceOffset = ChatLandscapeWidthGeometry.horizontalOffset(
+            containerWidth: geometry.size.width,
             leadingSafeAreaInset: geometry.safeAreaInsets.leading,
             trailingSafeAreaInset: geometry.safeAreaInsets.trailing,
-            isCompactLandscape: isCompactLayout && isLandscape
+            isCompactLandscape: isCompactLandscape,
+            nativeWindowWidth: nativeWindowSize?.width
         )
 
 #if os(visionOS)
@@ -5764,7 +5809,6 @@ enum ChatLandscapeWidthGeometry {
     ) -> Bool {
         guard let windowSize else { return false }
         return isCompactLandscape
-            && viewSize.width > viewSize.height
             && viewSize.width < windowSize.width - tolerance
     }
 
@@ -5772,19 +5816,35 @@ enum ChatLandscapeWidthGeometry {
         containerWidth: CGFloat,
         leadingSafeAreaInset: CGFloat,
         trailingSafeAreaInset: CGFloat,
-        isCompactLandscape: Bool
+        isCompactLandscape: Bool,
+        nativeWindowWidth: CGFloat? = nil
     ) -> CGFloat {
         guard isCompactLandscape else { return containerWidth }
-        return containerWidth + max(0, leadingSafeAreaInset) + max(0, trailingSafeAreaInset)
+        let safeAreaResolvedWidth = containerWidth + max(0, leadingSafeAreaInset) + max(0, trailingSafeAreaInset)
+        return max(safeAreaResolvedWidth, nativeWindowWidth ?? 0)
     }
 
     static func horizontalOffset(
+        containerWidth: CGFloat = 0,
         leadingSafeAreaInset: CGFloat,
         trailingSafeAreaInset: CGFloat,
-        isCompactLandscape: Bool
+        isCompactLandscape: Bool,
+        nativeWindowWidth: CGFloat? = nil,
+        tolerance: CGFloat = 1
     ) -> CGFloat {
         guard isCompactLandscape else { return 0 }
-        return (max(0, trailingSafeAreaInset) - max(0, leadingSafeAreaInset)) / 2
+        let leadingInset = max(0, leadingSafeAreaInset)
+        let trailingInset = max(0, trailingSafeAreaInset)
+        let safeAreaOffset = (trailingInset - leadingInset) / 2
+        guard let nativeWindowWidth, nativeWindowWidth > 0, containerWidth > 0 else {
+            return safeAreaOffset
+        }
+        let windowDelta = max(0, nativeWindowWidth - containerWidth)
+        let safeAreaDelta = leadingInset + trailingInset
+        guard windowDelta > safeAreaDelta + tolerance else {
+            return safeAreaOffset
+        }
+        return safeAreaOffset + ((windowDelta - safeAreaDelta) / 2)
     }
 }
 

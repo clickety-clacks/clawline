@@ -5830,6 +5830,7 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
 
     private final class FooterButton: UIButton {
         override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+            guard isUserInteractionEnabled else { return nil }
             guard self.point(inside: point, with: event) else { return nil }
             return self
         }
@@ -5871,6 +5872,7 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
 
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
         let actionButtons = stackView.arrangedSubviews.compactMap { $0 as? FooterButton }
+            .filter(\.isUserInteractionEnabled)
         if let button = FooterActionHitTesting.hitView(at: point, in: self, candidates: actionButtons, event: event) {
             return button
         }
@@ -6003,13 +6005,19 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         button.titleLabel?.adjustsFontForContentSizeCategory = true
         button.titleLabel?.lineBreakMode = .byTruncatingTail
         button.tintColor = color
-        button.isEnabled = item.action != nil && !item.options.isEmpty
-        button.showsMenuAsPrimaryAction = button.isEnabled
+        let hasAction = item.action != nil && !item.options.isEmpty
+        let isStaticAuthIndicator = item.action == nil && item.textColor != nil
+        button.isEnabled = hasAction || isStaticAuthIndicator
+        button.isUserInteractionEnabled = hasAction
+        button.showsMenuAsPrimaryAction = hasAction
+        if isStaticAuthIndicator {
+            button.accessibilityTraits = .staticText
+        }
         button.accessibilityLabel = item.text
         if !button.isEnabled, let reason = item.unsupportedReason {
             button.accessibilityHint = reason
         }
-        guard let sessionKey = status?.sessionKey, let action = item.action, button.isEnabled else {
+        guard let sessionKey = status?.sessionKey, let action = item.action, hasAction else {
             return button
         }
         button.menu = UIMenu(children: item.options.map { option in

@@ -162,6 +162,11 @@ struct SessionMetadataFooterHitTestingTests {
         )
         let oauthForeground = try #require(oauthButton.configuration?.baseForegroundColor)
         #expect(oauthForeground.isEqual(ChatFlowUIKitTheme.palette(isDark: false).sage))
+        #expect(oauthButton.isEnabled)
+        #expect(!oauthButton.isUserInteractionEnabled)
+        #expect(oauthButton.accessibilityTraits.contains(.staticText))
+        let oauthCenter = oauthButton.convert(CGPoint(x: oauthButton.bounds.midX, y: oauthButton.bounds.midY), to: oauthCell)
+        #expect(oauthCell.hitTest(oauthCenter, with: nil) !== oauthButton)
 
         let apiKeyCell = makeConfiguredCell(authMode: "api_key", isDark: false)
         let apiKeyButton = try #require(
@@ -170,6 +175,11 @@ struct SessionMetadataFooterHitTestingTests {
         )
         let apiKeyForeground = try #require(apiKeyButton.configuration?.baseForegroundColor)
         #expect(apiKeyForeground.isEqual(ChatFlowUIKitTheme.connectionReconnecting(isDark: false)))
+        #expect(apiKeyButton.isEnabled)
+        #expect(!apiKeyButton.isUserInteractionEnabled)
+        #expect(apiKeyButton.accessibilityTraits.contains(.staticText))
+        let apiKeyCenter = apiKeyButton.convert(CGPoint(x: apiKeyButton.bounds.midX, y: apiKeyButton.bounds.midY), to: apiKeyCell)
+        #expect(apiKeyCell.hitTest(apiKeyCenter, with: nil) !== apiKeyButton)
     }
 
     @Test("Footer model label prefers matching catalog display name")

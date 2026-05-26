@@ -153,6 +153,25 @@ struct SessionMetadataFooterHitTestingTests {
         #expect(SessionMetadataFooterCell.footerText(for: unknownStatus) == "gpt-5.5  ·  Thinking high  ·  Fast on")
     }
 
+    @Test("Footer auth mode uses semantic theme colors")
+    func footerAuthModeUsesSemanticThemeColors() throws {
+        let oauthCell = makeConfiguredCell(authMode: "oauth", isDark: false)
+        let oauthButton = try #require(
+            allSubviews(in: oauthCell).compactMap { $0 as? UIButton }
+                .first { $0.accessibilityLabel == "OAUTH" }
+        )
+        let oauthForeground = try #require(oauthButton.configuration?.baseForegroundColor)
+        #expect(oauthForeground.isEqual(ChatFlowUIKitTheme.palette(isDark: false).sage))
+
+        let apiKeyCell = makeConfiguredCell(authMode: "api_key", isDark: false)
+        let apiKeyButton = try #require(
+            allSubviews(in: apiKeyCell).compactMap { $0 as? UIButton }
+                .first { $0.accessibilityLabel == "API KEY" }
+        )
+        let apiKeyForeground = try #require(apiKeyButton.configuration?.baseForegroundColor)
+        #expect(apiKeyForeground.isEqual(ChatFlowUIKitTheme.connectionReconnecting(isDark: false)))
+    }
+
     @Test("Popup selectors mark current item with checkmark image instead of text")
     func popupSelectorsMarkCurrentItemWithCheckmarkImageInsteadOfText() throws {
         let cell = makeConfiguredCell()
@@ -180,8 +199,8 @@ struct SessionMetadataFooterHitTestingTests {
     }
 }
 
-private func makeConfiguredCell() -> SessionMetadataFooterCell {
-    let status = makeStatus()
+private func makeConfiguredCell(authMode: String? = nil, isDark: Bool = false) -> SessionMetadataFooterCell {
+    let status = makeStatus(authMode: authMode)
     let cell = SessionMetadataFooterCell(
         frame: CGRect(
             x: 0,
@@ -190,7 +209,7 @@ private func makeConfiguredCell() -> SessionMetadataFooterCell {
             height: SessionMetadataFooterCell.height(for: status)
         )
     )
-    cell.configure(status: status, isDark: false, onSelect: { _, _, _, _ in })
+    cell.configure(status: status, isDark: isDark, onSelect: { _, _, _, _ in })
     cell.setNeedsLayout()
     cell.layoutIfNeeded()
     return cell

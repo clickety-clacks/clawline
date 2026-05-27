@@ -1446,6 +1446,38 @@ final class ChatViewModel: ChatViewModelHosting {
         }
     }
 
+#if DEBUG
+    func debugSeedCrossChatNotificationsForDockProof() {
+        let now = Date()
+        crossChatNotificationBubblesBySourceChatId = [
+            "agent:main:clawline:ui-test:s_t1150_a": CrossChatNotificationBubble(
+                sourceChatId: "agent:main:clawline:ui-test:s_t1150_a",
+                sourceTitle: "T1150 Alpha",
+                entries: [
+                    CrossChatAssistantNotificationEntry(
+                        id: "s_t1150_notification_a",
+                        content: "Dock tap proof notification A",
+                        timestamp: now
+                    )
+                ],
+                lastAssistantActivityAt: now
+            ),
+            "agent:main:clawline:ui-test:s_t1150_b": CrossChatNotificationBubble(
+                sourceChatId: "agent:main:clawline:ui-test:s_t1150_b",
+                sourceTitle: "T1150 Beta",
+                entries: [
+                    CrossChatAssistantNotificationEntry(
+                        id: "s_t1150_notification_b",
+                        content: "Dock tap proof notification B",
+                        timestamp: now.addingTimeInterval(-1)
+                    )
+                ],
+                lastAssistantActivityAt: now.addingTimeInterval(-1)
+            )
+        ]
+    }
+#endif
+
     private func animateCrossChatNotificationDismissal(_ updates: @escaping () -> Void) {
         guard let crossChatNotificationDismissAnimator else {
             updates()

@@ -323,6 +323,9 @@ struct ChatView: View {
     @State private var scrollButtonSettleTask: Task<Void, Never>?
     @State private var scrollButtonTapSuppressionTask: Task<Void, Never>?
     @AppStorage("chat.scrollButton.horizontalDetent") private var scrollButtonDetentRawValue = ScrollButtonHorizontalDetent.center.rawValue
+#if DEBUG
+    @State private var didSeedCrossChatNotificationDockProof = false
+#endif
 
     init(viewModel: ChatViewModel, toastManager: ToastManager) {
         self._viewModel = Bindable(wrappedValue: viewModel)
@@ -456,6 +459,20 @@ struct ChatView: View {
         false
 #endif
     }
+
+#if DEBUG
+    private func seedCrossChatNotificationDockProofIfNeeded() {
+        guard !didSeedCrossChatNotificationDockProof,
+              ProcessInfo.processInfo.arguments.contains("--debug-cross-chat-notification-dock-proof") else {
+            return
+        }
+        didSeedCrossChatNotificationDockProof = true
+        viewModel.debugSeedCrossChatNotificationsForDockProof()
+        isCrossChatNotificationStackDocked = ProcessInfo.processInfo.arguments.contains(
+            "--debug-cross-chat-notification-dock-proof-start-docked"
+        )
+    }
+#endif
 
     private func currentMentionPickerQuery() -> String? {
         CrossChatMentionPickerLogic.query(
@@ -1235,6 +1252,9 @@ struct ChatView: View {
                     updates()
                 }
             }
+#if DEBUG
+            seedCrossChatNotificationDockProofIfNeeded()
+#endif
             viewModel.bindStreamSwitchCoordinatorIfNeeded()
             layoutCoordinator.setActiveSessionKey(viewModel.engineActiveSessionKey)
             layoutCoordinator.updateInputs(layoutInputs, metrics: layoutMetrics)
@@ -6165,6 +6185,10 @@ private struct CrossChatNotificationOverlay: View {
                         )
                         .offset(x: horizontalOffset(for: bubble) + (bubbleDragOffsetsBySourceChatId[bubble.sourceChatId] ?? 0))
                         .transition(Self.notificationTransition)
+                        .accessibilityIdentifier("cross_chat_notification_bubble_\(index)")
+                        .simultaneousGesture(
+                            collapsedBubbleTapGesture
+                        )
                         .simultaneousGesture(
                             DragGesture(minimumDistance: CrossChatNotificationGestureAxisLock.minimumDistance)
                                 .onChanged { value in
@@ -6182,6 +6206,7 @@ private struct CrossChatNotificationOverlay: View {
                 .frame(maxHeight: maxContainerHeight, alignment: .topTrailing)
                 .padding(.top, topMargin)
                 .padding(.trailing, (isCollapsed ? 0 : normalTrailingMargin) + Self.motionOverflowBleed)
+                .accessibilityIdentifier(isCollapsed ? "cross_chat_notification_stack_docked" : "cross_chat_notification_stack_undocked")
                 .animation(Self.revealAnimation, value: visibleBubbleIdentity)
                 .onPreferenceChange(CrossChatNotificationBubbleHeightPreferenceKey.self) { heights in
                     let activeSourceChatIds = Set(viewModel.crossChatNotificationBubbles.map(\.sourceChatId))
@@ -6194,15 +6219,7 @@ private struct CrossChatNotificationOverlay: View {
                 }
                 .overlay(alignment: .trailing) {
                     if isCollapsed {
-                        Color.clear
-                            .frame(width: Self.collapsedPeekWidth)
-                            .contentShape(Rectangle())
-                            .onTapGesture {}
-                            .accessibilityHidden(true)
-                            .simultaneousGesture(
-                                DragGesture(minimumDistance: 20)
-                                    .onEnded(handlePeekDrag)
-                            )
+                        collapsedPeekButton
                     }
                 }
             }
@@ -6318,6 +6335,43 @@ private struct CrossChatNotificationOverlay: View {
                 startCollapsedPreview(sourceChatIds: changedSourceChatIds)
             }
         }
+    }
+
+    private var collapsedPeekButton: some View {
+        Rectangle()
+            .fill(Color.primary.opacity(0.001))
+            .frame(width: Self.collapsedPeekWidth)
+            .frame(maxHeight: CGFloat.infinity)
+            .contentShape(Rectangle())
+            .accessibilityElement(children: .ignore)
+            .accessibilityAddTraits(.isButton)
+            .gesture(collapsedPeekTapOrDragGesture)
+            .accessibilityLabel("Show notifications")
+            .accessibilityIdentifier("cross_chat_notification_docked_hit_target")
+    }
+
+    private var collapsedBubbleTapGesture: some Gesture {
+        DragGesture(minimumDistance: 0)
+            .onEnded { value in
+                guard isCollapsed, Self.isCollapsedTap(value.translation) else { return }
+                restoreDock()
+            }
+    }
+
+    private var collapsedPeekTapOrDragGesture: some Gesture {
+        DragGesture(minimumDistance: 0)
+            .onEnded { value in
+                if Self.isCollapsedTap(value.translation) {
+                    restoreDock()
+                } else {
+                    handlePeekDrag(value)
+                }
+            }
+    }
+
+    private static func isCollapsedTap(_ translation: CGSize) -> Bool {
+        abs(translation.width) < CrossChatNotificationGestureAxisLock.minimumDistance
+            && abs(translation.height) < CrossChatNotificationGestureAxisLock.minimumDistance
     }
 
     private func horizontalOffset(for bubble: CrossChatNotificationBubble) -> CGFloat {

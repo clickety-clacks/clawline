@@ -404,6 +404,211 @@ describe("ChatRoute", () => {
     );
   });
 
+  it("retries transient status misses so the footer hydrates for idle sessions", async () => {
+    vi.useFakeTimers();
+    const activeSessionKey = "agent:main:clawline:user_1:main";
+    const statusCallsBySessionKey = new Map<string, number>();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = input instanceof URL ? input : new URL(String(input));
+
+        if (url.pathname === "/api/session-status") {
+          const sessionKey = url.searchParams.get("sessionKey") ?? "";
+          statusCallsBySessionKey.set(
+            sessionKey,
+            (statusCallsBySessionKey.get(sessionKey) ?? 0) + 1
+          );
+          if (
+            sessionKey === activeSessionKey &&
+            statusCallsBySessionKey.get(sessionKey) === 1
+          ) {
+            throw new DOMException("request aborted", "AbortError");
+          }
+
+          return new Response(
+            JSON.stringify({
+              sessionKey,
+              display: {
+                model: "gpt-5.5",
+                thinkingLevel: "low",
+                fastMode: false,
+                authMode: "oauth"
+              },
+              run: {
+                state: "idle"
+              },
+              capabilities: {
+                setModel: { supported: true },
+                setThinking: {
+                  supported: true,
+                  options: [
+                    { title: "Low", value: "low" },
+                    { title: "High", value: "high" }
+                  ]
+                },
+                setFastMode: {
+                  supported: true,
+                  options: [
+                    { title: "Off", enabled: false },
+                    { title: "On", enabled: true }
+                  ]
+                }
+              },
+              modelCatalog: {
+                available: true,
+                models: [
+                  {
+                    id: "gpt-5.5",
+                    name: "GPT-5.5",
+                    ref: "gpt-5.5"
+                  }
+                ]
+              }
+            }),
+            {
+              headers: { "Content-Type": "application/json" },
+              status: 200
+            }
+          );
+        }
+
+        if (url.pathname === "/api/streams") {
+          return new Response(JSON.stringify({ streams: TEST_STREAMS }), {
+            headers: { "Content-Type": "application/json" },
+            status: 200
+          });
+        }
+
+        if (url.pathname === "/api/trackable-sessions") {
+          return new Response(JSON.stringify({ sessions: [] }), {
+            headers: { "Content-Type": "application/json" },
+            status: 200
+          });
+        }
+
+        return new Response(JSON.stringify({ error: { code: "unexpected_path" } }), {
+          headers: { "Content-Type": "application/json" },
+          status: 404
+        });
+      })
+    );
+
+    renderChatRoute("/chat/agent:main:clawline:user_1:main");
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.queryByTestId("session-status-footer")).toBeNull();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+
+    expect(statusCallsBySessionKey.get(activeSessionKey)).toBe(2);
+    expect(screen.getByTestId("session-status-footer")).toHaveAccessibleName(
+      "GPT-5.5 · Thinking low · Fast off · OAUTH"
+    );
+  });
+
+  it("clears stale footer status without retrying permanent status rejections", async () => {
+    vi.useFakeTimers();
+    const activeSessionKey = "agent:main:clawline:user_1:main";
+    let activeStatusCalls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = input instanceof URL ? input : new URL(String(input));
+
+        if (url.pathname === "/api/session-status") {
+          const sessionKey = url.searchParams.get("sessionKey") ?? "";
+          if (sessionKey === activeSessionKey) {
+            activeStatusCalls += 1;
+            if (activeStatusCalls > 1) {
+              return new Response(
+                JSON.stringify({ error: { code: "session_not_found" } }),
+                {
+                  headers: { "Content-Type": "application/json" },
+                  status: 404
+                }
+              );
+            }
+          }
+
+          return new Response(
+            JSON.stringify({
+              sessionKey,
+              display: {
+                model: "gpt-5.5",
+                thinkingLevel: "low",
+                fastMode: false,
+                authMode: "oauth"
+              },
+              run: {
+                state: sessionKey === activeSessionKey ? "running" : "idle"
+              },
+              capabilities: {
+                setModel: { supported: true },
+                setThinking: { supported: true },
+                setFastMode: { supported: true }
+              },
+              modelCatalog: {
+                available: true,
+                models: [
+                  {
+                    id: "gpt-5.5",
+                    name: "GPT-5.5",
+                    ref: "gpt-5.5"
+                  }
+                ]
+              }
+            }),
+            {
+              headers: { "Content-Type": "application/json" },
+              status: 200
+            }
+          );
+        }
+
+        if (url.pathname === "/api/streams") {
+          return new Response(JSON.stringify({ streams: TEST_STREAMS }), {
+            headers: { "Content-Type": "application/json" },
+            status: 200
+          });
+        }
+
+        if (url.pathname === "/api/trackable-sessions") {
+          return new Response(JSON.stringify({ sessions: [] }), {
+            headers: { "Content-Type": "application/json" },
+            status: 200
+          });
+        }
+
+        return new Response(JSON.stringify({ error: { code: "unexpected_path" } }), {
+          headers: { "Content-Type": "application/json" },
+          status: 404
+        });
+      })
+    );
+
+    renderChatRoute("/chat/agent:main:clawline:user_1:main");
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.getByTestId("session-status-footer")).toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+    });
+    expect(screen.queryByTestId("session-status-footer")).toBeNull();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_000);
+    });
+    expect(activeStatusCalls).toBe(2);
+  });
+
   it("opens session selection as an overlay without changing the route", () => {
     renderChatRoute("/chat/agent:main:clawline:user_1:main");
 

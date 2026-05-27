@@ -22,6 +22,10 @@ import {
   useChatSessionInteractionCoordinator
 } from "./useChatSessionCoordinator";
 
+const SESSION_STATUS_REQUEST_TIMEOUT_MS = 2_000;
+const SESSION_STATUS_RUNNING_REFRESH_MS = 5_000;
+const SESSION_STATUS_RETRY_MS = 10_000;
+
 export function ChatRoute() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -115,7 +119,10 @@ export function ChatRoute() {
     async function refreshSessionStatus(sessionKey: string) {
       const abortController = new AbortController();
       abortControllers.add(abortController);
-      const timeoutId = window.setTimeout(() => abortController.abort(), 2_000);
+      const timeoutId = window.setTimeout(
+        () => abortController.abort(),
+        SESSION_STATUS_REQUEST_TIMEOUT_MS
+      );
       try {
         const status = await streamApiClient.fetchSessionStatus({
           serverUrl: statusServerUrl,
@@ -138,10 +145,25 @@ export function ChatRoute() {
         );
 
         if (runState === "running" || runState === "queued") {
-          timers.push(window.setTimeout(() => void refreshSessionStatus(sessionKey), 5_000));
+          timers.push(
+            window.setTimeout(
+              () => void refreshSessionStatus(sessionKey),
+              SESSION_STATUS_RUNNING_REFRESH_MS
+            )
+          );
         }
-      } catch {
+      } catch (error) {
         if (cancelled) {
+          return;
+        }
+
+        if (shouldRetrySessionStatus(error)) {
+          timers.push(
+            window.setTimeout(
+              () => void refreshSessionStatus(sessionKey),
+              SESSION_STATUS_RETRY_MS
+            )
+          );
           return;
         }
 
@@ -376,4 +398,31 @@ function applyNetworkStatusDotStates(
   }
 
   return next;
+}
+
+function shouldRetrySessionStatus(error: unknown) {
+  if (error instanceof DOMException && error.name === "AbortError") {
+    return true;
+  }
+  if (error instanceof TypeError) {
+    return true;
+  }
+  if (isHttpStreamApiError(error)) {
+    return (
+      error.statusCode === 408 ||
+      error.statusCode === 429 ||
+      error.statusCode >= 500
+    );
+  }
+
+  return false;
+}
+
+function isHttpStreamApiError(error: unknown): error is { statusCode: number } {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "statusCode" in error &&
+    typeof error.statusCode === "number"
+  );
 }

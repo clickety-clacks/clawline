@@ -2083,7 +2083,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         guard let currentMessage else { return nil }
         var actions: [UIMenuElement] = []
         if let copyableReadableText = currentCopyableReadableText {
-            actions.append(UIAction(title: "Copy to Clipboard", image: UIImage(systemName: "doc.on.doc")) { _ in
+            actions.append(UIAction(title: "Copy message", image: UIImage(systemName: "doc.on.doc")) { _ in
                 UIPasteboard.general.string = copyableReadableText
             })
         }

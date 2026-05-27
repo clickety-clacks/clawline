@@ -129,7 +129,7 @@ struct PromptFocusShortcutActivationTests {
             activeLock: .horizontalSwipe,
             finalTranslation: CGSize(width: -64, height: 4),
             completionThreshold: 44,
-            isCollapsed: true
+            isDocked: true
         )
 
         #expect(dockedLeftSwipe == .restoreDock)
@@ -140,7 +140,7 @@ struct PromptFocusShortcutActivationTests {
                 activeLock: .verticalScroll,
                 finalTranslation: CGSize(width: -64, height: 4),
                 completionThreshold: 44,
-                isCollapsed: true
+                isDocked: true
             ) == nil
         )
         #expect(
@@ -148,9 +148,23 @@ struct PromptFocusShortcutActivationTests {
                 activeLock: .horizontalSwipe,
                 finalTranslation: CGSize(width: -64, height: 4),
                 completionThreshold: 44,
-                isCollapsed: false
+                isDocked: false
             ) == .dismiss
         )
+    }
+
+    @Test("T1150 peeking dock-bound notification left swipe does not dismiss")
+    @MainActor
+    func peekingDockBoundNotificationLeftSwipeDoesNotDismiss() {
+        let peekingLeftSwipe = CrossChatNotificationBubbleSwipeCompletion.effect(
+            activeLock: .horizontalSwipe,
+            finalTranslation: CGSize(width: -64, height: 4),
+            completionThreshold: 44,
+            isDocked: true
+        )
+
+        #expect(peekingLeftSwipe == .restoreDock)
+        #expect(peekingLeftSwipe?.dismissesNotification == false)
     }
 
     @Test("T355 notification right swipe preserves dock and collapsed preview behavior")
@@ -161,7 +175,7 @@ struct PromptFocusShortcutActivationTests {
                 activeLock: .horizontalSwipe,
                 finalTranslation: CGSize(width: 64, height: 4),
                 completionThreshold: 44,
-                isCollapsed: false
+                isDocked: false
             ) == .dock
         )
         #expect(
@@ -169,7 +183,7 @@ struct PromptFocusShortcutActivationTests {
                 activeLock: .horizontalSwipe,
                 finalTranslation: CGSize(width: 64, height: 4),
                 completionThreshold: 44,
-                isCollapsed: true
+                isDocked: true
             ) == .clearCollapsedPreview
         )
     }

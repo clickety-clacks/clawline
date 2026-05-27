@@ -6194,19 +6194,15 @@ private struct CrossChatNotificationOverlay: View {
                 }
                 .overlay(alignment: .trailing) {
                     if isCollapsed {
-                        Button {
-                            restoreDock()
-                        } label: {
-                            Color.clear
-                                .frame(width: Self.collapsedPeekWidth)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityLabel("Show notifications")
-                        .simultaneousGesture(
-                            DragGesture(minimumDistance: 20)
-                                .onEnded(handlePeekDrag)
-                        )
+                        Color.clear
+                            .frame(width: Self.collapsedPeekWidth)
+                            .contentShape(Rectangle())
+                            .onTapGesture {}
+                            .accessibilityHidden(true)
+                            .simultaneousGesture(
+                                DragGesture(minimumDistance: 20)
+                                    .onEnded(handlePeekDrag)
+                            )
                     }
                 }
             }
@@ -6652,7 +6648,7 @@ private struct CrossChatNotificationOverlay: View {
             activeLock: activeLock,
             finalTranslation: value.translation,
             completionThreshold: Self.collapseSwipeThreshold,
-            isCollapsed: isCollapsed
+            isDocked: isCollapsed || previewingCollapsedSourceChatIds.contains(sourceChatId)
         ) else { return }
         switch completion {
         case .clearCollapsedPreview:
@@ -7456,7 +7452,7 @@ enum CrossChatNotificationBubbleSwipeCompletion: Equatable {
         activeLock: CrossChatNotificationGestureAxisLock?,
         finalTranslation: CGSize,
         completionThreshold: CGFloat,
-        isCollapsed: Bool
+        isDocked: Bool
     ) -> CrossChatNotificationBubbleSwipeCompletion? {
         guard CrossChatNotificationGestureAxisLock.allowsBubbleSwipeCompletion(
             activeLock: activeLock,
@@ -7464,20 +7460,20 @@ enum CrossChatNotificationBubbleSwipeCompletion: Equatable {
             completionThreshold: completionThreshold
         ) else { return nil }
         return effect(
-            isCollapsed: isCollapsed,
+            isDocked: isDocked,
             horizontalTranslation: finalTranslation.width
         )
     }
 
     private static func effect(
-        isCollapsed: Bool,
+        isDocked: Bool,
         horizontalTranslation: CGFloat
     ) -> CrossChatNotificationBubbleSwipeCompletion? {
         if horizontalTranslation > 0 {
-            return isCollapsed ? .clearCollapsedPreview : .dock
+            return isDocked ? .clearCollapsedPreview : .dock
         }
         if horizontalTranslation < 0 {
-            return isCollapsed ? .restoreDock : .dismiss
+            return isDocked ? .restoreDock : .dismiss
         }
         return nil
     }

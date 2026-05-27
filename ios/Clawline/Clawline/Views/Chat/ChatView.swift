@@ -1721,12 +1721,7 @@ struct ChatView: View {
                     focusedReplySourceChatId: focusedReplySourceChatId,
                     keyboardOwnershipStore: keyboardOwnershipStore,
                     onNavigateToSource: { sourceChatId in
-                        selectStream(
-                            sourceChatId,
-                            source: .programmatic,
-                            preserveCrossChatNotification: true
-                        )
-                        isCrossChatNotificationStackDocked = true
+                        selectStream(sourceChatId, source: .programmatic)
                     }
                 )
                 .visionOSOverlayDepthOffset(spatialOverlayDepthOffset)
@@ -2532,8 +2527,7 @@ struct ChatView: View {
 
     private func selectStream(
         _ sessionKey: String,
-        source: ChatViewModel.StreamSwitchSource,
-        preserveCrossChatNotification: Bool = false
+        source: ChatViewModel.StreamSwitchSource
     ) {
         StreamSwitchTiming.log("selectStream_called", sessionKey: sessionKey)
         if StreamSwitchKeyboardFocusPolicy.shouldRestoreComposerAfterSwitch(
@@ -2543,10 +2537,13 @@ struct ChatView: View {
         } else {
             streamSwitchComposerFocusRestore = nil
         }
+        if viewModel.uiSelectedSessionKey != sessionKey,
+           !viewModel.crossChatNotificationBubbles.isEmpty {
+            isCrossChatNotificationStackDocked = true
+        }
         viewModel.requestStreamSwitch(
             to: sessionKey,
-            source: source,
-            preserveCrossChatNotification: preserveCrossChatNotification
+            source: source
         )
     }
 

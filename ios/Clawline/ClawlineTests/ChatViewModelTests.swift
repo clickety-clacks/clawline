@@ -107,7 +107,7 @@ struct ChatViewModelTests {
         )
         defer { viewModel.onDisappear() }
 
-        await viewModel.activate(origin: "test.notificationNavigationCanPreserveNotificationContent")
+        await viewModel.activate(origin: "test.crossChatMentionSendUsesOnlyContentAfterChip")
         await viewModel.onAppear()
         chatService.emitServiceEvent(.streamSnapshot(streams))
         try await setReadyToSend(chatService: chatService, viewModel: viewModel)
@@ -176,16 +176,18 @@ struct ChatViewModelTests {
         #expect(viewModel.messages.isEmpty)
     }
 
-    @Test("T375 notification navigation can preserve notification content")
+    @Test("T375 notification navigation dismisses target notification and preserves unrelated content")
     @MainActor
-    func notificationNavigationCanPreserveNotificationContent() async throws {
+    func notificationNavigationDismissesTargetNotificationAndPreservesUnrelatedContent() async throws {
         resetChatPersistence()
         let auth = TestAuthManager()
         auth.storeCredentials(token: "jwt", userId: "user")
         let sourceSessionKey = "agent:main:clawline:user:s_source"
+        let otherSessionKey = "agent:main:clawline:user:s_other"
         let streams = [
             makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
             makeStreamSession(sessionKey: sourceSessionKey, displayName: "Source", kind: "custom", orderIndex: 1, isBuiltIn: false),
+            makeStreamSession(sessionKey: otherSessionKey, displayName: "Other", kind: "custom", orderIndex: 2, isBuiltIn: false),
         ]
         let chatService = TestChatService()
         chatService.streams = streams
@@ -200,7 +202,7 @@ struct ChatViewModelTests {
         )
         defer { viewModel.onDisappear() }
 
-        await viewModel.activate(origin: "test.notificationNavigationCanPreserveNotificationContent")
+        await viewModel.activate(origin: "test.notificationNavigationDismissesTargetNotificationAndPreservesUnrelatedContent")
         await viewModel.onAppear()
         chatService.emitServiceEvent(.streamSnapshot(streams))
         try await setConnected(chatService: chatService, viewModel: viewModel)
@@ -216,26 +218,30 @@ struct ChatViewModelTests {
         chatService.emitLifecycleEvent(.init(epoch: 1, payload: .serverMessage(data: Data(firstPayload.utf8))))
         let secondPayload = #"{"type":"message","id":"s_second","role":"assistant","content":"newer","timestamp":11000,"streaming":false,"sessionKey":"\#(sourceSessionKey)","attachments":[]}"#
         chatService.emitLifecycleEvent(.init(epoch: 1, payload: .serverMessage(data: Data(secondPayload.utf8))))
+        let otherPayload = #"{"type":"message","id":"s_other_notification","role":"assistant","content":"unrelated","timestamp":12000,"streaming":false,"sessionKey":"\#(otherSessionKey)","attachments":[]}"#
+        chatService.emitLifecycleEvent(.init(epoch: 1, payload: .serverMessage(data: Data(otherPayload.utf8))))
 
         for _ in 0..<50 {
-            if viewModel.crossChatNotificationBubbles.first?.entries.count == 2 { break }
+            if viewModel.crossChatNotificationBubbles.count == 2 { break }
             try await Task.sleep(for: .milliseconds(10))
         }
-        let bubble = try #require(viewModel.crossChatNotificationBubbles.first)
-        #expect(bubble.sourceChatId == sourceSessionKey)
-        #expect(bubble.entries.map(\.content) == ["newer", "older"])
+        let sourceBubble = try #require(
+            viewModel.crossChatNotificationBubbles.first { $0.sourceChatId == sourceSessionKey }
+        )
+        #expect(sourceBubble.entries.map(\.content) == ["newer", "older"])
+        let unrelatedBubble = try #require(
+            viewModel.crossChatNotificationBubbles.first { $0.sourceChatId == otherSessionKey }
+        )
+        #expect(unrelatedBubble.entries.map(\.content) == ["unrelated"])
 
         viewModel.requestStreamSwitch(
             to: sourceSessionKey,
-            source: .programmatic,
-            preserveCrossChatNotification: true
+            source: .programmatic
         )
         #expect(viewModel.uiSelectedSessionKey == sourceSessionKey)
-        #expect(viewModel.crossChatNotificationBubbles.map(\.sourceChatId) == [sourceSessionKey])
-        #expect(viewModel.crossChatNotificationBubbles.first?.entries.map(\.content) == ["newer", "older"])
-
-        viewModel.requestStreamSwitch(to: sourceSessionKey, source: .programmatic)
-        #expect(viewModel.crossChatNotificationBubbles.isEmpty)
+        #expect(!viewModel.crossChatNotificationBubbles.map(\.sourceChatId).contains(sourceSessionKey))
+        #expect(viewModel.crossChatNotificationBubbles.map(\.sourceChatId) == [otherSessionKey])
+        #expect(viewModel.crossChatNotificationBubbles.first?.entries.map(\.content) == ["unrelated"])
     }
 
     @Test("T307 assistant notifications dismiss when source disappears from stream snapshot")

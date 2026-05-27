@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Navigate, useLocation, useNavigate, useParams } from "react-router-dom";
+import { Navigate, useNavigate, useParams } from "react-router-dom";
 import { StreamManagerDrawer } from "../streams/StreamManagerDrawer";
 import { getSessionProvisioningState } from "../streams/provisioning";
 import { useAuthSessionStore } from "../../runtime/auth/authSessionStore";
@@ -24,7 +24,6 @@ import {
 
 export function ChatRoute() {
   const navigate = useNavigate();
-  const location = useLocation();
   const params = useParams();
   const { state: authState } = useAuthSessionStore();
   const { state: chatState, store: chatStore } = useChatDomainStore();
@@ -248,15 +247,7 @@ export function ChatRoute() {
     });
 
     const lastReadMessageId = chatStore.markSessionRead(activeSessionKey);
-    const routeState = location.state;
-    const preserveCrossChatNotification =
-      typeof routeState === "object" &&
-      routeState !== null &&
-      "preserveCrossChatNotificationSourceChatId" in routeState &&
-      routeState.preserveCrossChatNotificationSourceChatId === activeSessionKey;
-    if (!preserveCrossChatNotification) {
-      notificationStore.dismissCrossChatNotification(activeSessionKey);
-    }
+    notificationStore.dismissCrossChatNotification(activeSessionKey);
     if (
       lastReadMessageId &&
       chatState.provisionedSessionKeys.includes(activeSessionKey)
@@ -268,7 +259,6 @@ export function ChatRoute() {
     chatState.firstUnreadMessageIdBySessionKey,
     chatState.provisionedSessionKeys,
     chatStore,
-    location.state,
     notificationStore,
     transportStore
   ]);

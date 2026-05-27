@@ -48,7 +48,11 @@ interface RenderedNotificationBubble {
   isExiting: boolean;
 }
 
-export function CrossChatNotificationOverlay() {
+export function CrossChatNotificationOverlay({
+  activeSessionKey
+}: {
+  activeSessionKey?: string;
+}) {
   const navigate = useNavigate();
   const { state: authState } = useAuthSessionStore();
   const { state: chatState, store: chatStore } = useChatDomainStore();
@@ -94,6 +98,7 @@ export function CrossChatNotificationOverlay() {
   const collapsedRevealTimersBySourceChatIdRef = useRef<Record<string, number>>({});
   const previousNotificationActivitySignaturesBySourceChatIdRef =
     useRef<Record<string, string> | null>(null);
+  const previousActiveSessionKeyRef = useRef<string | undefined>(activeSessionKey);
   const entriesRefsBySourceChatId = useRef<Record<string, HTMLDivElement | null>>({});
   const bubbleRefsBySourceChatId = useRef<Record<string, HTMLElement | null>>({});
   const actionMenuRef = useRef<HTMLDivElement | null>(null);
@@ -202,6 +207,19 @@ export function CrossChatNotificationOverlay() {
     notificationShortcutMap
   });
   const hasActiveReply = orderedBubbles.some((bubble) => bubble.replyMode);
+
+  useEffect(() => {
+    const previousActiveSessionKey = previousActiveSessionKeyRef.current;
+    previousActiveSessionKeyRef.current = activeSessionKey;
+    if (
+      activeSessionKey &&
+      previousActiveSessionKey &&
+      activeSessionKey !== previousActiveSessionKey &&
+      orderedBubbles.length > 0
+    ) {
+      forceDockNotificationsAfterNavigation();
+    }
+  }, [activeSessionKey, orderedBubbles.length]);
   const hasCollapsedPreview = previewingCollapsedSourceChatIds.size > 0;
   const notificationActivitySignaturesBySourceChatId = useMemo(
     () =>
@@ -778,11 +796,7 @@ export function CrossChatNotificationOverlay() {
     setActionMenuSourceChatId(null);
     unpinReplySourceChatId(sourceChatId);
     markNotificationSourceRead(sourceChatId);
-    navigate(`/chat/${sourceChatId}`, {
-      state: {
-        preserveCrossChatNotificationSourceChatId: sourceChatId
-      }
-    });
+    navigate(`/chat/${sourceChatId}`);
     forceDockNotificationsAfterNavigation();
   }
 

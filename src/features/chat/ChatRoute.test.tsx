@@ -799,22 +799,53 @@ describe("ChatRoute", () => {
         "agent:main:clawline:user_1:side"
       ]
     });
-    applyAssistantNotification(view);
+    const notificationStreams = [
+      ...TEST_STREAMS.map((stream) => ({ ...stream })),
+      {
+        sessionKey: "agent:main:clawline:user_1:other",
+        displayName: "Other Thread",
+        kind: "custom",
+        orderIndex: 3,
+        isBuiltIn: false,
+        createdAt: 12,
+        updatedAt: 12,
+        adopted: false
+      }
+    ];
+    applyAssistantNotification(view, {
+      content: "Side body notification",
+      streams: notificationStreams
+    });
+    applyAssistantNotification(view, {
+      content: "Other notification",
+      id: "s_other_notify",
+      sessionKey: "agent:main:clawline:user_1:other",
+      timestamp: 22,
+      streams: notificationStreams
+    });
 
-    fireEvent.click(await screen.findByText("Side notification"));
+    fireEvent.click(await screen.findByText("Side body notification"));
 
     expect(screen.getByTestId("location")).toHaveTextContent(
       "/chat/agent:main:clawline:user_1:side"
     );
+    await waitFor(() => {
+      expect(screen.queryByLabelText("Side Thread notification")).toBeNull();
+    });
     expect(screen.getByLabelText("Cross-chat notifications")).toHaveClass(
       "cross-chat-notification-overlay--collapsed"
     );
-    expect(screen.getByLabelText("Side Thread notification")).toBeInTheDocument();
+    expect(screen.getByLabelText("Other Thread notification")).toBeInTheDocument();
     expect(
       view.notificationStore.getState().bubblesBySourceChatId[
         "agent:main:clawline:user_1:side"
+      ]
+    ).toBeUndefined();
+    expect(
+      view.notificationStore.getState().bubblesBySourceChatId[
+        "agent:main:clawline:user_1:other"
       ]?.entriesNewestFirst.map((entry) => entry.contentPreview)
-    ).toEqual(["Side notification"]);
+    ).toEqual(["Other notification"]);
   });
 
   it("uses viewport-fit notification capacity with ten only as the upper bound", async () => {
@@ -1027,32 +1058,83 @@ describe("ChatRoute", () => {
     expect(overlay).not.toHaveClass("cross-chat-notification-overlay--collapsed");
   });
 
-  it("docks and preserves notifications after direct notification navigation", async () => {
-    const view = renderChatRoute("/chat/agent:main:clawline:user_1:main", {
-      initialMessages: [],
-      sessionKeys: [
-        "agent:main:clawline:user_1:main",
-        "agent:main:main",
-        "agent:main:clawline:user_1:side"
-      ]
+  it("docks and dismisses overflow source notifications after normal chat navigation", async () => {
+    const originalInnerHeight = window.innerHeight;
+    Object.defineProperty(window, "innerHeight", {
+      configurable: true,
+      value: 230
     });
-    applyAssistantNotification(view);
+    try {
+      const view = renderChatRoute("/chat/agent:main:clawline:user_1:main", {
+        initialMessages: [],
+        sessionKeys: [
+          "agent:main:clawline:user_1:main",
+          "agent:main:main",
+          "agent:main:clawline:user_1:side"
+        ]
+      });
+      const notificationStreams = [
+        ...TEST_STREAMS.map((stream) => ({ ...stream })),
+        ...Array.from({ length: 2 }, (_, index) => ({
+          sessionKey: `agent:main:clawline:user_1:extra_${index}`,
+          displayName: `Extra ${index}`,
+          kind: "custom",
+          orderIndex: index + 3,
+          isBuiltIn: false,
+          createdAt: 20 + index,
+          updatedAt: 20 + index,
+          adopted: false
+        }))
+      ];
+      applyAssistantNotification(view, {
+        content: "Overflow side notification",
+        timestamp: 30,
+        streams: notificationStreams
+      });
+      for (let index = 0; index < 2; index += 1) {
+        applyAssistantNotification(view, {
+          content: `Extra notification ${index}`,
+          id: `s_extra_navigation_${index}`,
+          sessionKey: `agent:main:clawline:user_1:extra_${index}`,
+          timestamp: 31 + index,
+          streams: notificationStreams
+        });
+      }
 
-    const overlay = await screen.findByLabelText("Cross-chat notifications");
-    expect(await screen.findByLabelText("Side Thread notification"))
-      .toBeInTheDocument();
+      const overlay = await screen.findByLabelText("Cross-chat notifications");
+      expect(screen.queryByLabelText("Side Thread notification")).toBeNull();
+      expect(
+        view.notificationStore.getState().bubblesBySourceChatId[
+          "agent:main:clawline:user_1:side"
+        ]
+      ).toBeDefined();
 
-    fireEvent.click(screen.getByText("Side Thread"));
+      fireEvent.click(screen.getByRole("button", { name: "Manage streams" }));
+      fireEvent.click(screen.getByRole("button", { name: /Side Thread/i }));
 
-    expect(screen.getByTestId("location")).toHaveTextContent(
-      "/chat/agent:main:clawline:user_1:side"
-    );
-    expect(overlay).toHaveClass("cross-chat-notification-overlay--collapsed");
-    expect(
-      view.notificationStore.getState().bubblesBySourceChatId[
-        "agent:main:clawline:user_1:side"
-      ]?.entriesNewestFirst.map((entry) => entry.contentPreview)
-    ).toEqual(["Side notification"]);
+      expect(screen.getByTestId("location")).toHaveTextContent(
+        "/chat/agent:main:clawline:user_1:side"
+      );
+      await waitFor(() => {
+        expect(
+          view.notificationStore.getState().bubblesBySourceChatId[
+            "agent:main:clawline:user_1:side"
+          ]
+        ).toBeUndefined();
+      });
+      expect(overlay).toHaveClass("cross-chat-notification-overlay--collapsed");
+      expect(screen.getByLabelText("Extra 1 notification")).toBeInTheDocument();
+      expect(
+        view.notificationStore.getState().bubblesBySourceChatId[
+          "agent:main:clawline:user_1:extra_0"
+        ]?.entriesNewestFirst.map((entry) => entry.contentPreview)
+      ).toEqual(["Extra notification 0"]);
+    } finally {
+      Object.defineProperty(window, "innerHeight", {
+        configurable: true,
+        value: originalInnerHeight
+      });
+    }
   });
 
   it("temporarily reveals collapsed web notifications when new content arrives", async () => {
@@ -1361,7 +1443,27 @@ describe("ChatRoute", () => {
         "agent:main:clawline:user_1:side"
       ]
     });
-    applyAssistantNotification(navigateView);
+    const navigationStreams = [
+      ...TEST_STREAMS.map((stream) => ({ ...stream })),
+      {
+        sessionKey: "agent:main:clawline:user_1:other",
+        displayName: "Other Thread",
+        kind: "custom",
+        orderIndex: 3,
+        isBuiltIn: false,
+        createdAt: 12,
+        updatedAt: 12,
+        adopted: false
+      }
+    ];
+    applyAssistantNotification(navigateView, { streams: navigationStreams });
+    applyAssistantNotification(navigateView, {
+      content: "Other notification",
+      id: "s_other_shortcut_notify",
+      sessionKey: "agent:main:clawline:user_1:other",
+      timestamp: 20,
+      streams: navigationStreams
+    });
 
     expect(await screen.findByLabelText("Side Thread notification"))
       .toBeInTheDocument();
@@ -1390,14 +1492,23 @@ describe("ChatRoute", () => {
     expect(screen.getByTestId("location")).toHaveTextContent(
       "/chat/agent:main:clawline:user_1:side"
     );
+    await waitFor(() => {
+      expect(screen.queryByLabelText("Side Thread notification")).toBeNull();
+    });
     expect(screen.getByLabelText("Cross-chat notifications")).toHaveClass(
       "cross-chat-notification-overlay--collapsed"
     );
+    expect(screen.getByLabelText("Other Thread notification")).toBeInTheDocument();
     expect(
       navigateView.notificationStore.getState().bubblesBySourceChatId[
         "agent:main:clawline:user_1:side"
+      ]
+    ).toBeUndefined();
+    expect(
+      navigateView.notificationStore.getState().bubblesBySourceChatId[
+        "agent:main:clawline:user_1:other"
       ]?.entriesNewestFirst.map((entry) => entry.contentPreview)
-    ).toEqual(["Side notification"]);
+    ).toEqual(["Other notification"]);
     navigateView.unmount();
 
     const actionView = renderChatRoute("/chat/agent:main:clawline:user_1:main", {

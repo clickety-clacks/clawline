@@ -126,7 +126,7 @@ export function ChatShell({
               : null
           }) : undefined}
       >
-        <CrossChatNotificationOverlay />
+        <CrossChatNotificationOverlay activeSessionKey={selectedSessionKey} />
         <MessageList
           messages={selectedMessages}
           onCancelCurrentPrompt={onCancelCurrentPrompt}

@@ -15,7 +15,7 @@ struct Clawline_SpatialTests {
     @Test("Spatial transparency installer clears root view")
     func transparencyInstallerClearsRootView() {
         let window = makeWindow()
-        let rootView = UIView(frame: window.bounds)
+        let rootView = TestUIHostingView(frame: window.bounds)
         rootView.backgroundColor = .systemBackground
         rootView.isOpaque = true
         window.rootViewController = UIViewController()
@@ -27,18 +27,24 @@ struct Clawline_SpatialTests {
         #expect(rootView.isOpaque == false)
     }
 
-    @Test("Spatial transparency installer clears host ancestor chain")
-    func transparencyInstallerClearsHostAncestors() {
-        let host = UIView(frame: CGRect(x: 0, y: 0, width: 320, height: 240))
+    @Test("Spatial transparency installer clears hosting ancestors only")
+    func transparencyInstallerClearsHostingAncestorsOnly() {
+        let host = TestUIHostingView(frame: CGRect(x: 0, y: 0, width: 320, height: 240))
+        let ordinaryAncestor = UIView(frame: host.bounds)
         let probe = UIView(frame: .zero)
         host.backgroundColor = .systemBackground
         host.isOpaque = true
-        host.addSubview(probe)
+        ordinaryAncestor.backgroundColor = .secondarySystemBackground
+        ordinaryAncestor.isOpaque = true
+        host.addSubview(ordinaryAncestor)
+        ordinaryAncestor.addSubview(probe)
 
         SpatialWindowTransparency.applyStarting(at: probe)
 
         #expect(host.backgroundColor == .clear)
         #expect(host.isOpaque == false)
+        #expect(ordinaryAncestor.backgroundColor == .secondarySystemBackground)
+        #expect(ordinaryAncestor.isOpaque == true)
     }
 
     @Test("Spatial recursive scrub is scoped to window and hosting views")
@@ -120,3 +126,5 @@ struct Clawline_SpatialTests {
     }
 
 }
+
+private final class TestUIHostingView: UIView {}

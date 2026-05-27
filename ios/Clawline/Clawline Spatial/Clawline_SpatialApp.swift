@@ -146,6 +146,7 @@ private struct SpatialWindowCornerResizeMarker: View {
 
 #if canImport(UIKit)
 enum SpatialWindowTransparency {
+    @MainActor
     static func install() {
         UIView.appearance(whenContainedInInstancesOf: [UIHostingController<AnyView>.self]).backgroundColor = .clear
         UIScrollView.appearance(whenContainedInInstancesOf: [UIHostingController<AnyView>.self]).backgroundColor = .clear
@@ -158,7 +159,9 @@ enum SpatialWindowTransparency {
     static func applyStarting(at view: UIView) {
         var candidate: UIView? = view
         while let current = candidate {
-            setTransparent(current)
+            if shouldForceTransparent(current) {
+                setTransparent(current)
+            }
             candidate = current.superview
         }
         if let window = view.window {
@@ -169,7 +172,7 @@ enum SpatialWindowTransparency {
     @MainActor
     static func apply(to window: UIWindow) {
         setTransparent(window)
-        if let rootView = window.rootViewController?.view {
+        if let rootView = window.rootViewController?.view, shouldForceTransparent(rootView) {
             setTransparent(rootView)
         }
         setHostingBackgroundsClear(in: window)

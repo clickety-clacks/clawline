@@ -8262,6 +8262,12 @@ private struct CrossChatNotificationKeyboardShortcuts: View {
                     }
                         .keyboardShortcut(KeyEquivalent(Character("\(index)")), modifiers: [.command, .shift, .option])
                 }
+                ForEach(CrossChatNotificationGlobalShortcut.scrollSpecs(visibleNotificationCount: visibleBubbles.count), id: \.input) { spec in
+                    Button("") {
+                        routeScrollShortcut(spec)
+                    }
+                    .keyboardShortcut(KeyEquivalent(spec.input), modifiers: spec.modifiers)
+                }
                 Button("") {
                     routeNotificationStackShortcut(.notificationDismissAll) {
                         onDismissAll()

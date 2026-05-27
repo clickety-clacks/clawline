@@ -225,6 +225,53 @@ struct BubbleScrollTests {
         #expect(mediumWidth == 88)
     }
 
+    @Test("T330: UIKit fitting target can override fixed bubble width")
+    @MainActor
+    func fittingTargetCanOverrideFixedBubbleWidth() {
+        let metrics = ChatFlowTheme.Metrics(isCompact: false)
+        let message = Message(
+            id: "t330-fixed-width",
+            role: .assistant,
+            content: "This message is measured at the wide bubble width before UIKit asks the cell for a narrow fitting target.",
+            timestamp: Date(),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: "server:personal"
+        )
+        let presentation = buildPresentation(message, metrics: metrics, enableLinkPreviews: false)
+        let cell = MessageBubbleUIKitCell(frame: CGRect(x: 0, y: 0, width: 396, height: 120))
+        cell.contentView.frame = cell.bounds
+        cell.configure(
+            message: message,
+            presentation: presentation,
+            failureReason: nil,
+            isCompact: false,
+            maxWidth: 396,
+            showsHeader: false,
+            isDark: false,
+            onRequestExpand: nil,
+            onRequestLayout: nil,
+            onInteractiveCallback: nil,
+            onResend: nil
+        )
+        cell.setNeedsLayout()
+        cell.layoutIfNeeded()
+
+        let fixedWidthConstraints = recursiveConstraints(in: cell).filter {
+            $0.identifier == "MessageBubbleUIKitView.fixedWidth" && abs($0.constant - 396) < 0.5
+        }
+        let measured = cell.contentView.systemLayoutSizeFitting(
+            CGSize(width: 120, height: UIView.layoutFittingCompressedSize.height),
+            withHorizontalFittingPriority: .required,
+            verticalFittingPriority: .fittingSizeLevel
+        )
+
+        #expect(!fixedWidthConstraints.isEmpty)
+        #expect(fixedWidthConstraints.allSatisfy { $0.priority < .required })
+        #expect(measured.width <= 120.5)
+    }
+
     @Test("T047/T046: Overflow-to-fit transition clears stale inner offset and fade state")
     @MainActor
     func overflowTransitionResetsOffsetAndFade() {
@@ -886,6 +933,10 @@ struct BubbleScrollTests {
             }
         }
         return nil
+    }
+
+    private func recursiveConstraints(in view: UIView) -> [NSLayoutConstraint] {
+        view.constraints + view.subviews.flatMap { recursiveConstraints(in: $0) }
     }
 
     private struct ImmediateHighlightService: SalientHighlightServicing {

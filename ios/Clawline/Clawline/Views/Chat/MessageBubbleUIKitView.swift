@@ -491,6 +491,13 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
         ])
     }
 
+    private func makeFixedBubbleWidthConstraint(_ width: CGFloat) -> NSLayoutConstraint {
+        let constraint = bubbleBackgroundView.widthAnchor.constraint(equalToConstant: width)
+        constraint.identifier = "MessageBubbleUIKitView.fixedWidth"
+        constraint.priority = .defaultHigh
+        return constraint
+    }
+
     private static func linkPreviewWidthCap(metrics: ChatFlowTheme.Metrics) -> CGFloat {
         max(120, bubbleReferenceSize.width - (metrics.containerPadding * 2))
     }
@@ -1082,11 +1089,11 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
         case .short:
             bodyMaxWidthConstraint?.isActive = false
             // Set fixed width to match measured preferredWidth for consistent sizing
-            fixedWidthConstraint = bubbleBackgroundView.widthAnchor.constraint(equalToConstant: effectiveMaxWidth)
+            fixedWidthConstraint = makeFixedBubbleWidthConstraint(effectiveMaxWidth)
             fixedWidthConstraint?.isActive = true
         case .medium:
             bodyMaxWidthConstraint?.isActive = false
-            fixedWidthConstraint = bubbleBackgroundView.widthAnchor.constraint(equalToConstant: effectiveMaxWidth)
+            fixedWidthConstraint = makeFixedBubbleWidthConstraint(effectiveMaxWidth)
             fixedWidthConstraint?.isActive = true
         case .long:
             let maxLineWidth = ChatFlowTheme.maxLineWidth(bodyFontSize: metrics.bodyFontSize)
@@ -1094,7 +1101,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate {
             let constraint = bodyLabel.widthAnchor.constraint(lessThanOrEqualToConstant: maxLineWidth)
             constraint.isActive = true
             bodyMaxWidthConstraint = constraint
-            fixedWidthConstraint = bubbleBackgroundView.widthAnchor.constraint(equalToConstant: effectiveMaxWidth)
+            fixedWidthConstraint = makeFixedBubbleWidthConstraint(effectiveMaxWidth)
             fixedWidthConstraint?.isActive = true
         }
 

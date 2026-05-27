@@ -288,6 +288,7 @@ struct ChatView: View {
     @State private var isPhotosPickerPresented = false
     @State private var isFileImporterPresented = false
     @State private var isCancelCurrentPromptDialogPresented = false
+    @State private var isMissingReplyVisibleIdDialogPresented = false
     @State private var cancelCurrentPromptSessionKey: String?
     @State private var cancelCurrentPromptRequiresVisibleTyping = false
     @State private var cancelCurrentPromptAnchorFrame: CGRect?
@@ -890,6 +891,12 @@ struct ChatView: View {
             }
         )
         .sheet(item: $activeSheet, content: sheetView)
+        .alert(
+            ChatViewModel.missingReplyVisibleIdMessage,
+            isPresented: $isMissingReplyVisibleIdDialogPresented
+        ) {
+            Button("OK", role: .cancel) {}
+        }
         .photosPicker(
             isPresented: $isPhotosPickerPresented,
             selection: $photoPickerItems,
@@ -2176,6 +2183,10 @@ struct ChatView: View {
     }
 
     private func referenceMessageInPrompt(_ message: Message) {
+        guard message.hasStableReferenceIdentity else {
+            isMissingReplyVisibleIdDialogPresented = true
+            return
+        }
         selectionRange = viewModel.referenceMessageInPrompt(message, selectionRange: selectionRange)
         focusRequestID &+= 1
     }

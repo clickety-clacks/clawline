@@ -13,6 +13,7 @@ struct T320ReplyIndicatorProofTests {
         let context = try await makeReplyProofContext()
         let referenced = Message(
             id: "s_reference_echo",
+            llmVisibleMessageId: "llm_reference_echo",
             role: .assistant,
             content: "This is a very long referenced message that should truncate in the outgoing bubble chip.",
             timestamp: Date(timeIntervalSince1970: 1_700_000_100),
@@ -48,7 +49,7 @@ struct T320ReplyIndicatorProofTests {
 
         let tokenLabel = try #require(resolvedReplyReference.tokenLabel)
         #expect(resolvedReplyReference.sessionKey == t320PersonalSessionKey)
-        #expect(resolvedReplyReference.messageId == referenced.id)
+        #expect(resolvedReplyReference.llmVisibleMessageId == "llm_reference_echo")
         #expect(resolvedReplyReference.clientMessageId == "c_reference_echo")
         #expect(tokenLabel.hasSuffix("…"))
         #expect(tokenLabel.contains("This is a very long referenced message"))
@@ -62,6 +63,7 @@ struct T320ReplyIndicatorProofTests {
         let context = try await makeReplyProofContext()
         let referenced = Message(
             id: "s_reply_target",
+            llmVisibleMessageId: "llm_reply_target",
             role: .assistant,
             content: "The reply target that should be echoed in the outgoing bubble.",
             timestamp: Date(timeIntervalSince1970: 1_700_000_300),
@@ -96,7 +98,7 @@ struct T320ReplyIndicatorProofTests {
         }
         let visibleOutgoing = try #require(await MainActor.run { context.viewModel.messages.first })
         #expect(visibleOutgoing.role == .user)
-        #expect(visibleOutgoing.replyToMessageId == referenced.id)
+        #expect(visibleOutgoing.replyToMessageId == "llm_reply_target")
         #expect(visibleOutgoing.replyToClientMessageId == referenced.clientMessageId)
 
         try emitServerMessage(
@@ -123,10 +125,10 @@ struct T320ReplyIndicatorProofTests {
 
         let outgoing = try #require(await MainActor.run { context.viewModel.messages.first })
         #expect(outgoing.role == .user)
-        #expect(outgoing.replyToMessageId == referenced.id)
+        #expect(outgoing.replyToMessageId == "llm_reply_target")
         #expect(outgoing.replyToClientMessageId == referenced.clientMessageId)
         let outgoingReplyReference = context.viewModel.replyReference(for: outgoing)
-        #expect(outgoingReplyReference?.messageId == referenced.id)
+        #expect(outgoingReplyReference?.llmVisibleMessageId == "llm_reply_target")
         #expect(outgoingReplyReference?.clientMessageId == referenced.clientMessageId)
         #expect(outgoingReplyReference?.tokenLabel.contains("assistant:") == false)
     }
@@ -218,6 +220,7 @@ private func setReadyToSend(chatService: TestChatService, viewModel: ChatViewMod
 private func emitServerMessage(_ message: Message, via chatService: TestChatService, epoch: Int = 1) throws {
     let payload = ServerMessagePayload(
         id: message.id,
+        llmVisibleMessageId: message.llmVisibleMessageId,
         role: message.role,
         sender: message.sender,
         content: message.content,

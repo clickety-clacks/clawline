@@ -34,6 +34,7 @@ final class T320ReplyIndicatorProofXCTest: XCTestCase {
         let context = try await makeReplyProofContext()
         let referenced = Message(
             id: "s_reference_echo",
+            llmVisibleMessageId: "llm_reference_echo",
             role: .assistant,
             content: "This is a very long referenced message that should truncate in the outgoing bubble chip.",
             timestamp: Date(timeIntervalSince1970: 1_700_000_100),
@@ -64,7 +65,7 @@ final class T320ReplyIndicatorProofXCTest: XCTestCase {
         let resolvedReplyReference = try XCTUnwrap(context.viewModel.replyReference(for: replied))
 
         XCTAssertEqual(resolvedReplyReference.sessionKey, t320PersonalSessionKey)
-        XCTAssertEqual(resolvedReplyReference.messageId, referenced.id)
+        XCTAssertEqual(resolvedReplyReference.llmVisibleMessageId, "llm_reference_echo")
         XCTAssertEqual(resolvedReplyReference.clientMessageId, "c_reference_echo")
         XCTAssertTrue(resolvedReplyReference.tokenLabel.hasSuffix("…"))
         XCTAssertTrue(resolvedReplyReference.tokenLabel.contains("This is a very long referenced message"))
@@ -77,6 +78,7 @@ final class T320ReplyIndicatorProofXCTest: XCTestCase {
         let context = try await makeReplyProofContext()
         let referenced = Message(
             id: "s_reply_target",
+            llmVisibleMessageId: "llm_reply_target",
             role: .assistant,
             content: "The reply target that should be echoed in the outgoing bubble.",
             timestamp: Date(timeIntervalSince1970: 1_700_000_300),
@@ -105,7 +107,7 @@ final class T320ReplyIndicatorProofXCTest: XCTestCase {
             return XCTFail("Expected optimistic outgoing message bubble")
         }
         XCTAssertEqual(optimisticOutgoing.role, Message.Role.user)
-        XCTAssertEqual(optimisticOutgoing.replyToMessageId, referenced.id)
+        XCTAssertEqual(optimisticOutgoing.replyToMessageId, "llm_reply_target")
         XCTAssertEqual(optimisticOutgoing.replyToClientMessageId, referenced.clientMessageId)
 
         try emitServerMessage(
@@ -131,11 +133,11 @@ final class T320ReplyIndicatorProofXCTest: XCTestCase {
             return XCTFail("Expected echoed outgoing message bubble")
         }
         XCTAssertEqual(outgoing.role, Message.Role.user)
-        XCTAssertEqual(outgoing.replyToMessageId, referenced.id)
+        XCTAssertEqual(outgoing.replyToMessageId, "llm_reply_target")
         XCTAssertEqual(outgoing.replyToClientMessageId, referenced.clientMessageId)
 
         let outgoingReplyReference = context.viewModel.replyReference(for: outgoing)
-        XCTAssertEqual(outgoingReplyReference?.messageId, referenced.id)
+        XCTAssertEqual(outgoingReplyReference?.llmVisibleMessageId, "llm_reply_target")
         XCTAssertEqual(outgoingReplyReference?.clientMessageId, referenced.clientMessageId)
         XCTAssertEqual(outgoingReplyReference?.tokenLabel.contains("assistant:"), false)
     }
@@ -332,6 +334,7 @@ private func setReadyToSend(chatService: TestChatService, viewModel: ChatViewMod
 private func emitServerMessage(_ message: Message, via chatService: TestChatService, epoch: Int = 1) throws {
     let payload = ServerMessagePayload(
         id: message.id,
+        llmVisibleMessageId: message.llmVisibleMessageId,
         role: message.role,
         sender: message.sender,
         content: message.content,

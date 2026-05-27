@@ -28,6 +28,7 @@ struct ChatUserInfo: Equatable {
 
 struct Message: Identifiable, Equatable, Codable {
     let id: String
+    let llmVisibleMessageId: String?
     let role: Role
     let content: String
     let timestamp: Date
@@ -42,6 +43,7 @@ struct Message: Identifiable, Equatable, Codable {
     var deliveryState: DeliveryState
 
     init(id: String,
+         llmVisibleMessageId: String? = nil,
          role: Role,
          content: String,
          timestamp: Date,
@@ -55,6 +57,7 @@ struct Message: Identifiable, Equatable, Codable {
          replyToClientMessageId: String? = nil,
          deliveryState: DeliveryState = .normal) {
         self.id = id
+        self.llmVisibleMessageId = llmVisibleMessageId
         self.role = role
         self.content = content
         self.timestamp = timestamp
@@ -74,7 +77,7 @@ struct Message: Identifiable, Equatable, Codable {
     }
 
     var hasStableReferenceIdentity: Bool {
-        id.hasPrefix("s_") || clientMessageId != nil
+        llmVisibleMessageId?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
     }
 
     var displayName: String {
@@ -106,6 +109,7 @@ struct Message: Identifiable, Equatable, Codable {
 
     private enum CodingKeys: String, CodingKey {
         case id
+        case llmVisibleMessageId
         case role
         case content
         case timestamp
@@ -123,6 +127,7 @@ struct Message: Identifiable, Equatable, Codable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
+        llmVisibleMessageId = try container.decodeIfPresent(String.self, forKey: .llmVisibleMessageId)
         role = try container.decode(Role.self, forKey: .role)
         content = try container.decode(String.self, forKey: .content)
         timestamp = try container.decode(Date.self, forKey: .timestamp)
@@ -141,7 +146,7 @@ struct Message: Identifiable, Equatable, Codable {
 struct PendingMessageReference: Identifiable, Equatable, Codable {
     let id: UUID
     let sessionKey: String
-    let messageId: String
+    let llmVisibleMessageId: String?
     let messageRole: Message.Role
     let createdAt: Date
     let clientMessageId: String?
@@ -150,14 +155,17 @@ struct PendingMessageReference: Identifiable, Equatable, Codable {
     init(id: UUID = UUID(), message: Message) {
         self.id = id
         self.sessionKey = message.sessionKey
-        self.messageId = message.id
+        self.llmVisibleMessageId = message.llmVisibleMessageId
         self.messageRole = message.role
         self.createdAt = message.timestamp
         self.clientMessageId = message.clientMessageId
-        self.preview = message.content
+        self.preview = String(message.content
             .replacingOccurrences(of: "\n", with: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
+            .prefix(Self.previewLimit))
     }
+
+    static let previewLimit = 240
 
     var tokenLabel: String {
         guard !preview.isEmpty else { return "Reply" }

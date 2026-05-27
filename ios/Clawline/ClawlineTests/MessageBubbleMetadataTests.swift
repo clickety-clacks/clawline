@@ -274,8 +274,8 @@ struct MessageBubbleMetadataTests {
         #expect(menuTitles.contains("Reference message") == false)
     }
 
-    @Test("Unstable optimistic user bubbles do not expose Reply action")
-    func unstableOptimisticUserBubblesDoNotExposeReplyAction() {
+    @Test("Messages without visible ids still expose Reply action")
+    func messagesWithoutVisibleIdsStillExposeReplyAction() {
         let message = Message(
             id: "c_optimistic",
             role: .user,
@@ -326,7 +326,7 @@ struct MessageBubbleMetadataTests {
 
         let button = findSubview(in: bubble) { $0.accessibilityIdentifier == "message_bubble_header_menu_button" } as? UIButton
         let menuTitles = button?.menu?.children.compactMap { ($0 as? UIAction)?.title } ?? []
-        #expect(menuTitles.contains("Reply…") == false)
+        #expect(menuTitles.contains("Reply…"))
     }
 
     private func findSubview(in root: UIView, where predicate: (UIView) -> Bool) -> UIView? {

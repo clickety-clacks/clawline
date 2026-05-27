@@ -609,6 +609,116 @@ describe("ChatRoute", () => {
     expect(activeStatusCalls).toBe(2);
   });
 
+  it("refreshes footer status after session controls that omit status payloads", async () => {
+    const activeSessionKey = "agent:main:clawline:user_1:main";
+    let activeStatusCalls = 0;
+    const sessionControlBodies: unknown[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = input instanceof URL ? input : new URL(String(input));
+
+        if (url.pathname === "/api/session-status") {
+          const sessionKey = url.searchParams.get("sessionKey") ?? "";
+          if (sessionKey === activeSessionKey) {
+            activeStatusCalls += 1;
+          }
+
+          return new Response(
+            JSON.stringify({
+              sessionKey,
+              display: {
+                model: "gpt-5.5",
+                thinkingLevel:
+                  sessionKey === activeSessionKey && activeStatusCalls > 1
+                    ? "high"
+                    : "low",
+                fastMode: false
+              },
+              run: {
+                state: "idle"
+              },
+              capabilities: {
+                setModel: { supported: true },
+                setThinking: {
+                  supported: true,
+                  options: [
+                    { title: "Low", value: "low" },
+                    { title: "High", value: "high" }
+                  ]
+                },
+                setFastMode: { supported: true }
+              },
+              modelCatalog: {
+                available: true,
+                models: [
+                  {
+                    id: "gpt-5.5",
+                    name: "GPT-5.5",
+                    ref: "gpt-5.5"
+                  }
+                ]
+              }
+            }),
+            {
+              headers: { "Content-Type": "application/json" },
+              status: 200
+            }
+          );
+        }
+
+        if (url.pathname === "/api/session-control") {
+          sessionControlBodies.push(JSON.parse(String(init?.body)));
+          return new Response(
+            JSON.stringify({
+              ok: true,
+              sessionKey: activeSessionKey,
+              action: "set_thinking"
+            }),
+            {
+              headers: { "Content-Type": "application/json" },
+              status: 200
+            }
+          );
+        }
+
+        if (url.pathname === "/api/streams") {
+          return new Response(JSON.stringify({ streams: TEST_STREAMS }), {
+            headers: { "Content-Type": "application/json" },
+            status: 200
+          });
+        }
+
+        if (url.pathname === "/api/trackable-sessions") {
+          return new Response(JSON.stringify({ sessions: [] }), {
+            headers: { "Content-Type": "application/json" },
+            status: 200
+          });
+        }
+
+        return new Response(JSON.stringify({ error: { code: "unexpected_path" } }), {
+          headers: { "Content-Type": "application/json" },
+          status: 404
+        });
+      })
+    );
+
+    renderChatRoute("/chat/agent:main:clawline:user_1:main");
+
+    const thinkingControl = await screen.findByLabelText("Thinking low");
+    fireEvent.change(thinkingControl, { target: { value: "1" } });
+
+    expect(await screen.findByLabelText("Thinking high")).toBeInTheDocument();
+    expect(sessionControlBodies).toEqual([
+      {
+        action: "set_thinking",
+        sessionKey: activeSessionKey,
+        thinkingLevel: "high"
+      }
+    ]);
+    expect(activeStatusCalls).toBe(2);
+  });
+
   it("opens session selection as an overlay without changing the route", () => {
     renderChatRoute("/chat/agent:main:clawline:user_1:main");
 

@@ -239,6 +239,27 @@ export function ChatRoute() {
             ...current,
             [nextStatus.sessionKey]: nextStatus
           }));
+          return;
+        }
+
+        const abortController = new AbortController();
+        const timeoutId = window.setTimeout(
+          () => abortController.abort(),
+          SESSION_STATUS_REQUEST_TIMEOUT_MS
+        );
+        try {
+          const nextStatus = await streamApiClient.fetchSessionStatus({
+            serverUrl,
+            sessionKey,
+            signal: abortController.signal,
+            token
+          });
+          setSessionStatusBySessionKey((current) => ({
+            ...current,
+            [nextStatus.sessionKey]: nextStatus
+          }));
+        } finally {
+          window.clearTimeout(timeoutId);
         }
       } catch (error) {
         console.warn("Session control request failed", error);

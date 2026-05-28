@@ -6,6 +6,7 @@ import { useStoreValue } from "../shared/useStoreValue";
 import type { IncomingMessageSource, StreamRecord } from "./chatDomainStore";
 
 export interface AssistantNotificationEntry {
+  appendSeparatorTimestamp?: number;
   assistantMessageId: string;
   contentPreview: string;
   final: boolean;
@@ -176,16 +177,22 @@ function applyCrossChatNotificationForIncomingMessage(
   const sourceTitle =
     streams.find((stream) => stream.sessionKey === sourceChatId)?.displayName ??
     sourceChatId;
-  const nextEntry: AssistantNotificationEntry = {
-    assistantMessageId: message.id,
-    contentPreview: message.content,
-    final: !message.streaming,
-    updatedAt: message.timestamp
-  };
   const priorEntries = currentBubble?.entriesNewestFirst ?? [];
   const existingIndex = priorEntries.findIndex(
     (entry) => entry.assistantMessageId === message.id
   );
+  const nextEntry: AssistantNotificationEntry = {
+    assistantMessageId: message.id,
+    appendSeparatorTimestamp:
+      existingIndex >= 0
+        ? priorEntries[existingIndex]?.appendSeparatorTimestamp
+        : priorEntries.length > 0
+          ? message.timestamp
+          : undefined,
+    contentPreview: message.content,
+    final: !message.streaming,
+    updatedAt: message.timestamp
+  };
   const entriesNewestFirst =
     existingIndex >= 0
       ? [

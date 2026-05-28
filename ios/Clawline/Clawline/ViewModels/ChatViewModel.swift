@@ -20,6 +20,7 @@ struct CrossChatAssistantNotificationEntry: Identifiable, Equatable {
     let id: String
     var content: String
     var timestamp: Date
+    var appendSeparatorTimestamp: Date? = nil
 }
 
 struct CrossChatNotificationBubble: Identifiable, Equatable {
@@ -2245,11 +2246,6 @@ final class ChatViewModel: ChatViewModelHosting {
         let title = stream(for: message.sessionKey)?.displayName
             ?? message.sender
             ?? message.sessionKey
-        let entry = CrossChatAssistantNotificationEntry(
-            id: message.id,
-            content: message.content,
-            timestamp: message.timestamp
-        )
         var bubble = crossChatNotificationBubblesBySourceChatId[message.sessionKey] ?? CrossChatNotificationBubble(
             sourceChatId: message.sessionKey,
             sourceTitle: title,
@@ -2257,6 +2253,15 @@ final class ChatViewModel: ChatViewModelHosting {
             lastAssistantActivityAt: message.timestamp
         )
         bubble.sourceTitle = title
+        let existingSeparatorTimestamp = bubble.entries.first(where: { $0.id == message.id })?.appendSeparatorTimestamp
+        let appendSeparatorTimestamp = existingSeparatorTimestamp
+            ?? (bubble.entries.contains { $0.id != message.id } ? message.timestamp : nil)
+        let entry = CrossChatAssistantNotificationEntry(
+            id: message.id,
+            content: message.content,
+            timestamp: message.timestamp,
+            appendSeparatorTimestamp: appendSeparatorTimestamp
+        )
         if let existingIndex = bubble.entries.firstIndex(where: { $0.id == message.id }) {
             bubble.entries.remove(at: existingIndex)
         }

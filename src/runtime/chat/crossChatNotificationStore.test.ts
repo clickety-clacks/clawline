@@ -97,6 +97,91 @@ describe("crossChatNotificationStore", () => {
     expect(freshStore.getState().bubblesBySourceChatId).toEqual({});
   });
 
+  it("marks newly appended notification entries with one separator timestamp", () => {
+    const store = createCrossChatNotificationStore();
+
+    store.applyIncomingMessage({
+      message: {
+        type: "message",
+        id: "s_first",
+        role: "assistant",
+        content: "First",
+        timestamp: 100,
+        streaming: false,
+        sessionKey: "agent:main:clawline:user_1:side",
+        attachments: []
+      },
+      selectedSessionKey: "agent:main:clawline:user_1:main",
+      source: "live",
+      streams: STREAMS
+    });
+    store.applyIncomingMessage({
+      message: {
+        type: "message",
+        id: "s_second",
+        role: "assistant",
+        content: "Second",
+        timestamp: 200,
+        streaming: false,
+        sessionKey: "agent:main:clawline:user_1:side",
+        attachments: []
+      },
+      selectedSessionKey: "agent:main:clawline:user_1:main",
+      source: "live",
+      streams: STREAMS
+    });
+    store.applyIncomingMessage({
+      message: {
+        type: "message",
+        id: "s_second",
+        role: "assistant",
+        content: "Second final",
+        timestamp: 250,
+        streaming: false,
+        sessionKey: "agent:main:clawline:user_1:side",
+        attachments: []
+      },
+      selectedSessionKey: "agent:main:clawline:user_1:main",
+      source: "live",
+      streams: STREAMS
+    });
+    store.applyIncomingMessage({
+      message: {
+        type: "message",
+        id: "s_third",
+        role: "assistant",
+        content: "Third",
+        timestamp: 300,
+        streaming: false,
+        sessionKey: "agent:main:clawline:user_1:side",
+        attachments: []
+      },
+      selectedSessionKey: "agent:main:clawline:user_1:main",
+      source: "live",
+      streams: STREAMS
+    });
+
+    expect(
+      store.getState().bubblesBySourceChatId[
+        "agent:main:clawline:user_1:side"
+      ]?.entriesNewestFirst
+    ).toEqual([
+      expect.objectContaining({
+        appendSeparatorTimestamp: 300,
+        assistantMessageId: "s_third"
+      }),
+      expect.objectContaining({
+        appendSeparatorTimestamp: 200,
+        assistantMessageId: "s_second",
+        contentPreview: "Second final"
+      }),
+      expect.objectContaining({
+        appendSeparatorTimestamp: undefined,
+        assistantMessageId: "s_first"
+      })
+    ]);
+  });
+
   it("dismisses unavailable source chats from visible and overflow state", () => {
     const store = createCrossChatNotificationStore();
 

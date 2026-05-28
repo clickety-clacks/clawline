@@ -2039,20 +2039,8 @@ final class ChatViewModel: ChatViewModelHosting {
             setEngineActiveSessionKey(stream.sessionKey)
             return true
         } catch {
-            if shouldRetryCreateOnActiveConnection(after: error) {
-                do {
-                    try await reconnectActiveTransportForControlPlane()
-                    let stream = try await chatService.createStream(
-                        displayName: trimmed,
-                        idempotencyKey: idempotencyKey
-                    )
-                    applyStreamUpsert(stream)
-                    setEngineActiveSessionKey(stream.sessionKey)
-                    return true
-                } catch {
-                    toastManager.show(error.localizedDescription)
-                    return false
-                }
+            if shouldSignalLifecycleRecovery(after: error) {
+                await lifecycleCoordinator.reconnectIntentTransportInterrupted()
             }
             toastManager.show(error.localizedDescription)
             return false
@@ -2085,26 +2073,15 @@ final class ChatViewModel: ChatViewModelHosting {
             applyDeleteSuccess(for: stream)
             return true
         } catch {
-            if shouldRetryDeleteOnActiveConnection(after: error) {
-                do {
-                    try await reconnectActiveTransportForControlPlane()
-                    _ = try await chatService.deleteStream(
-                        sessionKey: sessionKey,
-                        idempotencyKey: idempotencyKey
-                    )
-                    applyDeleteSuccess(for: stream)
-                    return true
-                } catch {
-                    toastManager.show(error.localizedDescription)
-                    return false
-                }
+            if shouldSignalLifecycleRecovery(after: error) {
+                await lifecycleCoordinator.reconnectIntentTransportInterrupted()
             }
             toastManager.show(error.localizedDescription)
             return false
         }
     }
 
-    private func shouldRetryDeleteOnActiveConnection(after error: Swift.Error) -> Bool {
+    private func shouldSignalLifecycleRecovery(after error: Swift.Error) -> Bool {
         guard auth.token != nil else { return false }
         if let providerError = error as? ProviderChatService.Error,
            case .notConnected = providerError {
@@ -2115,27 +2092,6 @@ final class ChatViewModel: ChatViewModelHosting {
             return true
         }
         return false
-    }
-
-    private func shouldRetryCreateOnActiveConnection(after error: Swift.Error) -> Bool {
-        guard auth.token != nil else { return false }
-        if let providerError = error as? ProviderChatService.Error,
-           case .notConnected = providerError {
-            return true
-        }
-        if let streamError = error as? StreamAPIError,
-           streamError.code == "not_connected" {
-            return true
-        }
-        return false
-    }
-
-    private func reconnectActiveTransportForControlPlane() async throws {
-        guard let token = auth.token else {
-            throw ProviderChatService.Error.notConnected
-        }
-        let lastMessageId = legacyReplayCursorForActiveStream()
-        try await chatService.connect(token: token, lastMessageId: lastMessageId)
     }
 
     private static func makeIdempotencyKey() -> String {

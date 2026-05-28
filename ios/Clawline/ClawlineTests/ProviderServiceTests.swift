@@ -196,6 +196,44 @@ struct ProviderServiceTests {
         #expect(replayCursors[sideKey] as? String == "s_side_final")
     }
 
+    @Test("Lifecycle auth success does not publish provider connected before replay completion")
+    @MainActor
+    func lifecycleAuthSuccessDoesNotPublishProviderConnectedBeforeReplayCompletion() async throws {
+        let mockSocket = MockWebSocketClient()
+        let connector = MockWebSocketConnector(client: mockSocket)
+        let service = ProviderChatService(
+            connector: connector,
+            deviceId: "device_lifecycle_auth",
+            baseURLProvider: { URL(string: "https://example.com")! }
+        )
+        let states = T100ProviderConnectionStateRecorder()
+        let lifecycleEvents = T100ProviderLifecycleEventRecorder()
+        let stateTask = Task { @MainActor in
+            for await state in service.connectionState {
+                states.record(state)
+            }
+        }
+        let lifecycleTask = Task { @MainActor in
+            for await event in service.lifecycleTransportEvents {
+                lifecycleEvents.record(event)
+            }
+        }
+        defer {
+            stateTask.cancel()
+            lifecycleTask.cancel()
+            service.stopConnectionAttempt()
+        }
+
+        service.startConnectionAttempt(epoch: 1, lastMessageId: nil, token: "jwt")
+        #expect(await t100ProviderWaitUntil { mockSocket.sentTexts.contains { $0.contains("\"type\":\"auth\"") } })
+
+        mockSocket.enqueue(text: #"{ "type": "auth_result", "success": true, "replayCount": 0 }"#)
+        #expect(await t100ProviderWaitUntil { lifecycleEvents.containsAuthSuccess(epoch: 1) })
+        try await Task.sleep(forDuration: .milliseconds(50))
+
+        #expect(states.containsConnected() == false)
+    }
+
     @Test("Streaming partials do not advance replay cursors but finals do")
     func streamingPartialsDoNotAdvanceReplayCursors() async throws {
         let mockSocket = MockWebSocketClient()
@@ -1470,6 +1508,50 @@ private final class FallbackMockWebSocketConnector: WebSocketConnecting {
         }
         return client
     }
+}
+
+@MainActor
+private final class T100ProviderConnectionStateRecorder {
+    private var states: [ConnectionState] = []
+
+    func record(_ state: ConnectionState) {
+        states.append(state)
+    }
+
+    func containsConnected() -> Bool {
+        states.contains { state in
+            if case .connected = state { return true }
+            return false
+        }
+    }
+}
+
+@MainActor
+private final class T100ProviderLifecycleEventRecorder {
+    private var events: [LifecycleTransportEvent] = []
+
+    func record(_ event: LifecycleTransportEvent) {
+        events.append(event)
+    }
+
+    func containsAuthSuccess(epoch: Int) -> Bool {
+        events.contains { event in
+            guard event.epoch == epoch else { return false }
+            guard case .authResult(let success, _, _, _, _) = event.payload else { return false }
+            return success
+        }
+    }
+}
+
+@MainActor
+private func t100ProviderWaitUntil(_ condition: () async -> Bool) async -> Bool {
+    for _ in 0..<80 {
+        if await condition() {
+            return true
+        }
+        try? await Task.sleep(forDuration: .milliseconds(10))
+    }
+    return await condition()
 }
 
 private final class MockWebSocketClient: WebSocketClient {

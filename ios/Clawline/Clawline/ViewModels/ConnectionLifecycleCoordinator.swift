@@ -454,11 +454,6 @@ actor ConnectionLifecycleCoordinator {
                 break
             }
         }
-        if phase == .recovering, success {
-            reconnectTask?.cancel()
-            reconnectTask = nil
-            transition(to: .authenticating, reason: .authSucceeded)
-        }
         guard phase == .authenticating else { return }
         authTimeoutTask?.cancel()
         authTimeoutTask = nil
@@ -835,7 +830,6 @@ actor ConnectionLifecycleCoordinator {
             (.live, .failed),
             (.live, .idle),
             (.recovering, .connecting),
-            (.recovering, .authenticating),
             (.recovering, .failed),
             (.recovering, .idle),
             (.failed, .connecting),

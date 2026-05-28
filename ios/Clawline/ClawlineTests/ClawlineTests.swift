@@ -548,6 +548,205 @@ struct ClawlineTests {
 
 }
 
+struct T100ConnectionLifecycleCoordinatorTests {
+    @Test("T100: replay requires active sync completion before live")
+    func replayRequiresActiveSyncCompletionBeforeLive() async {
+        let starts = T100LifecycleStartRecorder()
+        let coordinator = ConnectionLifecycleCoordinator(
+            startAttempt: { epoch, lastMessageId, token in
+                Task { await starts.record(epoch: epoch, lastMessageId: lastMessageId, token: token) }
+            },
+            stopAttempt: {},
+            randomJitterMs: { 0 }
+        )
+        let outputs = T100LifecycleOutputRecorder()
+        let outputStream = await coordinator.outputs
+        let outputTask = Task {
+            for await output in outputStream {
+                await outputs.record(output)
+            }
+        }
+        defer { outputTask.cancel() }
+
+        await coordinator.viewAppeared()
+        await coordinator.authChanged(token: "jwt")
+        #expect(await t100WaitUntil { await starts.count() == 1 })
+
+        await coordinator.handleTransportEvent(.init(epoch: 1, payload: .transportOpened))
+        await coordinator.handleTransportEvent(.init(
+            epoch: 1,
+            payload: .authResult(
+                success: true,
+                replayCount: 0,
+                replayTruncated: false,
+                historyReset: false,
+                failureReason: nil
+            )
+        ))
+        #expect(await t100WaitUntil { await coordinator.phase == .replaying })
+
+        await coordinator.handleTransportEvent(.init(epoch: 0, payload: .syncComplete))
+        try? await Task.sleep(forDuration: .milliseconds(30))
+        #expect(await coordinator.phase == .replaying)
+
+        await coordinator.handleTransportEvent(.init(epoch: 1, payload: .syncComplete))
+        #expect(await t100WaitUntil { await coordinator.phase == .live })
+        #expect(await outputs.transitionTargets() == [.connecting, .authenticating, .replaying, .live])
+    }
+
+    @Test("T100: stale epoch output cannot advance a newer attempt")
+    func staleEpochOutputCannotAdvanceNewerAttempt() async {
+        let starts = T100LifecycleStartRecorder()
+        let coordinator = ConnectionLifecycleCoordinator(
+            startAttempt: { epoch, lastMessageId, token in
+                Task { await starts.record(epoch: epoch, lastMessageId: lastMessageId, token: token) }
+            },
+            stopAttempt: {},
+            randomJitterMs: { 0 }
+        )
+
+        await coordinator.viewAppeared()
+        await coordinator.authChanged(token: "jwt")
+        #expect(await t100WaitUntil { await starts.count() == 1 })
+        await coordinator.handleTransportEvent(.init(epoch: 1, payload: .transportOpened))
+        await coordinator.handleTransportEvent(.init(
+            epoch: 1,
+            payload: .authResult(
+                success: true,
+                replayCount: 0,
+                replayTruncated: false,
+                historyReset: false,
+                failureReason: nil
+            )
+        ))
+        #expect(await t100WaitUntil { await coordinator.phase == .replaying })
+
+        await coordinator.disconnectRequested()
+        await coordinator.startIfNeeded()
+        #expect(await t100WaitUntil { await starts.count() == 2 })
+
+        await coordinator.handleTransportEvent(.init(epoch: 1, payload: .syncComplete))
+        await coordinator.handleTransportEvent(.init(
+            epoch: 1,
+            payload: .authResult(
+                success: true,
+                replayCount: 0,
+                replayTruncated: false,
+                historyReset: false,
+                failureReason: nil
+            )
+        ))
+        try? await Task.sleep(forDuration: .milliseconds(30))
+        #expect(await coordinator.phase == .connecting)
+
+        await coordinator.handleTransportEvent(.init(epoch: 2, payload: .transportOpened))
+        await coordinator.handleTransportEvent(.init(
+            epoch: 2,
+            payload: .authResult(
+                success: true,
+                replayCount: 0,
+                replayTruncated: false,
+                historyReset: false,
+                failureReason: nil
+            )
+        ))
+        await coordinator.handleTransportEvent(.init(epoch: 2, payload: .syncComplete))
+        #expect(await t100WaitUntil { await coordinator.phase == .live })
+    }
+
+    @Test("T100: recovering ignores late auth success and manual retry cancels backoff")
+    func recoveringIgnoresLateAuthSuccessAndManualRetryCancelsBackoff() async {
+        let starts = T100LifecycleStartRecorder()
+        let coordinator = ConnectionLifecycleCoordinator(
+            startAttempt: { epoch, lastMessageId, token in
+                Task { await starts.record(epoch: epoch, lastMessageId: lastMessageId, token: token) }
+            },
+            stopAttempt: {},
+            randomJitterMs: { 0 }
+        )
+        let outputs = T100LifecycleOutputRecorder()
+        let outputStream = await coordinator.outputs
+        let outputTask = Task {
+            for await output in outputStream {
+                await outputs.record(output)
+            }
+        }
+        defer { outputTask.cancel() }
+
+        await coordinator.viewAppeared()
+        await coordinator.authChanged(token: "jwt")
+        #expect(await t100WaitUntil { await starts.count() == 1 })
+        await coordinator.handleTransportEvent(.init(epoch: 1, payload: .transportOpened))
+        await coordinator.handleTransportEvent(.init(epoch: 1, payload: .transportTimeout))
+        #expect(await t100WaitUntil { await coordinator.phase == .recovering })
+
+        await coordinator.handleTransportEvent(.init(
+            epoch: 1,
+            payload: .authResult(
+                success: true,
+                replayCount: 0,
+                replayTruncated: false,
+                historyReset: false,
+                failureReason: nil
+            )
+        ))
+        try? await Task.sleep(forDuration: .milliseconds(30))
+        #expect(await coordinator.phase == .recovering)
+        #expect(await outputs.containsTransition(from: .recovering, to: .authenticating) == false)
+
+        await coordinator.manualRetry()
+        #expect(await t100WaitUntil { await starts.count() == 2 })
+        #expect(await coordinator.phase == .connecting)
+
+        try? await Task.sleep(forDuration: .milliseconds(1100))
+        #expect(await starts.count() == 2)
+    }
+}
+
+private actor T100LifecycleStartRecorder {
+    private var calls: [(epoch: Int, lastMessageId: String?, token: String)] = []
+
+    func record(epoch: Int, lastMessageId: String?, token: String) {
+        calls.append((epoch, lastMessageId, token))
+    }
+
+    func count() -> Int {
+        calls.count
+    }
+}
+
+private actor T100LifecycleOutputRecorder {
+    private var outputs: [ConnectionLifecycleOutput] = []
+
+    func record(_ output: ConnectionLifecycleOutput) {
+        outputs.append(output)
+    }
+
+    func transitionTargets() -> [ConnectionLifecyclePhase] {
+        outputs.compactMap { output in
+            guard case .phaseTransition(_, let to, _, _) = output else { return nil }
+            return to
+        }
+    }
+
+    func containsTransition(from expectedFrom: ConnectionLifecyclePhase, to expectedTo: ConnectionLifecyclePhase) -> Bool {
+        outputs.contains { output in
+            guard case .phaseTransition(let from, let to, _, _) = output else { return false }
+            return from == expectedFrom && to == expectedTo
+        }
+    }
+}
+
+private func t100WaitUntil(_ condition: @escaping @Sendable () async -> Bool) async -> Bool {
+    for _ in 0..<80 {
+        if await condition() {
+            return true
+        }
+        try? await Task.sleep(forDuration: .milliseconds(10))
+    }
+    return await condition()
+}
+
 private final class SpyChatService: ChatServicing {
     struct SentMessage {
         let id: String

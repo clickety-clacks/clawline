@@ -5530,9 +5530,9 @@ struct ChatViewModelTests {
         #expect(viewModel.stream(for: customKey) == nil)
     }
 
-    @Test("Delete non-active stream retries through active connection when initially not connected")
+    @Test("Delete not_connected signals lifecycle recovery without direct reconnect retry")
     @MainActor
-    func deleteNonActiveStreamRetriesThroughActiveConnection() async throws {
+    func deleteNotConnectedSignalsLifecycleRecoveryWithoutDirectReconnectRetry() async throws {
         resetChatPersistence()
         let auth = TestAuthManager()
         auth.storeCredentials(token: "jwt", userId: "user")
@@ -5549,10 +5549,14 @@ struct ChatViewModelTests {
             toastManager: ToastManager(),
             salientHighlightService: SalientHighlightService()
         )
-        defer { viewModel.onDisappear() }
+        defer { viewModel.prepareForReplacement() }
 
-        await viewModel.onAppear()
+        await viewModel.activate(origin: "test.deleteNotConnected")
         chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
+        for _ in 0..<50 {
+            if viewModel.connectionState == .connected { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
 
         let created = await viewModel.createStream(displayName: "Retry Delete")
         #expect(created)
@@ -5565,11 +5569,16 @@ struct ChatViewModelTests {
         let connectCountBeforeDelete = chatService.connectCallCount
         let deleted = await viewModel.deleteStream(sessionKey: customKey)
 
-        #expect(deleted)
-        #expect(viewModel.stream(for: customKey) == nil)
-        #expect(chatService.deleteStreamCallCount == 2)
+        #expect(!deleted)
+        #expect(viewModel.stream(for: customKey) != nil)
+        #expect(chatService.deleteStreamCallCount == 1)
         #expect(chatService.lastDeletedSessionKey == customKey)
-        #expect(chatService.connectCallCount > connectCountBeforeDelete)
+        #expect(chatService.connectCallCount == connectCountBeforeDelete)
+        for _ in 0..<50 {
+            if viewModel.connectionState == .reconnecting { break }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(viewModel.connectionState == .reconnecting)
     }
 
     @Test("user_info event updates admin state")

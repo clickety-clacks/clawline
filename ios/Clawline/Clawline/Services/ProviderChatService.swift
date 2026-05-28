@@ -866,28 +866,16 @@ final class ProviderChatService: ChatServicing {
                 ),
                 lifecycleConnectionToken: lifecycleConnectionToken
             )
+            if result.success {
+                publishAuthSuccessMetadata(result)
+            }
+            return
         }
         if result.success {
             resolveAuthContinuation(with: .success(()))
             logger.info("state -> connected (auth success)")
             updateState(.connected)
-            let supportsSessionProvisioning = result.features?.contains("session_info") ?? false
-            emitServiceEvent(.sessionProvisioningAvailable(supportsSessionProvisioning))
-            if let info = sessionInfo(from: result) {
-                knownSessionKeys = Set(info.sessionKeys)
-                emitServiceEvent(.sessionInfo(info))
-            }
-            if let streamReadStates = result.streamReadStates {
-                emitServiceEvent(.streamReadStateSnapshot(streamReadStates))
-            }
-            if let streamTailStates = result.streamTailStates {
-                emitServiceEvent(.streamTailStateSnapshot(streamTailStates))
-            }
-            if let isAdmin = result.isAdmin {
-                logger.info("Auth result received (userId: \(result.userId ?? "unknown", privacy: .public), isAdmin: \(isAdmin, privacy: .public))")
-                let info = ChatUserInfo(userId: result.userId ?? "", isAdmin: isAdmin)
-                emitServiceEvent(.userInfo(info))
-            }
+            publishAuthSuccessMetadata(result)
         } else {
             let reason = result.reason ?? "Unknown error"
             let error = Error.authFailed(reason)
@@ -895,6 +883,26 @@ final class ProviderChatService: ChatServicing {
             logger.info("state -> failed (auth result) error=\(error.localizedDescription, privacy: .public)")
             updateState(.failed(error))
             performDisconnect(shouldNotify: false, reason: error.localizedDescription)
+        }
+    }
+
+    private func publishAuthSuccessMetadata(_ result: AuthResultPayload) {
+        let supportsSessionProvisioning = result.features?.contains("session_info") ?? false
+        emitServiceEvent(.sessionProvisioningAvailable(supportsSessionProvisioning))
+        if let info = sessionInfo(from: result) {
+            knownSessionKeys = Set(info.sessionKeys)
+            emitServiceEvent(.sessionInfo(info))
+        }
+        if let streamReadStates = result.streamReadStates {
+            emitServiceEvent(.streamReadStateSnapshot(streamReadStates))
+        }
+        if let streamTailStates = result.streamTailStates {
+            emitServiceEvent(.streamTailStateSnapshot(streamTailStates))
+        }
+        if let isAdmin = result.isAdmin {
+            logger.info("Auth result received (userId: \(result.userId ?? "unknown", privacy: .public), isAdmin: \(isAdmin, privacy: .public))")
+            let info = ChatUserInfo(userId: result.userId ?? "", isAdmin: isAdmin)
+            emitServiceEvent(.userInfo(info))
         }
     }
 
@@ -1017,6 +1025,7 @@ final class ProviderChatService: ChatServicing {
                     ),
                     lifecycleConnectionToken: lifecycleConnectionToken
                 )
+                return
             }
             resolveAuthContinuation(with: .failure(error))
             logger.info("state -> failed (server error auth_failed) error=\(error.localizedDescription, privacy: .public)")
@@ -1036,6 +1045,7 @@ final class ProviderChatService: ChatServicing {
                     ),
                     lifecycleConnectionToken: lifecycleConnectionToken
                 )
+                return
             }
             resolveAuthContinuation(with: .failure(error))
             logger.info("state -> failed (server error token_revoked) error=\(error.localizedDescription, privacy: .public)")
@@ -1055,6 +1065,7 @@ final class ProviderChatService: ChatServicing {
                     ),
                     lifecycleConnectionToken: lifecycleConnectionToken
                 )
+                return
             }
             logger.info("state -> failed (server error session_replaced)")
             updateState(.failed(error))
@@ -1097,6 +1108,14 @@ final class ProviderChatService: ChatServicing {
                 emitServiceEvent(.messageError(messageId: nil, code: payload.code, message: payload.message))
             }
         default:
+            if let lifecycleEpoch {
+                emitLifecycleEvent(
+                    epoch: lifecycleEpoch,
+                    payload: .transportClosed(reason: .error),
+                    lifecycleConnectionToken: lifecycleConnectionToken
+                )
+                return
+            }
             logger.info("state -> failed (server error) code=\(payload.code, privacy: .public)")
             updateState(.failed(Error.serverError(code: payload.code, message: payload.message)))
         }

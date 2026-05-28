@@ -2248,7 +2248,7 @@ final class ChatViewModel: ChatViewModelHosting {
         if resolvedMessage.role == .assistant,
            !resolvedMessage.streaming,
            let replyToMessageId = normalizedServerEventID(resolvedMessage.replyToMessageId) {
-            if messageFailures.removeValue(forKey: replyToMessageId) != nil {
+            if clearMessageFailures(for: replyToMessageId) {
                 bumpSendIndicatorRevision()
             }
         }
@@ -2586,6 +2586,7 @@ final class ChatViewModel: ChatViewModelHosting {
         }
 
         let pending = pendingLocalMessages.remove(at: pendingIndex)
+        let preservedFailure = messageFailures[pending.id] ?? messageFailures[message.id]
         ackedPendingLocalMessageIDs.remove(pending.id)
         bumpSendIndicatorRevision()
         var placeholderSessionKey = pending.sessionKey
@@ -2647,7 +2648,13 @@ final class ChatViewModel: ChatViewModelHosting {
         if let replySourceChatId = crossChatNotificationReplySourceByClientMessageId.removeValue(forKey: pending.id) {
             dismissCrossChatNotification(sourceChatId: replySourceChatId)
         }
-        messageFailures.removeValue(forKey: pending.id)
+        if let preservedFailure {
+            for targetId in failureTargetMessageIds(for: resolvedMessage.id) {
+                messageFailures[targetId] = preservedFailure
+            }
+        } else {
+            messageFailures.removeValue(forKey: pending.id)
+        }
         return true
     }
 
@@ -4536,7 +4543,9 @@ final class ChatViewModel: ChatViewModelHosting {
         let failure = MessageFailure(code: code, message: message)
         for targetId in failureTargetMessageIds(for: id) {
             messageFailures[targetId] = failure
-            if let pendingIndex = pendingLocalMessages.firstIndex(where: { $0.id == targetId }) {
+            let wasAckedPending = ackedPendingLocalMessageIDs.contains(targetId)
+            if !wasAckedPending,
+               let pendingIndex = pendingLocalMessages.firstIndex(where: { $0.id == targetId }) {
                 pendingLocalMessages.remove(at: pendingIndex)
             }
             ackedPendingLocalMessageIDs.remove(targetId)
@@ -4557,6 +4566,15 @@ final class ChatViewModel: ChatViewModelHosting {
             }
         }
         return ids
+    }
+
+    @discardableResult
+    private func clearMessageFailures(for id: String) -> Bool {
+        var didRemove = false
+        for targetId in failureTargetMessageIds(for: id) {
+            didRemove = messageFailures.removeValue(forKey: targetId) != nil || didRemove
+        }
+        return didRemove
     }
 
     private func markLocalMessageCanceled(id: String) {

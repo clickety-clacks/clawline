@@ -5817,6 +5817,97 @@ final class T249FailureBadgeTimingXCTest: XCTestCase {
         XCTAssertEqual(viewModel.failureMessage(for: "s_user_failed"), "late reject")
     }
 
+    @MainActor
+    func testAckFailureThenServerEchoReplacesFailedOptimisticBubble() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.activate(origin: "test.t249AckFailureThenServerEcho")
+        try await setReadyToSend(chatService: chatService, viewModel: viewModel)
+        viewModel.inputContent = NSAttributedString(string: "Accepted then failed")
+        viewModel.send()
+
+        let clientId = try await requireLastSentId(chatService)
+        chatService.emitServiceEvent(.messageAcked(id: clientId))
+        try await waitUntil {
+            viewModel.sendIndicatorState(for: clientId) == nil
+        }
+
+        chatService.emitServiceEvent(.messageError(messageId: clientId, code: "invalid_message", message: "late reject"))
+        try await waitUntil {
+            viewModel.sendIndicatorState(for: clientId) == .failed("late reject")
+        }
+
+        let payload = #"{"type":"message","id":"s_user_failed","role":"user","content":"Accepted then failed","timestamp":1700000000000,"streaming":false,"deviceId":"device","sessionKey":"\#(personalSessionKey)","attachments":[],"clientMessageId":"\#(clientId)"}"#
+        chatService.emitLifecycleEvent(.init(epoch: 1, payload: .serverMessage(data: Data(payload.utf8))))
+        try await waitUntil {
+            viewModel.messages.map(\.id) == ["s_user_failed"]
+        }
+
+        XCTAssertEqual(viewModel.messages.map(\.id), ["s_user_failed"])
+        XCTAssertEqual(viewModel.sendIndicatorState(for: "s_user_failed"), .failed("late reject"))
+        XCTAssertEqual(viewModel.failureMessage(for: "s_user_failed"), "late reject")
+    }
+
+    @MainActor
+    func testAssistantFinalClearsServerEchoFailureAliases() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.activate(origin: "test.t249AssistantFinalClearsFailureAliases")
+        try await setReadyToSend(chatService: chatService, viewModel: viewModel)
+        viewModel.inputContent = NSAttributedString(string: "Accepted then failed")
+        viewModel.send()
+
+        let clientId = try await requireLastSentId(chatService)
+        chatService.emitServiceEvent(.messageAcked(id: clientId))
+        try await waitUntil {
+            viewModel.sendIndicatorState(for: clientId) == nil
+        }
+
+        chatService.emitServiceEvent(.messageError(messageId: clientId, code: "invalid_message", message: "late reject"))
+        let userPayload = #"{"type":"message","id":"s_user_failed","role":"user","content":"Accepted then failed","timestamp":1700000000000,"streaming":false,"deviceId":"device","sessionKey":"\#(personalSessionKey)","attachments":[],"clientMessageId":"\#(clientId)"}"#
+        chatService.emitLifecycleEvent(.init(epoch: 1, payload: .serverMessage(data: Data(userPayload.utf8))))
+        try await waitUntil {
+            viewModel.sendIndicatorState(for: "s_user_failed") == .failed("late reject")
+        }
+
+        let assistantPayload = #"{"type":"message","id":"s_assistant_final","role":"assistant","content":"done","timestamp":1700000000001,"streaming":false,"deviceId":"device","sessionKey":"\#(personalSessionKey)","attachments":[],"replyToMessageId":"s_user_failed"}"#
+        chatService.emitLifecycleEvent(.init(epoch: 1, payload: .serverMessage(data: Data(assistantPayload.utf8))))
+        try await waitUntil {
+            viewModel.failureMessage(for: "s_user_failed") == nil
+                && viewModel.failureMessage(for: clientId) == nil
+        }
+
+        XCTAssertNil(viewModel.failureMessage(for: "s_user_failed"))
+        XCTAssertNil(viewModel.failureMessage(for: clientId))
+        XCTAssertNil(viewModel.sendIndicatorState(for: "s_user_failed"))
+    }
+
     private func waitUntil(
         timeoutIterations: Int = 50,
         predicate: @MainActor () -> Bool

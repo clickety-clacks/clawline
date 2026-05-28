@@ -3259,8 +3259,21 @@ final class ChatViewModel: ChatViewModelHosting {
     }
 
     func failureMessage(for messageId: String) -> String? {
-        guard let failure = messageFailures[messageId] else { return nil }
+        guard let failure = failure(for: messageId) else { return nil }
         return userFacingMessage(for: failure.code, fallback: failure.message)
+    }
+
+    private func failure(for messageId: String) -> MessageFailure? {
+        if let failure = messageFailures[messageId] {
+            return failure
+        }
+        guard let (message, _, _) = findMessage(id: messageId),
+              let clientMessageId = message.clientMessageId?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !clientMessageId.isEmpty
+        else {
+            return nil
+        }
+        return messageFailures[clientMessageId]
     }
 
     func liveProgress(for sessionKey: String) -> LiveAgentProgress? {
@@ -3295,9 +3308,6 @@ final class ChatViewModel: ChatViewModelHosting {
                 messageId: messageId,
                 reason: "messageErrorTerminal"
             )
-            if let messageId, ackedPendingLocalMessageIDs.contains(messageId) {
-                return
-            }
             if shouldShowMessageErrorToast(code: code) {
                 let resolved = userFacingMessage(for: code, fallback: message)
                 toastManager.show(resolved)
@@ -3308,12 +3318,8 @@ final class ChatViewModel: ChatViewModelHosting {
                 return
             }
             clearLiveProgress(messageId: messageId)
-            messageFailures[messageId] = MessageFailure(code: code, message: message)
+            markLocalMessageFailed(id: messageId, code: code, message: message)
             crossChatNotificationReplySourceByClientMessageId.removeValue(forKey: messageId)
-            if let pendingIndex = pendingLocalMessages.firstIndex(where: { $0.id == messageId }) {
-                pendingLocalMessages.remove(at: pendingIndex)
-            }
-            ackedPendingLocalMessageIDs.remove(messageId)
             bumpSendIndicatorRevision()
             if activeClientMessageId == messageId {
                 activeClientMessageId = nil
@@ -4527,11 +4533,30 @@ final class ChatViewModel: ChatViewModelHosting {
     }
 
     private func markLocalMessageFailed(id: String, code: String, message: String?) {
-        messageFailures[id] = MessageFailure(code: code, message: message)
-        if let pendingIndex = pendingLocalMessages.firstIndex(where: { $0.id == id }) {
-            pendingLocalMessages.remove(at: pendingIndex)
+        let failure = MessageFailure(code: code, message: message)
+        for targetId in failureTargetMessageIds(for: id) {
+            messageFailures[targetId] = failure
+            if let pendingIndex = pendingLocalMessages.firstIndex(where: { $0.id == targetId }) {
+                pendingLocalMessages.remove(at: pendingIndex)
+            }
+            ackedPendingLocalMessageIDs.remove(targetId)
         }
-        ackedPendingLocalMessageIDs.remove(id)
+    }
+
+    private func failureTargetMessageIds(for id: String) -> Set<String> {
+        var ids: Set<String> = [id]
+        for list in sessionMessages.values {
+            for message in list {
+                let clientMessageId = message.clientMessageId?.trimmingCharacters(in: .whitespacesAndNewlines)
+                if message.id == id || clientMessageId == id {
+                    ids.insert(message.id)
+                    if let clientMessageId, !clientMessageId.isEmpty {
+                        ids.insert(clientMessageId)
+                    }
+                }
+            }
+        }
+        return ids
     }
 
     private func markLocalMessageCanceled(id: String) {

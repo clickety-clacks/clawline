@@ -895,6 +895,46 @@ struct ChatViewModelTests {
         #expect(cursor == "s_replay_final")
     }
 
+    @Test("Lifecycle live transition synchronizes service transport readiness")
+    @MainActor
+    func lifecycleLiveTransitionSynchronizesServiceTransportReadiness() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        chatService.emitSyncCompleteOnStart = false
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.prepareForReplacement() }
+
+        await viewModel.activate(origin: "test.lifecycleTransportReady")
+
+        for _ in 0..<50 {
+            if chatService.connectCallCount > 0 { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+        #expect(chatService.isTransportReadyForSend == false)
+
+        chatService.emitLifecycleEvent(.init(epoch: 1, payload: .syncComplete))
+
+        for _ in 0..<50 {
+            if chatService.lifecycleReadyUpdates.contains(where: { $0.epoch == 1 && $0.isReady }) {
+                break
+            }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+
+        #expect(chatService.isTransportReadyForSend)
+        #expect(chatService.lifecycleReadyUpdates.contains(where: { $0.epoch == 1 && $0.isReady }))
+    }
+
     @Test("History reset preserves cursor-backed active stream with empty replay window")
     @MainActor
     func historyResetPreservesCursorBackedActiveStreamWithEmptyReplayWindow() async throws {
@@ -5736,6 +5776,7 @@ final class TestChatService: ChatServicing {
     private(set) var sendCallCount: Int = 0
     var lastPublishedReadState: (sessionKey: String, lastReadMessageId: String)?
     private(set) var connectCallCount: Int = 0
+    private(set) var lifecycleReadyUpdates: [(isReady: Bool, epoch: Int)] = []
     var isTransportReadyForSend: Bool = false
     var sendError: Swift.Error?
     var sendDelay: Duration?
@@ -5829,6 +5870,11 @@ final class TestChatService: ChatServicing {
         if emitSyncCompleteOnStart {
             lifecycleContinuation?.yield(.init(epoch: epoch, payload: .syncComplete))
         }
+    }
+
+    func setLifecycleTransportReadyForSend(_ isReady: Bool, epoch: Int) {
+        lifecycleReadyUpdates.append((isReady: isReady, epoch: epoch))
+        isTransportReadyForSend = isReady
     }
 
     func stopConnectionAttempt() {}

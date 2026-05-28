@@ -547,6 +547,43 @@ struct ClawlineTests {
         #expect(chatService.sentMessages.isEmpty)
     }
 
+    @Test("watch relay chat.send does not start a direct connect for lifecycle-managed transport")
+    @MainActor
+    func watchRelayChatSendDoesNotStartDirectConnectForLifecycleManagedTransport() async {
+        let suiteName = "ClawlineTests.watchRelayChatSendLifecycleManaged"
+        let defaults = UserDefaults(suiteName: suiteName) ?? .standard
+        defaults.removePersistentDomain(forName: suiteName)
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let chatService = SpyChatService()
+        chatService.isReadyForSend = false
+        chatService.allowsDirectRelayTransportConnect = false
+        let authManager = AuthManager(storage: defaults, secureStore: InMemorySecureStore())
+        authManager.storeCredentials(token: "jwt", userId: "user")
+        let service = WatchConnectivityService(
+            authManager: authManager,
+            sonioxKeyStore: SonioxKeyStore(),
+            cartesiaKeyStore: CartesiaKeyStore(keychain: KeychainSecureStore()),
+            chatService: chatService
+        )
+
+        let reply = await service.handleTestMessage([
+            "type": "chat.send",
+            "requestId": "req-4",
+            "payload": [
+                "id": "msg-4",
+                "content": "relay through lifecycle",
+                "sessionKey": "agent:main:clawline:flynn:main",
+                "attachments": []
+            ]
+        ])
+
+        let error = reply["error"] as? [String: Any]
+        #expect(error?["code"] as? String == "not_connected")
+        #expect(chatService.connectCalls == 0)
+        #expect(chatService.sentMessages.isEmpty)
+    }
+
 }
 
 struct T100ConnectionLifecycleCoordinatorTests {
@@ -761,6 +798,7 @@ private final class SpyChatService: ChatServicing {
     private(set) var connectTokens: [String] = []
     var isReadyForSend = true
     var markReadyOnConnect = true
+    var allowsDirectRelayTransportConnect = true
 
     let incomingMessages = AsyncStream<Message> { _ in }
     let connectionState = AsyncStream<ConnectionState> { continuation in continuation.yield(.connected) }

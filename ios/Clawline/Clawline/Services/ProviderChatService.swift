@@ -227,6 +227,7 @@ final class ProviderChatService: ChatServicing {
     private var isConnecting = false
     private var connectAttemptTask: Task<Void, Never>?
     private var activeLifecycleConnectionToken: UUID?
+    private var activeLifecycleEpoch: Int?
     private var lifecycleTransportReadyForSend = false
     private var authToken: String?
     private var replayCursorBySessionKey: [String: String] = [:]
@@ -238,6 +239,8 @@ final class ProviderChatService: ChatServicing {
         guard socket != nil else { return false }
         return lifecycleTransportReadyForSend || (authToken != nil && lastConnectionState == .connected)
     }
+
+    var allowsDirectRelayTransportConnect: Bool { false }
 
     init(connector: any WebSocketConnecting,
          deviceId: String,
@@ -446,10 +449,16 @@ final class ProviderChatService: ChatServicing {
     func startConnectionAttempt(epoch: Int, lastMessageId: String?, token: String) {
         connectAttemptTask?.cancel()
         activeLifecycleConnectionToken = nil
+        activeLifecycleEpoch = epoch
         lifecycleTransportReadyForSend = false
         connectAttemptTask = Task { [weak self] in
             await self?.runLifecycleConnectAttempt(epoch: epoch, lastMessageId: lastMessageId, token: token)
         }
+    }
+
+    func setLifecycleTransportReadyForSend(_ isReady: Bool, epoch: Int) {
+        guard activeLifecycleEpoch == epoch else { return }
+        lifecycleTransportReadyForSend = isReady && socket != nil
     }
 
     func stopConnectionAttempt() {
@@ -509,6 +518,7 @@ final class ProviderChatService: ChatServicing {
         shouldNotifyDisconnect = shouldNotify
         pendingDisconnectReason = reason
         activeLifecycleConnectionToken = nil
+        activeLifecycleEpoch = nil
         lifecycleTransportReadyForSend = false
         resolveAuthContinuation(with: .failure(Error.notConnected))
         receiveTask?.cancel()
@@ -673,6 +683,7 @@ final class ProviderChatService: ChatServicing {
 
         performDisconnect(shouldNotify: false)
         shouldNotifyDisconnect = false
+        activeLifecycleEpoch = epoch
 
         for (index, wsURL) in wsURLs.enumerated() {
             if Task.isCancelled { return }
@@ -682,6 +693,7 @@ final class ProviderChatService: ChatServicing {
                 if Task.isCancelled { return }
                 let connectionToken = UUID()
                 activeLifecycleConnectionToken = connectionToken
+                activeLifecycleEpoch = epoch
                 lifecycleTransportReadyForSend = false
                 authToken = token
                 socket = client
@@ -697,6 +709,7 @@ final class ProviderChatService: ChatServicing {
                 if index < wsURLs.count - 1, shouldFallbackToNextTransport(after: error) {
                     performDisconnect(shouldNotify: false)
                     shouldNotifyDisconnect = false
+                    activeLifecycleEpoch = epoch
                     continue
                 }
                 emitLifecycleEvent(
@@ -872,7 +885,6 @@ final class ProviderChatService: ChatServicing {
                 lifecycleConnectionToken: lifecycleConnectionToken
             )
             if result.success {
-                lifecycleTransportReadyForSend = true
                 publishAuthSuccessMetadata(result)
             } else {
                 lifecycleTransportReadyForSend = false

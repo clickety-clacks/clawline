@@ -2643,6 +2643,7 @@ final class ChatViewModel: ChatViewModelHosting {
                 mapped = .failed(ProviderChatService.Error.notConnected)
             }
             transitionConnectionState(mapped, source: .lifecycleCoordinator)
+            chatService.setLifecycleTransportReadyForSend(to == .live, epoch: epoch)
             // Auth-invalid failures: clear credentials so RootView routes to pairing recovery.
             // Transport/provider-down failures stay in failed state for manual retry.
             if to == .failed, case .failure(let failureReason) = reason,

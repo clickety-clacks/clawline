@@ -196,9 +196,9 @@ struct ProviderServiceTests {
         #expect(replayCursors[sideKey] as? String == "s_side_final")
     }
 
-    @Test("Lifecycle auth success marks transport ready without publishing provider connected")
+    @Test("Lifecycle live transition marks transport ready without publishing provider connected")
     @MainActor
-    func lifecycleAuthSuccessMarksTransportReadyWithoutPublishingProviderConnected() async throws {
+    func lifecycleLiveTransitionMarksTransportReadyWithoutPublishingProviderConnected() async throws {
         let mockSocket = MockWebSocketClient()
         let connector = MockWebSocketConnector(client: mockSocket)
         let service = ProviderChatService(
@@ -231,6 +231,10 @@ struct ProviderServiceTests {
         #expect(await t100ProviderWaitUntil { lifecycleEvents.containsAuthSuccess(epoch: 1) })
         try await Task.sleep(forDuration: .milliseconds(50))
 
+        #expect(service.isTransportReadyForSend == false)
+        service.setLifecycleTransportReadyForSend(true, epoch: 0)
+        #expect(service.isTransportReadyForSend == false)
+        service.setLifecycleTransportReadyForSend(true, epoch: 1)
         #expect(service.isTransportReadyForSend)
         #expect(states.containsConnected() == false)
 

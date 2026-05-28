@@ -5669,6 +5669,7 @@ enum CrossChatNotificationMarkdownRenderer {
 
 struct CrossChatRenderedNotificationEntry: Identifiable {
     let id: String
+    let appendSeparatorTimestamp: Date?
     let renderedBlocks: [RenderedMarkdownBlock]
 }
 
@@ -5686,6 +5687,7 @@ final class CrossChatNotificationRenderedEntryCache {
     private struct CacheKey: Hashable {
         let id: String
         let content: String
+        let appendSeparatorTimestamp: Date?
         let fontName: String
         let fontSize: CGFloat
         let inkColor: String
@@ -5733,6 +5735,7 @@ final class CrossChatNotificationRenderedEntryCache {
             CacheKey(
                 id: entry.id,
                 content: entry.content,
+                appendSeparatorTimestamp: entry.appendSeparatorTimestamp,
                 fontName: baseFont.fontDescriptor.postscriptName,
                 fontSize: baseFont.pointSize,
                 inkColor: Self.colorCacheComponent(inkColor),
@@ -5748,6 +5751,7 @@ final class CrossChatNotificationRenderedEntryCache {
             }
             let renderedEntry = CrossChatRenderedNotificationEntry(
                 id: entry.id,
+                appendSeparatorTimestamp: entry.appendSeparatorTimestamp,
                 renderedBlocks: renderBlocks(
                     entry.content,
                     entry.id,
@@ -7406,6 +7410,9 @@ struct CrossChatNotificationBubbleView: View {
                     ForEach(Array(entry.renderedBlocks.enumerated()), id: \.offset) { _, block in
                         notificationMarkdownBlock(block)
                     }
+                    if let appendSeparatorTimestamp = entry.appendSeparatorTimestamp {
+                        notificationDateSeparator(timestamp: appendSeparatorTimestamp)
+                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -7445,6 +7452,86 @@ struct CrossChatNotificationBubbleView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
+
+    private func notificationDateSeparator(timestamp: Date) -> some View {
+        HStack(spacing: 8) {
+            Rectangle()
+                .fill(Color.secondary.opacity(0.28))
+                .frame(height: 1)
+            Text(Self.formattedNotificationSeparatorTimestamp(timestamp, now: Date()))
+                .font(notificationFont(.secondaryLabel))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+            Rectangle()
+                .fill(Color.secondary.opacity(0.28))
+                .frame(height: 1)
+        }
+        .padding(.top, 4)
+        .padding(.bottom, 1)
+        .accessibilityElement(children: .combine)
+    }
+
+    private static func formattedNotificationSeparatorTimestamp(_ timestamp: Date, now: Date) -> String {
+        let interval = max(0, now.timeIntervalSince(timestamp))
+        if interval < 60 {
+            return "just now"
+        }
+        if interval < 3_600 {
+            return "\(Int(interval / 60))m ago"
+        }
+        let calendar = Calendar.autoupdatingCurrent
+        if interval < 86_400, calendar.isDate(timestamp, inSameDayAs: now) {
+            return timeFormatter.string(from: timestamp)
+        }
+        if calendar.isDateInYesterday(timestamp) {
+            return "\(relativeDayFormatter.string(from: timestamp)), \(timeFormatter.string(from: timestamp))"
+        }
+        if calendar.component(.year, from: timestamp) != calendar.component(.year, from: now) {
+            return "\(differentYearFormatter.string(from: timestamp)), \(timeFormatter.string(from: timestamp))"
+        }
+        if calendar.isDate(timestamp, equalTo: now, toGranularity: .weekOfYear) {
+            return "\(weekdayFormatter.string(from: timestamp)), \(timeFormatter.string(from: timestamp))"
+        }
+        return "\(monthDayFormatter.string(from: timestamp)), \(timeFormatter.string(from: timestamp))"
+    }
+
+    private static let timeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale.autoupdatingCurrent
+        formatter.setLocalizedDateFormatFromTemplate("jm")
+        return formatter
+    }()
+
+    private static let monthDayFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale.autoupdatingCurrent
+        formatter.setLocalizedDateFormatFromTemplate("MMM d")
+        return formatter
+    }()
+
+    private static let weekdayFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale.autoupdatingCurrent
+        formatter.setLocalizedDateFormatFromTemplate("EEE")
+        return formatter
+    }()
+
+    private static let differentYearFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale.autoupdatingCurrent
+        formatter.setLocalizedDateFormatFromTemplate("MMM d yyyy")
+        return formatter
+    }()
+
+    private static let relativeDayFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale.autoupdatingCurrent
+        formatter.doesRelativeDateFormatting = true
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .none
+        return formatter
+    }()
 
 }
 

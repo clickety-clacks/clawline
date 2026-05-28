@@ -224,6 +224,10 @@ struct ChatViewModelTests {
         let bubble = try #require(viewModel.crossChatNotificationBubbles.first)
         #expect(bubble.sourceChatId == sourceSessionKey)
         #expect(bubble.entries.map(\.content) == ["newer", "older"])
+        #expect(bubble.entries.map(\.appendSeparatorTimestamp) == [
+            Date(timeIntervalSince1970: 11),
+            nil
+        ])
 
         viewModel.requestStreamSwitch(
             to: sourceSessionKey,

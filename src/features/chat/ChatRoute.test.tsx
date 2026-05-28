@@ -1014,6 +1014,42 @@ describe("ChatRoute", () => {
     );
   });
 
+  it("shows date separators when content appends to an existing web notification", async () => {
+    const view = renderChatRoute("/chat/agent:main:clawline:user_1:main", {
+      initialMessages: [],
+      sessionKeys: [
+        "agent:main:clawline:user_1:main",
+        "agent:main:main",
+        "agent:main:clawline:user_1:side"
+      ]
+    });
+
+    applyAssistantNotification(view, {
+      content: "Older side notification",
+      id: "s_side_old",
+      timestamp: Date.now() - 10 * 60_000
+    });
+    applyAssistantNotification(view, {
+      content: "New side notification",
+      id: "s_side_new",
+      timestamp: Date.now() - 2 * 60_000
+    });
+
+    const bubble = await screen.findByLabelText("Side Thread notification");
+    const olderText = within(bubble).getByText("Older side notification");
+    const separator = bubble.querySelector(".cross-chat-notification-date-separator");
+
+    expect(within(bubble).getByText("New side notification")).toBeInTheDocument();
+    expect(olderText).toBeInTheDocument();
+    expect(separator).not.toBeNull();
+    expect(separator).toHaveTextContent("2m ago");
+    expect(separator?.compareDocumentPosition(olderText)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING
+    );
+    expect(bubble.querySelectorAll(".cross-chat-notification-date-separator")).toHaveLength(1);
+    expect(bubble.querySelector(".cross-chat-notification-actions")).toBeInTheDocument();
+  });
+
   it("replies from a notification to its source chat without changing the current transcript", async () => {
     const { chatStore, notificationStore, transportMachine } = renderChatRoute(
       "/chat/agent:main:clawline:user_1:main",

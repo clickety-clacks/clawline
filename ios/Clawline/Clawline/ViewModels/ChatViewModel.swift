@@ -456,7 +456,6 @@ final class ChatViewModel: ChatViewModelHosting {
         StreamSwitchTiming.log("applyActiveSessionKey_enter", sessionKey: sessionKey)
         engineActiveSessionKey = sessionKey
         restoreCachedMessagesIfNeeded(for: sessionKey)
-        ensureSessionStorage(for: sessionKey)
         messages = sessionMessages[sessionKey] ?? []
         StreamSwitchTiming.log("messages_assigned", sessionKey: sessionKey)
         persistActiveSessionKey(sessionKey)
@@ -598,6 +597,7 @@ final class ChatViewModel: ChatViewModelHosting {
     var canSend: Bool {
         pendingAttachmentStageCount == 0
             && transportSendButtonConnectionState == .connected
+            && sendProvisioningState(for: engineActiveSessionKey) == .ready
             && !inputContent.isEffectivelyEmpty
     }
 
@@ -709,6 +709,15 @@ final class ChatViewModel: ChatViewModelHosting {
         let epoch: Int
         let cursorBackedSessionKeys: Set<String>
         var messagesBySessionKey: [String: [Message]] = [:]
+    }
+
+    private struct MessageSourceFlags {
+        let isServer: Bool
+        let isCache: Bool
+
+        static let local = MessageSourceFlags(isServer: false, isCache: false)
+        static let server = MessageSourceFlags(isServer: true, isCache: false)
+        static let cache = MessageSourceFlags(isServer: false, isCache: true)
     }
 
     private func bumpSendIndicatorRevision() {
@@ -1726,7 +1735,7 @@ final class ChatViewModel: ChatViewModelHosting {
             replyToMessageId: replyToMessageId,
             replyToClientMessageId: replyToClientMessageId
         )
-        appendMessage(placeholder)
+        upsert(sessionKey: sessionKey, message: placeholder, sourceFlags: .local)
         pendingLocalMessages.append(PendingLocalMessage(id: clientId, sessionKey: sessionKey))
         scheduleSessionStatusRefresh(for: sessionKey, reason: "sendDispatched")
         bumpSendIndicatorRevision()
@@ -1764,7 +1773,7 @@ final class ChatViewModel: ChatViewModelHosting {
 
     func resendFailedMessage(messageId: String) {
         guard !isSending else { return }
-        guard let (message, sessionKey, index) = findMessage(id: messageId) else { return }
+        guard let (message, sessionKey, _) = findMessage(id: messageId) else { return }
         guard validateTextByteLimitForSend(message.content) else { return }
 
         let clientId = "c_\(UUID().uuidString)"
@@ -1779,10 +1788,8 @@ final class ChatViewModel: ChatViewModelHosting {
             sessionKey: sessionKey
         )
 
-        var messageList = sessionMessages[sessionKey] ?? []
-        messageList.remove(at: index)
-        messageList.append(resentMessage)
-        setMessages(messageList, for: sessionKey)
+        remove(sessionKey: sessionKey, messageId: messageId, reason: "retry_replace")
+        upsert(sessionKey: sessionKey, message: resentMessage, sourceFlags: .local)
 
         pendingLocalMessages.removeAll { $0.id == messageId }
         ackedPendingLocalMessageIDs.remove(messageId)
@@ -1826,7 +1833,7 @@ final class ChatViewModel: ChatViewModelHosting {
             if shouldGhost {
                 markLocalMessageCanceled(id: canceledClientMessageId)
             } else {
-                removePlaceholder(withId: canceledClientMessageId)
+                removePendingLocalMessage(id: canceledClientMessageId, reason: "cancel_send")
             }
             crossChatNotificationReplySourceByClientMessageId.removeValue(forKey: canceledClientMessageId)
         }
@@ -1924,27 +1931,10 @@ final class ChatViewModel: ChatViewModelHosting {
             await lifecycleCoordinator.setAuthToken(nil)
         }
         chatService.disconnect()
-        chatService.clearReplayCursors()
-        var sessionKeysToClear = Set(sessionMessages.keys)
-        sessionKeysToClear.formUnion(streamsBySessionKey.keys)
-        for key in sessionKeysToClear {
-            persistLastReadMessageId(nil, for: key)
-        }
-        lastReadMessageIdBySession.removeAll()
-        streamTailStateBySession.removeAll()
-        streamDotStateBySession.removeAll()
         auth.clearCredentials()
-        messageFailures.removeAll()
         clearInput()
         pendingAttachmentStageCount = 0
-        sessionMessages = [:]
-        clearActiveSession(clearPersistedActiveSessionKey: false)
-        streamsBySessionKey = [:]
-        orderedSessionKeys = []
-        syntheticSessionKeys = []
-        pendingLocalMessages.removeAll()
-        ackedPendingLocalMessageIDs.removeAll()
-        bumpSendIndicatorRevision()
+        clearAllForLogout(reason: "logout")
         isAssistantTyping = false
         typingSessionKey = nil
         clearAllLiveProgress()
@@ -2209,18 +2199,7 @@ final class ChatViewModel: ChatViewModelHosting {
             }
         }
 
-        ensureSessionStorage(for: resolvedMessage.sessionKey)
-        var messageList = sessionMessages[resolvedMessage.sessionKey] ?? []
-        let didAppendNewMessage: Bool
-        if let existingIndex = messageList.firstIndex(where: { $0.id == resolvedMessage.id }) {
-            logger.info("incoming duplicate id=\(resolvedMessage.id, privacy: .public) index=\(existingIndex, privacy: .public) sessionKey=\(resolvedMessage.sessionKey, privacy: .public)")
-            messageList[existingIndex] = resolvedMessage
-            didAppendNewMessage = false
-        } else {
-            messageList.append(resolvedMessage)
-            didAppendNewMessage = true
-        }
-        setMessages(messageList, for: resolvedMessage.sessionKey)
+        let didAppendNewMessage = upsert(sessionKey: resolvedMessage.sessionKey, message: resolvedMessage, sourceFlags: .server)
         if resolvedMessage.role == .assistant, !resolvedMessage.streaming {
             scheduleSessionStatusRefresh(for: resolvedMessage.sessionKey, reason: "assistantResponseCommitted")
         }
@@ -2356,17 +2335,11 @@ final class ChatViewModel: ChatViewModelHosting {
             .union(pending.messagesBySessionKey.keys)
         for sessionKey in allSessionKeys {
             let replayMessages = pending.messagesBySessionKey[sessionKey] ?? []
-            if pending.cursorBackedSessionKeys.contains(sessionKey) {
-                guard !replayMessages.isEmpty else { continue }
-                let merged = mergedMessagesPreservingOrder(
-                    existing: sessionMessages[sessionKey] ?? [],
-                    incoming: replayMessages
-                )
-                setMessages(merged, for: sessionKey)
-            } else {
+            if !pending.cursorBackedSessionKeys.contains(sessionKey) {
                 removeCachedMessages(for: sessionKey)
-                setMessages(replayMessages, for: sessionKey)
+                clearSessionMessages(sessionKey: sessionKey, reason: "history_reset_replay")
             }
+            replayMessages.forEach { upsert(sessionKey: sessionKey, message: $0, sourceFlags: .server) }
             applyReplayMessageSideEffects(replayMessages, sessionKey: sessionKey)
 
             if let replayCursor = lastServerMessageId(from: replayMessages) {
@@ -2386,20 +2359,6 @@ final class ChatViewModel: ChatViewModelHosting {
            replayMessages.contains(where: { $0.id.hasPrefix("s_") }) {
             markSessionRead(sessionKey)
         }
-    }
-
-    private func mergedMessagesPreservingOrder(existing: [Message], incoming: [Message]) -> [Message] {
-        guard !existing.isEmpty else { return incoming }
-        guard !incoming.isEmpty else { return existing }
-        var merged = existing
-        for message in incoming {
-            if let index = merged.firstIndex(where: { $0.id == message.id }) {
-                merged[index] = message
-            } else {
-                merged.append(message)
-            }
-        }
-        return merged
     }
 
     private func maybeTriggerAssistantIncomingHaptic(for message: Message, didAppendNewMessage: Bool) {
@@ -2501,14 +2460,7 @@ final class ChatViewModel: ChatViewModelHosting {
             )
 
             await MainActor.run {
-                self.ensureSessionStorage(for: updatedMessage.sessionKey)
-                var messageList = self.sessionMessages[updatedMessage.sessionKey] ?? []
-                if let existingIndex = messageList.firstIndex(where: { $0.id == updatedMessage.id }) {
-                    messageList[existingIndex] = updatedMessage
-                } else {
-                    messageList.append(updatedMessage)
-                }
-                self.setMessages(messageList, for: updatedMessage.sessionKey)
+                _ = self.upsert(sessionKey: updatedMessage.sessionKey, message: updatedMessage, sourceFlags: .server)
             }
         }
     }
@@ -2541,27 +2493,13 @@ final class ChatViewModel: ChatViewModelHosting {
             return false
         }
 
-        let pending = pendingLocalMessages.remove(at: pendingIndex)
-        ackedPendingLocalMessageIDs.remove(pending.id)
-        bumpSendIndicatorRevision()
-        var placeholderSessionKey = pending.sessionKey
-        ensureSessionStorage(for: placeholderSessionKey)
-        var pendingList = sessionMessages[placeholderSessionKey] ?? []
-        var placeholderIndex = pendingList.firstIndex(where: { $0.id == pending.id })
-        if placeholderIndex == nil {
-            for (sessionKey, list) in sessionMessages {
-                if let index = list.firstIndex(where: { $0.id == pending.id }) {
-                    placeholderSessionKey = sessionKey
-                    pendingList = list
-                    placeholderIndex = index
-                    break
-                }
-            }
-        }
-        guard let resolvedIndex = placeholderIndex else {
+        let pending = pendingLocalMessages[pendingIndex]
+        guard let (pendingMessage, placeholderSessionKey, _) = findMessage(id: pending.id) else {
             return false
         }
-        let pendingMessage = pendingList[resolvedIndex]
+        pendingLocalMessages.remove(at: pendingIndex)
+        ackedPendingLocalMessageIDs.remove(pending.id)
+        bumpSendIndicatorRevision()
         let replyToMessageId = message.replyToMessageId ?? pendingMessage.replyToMessageId
         let replyToClientMessageId = message.replyToClientMessageId ?? pendingMessage.replyToClientMessageId
         let resolvedMessage = Message(
@@ -2580,21 +2518,8 @@ final class ChatViewModel: ChatViewModelHosting {
             deliveryState: message.deliveryState
         )
 
-        if placeholderSessionKey == message.sessionKey {
-            pendingList[resolvedIndex] = resolvedMessage
-            setMessages(pendingList, for: placeholderSessionKey)
-        } else {
-            pendingList.remove(at: resolvedIndex)
-            if pendingList.isEmpty {
-                sessionMessages.removeValue(forKey: placeholderSessionKey)
-            } else {
-                setMessages(pendingList, for: placeholderSessionKey)
-            }
-            ensureSessionStorage(for: message.sessionKey)
-            var targetList = sessionMessages[message.sessionKey] ?? []
-            targetList.append(resolvedMessage)
-            setMessages(targetList, for: message.sessionKey)
-        }
+        remove(sessionKey: placeholderSessionKey, messageId: pending.id, reason: "replace_pending")
+        upsert(sessionKey: message.sessionKey, message: resolvedMessage, sourceFlags: .server)
         if activeClientMessageId == pending.id {
             activeClientMessageId = nil
             activeCrossChatNotificationReplySourceChatId = nil
@@ -2607,14 +2532,121 @@ final class ChatViewModel: ChatViewModelHosting {
         return true
     }
 
-    private func appendMessage(_ message: Message) {
-        ensureSessionStorage(for: message.sessionKey)
-        var messageList = sessionMessages[message.sessionKey] ?? []
-        messageList.append(message)
-        setMessages(messageList, for: message.sessionKey)
+    // MARK: - Message Stream Mutation Seam
+
+    @discardableResult
+    private func upsert(sessionKey: String, message: Message, sourceFlags: MessageSourceFlags) -> Bool {
+        var messageList = sessionMessages[sessionKey] ?? []
+        let didAppendNewMessage: Bool
+        if let existingIndex = messageList.firstIndex(where: { $0.id == message.id }) {
+            if sourceFlags.isCache {
+                return false
+            }
+            let existing = messageList[existingIndex]
+            let existingIsServer = normalizedServerEventID(existing.id) != nil
+            if !sourceFlags.isServer && existingIsServer {
+                return false
+            }
+            messageList[existingIndex] = message
+            didAppendNewMessage = false
+        } else {
+            messageList.append(message)
+            didAppendNewMessage = true
+        }
+        applyMessagesWrite(messageList, for: sessionKey)
+        return didAppendNewMessage
     }
 
-    private func setMessages(_ newMessages: [Message], for sessionKey: String) {
+    private func remove(sessionKey: String, messageId: String, reason: String) {
+        _ = reason
+        guard var messageList = sessionMessages[sessionKey],
+              let index = messageList.firstIndex(where: { $0.id == messageId }) else {
+            return
+        }
+        messageList.remove(at: index)
+        applyMessagesWrite(messageList, for: sessionKey)
+    }
+
+    private func removePendingLocalMessage(id: String, reason: String) {
+        if let pendingIndex = pendingLocalMessages.firstIndex(where: { $0.id == id }) {
+            let sessionKey = pendingLocalMessages[pendingIndex].sessionKey
+            pendingLocalMessages.remove(at: pendingIndex)
+            remove(sessionKey: sessionKey, messageId: id, reason: reason)
+        }
+        ackedPendingLocalMessageIDs.remove(id)
+        messageFailures.removeValue(forKey: id)
+        bumpSendIndicatorRevision()
+    }
+
+    private func clearSessionMessages(sessionKey: String, reason: String) {
+        _ = reason
+        applyMessagesWrite([], for: sessionKey)
+    }
+
+    private func removeSession(sessionKey: String, reason: String) {
+        _ = reason
+        sessionMessages.removeValue(forKey: sessionKey)
+        persistMessages([], for: sessionKey)
+        lastReadMessageIdBySession.removeValue(forKey: sessionKey)
+        streamTailStateBySession.removeValue(forKey: sessionKey)
+        streamDotStateBySession.removeValue(forKey: sessionKey)
+        sessionStatusBySessionKey.removeValue(forKey: sessionKey)
+        sessionStatusRefreshTasks.removeValue(forKey: sessionKey)?.cancel()
+        let removedIDs = Set(pendingLocalMessages.filter { $0.sessionKey == sessionKey }.map(\.id))
+        pendingLocalMessages.removeAll { $0.sessionKey == sessionKey }
+        ackedPendingLocalMessageIDs.subtract(removedIDs)
+        for id in removedIDs {
+            crossChatNotificationReplySourceByClientMessageId.removeValue(forKey: id)
+            messageFailures.removeValue(forKey: id)
+        }
+        if !removedIDs.isEmpty {
+            bumpSendIndicatorRevision()
+        }
+        chatService.setReplayCursor(nil, for: sessionKey)
+        persistLastReadMessageId(nil, for: sessionKey)
+        if typingSessionKey == sessionKey {
+            typingSessionKey = nil
+            isAssistantTyping = false
+        }
+        clearLiveProgress(sessionKey: sessionKey, runId: nil, messageId: nil)
+        clearTypingIndicatorMorphTarget(for: sessionKey)
+        if sessionKey == engineActiveSessionKey {
+            messages = []
+        }
+    }
+
+    private func clearAllForLogout(reason: String) {
+        _ = reason
+        let sessionKeysToClear = Set(sessionMessages.keys)
+            .union(streamsBySessionKey.keys)
+            .union(lastReadMessageIdBySession.keys)
+            .union(streamTailStateBySession.keys)
+            .union(streamDotStateBySession.keys)
+        for key in sessionKeysToClear {
+            persistLastReadMessageId(nil, for: key)
+            persistMessages([], for: key)
+        }
+        sessionMessages.removeAll()
+        streamsBySessionKey.removeAll()
+        orderedSessionKeys = []
+        syntheticSessionKeys.removeAll()
+        lastReadMessageIdBySession.removeAll()
+        streamTailStateBySession.removeAll()
+        streamDotStateBySession.removeAll()
+        messageFailures.removeAll()
+        pendingLocalMessages.removeAll()
+        ackedPendingLocalMessageIDs.removeAll()
+        activeClientMessageId = nil
+        activeCrossChatNotificationReplySourceChatId = nil
+        activeSendHasReachedTransport = false
+        isSending = false
+        crossChatNotificationReplySourceByClientMessageId.removeAll()
+        chatService.clearReplayCursors()
+        clearActiveSession(clearPersistedActiveSessionKey: false)
+        bumpSendIndicatorRevision()
+    }
+
+    private func applyMessagesWrite(_ newMessages: [Message], for sessionKey: String) {
         let oldCount = sessionMessages[sessionKey]?.count ?? 0
         sessionMessages[sessionKey] = newMessages
         let newCount = newMessages.count
@@ -2632,31 +2664,6 @@ final class ChatViewModel: ChatViewModelHosting {
                 logger.info("message list duplicate ids detected sessionKey=\(sessionKey, privacy: .public) total=\(total, privacy: .public) unique=\(uniqueCount, privacy: .public)")
             }
         }
-    }
-
-    private func ensureSessionStorage(for sessionKey: String) {
-        if sessionMessages[sessionKey] == nil {
-            sessionMessages[sessionKey] = []
-        }
-    }
-
-    private func removePlaceholder(withId id: String) {
-        let keys = Array(sessionMessages.keys)
-        for key in keys {
-            var list = sessionMessages[key] ?? []
-            if let index = list.firstIndex(where: { $0.id == id }) {
-                list.remove(at: index)
-                setMessages(list, for: key)
-                break
-            }
-        }
-        if let pendingIndex = pendingLocalMessages.firstIndex(where: { $0.id == id }) {
-            pendingLocalMessages.remove(at: pendingIndex)
-        }
-        ackedPendingLocalMessageIDs.remove(id)
-        bumpSendIndicatorRevision()
-        messageFailures.removeValue(forKey: id)
-        bumpSendIndicatorRevision()
     }
 
     private func handleLifecycleOutput(_ output: ConnectionLifecycleOutput) {
@@ -2811,7 +2818,7 @@ final class ChatViewModel: ChatViewModelHosting {
                 self.recordImageSendDebugEvent(.sendResult, detail: "failure localId=\(clientId) reason=cancelled")
 #endif
                 if activeSendHasReachedTransport {
-                    removePlaceholder(withId: clientId)
+                    removePendingLocalMessage(id: clientId, reason: "send_cancel_after_transport")
                 } else {
                     markLocalMessageCanceled(id: clientId)
                 }
@@ -2898,7 +2905,7 @@ final class ChatViewModel: ChatViewModelHosting {
                 self.recordImageSendDebugEvent(.sendResult, detail: "failure localId=\(clientId) reason=cancelled retry=1")
 #endif
                 if activeSendHasReachedTransport {
-                    removePlaceholder(withId: clientId)
+                    removePendingLocalMessage(id: clientId, reason: "retry_cancel_after_transport")
                 } else {
                     markLocalMessageCanceled(id: clientId)
                 }
@@ -3522,16 +3529,13 @@ final class ChatViewModel: ChatViewModelHosting {
     }
 
     private func sendProvisioningState(for sessionKey: String) -> SendProvisioningState {
+        guard !sessionKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return .unavailable
+        }
         if hasReceivedSessionProvisioning {
             return isLocallySendableSessionKey(sessionKey) ? .ready : .unavailable
         }
-        if supportsSessionProvisioning {
-            return .waiting
-        }
-        if connectionState == .connected && !hasResolvedProvisioningCapability {
-            return .waiting
-        }
-        return .ready
+        return .waiting
     }
 
     private func attemptPendingProvisionedSendIfPossible() {
@@ -3955,7 +3959,7 @@ final class ChatViewModel: ChatViewModelHosting {
                         guard self.writerCurrentEpoch == epoch else { return }
                         guard self.firstReplayAppliedEpoch != epoch else { return }
                     }
-                    self.setMessages(filtered, for: sessionKey)
+                    filtered.forEach { self.upsert(sessionKey: sessionKey, message: $0, sourceFlags: .cache) }
                     let cachedLast = self.lastServerMessageId(from: filtered)
                     self.chatService.seedReplayCursorIfMissing(cachedLast, for: sessionKey)
                     if let cachedLast,
@@ -4025,14 +4029,11 @@ final class ChatViewModel: ChatViewModelHosting {
     }
 
     private func markMissingFinalsAfterReplay() {
-        for (sessionKey, streamMessages) in sessionMessages {
-            let detectionMessages = streamMessages.filter { message in
-                !(message.role == .assistant
-                  && message.streaming
-                  && normalizedServerEventID(message.replyToMessageId) != nil)
-            }
-            if detectionMessages.count != streamMessages.count {
-                setMessages(detectionMessages, for: sessionKey)
+        for (sessionKey, streamMessages) in Array(sessionMessages) {
+            for message in streamMessages where message.role == .assistant
+                && message.streaming
+                && normalizedServerEventID(message.replyToMessageId) != nil {
+                remove(sessionKey: sessionKey, messageId: message.id, reason: "missing_final_after_replay")
             }
         }
     }
@@ -4135,7 +4136,6 @@ final class ChatViewModel: ChatViewModelHosting {
         syntheticSessionKeys.insert(sessionKey)
         recalculateOrderedSessionKeys()
         SessionRegistry.shared.upsert(synthesized)
-        ensureSessionStorage(for: sessionKey)
     }
 
     private func applyStreamSnapshot(_ streams: [StreamSession]) {
@@ -4159,25 +4159,10 @@ final class ChatViewModel: ChatViewModelHosting {
         unavailableCrossChatNotificationSourceIds.formUnion(removedSessionKeys)
         for sessionKey in removedSessionKeys {
             dismissCrossChatNotification(sourceChatId: sessionKey, markSourceRead: false)
-            sessionMessages.removeValue(forKey: sessionKey)
-            lastReadMessageIdBySession.removeValue(forKey: sessionKey)
-            streamTailStateBySession.removeValue(forKey: sessionKey)
-            streamDotStateBySession.removeValue(forKey: sessionKey)
-            sessionStatusBySessionKey.removeValue(forKey: sessionKey)
-            sessionStatusRefreshTasks.removeValue(forKey: sessionKey)?.cancel()
-            let removedIDs = Set(pendingLocalMessages.filter { $0.sessionKey == sessionKey }.map(\.id))
-            pendingLocalMessages.removeAll { $0.sessionKey == sessionKey }
-            ackedPendingLocalMessageIDs.subtract(removedIDs)
-            if !removedIDs.isEmpty {
-                bumpSendIndicatorRevision()
-            }
-            chatService.setReplayCursor(nil, for: sessionKey)
-            persistLastReadMessageId(nil, for: sessionKey)
-            persistMessages([], for: sessionKey)
+            removeSession(sessionKey: sessionKey, reason: "stream_snapshot_removed")
         }
         recalculateOrderedSessionKeys()
         for sessionKey in orderedSessionKeys {
-            ensureSessionStorage(for: sessionKey)
             restoreLastReadMessageIdIfNeeded(for: sessionKey)
             restoreCachedMessagesIfNeeded(for: sessionKey)
         }
@@ -4197,7 +4182,6 @@ final class ChatViewModel: ChatViewModelHosting {
         streamsBySessionKey[stream.sessionKey] = stream
         syntheticSessionKeys.remove(stream.sessionKey)
         recalculateOrderedSessionKeys()
-        ensureSessionStorage(for: stream.sessionKey)
         restoreLastReadMessageIdIfNeeded(for: stream.sessionKey)
         restoreCachedMessagesIfNeeded(for: stream.sessionKey)
         ensureDefaultActiveSessionIfNeeded()
@@ -4210,27 +4194,7 @@ final class ChatViewModel: ChatViewModelHosting {
         streamsBySessionKey.removeValue(forKey: sessionKey)
         syntheticSessionKeys.remove(sessionKey)
         recalculateOrderedSessionKeys()
-        sessionMessages.removeValue(forKey: sessionKey)
-        lastReadMessageIdBySession.removeValue(forKey: sessionKey)
-        streamTailStateBySession.removeValue(forKey: sessionKey)
-        streamDotStateBySession.removeValue(forKey: sessionKey)
-        sessionStatusBySessionKey.removeValue(forKey: sessionKey)
-        sessionStatusRefreshTasks.removeValue(forKey: sessionKey)?.cancel()
-        chatService.setReplayCursor(nil, for: sessionKey)
-        persistLastReadMessageId(nil, for: sessionKey)
-        persistMessages([], for: sessionKey)
-        let removedIDs = Set(pendingLocalMessages.filter { $0.sessionKey == sessionKey }.map(\.id))
-        pendingLocalMessages.removeAll { $0.sessionKey == sessionKey }
-        ackedPendingLocalMessageIDs.subtract(removedIDs)
-        if !removedIDs.isEmpty {
-            bumpSendIndicatorRevision()
-        }
-        if typingSessionKey == sessionKey {
-            typingSessionKey = nil
-            isAssistantTyping = false
-        }
-        clearLiveProgress(sessionKey: sessionKey, runId: nil, messageId: nil)
-        clearTypingIndicatorMorphTarget(for: sessionKey)
+        removeSession(sessionKey: sessionKey, reason: "stream_deleted")
 
         if engineActiveSessionKey == sessionKey {
             let fallback = streamMainSessionKey().flatMap { orderedSessionKeys.contains($0) ? $0 : nil }
@@ -4491,13 +4455,11 @@ final class ChatViewModel: ChatViewModelHosting {
     }
 
     private func markLocalMessageCanceled(id: String) {
-        for sessionKey in Array(sessionMessages.keys) {
-            var list = sessionMessages[sessionKey] ?? []
-            guard let index = list.firstIndex(where: { $0.id == id }) else { continue }
-            list[index].deliveryState = .canceled
-            list[index].streaming = false
-            setMessages(list, for: sessionKey)
-            break
+        if let (message, sessionKey, _) = findMessage(id: id) {
+            var canceledMessage = message
+            canceledMessage.deliveryState = .canceled
+            canceledMessage.streaming = false
+            upsert(sessionKey: sessionKey, message: canceledMessage, sourceFlags: .local)
         }
         if let pendingIndex = pendingLocalMessages.firstIndex(where: { $0.id == id }) {
             pendingLocalMessages.remove(at: pendingIndex)
@@ -4564,7 +4526,7 @@ final class ChatViewModel: ChatViewModelHosting {
             deviceId: nil,
             sessionKey: sessionKey
         )
-        appendMessage(ack)
+        upsert(sessionKey: sessionKey, message: ack, sourceFlags: .server)
         scheduleSessionStatusRefresh(for: sessionKey, reason: "noReplyTerminal")
     }
 
@@ -4836,6 +4798,26 @@ final class ChatViewModel: ChatViewModelHosting {
 #if DEBUG
     func debugConnectionSnapshot() -> (token: String?, lastMessageId: String?) {
         connectionSnapshot()
+    }
+
+    func debugUpsertMessage(_ message: Message, isServer: Bool = false, isCache: Bool = false) {
+        upsert(
+            sessionKey: message.sessionKey,
+            message: message,
+            sourceFlags: MessageSourceFlags(isServer: isServer, isCache: isCache)
+        )
+    }
+
+    func debugClearSessionMessages(_ sessionKey: String) {
+        clearSessionMessages(sessionKey: sessionKey, reason: "debug")
+    }
+
+    func debugRemoveSessionMessages(_ sessionKey: String) {
+        removeSession(sessionKey: sessionKey, reason: "debug")
+    }
+
+    func debugSessionMessageEntryExists(_ sessionKey: String) -> Bool {
+        sessionMessages[sessionKey] != nil
     }
 
     func debugObservationStartupCount() -> Int {

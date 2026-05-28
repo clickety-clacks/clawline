@@ -1054,6 +1054,59 @@ struct ChatViewModelTests {
         #expect(messages.first?.id == "s_user_echo")
     }
 
+    @Test("T105: server echo can canonicalize pending placeholder session")
+    @MainActor
+    func serverEchoCanonicalSessionMovesPendingPlaceholderThroughSeam() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let canonicalSessionKey = "agent:main:clawline:user:s_canonical"
+        let chatService = TestChatService()
+        chatService.streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: canonicalSessionKey, displayName: "Canonical", kind: "custom", orderIndex: 1, isBuiltIn: false),
+        ]
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
+        try await setReadyToSend(chatService: chatService, viewModel: viewModel)
+        viewModel.setActiveSessionKeyForTesting(personalSessionKey)
+        viewModel.inputContent = NSAttributedString(string: "Canonicalize me")
+        viewModel.send()
+        try await Task.sleep(forDuration: .milliseconds(10))
+
+        let placeholderId = try #require(viewModel.messages(for: personalSessionKey).first?.id)
+        #expect(placeholderId.hasPrefix("c_"))
+
+        chatService.emit(
+            Message(
+                id: "s_user_canonical",
+                role: .user,
+                content: "Canonicalize me",
+                timestamp: Date(),
+                streaming: false,
+                attachments: [],
+                deviceId: "device",
+                sessionKey: canonicalSessionKey,
+                clientMessageId: placeholderId
+            )
+        )
+        try await Task.sleep(forDuration: .milliseconds(10))
+
+        #expect(viewModel.messages(for: personalSessionKey).isEmpty)
+        #expect(viewModel.messages(for: canonicalSessionKey).map(\.id) == ["s_user_canonical"])
+    }
+
     @Test("Message reference token sends structured identity without quoted prompt text")
     @MainActor
     func messageReferenceSendsStructuredIdentity() async throws {
@@ -3099,6 +3152,53 @@ struct ChatViewModelTests {
         #expect(replacement.id != originalId)
         #expect(replacement.content == "Retry me")
         #expect(viewModel.failureMessage(for: replacement.id) != nil)
+    }
+
+    @Test("T105: retry uses a new client id at the tail")
+    @MainActor
+    func retryAppendsNewClientIdAtTailThroughSeam() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        try await setReadyToSend(chatService: chatService, viewModel: viewModel)
+        viewModel.inputContent = NSAttributedString(string: "Retry at tail")
+        viewModel.send()
+        try await Task.sleep(forDuration: .milliseconds(10))
+
+        guard let originalId = chatService.lastSentId else {
+            Issue.record("Expected sent message id")
+            return
+        }
+        chatService.emitServiceEvent(.messageError(messageId: originalId, code: "invalid_message", message: "bad"))
+        for _ in 0..<50 {
+            if viewModel.failureMessage(for: originalId) != nil { break }
+            try await Task.sleep(forDuration: .milliseconds(20))
+        }
+
+        viewModel.debugUpsertMessage(
+            makeTestMessage(id: "s_retry_tail", content: "tail", sessionKey: personalSessionKey),
+            isServer: true
+        )
+
+        viewModel.resendFailedMessage(messageId: originalId)
+        let ids = viewModel.messages.map(\.id)
+        #expect(!ids.contains(originalId))
+        #expect(ids.dropLast().last == "s_retry_tail")
+        #expect(ids.last?.hasPrefix("c_") == true)
+        #expect(ids.last != originalId)
     }
 
     @Test("Send blocks stale synthetic session keys after provisioning")
@@ -5682,6 +5782,180 @@ struct ChatViewModelTests {
         #expect(becameConnected)
         #expect(viewModel.debugObservationStartupCount() == 1)
     }
+
+    @Test("T105: direct message-store writes stay inside mutation seam")
+    func messageStreamDirectWritesStayInsideSeam() throws {
+        let sourceURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent() // ClawlineTests
+            .deletingLastPathComponent() // Clawline
+            .appendingPathComponent("Clawline/ViewModels/ChatViewModel.swift")
+        let contents = try String(contentsOf: sourceURL, encoding: .utf8)
+        let lines = contents.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+
+        guard let seamStart = lines.firstIndex(where: { $0.contains("// MARK: - Message Stream Mutation Seam") }),
+              let seamEnd = lines[seamStart...].firstIndex(where: { $0.contains("private func handleLifecycleOutput") }) else {
+            Issue.record("Unable to locate T105 message stream mutation seam in ChatViewModel.swift")
+            return
+        }
+
+        let directMutationPatterns = [
+            "sessionMessages\\[[^\\]]+\\]\\s*=",
+            "sessionMessages\\.removeValue",
+            "sessionMessages\\.removeAll\\(",
+            "sessionMessages\\s*=\\s*\\[:\\]"
+        ]
+        let regexes = try directMutationPatterns.map { pattern in
+            try NSRegularExpression(pattern: pattern)
+        }
+
+        for (idx, line) in lines.enumerated() {
+            let isInsideSeam = idx >= seamStart && idx < seamEnd
+            let range = NSRange(location: 0, length: (line as NSString).length)
+            for (pattern, regex) in zip(directMutationPatterns, regexes) {
+                if regex.firstMatch(in: line, range: range) != nil {
+                    #expect(isInsideSeam, "Direct message-store mutation pattern '\(pattern)' escaped T105 seam at line \(idx + 1)")
+                }
+            }
+        }
+
+        #expect(!contents.contains("private func setMessages("))
+        #expect(!contents.contains("private func appendMessage("))
+        #expect(!contents.contains("private func ensureSessionStorage("))
+    }
+
+    @Test("T105: server payload overwrites non-server duplicate id")
+    @MainActor
+    func messageStreamSeamServerWinsDuplicateId() async throws {
+        resetChatPersistence()
+        let viewModel = makeSeamTestViewModel()
+        defer { viewModel.onDisappear() }
+
+        let messageId = "m_duplicate"
+        viewModel.debugUpsertMessage(makeTestMessage(id: messageId, content: "local", sessionKey: personalSessionKey))
+        viewModel.debugUpsertMessage(
+            makeTestMessage(id: messageId, content: "server", sessionKey: personalSessionKey),
+            isServer: true
+        )
+
+        let messages = viewModel.messages(for: personalSessionKey)
+        #expect(messages.count == 1)
+        #expect(messages.first?.content == "server")
+    }
+
+    @Test("T105: cache restore is gap-fill only")
+    @MainActor
+    func messageStreamSeamCacheGapFillOnly() async throws {
+        resetChatPersistence()
+        let viewModel = makeSeamTestViewModel()
+        defer { viewModel.onDisappear() }
+
+        viewModel.debugUpsertMessage(makeTestMessage(id: "s_1", content: "live", sessionKey: personalSessionKey), isServer: true)
+        viewModel.debugUpsertMessage(makeTestMessage(id: "s_1", content: "stale-cache", sessionKey: personalSessionKey), isCache: true)
+        viewModel.debugUpsertMessage(makeTestMessage(id: "s_2", content: "cache-gap", sessionKey: personalSessionKey), isCache: true)
+
+        let messages = viewModel.messages(for: personalSessionKey)
+        #expect(messages.map(\.id) == ["s_1", "s_2"])
+        #expect(messages.first?.content == "live")
+    }
+
+    @Test("T105: duplicate ids are scoped per session")
+    @MainActor
+    func messageStreamSeamDuplicateIdsAreSessionScoped() async throws {
+        resetChatPersistence()
+        let viewModel = makeSeamTestViewModel()
+        defer { viewModel.onDisappear() }
+
+        let otherSessionKey = "agent:main:clawline:user:s_other"
+        viewModel.debugUpsertMessage(makeTestMessage(id: "s_shared", content: "one", sessionKey: personalSessionKey), isServer: true)
+        viewModel.debugUpsertMessage(makeTestMessage(id: "s_shared", content: "two", sessionKey: otherSessionKey), isServer: true)
+
+        #expect(viewModel.messages(for: personalSessionKey).map(\.content) == ["one"])
+        #expect(viewModel.messages(for: otherSessionKey).map(\.content) == ["two"])
+    }
+
+    @Test("T105: clearSessionMessages preserves entry while removeSession removes it")
+    @MainActor
+    func messageStreamSeamClearVsRemoveSession() async throws {
+        resetChatPersistence()
+        let chatService = TestChatService()
+        let viewModel = makeSeamTestViewModel(chatService: chatService)
+        defer { viewModel.onDisappear() }
+
+        let sessionKey = "agent:main:clawline:user:s_clear_remove"
+        chatService.setReplayCursor("s_msg", for: sessionKey)
+        viewModel.debugUpsertMessage(makeTestMessage(id: "s_msg", content: "payload", sessionKey: sessionKey), isServer: true)
+        #expect(viewModel.debugSessionMessageEntryExists(sessionKey))
+
+        viewModel.debugClearSessionMessages(sessionKey)
+        #expect(viewModel.debugSessionMessageEntryExists(sessionKey))
+        #expect(viewModel.messages(for: sessionKey).isEmpty)
+        #expect(chatService.replayCursorSnapshot()[sessionKey] == "s_msg")
+
+        viewModel.debugRemoveSessionMessages(sessionKey)
+        #expect(viewModel.debugSessionMessageEntryExists(sessionKey) == false)
+        #expect(chatService.replayCursorSnapshot()[sessionKey] == nil)
+    }
+
+    @Test("T105: canSend requires active session provisioning")
+    @MainActor
+    func canSendRequiresActiveSessionProvisioning() async throws {
+        resetChatPersistence()
+        let chatService = TestChatService()
+        chatService.streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true)
+        ]
+        let viewModel = makeSeamTestViewModel(chatService: chatService)
+        defer { viewModel.onDisappear() }
+
+        await viewModel.activate(origin: "test.t105.canSendProvisioning")
+        await viewModel.onAppear()
+        try await setConnected(chatService: chatService, viewModel: viewModel)
+        chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
+        for _ in 0..<50 {
+            if viewModel.orderedSessionKeys.contains(personalSessionKey) { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        viewModel.setActiveSessionKeyForTesting(personalSessionKey)
+        chatService.emitServiceEvent(.sessionProvisioningAvailable(true))
+        viewModel.inputContent = NSAttributedString(string: "blocked until provisioned")
+        try await Task.sleep(for: .milliseconds(20))
+        #expect(!viewModel.canSend)
+
+        chatService.emitServiceEvent(.sessionInfo(
+            SessionInfo(
+                userId: "user",
+                isAdmin: false,
+                dmScope: "dm",
+                sessionKeys: [personalSessionKey]
+            )
+        ))
+        try await Task.sleep(for: .milliseconds(20))
+        #expect(viewModel.canSend)
+    }
+
+    @Test("T105: logout atomically clears message state and dependent cursors")
+    @MainActor
+    func messageStreamSeamLogoutAtomicClear() async throws {
+        resetChatPersistence()
+        let chatService = TestChatService()
+        let viewModel = makeSeamTestViewModel(chatService: chatService)
+        defer { viewModel.onDisappear() }
+
+        let secondarySessionKey = "agent:main:clawline:user:s_logout_secondary"
+        viewModel.debugUpsertMessage(makeTestMessage(id: "s_primary", content: "primary", sessionKey: personalSessionKey), isServer: true)
+        viewModel.debugUpsertMessage(makeTestMessage(id: "s_secondary", content: "secondary", sessionKey: secondarySessionKey), isServer: true)
+        viewModel.logout()
+
+        #expect(viewModel.messages.isEmpty)
+        #expect(viewModel.activeSessionKey.isEmpty)
+        #expect(viewModel.uiSelectedSessionKey.isEmpty)
+        #expect(viewModel.lastReadMessageIdBySession.isEmpty)
+        #expect(viewModel.streamTailStateBySession.isEmpty)
+        #expect(viewModel.streamDotStateBySession.isEmpty)
+        #expect(viewModel.debugSessionMessageEntryExists(personalSessionKey) == false)
+        #expect(viewModel.debugSessionMessageEntryExists(secondarySessionKey) == false)
+        #expect(chatService.replayCursorSnapshot().isEmpty)
+    }
 }
 
 @MainActor
@@ -6046,6 +6320,34 @@ private func resetViewModelForTest(_ viewModel: ChatViewModel, auth: TestAuthMan
 }
 
 @MainActor
+private func makeSeamTestViewModel(chatService: TestChatService = TestChatService()) -> ChatViewModel {
+    let auth = TestAuthManager()
+    auth.storeCredentials(token: "jwt", userId: "user")
+    return ChatViewModel(
+        auth: auth,
+        chatService: chatService,
+        settings: SettingsManager(),
+        device: TestDevice(),
+        uploadService: TestUploadService(),
+        toastManager: ToastManager(),
+        salientHighlightService: SalientHighlightService()
+    )
+}
+
+private func makeTestMessage(id: String, content: String, sessionKey: String) -> Message {
+    Message(
+        id: id,
+        role: .assistant,
+        content: content,
+        timestamp: Date(),
+        streaming: false,
+        attachments: [],
+        deviceId: nil,
+        sessionKey: sessionKey
+    )
+}
+
+@MainActor
 private func setConnected(chatService: TestChatService, viewModel: ChatViewModel) async throws {
     chatService.emitConnectionState(.connected)
     for _ in 0..<50 {
@@ -6057,7 +6359,19 @@ private func setConnected(chatService: TestChatService, viewModel: ChatViewModel
 @MainActor
 private func setReadyToSend(chatService: TestChatService, viewModel: ChatViewModel) async throws {
     try await setConnected(chatService: chatService, viewModel: viewModel)
-    chatService.emitServiceEvent(.sessionProvisioningAvailable(false))
+    let sessionKeys = Array(
+        Set([personalSessionKey, viewModel.activeSessionKey, viewModel.uiSelectedSessionKey] + viewModel.orderedSessionKeys)
+            .filter { !$0.isEmpty }
+    )
+    chatService.emitServiceEvent(.sessionProvisioningAvailable(true))
+    chatService.emitServiceEvent(.sessionInfo(
+        SessionInfo(
+            userId: "user",
+            isAdmin: false,
+            dmScope: "dm",
+            sessionKeys: sessionKeys
+        )
+    ))
     try await Task.sleep(for: .milliseconds(20))
 }
 

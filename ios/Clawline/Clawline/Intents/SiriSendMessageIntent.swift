@@ -89,7 +89,7 @@ struct SendMessageIntent: AppIntent {
         do {
             NSLog("[SiriIntent][7] connecting...")
             try await withTimeout(SiriSendTimeouts.connect) {
-                try await chatService.connect(token: token, lastMessageId: nil)
+                try await connectSiriChatTransportWithLifecycle(chatService: chatService, token: token)
             }
             NSLog("[SiriIntent][8] connected")
 
@@ -192,6 +192,75 @@ private func loadAuthSnapshot() -> SiriAuthSnapshot {
         userId: authManager.currentUserId,
         isAdmin: authManager.isAdmin
     )
+}
+
+@available(iOS 17.0, *)
+@MainActor
+private func connectSiriChatTransportWithLifecycle(
+    chatService: ProviderChatService,
+    token: String
+) async throws {
+    let coordinator = ConnectionLifecycleCoordinator(
+        startAttempt: { [weak chatService] epoch, lastMessageId, token in
+            Task { @MainActor [weak chatService] in
+                chatService?.startConnectionAttempt(epoch: epoch, lastMessageId: lastMessageId, token: token)
+            }
+        },
+        stopAttempt: { [weak chatService] in
+            Task { @MainActor [weak chatService] in
+                chatService?.stopConnectionAttempt()
+            }
+        },
+        randomJitterMs: { 0 }
+    )
+    let outputs = await coordinator.outputs
+    let transportEvents = chatService.lifecycleTransportEvents
+
+    try await withThrowingTaskGroup(of: Void.self) { group in
+        group.addTask {
+            for await event in transportEvents {
+                await coordinator.handleTransportEvent(event)
+            }
+            throw SiriSendMessageIntentError.connectionTimeout
+        }
+        group.addTask { @MainActor in
+            for await output in outputs {
+                switch output {
+                case .phaseTransition(_, let to, let epoch, let reason):
+                    chatService.setLifecycleTransportReadyForSend(to == .live, epoch: epoch)
+                    if to == .live {
+                        return
+                    }
+                    if to == .failed {
+                        throw siriError(from: reason)
+                    }
+                default:
+                    break
+                }
+            }
+            throw SiriSendMessageIntentError.connectionTimeout
+        }
+
+        await coordinator.authChanged(token: token)
+        await coordinator.viewAppeared()
+        guard let _ = try await group.next() else {
+            throw SiriSendMessageIntentError.connectionTimeout
+        }
+        group.cancelAll()
+    }
+}
+
+@available(iOS 17.0, *)
+private func siriError(from reason: ConnectionLifecycleReason) -> SiriSendMessageIntentError {
+    guard case .failure(let failureReason) = reason else {
+        return .connectionTimeout
+    }
+    switch failureReason {
+    case .authRejected, .tokenRevoked, .sessionReplaced:
+        return .authExpired
+    default:
+        return .connectionTimeout
+    }
 }
 
 @available(iOS 17.0, *)

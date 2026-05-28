@@ -237,7 +237,7 @@ final class ProviderChatService: ChatServicing {
 
     var isTransportReadyForSend: Bool {
         guard socket != nil else { return false }
-        return lifecycleTransportReadyForSend || (authToken != nil && lastConnectionState == .connected)
+        return lifecycleTransportReadyForSend
     }
 
     var allowsDirectRelayTransportConnect: Bool { false }

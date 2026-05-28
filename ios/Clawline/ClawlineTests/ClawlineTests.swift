@@ -584,6 +584,25 @@ struct ClawlineTests {
         #expect(chatService.sentMessages.isEmpty)
     }
 
+    @Test("Siri send intent opens provider transport through lifecycle coordinator")
+    func siriSendIntentOpensProviderTransportThroughLifecycleCoordinator() throws {
+        let intentPath = URL(filePath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appending(path: "Clawline/Intents/SiriSendMessageIntent.swift")
+        let source = try String(contentsOf: intentPath, encoding: .utf8)
+        let connectRange = try #require(source.range(of: "private func connectSiriChatTransportWithLifecycle"))
+        let performRange = try #require(source.range(of: "func perform()"))
+        let performBody = source[performRange.lowerBound..<connectRange.lowerBound]
+        let connectBody = source[connectRange.lowerBound..<source.endIndex]
+
+        #expect(performBody.contains("connectSiriChatTransportWithLifecycle"))
+        #expect(!performBody.contains("chatService.connect(token:"))
+        #expect(connectBody.contains("ConnectionLifecycleCoordinator"))
+        #expect(connectBody.contains("startConnectionAttempt(epoch:"))
+        #expect(connectBody.contains("setLifecycleTransportReadyForSend(to == .live"))
+    }
+
 }
 
 struct T100ConnectionLifecycleCoordinatorTests {

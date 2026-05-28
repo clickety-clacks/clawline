@@ -196,9 +196,9 @@ struct ProviderServiceTests {
         #expect(replayCursors[sideKey] as? String == "s_side_final")
     }
 
-    @Test("Lifecycle auth success does not publish provider connected before replay completion")
+    @Test("Lifecycle auth success marks transport ready without publishing provider connected")
     @MainActor
-    func lifecycleAuthSuccessDoesNotPublishProviderConnectedBeforeReplayCompletion() async throws {
+    func lifecycleAuthSuccessMarksTransportReadyWithoutPublishingProviderConnected() async throws {
         let mockSocket = MockWebSocketClient()
         let connector = MockWebSocketConnector(client: mockSocket)
         let service = ProviderChatService(
@@ -231,7 +231,11 @@ struct ProviderServiceTests {
         #expect(await t100ProviderWaitUntil { lifecycleEvents.containsAuthSuccess(epoch: 1) })
         try await Task.sleep(forDuration: .milliseconds(50))
 
+        #expect(service.isTransportReadyForSend)
         #expect(states.containsConnected() == false)
+
+        service.stopConnectionAttempt()
+        #expect(await t100ProviderWaitUntil { service.isTransportReadyForSend == false })
     }
 
     @Test("Streaming partials do not advance replay cursors but finals do")

@@ -221,6 +221,7 @@ struct ClawlineTests {
         ])
 
         #expect(reply["type"] as? String == "chat.send.ack")
+        #expect(chatService.connectCalls == 0)
         #expect(chatService.sentMessages.count == 1)
         #expect(chatService.sentMessages.first?.id == "msg-1")
         #expect(chatService.sentMessages.first?.content == "hello from watch")

@@ -227,6 +227,7 @@ final class ProviderChatService: ChatServicing {
     private var isConnecting = false
     private var connectAttemptTask: Task<Void, Never>?
     private var activeLifecycleConnectionToken: UUID?
+    private var lifecycleTransportReadyForSend = false
     private var authToken: String?
     private var replayCursorBySessionKey: [String: String] = [:]
     private var knownSessionKeys: Set<String> = []
@@ -234,8 +235,8 @@ final class ProviderChatService: ChatServicing {
     private static let serverEventIDPrefix = "s_"
 
     var isTransportReadyForSend: Bool {
-        guard socket != nil, authToken != nil else { return false }
-        return lastConnectionState == .connected
+        guard socket != nil else { return false }
+        return lifecycleTransportReadyForSend || (authToken != nil && lastConnectionState == .connected)
     }
 
     init(connector: any WebSocketConnecting,
@@ -445,6 +446,7 @@ final class ProviderChatService: ChatServicing {
     func startConnectionAttempt(epoch: Int, lastMessageId: String?, token: String) {
         connectAttemptTask?.cancel()
         activeLifecycleConnectionToken = nil
+        lifecycleTransportReadyForSend = false
         connectAttemptTask = Task { [weak self] in
             await self?.runLifecycleConnectAttempt(epoch: epoch, lastMessageId: lastMessageId, token: token)
         }
@@ -507,6 +509,7 @@ final class ProviderChatService: ChatServicing {
         shouldNotifyDisconnect = shouldNotify
         pendingDisconnectReason = reason
         activeLifecycleConnectionToken = nil
+        lifecycleTransportReadyForSend = false
         resolveAuthContinuation(with: .failure(Error.notConnected))
         receiveTask?.cancel()
         receiveTask = nil
@@ -679,6 +682,8 @@ final class ProviderChatService: ChatServicing {
                 if Task.isCancelled { return }
                 let connectionToken = UUID()
                 activeLifecycleConnectionToken = connectionToken
+                lifecycleTransportReadyForSend = false
+                authToken = token
                 socket = client
                 startLifecycleListening(on: client, epoch: epoch, connectionToken: connectionToken)
                 emitLifecycleEvent(
@@ -867,7 +872,10 @@ final class ProviderChatService: ChatServicing {
                 lifecycleConnectionToken: lifecycleConnectionToken
             )
             if result.success {
+                lifecycleTransportReadyForSend = true
                 publishAuthSuccessMetadata(result)
+            } else {
+                lifecycleTransportReadyForSend = false
             }
             return
         }
@@ -1014,6 +1022,7 @@ final class ProviderChatService: ChatServicing {
         case "auth_failed":
             let error = Error.authFailed(message)
             if let lifecycleEpoch {
+                lifecycleTransportReadyForSend = false
                 emitLifecycleEvent(
                     epoch: lifecycleEpoch,
                     payload: .authResult(
@@ -1034,6 +1043,7 @@ final class ProviderChatService: ChatServicing {
         case "token_revoked":
             let error = Error.tokenRevoked(message)
             if let lifecycleEpoch {
+                lifecycleTransportReadyForSend = false
                 emitLifecycleEvent(
                     epoch: lifecycleEpoch,
                     payload: .authResult(
@@ -1054,6 +1064,7 @@ final class ProviderChatService: ChatServicing {
         case "session_replaced":
             let error = Error.sessionReplaced
             if let lifecycleEpoch {
+                lifecycleTransportReadyForSend = false
                 emitLifecycleEvent(
                     epoch: lifecycleEpoch,
                     payload: .authResult(
@@ -1079,6 +1090,7 @@ final class ProviderChatService: ChatServicing {
             }
             if invalidLastMessageId {
                 if let lifecycleEpoch {
+                    lifecycleTransportReadyForSend = false
                     emitLifecycleEvent(
                         epoch: lifecycleEpoch,
                         payload: .authResult(
@@ -1109,6 +1121,7 @@ final class ProviderChatService: ChatServicing {
             }
         default:
             if let lifecycleEpoch {
+                lifecycleTransportReadyForSend = false
                 emitLifecycleEvent(
                     epoch: lifecycleEpoch,
                     payload: .transportClosed(reason: .error),
@@ -1366,6 +1379,9 @@ final class ProviderChatService: ChatServicing {
         if let lifecycleConnectionToken, !isCurrentLifecycleConnectionToken(lifecycleConnectionToken) {
             logger.debug("ignoring stale lifecycle socket close")
             return
+        }
+        if lifecycleEpoch != nil {
+            lifecycleTransportReadyForSend = false
         }
         let rejectionError: Error? = {
             guard let closeInfo else { return nil }

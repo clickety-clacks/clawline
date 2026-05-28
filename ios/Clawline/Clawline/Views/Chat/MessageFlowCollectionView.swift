@@ -996,14 +996,9 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     deinit {
         let sessionKeys = Array(perStreamStateBySessionKey.keys)
         for sessionKey in sessionKeys {
-            let state = readState(for: sessionKey)
-            state.deferredPreviewRemeasureTimer?.invalidate()
-            mutateState(for: sessionKey) { runtimeState in
-                runtimeState.deferredPreviewRemeasureTimer = nil
-            }
+            cancelDeferredWork(for: sessionKey, cancelAll: true)
         }
         NotificationCenter.default.removeObserver(self, name: UIApplication.willResignActiveNotification, object: nil)
-        pendingBottomInsetHeightCapInvalidation?.cancel()
     }
 
     // MARK: - Cache Mutation Seam
@@ -1711,6 +1706,8 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 state.bubbleSizingV2RemeasureDebounceTimer = nil
                 state.bubbleSizingV2DeferredFlushTimer?.invalidate()
                 state.bubbleSizingV2DeferredFlushTimer = nil
+                state.deferredPreviewRemeasureTimer?.invalidate()
+                state.deferredPreviewRemeasureTimer = nil
                 state.bottomInsetRemeasureTimer?.invalidate()
                 state.bottomInsetRemeasureTimer = nil
                 state.pendingBottomInsetHeightCapInvalidation?.cancel()
@@ -1784,10 +1781,20 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             state.scrollStateWriteDebounceTimer?.invalidate()
             state.scrollStateWriteDebounceTimer = nil
             state.restoreGeneration += 1
-            state.pendingScrollRestoreState = loadPersistedScrollState(for: sessionKey)
-            state.restorePhase = .pendingTail
+            let persistedState = loadPersistedScrollState(for: sessionKey)
+            state.pendingScrollRestoreState = persistedState
             state.restoreConfirmationRetries = 0
-            state.suspendScrollPersistenceUntilRestoreConfirmed = true
+            if let persistedState {
+                state.sbbState = persistedState.atBottom
+                    ? .atBottom
+                    : (state.unreadCount > 0 ? .scrolledUpUnread : .scrolledUp)
+                state.restorePhase = .pendingTail
+                state.suspendScrollPersistenceUntilRestoreConfirmed = true
+            } else {
+                state.sbbState = .atBottom
+                state.restorePhase = .none
+                state.suspendScrollPersistenceUntilRestoreConfirmed = false
+            }
         }
         let newState = readState(for: sessionKey)
         if previousPendingState != newState.pendingScrollRestoreState {
@@ -3163,9 +3170,6 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         }
 
         if isSameKeyReRead {
-            // Same-key re-read must seed restore from the latest live position for this stream.
-            // Without this flush, reconnect-triggered re-read can replay a stale persisted anchor.
-            persistScrollStateNow(sessionKey: incomingSessionKey, bypassSuspension: true)
             prepareSameKeyReread(sessionKey: incomingSessionKey)
             mutateState(for: incomingSessionKey) { state in
                 state.lastSeenForceReReadGeneration = forceReReadGeneration
@@ -3184,40 +3188,8 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             return
         }
 
-        if materializationStateBySessionKey[incomingSessionKey] == nil {
-            prepareIncomingStateOnSwitch(sessionKey: incomingSessionKey, allowTailStage: true)
-        } else {
-            let persistedState = loadPersistedScrollState(for: incomingSessionKey)
-            let previousPendingState = readState(for: incomingSessionKey).pendingScrollRestoreState
-            let previousRestorePhase = readState(for: incomingSessionKey).restorePhase
-            mutateState(for: incomingSessionKey) { state in
-                state.pendingScrollRestoreState = nil
-                state.restorePhase = .none
-                state.suspendScrollPersistenceUntilRestoreConfirmed = false
-                if let persistedState, !persistedState.atBottom {
-                    state.sbbState = state.unreadCount > 0 ? .scrolledUpUnread : .scrolledUp
-                } else if persistedState?.atBottom == true {
-                    state.sbbState = .atBottom
-                }
-            }
-            let newState = readState(for: incomingSessionKey)
-            if previousPendingState != newState.pendingScrollRestoreState {
-                logPendingScrollRestoreStateChange(
-                    sessionKey: incomingSessionKey,
-                    from: previousPendingState,
-                    to: newState.pendingScrollRestoreState,
-                    reason: "runStreamContextSwitchSeam materializedRevisitReset"
-                )
-            }
-            if previousRestorePhase != newState.restorePhase {
-                logRestorePhaseChange(
-                    sessionKey: incomingSessionKey,
-                    from: previousRestorePhase,
-                    to: newState.restorePhase,
-                    reason: "runStreamContextSwitchSeam materializedRevisitReset"
-                )
-            }
-        }
+        let allowTailStage = materializationStateBySessionKey[incomingSessionKey] == nil
+        prepareIncomingStateOnSwitch(sessionKey: incomingSessionKey, allowTailStage: allowTailStage)
         mutateState(for: incomingSessionKey) { state in
             state.restoreGeneration &+= 1
             state.restoreConfirmationRetries = 0
@@ -5346,12 +5318,17 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     private func scheduleDeferredPreviewRemeasureFlushAfterRest() {
         guard !deferredPreviewRemeasureIds.isEmpty else { return }
         guard deferredPreviewRemeasureTimer == nil else { return }
+        guard let token = activeSessionGenerationToken() else { return }
         let timer = Timer(timeInterval: Self.previewRemeasureRestPollSeconds, repeats: false) { [weak self] _ in
             guard let self else { return }
-            self.deferredPreviewRemeasureTimer = nil
-            self.flushDeferredPreviewRemeasuresIfPossible()
-            if !self.deferredPreviewRemeasureIds.isEmpty {
-                self.scheduleDeferredPreviewRemeasureFlushAfterRest()
+            guard self.callbackSessionKey() == token.sessionKey else { return }
+            guard self.readState(for: token.sessionKey).restoreGeneration == token.generation else { return }
+            self.withBoundSessionKey(token.sessionKey) {
+                self.deferredPreviewRemeasureTimer = nil
+                self.flushDeferredPreviewRemeasuresIfPossible()
+                if !self.deferredPreviewRemeasureIds.isEmpty {
+                    self.scheduleDeferredPreviewRemeasureFlushAfterRest()
+                }
             }
         }
         deferredPreviewRemeasureTimer = timer

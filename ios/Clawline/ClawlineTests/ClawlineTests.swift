@@ -474,9 +474,9 @@ struct ClawlineTests {
         #expect(bodyBeforeDispatch.contains("activateRelay()"))
     }
 
-    @Test("watch relay chat.send connects phone transport before dispatch when needed")
+    @Test("watch relay chat.send fails before dispatch when phone transport is down")
     @MainActor
-    func watchRelayChatSendReconnectsBeforeDispatchWhenPhoneTransportIsDown() async {
+    func watchRelayChatSendFailsBeforeDispatchWhenPhoneTransportIsDown() async {
         let suiteName = "ClawlineTests.watchRelayChatSendReconnects"
         let defaults = UserDefaults(suiteName: suiteName) ?? .standard
         defaults.removePersistentDomain(forName: suiteName)
@@ -499,80 +499,6 @@ struct ClawlineTests {
             "payload": [
                 "id": "msg-2",
                 "content": "relay after reconnect",
-                "sessionKey": "agent:main:clawline:flynn:main",
-                "attachments": []
-            ]
-        ])
-
-        #expect(reply["type"] as? String == "chat.send.ack")
-        #expect(chatService.connectCalls == 1)
-        #expect(chatService.connectTokens == ["jwt"])
-        #expect(chatService.sentMessages.map(\.id) == ["msg-2"])
-    }
-
-    @Test("watch relay chat.send fails before dispatch if reconnect does not produce a send-ready transport")
-    @MainActor
-    func watchRelayChatSendDoesNotDispatchWhenReconnectIsStillNotReady() async {
-        let suiteName = "ClawlineTests.watchRelayChatSendReconnectStillNotReady"
-        let defaults = UserDefaults(suiteName: suiteName) ?? .standard
-        defaults.removePersistentDomain(forName: suiteName)
-        defer { defaults.removePersistentDomain(forName: suiteName) }
-
-        let chatService = SpyChatService()
-        chatService.isReadyForSend = false
-        chatService.markReadyOnConnect = false
-        let authManager = AuthManager(storage: defaults, secureStore: InMemorySecureStore())
-        authManager.storeCredentials(token: "jwt", userId: "user")
-        let service = WatchConnectivityService(
-            authManager: authManager,
-            sonioxKeyStore: SonioxKeyStore(),
-            cartesiaKeyStore: CartesiaKeyStore(keychain: KeychainSecureStore()),
-            chatService: chatService
-        )
-
-        let reply = await service.handleTestMessage([
-            "type": "chat.send",
-            "requestId": "req-3",
-            "payload": [
-                "id": "msg-3",
-                "content": "relay while connecting",
-                "sessionKey": "agent:main:clawline:flynn:main",
-                "attachments": []
-            ]
-        ])
-
-        let error = reply["error"] as? [String: Any]
-        #expect(error?["code"] as? String == "not_connected")
-        #expect(chatService.connectCalls == 1)
-        #expect(chatService.sentMessages.isEmpty)
-    }
-
-    @Test("watch relay chat.send does not start a direct connect for lifecycle-managed transport")
-    @MainActor
-    func watchRelayChatSendDoesNotStartDirectConnectForLifecycleManagedTransport() async {
-        let suiteName = "ClawlineTests.watchRelayChatSendLifecycleManaged"
-        let defaults = UserDefaults(suiteName: suiteName) ?? .standard
-        defaults.removePersistentDomain(forName: suiteName)
-        defer { defaults.removePersistentDomain(forName: suiteName) }
-
-        let chatService = SpyChatService()
-        chatService.isReadyForSend = false
-        chatService.allowsDirectRelayTransportConnect = false
-        let authManager = AuthManager(storage: defaults, secureStore: InMemorySecureStore())
-        authManager.storeCredentials(token: "jwt", userId: "user")
-        let service = WatchConnectivityService(
-            authManager: authManager,
-            sonioxKeyStore: SonioxKeyStore(),
-            cartesiaKeyStore: CartesiaKeyStore(keychain: KeychainSecureStore()),
-            chatService: chatService
-        )
-
-        let reply = await service.handleTestMessage([
-            "type": "chat.send",
-            "requestId": "req-4",
-            "payload": [
-                "id": "msg-4",
-                "content": "relay through lifecycle",
                 "sessionKey": "agent:main:clawline:flynn:main",
                 "attachments": []
             ]
@@ -816,8 +742,6 @@ private final class SpyChatService: ChatServicing {
     private(set) var connectCalls = 0
     private(set) var connectTokens: [String] = []
     var isReadyForSend = true
-    var markReadyOnConnect = true
-    var allowsDirectRelayTransportConnect = true
 
     let incomingMessages = AsyncStream<Message> { _ in }
     let connectionState = AsyncStream<ConnectionState> { continuation in continuation.yield(.connected) }
@@ -828,9 +752,6 @@ private final class SpyChatService: ChatServicing {
     func connect(token: String, lastMessageId: String?) async throws {
         connectCalls += 1
         connectTokens.append(token)
-        if markReadyOnConnect {
-            isReadyForSend = true
-        }
     }
     func startConnectionAttempt(epoch: Int, lastMessageId: String?, token: String) {}
     func stopConnectionAttempt() {}

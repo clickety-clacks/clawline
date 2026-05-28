@@ -240,8 +240,6 @@ final class ProviderChatService: ChatServicing {
         return lifecycleTransportReadyForSend
     }
 
-    var allowsDirectRelayTransportConnect: Bool { false }
-
     init(connector: any WebSocketConnecting,
          deviceId: String,
          baseURLProvider: @escaping () -> URL? = { ProviderBaseURLStore.baseURL },
@@ -547,7 +545,7 @@ final class ProviderChatService: ChatServicing {
         sessionKey: String?,
         references: [MessageReferenceContext] = []
     ) async throws {
-        guard let socket else {
+        guard let socket, lifecycleTransportReadyForSend else {
             throw Error.notConnected
         }
         guard id.hasPrefix("c_") else {
@@ -589,7 +587,7 @@ final class ProviderChatService: ChatServicing {
         action: String,
         data: JSONValue?
     ) async throws {
-        guard let socket else {
+        guard let socket, lifecycleTransportReadyForSend else {
             throw Error.notConnected
         }
         let payload = InteractiveCallbackOutboundPayload(
@@ -608,7 +606,7 @@ final class ProviderChatService: ChatServicing {
     }
 
     func publishReadState(sessionKey: String, lastReadMessageId: String) async throws {
-        guard let socket else {
+        guard let socket, lifecycleTransportReadyForSend else {
             throw Error.notConnected
         }
         let payload = ClientStreamReadPayload(sessionKey: sessionKey, lastReadMessageId: lastReadMessageId)

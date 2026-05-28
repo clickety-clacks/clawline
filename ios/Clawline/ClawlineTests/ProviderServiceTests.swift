@@ -232,10 +232,42 @@ struct ProviderServiceTests {
         try await Task.sleep(forDuration: .milliseconds(50))
 
         #expect(service.isTransportReadyForSend == false)
+        await expectNotConnected {
+            try await service.send(
+                id: "c_before_live",
+                content: "Before live",
+                attachments: [],
+                sessionKey: nil
+            )
+        }
+        await expectNotConnected {
+            try await service.sendInteractiveCallback(
+                sourceMessageId: "s_before_live",
+                action: "tap",
+                data: nil
+            )
+        }
+        await expectNotConnected {
+            try await service.publishReadState(
+                sessionKey: "agent:main:clawline:user:main",
+                lastReadMessageId: "s_before_live"
+            )
+        }
+        #expect(mockSocket.sentTexts.contains { $0.contains("\"id\":\"c_before_live\"") } == false)
+
         service.setLifecycleTransportReadyForSend(true, epoch: 0)
         #expect(service.isTransportReadyForSend == false)
+        mockSocket.enqueue(text: #"{ "type": "sync_complete" }"#)
+        #expect(await t100ProviderWaitUntil { lifecycleEvents.containsSyncComplete(epoch: 1) })
         service.setLifecycleTransportReadyForSend(true, epoch: 1)
         #expect(service.isTransportReadyForSend)
+        try await service.send(
+            id: "c_after_live",
+            content: "After live",
+            attachments: [],
+            sessionKey: nil
+        )
+        #expect(mockSocket.sentTexts.contains { $0.contains("\"id\":\"c_after_live\"") })
         #expect(states.containsConnected() == false)
 
         service.stopConnectionAttempt()
@@ -423,12 +455,7 @@ struct ProviderServiceTests {
             baseURLProvider: { baseURL }
         )
 
-        Task {
-            try await Task.sleep(forDuration: .milliseconds(10))
-            mockSocket.enqueue(text: #"{ "type": "auth_result", "success": true }"#)
-        }
-
-        try await service.connect(token: "jwt", lastMessageId: nil)
+        await connectLifecycleReady(service, mockSocket: mockSocket)
         try await service.send(
             id: "c_test",
             content: "Hello",
@@ -453,12 +480,7 @@ struct ProviderServiceTests {
             baseURLProvider: { baseURL }
         )
 
-        Task {
-            try await Task.sleep(forDuration: .milliseconds(10))
-            mockSocket.enqueue(text: #"{ "type": "auth_result", "success": true }"#)
-        }
-
-        try await service.connect(token: "jwt", lastMessageId: nil)
+        await connectLifecycleReady(service, mockSocket: mockSocket)
         try await service.publishReadState(
             sessionKey: "agent:main:clawline:user:main",
             lastReadMessageId: "s_read_1"
@@ -483,12 +505,7 @@ struct ProviderServiceTests {
         )
         var eventIterator = service.serviceEvents.makeAsyncIterator()
 
-        Task {
-            try await Task.sleep(forDuration: .milliseconds(10))
-            mockSocket.enqueue(text: #"{ "type": "auth_result", "success": true }"#)
-        }
-
-        try await service.connect(token: "jwt", lastMessageId: nil)
+        await connectLifecycleReady(service, mockSocket: mockSocket)
         try await service.send(
             id: "c_pending",
             content: "Hello",
@@ -530,12 +547,7 @@ struct ProviderServiceTests {
             baseURLProvider: { baseURL }
         )
 
-        Task {
-            try await Task.sleep(forDuration: .milliseconds(10))
-            mockSocket.enqueue(text: #"{ "type": "auth_result", "success": true }"#)
-        }
-
-        try await service.connect(token: "jwt", lastMessageId: nil)
+        await connectLifecycleReady(service, mockSocket: mockSocket)
         try await service.send(
             id: "c_single_send",
             content: "Hello once",
@@ -562,12 +574,7 @@ struct ProviderServiceTests {
             baseURLProvider: { baseURL }
         )
 
-        Task {
-            try await Task.sleep(forDuration: .milliseconds(10))
-            mockSocket.enqueue(text: #"{ "type": "auth_result", "success": true }"#)
-        }
-
-        try await service.connect(token: "jwt", lastMessageId: nil)
+        await connectLifecycleReady(service, mockSocket: mockSocket)
         try await service.send(
             id: "c_dedup",
             content: "Hello",
@@ -598,12 +605,7 @@ struct ProviderServiceTests {
             baseURLProvider: { baseURL }
         )
 
-        Task {
-            try await Task.sleep(forDuration: .milliseconds(10))
-            mockSocket.enqueue(text: #"{ "type": "auth_result", "success": true }"#)
-        }
-
-        try await service.connect(token: "jwt", lastMessageId: nil)
+        await connectLifecycleReady(service, mockSocket: mockSocket)
         try await service.send(
             id: "c_retry_cancel",
             content: "Hello",
@@ -666,11 +668,7 @@ struct ProviderServiceTests {
         )
         var eventIterator = service.serviceEvents.makeAsyncIterator()
 
-        Task {
-            try await Task.sleep(forDuration: .milliseconds(20))
-            mockSocket.enqueue(text: #"{ "type": "auth_result", "success": true }"#)
-        }
-        try await service.connect(token: "jwt", lastMessageId: nil)
+        await connectLifecycleReady(service, mockSocket: mockSocket)
         try await service.send(
             id: "c_ack_drop",
             content: "Ack me",
@@ -1549,6 +1547,14 @@ private final class T100ProviderLifecycleEventRecorder {
             return success
         }
     }
+
+    func containsSyncComplete(epoch: Int) -> Bool {
+        events.contains { event in
+            guard event.epoch == epoch else { return false }
+            guard case .syncComplete = event.payload else { return false }
+            return true
+        }
+    }
 }
 
 @MainActor
@@ -1560,6 +1566,32 @@ private func t100ProviderWaitUntil(_ condition: () async -> Bool) async -> Bool 
         try? await Task.sleep(forDuration: .milliseconds(10))
     }
     return await condition()
+}
+
+@MainActor
+private func expectNotConnected(_ operation: () async throws -> Void) async {
+    do {
+        try await operation()
+        Issue.record("Expected ProviderChatService.Error.notConnected")
+    } catch ProviderChatService.Error.notConnected {
+        return
+    } catch {
+        Issue.record("Expected ProviderChatService.Error.notConnected, got \(error)")
+    }
+}
+
+@MainActor
+private func connectLifecycleReady(
+    _ service: ProviderChatService,
+    mockSocket: MockWebSocketClient,
+    epoch: Int = 1
+) async {
+    service.startConnectionAttempt(epoch: epoch, lastMessageId: nil, token: "jwt")
+    #expect(await t100ProviderWaitUntil { mockSocket.sentTexts.contains { $0.contains("\"type\":\"auth\"") } })
+    mockSocket.enqueue(text: #"{ "type": "auth_result", "success": true, "replayCount": 0 }"#)
+    mockSocket.enqueue(text: #"{ "type": "sync_complete" }"#)
+    service.setLifecycleTransportReadyForSend(true, epoch: epoch)
+    #expect(service.isTransportReadyForSend)
 }
 
 private final class MockWebSocketClient: WebSocketClient {

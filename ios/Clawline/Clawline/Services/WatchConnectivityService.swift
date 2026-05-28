@@ -277,16 +277,7 @@ final class WatchConnectivityService: NSObject, WatchConnectivityServicing {
 
     private func ensureRelayChatTransportReady() async throws {
         guard !chatService.isTransportReadyForSend else { return }
-        guard chatService.allowsDirectRelayTransportConnect else {
-            throw ProviderChatService.Error.notConnected
-        }
-        guard let token = authManager.token else {
-            throw ProviderChatService.Error.notConnected
-        }
-        try await chatService.connect(token: token, lastMessageId: nil)
-        guard chatService.isTransportReadyForSend else {
-            throw ProviderChatService.Error.notConnected
-        }
+        throw ProviderChatService.Error.notConnected
     }
 
     private func handleChatCallback(requestId: String, payload: [String: Any], replyHandler: @escaping ([String: Any]) -> Void) {

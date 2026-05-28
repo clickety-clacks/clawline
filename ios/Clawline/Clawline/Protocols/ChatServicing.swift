@@ -63,7 +63,6 @@ protocol ChatServicing: AnyObject {
     var serviceEvents: AsyncStream<ChatServiceEvent> { get }
     var lifecycleTransportEvents: AsyncStream<LifecycleTransportEvent> { get }
     var isTransportReadyForSend: Bool { get }
-    var allowsDirectRelayTransportConnect: Bool { get }
 
     func connect(token: String, lastMessageId: String?) async throws
     func startConnectionAttempt(epoch: Int, lastMessageId: String?, token: String)
@@ -105,8 +104,6 @@ protocol ChatServicing: AnyObject {
 }
 
 extension ChatServicing {
-    var allowsDirectRelayTransportConnect: Bool { true }
-
     func setLifecycleTransportReadyForSend(_ isReady: Bool, epoch: Int) {
         _ = isReady
         _ = epoch

@@ -463,7 +463,7 @@ final class WatchConnectivityService: NSObject, WatchConnectivityServicing {
             dict["kind"] = "typingStateChanged"
             dict["isTyping"] = isTyping
             dict["sessionKey"] = sessionKey
-        case .agentProgress:
+        case .agentProgress, .promptTurnState:
             return nil
         case .streamSnapshot(let streams):
             dict["kind"] = "streamSnapshot"

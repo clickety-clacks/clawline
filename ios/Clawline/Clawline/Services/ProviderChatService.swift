@@ -1137,6 +1137,12 @@ final class ProviderChatService: ChatServicing {
             if let sessionKey {
                 emitServiceEvent(.typingStateChanged(isTyping: payload.payload.isActive, sessionKey: sessionKey))
             }
+        case "prompt_turn_state":
+            guard let payload = try? decoder.decode(PromptTurnStateEvent.self, from: data) else {
+                logger.warning("Failed to decode prompt_turn_state event payload")
+                return
+            }
+            emitServiceEvent(.promptTurnState(payload))
         default:
             logger.debug("Unknown event type: \(envelope.event, privacy: .public)")
         }

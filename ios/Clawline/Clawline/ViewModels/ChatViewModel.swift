@@ -3339,6 +3339,8 @@ final class ChatViewModel: ChatViewModelHosting {
             }
         case .agentProgress(let progress):
             handleAgentProgress(progress)
+        case .promptTurnState(let event):
+            handlePromptTurnState(event)
         case .connectionInterrupted(let reason):
             logger.info("connection interrupted reason=\(reason ?? "unknown", privacy: .public)")
             markPendingMessagesAsFailedForConnectionLoss()
@@ -3418,6 +3420,42 @@ final class ChatViewModel: ChatViewModelHosting {
             replaceAccessibleSessionKeys(with: info.sessionKeys)
             refreshTrackableSessions(reason: "sessionInfo")
             attemptPendingProvisionedSendIfPossible()
+        }
+    }
+
+    private func handlePromptTurnState(_ event: PromptTurnStateEvent) {
+        let state = event.payload.state.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let terminalState = event.payload.terminalState?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let messageId = event.payload.messageId
+        switch terminalState ?? state {
+        case "failed":
+            scheduleSessionStatusRefresh(for: event.payload.sessionKey, reason: "promptTurnFailed")
+            clearLiveProgress(messageId: messageId)
+            messageFailures[messageId] = MessageFailure(code: event.payload.error ?? "clawline.promptTurn.failed", message: nil)
+            if let pendingIndex = pendingLocalMessages.firstIndex(where: { $0.id == messageId }) {
+                pendingLocalMessages.remove(at: pendingIndex)
+            }
+            ackedPendingLocalMessageIDs.remove(messageId)
+            if activeClientMessageId == messageId {
+                activeClientMessageId = nil
+                activeCrossChatNotificationReplySourceChatId = nil
+                activeSendHasReachedTransport = false
+            }
+            isSending = false
+            bumpSendIndicatorRevision()
+        case "delivered", "canceled":
+            if let pendingIndex = pendingLocalMessages.firstIndex(where: { $0.id == messageId }) {
+                pendingLocalMessages.remove(at: pendingIndex)
+            }
+            ackedPendingLocalMessageIDs.remove(messageId)
+            if state == "canceled" {
+                markLocalMessageCanceled(id: messageId)
+            } else {
+                messageFailures.removeValue(forKey: messageId)
+                bumpSendIndicatorRevision()
+            }
+        default:
+            return
         }
     }
 

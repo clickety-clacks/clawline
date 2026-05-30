@@ -1,0 +1,488 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>T1135 Text Link URL Templates</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: transparent;
+      --fg: var(--clawline-fg, #1d2528);
+      --muted: #5f6f73;
+      --line: #cfd8d6;
+      --panel: #ffffff;
+      --accent: #176b6b;
+      --warn: #8a5400;
+      --danger: #9f3f2f;
+      --code: #eef3f2;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: transparent;
+        --fg: var(--clawline-fg, #eef4f3);
+        --muted: #a8b6b8;
+        --line: #304043;
+        --panel: #182022;
+        --accent: #6ec7bc;
+        --warn: #e2b45e;
+        --danger: #ef8d77;
+        --code: #202b2d;
+      }
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--fg);
+      font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    main {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 48px 22px 72px;
+    }
+
+    h1,
+    h2,
+    h3 {
+      line-height: 1.15;
+      letter-spacing: 0;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: clamp(2rem, 4vw, 3rem);
+    }
+
+    h2 {
+      margin-top: 42px;
+      padding-top: 22px;
+      border-top: 1px solid var(--line);
+      font-size: 1.45rem;
+    }
+
+    h3 {
+      margin-top: 28px;
+      font-size: 1.1rem;
+    }
+
+    p { margin: 10px 0; }
+
+    ul,
+    ol { padding-left: 1.3rem; }
+
+    li { margin: 7px 0; }
+
+    code,
+    pre {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.92em;
+      background: var(--code);
+      border-radius: 6px;
+    }
+
+    code { padding: 0.12rem 0.28rem; }
+
+    pre {
+      overflow-x: auto;
+      padding: 14px 16px;
+      border: 1px solid var(--line);
+    }
+
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      margin: 16px 0;
+      background: var(--panel);
+    }
+
+    th,
+    td {
+      border: 1px solid var(--line);
+      padding: 10px 12px;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      color: var(--accent);
+      font-weight: 700;
+    }
+
+    .meta {
+      color: var(--muted);
+      margin-bottom: 28px;
+    }
+
+    .callout {
+      border: 1px solid var(--line);
+      border-left: 5px solid var(--accent);
+      background: var(--panel);
+      padding: 14px 16px;
+      margin: 18px 0;
+      border-radius: 8px;
+    }
+
+    .warning { border-left-color: var(--warn); }
+
+    .danger { border-left-color: var(--danger); }
+
+    .decision { font-weight: 700; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>T1135 Text Link URL Templates</h1>
+  <p class="meta">Self-contained Clawline product and technical specification for turning matched rendered message text into internal-browser links through configurable URL templates. Prepared 2026-05-24 for T1135.</p>
+
+  <section class="callout">
+    <p class="decision">Decision: Clawline message rendering must support user-configurable text-match rules paired with URL templates. T1135 must not ship with a default configured Janus rule; users add rules from Clawline settings, including a Janus/Tracker rule that can open the existing tracker widget URL inside Clawline's internal browser.</p>
+    <p>The feature belongs at the rendered-message text layer. The renderer owns the final visible text and link ranges; activation routes through Clawline's internal browser surface instead of handing the generated URL to the operating system's external browser.</p>
+  </section>
+
+  <h2>Source Notes</h2>
+  <ul>
+    <li>The product request in the T1135 prompt is the source of truth for the required behavior and requirement IDs.</li>
+    <li>The requested invariants path <code>/Users/mike/shared-workspace/clawline/specs/clawline-invariants.md</code> was absent. The available mirror <code>/Users/mike/shared-workspace/clawline/implementation_details/clawline-invariants.md</code> was consulted.</li>
+    <li>Relevant existing guidance consulted: <code>implementation_details/salient-highlight.md</code>, <code>implementation_details/provider-salient-highlight.md</code>, <code>specs/t314-vim-mode-suggestions.html</code>, <code>specs/t319-t320-message-composer-input.html</code>, <code>specs/t307-cross-chat-notifications.html</code>, <code>specs/visionos-codepath-audit.md</code>, and the current Clawline link activation code paths in <code>UnifiedMarkdownRenderer</code>, <code>MessageBubbleUIKitView</code>, and <code>ExternalWebContentPolicy</code>.</li>
+    <li>Flynn clarified on 2026-05-24 that no text-link rule should be configured by default. The existing tracker wall/widget URL shape may be used when the user adds a Janus/Tracker rule, for example <code>https://tars.tail4105e8.ts.net:19443/tracker.html?id=&lt;TID&gt;</code>.</li>
+    <li>Tracker lookup for <code>T1135</code> through <code>scripts/janus-ticket-context --db tracking/tracker.db --tracking-dir tracking --ticket T1135 --related-links-only</code> returned <code>ticket_not_found</code>. No Tracker state transition is part of this spec file.</li>
+    <li>Engram source <code>76ef4530-14c7-4c75-9f44-7146bacaeb68</code> was queried with <code>engram peek</code>; it returned no readable content in this environment and did not affect the spec.</li>
+    <li>No implementation, deployment, merge, cleanup, or spindown work is part of this spec task.</li>
+  </ul>
+
+  <h2>Goals</h2>
+  <ul>
+    <li>Allow Clawline to define text-match rules that decorate matching rendered message text as activatable links.</li>
+    <li>Pair each match rule with a URL template that receives the matched text and regex capture groups.</li>
+    <li>Ensure interpolation cannot let matched message text alter the template's scheme, host, path structure, query separators, or fragment separators.</li>
+    <li>Route activation of generated links through Clawline's internal browser surface.</li>
+    <li>Provide a settings UI where users can add, edit, and remove regex plus URL-template rules, including a Janus ticket-reference rule for <code>T123</code>-style references.</li>
+    <li>Keep behavior consistent anywhere assistant or user message text is rendered in Clawline, except for surfaces explicitly scoped out by this spec.</li>
+    <li>Make invalid rule templates and generated URLs fail in a visible, non-crashing way without opening an external browser.</li>
+  </ul>
+
+  <h2>Non-Goals</h2>
+  <ul>
+    <li>No source-code change, deployment, merge, branch cleanup, or app spindown is specified here.</li>
+    <li>No default configured rule is required or allowed for T1135. Rules are created by the user in settings.</li>
+    <li>No link-preview card is created solely because a generated URL exists. The generated URL is an activation target for the matched text, not new visible message content.</li>
+    <li>No change to explicit markdown links or existing URL detection behavior beyond allowing non-URL text patterns to become links where this spec says they apply.</li>
+    <li>No provider-side message mutation. Generated links are a client rendering and activation behavior only.</li>
+    <li>No external-browser fallback for the T1135 generated-link path.</li>
+  </ul>
+
+  <h2>Terminology</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Term</th>
+        <th>Meaning</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Match rule</td>
+        <td>A named, configurable rule containing at minimum an enabled flag, a text pattern, and a paired URL template.</td>
+      </tr>
+      <tr>
+        <td>Rendered message text</td>
+        <td>The final user-visible text representation after Clawline message parsing, markdown rendering, table rendering, and other presentation transforms have produced linkable text ranges.</td>
+      </tr>
+      <tr>
+        <td>Generated link</td>
+        <td>A link range created from a match rule and URL template rather than from a literal URL or explicit markdown link in the message.</td>
+      </tr>
+      <tr>
+        <td>URL template</td>
+        <td>A literal URL string with placeholders that are replaced with encoded match values before activation.</td>
+      </tr>
+      <tr>
+        <td>Internal browser</td>
+        <td>The Clawline-owned in-app browser surface used for web content opened from chat, such as the existing iOS/iPadOS/Catalyst Safari-view-controller style browser surface. It is not <code>UIApplication.open</code> or an operating-system handoff to an external browser app.</td>
+      </tr>
+      <tr>
+        <td>Janus ticket reference</td>
+        <td>A token shaped like <code>T</code> followed by ASCII digits, for example <code>T123</code> or <code>T1135</code>.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>Product Requirements</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Requirement</th>
+        <th>Acceptance Check</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>R1135-01</td>
+        <td>Clawline supports a configurable match rule with a paired URL template.</td>
+        <td>A rule can be represented with a stable ID, enabled/disabled state, regex-compatible match pattern, and URL template, and the renderer can produce a generated link from that rule without hard-coding Janus-only logic into message layout.</td>
+      </tr>
+      <tr>
+        <td>R1135-02</td>
+        <td>Matched text and capture groups are safely interpolated into the template.</td>
+        <td>The full match and every capture group can be referenced from the template, and replacement values are encoded before insertion so message text cannot alter URL delimiters or routing outside the intended template position.</td>
+      </tr>
+      <tr>
+        <td>R1135-03</td>
+        <td>Activation opens the generated URL in Clawline's internal browser, not the external browser.</td>
+        <td>Activating a generated Janus link presents the in-app browser surface with the generated URL. The generated-link path does not call the platform external-open path.</td>
+      </tr>
+      <tr>
+        <td>R1135-04</td>
+        <td>Clawline ships with no configured text-link rules by default.</td>
+        <td>On a fresh install/profile, rendered tokens such as <code>T123</code> or <code>T1135</code> do not become generated links until the user adds a matching rule in settings.</td>
+      </tr>
+      <tr>
+        <td>R1135-05</td>
+        <td>Rule behavior is consistent wherever assistant/user message text is rendered, unless the spec explicitly scopes a surface out.</td>
+        <td>The same message content yields the same generated-link ranges and generated activation URLs in transcript bubbles, expanded message views, notification message previews that render assistant/user text, and other Clawline message-text renderers.</td>
+      </tr>
+      <tr>
+        <td>R1135-06</td>
+        <td>Invalid templates and invalid generated URLs fail visibly and safely.</td>
+        <td>An invalid rule does not crash rendering, does not create an invisible dead link, and does not open an external browser. The user or operator receives a visible failure signal appropriate to where the failure is detected.</td>
+      </tr>
+      <tr>
+        <td>R1135-07</td>
+        <td>Settings exposes a rule-management screen for text-link URL templates.</td>
+        <td>The settings screen shows the configured rules as an editable list and includes a <code>+</code> control to add another regex plus URL-template entry.</td>
+      </tr>
+      <tr>
+        <td>R1135-08</td>
+        <td>Users can add as many regex/template rules as they need.</td>
+        <td>The settings UI remains usable as the list grows, with scrolling/list layout that does not overflow fixed panels or hide controls.</td>
+      </tr>
+      <tr>
+        <td>R1135-09</td>
+        <td>Users can delete a configured rule only after confirmation.</td>
+        <td>Each rule row has an <code>x</code> delete control. Activating it opens a confirmation dialog; cancel keeps the rule unchanged, and confirm removes exactly that rule.</td>
+      </tr>
+      <tr>
+        <td>R1135-10</td>
+        <td>A user-created Janus/Tracker rule can use the existing tracker widget URL.</td>
+        <td>After adding regex <code>\bT([0-9]+)\b</code> with template <code>https://tars.tail4105e8.ts.net:19443/tracker.html?id={match}</code>, a rendered <code>T1135</code> token opens the corresponding tracker widget URL inside Clawline's internal browser.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>Rule Contract</h2>
+  <p>A T1135 rule has these semantic fields. Concrete type names are implementation details.</p>
+  <table>
+    <thead>
+      <tr>
+        <th>Field</th>
+        <th>Required Meaning</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>id</code></td>
+        <td>Stable rule identifier used in diagnostics and tests. User-created rules receive stable generated IDs.</td>
+      </tr>
+      <tr>
+        <td><code>enabled</code></td>
+        <td>Boolean that controls whether the rule participates in rendering.</td>
+      </tr>
+      <tr>
+        <td><code>pattern</code></td>
+        <td>Regex-compatible text pattern evaluated against rendered message text.</td>
+      </tr>
+      <tr>
+        <td><code>urlTemplate</code></td>
+        <td>Absolute internal-browser URL template containing placeholders for match values.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>Placeholder Contract</h3>
+  <ul>
+    <li><code>{match}</code> and <code>{0}</code> mean the full matched text.</li>
+    <li><code>{1}</code>, <code>{2}</code>, and later numeric placeholders mean regex capture groups by index.</li>
+    <li>Named capture placeholders may be supported as <code>{name}</code> when the implementation's regex engine exposes named captures.</li>
+    <li>An unresolved placeholder makes the generated URL invalid for that match and must follow <code>R1135-06</code>.</li>
+  </ul>
+
+  <h3>Safe Interpolation</h3>
+  <ul>
+    <li>The template string is treated as configuration. Matched message text is treated as untrusted input.</li>
+    <li>Each replacement value is URL percent-encoded before insertion into the template.</li>
+    <li>Encoding must preserve the template's literal URL delimiters but must encode delimiters that come from message text, including at least space, slash, question mark, ampersand, equals, hash, percent, and control characters.</li>
+    <li>After interpolation, Clawline constructs a URL object from the full generated string. A string that cannot become a valid absolute URL is invalid.</li>
+    <li>The generated URL must be suitable for Clawline's internal browser surface. The Janus/Tracker example uses an <code>https</code> URL.</li>
+  </ul>
+
+  <h3>Matching Order</h3>
+  <ul>
+    <li>Rules run against rendered message text ranges that do not already carry an explicit link destination.</li>
+    <li>Explicit markdown links and literal URL-detected link ranges keep their existing activation target.</li>
+    <li>When two generated-link rules overlap the same otherwise-unlinked text range, the earlier enabled rule in configured rule order owns that range.</li>
+    <li>A generated link must not split a Unicode scalar sequence or otherwise create a visually corrupt range.</li>
+  </ul>
+
+  <h2>Janus/Tracker Rule Example</h2>
+  <p>Clawline must not enable this rule by default. This is the expected user-created rule for opening the existing tracker widget from matched ticket text.</p>
+  <pre><code>{
+  "id": "janus-ticket",
+  "enabled": true,
+  "pattern": "\\bT([0-9]+)\\b",
+  "urlTemplate": "https://tars.tail4105e8.ts.net:19443/tracker.html?id={match}"
+}</code></pre>
+  <ul>
+    <li><code>T123</code> generates <code>https://tars.tail4105e8.ts.net:19443/tracker.html?id=T123</code>.</li>
+    <li><code>T1135</code> generates <code>https://tars.tail4105e8.ts.net:19443/tracker.html?id=T1135</code>.</li>
+    <li>The visible text remains exactly the matched token, for example <code>T1135</code>. The generated URL is not inserted into the transcript text.</li>
+    <li>The rule is case-sensitive for T1135: <code>T123</code> matches; <code>t123</code> does not.</li>
+    <li>A token embedded in a larger word, such as <code>AT123</code> or <code>T123abc</code>, does not match this example rule because of the word boundary requirement.</li>
+  </ul>
+
+  <h2>Rendering Surface Scope</h2>
+  <p><code>R1135-05</code> is intentionally broad because Clawline has multiple message-text renderers. The rule belongs with the rendered-message text pipeline, not only with one transcript cell.</p>
+  <table>
+    <thead>
+      <tr>
+        <th>Surface</th>
+        <th>T1135 Requirement</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Main transcript assistant/user bubbles</td>
+        <td>Required. Generated Janus links render and activate from normal message text.</td>
+      </tr>
+      <tr>
+        <td>Expanded message sheet or expanded message overlay</td>
+        <td>Required. The same rendered message content exposes the same generated-link targets.</td>
+      </tr>
+      <tr>
+        <td>Cross-chat notification message previews</td>
+        <td>Required when the preview renders assistant or user message text and supports activation. The generated URL and internal-browser route must match the transcript behavior.</td>
+      </tr>
+      <tr>
+        <td>Tables, markdown blocks, inline code, and code blocks inside assistant/user messages</td>
+        <td>Required when they are rendered as selectable or activatable message text. T1135 does not exempt them solely because of markdown styling.</td>
+      </tr>
+      <tr>
+        <td>Message accessibility/action surfaces</td>
+        <td>Must not contradict visible behavior. If accessibility exposes link activation for rendered message text, generated links are included with the same destination.</td>
+      </tr>
+      <tr>
+        <td>Composer draft text</td>
+        <td>Out of scope. The composer is input text, not rendered assistant/user message text.</td>
+      </tr>
+      <tr>
+        <td>Terminal sessions, interactive HTML documents, attachment viewers, settings text, and app chrome</td>
+        <td>Out of scope unless that surface is explicitly rendering assistant/user message text through the Clawline message renderer.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>Activation Routing</h2>
+  <ul>
+    <li>Generated-link activation must enter a Clawline-owned URL-open route that presents the internal browser surface.</li>
+    <li>The generated-link route must be distinguishable in tests from platform external-open APIs.</li>
+    <li>If a platform currently lacks an internal browser surface for the generated URL class, the implementation is not compliant by falling back to external open. It must either provide an internal browser surface or return a visible safe failure under <code>R1135-06</code>.</li>
+    <li>Generated Janus links must not mutate chat state, change the active session, send a prompt, or create a link-preview card. They only navigate the internal browser.</li>
+  </ul>
+
+  <h2>Invalid Rule and URL Behavior</h2>
+  <section class="callout warning">
+    <p class="decision">Invalid configuration and invalid generated URLs are product-visible failures, not silent drops.</p>
+    <p>The implementation should choose the visible surface appropriate to the failure timing: rule-load diagnostics for invalid configured rules, and user-visible activation feedback for a link that fails only after interpolation.</p>
+  </section>
+  <table>
+    <thead>
+      <tr>
+        <th>Failure</th>
+        <th>Required Behavior</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Invalid regex pattern</td>
+        <td>Disable that rule, keep message rendering stable, and expose a visible diagnostic that names the rule ID.</td>
+      </tr>
+      <tr>
+        <td>Unknown placeholder</td>
+        <td>Do not create an activatable link for that match. Expose a visible diagnostic or activation error that names the rule ID.</td>
+      </tr>
+      <tr>
+        <td>Missing capture group</td>
+        <td>Do not create an activatable link for that match. The visible matched text remains plain message text.</td>
+      </tr>
+      <tr>
+        <td>Generated string is not a valid absolute URL</td>
+        <td>Do not open anything. Show a visible safe failure instead of calling an external browser path.</td>
+      </tr>
+      <tr>
+        <td>Internal browser rejects the URL</td>
+        <td>Show a visible safe failure. Do not retry through the external browser.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>Verification Requirements</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Requirement</th>
+        <th>Required Proof</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>V1135-01</td>
+        <td>Tests cover match, capture/interpolation, escaping, URL construction, and open-routing.</td>
+        <td>Automated tests prove fresh installs have no configured rules, user-created Janus matching works, full-match placeholder use, capture-group placeholder use, percent-encoding of unsafe input characters, valid URL construction, invalid-template failure, invalid-generated-URL failure, settings add/delete behavior, delete confirmation behavior, and routing through the internal browser open path rather than external open.</td>
+      </tr>
+      <tr>
+        <td>V1135-02</td>
+        <td>Product proof uses real Clawline rendered text and internal-browser navigation, not demo code.</td>
+        <td>Simulator, device, or approved product proof starts with no default rule, adds the Janus/Tracker regex/template rule through settings, shows an actual Clawline assistant/user rendered message containing <code>T1135</code>, activates that rendered token, and presents the generated tracker widget URL in the internal browser.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h3>Minimum Test Matrix</h3>
+  <ul>
+    <li>Default state: with no user-created rule, <code>T123</code> and <code>T1135</code> remain plain rendered text.</li>
+    <li>User-created Janus/Tracker rule: after adding regex <code>\bT([0-9]+)\b</code>, <code>T123</code> and <code>T1135</code> match; <code>t1135</code>, <code>AT1135</code>, and <code>T1135abc</code> do not match.</li>
+    <li>Settings list: <code>+</code> adds multiple regex/template entries and the list remains usable when enough entries exist to require scrolling.</li>
+    <li>Delete confirmation: each row's <code>x</code> delete action asks for confirmation; cancel preserves the row and confirm removes exactly that row.</li>
+    <li>Capture/interpolation: a custom rule using <code>{1}</code> constructs the expected URL.</li>
+    <li>Escaping: matched values containing URL delimiter characters are encoded before insertion and cannot add query items, fragments, path segments, or a different host.</li>
+    <li>Existing links: explicit markdown link ranges keep their explicit link destination instead of being overwritten by a generated-link rule.</li>
+    <li>Surface consistency: the same assistant/user message content exposes the same generated URL in at least the main transcript and one secondary message-text surface.</li>
+    <li>Routing: generated-link activation invokes the internal browser route and a test double proves the external-open route was not called.</li>
+    <li>Failure: invalid pattern, unresolved placeholder, invalid generated URL, and internal-browser rejection produce visible safe failures without crashes or external-browser fallback.</li>
+  </ul>
+
+  <h2>Implementation Handoff</h2>
+  <ul>
+    <li>Implement exactly the T1135 behavior described here: user-configurable match rules, safe template interpolation, no default configured rule, settings add/delete UI, consistent rendered-message coverage, visible safe failures, and internal-browser routing.</li>
+    <li>Place matching at a shared rendered-message text boundary so downstream transcript cells, expanded views, and notification previews consume resolved link ranges instead of rebuilding rule behavior independently.</li>
+    <li>Do not add unrelated URL preview behavior, browser policy changes, message mutation, or provider protocol changes.</li>
+    <li>Preserve explicit link destinations. Generated-link rules fill otherwise-unlinked rendered text ranges.</li>
+    <li>Use the tracker widget URL as the Janus/Tracker example/template value when adding that rule in settings: <code>https://tars.tail4105e8.ts.net:19443/tracker.html?id={match}</code>.</li>
+  </ul>
+
+  <h2>Open Questions</h2>
+  <ol>
+    <li>Should the settings UI offer suggested rule presets later, or remain a blank user-managed list for T1135?</li>
+    <li>Should non-HTTP(S) internal-browser URL schemes ever be allowed, or should generated links remain web URLs only?</li>
+  </ol>
+</main>
+</body>
+</html>

@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>T188 — Clawline: safe channel delete + re-add, then re-enable deleteAccount</title>
+  <style>
+    :root {
+      --bg: color-mix(in srgb, Canvas 82%, transparent);
+      --panel: color-mix(in srgb, Canvas 92%, transparent);
+      --fg: CanvasText;
+      --muted: color-mix(in srgb, CanvasText 62%, transparent);
+      --border: color-mix(in srgb, CanvasText 18%, transparent);
+      --accent: #4f7cff;
+      --warn: #b7791f;
+      --danger: #c53030;
+      --ok: #2f855a;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --accent: #8fb3ff;
+        --warn: #f6c65b;
+        --danger: #ff8a8a;
+        --ok: #68d391;
+      }
+    }
+    html, body { margin: 0; padding: 0; background: transparent; color: var(--fg); font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    body { padding: 24px; }
+    .wrap { max-width: 980px; margin: 0 auto; }
+    .card { background: var(--bg); border: 1px solid var(--border); border-radius: 16px; padding: 18px 20px; margin: 0 0 16px; backdrop-filter: blur(4px); }
+    h1, h2, h3 { line-height: 1.2; margin: 0 0 10px; }
+    h1 { font-size: 1.8rem; }
+    h2 { font-size: 1.2rem; margin-top: 6px; }
+    h3 { font-size: 1rem; }
+    p, li { margin: 0 0 8px; }
+    ul { margin: 8px 0 0 22px; padding: 0; }
+    code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.92em; }
+    .meta, .muted { color: var(--muted); }
+    .pill { display: inline-block; padding: 2px 8px; border: 1px solid var(--border); border-radius: 999px; font-size: 12px; margin: 0 8px 8px 0; }
+    .req, .acc, .risk, .dec, .ver, .src, .rev { border-left: 3px solid var(--border); padding-left: 12px; margin: 12px 0; }
+    .req { border-left-color: var(--accent); }
+    .acc { border-left-color: var(--ok); }
+    .risk { border-left-color: var(--danger); }
+    .dec { border-left-color: var(--warn); }
+    .ver { border-left-color: var(--accent); }
+    .src { border-left-color: var(--muted); }
+    .rev { border-left-color: var(--ok); }
+    .status-ok { color: var(--ok); }
+    .status-warn { color: var(--warn); }
+    .status-bad { color: var(--danger); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <section class="card">
+      <h1>T188 — Clawline: Implement safe channel delete + re-add flow, then re-enable <code>deleteAccount</code></h1>
+      <p class="meta">Status target: Spec Review candidate · Artifact path: <code>/Users/mike/shared-workspace/clawline/specs/t188-safe-channel-delete-readd.html</code></p>
+      <div>
+        <span class="pill">Spec ticket: T188</span>
+        <span class="pill">Product area: Clawline provider</span>
+        <span class="pill">Scope: remove → re-add safety</span>
+        <span class="pill">Implementation: not started</span>
+      </div>
+    </section>
+
+    <section class="card" id="summary">
+      <h2>TL;DR</h2>
+      <p>Clawline channel deletion cannot be re-enabled until removing the channel performs a <strong>controlled gateway shutdown</strong>, and re-adding the channel performs a <strong>coordinated config write plus fresh <code>server.cluSecret</code> activation</strong> so CLU and the running gateway never disagree about auth state.</p>
+      <p>This spec sets the product contract to: <strong>delete stops the gateway before config removal</strong>; <strong>re-add writes a new secret and brings the gateway back only with that new secret active</strong>; <strong><code>deleteAccount</code> remains suppressed until the full round-trip is proven end-to-end</strong>.</p>
+    </section>
+
+    <section class="card" id="product-truth">
+      <h2>Product truth and problem statement</h2>
+      <p>T188 exists because Clawline config is not just a disposable account credential. It contains gateway operating state, including <code>server.cluSecret</code>, network settings, media paths, and other runtime-relevant fields. A naive delete would remove the on-disk config while the gateway keeps running with stale in-memory state, breaking CLU authentication and leaving the system in a deceptive half-alive state.</p>
+      <p>The feature is therefore <strong>not</strong> “allow account deletion.” The feature is “make Clawline delete/re-add a safe lifecycle transition for the gateway product.”</p>
+    </section>
+
+    <section class="card" id="proposed-contract">
+      <h2>Proposed product contract</h2>
+      <ul>
+        <li><strong>Remove with delete</strong> is a destructive lifecycle action, not a cosmetic config change.</li>
+        <li><strong>Remove without delete</strong> may disable the channel, but must not pretend to validate safe re-onboarding.</li>
+        <li><strong>Re-add</strong> must either start a stopped gateway with the freshly written secret or perform a controlled restart that guarantees the new secret is live before the gateway is considered healthy again.</li>
+        <li><strong>Until hot-reload proof exists, restart is the required truth path for secret rotation.</strong> This is a product safety decision, not an inference that hot reload is impossible.</li>
+      </ul>
+    </section>
+
+    <section class="card" id="requirements">
+      <h2>Requirements</h2>
+
+      <div class="req" id="R1">
+        <h3>R1 — Destructive remove must stop the live Clawline gateway before config deletion</h3>
+        <p>If the user performs <code>openclaw channels remove clawline --delete</code> or any equivalent UI delete action, the system must first drive the active Clawline gateway into a stopped state before deleting the Clawline account/config surface.</p>
+      </div>
+
+      <div class="req" id="R2">
+        <h3>R2 — No broken half-state may be presented as success</h3>
+        <p>The operation must fail closed if the gateway cannot be confirmed stopped. Deleting config while the gateway remains live is forbidden. User-visible success must mean the gateway is stopped and the deleted config is no longer authoritative.</p>
+      </div>
+
+      <div class="req" id="R3">
+        <h3>R3 — Delete must clean up gateway-owned Clawline runtime state</h3>
+        <p>The shutdown path must give Clawline a chance to clean up its own runtime-owned state on shutdown. This includes the same shutdown semantics the gateway would normally execute for a controlled stop; silent orphaning is not acceptable product behavior.</p>
+      </div>
+
+      <div class="req" id="R4">
+        <h3>R4 — Re-add must create a fresh CLU secret</h3>
+        <p>Any re-add / re-onboard flow after destructive removal must generate a new <code>channels.clawline.server.cluSecret</code>. Reusing a removed secret is forbidden.</p>
+      </div>
+
+      <div class="req" id="R5">
+        <h3>R5 — Re-add must make the new secret live before reporting readiness</h3>
+        <p>After writing the new config, the running gateway must authenticate CLU requests with the new secret and reject the old secret before the setup flow reports completion.</p>
+      </div>
+
+      <div class="req" id="R6">
+        <h3>R6 — Secret rotation truth is restart-until-proven-otherwise</h3>
+        <p>Because T188’s source truth explicitly identifies in-memory/out-of-disk secret skew as the failure mode, the required safe baseline is a controlled gateway restart as part of re-add unless an explicit hot-reload seam is implemented and proven equivalent. Review cannot assume existing config reload behavior is sufficient.</p>
+      </div>
+
+      <div class="req" id="R7">
+        <h3>R7 — Re-add must preserve non-secret user intent where safe</h3>
+        <p>The re-add flow may restore defaultable fields such as port/bind defaults, but it must not silently discard recoverable Clawline user intent without telling the user. The implementation must define which fields are regenerated, preserved, or re-prompted.</p>
+      </div>
+
+      <div class="req" id="R8">
+        <h3>R8 — Delete UX must communicate gateway impact before execution</h3>
+        <p>The destructive delete affordance must warn that it will stop Clawline gateway access and require explicit confirmation. The product must not frame this as a harmless disable toggle.</p>
+      </div>
+
+      <div class="req" id="R9">
+        <h3>R9 — <code>deleteAccount</code> may be re-enabled only after end-to-end proof</h3>
+        <p>The suppression in <code>extensions/clawline/src/channel.setup.ts</code> may be removed only when the delete → re-add round-trip has product proof covering shutdown, config mutation, fresh-secret activation, and post-re-add CLU access.</p>
+      </div>
+
+      <div class="req" id="R10">
+        <h3>R10 — Plain disable remains a separate, non-destructive action</h3>
+        <p><code>openclaw channels remove clawline</code> without delete semantics may continue to mean “disable but keep config,” but it must remain clearly distinct from destructive removal. T188 does not let a disable path substitute for safe delete proof.</p>
+      </div>
+    </section>
+
+    <section class="card" id="acceptance">
+      <h2>Acceptance criteria</h2>
+      <div class="acc" id="A1"><h3>A1</h3><p>A destructive remove request stops the live Clawline gateway before config deletion and reports failure if stop confirmation is missing.</p></div>
+      <div class="acc" id="A2"><h3>A2</h3><p>After destructive remove, the old <code>cluSecret</code> no longer grants CLU access and the gateway is not left listening in a stale-auth state.</p></div>
+      <div class="acc" id="A3"><h3>A3</h3><p>Re-adding Clawline writes a new non-empty <code>server.cluSecret</code> distinct from the prior deleted one.</p></div>
+      <div class="acc" id="A4"><h3>A4</h3><p>Post re-add, CLU requests with the new secret succeed and requests with the old secret fail.</p></div>
+      <div class="acc" id="A5"><h3>A5</h3><p>User-visible copy distinguishes disable vs delete and warns that delete stops Clawline gateway service.</p></div>
+      <div class="acc" id="A6"><h3>A6</h3><p>The implementation specifies exactly which config fields survive re-add, which are regenerated, and which must be re-entered or defaulted.</p></div>
+      <div class="acc" id="A7"><h3>A7</h3><p><code>deleteAccount</code> is re-enabled only after the proof matrix in this spec is satisfied.</p></div>
+    </section>
+
+    <section class="card" id="decisions">
+      <h2>Open decisions / proposed answers</h2>
+
+      <div class="dec" id="D1">
+        <h3>D1 — Secret reload mechanism</h3>
+        <p><strong>Proposed answer:</strong> require a controlled gateway restart for re-add v1. If later work proves a true in-process secret reload with equivalent safety, that can be a follow-up improvement. This keeps product truth aligned with T188’s stated failure mode instead of assuming current reload hooks solve auth skew.</p>
+      </div>
+
+      <div class="dec" id="D2">
+        <h3>D2 — Delete UX shape</h3>
+        <p><strong>Proposed answer:</strong> destructive delete should require explicit confirmation text that Clawline gateway access will stop and that re-adding will regenerate the CLU secret. Silent one-click delete is not acceptable.</p>
+      </div>
+
+      <div class="dec" id="D3">
+        <h3>D3 — Re-add posture</h3>
+        <p><strong>Proposed answer:</strong> treat re-add as guided re-onboarding that restores safe defaults and preserved non-secret fields where possible, rather than a minimal “just swap secret” hidden mutation. This better matches the fact that Clawline config is broader than a single credential.</p>
+      </div>
+    </section>
+
+    <section class="card" id="verification">
+      <h2>Verification targets</h2>
+
+      <div class="ver" id="V1"><h3>V1 — Pre-delete live-state proof</h3><p>Show Clawline gateway is running and CLU-authenticated requests work with the current secret before destructive remove.</p></div>
+      <div class="ver" id="V2"><h3>V2 — Controlled stop proof</h3><p>Show destructive remove causes a real gateway stop / listener-down result before config deletion is committed.</p></div>
+      <div class="ver" id="V3"><h3>V3 — No-stale-auth proof</h3><p>Show the old secret no longer authenticates once removal completes.</p></div>
+      <div class="ver" id="V4"><h3>V4 — Fresh-secret proof</h3><p>Show re-add writes a new secret distinct from the prior one.</p></div>
+      <div class="ver" id="V5"><h3>V5 — Post-readd auth proof</h3><p>Show the new secret authenticates CLU requests and the old secret is rejected after re-add.</p></div>
+      <div class="ver" id="V6"><h3>V6 — User-facing UX proof</h3><p>Show the delete confirmation warns about gateway stop and re-onboard impact, and that disable remains separately labeled.</p></div>
+      <div class="ver" id="V7"><h3>V7 — Re-enable gate proof</h3><p>Only after V1–V6 are satisfied may the <code>deleteAccount: undefined</code> suppression be removed.</p></div>
+    </section>
+
+    <section class="card" id="risks">
+      <h2>Risks</h2>
+      <div class="risk" id="K1"><h3>K1 — Stale secret acceptance</h3><p>If the old secret remains valid after re-add, CLU/gateway identity is ambiguous and the product is still broken.</p></div>
+      <div class="risk" id="K2"><h3>K2 — Config deletion before stop</h3><p>Deleting config first can strand a live gateway with no trustworthy on-disk source of truth and no safe way for CLU to reason about it.</p></div>
+      <div class="risk" id="K3"><h3>K3 — Disable/delete UX confusion</h3><p>If the destructive path looks like a harmless disable, users can break the whole Clawline control path accidentally.</p></div>
+      <div class="risk" id="K4"><h3>K4 — Silent field loss</h3><p>Re-add can damage product trust if user-owned non-secret settings disappear without warning or explicit defaulting rules.</p></div>
+    </section>
+
+    <section class="card" id="source-truth">
+      <h2>Source truth inspected</h2>
+      <div class="src" id="S1"><h3>S1</h3><p><code>/Volumes/BlipsAndChitz/tracker/tracking/T188.md</code> — primary ticket statement, product goal, and key questions.</p></div>
+      <div class="src" id="S2"><h3>S2</h3><p>Tracker DB row for T188 in <code>/Volumes/BlipsAndChitz/tracker/tracking/tracker.db</code> — confirms current live state is <code>Spec Writing</code> owned by Rebase.</p></div>
+      <div class="src" id="S3"><h3>S3</h3><p><code>/Users/mike/openclaw/extensions/clawline/src/channel.setup.ts</code> — confirms <code>deleteAccount: undefined</code> suppression still exists.</p></div>
+      <div class="src" id="S4"><h3>S4</h3><p><code>/Users/mike/openclaw/extensions/clawline/src/onboarding.ts</code> — shows current add/setup only enables/configures Clawline defaults; no proven safe delete/re-add orchestration exists there today.</p></div>
+      <div class="src" id="S5"><h3>S5</h3><p><code>/Users/mike/openclaw/src/commands/channels/remove.ts</code> — shows generic remove flow attempts a gateway stop only for plugins with gateway account lifecycle seams; review must not assume this alone proves Clawline-safe destructive delete.</p></div>
+      <div class="src" id="S6"><h3>S6</h3><p><code>/Users/mike/openclaw/src/commands/channels/add.ts</code> — shows add writes config and optional post-write hooks, but does not itself prove fresh-secret activation for Clawline.</p></div>
+      <div class="src" id="S7"><h3>S7</h3><p><code>/Users/mike/openclaw/extensions/clawline/src/runtime/config.ts</code> and <code>config-schema.ts</code> — confirm <code>server.cluSecret</code> is real persisted Clawline config, defaulting to null.</p></div>
+      <div class="src" id="S8"><h3>S8</h3><p><code>/Users/mike/openclaw/extensions/clawline/src/runtime/service.ts</code> — confirms Clawline has an explicit service start/stop handle, which is relevant to the shutdown/restart design space.</p></div>
+    </section>
+
+    <section class="card" id="implementation-shape">
+      <h2>Implementation shape the review should expect</h2>
+      <ul>
+        <li>A Clawline-owned lifecycle path for destructive remove that can deterministically stop the provider service before deleting config.</li>
+        <li>A Clawline-owned re-onboard path that can generate and persist a fresh <code>cluSecret</code> and then make that secret authoritative in the running gateway.</li>
+        <li>Proof-oriented tests that distinguish disable from destructive delete and prove stale-secret rejection.</li>
+        <li>Only after those exist: removal of <code>deleteAccount: undefined</code>.</li>
+      </ul>
+    </section>
+
+    <section class="card" id="adversarial-review">
+      <h2>Adversarial / self-review</h2>
+      <div class="rev" id="RV1">
+        <h3>RV1 — Ticket questions answered?</h3>
+        <p class="status-ok">Satisfied.</p>
+        <p>The spec answers safe delete behavior, gateway shutdown behavior, re-add behavior, secret rotation truth, and the gate for re-enabling <code>deleteAccount</code>.</p>
+      </div>
+      <div class="rev" id="RV2">
+        <h3>RV2 — Did the spec incorrectly promote current implementation to product truth?</h3>
+        <p class="status-ok">Satisfied.</p>
+        <p>Current code is used only as evidence of what exists today, not as authority for what the product should do.</p>
+      </div>
+      <div class="rev" id="RV3">
+        <h3>RV3 — Are there unresolved product decisions?</h3>
+        <p class="status-warn">Unproven but bounded.</p>
+        <p>D1–D3 remain review questions, but each has a concrete proposed answer. They do not block Spec Review; they are exactly what Spec Review should confirm or amend.</p>
+      </div>
+      <div class="rev" id="RV4">
+        <h3>RV4 — Is there any blocker that prevents spec review?</h3>
+        <p class="status-ok">No blocker for Spec Review.</p>
+        <p>The blocker was operational (spec-agent auth), not product ambiguity. This document is reviewable now.</p>
+      </div>
+    </section>
+  </div>
+</body>
+</html>

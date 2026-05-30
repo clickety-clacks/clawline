@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Clawline Keyboard Shortcut Inventory</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: Canvas;
+      --fg: CanvasText;
+      --muted: color-mix(in srgb, CanvasText 64%, transparent);
+      --line: color-mix(in srgb, CanvasText 18%, transparent);
+      --panel: color-mix(in srgb, Canvas 92%, CanvasText 8%);
+      --accent: #2f7d68;
+      --warn: #a35b00;
+      --bad: #a13b3b;
+      --radius: 8px;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+    }
+    html, body { margin: 0; background: var(--bg); color: var(--fg); }
+    body { padding: 28px; line-height: 1.45; }
+    main { max-width: 1180px; margin: 0 auto; }
+    h1 { font-size: 28px; margin: 0 0 8px; letter-spacing: 0; }
+    h2 { font-size: 19px; margin: 30px 0 10px; letter-spacing: 0; }
+    h3 { font-size: 15px; margin: 20px 0 8px; letter-spacing: 0; }
+    p { margin: 0 0 12px; }
+    code, kbd {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.94em;
+      border: 1px solid var(--line);
+      border-radius: 5px;
+      padding: 1px 5px;
+      background: var(--panel);
+    }
+    kbd { white-space: nowrap; }
+    .meta {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+      gap: 8px;
+      margin: 16px 0 22px;
+    }
+    .meta div, .note {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--panel);
+      padding: 10px 12px;
+    }
+    .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+    .value { margin-top: 2px; font-weight: 600; }
+    table { width: 100%; border-collapse: collapse; margin: 8px 0 18px; }
+    th, td { text-align: left; vertical-align: top; border-bottom: 1px solid var(--line); padding: 9px 8px; }
+    th { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+    td:first-child { width: 180px; }
+    td:nth-child(2) { width: 240px; }
+    .status { font-weight: 650; }
+    .active { color: var(--accent); }
+    .conditional { color: var(--warn); }
+    .legacy { color: var(--muted); }
+    .risk { color: var(--bad); }
+    ul { margin: 8px 0 18px 21px; padding: 0; }
+    li { margin: 5px 0; }
+    a { color: LinkText; }
+    @media (max-width: 760px) {
+      body { padding: 18px; }
+      table, thead, tbody, tr, th, td { display: block; }
+      thead { display: none; }
+      tr { border: 1px solid var(--line); border-radius: var(--radius); margin: 0 0 10px; background: var(--panel); }
+      td { border-bottom: 0; width: auto !important; padding: 7px 10px; }
+      td::before { content: attr(data-label); display: block; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Clawline Keyboard Shortcut Inventory</h1>
+  <p>This document is the primary product authority for Clawline keyboard shortcuts: what shortcuts exist, what they do, where they apply, and how conflicts resolve. Ticket specs and historical tracker notes are provenance only unless this document links or incorporates their behavior.</p>
+
+  <section class="meta" aria-label="Document metadata">
+    <div><div class="label">Status</div><div class="value">Primary shortcut authority</div></div>
+    <div><div class="label">Last updated</div><div class="value">2026-05-21</div></div>
+    <div><div class="label">Primary authority</div><div class="value">This document</div></div>
+    <div><div class="label">Scope</div><div class="value">Native, Catalyst, Web where supported</div></div>
+  </section>
+
+  <section class="note">
+    <p><strong>Product rule:</strong> this document owns Clawline shortcut product truth. The unified keyboard router is the implementation architecture that enforces this contract. Platform hooks normalize key events and report context; they do not invent precedence or own product behavior locally.</p>
+    <p><strong>Precedence rule:</strong> transient explicit surfaces win first, notification-global commands win over focused text fields when listed here, text fields own ordinary text editing, and transcript/chat scrolling receives only unclaimed keys.</p>
+    <p><strong>Review rule:</strong> every keyboard-related ticket review must receive this document as a source-of-truth artifact and mark each affected shortcut contract as satisfied, unsatisfied, unproven, or out-of-scope.</p>
+    <p><strong>Implementation state:</strong> every shortcut family in this inventory is expected to have an implementation path today except vim-mode suggestion keys, which remain planned until T314 implementation ships.</p>
+  </section>
+
+  <h2>Routing Precedence</h2>
+  <table>
+    <thead><tr><th>Priority</th><th>Owner</th><th>Keys</th><th>Rule</th></tr></thead>
+    <tbody>
+      <tr><td data-label="Priority">PR-01</td><td data-label="Owner">Visible picker/menu surface</td><td data-label="Keys"><kbd>Arrow Up</kbd>, <kbd>Arrow Down</kbd>, surface activation keys including <kbd>Return</kbd>/<kbd>Enter</kbd>, and surface cancel keys including <kbd>Esc</kbd> where supported</td><td data-label="Rule">Any visible picker, selector, popup, or context menu owns arrow navigation before underlying composer, reply, chat, or transcript handling. This includes the @mention popup, chat list selector, chat bubble context menu, notification context/action menu, and future picker/menu surfaces.</td></tr>
+      <tr><td data-label="Priority">PR-02</td><td data-label="Owner">Composer mention picker acceptance</td><td data-label="Keys"><kbd>Tab</kbd>, <kbd>Return</kbd>, <kbd>Enter</kbd></td><td data-label="Rule">When the composer @mention picker is visible, Tab and Return/Enter accept the highlighted mention before composer submit. Arrow navigation itself is covered by PR-01 for all visible pickers.</td></tr>
+      <tr><td data-label="Priority">PR-03</td><td data-label="Owner">Assigned notification bubble</td><td data-label="Keys"><kbd>Cmd-0</kbd>...<kbd>Cmd-9</kbd>, <kbd>Cmd-Shift-0</kbd>...<kbd>Cmd-Shift-9</kbd>, <kbd>Cmd-Shift-Option-0</kbd>...<kbd>Cmd-Shift-Option-9</kbd></td><td data-label="Rule">Always wins while the assigned notification exists, even over focused composer or reply text.</td></tr>
+      <tr><td data-label="Priority">PR-04</td><td data-label="Owner">Navigation fan-out resolver</td><td data-label="Keys"><kbd>Cmd-J</kbd>, <kbd>Cmd-K</kbd></td><td data-label="Rule">These navigation commands are always available. <kbd>Cmd-J</kbd>/<kbd>Cmd-K</kbd> fan out to scroll notification contents and visible scrollable chat-bubble contents simultaneously. Focus in composer or reply text must not disable them.</td></tr>
+      <tr><td data-label="Priority">PR-05</td><td data-label="Owner">Notification reply field</td><td data-label="Keys">Same editing keys as composer: printable text, selection, copy/cut/paste, undo/redo, arrows, Option-word movement/deletion, platform text-control chords such as <kbd>Ctrl-A</kbd>, <kbd>Ctrl-E</kbd>, <kbd>Ctrl-W</kbd>, <kbd>Ctrl-C</kbd>, plus <kbd>Return</kbd>, modified Return, and <kbd>Esc</kbd></td><td data-label="Rule">Reply fields are real text fields. After higher-priority notification-global commands are resolved, they must preserve the same text editing command contract as the prompt field.</td></tr>
+      <tr><td data-label="Priority">PR-06</td><td data-label="Owner">Composer</td><td data-label="Keys">Printable text, selection, copy/cut/paste, undo/redo, arrows, Option-word movement/deletion, platform text-control chords such as <kbd>Ctrl-A</kbd>, <kbd>Ctrl-E</kbd>, <kbd>Ctrl-W</kbd>, <kbd>Ctrl-C</kbd>, normal submit keys, modified newline keys</td><td data-label="Rule">Composer owns normal typing, editing, and submission when no higher-priority surface claims the event.</td></tr>
+      <tr><td data-label="Priority">PR-07</td><td data-label="Owner">Transcript/chat</td><td data-label="Keys"><kbd>Cmd-Shift-H</kbd>, <kbd>Cmd-Shift-L</kbd>, <kbd>Cmd-Shift-J</kbd>, <kbd>Cmd-Shift-K</kbd>, <kbd>Space</kbd>, <kbd>Return</kbd>, <kbd>/</kbd>, <kbd>;</kbd>, <kbd>Cmd-L</kbd>, <kbd>Cmd-;</kbd>/<kbd>Ctrl-;</kbd>, plus unclaimed navigation/scroll keys supported by platform</td><td data-label="Rule">Transcript/chat receives only unclaimed keys after transient surfaces, notification globals, navigation target resolution, and focused text editing have declined the event.</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Current Shortcut Inventory</h2>
+  <table>
+    <thead><tr><th>Shortcut</th><th>Behavior</th><th>Context</th><th>Source</th><th>Status</th></tr></thead>
+    <tbody>
+      <tr><td data-label="Shortcut"><kbd>Cmd-0</kbd>...<kbd>Cmd-9</kbd></td><td data-label="Behavior">Open the assigned notification action menu with <strong>Go to Chat...</strong> highlighted.</td><td data-label="Context">Visible assigned notification exists.</td><td data-label="Source">T307, T343</td><td data-label="Status" class="status active">Required</td></tr>
+      <tr><td data-label="Shortcut"><kbd>Cmd-Shift-0</kbd>...<kbd>Cmd-Shift-9</kbd></td><td data-label="Behavior">Toggle reply mode for the assigned notification.</td><td data-label="Context">Visible assigned notification exists.</td><td data-label="Source">T307, T343</td><td data-label="Status" class="status active">Required</td></tr>
+      <tr><td data-label="Shortcut"><kbd>Cmd-Shift-Option-0</kbd>...<kbd>Cmd-Shift-Option-9</kbd></td><td data-label="Behavior">Dismiss the assigned notification.</td><td data-label="Context">Visible assigned notification exists.</td><td data-label="Source">T307, T343</td><td data-label="Status" class="status active">Required</td></tr>
+      <tr><td data-label="Shortcut"><kbd>Cmd-J</kbd> / <kbd>Cmd-K</kbd></td><td data-label="Behavior">Scroll notification contents and visible scrollable chat-bubble contents simultaneously, using the same directional convention for both target classes.</td><td data-label="Context">Always available; not a fallback choice. Focus in composer/reply text must not disable either scroll target.</td><td data-label="Source">T307, T228, T343</td><td data-label="Status" class="status active">Required</td></tr>
+      <tr><td data-label="Shortcut"><kbd>Cmd-Shift-J</kbd> / <kbd>Cmd-Shift-K</kbd></td><td data-label="Behavior">Scroll the chat area/transcript only. These shortcuts are not notification shortcuts and do not scroll notification contents.</td><td data-label="Context">Always available when the chat area owns navigation; focused text editing and higher-priority transient surfaces can claim their own editing/menu keys first.</td><td data-label="Source">T221, T228, T343</td><td data-label="Status" class="status active">Required</td></tr>
+      <tr><td data-label="Shortcut"><kbd>Cmd-\</kbd></td><td data-label="Behavior">Toggle notification stack between normal placement and right-edge docked/peek state.</td><td data-label="Context">Notification stack exists.</td><td data-label="Source">T307</td><td data-label="Status" class="status active">Required</td></tr>
+      <tr><td data-label="Shortcut"><kbd>Cmd-Shift-Option--</kbd></td><td data-label="Behavior">Clear all visible and hidden notifications.</td><td data-label="Context">Notification stack exists.</td><td data-label="Source">T307, T343, Flynn replacement 2026-05-24</td><td data-label="Status" class="status active">Required</td></tr>
+      <tr><td data-label="Shortcut"><kbd>Cmd--</kbd></td><td data-label="Behavior">Reserved for font-scale decrease; invalid for notification clear-all.</td><td data-label="Context">Notification stack exists.</td><td data-label="Source">T307, Flynn conflict report 2026-05-24</td><td data-label="Status" class="status active">Reserved</td></tr>
+      <tr><td data-label="Shortcut"><kbd>Return</kbd> in notification reply</td><td data-label="Behavior">Send the reply to the notification source chat only.</td><td data-label="Context">Notification reply field focused.</td><td data-label="Source">T307</td><td data-label="Status" class="status active">Required</td></tr>
+      <tr><td data-label="Shortcut"><kbd>Esc</kbd> in notification reply</td><td data-label="Behavior">Cancel reply mode without dismissing the notification.</td><td data-label="Context">Notification reply field focused.</td><td data-label="Source">T307</td><td data-label="Status" class="status active">Required</td></tr>
+      <tr><td data-label="Shortcut">Text editing keys in reply fields</td><td data-label="Behavior">Match the prompt field: printable text, selection, copy/cut/paste, undo/redo, arrow navigation, Option-word movement/deletion, and platform text-control chords including examples such as <kbd>Ctrl-A</kbd>, <kbd>Ctrl-E</kbd>, <kbd>Ctrl-W</kbd>, and <kbd>Ctrl-C</kbd>.</td><td data-label="Context">Notification reply field focused, after notification-global shortcuts have declined the event.</td><td data-label="Source">Primary authority</td><td data-label="Status" class="status active">Required</td></tr>
+      <tr><td data-label="Shortcut"><kbd>Arrow Up</kbd> / <kbd>Arrow Down</kbd></td><td data-label="Behavior">Navigate the active visible picker/menu surface: @mention popup, chat list selector, chat bubble context menu, notification context/action menu, or any future picker/menu.</td><td data-label="Context">Any picker/menu visible; visible surface has precedence over underlying text, chat, and transcript handling.</td><td data-label="Source">Primary authority</td><td data-label="Status" class="status active">Required</td></tr>
+      <tr><td data-label="Shortcut"><kbd>Return</kbd> / <kbd>Enter</kbd></td><td data-label="Behavior">Accept the highlighted composer mention while the mention picker is open; activate the selected row/action while a visible picker/menu owns activation; otherwise submit composer text when composer owns the event.</td><td data-label="Context">Resolved by router precedence.</td><td data-label="Source">T307, T343</td><td data-label="Status" class="status active">Required</td></tr>
+      <tr><td data-label="Shortcut"><kbd>Tab</kbd></td><td data-label="Behavior">Accept the highlighted leading <code>@</code> chat mention into a mention chip.</td><td data-label="Context">Composer mention picker open.</td><td data-label="Source">T307</td><td data-label="Status" class="status active">Required</td></tr>
+      <tr><td data-label="Shortcut"><kbd>Cmd-F</kbd></td><td data-label="Behavior">Enter local vim mode for visible assistant-message suggestions.</td><td data-label="Context">Transcript/chat context only; native find wins inside text fields.</td><td data-label="Source">T314</td><td data-label="Status" class="status conditional">Planned / not implemented</td></tr>
+      <tr><td data-label="Shortcut">Assigned letter in vim mode</td><td data-label="Behavior">Submit the matching suggestion prompt through the current-chat send path and exit vim mode.</td><td data-label="Context">Vim mode active.</td><td data-label="Source">T314</td><td data-label="Status" class="status conditional">Planned / not implemented</td></tr>
+      <tr><td data-label="Shortcut"><kbd>Esc</kbd> in vim mode</td><td data-label="Behavior">Exit vim mode without side effects.</td><td data-label="Context">Vim mode active.</td><td data-label="Source">T314</td><td data-label="Status" class="status conditional">Planned / not implemented</td></tr>
+      <tr><td data-label="Shortcut"><kbd>Cmd-L</kbd></td><td data-label="Behavior">Focus Prompt Input.</td><td data-label="Context">App-level prompt focus shortcut.</td><td data-label="Source">T221/T216 contract</td><td data-label="Status" class="status active">Existing contract</td></tr>
+      <tr><td data-label="Shortcut"><kbd>Space</kbd> / <kbd>Return</kbd></td><td data-label="Behavior">Focus Prompt Input when no editable or interactive element owns the key.</td><td data-label="Context">Transcript/background context.</td><td data-label="Source">T221</td><td data-label="Status" class="status active">Existing contract</td></tr>
+      <tr><td data-label="Shortcut"><kbd>/</kbd> / <kbd>;</kbd></td><td data-label="Behavior">Open Streams when no editable or interactive element owns the key.</td><td data-label="Context">Transcript/background context; web parity where browser allows.</td><td data-label="Source">T221, T270</td><td data-label="Status" class="status active">Existing contract</td></tr>
+      <tr><td data-label="Shortcut"><kbd>Cmd-;</kbd> / <kbd>Ctrl-;</kbd></td><td data-label="Behavior">Open Streams, including while Prompt Input is focused.</td><td data-label="Context">Native and web parity where available.</td><td data-label="Source">T221, T270</td><td data-label="Status" class="status active">Existing contract</td></tr>
+      <tr><td data-label="Shortcut"><kbd>Cmd-/</kbd></td><td data-label="Behavior">Unregistered/reserved; must not accidentally open Streams.</td><td data-label="Context">Preserved contract.</td><td data-label="Source">T221/T216 contract</td><td data-label="Status" class="status conditional">Reserved</td></tr>
+      <tr><td data-label="Shortcut"><kbd>Cmd-.</kbd></td><td data-label="Behavior">Open the anchored typing-cancel confirmation when a prompt is in flight.</td><td data-label="Context">Typed cancellation path; same as tapping typing indicator.</td><td data-label="Source">T217, T288</td><td data-label="Status" class="status active">Existing contract</td></tr>
+      <tr><td data-label="Shortcut"><kbd>Cmd-Shift-H</kbd> / <kbd>Cmd-Shift-L</kbd></td><td data-label="Behavior">Navigate chats.</td><td data-label="Context">When chat navigation owns the event.</td><td data-label="Source">T221/T216 contract</td><td data-label="Status" class="status active">Existing contract</td></tr>
+      <tr><td data-label="Shortcut"><kbd>Cmd-+</kbd> / <kbd>Cmd--</kbd> / <kbd>Cmd-0</kbd></td><td data-label="Behavior">Increase font scale, decrease font scale, or reset font scale to 100%, then show a transient scale toast.</td><td data-label="Context">iPad/iOS font scale. <kbd>Cmd--</kbd> must not be reused for notification clear-all; notification clear-all uses <kbd>Cmd-Shift-Option--</kbd>. <kbd>Cmd-0</kbd> remains a conflict with assigned notification slot 0 and needs router conflict proof.</td><td data-label="Source">T134, T307</td><td data-label="Status" class="status conditional">Needs router conflict proof</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Platform Notes</h2>
+  <ul>
+    <li>On iOS/iPadOS, notification shortcut numbers are visible only when hardware-keyboard availability is detected.</li>
+    <li>On macOS/Catalyst, hardware-keyboard shortcuts are assumed available unless the platform reports otherwise.</li>
+    <li>On web, browser/system-owned conflicts remain unsupported where the browser cannot safely expose the shortcut.</li>
+    <li>Platform bridges may need responder-layer capture for UIKit/AppKit/Web, but they remain bridges. The router remains the policy authority.</li>
+  </ul>
+
+  <h2>Open Risks</h2>
+  <ul>
+    <li><strong>Font-scale conflicts:</strong> font scale uses <kbd>Cmd-+</kbd> to increase, <kbd>Cmd--</kbd> to decrease, and <kbd>Cmd-0</kbd> to reset to 100%. Notification clear-all uses <kbd>Cmd-Shift-Option--</kbd>, matching the assigned-notification dismiss family. <kbd>Cmd-0</kbd> also opens the assigned notification action menu for slot 0 and still needs explicit router proof.</li>
+    <li><strong>Drift risk:</strong> new SwiftUI <code>keyboardShortcut</code>, UIKit responder overrides, or web <code>onKeyDown</code> handlers can bypass the router. Reviews for keyboard work must check this document plus T343.</li>
+    <li><strong>Inventory gap:</strong> older archived shortcuts may exist outside active specs. When found, add them here with source and conflict notes rather than treating tickets as the long-term inventory.</li>
+  </ul>
+
+  <h2>Provenance Documents</h2>
+  <p>These documents explain where parts of this inventory came from. They are not shortcut authority when they conflict with this document.</p>
+  <ul>
+    <li><code>/Users/mike/shared-workspace/clawline/specs/t343-unified-keyboard-routing.html</code></li>
+    <li><code>/Users/mike/shared-workspace/clawline/specs/t307-cross-chat-notifications.html</code></li>
+    <li><code>/Users/mike/shared-workspace/clawline/specs/t314-vim-mode-suggestions.html</code></li>
+    <li><code>/Users/mike/.openclaw/workspace/tracking/T221.md</code></li>
+    <li><code>/Users/mike/.openclaw/workspace/tracking/T270.md</code></li>
+    <li><code>/Users/mike/.openclaw/workspace/tracking/T217.md</code> and <code>T288.md</code></li>
+    <li><code>/Users/mike/.openclaw/workspace/tracking/T228.md</code></li>
+    <li><code>/Users/mike/.openclaw/workspace/tracking/T134.md.archived</code></li>
+  </ul>
+</main>
+</body>
+</html>

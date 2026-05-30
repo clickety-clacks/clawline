@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>T1136 iOS Chat Popup Focus</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --fg: #1d2528;
+      --muted: #5f6f73;
+      --line: #cfd8d6;
+      --panel: #ffffff;
+      --accent: #176b6b;
+      --code: #eef3f2;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --fg: #eef4f3;
+        --muted: #a8b6b8;
+        --line: #304043;
+        --panel: #182022;
+        --accent: #6ec7bc;
+        --code: #202b2d;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: transparent;
+      color: var(--fg);
+      font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    main {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 48px 22px 72px;
+    }
+    h1, h2, h3 {
+      line-height: 1.15;
+      letter-spacing: 0;
+    }
+    h1 {
+      margin: 0 0 8px;
+      font-size: clamp(2rem, 4vw, 3rem);
+    }
+    h2 {
+      margin-top: 34px;
+      padding-top: 20px;
+      border-top: 1px solid var(--line);
+      font-size: 1.4rem;
+    }
+    h3 {
+      margin-top: 22px;
+      font-size: 1.08rem;
+    }
+    p { margin: 10px 0; }
+    ul { padding-left: 1.25rem; }
+    li { margin: 7px 0; }
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.92em;
+      background: var(--code);
+      border-radius: 6px;
+      padding: 0.12rem 0.28rem;
+    }
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      margin: 16px 0;
+      background: var(--panel);
+    }
+    th, td {
+      border: 1px solid var(--line);
+      padding: 10px 12px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      color: var(--accent);
+      font-weight: 700;
+    }
+    .meta {
+      color: var(--muted);
+      margin-bottom: 24px;
+    }
+    .callout {
+      border: 1px solid var(--line);
+      border-left: 5px solid var(--accent);
+      background: var(--panel);
+      padding: 14px 16px;
+      margin: 18px 0;
+      border-radius: 8px;
+    }
+    .decision { font-weight: 700; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>T1136 iOS Chat Popup Focus</h1>
+  <p class="meta">Focused Clawline technical specification for T1136. Prepared 2026-05-24.</p>
+
+  <section class="callout">
+    <p class="decision">Decision: on iOS/iPadOS, opening the chat stream popup while the software keyboard is already visible transfers text focus from the prompt composer to the popup filter. Closing that popup while the software keyboard is still visible restores focus to the prompt composer only when the popup focus handoff actually displaced composer focus.</p>
+  </section>
+
+  <h2>Source Notes</h2>
+  <ul>
+    <li>The T1136 product prompt is the source of truth. Current source was inspected only to identify affected surfaces and constraints.</li>
+    <li>Tracker context command <code>scripts/janus-ticket-context --ssh-host tars --ticket T1136 --related-links-only</code> was attempted from <code>/Users/mike/src/clawline</code>, but that helper is not present in this checkout. No Tracker state transition is part of this spec task.</li>
+    <li>Engram source <code>082a2586-6323-4d87-98ce-905f21738371</code> was queried with <code>engram peek</code>; it returned no readable content in this environment and did not affect requirements.</li>
+    <li>The relevant Swift path is shared by iOS/iPadOS and Catalyst-adjacent build surfaces, but the required behavior is scoped to iOS/iPadOS software-keyboard state. Web was not found to share this native focus path.</li>
+  </ul>
+
+  <h2>Affected Source Surfaces</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Path</th>
+        <th>Reason</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>/Users/mike/src/clawline/ios/Clawline/Clawline/Views/Chat/ChatView.swift</code></td>
+        <td>Owns stable composer focus state <code>isInputFocused</code>, software keyboard visibility, prompt focus trigger <code>focusRequestID</code>, stream popup route state, popup open/close bindings, and the dot/keyboard shortcut entry paths.</td>
+      </tr>
+      <tr>
+        <td><code>/Users/mike/src/clawline/ios/Clawline/Clawline/Views/Chat/StreamManagerSheet.swift</code></td>
+        <td>Owns the popup filter <code>TextField</code>, <code>isSearchFieldFocused</code>, search focus request handling, filtering, selection, arrow-key movement, Return activation, and popup teardown cleanup.</td>
+      </tr>
+      <tr>
+        <td><code>/Users/mike/src/clawline/ios/Clawline/Clawline/Views/Chat/KeyboardCommandRouter.swift</code></td>
+        <td>Defines composer-focused keyboard ownership records. T1136 must not change hardware keyboard routing unless implementation discovers a necessary focus-hint update for the existing popup/search path.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>Requirements</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Requirement</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>R1136-01</code></td>
+        <td>On iOS/iPadOS, if the chat stream popup opens while the software keyboard is already visible, the popup filter input receives text focus.</td>
+      </tr>
+      <tr>
+        <td><code>R1136-02</code></td>
+        <td>When the popup closes while the software keyboard is still visible, focus returns to the prompt composer only if T1136's popup-opening focus handoff displaced the composer for that popup presentation.</td>
+      </tr>
+      <tr>
+        <td><code>R1136-03</code></td>
+        <td>Opening the popup when the software keyboard is not visible must not summon the software keyboard solely for the popup filter.</td>
+      </tr>
+      <tr>
+        <td><code>R1136-04</code></td>
+        <td>If the popup closes after the software keyboard has been dismissed, T1136 must not restore composer focus or re-open the software keyboard.</td>
+      </tr>
+      <tr>
+        <td><code>R1136-05</code></td>
+        <td>The software-keyboard focus behavior applies whether the popup is opened by touch on the stream dots or through an existing keyboard command path.</td>
+      </tr>
+      <tr>
+        <td><code>R1136-06</code></td>
+        <td>Existing popup filtering, highlighted-row synchronization, arrow-key navigation, Return activation, clear-filter behavior, inline rename focus, track-picker behavior, and stream selection behavior remain unchanged except for the specified focus handoff.</td>
+      </tr>
+      <tr>
+        <td><code>R1136-07</code></td>
+        <td>Normal prompt behavior when the popup is not open remains unchanged, including typing, submit, attachment picker focus restoration, mention picker behavior, and prompt focus shortcuts.</td>
+      </tr>
+      <tr>
+        <td><code>R1136-08</code></td>
+        <td>Hardware keyboard behavior is preserved. T1136 must not add new hardware shortcuts, remove existing popup focus from keyboard-open paths, or change keyboard router precedence unless required only to keep existing behavior working after the software-keyboard handoff.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>Named Edge Cases</h2>
+  <ul>
+    <li><code>EC1136-01</code>: Opening popup without software keyboard visible leaves popup filter unfocused and does not present the keyboard.</li>
+    <li><code>EC1136-02</code>: Closing popup after keyboard dismissal leaves the composer unfocused and does not re-present the keyboard.</li>
+    <li><code>EC1136-03</code>: Popup opened by touch while the software keyboard is up focuses the filter, matching the keyboard-open path.</li>
+    <li><code>EC1136-04</code>: Popup opened by keyboard path preserves existing hardware-keyboard filter/navigation behavior; if software keyboard is also up, the filter is focused by the T1136 rule.</li>
+    <li><code>EC1136-05</code>: While the filter is focused and filtering text changes the list, focus remains in the filter; selection synchronization and Return activation continue to work.</li>
+    <li><code>EC1136-06</code>: Restoration to the composer occurs only when the popup presentation took focus from the composer because the software keyboard was already up, and only while the software keyboard remains up at close time.</li>
+  </ul>
+
+  <h2>Implementation Handoff</h2>
+  <ul>
+    <li>Scope implementation to the native iOS/iPadOS chat popup focus path. Do not add provider, web, demo, harness, or unrelated popup behavior.</li>
+    <li>The likely ownership boundary is <code>ChatView</code>: detect software keyboard visibility at popup open, request popup search focus for that presentation, remember whether composer focus should be restored, and clear that restoration flag on close or dismissal paths.</li>
+    <li><code>StreamManagerSheet</code> should continue consuming explicit search focus request IDs and should not infer product behavior from its own appearance alone.</li>
+    <li>Do not move stable composer focus state into <code>MessageInputBar</code>; source comments identify that as fragile because the input bar is recreated during geometry changes.</li>
+    <li>Open questions: none from product truth. Exact implementation blocker: the Tracker context helper referenced by local process instructions is absent from this checkout.</li>
+  </ul>
+
+  <h2>Verification Targets</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Target</th>
+        <th>Checks</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>V1136-SIM-01</code></td>
+        <td>iOS Simulator, software keyboard visible before popup opens.</td>
+        <td>Focus enters popup filter on open; typed text filters streams; closing popup while keyboard remains visible restores composer focus and continued typing goes into the prompt.</td>
+      </tr>
+      <tr>
+        <td><code>V1136-SIM-02</code></td>
+        <td>iOS Simulator, software keyboard hidden before popup opens.</td>
+        <td>Opening popup does not summon keyboard; closing popup does not focus composer.</td>
+      </tr>
+      <tr>
+        <td><code>V1136-SIM-03</code></td>
+        <td>iOS Simulator, keyboard dismissed while popup is open.</td>
+        <td>Closing popup does not restore composer focus and does not re-open keyboard.</td>
+      </tr>
+      <tr>
+        <td><code>V1136-DEV-01</code></td>
+        <td>Physical iPhone or iPad with software keyboard.</td>
+        <td>Repeat <code>V1136-SIM-01</code> and <code>V1136-SIM-03</code> on device because this bug is keyboard/focus behavior.</td>
+      </tr>
+      <tr>
+        <td><code>V1136-DEV-02</code></td>
+        <td>Physical iPad with hardware keyboard, or equivalent supported manual hardware-keyboard validation target.</td>
+        <td>Existing popup open, filter, arrow navigation, Return activation, and composer behavior remain unchanged.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>Proof Gates</h2>
+  <ul>
+    <li><code>PG1136-01</code>: Simulator proof records the three simulator verification targets above. XcodeBuildMCP screenshots/UI hierarchy/log notes are acceptable; demo pages or test harnesses are not proof.</li>
+    <li><code>PG1136-02</code>: Device proof records software-keyboard behavior on a real iOS/iPadOS device before the ticket moves to human verification. Demo pages or test harnesses are not proof.</li>
+    <li><code>PG1136-03</code>: Hardware-keyboard regression proof records that existing popup filtering/navigation behavior still works on a supported hardware-keyboard target.</li>
+  </ul>
+
+  <h2>Adversarial Self-Review</h2>
+  <ul>
+    <li>Checked against product truth: the spec requires focus into the filter only when the software keyboard is already up, and composer restoration only when the keyboard is still up.</li>
+    <li>Checked against overreach: the spec does not add validation, security behavior, provider changes, web behavior, demo harnesses, or new keyboard shortcuts.</li>
+    <li>Checked edge cases: opening without keyboard, closing after keyboard dismissal, touch versus keyboard entry, filtering while focused, and conditional composer restoration are explicit.</li>
+    <li>Checked preservation requirements: normal prompt behavior, hardware keyboard behavior, and existing popup filtering/navigation are non-regression requirements.</li>
+  </ul>
+</main>
+</body>
+</html>

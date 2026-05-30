@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>T1153 Notification Update Date Separators</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: transparent;
+      --fg: var(--clawline-fg, #1d2528);
+      --muted: #5f6f73;
+      --line: #cfd8d6;
+      --panel: #ffffff;
+      --accent: #176b6b;
+      --warn: #8a5400;
+      --code: #eef3f2;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --fg: var(--clawline-fg, #eef4f3);
+        --muted: #a8b6b8;
+        --line: #304043;
+        --panel: #182022;
+        --accent: #6ec7bc;
+        --warn: #e2b45e;
+        --code: #202b2d;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--fg);
+      font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    main {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 48px 22px 72px;
+    }
+    h1, h2, h3 { line-height: 1.15; }
+    h1 { margin: 0 0 8px; font-size: clamp(2rem, 4vw, 3rem); }
+    h2 { margin-top: 42px; padding-top: 22px; border-top: 1px solid var(--line); font-size: 1.45rem; }
+    h3 { margin-top: 28px; font-size: 1.1rem; }
+    p { margin: 10px 0; }
+    ul, ol { padding-left: 1.3rem; }
+    li { margin: 7px 0; }
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.92em;
+      background: var(--code);
+      border-radius: 6px;
+      padding: 0.12rem 0.28rem;
+    }
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      margin: 16px 0;
+      background: var(--panel);
+    }
+    th, td {
+      border: 1px solid var(--line);
+      padding: 10px 12px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th { color: var(--accent); font-weight: 700; }
+    .meta { color: var(--muted); margin-bottom: 28px; }
+    .callout {
+      border: 1px solid var(--line);
+      border-left: 5px solid var(--accent);
+      background: var(--panel);
+      padding: 14px 16px;
+      margin: 18px 0;
+      border-radius: 8px;
+    }
+    .warning { border-left-color: var(--warn); }
+    .decision { font-weight: 700; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>T1153 Notification Update Date Separators</h1>
+  <p class="meta">Self-contained Clawline product and technical specification for visually separating newly appended notification content inside an existing notification bubble. Prepared 2026-05-27 for T1153.</p>
+
+  <section class="callout">
+    <p class="decision">Decision: when Clawline appends new content to an already-visible notification for the same source conversation, the notification must insert a horizontal separator with a human-readable date/time label between the older content and the appended content.</p>
+    <p>The separator is a readability seam inside one existing notification card. It must preserve the current notification controls, layout hierarchy, and interaction model while making the update moment obvious on the real notification surface.</p>
+  </section>
+
+  <h2>Source Notes</h2>
+  <ul>
+    <li>Source of truth is Tracker ticket <code>T1153</code> in <code>/Volumes/BlipsAndChitz/tracker/tracking/tracker.db</code>, including the Janus ticket context and goal/next-step text.</li>
+    <li><code>scripts/janus-ticket-context</code> returned synthesized DB context because <code>/Users/mike/.openclaw/workspace/tracking/T1153.md</code> does not exist yet.</li>
+    <li>This spec is grounded in the ticket requirement only. It does not infer product truth from current implementation details.</li>
+    <li>Required proof is visual/product verification on the real Clawline notification surface, not simulator-only or unit-test-only evidence.</li>
+  </ul>
+
+  <h2>Goals</h2>
+  <ul>
+    <li>Make appended content inside an existing notification visually distinct from earlier content.</li>
+    <li>Show a human-readable time marker at the boundary where the new content begins.</li>
+    <li>Preserve the notification's existing controls, stack behavior, and overall card layout.</li>
+    <li>Keep the change local to appended notification rendering rather than introducing a new notification type.</li>
+  </ul>
+
+  <h2>Non-Goals</h2>
+  <ul>
+    <li>No redesign of notification actions, docking, peeking, reply controls, or stack placement.</li>
+    <li>No new notification history view, inbox, badge, or expanded transcript mode.</li>
+    <li>No requirement here to restyle normal single-message notifications that do not append content.</li>
+    <li>No implementation, deployment, or merge procedure is defined by this spec.</li>
+  </ul>
+
+  <h2>Terminology</h2>
+  <table>
+    <thead>
+      <tr><th>Term</th><th>Meaning</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Notification card</td><td>The existing Clawline notification surface for one conversation/source stream.</td></tr>
+      <tr><td>Existing content</td><td>The message content already visible in that notification before an update arrives.</td></tr>
+      <tr><td>Appended content</td><td>Newly added message content merged into the same notification card instead of creating a new separate card.</td></tr>
+      <tr><td>Date separator</td><td>A horizontal divider row with a human-readable date/time label that marks the boundary between existing content and appended content.</td></tr>
+      <tr><td>Human-readable date/time</td><td>A user-facing label such as <code>12:31 PM</code>, <code>Today 12:31 PM</code>, or <code>Wed 12:31 PM</code> that can be read directly without raw timestamps.</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Product Requirements</h2>
+  <table>
+    <thead>
+      <tr><th>ID</th><th>Requirement</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>R1</td><td>When new content is appended to an existing notification card, Clawline must insert exactly one date separator between the older visible content and the first appended item from that update.</td></tr>
+      <tr><td>R2</td><td>The separator must include a horizontal visual rule plus a human-readable date/time label that indicates when the appended block began.</td></tr>
+      <tr><td>R3</td><td>The date/time label must be derived from the appended content's timestamp boundary, not from arbitrary render time if a message timestamp exists.</td></tr>
+      <tr><td>R4</td><td>The separator must remain visually subordinate to the message content: readable and obvious, but not louder than sender/content/action controls.</td></tr>
+      <tr><td>R5</td><td>Existing notification controls and layout must remain intact. The separator must not displace, remove, or restyle the current control row in a way that changes product behavior.</td></tr>
+      <tr><td>R6</td><td>If multiple new messages are appended in one update burst, they share one separator at the start of the appended block rather than receiving one separator per message.</td></tr>
+      <tr><td>R7</td><td>If a notification is initially created with fresh content rather than appended into an existing card, no extra separator is inserted at the top solely because the notification exists.</td></tr>
+      <tr><td>R8</td><td>Repeated append cycles to the same notification card must create a new separator for each distinct appended block so the user can see each update boundary in order.</td></tr>
+      <tr><td>R9</td><td>The separator treatment must work on the real Clawline notification surface in the product's supported light and dark appearances.</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Rendering and Interaction Notes</h2>
+  <ul>
+    <li>The separator belongs inside the message-content column of the existing notification card, not outside the card chrome.</li>
+    <li>The horizontal rule may be full-width within the content column or visually centered around the label, but it must clearly read as a boundary line.</li>
+    <li>The label text should stay concise. The exact formatting can follow existing Clawline timestamp conventions as long as it is human-readable and visually distinct from message body text.</li>
+    <li>The separator is informational only. This spec does not require tap behavior, hover behavior, or a menu.</li>
+    <li>If the appended block is collapsed, truncated, or otherwise constrained by existing notification behavior, the separator must still remain visible at the block boundary.</li>
+  </ul>
+
+  <h2>Acceptance Criteria</h2>
+  <table>
+    <thead>
+      <tr><th>ID</th><th>Acceptance check</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>A1</td><td>Given an existing notification card with visible prior content, when a new message is appended into that same card, the card shows a separator row before the new message block.</td></tr>
+      <tr><td>A2</td><td>The separator row contains both a visible horizontal divider treatment and a readable date/time label.</td></tr>
+      <tr><td>A3</td><td>The notification's existing action/control layout still matches current product behavior after the separator appears.</td></tr>
+      <tr><td>A4</td><td>A burst that appends multiple messages at once produces one separator for that burst, not one per appended message.</td></tr>
+      <tr><td>A5</td><td>A second later append to the same card creates another separator at the next boundary, preserving the earlier separator.</td></tr>
+      <tr><td>A6</td><td>A newly created notification without prior content does not show an unnecessary leading separator.</td></tr>
+      <tr><td>A7</td><td>Real notification-surface proof in both the active product appearance and content layout shows the separator is readable and not visually breaking the card.</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Verification Plan</h2>
+  <ol>
+    <li><strong>VP1:</strong> Produce a real Clawline notification on the intended notification surface.</li>
+    <li><strong>VP2:</strong> Cause additional content to append into that same notification card rather than opening a separate unrelated card.</li>
+    <li><strong>VP3:</strong> Capture visual proof showing the old content, the separator with human-readable date/time label, and the appended content in one card.</li>
+    <li><strong>VP4:</strong> Confirm the existing notification controls/layout remain present and usable in the same proof capture.</li>
+    <li><strong>VP5:</strong> If the product supports both light and dark appearance on that surface, capture or otherwise verify readability in both.</li>
+  </ol>
+
+  <section class="callout warning">
+    <p class="decision">Required proof gate</p>
+    <p>Implementation is not product-ready until the separator is shown on the real Clawline notification surface. Source diffs, previews, simulator screenshots, or isolated component tests are supporting evidence only.</p>
+  </section>
+
+  <h2>Open Questions / Known Unknowns</h2>
+  <ul>
+    <li>Q1: Exact date/time copy format is not specified beyond being human-readable. Implementation should follow the nearest existing Clawline timestamp style unless Flynn amends the product wording.</li>
+    <li>Q2: This ticket does not define whether very old appended content should show a fuller date than same-day content; that formatting detail can follow existing timestamp conventions if present.</li>
+  </ul>
+</main>
+</body>
+</html>

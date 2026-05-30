@@ -1,0 +1,359 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>T100 Connection Lifecycle State Machine Redesign</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f7f7f4;
+      --fg: #1d2528;
+      --muted: #5f6f73;
+      --line: #cfd8d6;
+      --panel: #ffffff;
+      --accent: #176b6b;
+      --warn: #8a5400;
+      --code: #eef3f2;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #101516;
+        --fg: #eef4f3;
+        --muted: #a8b6b8;
+        --line: #304043;
+        --panel: #182022;
+        --accent: #6ec7bc;
+        --warn: #e2b45e;
+        --code: #202b2d;
+      }
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--fg);
+      font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    main {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 48px 22px 72px;
+    }
+
+    h1, h2, h3 {
+      line-height: 1.15;
+      letter-spacing: 0;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: clamp(2rem, 4vw, 3rem);
+    }
+
+    h2 {
+      margin-top: 42px;
+      padding-top: 22px;
+      border-top: 1px solid var(--line);
+      font-size: 1.45rem;
+    }
+
+    h3 {
+      margin-top: 28px;
+      font-size: 1.1rem;
+    }
+
+    p {
+      margin: 10px 0;
+    }
+
+    ul, ol {
+      padding-left: 1.3rem;
+    }
+
+    li {
+      margin: 7px 0;
+    }
+
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.92em;
+      background: var(--code);
+      border-radius: 6px;
+      padding: 0.12rem 0.28rem;
+    }
+
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      margin: 16px 0;
+      background: var(--panel);
+    }
+
+    th, td {
+      border: 1px solid var(--line);
+      padding: 10px 12px;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      color: var(--accent);
+      font-weight: 700;
+    }
+
+    .meta {
+      color: var(--muted);
+      margin-bottom: 28px;
+    }
+
+    .callout {
+      border: 1px solid var(--line);
+      border-left: 5px solid var(--accent);
+      background: var(--panel);
+      padding: 14px 16px;
+      margin: 18px 0;
+      border-radius: 8px;
+    }
+
+    .warning {
+      border-left-color: var(--warn);
+    }
+
+    .decision {
+      font-weight: 700;
+    }
+
+    .id {
+      color: var(--accent);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.92em;
+      white-space: nowrap;
+    }
+  </style>
+</head>
+<body>
+<main>
+  <h1>T100 Connection Lifecycle State Machine Redesign</h1>
+  <p class="meta">Clawline iOS shared spec. Prepared 2026-05-27. Canonical artifact: <code>/Users/mike/shared-workspace/clawline/specs/connection-lifecycle-state-machine.html</code>.</p>
+
+  <section class="callout">
+    <p class="decision">Decision: Clawline iOS must replace distributed connection lifecycle decisions with one explicit lifecycle state machine authority.</p>
+    <p>The lifecycle authority owns phase transitions, reconnect admission, replay completion, and stale-attempt rejection. <code>ChatViewModel</code>, <code>ProviderChatService</code>, and <code>URLSessionWebSocketConnector</code> may emit events or intents into that authority, but they may not independently decide lifecycle phase.</p>
+  </section>
+
+  <h2>Source Basis</h2>
+  <ul>
+    <li>Tracker T100 goal: replace the distributed, implicit connection lifecycle across <code>ChatViewModel</code>, <code>ProviderChatService</code>, and <code>URLSessionWebSocketConnector</code> with a single explicit state machine covering <code>idle</code>, <code>connecting</code>, <code>authenticating</code>, <code>replaying</code>, <code>live</code>, <code>recovering</code>, and <code>failed</code>, with a single authority and explicit replay-complete barrier.</li>
+    <li>Preserved source material: <code>/Users/mike/shared-workspace/clawline/implementation_details/connection-lifecycle.md</code>. This spec carries forward only the details that define product-visible lifecycle behavior or prevent the known reconnect/replay failure modes.</li>
+  </ul>
+
+  <h2>Goal</h2>
+  <p><span class="id">T100-GOAL-01</span> Make Clawline iOS connection status and message replay behavior deterministic by routing all connection lifecycle transitions through one explicit state machine.</p>
+  <p><span class="id">T100-GOAL-02</span> Prevent reconnect loops, stale replay cursors, and late cache restores from moving the app backward after a newer connection attempt has succeeded.</p>
+
+  <h2>Non-Goals</h2>
+  <ul>
+    <li><span class="id">T100-NG-01</span> This spec does not redesign message rendering, transcript layout, typing indicators, notifications, or send-button visuals.</li>
+    <li><span class="id">T100-NG-02</span> This spec does not define provider-side protocol changes.</li>
+    <li><span class="id">T100-NG-03</span> This spec does not require a specific Swift type name, file layout, actor implementation, or migration sequence beyond the behavioral ownership rules below.</li>
+    <li><span class="id">T100-NG-04</span> This spec does not add new legacy compatibility paths or alternate reconnect mechanisms.</li>
+  </ul>
+
+  <h2>Lifecycle Model</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Phase</th>
+        <th>Meaning</th>
+        <th>Allowed Exit</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><span class="id">T100-PH-01</span></td>
+        <td><code>idle</code></td>
+        <td>No active provider connection attempt is running.</td>
+        <td><code>connecting</code> when a connection is requested.</td>
+      </tr>
+      <tr>
+        <td><span class="id">T100-PH-02</span></td>
+        <td><code>connecting</code></td>
+        <td>The transport is being opened.</td>
+        <td><code>authenticating</code> on transport open; <code>recovering</code> or <code>failed</code> on failure according to retry policy.</td>
+      </tr>
+      <tr>
+        <td><span class="id">T100-PH-03</span></td>
+        <td><code>authenticating</code></td>
+        <td>The opened transport is proving it is accepted for the current Clawline session.</td>
+        <td><code>replaying</code> on authentication success; <code>recovering</code> or <code>failed</code> on rejection/failure according to retry policy.</td>
+      </tr>
+      <tr>
+        <td><span class="id">T100-PH-04</span></td>
+        <td><code>replaying</code></td>
+        <td>The app is catching up server-sourced messages from the connection snapshot cursors.</td>
+        <td><code>live</code> only after the replay-complete barrier passes; <code>recovering</code> or <code>failed</code> on failure according to retry policy.</td>
+      </tr>
+      <tr>
+        <td><span class="id">T100-PH-05</span></td>
+        <td><code>live</code></td>
+        <td>The connection is current, replay has completed, and live events may be applied.</td>
+        <td><code>recovering</code> on transport interruption or explicit lifecycle recovery event; <code>idle</code> on intentional teardown.</td>
+      </tr>
+      <tr>
+        <td><span class="id">T100-PH-06</span></td>
+        <td><code>recovering</code></td>
+        <td>The connection has failed but remains eligible for retry.</td>
+        <td><code>connecting</code> when the lifecycle authority admits a retry; <code>failed</code> when retry policy is exhausted; <code>idle</code> on intentional teardown.</td>
+      </tr>
+      <tr>
+        <td><span class="id">T100-PH-07</span></td>
+        <td><code>failed</code></td>
+        <td>The connection is not live and automatic recovery has stopped.</td>
+        <td><code>connecting</code> only from an explicit user or app retry intent accepted by the lifecycle authority.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>Requirements</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Requirement</th>
+        <th>Acceptance Check</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><span class="id">T100-REQ-01</span></td>
+        <td>There is exactly one connection lifecycle authority for iOS phase transitions.</td>
+        <td>A code search shows only the lifecycle authority writes the public connection phase. <code>ChatViewModel</code>, <code>ProviderChatService</code>, and <code>URLSessionWebSocketConnector</code> send events or intents to the authority instead of assigning phase directly.</td>
+      </tr>
+      <tr>
+        <td><span class="id">T100-REQ-02</span></td>
+        <td>The lifecycle authority exposes only the seven phases listed in <span class="id">T100-PH-01</span> through <span class="id">T100-PH-07</span>.</td>
+        <td>Tests or compile-time checks fail if an implementation adds a product-visible lifecycle phase not listed in this spec.</td>
+      </tr>
+      <tr>
+        <td><span class="id">T100-REQ-03</span></td>
+        <td>Each connection attempt has an epoch token, and async callbacks from stale epochs are ignored.</td>
+        <td>A stale transport, auth, replay, cache, or retry callback from an older epoch cannot change phase, cursor state, or live message state after a newer epoch is active.</td>
+      </tr>
+      <tr>
+        <td><span class="id">T100-REQ-04</span></td>
+        <td><code>replaying</code> cannot transition to <code>live</code> until replay completion has been explicitly observed for the active epoch.</td>
+        <td>An auth success without replay completion leaves the lifecycle out of <code>live</code>; a replay completion from a stale epoch is ignored.</td>
+      </tr>
+      <tr>
+        <td><span class="id">T100-REQ-05</span></td>
+        <td>Reconnect intents received while the lifecycle is <code>connecting</code>, <code>authenticating</code>, <code>replaying</code>, or <code>live</code> are ignored, not queued.</td>
+        <td>A late reconnect trigger during any active phase does not create a pending reconnect and does not run after the current attempt reaches <code>live</code>.</td>
+      </tr>
+      <tr>
+        <td><span class="id">T100-REQ-06</span></td>
+        <td>While in <code>recovering</code>, the lifecycle authority's backoff timer is the only automatic reconnect mechanism.</td>
+        <td>Transport interruption, scene activation, and other external reconnect intents during <code>recovering</code> do not start parallel reconnect attempts.</td>
+      </tr>
+      <tr>
+        <td><span class="id">T100-REQ-07</span></td>
+        <td>Manual retry during <code>recovering</code> cancels the pending backoff timer, transitions immediately to <code>connecting</code>, resets that attempt's delay to 1 second, and does not increment the automatic recovering-attempt counter.</td>
+        <td>A test drives <code>recovering</code>, fires manual retry, and verifies immediate retry plus unchanged automatic attempt count.</td>
+      </tr>
+      <tr>
+        <td><span class="id">T100-REQ-08</span></td>
+        <td>The connection snapshot used for replay includes cursors for every known stream/session, not only the active chat session.</td>
+        <td>After reconnect, inactive streams with known cursors do not replay from scratch solely because another stream was active at connection time.</td>
+      </tr>
+      <tr>
+        <td><span class="id">T100-REQ-09</span></td>
+        <td>Cache restore is gap-fill input only and cannot overwrite newer server-sourced state for the active or newer epoch.</td>
+        <td>A delayed cache restore arriving after live server messages does not clear, reorder, or roll back those live messages or their cursors.</td>
+      </tr>
+      <tr>
+        <td><span class="id">T100-REQ-10</span></td>
+        <td>Session message and cursor mutation happens through one store mutation boundary that enforces epoch and gap-fill rules.</td>
+        <td>A code search shows no direct writes to session messages or last-server-message cursors outside the chosen mutation boundary and its tests.</td>
+      </tr>
+      <tr>
+        <td><span class="id">T100-REQ-11</span></td>
+        <td>Intentional teardown is distinct from recovery.</td>
+        <td>An intentional user/app teardown transitions to <code>idle</code> and does not schedule backoff recovery.</td>
+      </tr>
+      <tr>
+        <td><span class="id">T100-REQ-12</span></td>
+        <td>Only the lifecycle authority decides whether a failure moves to <code>recovering</code> or <code>failed</code>.</td>
+        <td>Transport and service layers report failure facts; they do not independently mark the app recovered, failed, or live.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>State Transition Checks</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Scenario</th>
+        <th>Expected Result</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><span class="id">T100-AC-01</span></td>
+        <td>Fresh launch requests provider connection.</td>
+        <td><code>idle -> connecting -> authenticating -> replaying -> live</code> occurs in order for one epoch.</td>
+      </tr>
+      <tr>
+        <td><span class="id">T100-AC-02</span></td>
+        <td>Transport opens, then a stale previous attempt emits auth or replay output.</td>
+        <td>The stale output is ignored and the active epoch continues unchanged.</td>
+      </tr>
+      <tr>
+        <td><span class="id">T100-AC-03</span></td>
+        <td>Replay has not completed for the active epoch.</td>
+        <td>The lifecycle does not enter <code>live</code>.</td>
+      </tr>
+      <tr>
+        <td><span class="id">T100-AC-04</span></td>
+        <td>Connection fails during <code>connecting</code>, <code>authenticating</code>, <code>replaying</code>, or <code>live</code> while retry remains available.</td>
+        <td>The lifecycle enters <code>recovering</code> and uses one backoff path.</td>
+      </tr>
+      <tr>
+        <td><span class="id">T100-AC-05</span></td>
+        <td>Multiple reconnect triggers fire during <code>recovering</code>.</td>
+        <td>Only the admitted retry path runs; no parallel reconnect loop is created.</td>
+      </tr>
+      <tr>
+        <td><span class="id">T100-AC-06</span></td>
+        <td>Manual retry is tapped during <code>recovering</code>.</td>
+        <td>Pending backoff is cancelled and the lifecycle immediately enters <code>connecting</code> without increasing the automatic recovering-attempt counter.</td>
+      </tr>
+      <tr>
+        <td><span class="id">T100-AC-07</span></td>
+        <td>A delayed cache restore arrives after server replay/live events.</td>
+        <td>Cache fills missing gaps only and does not overwrite newer server messages or cursors.</td>
+      </tr>
+      <tr>
+        <td><span class="id">T100-AC-08</span></td>
+        <td>Reconnect occurs while multiple sessions have known cursors.</td>
+        <td>The replay snapshot includes all known per-session cursors, and inactive sessions do not unnecessarily replay from scratch.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>Implementation Handoff</h2>
+  <ul>
+    <li><span class="id">T100-HO-01</span> Implementation must stay inside Clawline iOS connection lifecycle and store/cursor mutation boundaries needed by this spec.</li>
+    <li><span class="id">T100-HO-02</span> Implementation should treat existing reconnect schedulers, cache restore, transport callbacks, scene activation, and provider service events as inputs to the lifecycle authority, not as peer state machines.</li>
+    <li><span class="id">T100-HO-03</span> Tests should cover transition order, stale epoch rejection, replay barrier behavior, recovering backoff admission, manual retry behavior, all-session cursor snapshots, and delayed cache restore.</li>
+    <li><span class="id">T100-HO-04</span> If implementation discovers an additional product-visible phase or reconnect path is necessary, return T100 to spec work instead of adding it silently.</li>
+  </ul>
+
+  <h2>Open Questions</h2>
+  <p><span class="id">T100-OQ-01</span> None for Spec Review. The implementation may choose concrete Swift type names and file placement as long as the behavioral requirements above are met.</p>
+</main>
+</body>
+</html>

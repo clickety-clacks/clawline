@@ -164,7 +164,7 @@
     <li>Make prompt composer keyboard behavior match standard multiline input semantics: <code>Shift+Enter</code> and <code>Ctrl+Enter</code> insert a newline into the prompt composer, while plain <code>Enter</code>/<code>Return</code> submits the prompt.</li>
     <li>Add a Catalyst chat-bubble/title-area context menu opened by mouse or trackpad right-click and by tapping the title-bar area of a chat bubble.</li>
     <li>Expose <strong>Insert into prompt</strong> only for user bubbles/messages; it inserts the user message contents into the prompt composer as editable prompt text.</li>
-    <li>Expose <strong>Reference message</strong> / quote behavior that adds a visible composer reference token, lets the user type additional prompt text, and sends the typed prompt plus structured referenced-message identity.</li>
+    <li>Expose <strong>Reply…</strong> behavior that adds a visible composer reference token, lets the user type additional prompt text, and sends the typed prompt plus structured referenced-message identity.</li>
     <li>Ensure reference/quote behavior does not paste the referenced message body into visible prompt text.</li>
     <li>Define enough cross-platform behavior for Web, Catalyst, iOS, and iPadOS implementation checks so platform-specific text controls do not diverge.</li>
   </ul>
@@ -280,24 +280,30 @@
       </tr>
       <tr>
         <td>R9</td>
-        <td>The reference/quote action adds a visible reference token to the composer and does not paste the referenced message body into visible prompt text.</td>
+        <td>The reply/reference action adds a visible reference token to the composer and does not paste the referenced message body into visible prompt text.</td>
         <td>Eligible transcript messages</td>
-        <td>Composer displays a token naming or summarizing the reference target; the text editor body contains only user-typed or inserted prompt text.</td>
+        <td>Composer displays a token with an SF Symbols reply icon and a compact truncated preview of the referenced message text; the token must not prepend role labels such as <strong>assistant:</strong>, <strong>user:</strong>, or similar. The text editor body contains only user-typed or inserted prompt text.</td>
       </tr>
       <tr>
         <td>R10</td>
+        <td>After submit, the user's outgoing transcript bubble preserves visible reply/reference context inside the bubble.</td>
+        <td>Transcript echo</td>
+        <td>After a referenced/reply send is accepted and the user's outgoing message bubble appears, that bubble contains an in-bubble reply token/indicator showing which prior message the user replied to. Reply context is not limited to the pre-send composer token or downstream assistant/model context.</td>
+      </tr>
+      <tr>
+        <td>R11</td>
         <td>Submitting with a reference token sends the prompt text plus structured referenced-message identity.</td>
         <td>Send path</td>
         <td>Outgoing payload includes typed prompt text and reference context containing stable message/session identity.</td>
       </tr>
       <tr>
-        <td>R11</td>
+        <td>R12</td>
         <td>Removing a reference token before submit removes that reference from outgoing structured context.</td>
         <td>Prompt composer</td>
         <td>Submit after removal carries no identity for the removed reference.</td>
       </tr>
       <tr>
-        <td>R12</td>
+        <td>R13</td>
         <td>The send path must preserve Clawline session identity and must not canonicalize referenced or active Clawline sessions into <code>agent:main:main</code>.</td>
         <td>Reference context and send routing</td>
         <td>Payload/session inspection shows structurally distinct Clawline session keys are retained.</td>
@@ -355,28 +361,35 @@
     </thead>
     <tbody>
       <tr>
+        <td><strong>Copy to Clipboard</strong></td>
+        <td>Transcript messages with copyable text content.</td>
+        <td>Copy the targeted message's readable text to the system clipboard. The action does not alter composer text, reference tokens, send state, chat routing, or transcript contents.</td>
+      </tr>
+      <tr>
         <td><strong>Insert into prompt</strong></td>
         <td>User bubbles/messages only.</td>
         <td>Insert the targeted user message contents into the prompt composer as editable text. The action does not submit.</td>
       </tr>
       <tr>
-        <td><strong>Reference message</strong></td>
+        <td><strong>Reply…</strong></td>
         <td>Transcript messages that have stable identity and can be represented in reference context.</td>
         <td>Add a visible composer reference token backed by structured identity for the targeted message. The action does not paste message body text into the prompt and does not submit.</td>
       </tr>
     </tbody>
   </table>
 
-  <p>The ticket names reference/quote behavior. Product behavior is specified as <strong>Reference message</strong> unless implementation already uses a shorter visible label such as <strong>Quote</strong>; the required behavior is the token and structured identity contract, not the exact English label.</p>
+  <p>The ticket names reference/quote behavior, but the visible context-menu item is product copy and must be <strong>Reply…</strong>. The required behavior remains a composer token plus structured identity; the menu label must not say <strong>Reference message</strong> or <strong>Quote message</strong>.</p>
+  <p><strong>Copy to Clipboard</strong> is a plain clipboard action, not a composer action. It must use the system clipboard available to the Catalyst app and must copy only the selected message's user-readable text. It must not paste into the prompt, create a reference token, trigger send eligibility, or mutate the transcript.</p>
 
   <h2>Composer Reference UX</h2>
   <ul>
-    <li>After <strong>Reference message</strong>, the composer shows a visible token before or near the prompt text editing area. The token must be visually distinct from typed prompt text.</li>
-    <li>The token should identify the target enough for the user to understand what will be referenced, such as role/author and a short message locator or compact preview. The preview must not become submitted prompt text.</li>
+    <li>After <strong>Reply…</strong>, the composer shows a visible token before or near the prompt text editing area. The token must be visually distinct from typed prompt text.</li>
+    <li>The token starts with the platform reply icon from SF Symbols on Apple platforms, followed by the first part of the referenced message text truncated with an ellipsis. The token must not prepend role labels such as <strong>assistant:</strong>, <strong>user:</strong>, <strong>tool:</strong>, or similar. The preview must not become submitted prompt text.</li>
     <li>The user can continue typing prompt text after adding the token.</li>
+    <li>After the send is accepted and the user's outgoing message bubble appears in the transcript, the reply/reference context remains visible inside that user bubble as a reply token or indicator. The transcript echo must show which prior message this outgoing user message is replying to.</li>
     <li>The user can submit a prompt with one or more reference tokens if the implementation supports multiple tokens. If implementation chooses single-reference behavior for this pass, adding a second reference must replace the first or be explicitly blocked in UI; silent duplicate or hidden references are not allowed.</li>
     <li>The user can remove a reference token before submit. Removed tokens must not remain in the outgoing structured context.</li>
-    <li>Composer focus should move to or remain in the prompt text editor after either <strong>Insert into prompt</strong> or <strong>Reference message</strong>, so the user can keep typing.</li>
+    <li>Composer focus should move to or remain in the prompt text editor after either <strong>Insert into prompt</strong> or <strong>Reply…</strong>, so the user can keep typing.</li>
     <li>Sending with only a reference token and no prompt text is allowed only if the existing composer send eligibility permits non-text context sends. If current send eligibility requires prompt text, this spec does not add a new empty-text send rule.</li>
   </ul>
 
@@ -398,11 +411,13 @@
 }</code></pre>
   <ul>
     <li><code>promptText</code> contains only the actual composer text the user typed or inserted through text-editing actions such as <strong>Insert into prompt</strong>.</li>
-    <li><code>references</code> contains one entry per visible reference token present at submit time.</li>
+    <li><code>references</code> contains one entry per visible reference token present at submit time. A live receiving assistant/provider turn must expose that structured reference metadata; if an assistant only receives prompt text with no reply/reference metadata, the feature is failing even if the client UI showed a token.</li>
     <li><code>sessionKey</code> is required. Clawline session keys must remain structurally distinct and must not be collapsed to <code>agent:main:main</code>.</li>
     <li><code>messageId</code> is required when the transcript has a stable message identifier. If the local model differentiates provider message ID from local client message ID, preserve both rather than overwriting one with the other.</li>
     <li><code>messageRole</code> is required for downstream context assembly and menu visibility checks.</li>
-    <li>The context assembler may resolve the referenced message body downstream using this identity, but the composer must not implement reference behavior by pasting hidden or visible quoted text into <code>promptText</code>.</li>
+    <li>The downstream model path must be able to use the referenced message by identity, either because that message is already present in the conversation/context history available to the LLM or because provider-side context assembly resolves the identity before model submission. Product proof requires a live assistant/model turn where the referenced message is actually visible in inbound context, not just client-side payload construction or provider unit tests.</li>
+    <li>The context assembler may resolve the referenced message body downstream using this identity when needed, but the composer must not implement reference behavior by pasting hidden or visible quoted text into <code>promptText</code>, and the client must not resend the entire quoted message as the reference mechanism.</li>
+    <li>A reference payload that only carries IDs but is ignored, stripped, renamed, untrusted, or unresolvable downstream does not satisfy T320; the implementation/review gate must prove the reference identity reaches a path the LLM can actually use.</li>
     <li>If the referenced message no longer exists at submit time, use the existing send-error pathway or block submission with an inline composer error. Do not silently send a prompt whose visible token claims a reference that is absent from structured context.</li>
   </ul>
 
@@ -473,7 +488,7 @@
       </tr>
       <tr>
         <td>Draft submitted with reference token</td>
-        <td>Outgoing send contains prompt text plus structured reference context. Transcript display may show the sent prompt according to existing message rendering rules, but must not pretend quoted text was typed by the user.</td>
+        <td>Outgoing send contains prompt text plus structured reference context. Transcript display shows the sent prompt according to existing message rendering rules and includes an in-bubble reply token/indicator on the user's outgoing message bubble. It must not pretend quoted text was typed by the user.</td>
       </tr>
       <tr>
         <td>Referenced message deleted or unavailable before submit</td>
@@ -500,8 +515,9 @@
     <li>Implement exactly the specified T319/T320 behavior. Do not add additional validation, hidden prompt rewriting, new routing fallback, or broad context-menu actions unless Flynn updates this spec.</li>
     <li>Use the existing composer send path for plain Enter and final prompt submit. The spec changes the key handling for modified Enter, not the send architecture.</li>
     <li>Use stable transcript/session identity for references. If the current model lacks a stable identity for a message class, hide or disable reference action for that class rather than inventing unstable identity.</li>
+    <li>Use the platform clipboard path for <strong>Copy to Clipboard</strong>. If a transcript item has no copyable readable text, hide or disable the action rather than copying placeholders, structured metadata, or hidden transport content.</li>
     <li>Keep <strong>Insert into prompt</strong> eligibility role-based: user messages only.</li>
-    <li>Keep reference/quote semantically separate from insertion: insert copies user message text into the prompt; reference creates a token and structured context.</li>
+    <li>Keep reply/reference semantically separate from insertion: insert copies user message text into the prompt; reply creates a token and structured context.</li>
   </ul>
 
   <h2>Proof Gates</h2>
@@ -510,9 +526,11 @@
     <li>Keyboard gate: automated or manual tests prove plain Enter submits, Shift+Enter inserts newline, and Ctrl+Enter inserts newline in the prompt composer on relevant Web, Catalyst, iOS, and iPadOS paths.</li>
     <li>No-submit gate: pressing Shift+Enter or Ctrl+Enter creates no transcript user message, no optimistic placeholder, and no outbound send.</li>
     <li>Catalyst menu gate: mouse right-click, trackpad secondary click, and title-area tap open the message context menu for the targeted bubble.</li>
+    <li>Clipboard gate: selecting <strong>Copy to Clipboard</strong> copies the targeted message's readable text to the system clipboard and does not modify composer text, reference tokens, outgoing payload, or transcript contents.</li>
     <li>Eligibility gate: <strong>Insert into prompt</strong> appears for user messages and does not appear for non-user messages.</li>
     <li>Insertion gate: selecting <strong>Insert into prompt</strong> inserts user message contents into the composer as editable text and leaves send under user control.</li>
-    <li>Reference UI gate: selecting reference/quote creates a visible composer token without pasting referenced message body into prompt text.</li>
+    <li>Reference UI gate: selecting <strong>Reply…</strong> creates a visible composer token with an SF Symbols reply icon and ellipsized message preview, without pasted message body or role-label prefix in prompt text.</li>
+    <li>Sent-bubble reply gate: after a referenced send is accepted, the user's outgoing transcript bubble includes an in-bubble reply token/indicator showing which prior message the user replied to.</li>
     <li>Reference payload gate: submitting with a token sends structured reference context including session identity and message identity alongside prompt text.</li>
     <li>Removal gate: removing a token before submit removes its identity from outgoing context.</li>
     <li>Session invariant gate: active and referenced Clawline session keys remain structurally distinct and are not canonicalized into <code>agent:main:main</code>.</li>
@@ -520,7 +538,6 @@
 
   <h2>Open Questions</h2>
   <ul>
-    <li>Should the visible menu label be <strong>Reference message</strong>, <strong>Quote message</strong>, or another product string? This spec treats the behavior as authoritative and the exact label as product-copy follow-up.</li>
     <li>Should multiple simultaneous reference tokens be supported in the first implementation pass? If not, the implementation must make single-reference behavior explicit by replacing or visibly blocking additional references.</li>
     <li>What exact downstream wire/schema field names should carry reference context if an existing Clawline envelope already has a preferred extension point? The semantic contract in this spec is required regardless of field names.</li>
   </ul>

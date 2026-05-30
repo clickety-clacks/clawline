@@ -197,6 +197,10 @@ enum CrossChatNotificationOverlayLifecycle {
     static func shouldResetCollapsedStateOnDisappear(hasVisibleBubbles: Bool) -> Bool {
         !hasVisibleBubbles
     }
+
+    static func shouldResetCollapsedStateOnBubbleCountChange(visibleBubbleCount: Int) -> Bool {
+        visibleBubbleCount == 0
+    }
 }
 
 @MainActor
@@ -1191,6 +1195,12 @@ struct ChatView: View {
                     measuredHeightsBySourceChatId: crossChatNotificationMeasuredHeightsBySourceChatId,
                     keyboardOwnershipStore: keyboardOwnershipStore
                 )
+            }
+            .onChange(of: notificationShortcutVisibleCount) { _, visibleCount in
+                if CrossChatNotificationOverlayLifecycle
+                    .shouldResetCollapsedStateOnBubbleCountChange(visibleBubbleCount: visibleCount) {
+                    isCrossChatNotificationStackDocked = false
+                }
             }
         )
 

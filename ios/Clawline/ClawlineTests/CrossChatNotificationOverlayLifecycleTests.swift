@@ -22,4 +22,17 @@ struct CrossChatNotificationOverlayLifecycleTests {
             )
         )
     }
+
+    @Test func clearingVisibleNotificationsResetsCollapsedState() {
+        #expect(
+            CrossChatNotificationOverlayLifecycle.shouldResetCollapsedStateOnBubbleCountChange(
+                visibleBubbleCount: 0
+            )
+        )
+        #expect(
+            !CrossChatNotificationOverlayLifecycle.shouldResetCollapsedStateOnBubbleCountChange(
+                visibleBubbleCount: 1
+            )
+        )
+    }
 }

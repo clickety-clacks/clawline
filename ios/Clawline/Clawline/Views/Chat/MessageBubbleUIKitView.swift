@@ -2095,9 +2095,10 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
             })
         }
         if currentMessage.role == .user {
-            actions.append(UIAction(title: "Insert into prompt", image: UIImage(systemName: "text.insert")) { [weak self] _ in
-                guard let self, let message = self.currentMessage else { return }
-                self.onInsertIntoPrompt?(message)
+            let message = currentMessage
+            let onInsertIntoPrompt = onInsertIntoPrompt
+            actions.append(UIAction(title: "Insert into prompt", image: UIImage(systemName: "text.insert")) { _ in
+                onInsertIntoPrompt?(message)
             })
         }
         actions.append(UIAction(title: "Reply…", image: UIImage(systemName: "arrowshape.turn.up.left")) { [weak self] _ in

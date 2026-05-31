@@ -30,6 +30,33 @@ final class T320ReplyIndicatorProofXCTest: XCTestCase {
         XCTAssertFalse(menuTitles.contains("Quote message"))
     }
 
+    func testInsertIntoPromptActionKeepsTargetedUserMessageWhenBubbleIsReused() throws {
+        let message = Message(
+            id: "s_insert_target",
+            role: .user,
+            content: "Insert this user text.",
+            timestamp: Date(timeIntervalSince1970: 1_700_000_050),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: t320PersonalSessionKey
+        )
+        var insertedMessage: Message?
+        let bubble = makeConfiguredBubble(message: message) { insertedMessage = $0 }
+        let button = try XCTUnwrap(findSubview(in: bubble) {
+            $0.accessibilityIdentifier == "message_bubble_header_menu_button"
+        } as? UIButton)
+        let insertAction = try XCTUnwrap(button.menu?.children.compactMap { $0 as? UIAction }.first {
+            $0.title == "Insert into prompt"
+        })
+
+        bubble.prepareForReuse()
+        insertAction.performWithSender(nil, target: nil)
+
+        XCTAssertEqual(insertedMessage?.id, message.id)
+        XCTAssertEqual(insertedMessage?.content, message.content)
+    }
+
     func testReplyReferenceResolvesEchoedClientVisibleIdentityForTranscriptIndicator() async throws {
         let context = try await makeReplyProofContext()
         let referenced = Message(
@@ -179,7 +206,10 @@ final class T320ReplyIndicatorProofXCTest: XCTestCase {
 }
 
 @MainActor
-private func makeConfiguredBubble(message: Message) -> MessageBubbleUIKitView {
+private func makeConfiguredBubble(
+    message: Message,
+    onInsertIntoPrompt: ((Message) -> Void)? = nil
+) -> MessageBubbleUIKitView {
     let metrics = ChatFlowTheme.Metrics(isCompact: true)
     var streamingState = StreamingTableParseState()
     let presentation = MessagePresentationBuilder.build(
@@ -205,7 +235,7 @@ private func makeConfiguredBubble(message: Message) -> MessageBubbleUIKitView {
         onRequestExpand: nil,
         onRequestLayout: nil,
         onInteractiveCallback: nil,
-        onInsertIntoPrompt: nil,
+        onInsertIntoPrompt: onInsertIntoPrompt,
         onReferenceMessage: nil,
         replyReference: nil,
         salientHighlightService: nil

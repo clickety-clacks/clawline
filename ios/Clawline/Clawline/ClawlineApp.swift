@@ -17,7 +17,6 @@ struct ClawlineApp: App {
     @State private var settingsManager: SettingsManager
     @State private var sonioxKeyStore: SonioxKeyStore
     @State private var cartesiaKeyStore: CartesiaKeyStore
-    @State private var watchConnectivityService: any WatchConnectivityServicing
 
     private let deviceIdentifier: any DeviceIdentifying
     private let connectionService: any ConnectionServicing
@@ -56,9 +55,6 @@ struct ClawlineApp: App {
         let chatService = coreServices.chatService
         self.chatService = chatService
         self.uploadService = coreServices.uploadService
-        let watchConnectivityService = coreServices.watchConnectivityService
-        _watchConnectivityService = State(initialValue: watchConnectivityService)
-        watchConnectivityService.activate()
     }
 
     var body: some Scene {

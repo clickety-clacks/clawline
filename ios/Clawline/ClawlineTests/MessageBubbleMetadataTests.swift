@@ -194,6 +194,48 @@ struct MessageBubbleMetadataTests {
         #expect(state.replyIndicatorText?.contains("assistant:") == false)
     }
 
+    @Test("BubbleSizingV2 does not preserve design cap as short bubble body height")
+    func bubbleSizingV2ShortBubbleViewportTracksMeasuredContent() {
+        let metrics = ChatFlowTheme.Metrics(isCompact: true)
+        let env = BubbleSizingV2.Environment(
+            containerWidth: 396,
+            containerHeight: 844,
+            singleLinkContainerHeight: 844,
+            topInset: 0,
+            bottomInset: 0,
+            truncationBottomInset: 0,
+            isVisionOS: false,
+            metricsFingerprint: 1
+        )
+        let heightPolicy = BubbleSizingV2.BubbleHeightPolicy.resolve(
+            metrics: metrics,
+            env: env,
+            isSingleLinkPreview: false,
+            prefersScreenAwareHeightCap: false,
+            allowsOuterScroll: false
+        )
+        let plan = BubbleSizingV2.Plan(
+            messageId: "short-bubble",
+            presentationFingerprint: 1,
+            sizeClass: .short,
+            isSingleLinkPreview: false,
+            isWide: false,
+            maxWidth: 396,
+            minWidth: 40,
+            heightPolicy: heightPolicy,
+            allowsOuterScroll: false,
+            linkPreviewURL: nil
+        )
+
+        let viewportHeight = BubbleSizingV2.finalOuterScrollViewportHeight(
+            plan: plan,
+            measuredContentHeight: 52,
+            provisionalViewportHeight: 1_980
+        )
+
+        #expect(viewportHeight == 52)
+    }
+
     @Test("Reply token stays compact for long referenced previews")
     func replyTokenStaysCompactForLongReferencedPreviews() {
         let referenced = Message(

@@ -4841,6 +4841,11 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         let dynamicHeight2 = uiKitBubbleSizer.measuredDynamicContentHeight(fittingWidth: contentWidth)
 
         let outerScrollEnabled = plan.allowsOuterScroll && measured2.height > plan.heightPolicy.heightCap
+        let finalViewportHeight = BubbleSizingV2.finalOuterScrollViewportHeight(
+            plan: plan,
+            measuredContentHeight: dynamicHeight2,
+            provisionalViewportHeight: viewportHeight
+        )
         let cellHeight: CGFloat = {
             if plan.isSingleLinkPreview {
                 return plan.heightPolicy.heightCap
@@ -4858,7 +4863,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             contentHeight: dynamicHeight2,
             chromeHeight: chromeHeight,
             outerScrollEnabled: outerScrollEnabled,
-            outerScrollViewportHeight: viewportHeight,
+            outerScrollViewportHeight: finalViewportHeight,
             isFinal: linkPreviewEstimatedHeight != nil
         )
 

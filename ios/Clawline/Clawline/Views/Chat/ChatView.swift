@@ -253,6 +253,12 @@ enum StreamPopupFocusHandoff {
     ) -> Bool {
         didDisplaceComposerFocus && isSoftwareKeyboardVisible
     }
+
+    static func shouldRestoreComposerOnCloseAfterTrackedKeyboardState(
+        didDisplaceComposerFocus: Bool
+    ) -> Bool {
+        didDisplaceComposerFocus
+    }
 }
 
 struct ChatView: View {
@@ -296,6 +302,7 @@ struct ChatView: View {
     @State private var focusRequestID = 0
     @State private var shouldRestoreFocusAfterPicker = false
     @State private var shouldRestoreFocusAfterStreamPopup = false
+    @State private var streamPopupKeyboardDismissalTask: Task<Void, Never>?
     @State private var scrollButtonStateBySessionKey: [String: ScrollButtonState] = [:]
     @State private var scrollButtonDragTranslation: CGFloat = 0
     @State private var scrollButtonIsDragging = false
@@ -1247,7 +1254,10 @@ struct ChatView: View {
             guard streamToastManager.isVisible, streamToastManager.sessionKey == completedSessionKey else { return }
             scheduleStreamToastBusyClear()
         }
-        .onChange(of: keyboardHeight) { _, _ in layoutRevision &+= 1 }
+        .onChange(of: keyboardHeight) { _, height in
+            layoutRevision &+= 1
+            reconcileStreamPopupKeyboardVisibility(isVisible: height > 0.5)
+        }
         .onChange(of: keyboardAnimationDuration) { _, _ in layoutRevision &+= 1 }
         .onChange(of: keyboardAnimationCurve) { _, _ in layoutRevision &+= 1 }
         .onChange(of: inputBarHeight) { _, _ in
@@ -2693,28 +2703,68 @@ struct ChatView: View {
     @MainActor
     private func openStreamPopup(focusSearch: Bool) {
         shouldRestoreFocusAfterStreamPopup = isKeyboardVisible && isInputFocused
+        streamPopupKeyboardDismissalTask?.cancel()
+        streamPopupKeyboardDismissalTask = nil
         streamPopupRouteController.openPopup(focusSearch: focusSearch)
     }
 
     @MainActor
     private func closeStreamPopup(restoreComposerFocusIfNeeded: Bool = true) {
         let shouldRestoreComposer = restoreComposerFocusIfNeeded
-            && StreamPopupFocusHandoff.shouldRestoreComposerOnClose(
-                didDisplaceComposerFocus: shouldRestoreFocusAfterStreamPopup,
-                isSoftwareKeyboardVisible: isKeyboardVisible
+            && StreamPopupFocusHandoff.shouldRestoreComposerOnCloseAfterTrackedKeyboardState(
+                didDisplaceComposerFocus: shouldRestoreFocusAfterStreamPopup
             )
         shouldRestoreFocusAfterStreamPopup = false
-        streamPopupRouteController.closePopup()
+        streamPopupKeyboardDismissalTask?.cancel()
+        streamPopupKeyboardDismissalTask = nil
         if shouldRestoreComposer {
             focusRequestID &+= 1
+        }
+        streamPopupRouteController.closePopup()
+        if shouldRestoreComposer {
+            Task { @MainActor in
+                await Task.yield()
+                focusRequestID &+= 1
+            }
         }
     }
 
     @MainActor
     private func presentTrackPickerFromStreamPopup() {
         shouldRestoreFocusAfterStreamPopup = false
+        streamPopupKeyboardDismissalTask?.cancel()
+        streamPopupKeyboardDismissalTask = nil
         prepareForAttachmentPicker()
         streamPopupRouteController.presentTrackPicker()
+    }
+
+    @MainActor
+    private func reconcileStreamPopupKeyboardVisibility(isVisible: Bool) {
+        guard shouldRestoreFocusAfterStreamPopup,
+              streamPopupRouteController.isPopupPresented else {
+            streamPopupKeyboardDismissalTask?.cancel()
+            streamPopupKeyboardDismissalTask = nil
+            return
+        }
+        if isVisible {
+            streamPopupKeyboardDismissalTask?.cancel()
+            streamPopupKeyboardDismissalTask = nil
+            return
+        }
+        streamPopupKeyboardDismissalTask?.cancel()
+        streamPopupKeyboardDismissalTask = Task { @MainActor in
+            do {
+                try await Task.sleep(for: .milliseconds(180))
+            } catch is CancellationError {
+                return
+            } catch {
+                return
+            }
+            guard streamPopupRouteController.isPopupPresented,
+                  !isKeyboardVisible else { return }
+            shouldRestoreFocusAfterStreamPopup = false
+            streamPopupKeyboardDismissalTask = nil
+        }
     }
 
     private func deviceCornerRadius() -> CGFloat {

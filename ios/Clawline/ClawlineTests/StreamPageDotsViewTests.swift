@@ -577,6 +577,20 @@ struct StreamPageDotsViewTests {
         )
     }
 
+    @Test("T1136 tracked popup close restores composer from presentation flag")
+    func streamPopupTrackedCloseRestoresComposerFromPresentationFlag() {
+        #expect(
+            StreamPopupFocusHandoff.shouldRestoreComposerOnCloseAfterTrackedKeyboardState(
+                didDisplaceComposerFocus: true
+            )
+        )
+        #expect(
+            StreamPopupFocusHandoff.shouldRestoreComposerOnCloseAfterTrackedKeyboardState(
+                didDisplaceComposerFocus: false
+            ) == false
+        )
+    }
+
     @Test("Active dots override unread styling")
     func activeKindWinsPrecedence() {
         let kind = StreamDotColor.kind(

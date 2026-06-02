@@ -1204,7 +1204,8 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                     viewSize: view.bounds.size,
                     windowSize: view.window?.bounds.size,
                     isCompactLandscape: traitCollection.horizontalSizeClass == .compact
-                        && view.bounds.width > view.bounds.height
+                        && (view.bounds.width > view.bounds.height
+                            || (view.window?.bounds.width ?? 0) > (view.window?.bounds.height ?? 0))
                 )
             )
 

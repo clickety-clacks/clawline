@@ -253,6 +253,43 @@ struct MessageInputBarBoundaryTests {
         ) == 0)
     }
 
+    @Test("T357 compact landscape message surface uses physical width")
+    func compactLandscapeMessageSurfaceUsesPhysicalWidth() throws {
+        let chatViewPath = URL(filePath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appending(path: "Clawline/Views/Chat/ChatView.swift")
+        let source = try String(contentsOf: chatViewPath, encoding: .utf8)
+
+        #expect(ChatLandscapeWidthGeometry.physicalWidth(
+            containerWidth: 750,
+            leadingSafeAreaInset: 62,
+            trailingSafeAreaInset: 62,
+            isCompactLandscape: true
+        ) == 874)
+        #expect(ChatLandscapeWidthGeometry.physicalWidth(
+            containerWidth: 402,
+            leadingSafeAreaInset: 0,
+            trailingSafeAreaInset: 0,
+            isCompactLandscape: true,
+            nativeWindowWidth: 874
+        ) == 874)
+        #expect(ChatLandscapeWidthGeometry.horizontalOffset(
+            containerWidth: 402,
+            leadingSafeAreaInset: 0,
+            trailingSafeAreaInset: 0,
+            isCompactLandscape: true,
+            nativeWindowWidth: 874
+        ) == 236)
+        #expect(ChatLandscapeWidthGeometry.shouldFillWindowWidth(
+            viewSize: CGSize(width: 402, height: 874),
+            windowSize: CGSize(width: 874, height: 402),
+            isCompactLandscape: true
+        ))
+        #expect(source.contains(".frame(width: chatSurfaceWidth)"))
+        #expect(source.contains(".offset(x: chatSurfaceOffset)"))
+    }
+
     @Test("T357 asymmetric compact landscape chrome recenters to physical window")
     func asymmetricCompactLandscapeChromeRecentersToPhysicalWindow() {
         #expect(ChatLandscapeWidthGeometry.physicalWidth(
@@ -265,6 +302,13 @@ struct MessageInputBarBoundaryTests {
             leadingSafeAreaInset: 44,
             trailingSafeAreaInset: 80,
             isCompactLandscape: true
+        ) == 18)
+        #expect(ChatLandscapeWidthGeometry.horizontalOffset(
+            containerWidth: 750,
+            leadingSafeAreaInset: 44,
+            trailingSafeAreaInset: 80,
+            isCompactLandscape: true,
+            nativeWindowWidth: 800
         ) == 18)
     }
 

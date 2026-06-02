@@ -265,7 +265,9 @@ enum StreamSwitchKeyboardFocusPolicy {
 
 enum StreamPagerKeyboardDismissPolicy {
     static func apply(to scrollView: UIScrollView) {
+#if !os(visionOS)
         scrollView.keyboardDismissMode = .none
+#endif
     }
 }
 
@@ -5835,6 +5837,31 @@ enum CrossChatNotificationGeometry {
     }
 }
 
+enum CrossChatNotificationEntrySurfaceGeometry {
+    static func entriesNeedScroll(
+        measuredContentHeight: CGFloat,
+        contentMaxHeight: CGFloat
+    ) -> Bool {
+        measuredContentHeight > contentMaxHeight + 0.5
+    }
+
+    static func resolvedViewportHeight(
+        measuredContentHeight: CGFloat,
+        contentMaxHeight: CGFloat,
+        entriesNeedScroll: Bool
+    ) -> CGFloat? {
+        guard entriesNeedScroll, measuredContentHeight > 0 else { return nil }
+        return min(measuredContentHeight, contentMaxHeight)
+    }
+
+    static func bottomBreathingRoom(
+        entriesNeedScroll: Bool,
+        configuredBreathingRoom: CGFloat
+    ) -> CGFloat {
+        entriesNeedScroll ? configuredBreathingRoom : 0
+    }
+}
+
 enum ChatLandscapeWidthGeometry {
     static func shouldFillWindowWidth(
         viewSize: CGSize,
@@ -7055,12 +7082,18 @@ struct CrossChatNotificationBubbleView: View {
     }
 
     private var resolvedEntriesHeight: CGFloat? {
-        guard measuredEntriesHeight > 0 else { return nil }
-        return min(measuredEntriesHeight, contentMaxHeight)
+        CrossChatNotificationEntrySurfaceGeometry.resolvedViewportHeight(
+            measuredContentHeight: measuredEntriesHeight,
+            contentMaxHeight: contentMaxHeight,
+            entriesNeedScroll: entriesNeedScroll
+        )
     }
 
     private var entriesNeedScroll: Bool {
-        measuredEntriesHeight > contentMaxHeight + 0.5
+        CrossChatNotificationEntrySurfaceGeometry.entriesNeedScroll(
+            measuredContentHeight: measuredEntriesHeight,
+            contentMaxHeight: contentMaxHeight
+        )
     }
 
     private var notificationAccentColor: Color {
@@ -7224,6 +7257,13 @@ struct CrossChatNotificationBubbleView: View {
                     if entriesNeedScroll {
                         ScrollView(.vertical) {
                             measuredNotificationEntriesContent(renderedEntries)
+                                .padding(
+                                    .bottom,
+                                    CrossChatNotificationEntrySurfaceGeometry.bottomBreathingRoom(
+                                        entriesNeedScroll: true,
+                                        configuredBreathingRoom: entriesBottomBreathingRoom
+                                    )
+                                )
                         }
                         .frame(height: resolvedEntriesHeight ?? contentMaxHeight, alignment: .top)
                         .scrollIndicators(.visible)
@@ -7391,7 +7431,6 @@ struct CrossChatNotificationBubbleView: View {
     @ViewBuilder
     private func measuredNotificationEntriesContent(_ entries: [CrossChatRenderedNotificationEntry]) -> some View {
         notificationEntriesContent(entries)
-            .padding(.bottom, entriesBottomBreathingRoom)
             .background(
                 GeometryReader { proxy in
                     Color.clear.preference(

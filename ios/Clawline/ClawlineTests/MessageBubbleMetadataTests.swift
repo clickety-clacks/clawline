@@ -236,6 +236,66 @@ struct MessageBubbleMetadataTests {
         #expect(viewportHeight == 52)
     }
 
+    @Test("Reply quote text participates in normal bubble width")
+    func replyQuoteTextParticipatesInNormalBubbleWidth() {
+        let referenced = Message(
+            id: "s_width_reference",
+            role: .assistant,
+            content: "Referenced text whose reply chip should widen the outgoing bubble.",
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: "server:personal",
+            clientMessageId: "c_width_reference"
+        )
+        let replyReference = PendingMessageReference(message: referenced)
+        let message = Message(
+            id: "s_width_reply",
+            role: .user,
+            content: "Ok",
+            timestamp: Date(timeIntervalSince1970: 1_700_000_100),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: referenced.sessionKey,
+            replyToMessageId: referenced.id,
+            replyToClientMessageId: referenced.clientMessageId
+        )
+        let metrics = ChatFlowTheme.Metrics(isCompact: true)
+        var streamingState = StreamingTableParseState()
+        let presentation = MessagePresentationBuilder.build(
+            from: message,
+            metrics: metrics,
+            streamingState: &streamingState
+        )
+        let bubble = MessageBubbleUIKitView(frame: CGRect(x: 0, y: 0, width: 320, height: 1))
+
+        bubble.configure(
+            message: message,
+            presentation: presentation,
+            sizeClass: .short,
+            metrics: metrics,
+            maxWidth: 320,
+            bubbleSizingV2: nil,
+            showsHeader: false,
+            paddingScale: 1,
+            minWidthOverride: 40,
+            maxWidthOverride: 320,
+            useContinuousCorners: true,
+            isDark: false,
+            onRequestExpand: nil,
+            onRequestLayout: nil,
+            onInteractiveCallback: nil,
+            onInsertIntoPrompt: nil,
+            onReferenceMessage: nil,
+            replyReference: replyReference,
+            salientHighlightService: nil
+        )
+
+        #expect(bubble.preferredWidth(maxWidth: 320, minWidth: 40) > 120)
+    }
+
     @Test("Reply token stays compact for long referenced previews")
     func replyTokenStaysCompactForLongReferencedPreviews() {
         let referenced = Message(

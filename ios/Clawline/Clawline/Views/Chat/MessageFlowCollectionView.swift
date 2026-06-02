@@ -6116,7 +6116,7 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
     ) -> UIButton {
         let button = TestMenuButton(type: .system)
         var configuration = UIButton.Configuration.plain()
-        configuration.image = UIImage(systemName: "testtube.2")
+        configuration.image = UIImage(systemName: "gearshape")
         configuration.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 4, bottom: 0, trailing: 4)
         configuration.baseForegroundColor = color
         configuration.background.strokeWidth = 0

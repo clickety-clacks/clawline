@@ -161,6 +161,7 @@ struct SessionMetadataFooterHitTestingTests {
         #expect(actions.map(\.title) == ["Settings", "Logout"])
         #expect(actions.last?.attributes.contains(.destructive) == true)
         #expect(testMenuButton.showsMenuAsPrimaryAction)
+        #expect(testMenuButton.configuration?.image == UIImage(systemName: "gearshape"))
         let testMenuCenter = testMenuButton.convert(
             CGPoint(x: testMenuButton.bounds.midX, y: testMenuButton.bounds.midY),
             to: cell

@@ -53,13 +53,35 @@ const CrossChatNotificationStoreContext =
 
 export function createCrossChatNotificationStore(): CrossChatNotificationStore {
   const baseStore = createStore<CrossChatNotificationState>(EMPTY_STATE);
+  const dismissedAssistantMessageIdsBySourceChatId = new Map<string, Set<string>>();
+
+  function rememberDismissedEntries(bubble: CrossChatNotificationBubble | undefined) {
+    if (!bubble) {
+      return;
+    }
+
+    const dismissedIds =
+      dismissedAssistantMessageIdsBySourceChatId.get(bubble.sourceChatId) ??
+      new Set<string>();
+    for (const entry of bubble.entriesNewestFirst) {
+      dismissedIds.add(entry.assistantMessageId);
+    }
+    dismissedAssistantMessageIdsBySourceChatId.set(
+      bubble.sourceChatId,
+      dismissedIds
+    );
+  }
 
   return {
     getState: baseStore.getState,
     subscribe: baseStore.subscribe,
     applyIncomingMessage(input) {
       baseStore.setState((current) =>
-        applyCrossChatNotificationForIncomingMessage(current, input)
+        applyCrossChatNotificationForIncomingMessage(
+          current,
+          input,
+          dismissedAssistantMessageIdsBySourceChatId
+        )
       );
     },
     clearCrossChatNotifications() {
@@ -67,11 +89,15 @@ export function createCrossChatNotificationStore(): CrossChatNotificationStore {
         if (Object.keys(current.bubblesBySourceChatId).length === 0) {
           return current;
         }
+        for (const bubble of Object.values(current.bubblesBySourceChatId)) {
+          rememberDismissedEntries(bubble);
+        }
         return EMPTY_STATE;
       });
     },
     dismissCrossChatNotification(sourceChatId) {
       baseStore.setState((current) => {
+        rememberDismissedEntries(current.bubblesBySourceChatId[sourceChatId]);
         const nextBubbles = omitNotificationBubble(
           current.bubblesBySourceChatId,
           sourceChatId
@@ -129,6 +155,7 @@ export function createCrossChatNotificationStore(): CrossChatNotificationStore {
       );
     },
     reset() {
+      dismissedAssistantMessageIdsBySourceChatId.clear();
       baseStore.setState(EMPTY_STATE);
     }
   };
@@ -160,7 +187,8 @@ export function useCrossChatNotificationStore() {
 
 function applyCrossChatNotificationForIncomingMessage(
   state: CrossChatNotificationState,
-  input: Parameters<CrossChatNotificationStore["applyIncomingMessage"]>[0]
+  input: Parameters<CrossChatNotificationStore["applyIncomingMessage"]>[0],
+  dismissedAssistantMessageIdsBySourceChatId: Map<string, Set<string>>
 ) {
   const { message, selectedSessionKey, source, streams } = input;
   const sourceChatId = message.sessionKey ?? streams[0]?.sessionKey ?? "unassigned";
@@ -174,6 +202,12 @@ function applyCrossChatNotificationForIncomingMessage(
   }
 
   const currentBubble = state.bubblesBySourceChatId[sourceChatId];
+  if (
+    dismissedAssistantMessageIdsBySourceChatId.get(sourceChatId)?.has(message.id)
+  ) {
+    return state;
+  }
+
   const sourceTitle =
     streams.find((stream) => stream.sessionKey === sourceChatId)?.displayName ??
     sourceChatId;

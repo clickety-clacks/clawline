@@ -459,6 +459,179 @@ test("live bug procedure: ack-only sends survive reload, side send, and reconnec
   }
 });
 
+test("dismissed cross-chat notification does not reappear for the same streaming assistant message", async ({
+  page
+}) => {
+  const port = 25_801 + Math.floor(Math.random() * 1_000);
+  const mainSessionKey = "agent:main:clawline:clawline_web_test:main";
+  const sideSessionKey = "agent:main:clawline:clawline_web_test:side";
+  let activeSocket: import("ws").WebSocket | null = null;
+
+  const streams = [
+    {
+      sessionKey: mainSessionKey,
+      displayName: "Main",
+      kind: "main",
+      orderIndex: 0,
+      isBuiltIn: true,
+      createdAt: 1_764_500_000_000,
+      updatedAt: 1_764_500_000_000
+    },
+    {
+      sessionKey: sideSessionKey,
+      displayName: "Side thread",
+      kind: "custom",
+      orderIndex: 1,
+      isBuiltIn: false,
+      createdAt: 1_764_500_000_100,
+      updatedAt: 1_764_500_000_100
+    }
+  ];
+
+  const wss = new WebSocketServer({ port });
+
+  wss.on("connection", (socket) => {
+    activeSocket = socket;
+    socket.on("message", (buffer) => {
+      const payload = JSON.parse(buffer.toString()) as { type: string };
+
+      if (payload.type === "pair_request") {
+        socket.send(
+          JSON.stringify({
+            type: "pair_result",
+            success: true,
+            token: "jwt-notification-reappear-token",
+            userId: "clawline_web_test"
+          })
+        );
+        return;
+      }
+
+      if (payload.type === "auth") {
+        socket.send(
+          JSON.stringify({
+            type: "auth_result",
+            success: true,
+            userId: "clawline_web_test",
+            sessionId: "sess_notification_reappear",
+            isAdmin: false,
+            replayCount: 0,
+            replayTruncated: false,
+            historyReset: false,
+            sessionKeys: [mainSessionKey, sideSessionKey]
+          })
+        );
+        socket.send(
+          JSON.stringify({
+            type: "session_info",
+            userId: "clawline_web_test",
+            isAdmin: false,
+            sessionKeys: [mainSessionKey, sideSessionKey]
+          })
+        );
+        socket.send(
+          JSON.stringify({
+            type: "stream_snapshot",
+            streams
+          })
+        );
+      }
+    });
+  });
+
+  try {
+    await page.goto("/pair");
+    await page.getByLabel("Name").fill("Clawline Web Test Browser");
+    await page.getByLabel("Provider address").fill(`ws://127.0.0.1:${port}`);
+    await page.getByRole("button", { name: "Pair browser" }).click();
+
+    await expect(page).toHaveURL(new RegExp(`/chat/${escapeForRegExp(mainSessionKey)}$`));
+    await expect.poll(() => activeSocket).not.toBeNull();
+
+    activeSocket?.send(
+      JSON.stringify({
+        type: "message",
+        id: "s_side_streaming_reappear",
+        role: "assistant",
+        content: "Partial side notification",
+        timestamp: 1_764_500_001_000,
+        streaming: true,
+        sessionKey: sideSessionKey,
+        attachments: []
+      })
+    );
+
+    const notification = page.getByLabel("Side thread notification");
+    await expect(notification).toBeVisible();
+    await expect(notification.getByText("Partial side notification")).toBeVisible();
+    await notification.getByRole("button", { name: "Dismiss" }).click();
+    await expect(notification).toHaveCount(0);
+
+    activeSocket?.send(
+      JSON.stringify({
+        type: "message",
+        id: "s_side_streaming_reappear",
+        role: "assistant",
+        content: "Final side notification should stay dismissed",
+        timestamp: 1_764_500_001_100,
+        streaming: false,
+        sessionKey: sideSessionKey,
+        attachments: []
+      })
+    );
+
+    await expect(page.getByText("Final side notification should stay dismissed")).toHaveCount(0);
+    await expect(page.getByTestId("cross-chat-notification-bubble")).toHaveCount(0);
+
+    activeSocket?.send(
+      JSON.stringify({
+        type: "message",
+        id: "s_side_distinct_after_dismiss",
+        role: "assistant",
+        content: "Distinct side notification appears",
+        timestamp: 1_764_500_001_200,
+        streaming: false,
+        sessionKey: sideSessionKey,
+        attachments: []
+      })
+    );
+
+    await expect(page.getByText("Distinct side notification appears")).toBeVisible();
+
+    activeSocket?.send(
+      JSON.stringify({
+        type: "message",
+        id: "s_side_streaming_reappear",
+        role: "assistant",
+        content: "Late old notification update should stay dismissed",
+        timestamp: 1_764_500_001_300,
+        streaming: false,
+        sessionKey: sideSessionKey,
+        attachments: []
+      })
+    );
+
+    await expect(
+      page.getByText("Late old notification update should stay dismissed")
+    ).toHaveCount(0);
+    await expect(page.getByText("Distinct side notification appears")).toBeVisible();
+  } finally {
+    await page.goto("about:blank");
+    for (const client of wss.clients) {
+      client.terminate();
+    }
+    await new Promise<void>((resolve, reject) => {
+      wss.close((error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve();
+      });
+    });
+  }
+});
+
 function escapeForRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

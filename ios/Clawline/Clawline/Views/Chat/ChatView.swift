@@ -302,6 +302,7 @@ struct ChatView: View {
     @State private var isPhotosPickerPresented = false
     @State private var isFileImporterPresented = false
     @State private var isCancelCurrentPromptDialogPresented = false
+    @State private var isLogoutConfirmationPresented = false
     @State private var isMissingReplyVisibleIdDialogPresented = false
     @State private var cancelCurrentPromptSessionKey: String?
     @State private var cancelCurrentPromptRequiresVisibleTyping = false
@@ -934,6 +935,16 @@ struct ChatView: View {
             isPresented: $isMissingReplyVisibleIdDialogPresented
         ) {
             Button("OK", role: .cancel) {}
+        }
+        .confirmationDialog(
+            "Log out of Clawline?",
+            isPresented: $isLogoutConfirmationPresented,
+            titleVisibility: .visible
+        ) {
+            Button("Logout", role: .destructive) {
+                viewModel.logout()
+            }
+            Button("Cancel", role: .cancel) {}
         }
         .photosPicker(
             isPresented: $isPhotosPickerPresented,
@@ -2277,6 +2288,14 @@ struct ChatView: View {
                     value: value,
                     enabled: enabled
                 )
+            },
+            onFooterTestMenuSelected: { action in
+                switch action {
+                case .settings:
+                    settings.toggleSettings()
+                case .logout:
+                    isLogoutConfirmationPresented = true
+                }
             },
             onInsertMessageIntoPrompt: { message in
                 insertMessageIntoPrompt(message)

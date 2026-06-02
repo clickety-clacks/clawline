@@ -144,6 +144,7 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
     var onTypingIndicatorTap: (@MainActor (CGRect) -> Void)?
     var onTypingIndicatorAnchorFrameChanged: (@MainActor (CGRect?) -> Void)? = nil
     var onSessionControlSelected: (@MainActor (String, SessionControlAction, String?, Bool?) -> Void)?
+    var onFooterTestMenuSelected: (@MainActor (FooterTestMenuAction) -> Void)?
     var onInsertMessageIntoPrompt: (@MainActor (Message) -> Void)?
     var onReferenceMessageInPrompt: (@MainActor (Message) -> Void)?
     @Environment(\.colorScheme) private var colorScheme
@@ -179,6 +180,7 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
             onTypingIndicatorTap: onTypingIndicatorTap,
             onTypingIndicatorAnchorFrameChanged: onTypingIndicatorAnchorFrameChanged,
             onSessionControlSelected: onSessionControlSelected,
+            onFooterTestMenuSelected: onFooterTestMenuSelected,
             onInsertMessageIntoPrompt: onInsertMessageIntoPrompt,
             onReferenceMessageInPrompt: onReferenceMessageInPrompt,
             isDark: isDark,
@@ -214,6 +216,7 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
             onTypingIndicatorTap: onTypingIndicatorTap,
             onTypingIndicatorAnchorFrameChanged: onTypingIndicatorAnchorFrameChanged,
             onSessionControlSelected: onSessionControlSelected,
+            onFooterTestMenuSelected: onFooterTestMenuSelected,
             onInsertMessageIntoPrompt: onInsertMessageIntoPrompt,
             onReferenceMessageInPrompt: onReferenceMessageInPrompt,
             isDark: isDark,
@@ -223,6 +226,11 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
             layoutCoordinator.registerListView(uiViewController, sessionKey: sessionKey)
         }
     }
+}
+
+enum FooterTestMenuAction {
+    case settings
+    case logout
 }
 
 final class MessageFlowCollectionViewController: UIViewController, UICollectionViewDelegateFlowLayout {
@@ -248,6 +256,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         let onTypingIndicatorTap: (@MainActor (CGRect) -> Void)?
         let onTypingIndicatorAnchorFrameChanged: (@MainActor (CGRect?) -> Void)?
         let onSessionControlSelected: (@MainActor (String, SessionControlAction, String?, Bool?) -> Void)?
+        let onFooterTestMenuSelected: (@MainActor (FooterTestMenuAction) -> Void)?
         let onInsertMessageIntoPrompt: (@MainActor (Message) -> Void)?
         let onReferenceMessageInPrompt: (@MainActor (Message) -> Void)?
         let isDark: Bool?
@@ -451,6 +460,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     private var onTypingIndicatorAnchorFrameChanged: (@MainActor (CGRect?) -> Void)?
     private var lastReportedTypingIndicatorAnchorFrame: CGRect?
     private var onSessionControlSelected: (@MainActor (String, SessionControlAction, String?, Bool?) -> Void)?
+    private var onFooterTestMenuSelected: (@MainActor (FooterTestMenuAction) -> Void)?
     private var onInsertMessageIntoPrompt: (@MainActor (Message) -> Void)?
     private var onReferenceMessageInPrompt: (@MainActor (Message) -> Void)?
     private let webBubbleCoordinator = WebBubbleCoordinator()
@@ -2239,6 +2249,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         onTypingIndicatorTap: (@MainActor (CGRect) -> Void)? = nil,
         onTypingIndicatorAnchorFrameChanged: (@MainActor (CGRect?) -> Void)? = nil,
         onSessionControlSelected: (@MainActor (String, SessionControlAction, String?, Bool?) -> Void)? = nil,
+        onFooterTestMenuSelected: (@MainActor (FooterTestMenuAction) -> Void)? = nil,
         onInsertMessageIntoPrompt: (@MainActor (Message) -> Void)? = nil,
         onReferenceMessageInPrompt: (@MainActor (Message) -> Void)? = nil,
         isDark: Bool? = nil,
@@ -2266,6 +2277,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             onTypingIndicatorTap: onTypingIndicatorTap,
             onTypingIndicatorAnchorFrameChanged: onTypingIndicatorAnchorFrameChanged,
             onSessionControlSelected: onSessionControlSelected,
+            onFooterTestMenuSelected: onFooterTestMenuSelected,
             onInsertMessageIntoPrompt: onInsertMessageIntoPrompt,
             onReferenceMessageInPrompt: onReferenceMessageInPrompt,
             isDark: isDark,
@@ -2308,6 +2320,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         self.onTypingIndicatorTap = onTypingIndicatorTap
         self.onTypingIndicatorAnchorFrameChanged = onTypingIndicatorAnchorFrameChanged
         self.onSessionControlSelected = onSessionControlSelected
+        self.onFooterTestMenuSelected = onFooterTestMenuSelected
         self.onInsertMessageIntoPrompt = onInsertMessageIntoPrompt
         self.onReferenceMessageInPrompt = onReferenceMessageInPrompt
         self.allowsTransparentWindowBackground = allowsTransparentWindowBackground
@@ -3807,7 +3820,8 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 cell?.configure(
                     status: self.sessionStatus,
                     isDark: self.currentIsDark,
-                    onSelect: self.onSessionControlSelected
+                    onSelect: self.onSessionControlSelected,
+                    onTestMenuSelect: self.onFooterTestMenuSelected
                 )
                 cell?.alpha = self.footerRevealAlpha()
                 return cell
@@ -5809,9 +5823,12 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
     static let bottomPadding: CGFloat = 4
     static let horizontalPadding: CGFloat = 12
     static let actionRegionHeight: CGFloat = 44
-    static let fadeRevealRange: CGFloat = topPadding + actionRegionHeight
+    static let versionRowHeight: CGFloat = 22
+    static let fadeRevealRange: CGFloat = topPadding + actionRegionHeight + versionRowHeight
 
     private let stackView = UIStackView()
+    private let controlsStackView = UIStackView()
+    private let versionStackView = UIStackView()
 
     private struct FooterItem {
         let text: String
@@ -5846,26 +5863,49 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         }
     }
 
+    private final class TestMenuButton: UIButton {
+        override func point(inside point: CGPoint, with _: UIEvent?) -> Bool {
+            bounds.insetBy(dx: -10, dy: -10).contains(point)
+        }
+    }
+
     override init(frame: CGRect) {
         super.init(frame: frame)
         contentView.backgroundColor = .clear
         backgroundColor = .clear
 
         stackView.translatesAutoresizingMaskIntoConstraints = false
-        stackView.axis = .horizontal
+        stackView.axis = .vertical
         stackView.alignment = .center
         stackView.distribution = .fill
-        stackView.spacing = 2
+        stackView.spacing = 0
         stackView.setContentHuggingPriority(.required, for: .horizontal)
         stackView.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
         contentView.addSubview(stackView)
+
+        controlsStackView.axis = .horizontal
+        controlsStackView.alignment = .center
+        controlsStackView.distribution = .fill
+        controlsStackView.spacing = 2
+        controlsStackView.setContentHuggingPriority(.required, for: .horizontal)
+        controlsStackView.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+        stackView.addArrangedSubview(controlsStackView)
+
+        versionStackView.axis = .horizontal
+        versionStackView.alignment = .center
+        versionStackView.distribution = .fill
+        versionStackView.spacing = 4
+        versionStackView.setContentHuggingPriority(.required, for: .horizontal)
+        versionStackView.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+        stackView.addArrangedSubview(versionStackView)
 
         NSLayoutConstraint.activate([
             stackView.leadingAnchor.constraint(greaterThanOrEqualTo: contentView.leadingAnchor, constant: Self.horizontalPadding),
             stackView.trailingAnchor.constraint(lessThanOrEqualTo: contentView.trailingAnchor, constant: -Self.horizontalPadding),
             stackView.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
             stackView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: Self.topPadding),
-            stackView.heightAnchor.constraint(equalToConstant: Self.actionRegionHeight),
+            controlsStackView.heightAnchor.constraint(equalToConstant: Self.actionRegionHeight),
+            versionStackView.heightAnchor.constraint(equalToConstant: Self.versionRowHeight),
         ])
     }
 
@@ -5875,9 +5915,13 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
     }
 
     override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
-        let actionButtons = stackView.arrangedSubviews.compactMap { $0 as? FooterButton }
+        let actionButtons = controlsStackView.arrangedSubviews.compactMap { $0 as? FooterButton }
         if let button = FooterActionHitTesting.hitView(at: point, in: self, candidates: actionButtons, event: event) {
             return button
+        }
+        if let testMenuButton = versionStackView.arrangedSubviews.compactMap({ $0 as? TestMenuButton }).first,
+           testMenuButton.point(inside: testMenuButton.convert(point, from: self), with: event) {
+            return testMenuButton
         }
         return super.hitTest(point, with: event)
     }
@@ -5885,25 +5929,32 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
     func configure(
         status: SessionStatus?,
         isDark: Bool,
-        onSelect: (@MainActor (String, SessionControlAction, String?, Bool?) -> Void)?
+        onSelect: (@MainActor (String, SessionControlAction, String?, Bool?) -> Void)?,
+        onTestMenuSelect: (@MainActor (FooterTestMenuAction) -> Void)? = nil
     ) {
         let palette = ChatFlowUIKitTheme.palette(isDark: isDark)
         let textColor = palette.textMuted.withAlphaComponent(Self.textAlpha(isDark: isDark))
-        for view in stackView.arrangedSubviews {
-            stackView.removeArrangedSubview(view)
+        for view in controlsStackView.arrangedSubviews {
+            controlsStackView.removeArrangedSubview(view)
+            view.removeFromSuperview()
+        }
+        for view in versionStackView.arrangedSubviews {
+            versionStackView.removeArrangedSubview(view)
             view.removeFromSuperview()
         }
         let items = Self.footerItems(for: status, isDark: isDark)
         for item in items {
-            stackView.addArrangedSubview(footerView(for: item, status: status, color: item.textColor ?? textColor, onSelect: onSelect))
+            controlsStackView.addArrangedSubview(footerView(for: item, status: status, color: item.textColor ?? textColor, onSelect: onSelect))
         }
+        versionStackView.addArrangedSubview(versionLabel(color: textColor))
+        versionStackView.addArrangedSubview(testMenuButton(color: textColor, onSelect: onTestMenuSelect))
         accessibilityLabel = Self.footerText(for: status)
         accessibilityTraits = items.contains { $0.action != nil && !$0.options.isEmpty } ? .button : .staticText
     }
 
     static func height(for status: SessionStatus?) -> CGFloat {
         guard footerText(for: status) != nil else { return 0 }
-        return ceil(actionRegionHeight + topPadding + bottomPadding)
+        return ceil(actionRegionHeight + versionRowHeight + topPadding + bottomPadding)
     }
 
     static func shouldAppendFooter(after itemIds: [String], status: SessionStatus?) -> Bool {
@@ -6040,6 +6091,58 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
             }
         })
         return button
+    }
+
+    private func versionLabel(color: UIColor) -> UILabel {
+        let label = UILabel()
+        label.text = Self.versionBuildText()
+        label.font = Self.footerFont
+        label.textColor = color
+        label.adjustsFontForContentSizeCategory = true
+        label.lineBreakMode = .byTruncatingTail
+        label.textAlignment = .center
+        label.isAccessibilityElement = true
+        label.accessibilityLabel = label.text
+        label.accessibilityTraits = .staticText
+        label.setContentHuggingPriority(.required, for: .horizontal)
+        label.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+        return label
+    }
+
+    private func testMenuButton(
+        color: UIColor,
+        onSelect: (@MainActor (FooterTestMenuAction) -> Void)?
+    ) -> UIButton {
+        let button = TestMenuButton(type: .system)
+        var configuration = UIButton.Configuration.plain()
+        configuration.image = UIImage(systemName: "testtube.2")
+        configuration.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 4, bottom: 0, trailing: 4)
+        configuration.baseForegroundColor = color
+        configuration.background.strokeWidth = 0
+        button.configuration = configuration
+        button.tintColor = color
+        button.accessibilityLabel = "Test menu"
+        button.showsMenuAsPrimaryAction = true
+        button.menu = UIMenu(children: [
+            UIAction(title: "Settings", image: UIImage(systemName: "gearshape")) { _ in
+                Task { @MainActor in
+                    onSelect?(.settings)
+                }
+            },
+            UIAction(title: "Logout", image: UIImage(systemName: "rectangle.portrait.and.arrow.right"), attributes: .destructive) { _ in
+                Task { @MainActor in
+                    onSelect?(.logout)
+                }
+            }
+        ])
+        button.widthAnchor.constraint(equalToConstant: 44).isActive = true
+        return button
+    }
+
+    static func versionBuildText(bundle: Bundle = .main) -> String {
+        let version = normalized(bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String) ?? "unknown"
+        let build = normalized(bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String) ?? "unknown"
+        return "Version \(version) (\(build))"
     }
 
     private static func modelOptions(display: SessionStatus.Display,

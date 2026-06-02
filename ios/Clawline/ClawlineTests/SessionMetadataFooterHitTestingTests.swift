@@ -41,8 +41,8 @@ struct SessionMetadataFooterHitTestingTests {
         let frames = buttons.map { $0.convert($0.bounds, to: cell) }
 
         #expect(SessionMetadataFooterCell.topPadding == 12)
-        #expect(SessionMetadataFooterCell.height(for: makeStatus()) == 60)
-        #expect(SessionMetadataFooterCell.fadeRevealRange == 56)
+        #expect(SessionMetadataFooterCell.height(for: makeStatus()) == 82)
+        #expect(SessionMetadataFooterCell.fadeRevealRange == 78)
         #expect(frames.allSatisfy {
             let centeredY = SessionMetadataFooterCell.topPadding
                 + (SessionMetadataFooterCell.actionRegionHeight - $0.height) / 2
@@ -141,7 +141,31 @@ struct SessionMetadataFooterHitTestingTests {
         let foreground = try #require(configuration.baseForegroundColor)
 
         #expect(foreground.cgColor.alpha == SessionMetadataFooterCell.textAlpha(isDark: false))
-        #expect(SessionMetadataFooterCell.fadeRevealRange == 56)
+        #expect(SessionMetadataFooterCell.fadeRevealRange == 78)
+    }
+
+    @Test("Footer shows version build line and test menu")
+    func footerShowsVersionBuildLineAndTestMenu() throws {
+        let cell = makeConfiguredCell()
+        let versionLabel = try #require(
+            allSubviews(in: cell).compactMap { $0 as? UILabel }
+                .first { $0.accessibilityLabel?.hasPrefix("Version ") == true }
+        )
+        let testMenuButton = try #require(
+            allSubviews(in: cell).compactMap { $0 as? UIButton }
+                .first { $0.accessibilityLabel == "Test menu" }
+        )
+        let actions = try #require(testMenuButton.menu?.children.compactMap { $0 as? UIAction })
+
+        #expect(versionLabel.text == SessionMetadataFooterCell.versionBuildText())
+        #expect(actions.map(\.title) == ["Settings", "Logout"])
+        #expect(actions.last?.attributes.contains(.destructive) == true)
+        #expect(testMenuButton.showsMenuAsPrimaryAction)
+        let testMenuCenter = testMenuButton.convert(
+            CGPoint(x: testMenuButton.bounds.midX, y: testMenuButton.bounds.midY),
+            to: cell
+        )
+        #expect(cell.hitTest(testMenuCenter, with: nil) === testMenuButton)
     }
 
     @Test("Footer renders sanitized auth mode as right-most text")
@@ -430,6 +454,7 @@ private func footerButtons(in cell: SessionMetadataFooterCell) throws -> [UIButt
     let buttons = allSubviews(in: cell)
         .compactMap { $0 as? UIButton }
         .filter { $0.isEnabled }
+        .filter { $0.accessibilityLabel != "Test menu" }
         .sorted {
             $0.convert($0.bounds, to: cell).minX < $1.convert($1.bounds, to: cell).minX
         }

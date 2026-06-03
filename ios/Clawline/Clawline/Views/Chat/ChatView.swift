@@ -1138,7 +1138,14 @@ struct ChatView: View {
             CrossChatNotificationOverlay.minVisibleBubbleHeight,
             geometry.size.height - notificationOverlayTopMargin - inputBarTopFromScreenBottom - 24
         )
+#if os(iOS) && !targetEnvironment(macCatalyst)
+        let notificationOverlayMaxWidth = nativeWindowSize
+            .map { min(geometry.size.width, min($0.width, $0.height)) }
+            ?? geometry.size.width
+#else
         let notificationOverlayMaxWidth = geometry.size.width
+#endif
+        let notificationOverlayHorizontalCorrection = notificationOverlayMaxWidth - geometry.size.width
         let keyboardVisibleNotificationBubbles = CrossChatNotificationOverlay.visibleBubbles(
             maxContainerHeight: notificationOverlayMaxHeight,
             bubbles: viewModel.crossChatNotificationBubbles,
@@ -1217,6 +1224,7 @@ struct ChatView: View {
                     focusedReplySourceChatId: $crossChatNotificationFocusedReplySourceChatId,
                     keyboardOwnershipStore: keyboardOwnershipStore
                 )
+                .offset(x: notificationOverlayHorizontalCorrection)
             }
             .overlay(alignment: .topTrailing) {
                 notificationKeyboardShortcutView(
@@ -1761,12 +1769,7 @@ struct ChatView: View {
                     focusedReplySourceChatId: focusedReplySourceChatId,
                     keyboardOwnershipStore: keyboardOwnershipStore,
                     onNavigateToSource: { sourceChatId in
-                        selectStream(
-                            sourceChatId,
-                            source: .programmatic,
-                            preserveCrossChatNotification: true
-                        )
-                        isCrossChatNotificationStackDocked = true
+                        navigateToCrossChatNotificationSource(sourceChatId)
                     }
                 )
                 .visionOSOverlayDepthOffset(spatialOverlayDepthOffset)
@@ -2612,6 +2615,18 @@ struct ChatView: View {
             source: source,
             preserveCrossChatNotification: preserveCrossChatNotification
         )
+    }
+
+    private func navigateToCrossChatNotificationSource(_ sourceChatId: String) {
+        StreamSwitchTiming.log("notification_navigation_called", sessionKey: sourceChatId)
+        if StreamSwitchKeyboardFocusPolicy.shouldRestoreComposerAfterSwitch(
+            wasSoftwareKeyboardVisible: isKeyboardVisible
+        ) {
+            armComposerFocusRestoreAfterStreamSwitch(for: sourceChatId)
+        } else {
+            streamSwitchComposerFocusRestore = nil
+        }
+        viewModel.requestCrossChatNotificationNavigation(to: sourceChatId)
     }
 
     private func previewScrubStream(_ sessionKey: String, viewModel: ChatViewModel) {
@@ -5845,6 +5860,7 @@ final class CrossChatNotificationRenderedEntryCache {
 
 enum CrossChatNotificationGeometry {
     static let collapsedPeekWidth: CGFloat = 18
+    static let swipeCompletionThreshold: CGFloat = 44
 
     static func layoutHostWidth(maxContainerWidth: CGFloat) -> CGFloat {
         max(0, maxContainerWidth)
@@ -5967,6 +5983,7 @@ private struct CrossChatNotificationOverlay: View {
     @State private var actionMenuSelection: CrossChatNotificationActionMenuItem = .goToChat
     @State private var scrollViewsBySourceChatId: [String: WeakScrollViewBox] = [:]
     @State private var previewingCollapsedSourceChatIds: Set<String> = []
+    @State private var dockedCollapsedPreviewSourceChatIds: Set<String> = []
     @State private var collapsedPreviewTasksBySourceChatId: [String: Task<Void, Never>] = [:]
     @State private var bubbleDragOffsetsBySourceChatId: [String: CGFloat] = [:]
     @State private var dismissSwipeActiveSourceChatIds: Set<String> = []
@@ -5982,7 +5999,7 @@ private struct CrossChatNotificationOverlay: View {
     private static let maxStackWidth: CGFloat = 562.5
     private static let bubbleCornerRadius: CGFloat = 18
     private static let collapsedPeekWidth: CGFloat = CrossChatNotificationGeometry.collapsedPeekWidth
-    private static let collapseSwipeThreshold: CGFloat = 44
+    private static let collapseSwipeThreshold: CGFloat = CrossChatNotificationGeometry.swipeCompletionThreshold
     private static let dragPliabilityLimit: CGFloat = 82
     // Drag is rubber-banded to `dragPliabilityLimit`; the rest covers card corner,
     // dismiss blur, shadow/material halo, and pixel rounding outside the bubble frame.
@@ -6269,8 +6286,34 @@ private struct CrossChatNotificationOverlay: View {
                         .offset(x: horizontalOffset(for: bubble) + (bubbleDragOffsetsBySourceChatId[bubble.sourceChatId] ?? 0))
                         .transition(Self.notificationTransition)
                         .accessibilityIdentifier("cross_chat_notification_bubble_\(index)")
-                        .simultaneousGesture(
-                            collapsedBubbleTapGesture
+                        .accessibilityHidden(isCollapsed && !previewingCollapsedSourceChatIds.contains(bubble.sourceChatId))
+                        .onAppear {
+                            if isCollapsed && !isDebugSkippingCollapsedPreview {
+                                startCollapsedPreview(sourceChatIds: [bubble.sourceChatId])
+                            }
+                        }
+                        .overlay {
+                            if isCollapsed && previewingCollapsedSourceChatIds.contains(bubble.sourceChatId) {
+                                NotificationPeekingHitTargetView(
+                                    accessibilityIdentifier: "cross_chat_notification_peeking_hit_target_\(index)",
+                                    onTap: {
+                                        onNavigateToSource(bubble.sourceChatId)
+                                    },
+                                    onLeftSwipe: {
+                                        dismissNotification(sourceChatId: bubble.sourceChatId)
+                                    },
+                                    onRightSwipe: {
+                                        dockCollapsedPreview(sourceChatId: bubble.sourceChatId)
+                                    }
+                                )
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                .background(Color.primary.opacity(0.001))
+                                .contentShape(Rectangle())
+                            }
+                        }
+                        .highPriorityGesture(
+                            peekingTapOrDragGesture(sourceChatId: bubble.sourceChatId),
+                            including: isCollapsed && previewingCollapsedSourceChatIds.contains(bubble.sourceChatId) ? .gesture : .none
                         )
                         .simultaneousGesture(
                             DragGesture(minimumDistance: CrossChatNotificationGestureAxisLock.minimumDistance)
@@ -6300,10 +6343,12 @@ private struct CrossChatNotificationOverlay: View {
                 .overlay(alignment: .top) {
                     actionMenuOverlay()
                 }
-                .overlay(alignment: .trailing) {
-                    if isCollapsed {
-                        collapsedPeekButton
-                    }
+
+                if isCollapsed && activeCollapsedPreviewSourceChatId() == nil {
+                    collapsedPeekButton(height: maxContainerHeight)
+                        .padding(.top, topMargin)
+                        .padding(.trailing, Self.motionOverflowBleed)
+                        .zIndex(200)
                 }
             }
             .offset(x: Self.motionOverflowBleed)
@@ -6312,8 +6357,9 @@ private struct CrossChatNotificationOverlay: View {
             .onAppear {
                 showShortcutLabels = CrossChatShortcutLabelAvailability.current
                 viewModel.closeOverflowingCrossChatNotificationReplies(visibleSourceChatIds: Set(visibleBubbles.map(\.sourceChatId)))
-                if isCollapsed {
+                if isCollapsed && !isDebugSkippingCollapsedPreview {
                     startCollapsedPreview(sourceChatIds: visibleBubbles.map(\.sourceChatId))
+                    scheduleCollapsedPreviewForVisibleBubbles()
                 }
             }
             .onDisappear {
@@ -6399,6 +6445,14 @@ private struct CrossChatNotificationOverlay: View {
                     self.focusedReplySourceChatId = nil
                 }
                 pruneGestureAxisLocks(visibleSourceChatIds: sourceChatIdSet)
+                if isCollapsed && !isDebugSkippingCollapsedPreview {
+                    let missingPreviewSourceChatIds = sourceChatIds.filter {
+                        !previewingCollapsedSourceChatIds.contains($0)
+                            && !dockedCollapsedPreviewSourceChatIds.contains($0)
+                    }
+                    startCollapsedPreview(sourceChatIds: missingPreviewSourceChatIds)
+                    scheduleCollapsedPreviewForVisibleBubbles()
+                }
             }
             .onChange(of: visibleReplySignature) { _, _ in
                 closeActionMenuIfSourceIsReplying()
@@ -6411,34 +6465,25 @@ private struct CrossChatNotificationOverlay: View {
                 viewModel.closeOverflowingCrossChatNotificationReplies(visibleSourceChatIds: Set(visibleBubbles.map(\.sourceChatId)))
             }
             .onChange(of: allBubbleActivitySignaturesBySourceChatId) { oldValue, newValue in
-                guard isCollapsed else { return }
+                guard isCollapsed, !isDebugSkippingCollapsedPreview else { return }
                 let changedSourceChatIds = newValue.compactMap { sourceChatId, signature in
                     oldValue[sourceChatId] == signature ? nil : sourceChatId
                 }
+                dockedCollapsedPreviewSourceChatIds.subtract(changedSourceChatIds)
                 startCollapsedPreview(sourceChatIds: changedSourceChatIds)
             }
         }
     }
 
-    private var collapsedPeekButton: some View {
-        Rectangle()
-            .fill(Color.primary.opacity(0.001))
+    private func collapsedPeekButton(height: CGFloat) -> some View {
+        Color.primary.opacity(0.001)
             .frame(width: Self.collapsedPeekWidth)
-            .frame(maxHeight: CGFloat.infinity)
+            .frame(height: height)
             .contentShape(Rectangle())
-            .accessibilityElement(children: .ignore)
-            .accessibilityAddTraits(.isButton)
-            .gesture(collapsedPeekTapOrDragGesture)
+            .highPriorityGesture(collapsedPeekTapOrDragGesture)
+            .accessibilityElement()
             .accessibilityLabel("Show notifications")
             .accessibilityIdentifier("cross_chat_notification_docked_hit_target")
-    }
-
-    private var collapsedBubbleTapGesture: some Gesture {
-        DragGesture(minimumDistance: 0)
-            .onEnded { value in
-                guard isCollapsed, Self.isCollapsedTap(value.translation) else { return }
-                restoreDock()
-            }
     }
 
     private var collapsedPeekTapOrDragGesture: some Gesture {
@@ -6455,6 +6500,25 @@ private struct CrossChatNotificationOverlay: View {
     private static func isCollapsedTap(_ translation: CGSize) -> Bool {
         abs(translation.width) < CrossChatNotificationGestureAxisLock.minimumDistance
             && abs(translation.height) < CrossChatNotificationGestureAxisLock.minimumDistance
+    }
+
+    private func peekingTapOrDragGesture(sourceChatId: String) -> some Gesture {
+        DragGesture(minimumDistance: 0)
+            .onEnded { value in
+                guard isCollapsed,
+                      previewingCollapsedSourceChatIds.contains(sourceChatId) else { return }
+                if Self.isCollapsedTap(value.translation) {
+                    onNavigateToSource(sourceChatId)
+                    return
+                }
+                guard abs(value.translation.width) > abs(value.translation.height),
+                      abs(value.translation.width) >= Self.collapseSwipeThreshold else { return }
+                if value.translation.width < 0 {
+                    dismissNotification(sourceChatId: sourceChatId)
+                } else {
+                    dockCollapsedPreview(sourceChatId: sourceChatId)
+                }
+            }
     }
 
     private func horizontalOffset(for bubble: CrossChatNotificationBubble) -> CGFloat {
@@ -6785,13 +6849,17 @@ private struct CrossChatNotificationOverlay: View {
             activeLock: activeLock,
             finalTranslation: value.translation,
             completionThreshold: Self.collapseSwipeThreshold,
-            isDocked: isCollapsed || previewingCollapsedSourceChatIds.contains(sourceChatId)
+            isDocked: isCollapsed && !previewingCollapsedSourceChatIds.contains(sourceChatId)
         ) else { return }
         switch completion {
         case .clearCollapsedPreview:
-            clearCollapsedPreview(sourceChatId: sourceChatId)
+            dockCollapsedPreview(sourceChatId: sourceChatId)
         case .dock:
-            dock()
+            if isCollapsed {
+                dockCollapsedPreview(sourceChatId: sourceChatId)
+            } else {
+                dock()
+            }
         case .restoreDock:
             restoreDock()
         case .dismiss:
@@ -6821,8 +6889,44 @@ private struct CrossChatNotificationOverlay: View {
         let horizontal = value.translation.width
         guard abs(horizontal) > abs(value.translation.height),
               abs(horizontal) >= Self.collapseSwipeThreshold else { return }
+        guard let sourceChatId = activeCollapsedPreviewSourceChatId() else {
+            if horizontal < 0 {
+                restoreDock()
+            }
+            return
+        }
         if horizontal < 0 {
+            dismissNotification(sourceChatId: sourceChatId)
+        } else if horizontal > 0 {
+            dockCollapsedPreview(sourceChatId: sourceChatId)
+        }
+    }
+
+    private func handlePeekTap() {
+        guard let sourceChatId = activeCollapsedPreviewSourceChatId() else {
             restoreDock()
+            return
+        }
+        onNavigateToSource(sourceChatId)
+    }
+
+    private func activeCollapsedPreviewSourceChatId() -> String? {
+        visibleBubbles.first { bubble in
+            previewingCollapsedSourceChatIds.contains(bubble.sourceChatId)
+        }?.sourceChatId
+    }
+
+    private func missingCollapsedPreviewSourceChatIds() -> [String] {
+        visibleSourceChatIds.filter { sourceChatId in
+            !previewingCollapsedSourceChatIds.contains(sourceChatId)
+        }
+    }
+
+    private func scheduleCollapsedPreviewForVisibleBubbles() {
+        Task { @MainActor in
+            await Task.yield()
+            guard isCollapsed, !isDebugSkippingCollapsedPreview else { return }
+            startCollapsedPreview(sourceChatIds: missingCollapsedPreviewSourceChatIds())
         }
     }
 
@@ -6861,25 +6965,33 @@ private struct CrossChatNotificationOverlay: View {
         previewingCollapsedSourceChatIds.remove(sourceChatId)
     }
 
+    private func dockCollapsedPreview(sourceChatId: String) {
+        dockedCollapsedPreviewSourceChatIds.insert(sourceChatId)
+        clearCollapsedPreview(sourceChatId: sourceChatId)
+    }
+
     private func clearAllCollapsedPreviews() {
         for task in collapsedPreviewTasksBySourceChatId.values {
             task.cancel()
         }
         collapsedPreviewTasksBySourceChatId = [:]
         previewingCollapsedSourceChatIds.removeAll()
+        dockedCollapsedPreviewSourceChatIds.removeAll()
     }
 
     private func startCollapsedPreview(sourceChatIds: [String]) {
         guard isCollapsed else { return }
         let visibleSourceChatIds = Set(visibleBubbles.map(\.sourceChatId))
-        for sourceChatId in sourceChatIds where visibleSourceChatIds.contains(sourceChatId) {
+        for sourceChatId in sourceChatIds where visibleSourceChatIds.contains(sourceChatId)
+            && !dockedCollapsedPreviewSourceChatIds.contains(sourceChatId) {
             collapsedPreviewTasksBySourceChatId[sourceChatId]?.cancel()
             withAnimation(Self.revealAnimation) {
                 _ = previewingCollapsedSourceChatIds.insert(sourceChatId)
             }
+            let previewDurationNanoseconds = collapsedPreviewDurationNanoseconds
             collapsedPreviewTasksBySourceChatId[sourceChatId] = Task { @MainActor in
                 do {
-                    try await Task.sleep(nanoseconds: 5_000_000_000)
+                    try await Task.sleep(nanoseconds: previewDurationNanoseconds)
                 } catch is CancellationError {
                     return
                 } catch {
@@ -6895,6 +7007,23 @@ private struct CrossChatNotificationOverlay: View {
                 collapsedPreviewTasksBySourceChatId[sourceChatId] = nil
             }
         }
+    }
+
+    private var isDebugSkippingCollapsedPreview: Bool {
+#if DEBUG
+        ProcessInfo.processInfo.arguments.contains("--debug-cross-chat-notification-dock-proof-skip-preview")
+#else
+        false
+#endif
+    }
+
+    private var collapsedPreviewDurationNanoseconds: UInt64 {
+#if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--debug-cross-chat-notification-dock-proof-extended-preview") {
+            return 15_000_000_000
+        }
+#endif
+        return 5_000_000_000
     }
 
     private func closeActionMenu() {
@@ -7416,7 +7545,8 @@ struct CrossChatNotificationBubbleView: View {
                 onActivate()
             }
         }
-        .onTapGesture(perform: onActivate)
+        .contentShape(RoundedRectangle(cornerRadius: bubbleCornerRadius, style: .continuous))
+        .onTapGesture(perform: onNavigate)
         .background(alignment: .leading) {
             Rectangle()
                 .fill(notificationAccentColor.opacity(notificationAccentOpacity))
@@ -8483,6 +8613,72 @@ private struct CrossChatNotificationKeyboardShortcuts: View {
             .route(intent: intent, store: keyboardOwnershipStore)
             .outcome else { return }
         action()
+    }
+}
+
+private struct NotificationPeekingHitTargetView: UIViewRepresentable {
+    let accessibilityIdentifier: String
+    let onTap: () -> Void
+    let onLeftSwipe: () -> Void
+    let onRightSwipe: () -> Void
+
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView(frame: .zero)
+        view.backgroundColor = .clear
+        view.isAccessibilityElement = true
+        view.accessibilityLabel = "Peeking notification"
+        view.accessibilityIdentifier = accessibilityIdentifier
+
+        let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleTap))
+        view.addGestureRecognizer(tap)
+
+        let pan = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handlePan(_:)))
+        view.addGestureRecognizer(pan)
+
+        return view
+    }
+
+    func updateUIView(_ uiView: UIView, context: Context) {
+        uiView.accessibilityIdentifier = accessibilityIdentifier
+        context.coordinator.onTap = onTap
+        context.coordinator.onLeftSwipe = onLeftSwipe
+        context.coordinator.onRightSwipe = onRightSwipe
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onTap: onTap, onLeftSwipe: onLeftSwipe, onRightSwipe: onRightSwipe)
+    }
+
+    final class Coordinator: NSObject {
+        var onTap: () -> Void
+        var onLeftSwipe: () -> Void
+        var onRightSwipe: () -> Void
+
+        init(
+            onTap: @escaping () -> Void,
+            onLeftSwipe: @escaping () -> Void,
+            onRightSwipe: @escaping () -> Void
+        ) {
+            self.onTap = onTap
+            self.onLeftSwipe = onLeftSwipe
+            self.onRightSwipe = onRightSwipe
+        }
+
+        @objc func handleTap() {
+            onTap()
+        }
+
+        @objc func handlePan(_ recognizer: UIPanGestureRecognizer) {
+            guard recognizer.state == .ended else { return }
+            let translation = recognizer.translation(in: recognizer.view)
+            guard abs(translation.x) > abs(translation.y),
+                  abs(translation.x) >= CrossChatNotificationGeometry.swipeCompletionThreshold else { return }
+            if translation.x < 0 {
+                onLeftSwipe()
+            } else {
+                onRightSwipe()
+            }
+        }
     }
 }
 

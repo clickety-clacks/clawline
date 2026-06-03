@@ -351,6 +351,12 @@ final class ChatViewModel: ChatViewModelHosting {
         }
     }
 
+    func requestCrossChatNotificationNavigation(to sourceChatId: String) {
+        guard !sourceChatId.isEmpty else { return }
+        ensureStreamEntry(for: sourceChatId)
+        requestStreamSwitch(to: sourceChatId, source: .programmatic)
+    }
+
     func streamPagerDidBeginInteraction() {
         isPagerInteracting = true
         pendingEngineActivationTask?.cancel()
@@ -382,11 +388,11 @@ final class ChatViewModel: ChatViewModelHosting {
             return
         }
         guard orderedSessionKeys.contains(sessionKey) else { return }
-        guard engineActiveSessionKey != sessionKey else { return }
-        applyActiveSessionKey(sessionKey)
         if !preserveCrossChatNotification {
             dismissCrossChatNotification(sourceChatId: sessionKey)
         }
+        guard engineActiveSessionKey != sessionKey else { return }
+        applyActiveSessionKey(sessionKey)
         markSessionRead(sessionKey, preferServerTail: true)
         // Keep intent selection coherent for non-switch engine mutations (bootstrap/deletion fallback).
         // Stream-switch path still writes uiSelectedSessionKey explicitly before this runs.
@@ -443,6 +449,9 @@ final class ChatViewModel: ChatViewModelHosting {
         pendingEngineActivationTask?.cancel()
         pendingEngineActivationTask = nil
 
+        if !preserveCrossChatNotification {
+            dismissCrossChatNotification(sourceChatId: target)
+        }
         guard target != engineActiveSessionKey else { return }
 
         // Engine activation start pulse keeps toast spinner visible until active page finishes materializing.
@@ -1450,25 +1459,98 @@ final class ChatViewModel: ChatViewModelHosting {
 #if DEBUG
     func debugSeedCrossChatNotificationsForDockProof() {
         let now = Date()
+        let mainSessionKey = SessionKey.clawlineMain(userId: auth.currentUserId ?? "debug-user")
+        let alphaSessionKey = "agent:main:clawline:ui-test:s_t1174_a"
+        let betaSessionKey = "agent:main:clawline:ui-test:s_t1174_b"
+        let streams = [
+            StreamSession(
+                sessionKey: mainSessionKey,
+                displayName: "T1174 Main",
+                kind: "main",
+                orderIndex: 0,
+                isBuiltIn: true,
+                createdAt: now,
+                updatedAt: now
+            ),
+            StreamSession(
+                sessionKey: alphaSessionKey,
+                displayName: "T1174 Alpha Chat",
+                kind: "custom",
+                orderIndex: 1,
+                isBuiltIn: false,
+                createdAt: now,
+                updatedAt: now,
+                trackingMode: .adopted
+            ),
+            StreamSession(
+                sessionKey: betaSessionKey,
+                displayName: "T1174 Beta Chat",
+                kind: "custom",
+                orderIndex: 2,
+                isBuiltIn: false,
+                createdAt: now,
+                updatedAt: now,
+                trackingMode: .adopted
+            )
+        ]
+        for stream in streams {
+            streamsBySessionKey[stream.sessionKey] = stream
+            syntheticSessionKeys.insert(stream.sessionKey)
+            ensureSessionStorage(for: stream.sessionKey)
+        }
+        let alphaMessage = Message(
+            id: "s_t1174_alpha_chat_message",
+            role: .assistant,
+            content: "T1174 Alpha Chat proof message",
+            timestamp: now,
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: alphaSessionKey,
+            sender: nil
+        )
+        let betaMessage = Message(
+            id: "s_t1174_beta_chat_message",
+            role: .assistant,
+            content: "T1174 Beta Chat proof message",
+            timestamp: now,
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: betaSessionKey,
+            sender: nil
+        )
+        sessionMessages[alphaSessionKey] = [alphaMessage]
+        sessionMessages[betaSessionKey] = [betaMessage]
+        persistMessages([alphaMessage], for: alphaSessionKey)
+        persistMessages([betaMessage], for: betaSessionKey)
+        recalculateOrderedSessionKeys()
+        SessionRegistry.shared.replace(with: orderedStreams)
+        ensureDefaultActiveSessionIfNeeded()
+        if ProcessInfo.processInfo.arguments.contains("--debug-cross-chat-notification-dock-proof-start-on-alpha") {
+            setEngineActiveSessionKey(alphaSessionKey, preserveCrossChatNotification: true)
+            setUISelectedSessionKey(alphaSessionKey)
+        }
+
         crossChatNotificationBubblesBySourceChatId = [
-            "agent:main:clawline:ui-test:s_t1150_a": CrossChatNotificationBubble(
-                sourceChatId: "agent:main:clawline:ui-test:s_t1150_a",
-                sourceTitle: "T1150 Alpha",
+            alphaSessionKey: CrossChatNotificationBubble(
+                sourceChatId: alphaSessionKey,
+                sourceTitle: "T1174 Alpha",
                 entries: [
                     CrossChatAssistantNotificationEntry(
-                        id: "s_t1150_notification_a",
+                        id: "s_t1174_notification_a",
                         content: "Dock tap proof notification A",
                         timestamp: now
                     )
                 ],
                 lastAssistantActivityAt: now
             ),
-            "agent:main:clawline:ui-test:s_t1150_b": CrossChatNotificationBubble(
-                sourceChatId: "agent:main:clawline:ui-test:s_t1150_b",
-                sourceTitle: "T1150 Beta",
+            betaSessionKey: CrossChatNotificationBubble(
+                sourceChatId: betaSessionKey,
+                sourceTitle: "T1174 Beta",
                 entries: [
                     CrossChatAssistantNotificationEntry(
-                        id: "s_t1150_notification_b",
+                        id: "s_t1174_notification_b",
                         content: "Dock tap proof notification B",
                         timestamp: now.addingTimeInterval(-1)
                     )

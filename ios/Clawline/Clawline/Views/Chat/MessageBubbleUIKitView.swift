@@ -31,6 +31,11 @@ struct MessageBubbleMetadataDebugState {
     let metadataNeededWidth: CGFloat
     let replyIndicatorHidden: Bool
     let replyIndicatorText: String?
+    let replyIndicatorRenderedText: NSAttributedString?
+    let replyIndicatorLineLimit: Int
+    let replyIndicatorTextHeight: CGFloat
+    let replyIndicatorTextLineHeight: CGFloat
+    let replyIndicatorUncappedTextHeight: CGFloat
 }
 
 private final class BubbleSafeAreaNeutralScrollView: UIScrollView {
@@ -550,7 +555,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
     private let replyIndicatorChipView = UIView()
     private let replyIndicatorStack = UIStackView()
     private let replyIndicatorIconView = UIImageView()
-    private let replyIndicatorLabel = UILabel()
+    private let replyIndicatorTextView = UITextView()
     private let headerMenuButton = UIButton(type: .custom)
     private let bodyLabel = UITextView()
     private let bodyTextContainer = UIView()
@@ -776,7 +781,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
 
         replyIndicatorStack.translatesAutoresizingMaskIntoConstraints = false
         replyIndicatorStack.axis = .horizontal
-        replyIndicatorStack.alignment = .center
+        replyIndicatorStack.alignment = .top
         replyIndicatorStack.spacing = 6
         replyIndicatorStack.isLayoutMarginsRelativeArrangement = true
         replyIndicatorStack.directionalLayoutMargins = NSDirectionalEdgeInsets(top: 6, leading: 10, bottom: 6, trailing: 10)
@@ -788,16 +793,20 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         replyIndicatorIconView.setContentHuggingPriority(.required, for: .horizontal)
         replyIndicatorIconView.setContentCompressionResistancePriority(.required, for: .horizontal)
 
-        replyIndicatorLabel.numberOfLines = 1
-        replyIndicatorLabel.lineBreakMode = .byTruncatingTail
-        replyIndicatorLabel.font = UIFont.clawline(.timestamp)
-        replyIndicatorLabel.adjustsFontForContentSizeCategory = true
-        replyIndicatorLabel.textColor = .label
-        replyIndicatorLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        replyIndicatorLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        replyIndicatorTextView.translatesAutoresizingMaskIntoConstraints = false
+        UnifiedMarkdownRenderer.configureTextView(
+            replyIndicatorTextView,
+            delegate: nil,
+            enableDataDetectors: false
+        )
+        replyIndicatorTextView.textContainer.maximumNumberOfLines = 3
+        replyIndicatorTextView.textContainer.lineBreakMode = .byTruncatingTail
+        replyIndicatorTextView.adjustsFontForContentSizeCategory = true
+        replyIndicatorTextView.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        replyIndicatorTextView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         replyIndicatorStack.addArrangedSubview(replyIndicatorIconView)
-        replyIndicatorStack.addArrangedSubview(replyIndicatorLabel)
+        replyIndicatorStack.addArrangedSubview(replyIndicatorTextView)
         replyIndicatorChipView.addSubview(replyIndicatorStack)
         replyIndicatorContainer.addSubview(replyIndicatorChipView)
         NSLayoutConstraint.activate([
@@ -807,6 +816,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
             replyIndicatorStack.bottomAnchor.constraint(equalTo: replyIndicatorChipView.bottomAnchor),
             replyIndicatorIconView.widthAnchor.constraint(equalToConstant: 12),
             replyIndicatorIconView.heightAnchor.constraint(equalToConstant: 12),
+            replyIndicatorIconView.topAnchor.constraint(equalTo: replyIndicatorTextView.firstBaselineAnchor, constant: -10),
             replyIndicatorChipView.leadingAnchor.constraint(equalTo: replyIndicatorContainer.leadingAnchor),
             replyIndicatorChipView.topAnchor.constraint(equalTo: replyIndicatorContainer.topAnchor),
             replyIndicatorChipView.bottomAnchor.constraint(equalTo: replyIndicatorContainer.bottomAnchor),
@@ -2192,8 +2202,24 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
             headerWidth: headerStack.bounds.width,
             metadataNeededWidth: metadataNeededWidth(),
             replyIndicatorHidden: replyIndicatorContainer.isHidden,
-            replyIndicatorText: replyIndicatorLabel.text
+            replyIndicatorText: currentReplyReference?.tokenLabel,
+            replyIndicatorRenderedText: replyIndicatorTextView.attributedText,
+            replyIndicatorLineLimit: replyIndicatorTextView.textContainer.maximumNumberOfLines,
+            replyIndicatorTextHeight: replyIndicatorTextView.bounds.height,
+            replyIndicatorTextLineHeight: replyIndicatorTextView.font?.lineHeight ?? UIFont.clawline(.timestamp).lineHeight,
+            replyIndicatorUncappedTextHeight: replyIndicatorUncappedTextHeightForTests()
         )
+    }
+
+    private func replyIndicatorUncappedTextHeightForTests() -> CGFloat {
+        guard replyIndicatorTextView.bounds.width > 0 else { return 0 }
+        let originalLineLimit = replyIndicatorTextView.textContainer.maximumNumberOfLines
+        replyIndicatorTextView.textContainer.maximumNumberOfLines = 0
+        let height = replyIndicatorTextView.sizeThatFits(
+            CGSize(width: replyIndicatorTextView.bounds.width, height: .greatestFiniteMagnitude)
+        ).height
+        replyIndicatorTextView.textContainer.maximumNumberOfLines = originalLineLimit
+        return height
     }
 
     private func metadataNeededWidth() -> CGFloat {
@@ -2208,7 +2234,24 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         let shouldShow = currentMessage?.role == .user && currentReplyReference != nil
         replyIndicatorContainer.isHidden = !shouldShow
         replyIndicatorChipView.isHidden = !shouldShow
-        replyIndicatorLabel.text = currentReplyReference?.tokenLabel
+        if let reference = currentReplyReference {
+            let label = reference.preview.isEmpty ? reference.tokenLabel : reference.preview
+            let font = UIFont.clawline(.timestamp)
+            replyIndicatorTextView.attributedText = UnifiedMarkdownRenderer.renderNSAttributedString(
+                markdown: MessageReferenceMarkdownDisplay.renderableMarkdown(label),
+                baseFont: font,
+                inkColor: UIColor.label,
+                lineSpacing: 1
+            ) ?? NSAttributedString(
+                string: label,
+                attributes: [
+                    .font: font,
+                    .foregroundColor: UIColor.label
+                ]
+            )
+        } else {
+            replyIndicatorTextView.attributedText = nil
+        }
         if let tokenLabel = currentReplyReference?.tokenLabel {
             replyIndicatorChipView.accessibilityLabel = "Reply to \(tokenLabel)"
         } else {

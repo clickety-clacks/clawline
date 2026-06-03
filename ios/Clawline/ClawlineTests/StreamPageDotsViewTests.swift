@@ -591,6 +591,21 @@ struct StreamPageDotsViewTests {
         )
     }
 
+    @Test("T1136 popup close requests composer focus after popup dismissal")
+    func streamPopupCloseRequestsComposerFocusAfterDismissal() {
+        #expect(
+            StreamPopupFocusHandoff.closeActions(shouldRestoreComposerFocus: true) == [
+                .closePopup,
+                .requestComposerFocusAfterDismissal
+            ]
+        )
+        #expect(
+            StreamPopupFocusHandoff.closeActions(shouldRestoreComposerFocus: false) == [
+                .closePopup
+            ]
+        )
+    }
+
     @Test("Active dots override unread styling")
     func activeKindWinsPrecedence() {
         let kind = StreamDotColor.kind(

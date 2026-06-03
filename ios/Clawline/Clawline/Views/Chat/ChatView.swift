@@ -243,6 +243,11 @@ final class StreamPopupRouteController {
 }
 
 enum StreamPopupFocusHandoff {
+    enum CloseAction: Equatable {
+        case closePopup
+        case requestComposerFocusAfterDismissal
+    }
+
     static func shouldFocusSearchOnOpen(isSoftwareKeyboardVisible: Bool) -> Bool {
         isSoftwareKeyboardVisible
     }
@@ -258,6 +263,14 @@ enum StreamPopupFocusHandoff {
         didDisplaceComposerFocus: Bool
     ) -> Bool {
         didDisplaceComposerFocus
+    }
+
+    static func closeActions(
+        shouldRestoreComposerFocus: Bool
+    ) -> [CloseAction] {
+        shouldRestoreComposerFocus
+            ? [.closePopup, .requestComposerFocusAfterDismissal]
+            : [.closePopup]
     }
 }
 
@@ -303,6 +316,7 @@ struct ChatView: View {
     @State private var shouldRestoreFocusAfterPicker = false
     @State private var shouldRestoreFocusAfterStreamPopup = false
     @State private var streamPopupKeyboardDismissalTask: Task<Void, Never>?
+    @State private var streamPopupComposerFocusTask: Task<Void, Never>?
     @State private var scrollButtonStateBySessionKey: [String: ScrollButtonState] = [:]
     @State private var scrollButtonDragTranslation: CGFloat = 0
     @State private var scrollButtonIsDragging = false
@@ -837,6 +851,8 @@ struct ChatView: View {
             viewModel.onDisappear(origin: "ChatView.onDisappear[\(chatViewTraceId)] scene=\(String(describing: scenePhase))")
             resetScrollButtonInteractionState()
             closeStreamPopup(restoreComposerFocusIfNeeded: false)
+            streamPopupComposerFocusTask?.cancel()
+            streamPopupComposerFocusTask = nil
 #if DEBUG
             lifecycleDebugOverlayDismissTask?.cancel()
             lifecycleDebugOverlayDismissTask = nil
@@ -2705,6 +2721,8 @@ struct ChatView: View {
         shouldRestoreFocusAfterStreamPopup = isKeyboardVisible && isInputFocused
         streamPopupKeyboardDismissalTask?.cancel()
         streamPopupKeyboardDismissalTask = nil
+        streamPopupComposerFocusTask?.cancel()
+        streamPopupComposerFocusTask = nil
         streamPopupRouteController.openPopup(focusSearch: focusSearch)
     }
 
@@ -2717,14 +2735,13 @@ struct ChatView: View {
         shouldRestoreFocusAfterStreamPopup = false
         streamPopupKeyboardDismissalTask?.cancel()
         streamPopupKeyboardDismissalTask = nil
-        if shouldRestoreComposer {
-            focusRequestID &+= 1
-        }
-        streamPopupRouteController.closePopup()
-        if shouldRestoreComposer {
-            Task { @MainActor in
-                await Task.yield()
-                focusRequestID &+= 1
+
+        for action in StreamPopupFocusHandoff.closeActions(shouldRestoreComposerFocus: shouldRestoreComposer) {
+            switch action {
+            case .closePopup:
+                streamPopupRouteController.closePopup()
+            case .requestComposerFocusAfterDismissal:
+                requestComposerFocusAfterStreamPopupDismissal()
             }
         }
     }
@@ -2734,8 +2751,28 @@ struct ChatView: View {
         shouldRestoreFocusAfterStreamPopup = false
         streamPopupKeyboardDismissalTask?.cancel()
         streamPopupKeyboardDismissalTask = nil
+        streamPopupComposerFocusTask?.cancel()
+        streamPopupComposerFocusTask = nil
         prepareForAttachmentPicker()
         streamPopupRouteController.presentTrackPicker()
+    }
+
+    @MainActor
+    private func requestComposerFocusAfterStreamPopupDismissal() {
+        streamPopupComposerFocusTask?.cancel()
+        streamPopupComposerFocusTask = Task { @MainActor in
+            await Task.yield()
+            do {
+                try await Task.sleep(for: .milliseconds(75))
+            } catch is CancellationError {
+                return
+            } catch {
+                return
+            }
+            guard streamPopupRouteController.route == .closed else { return }
+            focusRequestID &+= 1
+            streamPopupComposerFocusTask = nil
+        }
     }
 
     @MainActor

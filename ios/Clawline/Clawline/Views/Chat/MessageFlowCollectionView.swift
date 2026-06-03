@@ -3628,6 +3628,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             allowsTransparentWindowBackground: allowsTransparentWindowBackground
         )
         collectionView.isOpaque = !currentIsDark && !allowsTransparentWindowBackground
+        updateSpatialGazeScrollHitSurface()
         collectionView.contentInsetAdjustmentBehavior = .never
         collectionView.alwaysBounceVertical = true
         #if !os(visionOS)
@@ -3667,6 +3668,16 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         view.isOpaque = !isDark && !allowsTransparentWindowBackground
         collectionView?.backgroundColor = color
         collectionView?.isOpaque = !isDark && !allowsTransparentWindowBackground
+        updateSpatialGazeScrollHitSurface()
+    }
+
+    private func updateSpatialGazeScrollHitSurface() {
+#if os(visionOS)
+        guard let collectionView else { return }
+        collectionView.backgroundView = allowsTransparentWindowBackground
+            ? SpatialGazeScrollHitSurfaceView()
+            : nil
+#endif
     }
 
     @objc private func handleCollectionViewTap(_ recognizer: UITapGestureRecognizer) {
@@ -6354,6 +6365,25 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         return trimmed.isEmpty ? nil : trimmed
     }
 }
+
+#if os(visionOS)
+final class SpatialGazeScrollHitSurfaceView: UIView {
+    static let surfaceAlpha: CGFloat = 0.001
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = UIColor.black.withAlphaComponent(Self.surfaceAlpha)
+        isOpaque = false
+        isUserInteractionEnabled = true
+        accessibilityElementsHidden = true
+        isAccessibilityElement = false
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+}
+#endif
 
 enum FooterActionHitTesting {
     @MainActor

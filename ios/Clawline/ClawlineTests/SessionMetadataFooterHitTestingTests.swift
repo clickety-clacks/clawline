@@ -162,11 +162,21 @@ struct SessionMetadataFooterHitTestingTests {
         #expect(actions.last?.attributes.contains(.destructive) == true)
         #expect(testMenuButton.showsMenuAsPrimaryAction)
         #expect(testMenuButton.configuration?.image == UIImage(systemName: "gearshape"))
+        #expect(testMenuButton.configuration?.preferredSymbolConfigurationForImage == UIImage.SymbolConfiguration(
+            pointSize: SessionMetadataFooterCell.testMenuIconPointSize,
+            weight: .regular
+        ))
+        #expect(testMenuButton.bounds.width == 44)
         let testMenuCenter = testMenuButton.convert(
             CGPoint(x: testMenuButton.bounds.midX, y: testMenuButton.bounds.midY),
             to: cell
         )
         #expect(cell.hitTest(testMenuCenter, with: nil) === testMenuButton)
+        let expandedHitPoint = testMenuButton.convert(
+            CGPoint(x: testMenuButton.bounds.midX, y: testMenuButton.bounds.minY - 8),
+            to: cell
+        )
+        #expect(cell.hitTest(expandedHitPoint, with: nil) === testMenuButton)
     }
 
     @Test("Footer renders sanitized auth mode as right-most text")

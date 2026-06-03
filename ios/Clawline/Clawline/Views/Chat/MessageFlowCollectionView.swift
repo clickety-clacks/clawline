@@ -5826,6 +5826,7 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
     static let actionRegionHeight: CGFloat = 44
     static let versionRowHeight: CGFloat = 22
     static let fadeRevealRange: CGFloat = topPadding + actionRegionHeight + versionRowHeight
+    static let testMenuIconPointSize: CGFloat = 11
 
     private let stackView = UIStackView()
     private let controlsStackView = UIStackView()
@@ -6117,6 +6118,10 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         let button = TestMenuButton(type: .system)
         var configuration = UIButton.Configuration.plain()
         configuration.image = UIImage(systemName: "gearshape")
+        configuration.preferredSymbolConfigurationForImage = UIImage.SymbolConfiguration(
+            pointSize: Self.testMenuIconPointSize,
+            weight: .regular
+        )
         configuration.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 4, bottom: 0, trailing: 4)
         configuration.baseForegroundColor = color
         configuration.background.strokeWidth = 0

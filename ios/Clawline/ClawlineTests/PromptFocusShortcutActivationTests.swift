@@ -129,7 +129,7 @@ struct PromptFocusShortcutActivationTests {
             activeLock: .horizontalSwipe,
             finalTranslation: CGSize(width: -64, height: 4),
             completionThreshold: 44,
-            isCollapsed: true
+            isDocked: true
         )
 
         #expect(dockedLeftSwipe == .restoreDock)
@@ -140,7 +140,7 @@ struct PromptFocusShortcutActivationTests {
                 activeLock: .verticalScroll,
                 finalTranslation: CGSize(width: -64, height: 4),
                 completionThreshold: 44,
-                isCollapsed: true
+                isDocked: true
             ) == nil
         )
         #expect(
@@ -148,9 +148,23 @@ struct PromptFocusShortcutActivationTests {
                 activeLock: .horizontalSwipe,
                 finalTranslation: CGSize(width: -64, height: 4),
                 completionThreshold: 44,
-                isCollapsed: false
+                isDocked: false
             ) == .dismiss
         )
+    }
+
+    @Test("T1150 peeking dock-bound notification left swipe does not dismiss")
+    @MainActor
+    func peekingDockBoundNotificationLeftSwipeDoesNotDismiss() {
+        let peekingLeftSwipe = CrossChatNotificationBubbleSwipeCompletion.effect(
+            activeLock: .horizontalSwipe,
+            finalTranslation: CGSize(width: -64, height: 4),
+            completionThreshold: 44,
+            isDocked: true
+        )
+
+        #expect(peekingLeftSwipe == .restoreDock)
+        #expect(peekingLeftSwipe?.dismissesNotification == false)
     }
 
     @Test("T355 notification right swipe preserves dock and collapsed preview behavior")
@@ -161,7 +175,7 @@ struct PromptFocusShortcutActivationTests {
                 activeLock: .horizontalSwipe,
                 finalTranslation: CGSize(width: 64, height: 4),
                 completionThreshold: 44,
-                isCollapsed: false
+                isDocked: false
             ) == .dock
         )
         #expect(
@@ -169,7 +183,7 @@ struct PromptFocusShortcutActivationTests {
                 activeLock: .horizontalSwipe,
                 finalTranslation: CGSize(width: 64, height: 4),
                 completionThreshold: 44,
-                isCollapsed: true
+                isDocked: true
             ) == .clearCollapsedPreview
         )
     }
@@ -910,6 +924,36 @@ struct PromptFocusShortcutActivationTests {
         #expect(CrossChatNotificationGlobalShortcut.Action.scrollUp.rootScrollIntent == .transcriptBubbleScrollBackward)
     }
 
+    @Test("Notification scroll resolver finds ancestor scroll view")
+    @MainActor
+    func notificationScrollResolverFindsAncestorScrollView() {
+        let scrollView = UIScrollView()
+        let content = UIView()
+        let resolver = UIView()
+
+        scrollView.addSubview(content)
+        content.addSubview(resolver)
+
+        #expect(NotificationScrollViewLookup.resolve(from: resolver) === scrollView)
+    }
+
+    @Test("Notification scroll resolver does not bind sibling scroll view")
+    @MainActor
+    func notificationScrollResolverDoesNotBindSiblingScrollView() {
+        let localHost = UIView()
+        let scrollView = UIScrollView()
+        let scrollContent = UIView()
+        let resolverContainer = UIView()
+        let resolver = UIView()
+
+        localHost.addSubview(scrollView)
+        scrollView.addSubview(scrollContent)
+        localHost.addSubview(resolverContainer)
+        resolverContainer.addSubview(resolver)
+
+        #expect(NotificationScrollViewLookup.resolve(from: resolver) == nil)
+    }
+
     @Test("T351 notification overlay host reports viewport width, not motion overflow width")
     func notificationOverlayHostReportsViewportWidthNotMotionOverflowWidth() {
         #expect(CrossChatNotificationGeometry.layoutHostWidth(maxContainerWidth: 393) == 393)
@@ -1023,6 +1067,7 @@ struct PromptFocusShortcutActivationTests {
                 isShortcutEnabled: true,
                 isAlreadyFirstResponder: false,
                 currentFirstResponderIsTextInput: false,
+                currentFirstResponderOwnsTerminalInput: false,
                 currentFirstResponderOwnsEmbeddedScroll: false,
                 canRetryAfterTextInput: true
             ) == .activate
@@ -1032,6 +1077,7 @@ struct PromptFocusShortcutActivationTests {
                 isShortcutEnabled: true,
                 isAlreadyFirstResponder: false,
                 currentFirstResponderIsTextInput: true,
+                currentFirstResponderOwnsTerminalInput: false,
                 currentFirstResponderOwnsEmbeddedScroll: false,
                 canRetryAfterTextInput: false
             ) == .skip
@@ -1041,6 +1087,7 @@ struct PromptFocusShortcutActivationTests {
                 isShortcutEnabled: false,
                 isAlreadyFirstResponder: false,
                 currentFirstResponderIsTextInput: false,
+                currentFirstResponderOwnsTerminalInput: false,
                 currentFirstResponderOwnsEmbeddedScroll: false,
                 canRetryAfterTextInput: true
             ) == .skip
@@ -1050,6 +1097,7 @@ struct PromptFocusShortcutActivationTests {
                 isShortcutEnabled: true,
                 isAlreadyFirstResponder: true,
                 currentFirstResponderIsTextInput: false,
+                currentFirstResponderOwnsTerminalInput: false,
                 currentFirstResponderOwnsEmbeddedScroll: false,
                 canRetryAfterTextInput: true
             ) == .skip
@@ -1063,7 +1111,22 @@ struct PromptFocusShortcutActivationTests {
                 isShortcutEnabled: true,
                 isAlreadyFirstResponder: false,
                 currentFirstResponderIsTextInput: false,
+                currentFirstResponderOwnsTerminalInput: false,
                 currentFirstResponderOwnsEmbeddedScroll: true,
+                canRetryAfterTextInput: true
+            ) == .skip
+        )
+    }
+
+    @Test("Prompt focus shortcut does not steal focus from terminal input")
+    func promptFocusShortcutDoesNotStealFocusFromTerminalInput() {
+        #expect(
+            PromptFocusShortcutActivation.action(
+                isShortcutEnabled: true,
+                isAlreadyFirstResponder: false,
+                currentFirstResponderIsTextInput: false,
+                currentFirstResponderOwnsTerminalInput: true,
+                currentFirstResponderOwnsEmbeddedScroll: false,
                 canRetryAfterTextInput: true
             ) == .skip
         )
@@ -1076,6 +1139,7 @@ struct PromptFocusShortcutActivationTests {
                 isShortcutEnabled: true,
                 isAlreadyFirstResponder: false,
                 currentFirstResponderIsTextInput: true,
+                currentFirstResponderOwnsTerminalInput: false,
                 currentFirstResponderOwnsEmbeddedScroll: false,
                 canRetryAfterTextInput: true
             ) == .retryAfterTextInputResigns

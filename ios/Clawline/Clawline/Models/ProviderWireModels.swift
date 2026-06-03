@@ -132,6 +132,21 @@ struct AgentProgressItem: Codable, Equatable {
     let progressText: String?
 }
 
+struct PromptTurnStateEvent: Codable, Equatable {
+    let type: String
+    let event: String
+    let payload: Payload
+
+    struct Payload: Codable, Equatable {
+        let messageId: String
+        let sessionKey: String
+        let state: String
+        let terminalState: String?
+        let correlationId: String?
+        let clawlineMessageRowId: Int?
+        let error: String?
+    }
+}
 
 struct StreamReadStatePayload: Codable, Equatable {
     let type: String
@@ -165,6 +180,7 @@ struct ClientStreamReadPayload: Codable, Equatable {
 struct ServerMessagePayload: Codable, Equatable {
     let type: String
     let id: String
+    let llmVisibleMessageId: String?
     let role: Message.Role
     let sender: String?
     let content: String
@@ -180,6 +196,7 @@ struct ServerMessagePayload: Codable, Equatable {
     enum CodingKeys: String, CodingKey {
         case type
         case id
+        case llmVisibleMessageId
         case role
         case sender
         case from
@@ -250,6 +267,7 @@ struct ServerMessagePayload: Codable, Equatable {
 
     init(type: String = "message",
          id: String,
+         llmVisibleMessageId: String? = nil,
          role: Message.Role,
          sender: String? = nil,
          content: String,
@@ -263,6 +281,7 @@ struct ServerMessagePayload: Codable, Equatable {
          replyToClientMessageId: String? = nil) {
         self.type = type
         self.id = id
+        self.llmVisibleMessageId = llmVisibleMessageId
         self.role = role
         self.sender = sender
         self.content = content
@@ -280,6 +299,7 @@ struct ServerMessagePayload: Codable, Equatable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         type = try container.decode(String.self, forKey: .type)
         id = try container.decode(String.self, forKey: .id)
+        llmVisibleMessageId = try container.decodeIfPresent(String.self, forKey: .llmVisibleMessageId)
         let legacySender = try container.decodeIfPresent(String.self, forKey: .sender)
         let fromField = try container.decodeIfPresent(FromField.self, forKey: .from)
         let topLevelName = try container.decodeIfPresent(String.self, forKey: .name)
@@ -312,6 +332,7 @@ struct ServerMessagePayload: Codable, Equatable {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(type, forKey: .type)
         try container.encode(id, forKey: .id)
+        try container.encodeIfPresent(llmVisibleMessageId, forKey: .llmVisibleMessageId)
         try container.encode(role, forKey: .role)
         try container.encodeIfPresent(sender, forKey: .sender)
         try container.encode(content, forKey: .content)
@@ -380,49 +401,40 @@ struct ClientMessagePayload: Codable, Equatable {
 
 struct MessageReferenceContext: Codable, Equatable {
     let kind: String
-    let sessionKey: String
-    let messageId: String
-    let messageRole: Message.Role
-    let createdAt: Date
-    let clientMessageId: String?
+    let llmVisibleMessageId: String
+    let role: Message.Role?
+    let preview: String?
 
     private enum CodingKeys: String, CodingKey {
         case kind
-        case sessionKey
-        case messageId
-        case messageRole
-        case createdAt
-        case clientMessageId
+        case llmVisibleMessageId
+        case role
+        case preview
     }
 
-    init(reference: PendingMessageReference) {
-        self.kind = "message"
-        self.sessionKey = reference.sessionKey
-        self.messageId = reference.messageId
-        self.messageRole = reference.messageRole
-        self.createdAt = reference.createdAt
-        self.clientMessageId = reference.clientMessageId
+    init?(reference: PendingMessageReference) {
+        guard let llmVisibleMessageId = reference.llmVisibleMessageId?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !llmVisibleMessageId.isEmpty else { return nil }
+        self.kind = "reply"
+        self.llmVisibleMessageId = llmVisibleMessageId
+        self.role = reference.messageRole
+        self.preview = reference.preview.isEmpty ? nil : reference.preview
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        kind = try container.decode(String.self, forKey: .kind)
-        sessionKey = try container.decode(String.self, forKey: .sessionKey)
-        messageId = try container.decode(String.self, forKey: .messageId)
-        messageRole = try container.decode(Message.Role.self, forKey: .messageRole)
-        let milliseconds = try container.decode(Double.self, forKey: .createdAt)
-        createdAt = Date(timeIntervalSince1970: milliseconds / 1000)
-        clientMessageId = try container.decodeIfPresent(String.self, forKey: .clientMessageId)
+        kind = try container.decodeIfPresent(String.self, forKey: .kind) ?? "reply"
+        llmVisibleMessageId = try container.decode(String.self, forKey: .llmVisibleMessageId)
+        role = try container.decodeIfPresent(Message.Role.self, forKey: .role)
+        preview = try container.decodeIfPresent(String.self, forKey: .preview)
     }
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(kind, forKey: .kind)
-        try container.encode(sessionKey, forKey: .sessionKey)
-        try container.encode(messageId, forKey: .messageId)
-        try container.encode(messageRole, forKey: .messageRole)
-        try container.encode(createdAt.timeIntervalSince1970 * 1000, forKey: .createdAt)
-        try container.encodeIfPresent(clientMessageId, forKey: .clientMessageId)
+        try container.encode(llmVisibleMessageId, forKey: .llmVisibleMessageId)
+        try container.encodeIfPresent(role, forKey: .role)
+        try container.encodeIfPresent(preview, forKey: .preview)
     }
 }
 
@@ -430,6 +442,7 @@ extension Message {
     init(payload: ServerMessagePayload, sessionKey: String) {
         self.init(
             id: payload.id,
+            llmVisibleMessageId: payload.llmVisibleMessageId,
             role: payload.role,
             content: payload.content,
             timestamp: payload.timestamp,

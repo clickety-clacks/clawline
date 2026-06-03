@@ -134,6 +134,73 @@ struct InteractiveHTMLBubbleUIKitViewTests {
         #expect(bubble.bounds.height >= 44)
         #expect(firstWebView(in: bubble) == nil)
     }
+
+    @Test("Interactive bubble reloads once after web content process termination, then shows permanent crash error")
+    func interactiveBubbleReloadsOnceAfterWebContentProcessTermination() async throws {
+        guard let windowScene = UIApplication.shared.connectedScenes
+            .compactMap({ $0 as? UIWindowScene })
+            .first
+        else {
+            Issue.record("No UIWindowScene available for interactive bubble test")
+            return
+        }
+
+        let window = UIWindow(windowScene: windowScene)
+        window.frame = CGRect(x: 0, y: 0, width: 390, height: 844)
+        let host = UIViewController()
+        host.view.frame = window.bounds
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer {
+            window.isHidden = true
+        }
+
+        try await warmUpInteractiveWebKit(in: host.view)
+
+        let bubble = InteractiveHTMLBubbleUIKitView()
+        bubble.translatesAutoresizingMaskIntoConstraints = false
+        host.view.addSubview(bubble)
+        NSLayoutConstraint.activate([
+            bubble.leadingAnchor.constraint(equalTo: host.view.leadingAnchor, constant: 16),
+            bubble.topAnchor.constraint(equalTo: host.view.topAnchor, constant: 16),
+            bubble.widthAnchor.constraint(equalToConstant: 320),
+            bubble.heightAnchor.constraint(equalToConstant: 44)
+        ])
+        host.view.layoutIfNeeded()
+
+        bubble.configure(
+            descriptor: viewportDrivenDescriptor(),
+            messageId: "msg-crash-reload",
+            isDark: false
+        )
+
+        try await waitFor(timeout: .seconds(3), poll: .milliseconds(25)) {
+            guard let webView = firstWebView(in: bubble) else { return false }
+            return webView.alpha >= 0.99
+        }
+
+        guard let webView = firstWebView(in: bubble) else {
+            Issue.record("Expected WKWebView before process termination")
+            return
+        }
+        let lockedHeight = heightConstraintConstant(for: webView)
+        #expect(lockedHeight > 100)
+
+        bubble.webViewWebContentProcessDidTerminate(webView)
+        #expect(firstWebView(in: bubble) === webView)
+        #expect(visibleLabelText(in: bubble)?.contains("Content crashed") != true)
+
+        try await waitFor(timeout: .seconds(3), poll: .milliseconds(25)) {
+            webView.alpha >= 0.99
+        }
+        #expect(abs(heightConstraintConstant(for: webView) - lockedHeight) <= 0.5)
+        let reloadedText = try await evaluateString(webView: webView, js: "document.body.innerText || ''")
+        #expect(reloadedText.contains("Visible Content"))
+
+        bubble.webViewWebContentProcessDidTerminate(webView)
+        #expect(firstWebView(in: bubble) == nil)
+        #expect(visibleLabelText(in: bubble)?.contains("Content crashed") == true)
+    }
 }
 
 @MainActor

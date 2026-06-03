@@ -64,6 +64,14 @@ export interface ClientMessagePayload {
   content: string;
   attachments: ClientAttachmentPayload[];
   sessionKey?: string;
+  references?: MessageReferencePayload[];
+}
+
+export interface MessageReferencePayload {
+  kind: "reply";
+  llmVisibleMessageId: string;
+  role?: MessageRole;
+  preview?: string;
 }
 
 export type JsonValue =
@@ -118,6 +126,7 @@ export interface ServerAttachmentPayload {
 export interface ServerMessagePayload {
   type: "message";
   id: string;
+  llmVisibleMessageId?: string;
   role: MessageRole;
   content: string;
   timestamp: number;
@@ -460,9 +469,15 @@ function parseServerMessageFromRecord(value: JsonRecord): ServerMessagePayload {
     throw new Error(`Invalid message.role: ${role}`);
   }
 
+  const llmVisibleMessageId = optionalString(
+    value.llmVisibleMessageId,
+    "message.llmVisibleMessageId"
+  );
+
   return {
     type: "message",
     id: requiredString(value.id, "message.id"),
+    ...(llmVisibleMessageId ? { llmVisibleMessageId } : {}),
     role,
     content: requiredStringAllowEmpty(value.content, "message.content"),
     timestamp: requiredNumber(value.timestamp, "message.timestamp"),

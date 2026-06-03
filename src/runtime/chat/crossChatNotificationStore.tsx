@@ -6,6 +6,7 @@ import { useStoreValue } from "../shared/useStoreValue";
 import type { IncomingMessageSource, StreamRecord } from "./chatDomainStore";
 
 export interface AssistantNotificationEntry {
+  appendSeparatorTimestamp?: number;
   assistantMessageId: string;
   contentPreview: string;
   final: boolean;
@@ -52,13 +53,35 @@ const CrossChatNotificationStoreContext =
 
 export function createCrossChatNotificationStore(): CrossChatNotificationStore {
   const baseStore = createStore<CrossChatNotificationState>(EMPTY_STATE);
+  const dismissedAssistantMessageIdsBySourceChatId = new Map<string, Set<string>>();
+
+  function rememberDismissedEntries(bubble: CrossChatNotificationBubble | undefined) {
+    if (!bubble) {
+      return;
+    }
+
+    const dismissedIds =
+      dismissedAssistantMessageIdsBySourceChatId.get(bubble.sourceChatId) ??
+      new Set<string>();
+    for (const entry of bubble.entriesNewestFirst) {
+      dismissedIds.add(entry.assistantMessageId);
+    }
+    dismissedAssistantMessageIdsBySourceChatId.set(
+      bubble.sourceChatId,
+      dismissedIds
+    );
+  }
 
   return {
     getState: baseStore.getState,
     subscribe: baseStore.subscribe,
     applyIncomingMessage(input) {
       baseStore.setState((current) =>
-        applyCrossChatNotificationForIncomingMessage(current, input)
+        applyCrossChatNotificationForIncomingMessage(
+          current,
+          input,
+          dismissedAssistantMessageIdsBySourceChatId
+        )
       );
     },
     clearCrossChatNotifications() {
@@ -66,11 +89,15 @@ export function createCrossChatNotificationStore(): CrossChatNotificationStore {
         if (Object.keys(current.bubblesBySourceChatId).length === 0) {
           return current;
         }
+        for (const bubble of Object.values(current.bubblesBySourceChatId)) {
+          rememberDismissedEntries(bubble);
+        }
         return EMPTY_STATE;
       });
     },
     dismissCrossChatNotification(sourceChatId) {
       baseStore.setState((current) => {
+        rememberDismissedEntries(current.bubblesBySourceChatId[sourceChatId]);
         const nextBubbles = omitNotificationBubble(
           current.bubblesBySourceChatId,
           sourceChatId
@@ -128,6 +155,7 @@ export function createCrossChatNotificationStore(): CrossChatNotificationStore {
       );
     },
     reset() {
+      dismissedAssistantMessageIdsBySourceChatId.clear();
       baseStore.setState(EMPTY_STATE);
     }
   };
@@ -159,7 +187,8 @@ export function useCrossChatNotificationStore() {
 
 function applyCrossChatNotificationForIncomingMessage(
   state: CrossChatNotificationState,
-  input: Parameters<CrossChatNotificationStore["applyIncomingMessage"]>[0]
+  input: Parameters<CrossChatNotificationStore["applyIncomingMessage"]>[0],
+  dismissedAssistantMessageIdsBySourceChatId: Map<string, Set<string>>
 ) {
   const { message, selectedSessionKey, source, streams } = input;
   const sourceChatId = message.sessionKey ?? streams[0]?.sessionKey ?? "unassigned";
@@ -173,19 +202,31 @@ function applyCrossChatNotificationForIncomingMessage(
   }
 
   const currentBubble = state.bubblesBySourceChatId[sourceChatId];
+  if (
+    dismissedAssistantMessageIdsBySourceChatId.get(sourceChatId)?.has(message.id)
+  ) {
+    return state;
+  }
+
   const sourceTitle =
     streams.find((stream) => stream.sessionKey === sourceChatId)?.displayName ??
     sourceChatId;
-  const nextEntry: AssistantNotificationEntry = {
-    assistantMessageId: message.id,
-    contentPreview: message.content,
-    final: !message.streaming,
-    updatedAt: message.timestamp
-  };
   const priorEntries = currentBubble?.entriesNewestFirst ?? [];
   const existingIndex = priorEntries.findIndex(
     (entry) => entry.assistantMessageId === message.id
   );
+  const nextEntry: AssistantNotificationEntry = {
+    assistantMessageId: message.id,
+    appendSeparatorTimestamp:
+      existingIndex >= 0
+        ? priorEntries[existingIndex]?.appendSeparatorTimestamp
+        : priorEntries.length > 0
+          ? message.timestamp
+          : undefined,
+    contentPreview: message.content,
+    final: !message.streaming,
+    updatedAt: message.timestamp
+  };
   const entriesNewestFirst =
     existingIndex >= 0
       ? [

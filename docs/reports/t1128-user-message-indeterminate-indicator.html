@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>T1128 - User Message Bubble Indeterminate Indicator</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f7f5f1;
+      --panel: #ffffff;
+      --text: #1f2328;
+      --muted: #626b75;
+      --line: #d7d0c7;
+      --accent: #0d6b8f;
+      --warn: #8f5a00;
+      --gap: #8b1e3f;
+      --code: #f0ece6;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #111316;
+        --panel: #1a1d21;
+        --text: #eff2f4;
+        --muted: #aab2bb;
+        --line: #343a42;
+        --accent: #6fc2e3;
+        --warn: #f0bd66;
+        --gap: #ff8ca8;
+        --code: #24282e;
+      }
+    }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    main {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 36px 22px 56px;
+    }
+    h1, h2, h3 { line-height: 1.18; }
+    h1 { margin: 0 0 8px; font-size: 30px; }
+    h2 { margin: 32px 0 12px; font-size: 22px; }
+    h3 { margin: 22px 0 8px; font-size: 17px; }
+    p { margin: 8px 0; }
+    .meta, .note { color: var(--muted); }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 16px;
+      margin: 14px 0;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 12px 0 20px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+    }
+    th, td {
+      text-align: left;
+      vertical-align: top;
+      border-bottom: 1px solid var(--line);
+      padding: 9px 10px;
+    }
+    th {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: .04em;
+      color: var(--muted);
+      background: color-mix(in srgb, var(--panel) 84%, var(--line));
+    }
+    tr:last-child td { border-bottom: 0; }
+    code {
+      background: var(--code);
+      padding: 1px 4px;
+      border-radius: 4px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.92em;
+    }
+    .id {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      white-space: nowrap;
+      color: var(--accent);
+      font-weight: 650;
+    }
+    .gap { color: var(--gap); font-weight: 650; }
+    .warn { color: var(--warn); font-weight: 650; }
+    ul { padding-left: 22px; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>T1128: User Message Bubble Indeterminate Indicator</h1>
+  <p class="meta">Investigation/report only. Prepared 2026-05-23 and continued 2026-05-23 22:53 PDT from the Clawline source tree and shared workspace docs. No code changes, deploy, merge, restart, cleanup, or rehome were performed for T1128.</p>
+
+  <section class="panel">
+    <h2>Executive Summary</h2>
+    <p><span class="id">R1128-01</span> The bottom-right indeterminate indicator on native user message bubbles represents a locally-created outbound user message that has been handed to Clawline's send pipeline but has not yet received provider <code>ack</code> for its client message id.</p>
+    <p><span class="id">R1128-02</span> On iOS and Mac Catalyst, the visual is a 24 x 24 badge positioned at the bubble's bottom-right edge. Pending state uses a <code>UIActivityIndicatorView</code>; failure state reuses the same badge location with an exclamation button and a resend menu.</p>
+    <p><span class="id">R1128-03</span> The indicator disappears when the local message is accepted by provider <code>ack</code>, replaced by the provider's echoed user message, canceled before transport send, removed by teardown/logout/history reset, or converted to a failed resend affordance.</p>
+    <p><span class="id">R1128-04</span> This is not the assistant typing indicator, live agent progress, attachment loading spinner, stream-manager progress row, or web text footer. Those are overlapping progress surfaces with different state machines.</p>
+  </section>
+
+  <section class="panel">
+    <h2>Continuation Verdict</h2>
+    <p><span class="id">R1128-10</span> Re-checking the current worktree at <code>32042847036b1c4d93df7300aff9fae12d58c43d</code> did not change the finding: the native bottom-right user-bubble indeterminate indicator is a send-ack indicator for an optimistic local user message.</p>
+    <p><span class="id">R1128-11</span> Current line-anchored proof: <code>ChatViewModel.swift:37-40</code> defines only <code>.pending</code> and <code>.failed</code> send-indicator states; <code>ChatViewModel.swift:622-634</code> owns pending, acked, and failed local-send bookkeeping; <code>ChatViewModel.swift:1715-1732</code> creates the optimistic user bubble and records it as pending; <code>ChatViewModel.swift:3232-3240</code> returns <code>.pending</code> only while that id remains pending and unacked; <code>ProviderChatService.swift:962-971</code> maps provider <code>ack</code> to <code>.messageAcked</code>; and <code>ChatViewModel.swift:3280-3289</code> records the ack and bumps the indicator revision.</p>
+    <p><span class="id">R1128-12</span> Current UI proof: <code>MessageBubbleUIKitView.swift:467-487</code> shows/hides the badge from the send-indicator state, and <code>MessageBubbleUIKitView.swift:2777-2838</code> uses a 24 x 24 spinner for pending and a resend-menu exclamation badge for failed sends.</p>
+    <p><span class="id">R1128-13</span> Tracker write status: the supported Tracker lookup paths available during this continuation did not contain <code>T1128</code>, so the report is saved here but the ticket state could not be advanced through <code>tracking.update_service</code> without a resolvable Tracker item.</p>
+  </section>
+
+  <h2>Requirement Coverage</h2>
+  <table>
+    <thead><tr><th>ID</th><th>Requirement</th><th>Finding</th></tr></thead>
+    <tbody>
+      <tr><td class="id">R1128-01</td><td>Product-level meaning.</td><td>The native spinner means "message sending": local optimistic user bubble exists and provider acceptance has not arrived.</td></tr>
+      <tr><td class="id">R1128-02</td><td>Lifecycle state machine.</td><td>Defined below as <span class="id">S1128-01</span> through <span class="id">S1128-07</span> and <span class="id">TR1128-01</span> through <span class="id">TR1128-13</span>.</td></tr>
+      <tr><td class="id">R1128-03</td><td>Source-grounded evidence.</td><td>Evidence comes from protocol docs, native view model/view code, provider service handling, tests, and web implementation files listed in the evidence section.</td></tr>
+      <tr><td class="id">R1128-04</td><td>Platform differences.</td><td>Native iOS/Catalyst use the spinner badge. Web/Electron uses text in a footer for pending/acked/failed delivery; no bottom-right indeterminate spinner was found in web message bubbles.</td></tr>
+      <tr><td class="id">R1128-05</td><td>Unproven behavior/spec gaps.</td><td>Explicit gaps are listed in the gap section. Most notably, the source docs still describe ack retry/persistence expectations that the current native tests contradict.</td></tr>
+      <tr><td class="id">R1128-06</td><td>Multiple indicators separated.</td><td>Native send badge, web delivery footer, assistant typing indicator, live progress, and attachment/web loading spinners are separated below.</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Product Model</h2>
+  <p><span class="id">R1128-07</span> The product contract in <code>docs/ios-provider-connection.md</code> says client messages use client ids like <code>c_123</code>; provider-assigned durable events use <code>s_*</code>; the provider echoes accepted user messages to all devices with <code>clientMessageId</code>; and the client should keep a message in a sending state until provider <code>ack</code> arrives.</p>
+  <p><span class="id">R1128-08</span> In implementation terms, native Clawline creates an optimistic local user <code>Message</code> whose <code>id</code> is the <code>c_*</code> client id. That id is added to <code>pendingLocalMessages</code>. While it is present there and absent from <code>ackedPendingLocalMessageIDs</code>, <code>sendIndicatorState(for:)</code> returns <code>.pending</code>.</p>
+  <p><span class="id">R1128-09</span> Provider <code>ack</code> is acceptance/durability, not assistant completion. The spinner is expected to clear before the assistant's final answer if ack arrives first. The later assistant typing/live-progress surface is separate.</p>
+
+  <h2>Native State Machine</h2>
+  <table>
+    <thead><tr><th>State ID</th><th>Name</th><th>Visible UI</th><th>State owner / fields</th><th>Exit condition</th></tr></thead>
+    <tbody>
+      <tr><td class="id">S1128-01</td><td>No local outbound bubble</td><td>No user bubble, no send badge.</td><td>No current optimistic message for a client id.</td><td>User submits a valid send.</td></tr>
+      <tr><td class="id">S1128-02</td><td>Validation/provisioning gate</td><td>Usually no bubble yet. For provisioning-waiting sends, current source records <code>pendingProvisionedSend</code> without appending a bubble.</td><td><code>canSend</code>, <code>sendProvisioningState</code>, attachment staging, byte-limit guards.</td><td>Ready send starts, waiting send later drains, or validation fails.</td></tr>
+      <tr><td class="id">S1128-03</td><td>Pending local send</td><td>Bottom-right indeterminate spinner badge on the user bubble.</td><td><code>pendingLocalMessages</code> contains <code>c_*</code>; <code>ackedPendingLocalMessageIDs</code> does not contain it; <code>messageFailures</code> has no entry.</td><td>Provider ack, echoed user replacement, send failure, pre-transport cancel, teardown/logout/history reset.</td></tr>
+      <tr><td class="id">S1128-04</td><td>Acked local send awaiting echo/replacement</td><td>No native badge. Local <code>c_*</code> bubble may remain until echoed user message replaces it.</td><td><code>ackedPendingLocalMessageIDs</code> contains the client id; <code>pendingLocalMessages</code> may still contain it.</td><td>Echoed user message with matching <code>clientMessageId</code>, history reset, or cleanup.</td></tr>
+      <tr><td class="id">S1128-05</td><td>Server user message</td><td>No send badge.</td><td>Provider echo has server <code>s_*</code> id and matching <code>clientMessageId</code>; native replacement removed the pending local id.</td><td>Normal transcript lifecycle.</td></tr>
+      <tr><td class="id">S1128-06</td><td>Failed send</td><td>Bottom-right failure badge with exclamation icon and resend menu.</td><td><code>messageFailures[messageId]</code> set; pending entry removed unless failure is late-shielded by ack.</td><td>User resends, message/stream is removed, or reset/logout occurs.</td></tr>
+      <tr><td class="id">S1128-07</td><td>Canceled local ghost</td><td>No send badge; bubble remains visible as a canceled/ghost user message.</td><td><code>Message.deliveryState == .canceled</code>; pending/failure entries cleared.</td><td>Normal transcript lifecycle or cleanup.</td></tr>
+    </tbody>
+  </table>
+
+  <table>
+    <thead><tr><th>Transition ID</th><th>From -> To</th><th>Trigger</th><th>Evidence</th></tr></thead>
+    <tbody>
+      <tr><td class="id">TR1128-01</td><td>S1128-01 -> S1128-02</td><td>User taps send or submits composer; code enters <code>sendResolved</code>.</td><td><code>ChatViewModel.send()</code> calls <code>sendResolved(...)</code>; <code>sendResolved</code> checks sending lock, staged attachments, empty content, byte limit, stream selection, provisioning, and transport connection.</td></tr>
+      <tr><td class="id">TR1128-02</td><td>S1128-02 -> S1128-03</td><td>Provisioning ready and transport connected; <code>beginSend</code> appends optimistic local message.</td><td><code>beginSend</code> creates <code>clientId</code>, sets <code>isSending</code>, appends a local user <code>Message</code>, appends <code>PendingLocalMessage</code>, and bumps send-indicator revision.</td></tr>
+      <tr><td class="id">TR1128-03</td><td>S1128-03 -> S1128-03</td><td>Transport send starts but ack has not arrived.</td><td><code>performSend</code> sets <code>activeSendHasReachedTransport</code>; <code>sendIndicatorState(for:)</code> still returns <code>.pending</code> until ack or failure.</td></tr>
+      <tr><td class="id">TR1128-04</td><td>S1128-03 -> S1128-04</td><td>Provider sends <code>{ "type": "ack", "id": "c_*" }</code>.</td><td><code>ProviderChatService.handleAck</code> emits <code>.messageAcked</code>; <code>ChatViewModel.handle(serviceEvent:)</code> inserts the id into <code>ackedPendingLocalMessageIDs</code> and clears active sending fields.</td></tr>
+      <tr><td class="id">TR1128-05</td><td>S1128-03 -> S1128-05</td><td>Echoed user message arrives before or around ack and matches local device id plus <code>clientMessageId</code>.</td><td><code>replacePendingMessageIfNeeded(with:)</code> removes the pending local id and replaces/moves the bubble with the server message.</td></tr>
+      <tr><td class="id">TR1128-06</td><td>S1128-04 -> S1128-05</td><td>Echoed user message arrives after ack.</td><td>Same replacement path; acked id is removed from <code>ackedPendingLocalMessageIDs</code>.</td></tr>
+      <tr><td class="id">TR1128-07</td><td>S1128-03 -> S1128-06</td><td>Provider emits scoped <code>error</code> with <code>messageId</code> before ack.</td><td><code>ProviderChatService.handleServerError</code> emits <code>.messageError</code>; view model records <code>messageFailures[messageId]</code> and removes the pending entry.</td></tr>
+      <tr><td class="id">TR1128-08</td><td>S1128-03 -> S1128-06</td><td>Connection loss affects unacked pending sends.</td><td><code>ProviderChatService.performDisconnect</code> emits <code>connection_lost</code> for pending ids; <code>markPendingMessagesAsFailedForConnectionLoss</code> marks ids not in the acked set as failures.</td></tr>
+      <tr><td class="id">TR1128-09</td><td>S1128-03 -> S1128-06</td><td>Unscoped terminal message error occurs before ack.</td><td><code>markPendingMessagesFailedForUnscopedMessageError</code> applies the failure to pending ids excluding acked ids.</td></tr>
+      <tr><td class="id">TR1128-10</td><td>S1128-04 -> S1128-04</td><td>Late scoped/unscoped error arrives after ack.</td><td>Handler returns when <code>ackedPendingLocalMessageIDs.contains(messageId)</code>; tests call this "shields accepted send from later errors."</td></tr>
+      <tr><td class="id">TR1128-11</td><td>S1128-03 -> S1128-07</td><td>User cancels before the send reaches transport.</td><td><code>cancelActiveSend(shouldGhostOnlyBeforeTransport: true)</code> calls <code>markLocalMessageCanceled</code> only when <code>activeSendHasReachedTransport</code> is false.</td></tr>
+      <tr><td class="id">TR1128-12</td><td>S1128-06 -> S1128-03</td><td>User chooses Resend from the failed badge menu.</td><td><code>MessageFailureBadgeView.configureFailure</code> adds a "Resend" action; <code>resendFailedMessage</code> removes the failed bubble, creates a new <code>c_*</code> message, clears failure, and appends a pending entry.</td></tr>
+      <tr><td class="id">TR1128-13</td><td>S1128-03/S1128-04/S1128-06 -> S1128-01</td><td>Logout, history reset, stream delete/untrack cleanup, or teardown clears pending/failure state.</td><td><code>logout</code> and <code>handleHistoryResetRequired</code> clear <code>pendingLocalMessages</code>, <code>ackedPendingLocalMessageIDs</code>, and <code>messageFailures</code>.</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Source Evidence</h2>
+  <h3>Protocol and Product Evidence</h3>
+  <ul>
+    <li><span class="id">E1128-01</span> <code>docs/ios-provider-connection.md:136-162</code>: client ids are <code>c_*</code>, provider events are <code>s_*</code>, provider ack shape is <code>{type:"ack", id:"c_123"}</code>, and clients should keep messages in a sending state until ack arrives.</li>
+    <li><span class="id">E1128-02</span> <code>docs/ios-provider-connection.md:141-162</code> and <code>:203-211</code>: accepted user messages are echoed back with a server id and <code>clientMessageId</code>; the local optimistic row is supposed to be replaced by that echo.</li>
+    <li><span class="id">E1128-03</span> <code>docs/provider-testing.md:157-165</code>: provider sends ack after durable persistence; duplicate/retry handling is idempotent around that ack boundary.</li>
+  </ul>
+
+  <h3>Native iOS/Catalyst Evidence</h3>
+  <ul>
+    <li><span class="id">E1128-04</span> <code>ios/Clawline/Clawline/ViewModels/ChatViewModel.swift:37-40</code>: native send-indicator state is <code>.pending</code> or <code>.failed(String)</code>.</li>
+    <li><span class="id">E1128-05</span> <code>ChatViewModel.swift:537-549</code>: the native owner fields are <code>pendingLocalMessages</code>, <code>ackedPendingLocalMessageIDs</code>, and <code>messageFailures</code>.</li>
+    <li><span class="id">E1128-06</span> <code>ChatViewModel.swift:1597-1634</code>: <code>beginSend</code> creates the optimistic user message, appends <code>PendingLocalMessage</code>, schedules status refresh, and bumps the indicator revision.</li>
+    <li><span class="id">E1128-07</span> <code>ChatViewModel.swift:3131-3139</code>: <code>sendIndicatorState(for:)</code> returns failure first, otherwise pending only if the id is still pending and not acked.</li>
+    <li><span class="id">E1128-08</span> <code>ProviderChatService.swift:962-972</code>: incoming ack removes the id from provider-service pending storage and emits <code>.messageAcked</code>.</li>
+    <li><span class="id">E1128-09</span> <code>ChatViewModel.swift:3179-3188</code>: message ack inserts the id into <code>ackedPendingLocalMessageIDs</code>, removes any failure, dismisses notification replies when applicable, and bumps indicator revision.</li>
+    <li><span class="id">E1128-10</span> <code>ChatViewModel.swift:2430-2490</code>: echoed user messages from the same device with a matching <code>clientMessageId</code> replace the optimistic local message and clear pending/failure bookkeeping.</li>
+    <li><span class="id">E1128-11</span> <code>MessageBubbleUIKitView.swift:371-488</code>: the badge is positioned relative to the bubble bottom/trailing anchors and configured from <code>sendIndicatorState</code>.</li>
+    <li><span class="id">E1128-12</span> <code>MessageBubbleUIKitView.swift:2700-2775</code>: pending state starts an indeterminate <code>UIActivityIndicatorView</code>; failure state stops it and shows an exclamation menu button.</li>
+    <li><span class="id">E1128-13</span> <code>MessageFlowCollectionView.swift:3740-3773</code> and <code>:5068-5073</code>: the collection view queries <code>sendIndicatorState</code> while configuring cells and includes it in the message fingerprint so indicator changes reconfigure/remeasure the bubble.</li>
+    <li><span class="id">E1128-14</span> <code>ChatViewModelTests.swift:1228-1482</code>: focused tests cover pending-until-ack, cancel-before-transport ghosting, cancel-after-transport no-op, ack clearing pending, late error shielding, accepted replay without failure, failed resend, and unscoped payload-too-large behavior.</li>
+  </ul>
+
+  <h3>Web/Electron Evidence</h3>
+  <ul>
+    <li><span class="id">E1128-15</span> <code>src/runtime/chat/chatDomainStore.tsx:24-47</code>: web delivery states are <code>pending</code>, <code>acked</code>, <code>failed</code>, and <code>server</code>.</li>
+    <li><span class="id">E1128-16</span> <code>chatDomainStore.tsx:198-258</code>: web optimistic sends are enqueued as <code>delivery:"pending"</code>; ack changes delivery to <code>acked</code> but keeps the pending record for later replacement.</li>
+    <li><span class="id">E1128-17</span> <code>applyServerEvent.ts:79-123</code>: web replaces matching local optimistic user messages with server messages when same-device echoes arrive.</li>
+    <li><span class="id">E1128-18</span> <code>MessageList.tsx:847-865</code> and <code>src/app/styles.css:828-846</code>: web renders text footer statuses ("Sending...", "Accepted by provider", "Send failed Retry") rather than a bottom-right indeterminate spinner.</li>
+    <li><span class="id">E1128-19</span> No Electron-specific alternate message-bubble indicator code was found in the active web source. If Electron packages this React app, it inherits the web footer behavior unless packaging code outside this tree overrides it.</li>
+  </ul>
+
+  <h2>Separate / Overlapping Indicators</h2>
+  <table>
+    <thead><tr><th>ID</th><th>Indicator</th><th>Owner</th><th>Relationship to observed bottom-right user-bubble spinner</th></tr></thead>
+    <tbody>
+      <tr><td class="id">I1128-01</td><td>Native user-bubble send badge</td><td><code>MessageSendIndicatorState</code>, <code>MessageFailureBadgeView</code></td><td>This is the observed indicator.</td></tr>
+      <tr><td class="id">I1128-02</td><td>Native assistant typing indicator</td><td><code>shouldShowTypingIndicator</code>, <code>TypingIndicatorCell</code></td><td>Separate row/bubble for assistant run state. Not bottom-right of a user bubble.</td></tr>
+      <tr><td class="id">I1128-03</td><td>Live agent progress</td><td><code>agent_progress</code> events and <code>LiveAgentProgress</code></td><td>Separate current-turn progress surface. It may coexist after user ack, but does not drive the user-bubble spinner.</td></tr>
+      <tr><td class="id">I1128-04</td><td>Interactive HTML/link/attachment loading spinners</td><td>Attachment/web views</td><td>Content-loading indicators inside attachment surfaces, not send-ack state.</td></tr>
+      <tr><td class="id">I1128-05</td><td>Web message delivery footer</td><td><code>DeliveryState</code> in <code>chatDomainStore</code></td><td>Semantically related send lifecycle, visually different: text footer, not bottom-right indeterminate spinner.</td></tr>
+      <tr><td class="id">I1128-06</td><td>Cross-chat notification reply sending state</td><td>Native <code>activeCrossChatNotificationReplySourceChatId</code>; web <code>sendingReplySourceChatIds</code></td><td>Uses same send path for the destination/source chat but has additional notification-dismissal behavior.</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Platform Matrix</h2>
+  <table>
+    <thead><tr><th>ID</th><th>Platform</th><th>Pending UI</th><th>Ack UI</th><th>Failure UI</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td class="id">P1128-01</td><td>iOS native</td><td>Bottom-right indeterminate spinner badge.</td><td>Badge disappears; local bubble may remain until echo replacement.</td><td>Bottom-right exclamation badge with resend menu.</td><td>Source uses UIKit collection cells and <code>MessageBubbleUIKitView</code>.</td></tr>
+      <tr><td class="id">P1128-02</td><td>Mac Catalyst</td><td>Same native badge path.</td><td>Same native badge path.</td><td>Same native badge path.</td><td>Catalyst conditionals exist for header menu behavior, not this indicator.</td></tr>
+      <tr><td class="id">P1128-03</td><td>Web</td><td>Text footer "Sending...".</td><td>Text footer "Accepted by provider" until echo replacement.</td><td>Text footer "Send failed" plus Retry button.</td><td>No bottom-right spinner found in web bubble source.</td></tr>
+      <tr><td class="id">P1128-04</td><td>Electron</td><td class="warn">Unproven as a separate platform.</td><td class="warn">Unproven as a separate platform.</td><td class="warn">Unproven as a separate platform.</td><td>Active source evidence only shows the React web behavior. No Electron-specific override was found in scoped search.</td></tr>
+      <tr><td class="id">P1128-05</td><td>visionOS / Spatial</td><td class="warn">Unproven in this report.</td><td class="warn">Unproven in this report.</td><td class="warn">Unproven in this report.</td><td>Spatial target appears to share native models/views for Clawline where compiled, but this report did not prove rendered Spatial bubble behavior.</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Spec Gaps and Unproven Behavior</h2>
+  <ul>
+    <li><span class="id">G1128-01</span> <span class="gap">Spec/implementation mismatch:</span> <code>docs/ios-provider-connection.md:162</code> says no ack after 5 seconds should cause resend with the same id and pending ids should persist after relaunch. Current native tests explicitly say <code>Chat send does not automatically retry an unacked message</code>, and native state stores pending send bookkeeping in memory. This report does not resolve which is current product authority.</li>
+    <li><span class="id">G1128-02</span> <span class="gap">Ack-only lifetime after app relaunch is unproven for native.</span> If a message is acked but the app exits before the echo, current source evidence does not prove the exact UI after relaunch.</li>
+    <li><span class="id">G1128-03</span> <span class="gap">No explicit product spec was found for the native badge's exact placement, size, color, or whether it should be visible at all after transport send starts but before ack.</span> The implementation and tests prove current behavior; product acceptance should confirm visual intent.</li>
+    <li><span class="id">G1128-04</span> <span class="gap">Electron-specific behavior is unproven.</span> The web code has text status, but no separate Electron runtime indicator override was proven.</li>
+    <li><span class="id">G1128-05</span> <span class="gap">Provider ordering edge case is implementation-defined in this report.</span> The client handles ack before echo and echo before ack, but this report did not prove provider ordering guarantees beyond the documented protocol semantics.</li>
+  </ul>
+
+  <h2>Answer to Flynn's Question</h2>
+  <p><span class="id">A1128-01</span> It appears when a user send has passed local validation and Clawline has inserted the optimistic <code>c_*</code> user bubble, but the provider has not yet acknowledged that <code>c_*</code> id.</p>
+  <p><span class="id">A1128-02</span> It disappears when provider ack marks that client id accepted, when the provider's echoed user message replaces the optimistic bubble, when the send is canceled before transport, or when the pending send becomes a failure/retry state.</p>
+  <p><span class="id">A1128-03</span> It does not mean the assistant is still thinking. After ack, assistant activity is represented by the assistant typing indicator, session status/live progress, and eventual assistant message stream, not by the user-bubble spinner.</p>
+</main>
+</body>
+</html>

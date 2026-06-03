@@ -224,6 +224,10 @@ struct ChatViewModelTests {
         let bubble = try #require(viewModel.crossChatNotificationBubbles.first)
         #expect(bubble.sourceChatId == sourceSessionKey)
         #expect(bubble.entries.map(\.content) == ["newer", "older"])
+        #expect(bubble.entries.map(\.appendSeparatorTimestamp) == [
+            Date(timeIntervalSince1970: 11),
+            nil
+        ])
 
         viewModel.requestStreamSwitch(
             to: sourceSessionKey,
@@ -1076,6 +1080,7 @@ struct ChatViewModelTests {
         try await setReadyToSend(chatService: chatService, viewModel: viewModel)
         let referenced = Message(
             id: "s_ref",
+            llmVisibleMessageId: "llm_ref",
             role: .assistant,
             content: "Do not paste this into the prompt",
             timestamp: Date(timeIntervalSince1970: 1_700_000_000),
@@ -1096,11 +1101,10 @@ struct ChatViewModelTests {
         #expect(chatService.lastSentContent == "Summarize the selected context")
         #expect(chatService.lastSentContent?.contains("Do not paste") == false)
         let reference = try #require(chatService.lastSentReferences.first)
-        #expect(reference.kind == "message")
-        #expect(reference.sessionKey == referenced.sessionKey)
-        #expect(reference.messageId == referenced.id)
-        #expect(reference.messageRole == .assistant)
-        #expect(reference.clientMessageId == "c_ref")
+        #expect(reference.kind == "reply")
+        #expect(reference.llmVisibleMessageId == "llm_ref")
+        #expect(reference.role == .assistant)
+        #expect(reference.preview == "Do not paste this into the prompt")
 
         let payload = ClientMessagePayload(
             id: "c_payload",
@@ -1112,7 +1116,191 @@ struct ChatViewModelTests {
         let encoded = try JSONEncoder().encode(payload)
         let object = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
         let references = try #require(object["references"] as? [[String: Any]])
-        #expect(references.first?["createdAt"] as? Double == 1_700_000_000_000)
+        #expect(references.first?["llmVisibleMessageId"] as? String == "llm_ref")
+        #expect(references.first?["preview"] as? String == "Do not paste this into the prompt")
+    }
+
+    @Test("Reply reference resolves echoed client-visible identity for transcript indicator")
+    @MainActor
+    func replyReferenceResolvesEchoedClientVisibleIdentityForTranscriptIndicator() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.activate(origin: "test.replyReferenceResolvesEchoedClientVisibleIdentityForTranscriptIndicator")
+        await viewModel.onAppear()
+        let personalStream = makeStreamSession(
+            sessionKey: personalSessionKey,
+            displayName: "Personal",
+            kind: "main",
+            orderIndex: 0,
+            isBuiltIn: true
+        )
+        chatService.streams = [personalStream]
+        chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
+        chatService.emitServiceEvent(
+            .sessionInfo(
+                SessionInfo(
+                    userId: "user",
+                    isAdmin: false,
+                    dmScope: "dm",
+                    sessionKeys: [personalSessionKey]
+                )
+            )
+        )
+        viewModel.setActiveSessionKeyForTesting(personalSessionKey)
+        for _ in 0..<50 {
+            if viewModel.activeSessionKey == personalSessionKey {
+                break
+            }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let referenced = Message(
+            id: "s_reference_echo",
+            llmVisibleMessageId: "llm_reference_echo",
+            role: .assistant,
+            content: "This is a very long referenced message that should truncate in the outgoing bubble chip.",
+            timestamp: Date(timeIntervalSince1970: 1_700_000_100),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: personalSessionKey,
+            clientMessageId: "c_reference_echo"
+        )
+        try emitServerMessage(referenced, via: chatService)
+        try await Task.sleep(for: .milliseconds(10))
+
+        let replied = Message(
+            id: "s_reply_echo",
+            role: .user,
+            content: "Got it.",
+            timestamp: Date(timeIntervalSince1970: 1_700_000_200),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: personalSessionKey,
+            replyToClientMessageId: "c_reference_echo"
+        )
+
+        let replyReference = viewModel.replyReference(for: replied)
+        let tokenLabel = try #require(replyReference?.tokenLabel)
+        #expect(replyReference?.sessionKey == personalSessionKey)
+        #expect(replyReference?.llmVisibleMessageId == "llm_reference_echo")
+        #expect(replyReference?.clientMessageId == "c_reference_echo")
+        #expect(tokenLabel.hasSuffix("…"))
+        #expect(tokenLabel.contains("This is a very long referenced message"))
+        #expect(tokenLabel.contains("assistant:") == false)
+        #expect(tokenLabel.contains("user:") == false)
+        #expect(tokenLabel.contains("tool:") == false)
+    }
+
+    @Test("Accepted reply send echoes reply token metadata onto the outgoing user bubble")
+    @MainActor
+    func acceptedReplySendEchoesReplyTokenMetadataOntoOutgoingBubble() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.activate(origin: "test.acceptedReplySendEchoesReplyTokenMetadataOntoOutgoingBubble")
+        await viewModel.onAppear()
+        let personalStream = makeStreamSession(
+            sessionKey: personalSessionKey,
+            displayName: "Personal",
+            kind: "main",
+            orderIndex: 0,
+            isBuiltIn: true
+        )
+        chatService.streams = [personalStream]
+        chatService.emitServiceEvent(.streamSnapshot(chatService.streams))
+        chatService.emitServiceEvent(
+            .sessionInfo(
+                SessionInfo(
+                    userId: "user",
+                    isAdmin: false,
+                    dmScope: "dm",
+                    sessionKeys: [personalSessionKey]
+                )
+            )
+        )
+        try await setReadyToSend(chatService: chatService, viewModel: viewModel)
+        viewModel.setActiveSessionKeyForTesting(personalSessionKey)
+        for _ in 0..<50 {
+            if viewModel.activeSessionKey == personalSessionKey {
+                break
+            }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let referenced = Message(
+            id: "s_reply_target",
+            llmVisibleMessageId: "llm_reply_target",
+            role: .assistant,
+            content: "The reply target that should be echoed in the outgoing bubble.",
+            timestamp: Date(timeIntervalSince1970: 1_700_000_300),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: personalSessionKey,
+            clientMessageId: "c_reply_target"
+        )
+        try emitServerMessage(referenced, via: chatService)
+        try await Task.sleep(for: .milliseconds(10))
+
+        viewModel.inputContent = NSAttributedString(string: "Replying now")
+        _ = viewModel.referenceMessageInPrompt(referenced, selectionRange: NSRange(location: 0, length: 0))
+        viewModel.send()
+
+        try await Task.sleep(for: .milliseconds(10))
+        let optimisticOutgoing = try #require(await MainActor.run { viewModel.messages.last })
+        #expect(optimisticOutgoing.role == .user)
+        #expect(optimisticOutgoing.replyToMessageId == "llm_reply_target")
+        #expect(optimisticOutgoing.replyToClientMessageId == referenced.clientMessageId)
+
+        try emitServerMessage(
+            Message(
+                id: "s_reply_echo",
+                role: .user,
+                content: "Replying now",
+                timestamp: Date(timeIntervalSince1970: 1_700_000_350),
+                streaming: false,
+                attachments: [],
+                deviceId: "device",
+                sessionKey: personalSessionKey,
+                clientMessageId: optimisticOutgoing.id
+            ),
+            via: chatService
+        )
+        try await Task.sleep(for: .milliseconds(10))
+
+        let outgoing = try #require(await MainActor.run { viewModel.messages.last })
+        #expect(outgoing.role == .user)
+        #expect(outgoing.replyToMessageId == "llm_reply_target")
+        #expect(outgoing.replyToClientMessageId == referenced.clientMessageId)
+        let outgoingReplyReference = viewModel.replyReference(for: outgoing)
+        #expect(outgoingReplyReference?.llmVisibleMessageId == "llm_reply_target")
+        #expect(outgoingReplyReference?.clientMessageId == referenced.clientMessageId)
+        #expect(outgoingReplyReference?.tokenLabel.contains("assistant:") == false)
     }
 
     @Test("Composer exposes modified Return as local newline key commands")
@@ -1375,6 +1563,63 @@ struct ChatViewModelTests {
 
         #expect(viewModel.sendIndicatorState(for: messageId) == nil)
         #expect(viewModel.failureMessage(for: messageId) == nil)
+    }
+
+    @Test("Prompt turn failed state marks accepted send failed immediately")
+    @MainActor
+    func promptTurnFailedStateMarksAcceptedSendFailedImmediately() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        try await setReadyToSend(chatService: chatService, viewModel: viewModel)
+        viewModel.inputContent = NSAttributedString(string: "Accepted then failed")
+        viewModel.send()
+
+        let messageId = try await requireLastSentId(chatService)
+        chatService.emitServiceEvent(.messageAcked(id: messageId))
+        for _ in 0..<50 {
+            if viewModel.sendIndicatorState(for: messageId) == nil { break }
+            try await Task.sleep(forDuration: .milliseconds(20))
+        }
+
+        chatService.emitServiceEvent(
+            .promptTurnState(
+                PromptTurnStateEvent(
+                    type: "event",
+                    event: "prompt_turn_state",
+                    payload: .init(
+                        messageId: messageId,
+                        sessionKey: personalSessionKey,
+                        state: "failed",
+                        terminalState: "failed",
+                        correlationId: "corr_1",
+                        clawlineMessageRowId: 1,
+                        error: "clawline.promptTurn.noDelivery"
+                    )
+                )
+            )
+        )
+        for _ in 0..<50 {
+            if viewModel.sendIndicatorState(for: messageId) == .failed("clawline.promptTurn.noDelivery") {
+                return
+            }
+            try await Task.sleep(forDuration: .milliseconds(20))
+        }
+
+        Issue.record("Expected accepted send to show prompt-turn failure without waiting for reload")
     }
 
     @Test("Accepted replayed user message without final reply does not show failed indicator")
@@ -2444,6 +2689,10 @@ struct ChatViewModelTests {
 
         #expect(uploadService.uploadedPayloads.count == 1)
         #expect(chatService.lastSentAttachments.count == 2)
+        guard chatService.lastSentAttachments.count == 2 else {
+            Issue.record("Expected send to produce two wire attachments")
+            return
+        }
 
         let first = chatService.lastSentAttachments[0]
         let second = chatService.lastSentAttachments[1]
@@ -2503,6 +2752,40 @@ struct ChatViewModelTests {
         #expect(mimeType == "image/jpeg")
         #expect(data.count <= PendingAttachment.modelAwareMaxImageRawByteLimit)
         #expect(data.count < oversized.count)
+    }
+
+    @Test("two immediate sends dispatch one outbound message")
+    @MainActor
+    func immediateDoubleSendDispatchesOnce() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let uploadService = TestUploadService()
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: uploadService,
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        viewModel.inputContent = NSAttributedString(string: "Send once")
+
+        await viewModel.onAppear()
+        try await setReadyToSend(chatService: chatService, viewModel: viewModel)
+        viewModel.send()
+        let firstSendTask = viewModel.sendTask
+        viewModel.send()
+        let secondSendTask = viewModel.sendTask
+        try await firstSendTask?.value
+        try await secondSendTask?.value
+
+        #expect(chatService.sendCallCount == 1)
+        #expect(chatService.lastSentContent == "Send once")
     }
 
     @Test("send during attachment staging gap does not prune and retries cleanly after token insertion")
@@ -5466,7 +5749,7 @@ struct ChatViewModelTests {
 }
 
 @MainActor
-private final class TestAuthManager: AuthManaging {
+final class TestAuthManager: AuthManaging {
     var isAuthenticated: Bool = false
     var currentUserId: String?
     var token: String?
@@ -5491,7 +5774,7 @@ private final class TestAuthManager: AuthManaging {
 
     func refreshAdminStatusFromToken() {}
 }
-private final class TestChatService: ChatServicing {
+final class TestChatService: ChatServicing {
     private var messageContinuation: AsyncStream<Message>.Continuation?
     private var stateContinuation: AsyncStream<ConnectionState>.Continuation?
     private var eventContinuation: AsyncStream<ChatServiceEvent>.Continuation?
@@ -5505,6 +5788,7 @@ private final class TestChatService: ChatServicing {
     private(set) var lastSessionKey: String?
     private(set) var sentIds: [String] = []
     private(set) var lastSentReferences: [MessageReferenceContext] = []
+    private(set) var sendCallCount: Int = 0
     var lastPublishedReadState: (sessionKey: String, lastReadMessageId: String)?
     private(set) var connectCallCount: Int = 0
     var isTransportReadyForSend: Bool = false
@@ -5637,6 +5921,7 @@ private final class TestChatService: ChatServicing {
               attachments: [WireAttachment],
               sessionKey: String?,
               references: [MessageReferenceContext]) async throws {
+        sendCallCount += 1
         if let sendError {
             throw sendError
         }
@@ -5838,6 +6123,27 @@ private func setReadyToSend(chatService: TestChatService, viewModel: ChatViewMod
     try await setConnected(chatService: chatService, viewModel: viewModel)
     chatService.emitServiceEvent(.sessionProvisioningAvailable(false))
     try await Task.sleep(for: .milliseconds(20))
+}
+
+@MainActor
+private func emitServerMessage(_ message: Message, via chatService: TestChatService, epoch: Int = 1) throws {
+    let payload = ServerMessagePayload(
+        id: message.id,
+        llmVisibleMessageId: message.llmVisibleMessageId,
+        role: message.role,
+        sender: message.sender,
+        content: message.content,
+        timestamp: message.timestamp,
+        streaming: message.streaming,
+        deviceId: message.deviceId,
+        sessionKey: message.sessionKey,
+        attachments: message.attachments,
+        clientMessageId: message.clientMessageId,
+        replyToMessageId: message.replyToMessageId,
+        replyToClientMessageId: message.replyToClientMessageId
+    )
+    let data = try JSONEncoder().encode(payload)
+    chatService.emitLifecycleEvent(.init(epoch: epoch, payload: .serverMessage(data: data)))
 }
 
 private func requireLastSentId(_ chatService: TestChatService) async throws -> String {
@@ -6049,6 +6355,6 @@ private func makeSessionStatus(
     )
 }
 
-private struct TestDevice: DeviceIdentifying {
+struct TestDevice: DeviceIdentifying {
     let deviceId: String = "device"
 }

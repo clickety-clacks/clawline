@@ -1,6 +1,7 @@
 import Testing
 import SwiftUI
 import UIKit
+import XCTest
 @testable import Clawline
 
 struct UnifiedMarkdownRenderingAcceptanceTests {
@@ -470,6 +471,66 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
         #expect(linkTarget("details", in: attributed)?.absoluteString == "https://example.com")
     }
 
+    @Test("T1133 notification render cache reuses rendered markdown across body passes")
+    @MainActor
+    func t1133_notificationRenderCacheReusesRenderedMarkdownAcrossBodyPasses() {
+        let cache = CrossChatNotificationRenderedEntryCache()
+        let baseFont = UIFont.systemFont(ofSize: 15, weight: .regular)
+        let inkColor = UIColor.secondaryLabel
+        var renderCallCount = 0
+        let entries = [
+            CrossChatAssistantNotificationEntry(
+                id: "t1133_entry",
+                content: "Cached **notification**",
+                timestamp: Date()
+            )
+        ]
+
+        let renderer: CrossChatNotificationRenderedEntryCache.RenderBlocks = { content, _, _, _, _, _ in
+            renderCallCount += 1
+            return [.attributedText(NSAttributedString(string: content))]
+        }
+
+        let first = cache.entries(
+            for: entries,
+            baseFont: baseFont,
+            inkColor: inkColor,
+            lineSpacing: 2,
+            isDark: false,
+            renderBlocks: renderer
+        )
+        let second = cache.entries(
+            for: entries,
+            baseFont: baseFont,
+            inkColor: inkColor,
+            lineSpacing: 2,
+            isDark: false,
+            renderBlocks: renderer
+        )
+
+        #expect(renderCallCount == 1)
+        #expect(first.first?.id == "t1133_entry")
+        #expect(second.first?.id == "t1133_entry")
+
+        let changedEntries = [
+            CrossChatAssistantNotificationEntry(
+                id: "t1133_entry",
+                content: "Changed **notification**",
+                timestamp: Date()
+            )
+        ]
+        _ = cache.entries(
+            for: changedEntries,
+            baseFont: baseFont,
+            inkColor: inkColor,
+            lineSpacing: 2,
+            isDark: false,
+            renderBlocks: renderer
+        )
+
+        #expect(renderCallCount == 2)
+    }
+
     @Test("T307 real notification bubble renders assistant markdown content")
     @MainActor
     func t307_realNotificationBubbleRendersAssistantMarkdownContent() throws {
@@ -534,6 +595,89 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
         })
         #expect(isBold("notification", in: textView.attributedText))
         #expect(linkTarget("details", in: textView.attributedText)?.absoluteString == "https://example.com")
+    }
+
+    @Test("T383 visible notification renders one attributed text view while dismissed renders none")
+    @MainActor
+    func t383_realNotificationBubbleDoesNotDuplicateAttributedTextViewsForMeasurement() throws {
+        let notificationText = "Side notification with details"
+        let dismissedHost = UIHostingController(
+            rootView: Color.clear
+                .frame(width: 420, height: 320)
+        )
+        let dismissedWindow = UIWindow(frame: CGRect(x: 0, y: 0, width: 420, height: 320))
+        dismissedWindow.rootViewController = dismissedHost
+        dismissedWindow.makeKeyAndVisible()
+        dismissedHost.view.frame = dismissedWindow.bounds
+        dismissedHost.view.setNeedsLayout()
+        dismissedHost.view.layoutIfNeeded()
+
+        let dismissedTextViews = textViews(in: dismissedHost.view).filter { textView in
+            textView.attributedText.string.contains(notificationText)
+        }
+        #expect(dismissedTextViews.isEmpty)
+
+        let bubble = CrossChatNotificationBubble(
+            sourceChatId: "agent:main:clawline:user:s_t383_notification_perf",
+            sourceTitle: "Side Thread",
+            entries: [
+                CrossChatAssistantNotificationEntry(
+                    id: "s_t383_entry",
+                    content: "Side **notification** with [details](https://example.com)",
+                    timestamp: Date()
+                )
+            ],
+            lastAssistantActivityAt: Date()
+        )
+        let host = UIHostingController(
+            rootView: CrossChatNotificationBubbleView(
+                bubble: bubble,
+                assignedNumber: 1,
+                visibleNotificationCount: 1,
+                showShortcutLabel: true,
+                maxBubbleHeight: 205,
+                maxBubbleWidth: 360,
+                bubbleCornerRadius: 18,
+                isSending: false,
+                canCancelSend: false,
+                canSendReply: false,
+                connectionState: .connected,
+                replyDraft: .constant(""),
+                onDismiss: {},
+                onReply: {},
+                onCancelReply: {},
+                onDismissAll: {},
+                onNavigate: {},
+                onSendReply: {},
+                onCancelSend: {},
+                onReconnect: {},
+                onActivate: {},
+                onReplyFocusChange: { _ in },
+                isActionMenuOpen: false,
+                actionMenuSelection: .goToChat,
+                onActionMenuSelectionChange: { _ in },
+                onActionMenuAction: { _ in },
+                onRegisterScrollView: { _ in },
+                isDismissSwipeActive: false,
+                isContentScrollLocked: false,
+                onContentScrollDragChanged: { _ in },
+                onContentScrollDragEnded: {}
+            )
+        )
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 420, height: 320))
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        host.view.frame = window.bounds
+        host.view.setNeedsLayout()
+        host.view.layoutIfNeeded()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.15))
+        host.view.layoutIfNeeded()
+
+        let notificationTextViews = textViews(in: host.view).filter { textView in
+            textView.attributedText.string.contains(notificationText)
+        }
+        #expect(notificationTextViews.count == 1)
+        #expect(try #require(notificationTextViews.first).isHidden == false)
     }
 
     private enum BlockType: Equatable {
@@ -643,6 +787,102 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
         return attributed.attribute(.link, at: range.location, effectiveRange: nil) as? URL
     }
 
+    private func textViews(in view: UIView) -> [UITextView] {
+        var result: [UITextView] = []
+        if let textView = view as? UITextView {
+            result.append(textView)
+        }
+        for subview in view.subviews {
+            result.append(contentsOf: textViews(in: subview))
+        }
+        return result
+    }
+}
+
+final class T383NotificationPerformanceProofTests: XCTestCase {
+    @MainActor
+    func testVisibleNotificationRendersOneAttributedTextViewWhileDismissedRendersNone() throws {
+        let notificationText = "Side notification with details"
+        let dismissedHost = UIHostingController(
+            rootView: Color.clear
+                .frame(width: 420, height: 320)
+        )
+        let dismissedWindow = UIWindow(frame: CGRect(x: 0, y: 0, width: 420, height: 320))
+        dismissedWindow.rootViewController = dismissedHost
+        dismissedWindow.makeKeyAndVisible()
+        dismissedHost.view.frame = dismissedWindow.bounds
+        dismissedHost.view.setNeedsLayout()
+        dismissedHost.view.layoutIfNeeded()
+
+        let dismissedTextViews = textViews(in: dismissedHost.view).filter { textView in
+            textView.attributedText.string.contains(notificationText)
+        }
+        XCTAssertTrue(dismissedTextViews.isEmpty)
+
+        let bubble = CrossChatNotificationBubble(
+            sourceChatId: "agent:main:clawline:user:s_t383_notification_perf",
+            sourceTitle: "Side Thread",
+            entries: [
+                CrossChatAssistantNotificationEntry(
+                    id: "s_t383_entry",
+                    content: "Side **notification** with [details](https://example.com)",
+                    timestamp: Date()
+                )
+            ],
+            lastAssistantActivityAt: Date()
+        )
+        let host = UIHostingController(
+            rootView: CrossChatNotificationBubbleView(
+                bubble: bubble,
+                assignedNumber: 1,
+                visibleNotificationCount: 1,
+                showShortcutLabel: true,
+                maxBubbleHeight: 205,
+                maxBubbleWidth: 360,
+                bubbleCornerRadius: 18,
+                isSending: false,
+                canCancelSend: false,
+                canSendReply: false,
+                connectionState: .connected,
+                replyDraft: .constant(""),
+                onDismiss: {},
+                onReply: {},
+                onCancelReply: {},
+                onDismissAll: {},
+                onNavigate: {},
+                onSendReply: {},
+                onCancelSend: {},
+                onReconnect: {},
+                onActivate: {},
+                onReplyFocusChange: { _ in },
+                isActionMenuOpen: false,
+                actionMenuSelection: .goToChat,
+                onActionMenuSelectionChange: { _ in },
+                onActionMenuAction: { _ in },
+                onRegisterScrollView: { _ in },
+                isDismissSwipeActive: false,
+                isContentScrollLocked: false,
+                onContentScrollDragChanged: { _ in },
+                onContentScrollDragEnded: {}
+            )
+        )
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 420, height: 320))
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        host.view.frame = window.bounds
+        host.view.setNeedsLayout()
+        host.view.layoutIfNeeded()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.15))
+        host.view.layoutIfNeeded()
+
+        let notificationTextViews = textViews(in: host.view).filter { textView in
+            textView.attributedText.string.contains(notificationText)
+        }
+        XCTAssertEqual(notificationTextViews.count, 1)
+        XCTAssertFalse(try XCTUnwrap(notificationTextViews.first).isHidden)
+    }
+
+    @MainActor
     private func textViews(in view: UIView) -> [UITextView] {
         var result: [UITextView] = []
         if let textView = view as? UITextView {

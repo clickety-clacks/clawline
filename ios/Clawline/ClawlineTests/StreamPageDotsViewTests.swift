@@ -591,6 +591,20 @@ struct StreamPageDotsViewTests {
         )
     }
 
+    @Test("T1146 stream switch preserves only pre-existing software keyboard state")
+    func streamSwitchRestoresComposerOnlyWhenKeyboardWasAlreadyUp() {
+        #expect(
+            StreamSwitchKeyboardFocusPolicy.shouldRestoreComposerAfterSwitch(
+                wasSoftwareKeyboardVisible: true
+            )
+        )
+        #expect(
+            StreamSwitchKeyboardFocusPolicy.shouldRestoreComposerAfterSwitch(
+                wasSoftwareKeyboardVisible: false
+            ) == false
+        )
+    }
+
     @Test("T1136 popup close requests composer focus after popup dismissal")
     func streamPopupCloseRequestsComposerFocusAfterDismissal() {
         #expect(
@@ -604,6 +618,17 @@ struct StreamPageDotsViewTests {
                 .closePopup
             ]
         )
+    }
+
+    @Test("T1146 stream pager does not dismiss the software keyboard")
+    @MainActor
+    func streamPagerDoesNotDismissSoftwareKeyboard() {
+        let scrollView = UIScrollView()
+        scrollView.keyboardDismissMode = .interactive
+
+        StreamPagerKeyboardDismissPolicy.apply(to: scrollView)
+
+        #expect(scrollView.keyboardDismissMode == .none)
     }
 
     @Test("Active dots override unread styling")

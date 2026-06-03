@@ -17,6 +17,7 @@ interface FooterItem {
   action?: SessionControlAction;
   options: FooterOption[];
   text: string;
+  tone?: "auth-api-key" | "auth-oauth";
   unsupportedReason?: string | null;
 }
 
@@ -53,6 +54,7 @@ export function SessionStatusFooter({
           <span className="sr-only">{item.text}</span>
           <select
             aria-label={item.text}
+            className={item.tone ? `session-status-footer-select--${item.tone}` : undefined}
             disabled={!item.action || item.options.length === 0}
             onChange={(event) => {
               if (!item.action) {
@@ -106,7 +108,7 @@ export function footerItems(status?: SessionStatusPayload | null): FooterItem[] 
     {
       action: modelCapability.isSupported ? "set_model" : undefined,
       options: modelOptions(status),
-      text: normalized(display.model) ?? "Unknown model",
+      text: displayModelText(status),
       unsupportedReason: modelCapability.reason ?? "model_catalog_control_not_available"
     },
     {
@@ -168,6 +170,20 @@ function modelOptions(status: SessionStatusPayload): FooterOption[] {
     value: model,
     isCurrent: model === current
   }));
+}
+
+function displayModelText(status: SessionStatusPayload): string {
+  const current = normalized(status.display?.model);
+  if (status.modelCatalog?.available === true) {
+    const match = (status.modelCatalog.models ?? []).find((model) => {
+      const title = normalized(model.name) ?? normalized(model.ref) ?? normalized(model.alias) ?? model.ref;
+      return current === normalized(model.id) || current === normalized(model.ref) || current === title;
+    });
+    if (match) {
+      return normalized(match.name) ?? normalized(match.ref) ?? normalized(match.alias) ?? match.ref;
+    }
+  }
+  return current ?? "Unknown model";
 }
 
 function levelControlAction({
@@ -309,10 +325,10 @@ function fastModeText(
 function authModeFooterItem(authMode: string | null | undefined): FooterItem | null {
   switch (authMode?.trim().toLowerCase()) {
     case "oauth":
-      return { text: "OAUTH", action: undefined, options: [{ title: "OAUTH", isCurrent: true }] };
+      return { text: "OAUTH", tone: "auth-oauth", action: undefined, options: [{ title: "OAUTH", isCurrent: true }] };
     case "api_key":
     case "api-key":
-      return { text: "API KEY", action: undefined, options: [{ title: "API KEY", isCurrent: true }] };
+      return { text: "API KEY", tone: "auth-api-key", action: undefined, options: [{ title: "API KEY", isCurrent: true }] };
     default:
       return null;
   }

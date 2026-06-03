@@ -27,6 +27,7 @@ export interface StreamRecord extends StreamSessionPayload {}
 
 export interface ChatMessageRecord {
   id: string;
+  llmVisibleMessageId?: string;
   role: "user" | "assistant";
   content: string;
   timestamp: number;

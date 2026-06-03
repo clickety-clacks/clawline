@@ -1343,13 +1343,15 @@ describe("MessageList rich rendering", () => {
           available: true,
           models: [
             {
+              id: "gpt-5.5",
               ref: "openai/gpt-5.5",
-              name: "gpt-5.5",
+              name: "GPT-5.5",
               alias: "gpt"
             },
             {
+              id: "gpt-5.4",
               ref: "openai/gpt-5.4",
-              name: "gpt-5.4"
+              name: "GPT-5.4"
             }
           ]
         }
@@ -1357,8 +1359,8 @@ describe("MessageList rich rendering", () => {
     });
 
     expect(await screen.findByTestId("session-status-footer")).toBeInTheDocument();
-    const modelControl = screen.getByLabelText("gpt-5.5") as HTMLSelectElement;
-    expect(modelControl.options[0]?.textContent).toBe("✓ gpt-5.5");
+    const modelControl = screen.getByLabelText("GPT-5.5") as HTMLSelectElement;
+    expect(modelControl.options[0]?.textContent).toBe("✓ GPT-5.5");
 
     fireEvent.change(modelControl, {
       target: { value: "1" }
@@ -1395,6 +1397,43 @@ describe("MessageList rich rendering", () => {
     expect(fastModeControl).toHaveTextContent("Off");
   });
 
+  it("uses catalog display name for footer model label when available", async () => {
+    renderMessageListWithProps({
+      messages: [makeMessage(1)],
+      sessionKey: "agent:heimdal:main",
+      sessionStatus: {
+        sessionKey: "agent:heimdal:main",
+        display: {
+          model: "qwen3.6-35b-a3b",
+          thinkingLevel: "high",
+          fastMode: false
+        },
+        capabilities: {
+          setModel: { supported: true },
+          setThinking: { supported: true },
+          setFastMode: { supported: true }
+        },
+        modelCatalog: {
+          available: true,
+          models: [
+            {
+              id: "qwen3.6-35b-a3b",
+              provider: "gibson",
+              ref: "gibson/qwen3.6-35b-a3b",
+              name: "Qwen 3.6 35B-A3B Q4_K_M (gibson)",
+              alias: "qwen"
+            }
+          ]
+        }
+      }
+    });
+
+    const footer = await screen.findByTestId("session-status-footer");
+    expect(footer).toHaveAccessibleName("Qwen 3.6 35B-A3B Q4_K_M (gibson) · Thinking high · Fast off");
+    expect(screen.getByLabelText("Qwen 3.6 35B-A3B Q4_K_M (gibson)")).toBeInTheDocument();
+    expect(screen.queryByLabelText("qwen3.6-35b-a3b")).not.toBeInTheDocument();
+  });
+
   it("uses provider-supplied footer control options", async () => {
     const onSessionControlSelected = vi.fn();
     renderMessageListWithProps({
@@ -1427,8 +1466,9 @@ describe("MessageList rich rendering", () => {
           available: true,
           models: [
             {
+              id: "gpt-5.5",
               ref: "openai/gpt-5.5",
-              name: "gpt-5.5"
+              name: "GPT-5.5"
             }
           ]
         }
@@ -1485,6 +1525,35 @@ describe("MessageList rich rendering", () => {
     const authControl = screen.getByLabelText("API KEY");
     expect(authControl).toBeDisabled();
     expect(authControl).toHaveTextContent("API KEY");
+    expect(authControl).toHaveClass("session-status-footer-select--auth-api-key");
+  });
+
+  it("renders OAuth auth mode with the theme green footer color", async () => {
+    renderMessageListWithProps({
+      messages: [makeMessage(1)],
+      sessionKey: "agent:main:clawline:flynn:main",
+      sessionStatus: {
+        sessionKey: "agent:main:clawline:flynn:main",
+        display: {
+          model: "gpt-5.5",
+          thinkingLevel: "medium",
+          fastMode: true,
+          authMode: "oauth"
+        },
+        capabilities: {
+          setModel: { supported: false },
+          setThinking: { supported: false },
+          setFastMode: { supported: false }
+        }
+      }
+    });
+
+    const footer = await screen.findByTestId("session-status-footer");
+    expect(footer).toHaveAccessibleName("gpt-5.5 · Thinking medium · Fast on · OAUTH");
+    const authControl = screen.getByLabelText("OAUTH");
+    expect(authControl).toBeDisabled();
+    expect(authControl).toHaveTextContent("OAUTH");
+    expect(authControl).toHaveClass("session-status-footer-select--auth-oauth");
   });
 
   it("hides unknown auth mode in the footer", async () => {

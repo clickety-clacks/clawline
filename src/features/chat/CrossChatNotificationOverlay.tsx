@@ -1216,11 +1216,17 @@ export function CrossChatNotificationOverlay() {
               }}
             >
               {bubble.entriesNewestFirst.map((entry) => (
-                <RichMessageBody
-                  className="cross-chat-notification-markdown"
-                  content={entry.contentPreview.length > 0 ? entry.contentPreview : "Assistant reply"}
-                  key={entry.assistantMessageId}
-                />
+                <div key={entry.assistantMessageId}>
+                  <RichMessageBody
+                    className="cross-chat-notification-markdown"
+                    content={entry.contentPreview.length > 0 ? entry.contentPreview : "Assistant reply"}
+                  />
+                  {entry.appendSeparatorTimestamp !== undefined ? (
+                    <div className="cross-chat-notification-date-separator">
+                      <span>{formatNotificationSeparatorTimestamp(entry.appendSeparatorTimestamp)}</span>
+                    </div>
+                  ) : null}
+                </div>
               ))}
             </div>
           ) : null}
@@ -1424,11 +1430,78 @@ function notificationBubbleActivitySignature(bubble: CrossChatNotificationBubble
           entry.assistantMessageId,
           entry.updatedAt,
           entry.final,
+          entry.appendSeparatorTimestamp ?? "",
           entry.contentPreview
         ].join(":")
       )
       .join(",")
   ].join(":");
+}
+
+function formatNotificationSeparatorTimestamp(timestamp: number, now = Date.now()) {
+  const messageDate = new Date(timestamp);
+  const nowDate = new Date(now);
+  const diffMs = Math.max(0, now - timestamp);
+  const diffMinutes = Math.floor(diffMs / 60_000);
+
+  if (diffMs < 60_000) {
+    return "just now";
+  }
+
+  if (diffMinutes < 60) {
+    return `${diffMinutes}m ago`;
+  }
+
+  if (isSameDay(messageDate, nowDate)) {
+    return messageDate.toLocaleTimeString([], {
+      hour: "numeric",
+      minute: "2-digit"
+    });
+  }
+
+  const yesterday = new Date(nowDate);
+  yesterday.setDate(nowDate.getDate() - 1);
+
+  if (isSameDay(messageDate, yesterday)) {
+    return `Yesterday, ${messageDate.toLocaleTimeString([], {
+      hour: "numeric",
+      minute: "2-digit"
+    })}`;
+  }
+
+  const diffDays = Math.floor(diffMs / 86_400_000);
+  if (diffDays < 7) {
+    return messageDate.toLocaleDateString([], {
+      weekday: "long",
+      hour: "numeric",
+      minute: "2-digit"
+    });
+  }
+
+  if (messageDate.getFullYear() === nowDate.getFullYear()) {
+    return messageDate.toLocaleDateString([], {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit"
+    });
+  }
+
+  return messageDate.toLocaleDateString([], {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit"
+  });
+}
+
+function isSameDay(left: Date, right: Date) {
+  return (
+    left.getFullYear() === right.getFullYear() &&
+    left.getMonth() === right.getMonth() &&
+    left.getDate() === right.getDate()
+  );
 }
 
 function applyReplyPinsToBubbleOrder(

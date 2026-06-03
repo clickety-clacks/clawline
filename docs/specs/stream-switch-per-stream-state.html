@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>T103 Stream Switch and Per-Stream State</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f7f7f4;
+      --fg: #1d2528;
+      --muted: #5f6f73;
+      --line: #cfd8d6;
+      --panel: #ffffff;
+      --accent: #176b6b;
+      --warn: #8a5400;
+      --code: #eef3f2;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #101516;
+        --fg: #eef4f3;
+        --muted: #a8b6b8;
+        --line: #304043;
+        --panel: #182022;
+        --accent: #6ec7bc;
+        --warn: #e2b45e;
+        --code: #202b2d;
+      }
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--fg);
+      font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    main {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 48px 22px 72px;
+    }
+
+    h1, h2, h3 {
+      line-height: 1.15;
+      letter-spacing: 0;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: clamp(2rem, 4vw, 3rem);
+    }
+
+    h2 {
+      margin-top: 42px;
+      padding-top: 22px;
+      border-top: 1px solid var(--line);
+      font-size: 1.45rem;
+    }
+
+    h3 {
+      margin-top: 28px;
+      font-size: 1.1rem;
+    }
+
+    p {
+      margin: 10px 0;
+    }
+
+    ul, ol {
+      padding-left: 1.3rem;
+    }
+
+    li {
+      margin: 7px 0;
+    }
+
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.92em;
+      background: var(--code);
+      border-radius: 6px;
+      padding: 0.12rem 0.28rem;
+    }
+
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      margin: 16px 0;
+      background: var(--panel);
+    }
+
+    th, td {
+      border: 1px solid var(--line);
+      padding: 10px 12px;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      color: var(--accent);
+      font-weight: 700;
+    }
+
+    .meta {
+      color: var(--muted);
+      margin-bottom: 28px;
+    }
+
+    .callout {
+      border: 1px solid var(--line);
+      border-left: 5px solid var(--accent);
+      background: var(--panel);
+      padding: 14px 16px;
+      margin: 18px 0;
+      border-radius: 8px;
+    }
+
+    .warning {
+      border-left-color: var(--warn);
+    }
+
+    .decision {
+      font-weight: 700;
+    }
+
+    .id {
+      color: var(--accent);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.92em;
+      white-space: nowrap;
+    }
+  </style>
+</head>
+<body>
+<main>
+  <h1>T103 Stream Switch and Per-Stream State</h1>
+  <p class="meta">Clawline iOS shared spec. Prepared 2026-05-27. Canonical artifact: <code>/Users/mike/shared-workspace/clawline/specs/stream-switch-per-stream-state.html</code>.</p>
+
+  <section class="callout">
+    <p class="decision">Decision: stream switching must be governed by a per-stream runtime state contract, not by controller-global reset behavior.</p>
+    <p>T103 stays separate from T100. T100 owns provider connection lifecycle, replay, reconnect admission, and cache/replay barriers. T103 owns visible stream activation, scroll persistence, scroll-to-bottom state, deferred UI work, and per-stream runtime state keyed by <code>sessionKey</code>.</p>
+  </section>
+
+  <h2>Source Basis</h2>
+  <ul>
+    <li>Tracker T103 goal: stream switch should land at the persisted scroll position or bottom, not mid-conversation.</li>
+    <li>Preserved source material: <code>/Users/mike/shared-workspace/clawline/implementation_details/per-stream-state-encapsulation.md</code>.</li>
+    <li>Context source: <code>/Users/mike/shared-workspace/clawline/papers/corral-protocol-2026-02-21.md</code> records the unified T095/T103/T104 direction: per-session map ownership, not controller-level reset hacks.</li>
+    <li>Related dependency note: <code>/Users/mike/shared-workspace/clawline/implementation_details/t113-architecture-plan.md</code> says per-stream state depends on T105 message-stream seam coherence and must not conflate UI state with transport replay cursors.</li>
+  </ul>
+
+  <h2>Goal</h2>
+  <p><span class="id">T103-GOAL-01</span> Switching into a Clawline stream lands at that stream's persisted scroll position when one exists, otherwise at bottom.</p>
+  <p><span class="id">T103-GOAL-02</span> State from one stream must not leak into another stream through reused controller instances, debounce timers, scroll callbacks, pending auto-scroll work, restore phase, typing state, morph state, unread state, or size caches.</p>
+
+  <h2>Non-Goals</h2>
+  <ul>
+    <li><span class="id">T103-NG-01</span> This spec does not redesign the connection lifecycle state machine, reconnect policy, or provider replay protocol.</li>
+    <li><span class="id">T103-NG-02</span> This spec does not change message rendering, markdown parsing, bubble visual design, or stream selector UI.</li>
+    <li><span class="id">T103-NG-03</span> This spec does not require a specific Swift file layout or type name if the ownership and behavior requirements are met.</li>
+    <li><span class="id">T103-NG-04</span> This spec does not reimplement T104 if existing branch work already provides conformant per-stream SBB ownership; implementation must verify branch state first.</li>
+  </ul>
+
+  <h2>Ownership Model</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>State Class</th>
+        <th>Owner</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><span class="id">T103-OWN-01</span></td>
+        <td>Scroll position, restore phase, restore generation, and persisted anchor facts.</td>
+        <td>Per-stream runtime state keyed by <code>sessionKey</code>.</td>
+      </tr>
+      <tr>
+        <td><span class="id">T103-OWN-02</span></td>
+        <td>Scroll-to-bottom button state, last reported hide indicator, and bottom-inset facts used by that control.</td>
+        <td>Per-stream runtime state keyed by <code>sessionKey</code>.</td>
+      </tr>
+      <tr>
+        <td><span class="id">T103-OWN-03</span></td>
+        <td>Last-message/unread facts that affect auto-scroll and unread-marker behavior.</td>
+        <td>Per-stream runtime state keyed by <code>sessionKey</code>.</td>
+      </tr>
+      <tr>
+        <td><span class="id">T103-OWN-04</span></td>
+        <td>Typing, morph, auto-scroll retry, and debounce work scheduled across an async or dispatch boundary.</td>
+        <td>Captured <code>sessionKey</code> plus generation validation before read or write.</td>
+      </tr>
+      <tr>
+        <td><span class="id">T103-OWN-05</span></td>
+        <td>Bubble sizing cache identity when a shared controller-global cache exists.</td>
+        <td>Cache keys include <code>sessionKey</code>; stream cleanup only removes the deleted stream's entries.</td>
+      </tr>
+      <tr>
+        <td><span class="id">T103-OWN-06</span></td>
+        <td>Per-stream replay cursors.</td>
+        <td>Transport layer, not <code>ChatViewModel</code> UI runtime state.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>Requirements</h2>
+  <h3><span class="id">T103-REQ-01</span> Single Stream-Switch Seam</h3>
+  <p>Stream activation must pass through one stream-context switch seam. Callers may request a switch, but they must not independently reset scroll, restore, SBB, typing, unread, morph, debounce, or sizing state outside that seam.</p>
+
+  <h3><span class="id">T103-REQ-02</span> Outgoing Flush Uses The Outgoing Key</h3>
+  <p>The switch seam must capture the outgoing <code>sessionKey</code> before rebinding to the incoming stream and must flush outgoing scroll persistence using that captured key. Reading an effective key after mutation for outgoing persistence is invalid.</p>
+
+  <h3><span class="id">T103-REQ-03</span> Seam Work Precedes Offscreen Guards</h3>
+  <p>Required switch bookkeeping must run even when render policy is frozen or the controller is offscreen. Offscreen and frozen guards may skip heavy render work, but they must not skip outgoing flush, incoming restore setup, key commit, timer cancellation, or generation ownership updates.</p>
+
+  <h3><span class="id">T103-REQ-04</span> Debounce Is Batching Only</h3>
+  <p>Debounce timers may batch same-stream work, but they are not lifecycle gates. On stream switch, pending debounce work for the outgoing stream must flush or cancel deterministically. Any callback that survives a yield or dispatch boundary must use a captured <code>sessionKey</code>, not a dynamic "current stream" lookup.</p>
+
+  <h3><span class="id">T103-REQ-05</span> Deferred Work Must Be Stream-Owned</h3>
+  <p>Deferred scroll-to-bottom retries, morph callbacks, typing-state callbacks, and any other scheduled work must capture the owning <code>sessionKey</code> and generation at schedule time and validate both before reading or writing per-stream state.</p>
+
+  <h3><span class="id">T103-REQ-06</span> Shared At-Bottom Definition</h3>
+  <p>SBB hide/show logic, auto-scroll eligibility for appended messages, and restore fallback-to-bottom checks must use one shared at-bottom helper and threshold source. Divergent thresholds across those sites are invalid.</p>
+
+  <h3><span class="id">T103-REQ-07</span> Same-Key Re-Read Is Explicit</h3>
+  <p>A same-key update must not re-arm restore unless <code>forceReReadGeneration</code> advances. Same-key re-read must reload persisted state and must not persist current in-memory geometry until the re-read reaches a confirmed or deterministic fallback state.</p>
+
+  <h3><span class="id">T103-REQ-08</span> Stable Callback Key During Switch</h3>
+  <p>Scroll delegate and layout callbacks during a switch must route through the last committed effective session key for the active surface, not through a dynamic fallback that can change mid-seam.</p>
+
+  <h3><span class="id">T103-REQ-09</span> Deleted Stream Cleanup</h3>
+  <p>When stream membership changes, per-stream runtime entries for deleted keys must be pruned. Timers and work items owned by deleted keys must be cancelled. A later stream reusing the same key starts from a fresh runtime entry unless durable stream data explicitly defines otherwise.</p>
+
+  <h3><span class="id">T103-REQ-10</span> Transport Cursors Are Not UI Runtime State</h3>
+  <p>Per-stream replay cursors belong to the transport owner. UI per-stream runtime state may observe populated messages and scroll facts, but it must not become the owner for replay cursor progression.</p>
+
+  <h2>Acceptance Checks</h2>
+  <ul>
+    <li><span class="id">T103-AC-01</span> Switching from stream A to stream B persists stream A scroll state using stream A's captured key before stream B becomes the active runtime key.</li>
+    <li><span class="id">T103-AC-02</span> Switching into a stream with persisted scroll state restores that position; switching into a stream without persisted scroll state lands at bottom.</li>
+    <li><span class="id">T103-AC-03</span> An offscreen or frozen controller still runs switch bookkeeping and does not lose scroll persistence or restore setup.</li>
+    <li><span class="id">T103-AC-04</span> A pending debounce callback from stream A cannot mutate stream B after a switch.</li>
+    <li><span class="id">T103-AC-05</span> A pending scroll-to-bottom retry from stream A cannot scroll stream B after a switch.</li>
+    <li><span class="id">T103-AC-06</span> SBB visibility, appended-message auto-scroll, and fallback-to-bottom decisions use the same at-bottom threshold.</li>
+    <li><span class="id">T103-AC-07</span> Same-key updates do not re-arm restore unless <code>forceReReadGeneration</code> advances.</li>
+    <li><span class="id">T103-AC-08</span> Same-key re-read does not write stale in-memory geometry into durable persisted scroll state before confirmation or fallback.</li>
+    <li><span class="id">T103-AC-09</span> Deleting a stream removes its runtime entry and cancels its owned timers/work items without evicting another stream's active state.</li>
+    <li><span class="id">T103-AC-10</span> Shared sizing caches include <code>sessionKey</code> in identity and do not invalidate the visible stream when a different stream is cleaned up.</li>
+    <li><span class="id">T103-AC-11</span> Per-stream replay cursors remain owned by the transport layer and are not moved into <code>ChatViewModel</code> UI runtime state.</li>
+  </ul>
+
+  <h2>Implementation Handoff</h2>
+  <ol>
+    <li><span class="id">T103-HO-01</span> First identify the existing switch seam and state variables that can influence scroll, SBB, restore, unread/last-message, typing, morph, deferred scroll, debounce, and sizing behavior.</li>
+    <li><span class="id">T103-HO-02</span> Consolidate those facts into per-stream ownership keyed by <code>sessionKey</code> or into captured keyed work items where deferred execution is required.</li>
+    <li><span class="id">T103-HO-03</span> Verify existing branch work for T104 before re-implementing SBB state.</li>
+    <li><span class="id">T103-HO-04</span> Keep transport replay cursor work aligned with T100 and T105, but do not move cursor ownership into the T103 UI runtime state.</li>
+  </ol>
+
+  <h2>Open Questions</h2>
+  <ul>
+    <li><span class="id">T103-OQ-01</span> Which existing implementation branch, if any, still contains the T104 per-stream SBB work that the T113 notes describe as already implemented?</li>
+    <li><span class="id">T103-OQ-02</span> Should the final implementation expose a named <code>PerStreamRuntimeState</code> type, or is an existing state owner acceptable if it enforces the same keyed ownership contract?</li>
+  </ul>
+</main>
+</body>
+</html>

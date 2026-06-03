@@ -29,6 +29,14 @@ struct MessageBubbleMetadataDebugState {
     let timestampAlpha: CGFloat
     let headerWidth: CGFloat
     let metadataNeededWidth: CGFloat
+    let replyIndicatorHidden: Bool
+    let replyIndicatorText: String?
+    let replyIndicatorRenderedText: NSAttributedString?
+    let replyIndicatorLineLimit: Int
+    let replyIndicatorTextHeight: CGFloat
+    let replyIndicatorTextLineHeight: CGFloat
+    let replyIndicatorUncappedTextHeight: CGFloat
+    let replyIndicatorChipHeight: CGFloat
 }
 
 private final class BubbleSafeAreaNeutralScrollView: UIScrollView {
@@ -99,6 +107,10 @@ enum ImagePopupViewerLayout {
         let vertical = max(0, (viewportSize.height - contentSize.height) / 2)
         return UIEdgeInsets(top: vertical, left: horizontal, bottom: vertical, right: horizontal)
     }
+
+    static func zoomedContentSize(imageSize: CGSize, zoomScale: CGFloat) -> CGSize {
+        CGSize(width: imageSize.width * zoomScale, height: imageSize.height * zoomScale)
+    }
 }
 
 private class MessageImageThumbnailView: UIImageView {
@@ -138,7 +150,7 @@ private class MessageImageThumbnailView: UIImageView {
     }
 }
 
-private final class ImagePopupViewerController: UIViewController, UIScrollViewDelegate, UIGestureRecognizerDelegate {
+final class ImagePopupViewerController: UIViewController, UIScrollViewDelegate, UIGestureRecognizerDelegate {
     private let image: UIImage
     private let popupView = UIView()
     private let scrollView = UIScrollView()
@@ -244,6 +256,13 @@ private final class ImagePopupViewerController: UIViewController, UIScrollViewDe
     }
 
     private func configureZoomScale() {
+        guard image.size.width > 0,
+              image.size.height > 0,
+              scrollView.bounds.width > 0,
+              scrollView.bounds.height > 0 else {
+            return
+        }
+
         let initialScale = ImagePopupViewerLayout.initialZoomScale(
             imageSize: image.size,
             viewportSize: scrollView.bounds.size
@@ -256,16 +275,15 @@ private final class ImagePopupViewerController: UIViewController, UIScrollViewDe
         } else if scrollView.zoomScale < initialScale {
             scrollView.zoomScale = initialScale
         }
-        scrollView.contentSize = image.size
+        scrollView.contentSize = ImagePopupViewerLayout.zoomedContentSize(
+            imageSize: image.size,
+            zoomScale: scrollView.zoomScale
+        )
     }
 
     private func centerImage() {
-        let contentSize = CGSize(
-            width: image.size.width * scrollView.zoomScale,
-            height: image.size.height * scrollView.zoomScale
-        )
         scrollView.contentInset = ImagePopupViewerLayout.centeredContentInset(
-            contentSize: contentSize,
+            contentSize: scrollView.contentSize,
             viewportSize: scrollView.bounds.size
         )
     }
@@ -287,6 +305,13 @@ private final class ImagePopupViewerController: UIViewController, UIScrollViewDe
         dismiss(animated: true)
     }
 }
+
+#if DEBUG
+extension ImagePopupViewerController {
+    var debugScrollView: UIScrollView { scrollView }
+    var debugImageView: UIImageView { imageView }
+}
+#endif
 
 private final class RemoteMessageImageView: MessageImageThumbnailView {
     private var task: URLSessionDataTask?
@@ -430,6 +455,7 @@ final class MessageBubbleUIKitContainerView: UIView {
                    onInteractiveCallback: ((String, String, JSONValue?) -> Void)?,
                    onInsertIntoPrompt: ((Message) -> Void)?,
                    onReferenceMessage: ((Message) -> Void)?,
+                   replyReference: PendingMessageReference? = nil,
                    onResend: (() -> Void)?) {
         let metrics = ChatFlowTheme.Metrics(isCompact: isCompact)
         let sizeClass = MessageFlowRules.sizeClass(for: presentation)
@@ -455,12 +481,8 @@ final class MessageBubbleUIKitContainerView: UIView {
             onInteractiveCallback: onInteractiveCallback,
             onInsertIntoPrompt: onInsertIntoPrompt,
             onReferenceMessage: onReferenceMessage,
+            replyReference: replyReference,
             salientHighlightService: salientHighlightService
-
-
-
-
-
         )
         self.onResend = onResend
         self.onRequestLayout = onRequestLayout
@@ -530,6 +552,12 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
     private let senderLabel = UILabel()
     private let senderTimestampSpacer = UIView()
     private let timestampLabel = UILabel()
+    private let replyIndicatorContainer = UIView()
+    private let replyIndicatorChipView = UIView()
+    private let replyIndicatorStack = UIStackView()
+    private let replyIndicatorIconView = UIImageView()
+    private let replyIndicatorTextView = UITextView()
+    private var replyIndicatorTextHeightConstraint: NSLayoutConstraint?
     private let headerMenuButton = UIButton(type: .custom)
     private let bodyLabel = UITextView()
     private let bodyTextContainer = UIView()
@@ -560,6 +588,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
     private var onReferenceMessage: ((Message) -> Void)?
     private var currentMessage: Message?
     private var currentCopyableReadableText: String?
+    private var currentReplyReference: PendingMessageReference?
 
     // Salient highlights are applied asynchronously and must be cancelable on cell reuse.
     private var salientTask: Task<Void, Never>?
@@ -575,6 +604,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
     private var explicitIsDarkOverride: Bool?
     private var currentContentPaddingHorizontal: CGFloat = 16
     private var currentContentPaddingVertical: CGFloat = 14
+    private var currentEffectiveMaxWidth: CGFloat = 320
     private var contentLeadingConstraint: NSLayoutConstraint!
     private var contentTrailingConstraint: NSLayoutConstraint!
     private var contentTopConstraint: NSLayoutConstraint!
@@ -739,6 +769,66 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         headerStack.addArrangedSubview(senderTimestampSpacer)
         headerStack.addArrangedSubview(timestampLabel)
         senderLabel.firstBaselineAnchor.constraint(equalTo: timestampLabel.firstBaselineAnchor).isActive = true
+
+        replyIndicatorContainer.translatesAutoresizingMaskIntoConstraints = false
+        replyIndicatorContainer.backgroundColor = .clear
+        replyIndicatorContainer.isHidden = true
+
+        replyIndicatorChipView.translatesAutoresizingMaskIntoConstraints = false
+        replyIndicatorChipView.backgroundColor = .secondarySystemFill
+        replyIndicatorChipView.layer.cornerRadius = 10
+        replyIndicatorChipView.layer.cornerCurve = .continuous
+        replyIndicatorChipView.clipsToBounds = true
+        replyIndicatorChipView.isAccessibilityElement = true
+        replyIndicatorChipView.accessibilityTraits = .staticText
+
+        replyIndicatorStack.translatesAutoresizingMaskIntoConstraints = false
+        replyIndicatorStack.axis = .horizontal
+        replyIndicatorStack.alignment = .top
+        replyIndicatorStack.spacing = 6
+        replyIndicatorStack.isLayoutMarginsRelativeArrangement = true
+        replyIndicatorStack.directionalLayoutMargins = NSDirectionalEdgeInsets(top: 6, leading: 10, bottom: 6, trailing: 10)
+
+        replyIndicatorIconView.translatesAutoresizingMaskIntoConstraints = false
+        replyIndicatorIconView.image = UIImage(systemName: "arrowshape.turn.up.left")
+        replyIndicatorIconView.tintColor = .label
+        replyIndicatorIconView.contentMode = .scaleAspectFit
+        replyIndicatorIconView.setContentHuggingPriority(.required, for: .horizontal)
+        replyIndicatorIconView.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        replyIndicatorTextView.translatesAutoresizingMaskIntoConstraints = false
+        UnifiedMarkdownRenderer.configureTextView(
+            replyIndicatorTextView,
+            delegate: nil,
+            enableDataDetectors: false
+        )
+        replyIndicatorTextView.textContainer.maximumNumberOfLines = 3
+        replyIndicatorTextView.textContainer.lineBreakMode = .byTruncatingTail
+        replyIndicatorTextView.adjustsFontForContentSizeCategory = true
+        replyIndicatorTextView.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        replyIndicatorTextView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        let replyTextHeight = replyIndicatorTextView.heightAnchor.constraint(equalToConstant: 0)
+        replyTextHeight.priority = .required
+        replyTextHeight.isActive = true
+        replyIndicatorTextHeightConstraint = replyTextHeight
+
+        replyIndicatorStack.addArrangedSubview(replyIndicatorIconView)
+        replyIndicatorStack.addArrangedSubview(replyIndicatorTextView)
+        replyIndicatorChipView.addSubview(replyIndicatorStack)
+        replyIndicatorContainer.addSubview(replyIndicatorChipView)
+        NSLayoutConstraint.activate([
+            replyIndicatorStack.leadingAnchor.constraint(equalTo: replyIndicatorChipView.leadingAnchor),
+            replyIndicatorStack.topAnchor.constraint(equalTo: replyIndicatorChipView.topAnchor),
+            replyIndicatorStack.trailingAnchor.constraint(equalTo: replyIndicatorChipView.trailingAnchor),
+            replyIndicatorStack.bottomAnchor.constraint(equalTo: replyIndicatorChipView.bottomAnchor),
+            replyIndicatorIconView.widthAnchor.constraint(equalToConstant: 12),
+            replyIndicatorIconView.heightAnchor.constraint(equalToConstant: 12),
+            replyIndicatorIconView.topAnchor.constraint(equalTo: replyIndicatorTextView.firstBaselineAnchor, constant: -10),
+            replyIndicatorChipView.leadingAnchor.constraint(equalTo: replyIndicatorContainer.leadingAnchor),
+            replyIndicatorChipView.topAnchor.constraint(equalTo: replyIndicatorContainer.topAnchor),
+            replyIndicatorChipView.bottomAnchor.constraint(equalTo: replyIndicatorContainer.bottomAnchor),
+            replyIndicatorChipView.trailingAnchor.constraint(lessThanOrEqualTo: replyIndicatorContainer.trailingAnchor)
+        ])
         headerStack.isUserInteractionEnabled = true
         headerMenuButton.translatesAutoresizingMaskIntoConstraints = false
         headerMenuButton.backgroundColor = .clear
@@ -751,6 +841,9 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
             headerMenuButton.trailingAnchor.constraint(equalTo: headerStack.trailingAnchor),
             headerMenuButton.bottomAnchor.constraint(equalTo: headerStack.bottomAnchor)
         ])
+#if targetEnvironment(macCatalyst)
+        headerMenuButton.addInteraction(UIContextMenuInteraction(delegate: self))
+#endif
 
         bodyLabel.translatesAutoresizingMaskIntoConstraints = false
         UnifiedMarkdownRenderer.configureTextView(
@@ -758,7 +851,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
             delegate: self,
             enableDataDetectors: enableDataDetectors
         )
-        let bodyTap = UITapGestureRecognizer(target: self, action: #selector(handleBubbleTap))
+        let bodyTap = UITapGestureRecognizer(target: self, action: #selector(handleBodyTap(_:)))
         bodyTap.cancelsTouchesInView = false
         bodyTap.delaysTouchesBegan = false
         bodyTap.delaysTouchesEnded = false
@@ -787,6 +880,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         ])
 
         contentStack.addArrangedSubview(headerStack)
+        contentStack.addArrangedSubview(replyIndicatorContainer)
 
         // Dynamic content wrapper clips content for truncation
         dynamicContentWrapper.clipsToBounds = true
@@ -860,6 +954,13 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
             contentTopConstraint,
             contentBottomConstraint
         ])
+    }
+
+    private func makeFixedBubbleWidthConstraint(_ width: CGFloat) -> NSLayoutConstraint {
+        let constraint = bubbleBackgroundView.widthAnchor.constraint(equalToConstant: width)
+        constraint.identifier = "MessageBubbleUIKitView.fixedWidth"
+        constraint.priority = .defaultHigh
+        return constraint
     }
 
     private static func linkPreviewWidthCap(metrics: ChatFlowTheme.Metrics) -> CGFloat {
@@ -965,6 +1066,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         topHighlightMask.path = (hasTerminalSessionsForLayout || useContinuousCorners) ? path.cgPath : highlightMaskPath.cgPath
 
         updateTimestampVisibilityIfNeeded()
+        updateReplyIndicatorTextHeightConstraint()
         updateOuterScrollState()
     }
 
@@ -989,6 +1091,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
                    onInteractiveCallback: ((String, String, JSONValue?) -> Void)?,
                    onInsertIntoPrompt: ((Message) -> Void)? = nil,
                    onReferenceMessage: ((Message) -> Void)? = nil,
+                   replyReference: PendingMessageReference? = nil,
                    salientHighlightService: (any SalientHighlightServicing)? = nil) {
         assert(Thread.isMainThread)
         self.terminalConnectionPool = terminalConnectionPool
@@ -996,6 +1099,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         currentMessage = message
         currentMessageId = message.id
         currentCopyableReadableText = presentation.copyableReadableText
+        currentReplyReference = replyReference
         // Store for trait collection updates
         currentMessageRole = message.role
         currentMessageDeliveryState = message.deliveryState
@@ -1029,6 +1133,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
 
         // Reset width constraints per size class.
         currentMetrics = metrics
+        currentEffectiveMaxWidth = effectiveMaxWidth
         minWidthConstraint.constant = effectiveMinWidth
         maxWidthConstraint.constant = effectiveMaxWidth
         fixedWidthConstraint?.isActive = false
@@ -1038,6 +1143,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         self.onInteractiveCallback = onInteractiveCallback
         self.onInsertIntoPrompt = onInsertIntoPrompt
         self.onReferenceMessage = onReferenceMessage
+        updateReplyIndicator()
         headerMenuButton.menu = messageContextMenu()
 
         // Use explicit isDark if provided, otherwise fall back to trait collection
@@ -1496,11 +1602,11 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         case .short:
             bodyMaxWidthConstraint?.isActive = false
             // Set fixed width to match measured preferredWidth for consistent sizing
-            fixedWidthConstraint = bubbleBackgroundView.widthAnchor.constraint(equalToConstant: effectiveMaxWidth)
+            fixedWidthConstraint = makeFixedBubbleWidthConstraint(effectiveMaxWidth)
             fixedWidthConstraint?.isActive = true
         case .medium:
             bodyMaxWidthConstraint?.isActive = false
-            fixedWidthConstraint = bubbleBackgroundView.widthAnchor.constraint(equalToConstant: effectiveMaxWidth)
+            fixedWidthConstraint = makeFixedBubbleWidthConstraint(effectiveMaxWidth)
             fixedWidthConstraint?.isActive = true
         case .long:
             let maxLineWidth = ChatFlowTheme.maxLineWidth(bodyFontSize: metrics.bodyFontSize)
@@ -1508,7 +1614,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
             let constraint = bodyLabel.widthAnchor.constraint(lessThanOrEqualToConstant: maxLineWidth)
             constraint.isActive = true
             bodyMaxWidthConstraint = constraint
-            fixedWidthConstraint = bubbleBackgroundView.widthAnchor.constraint(equalToConstant: effectiveMaxWidth)
+            fixedWidthConstraint = makeFixedBubbleWidthConstraint(effectiveMaxWidth)
             fixedWidthConstraint?.isActive = true
         }
 
@@ -1565,8 +1671,10 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         currentMessage = nil
         currentMessageId = nil
         currentCopyableReadableText = nil
+        currentReplyReference = nil
         onInsertIntoPrompt = nil
         onReferenceMessage = nil
+        updateReplyIndicator()
         headerMenuButton.menu = nil
         suppressExpandTapForLinkCards = false
         allowSwipeUpExpandForSingleLink = false
@@ -1861,9 +1969,16 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         let headerWidth: CGFloat = showsHeader
             ? (32 + headerStack.spacing + senderLabel.intrinsicContentSize.width)
             : 0
+        let replyWidth: CGFloat = replyIndicatorContainer.isHidden
+            ? 0
+            : replyIndicatorChipView.systemLayoutSizeFitting(
+                CGSize(width: maxWidth, height: UIView.layoutFittingCompressedSize.height),
+                withHorizontalFittingPriority: .fittingSizeLevel,
+                verticalFittingPriority: .fittingSizeLevel
+            ).width
         let contentWidth = maxWidth - (currentContentPaddingHorizontal * 2)
         let bodySize = bodyLabel.sizeThatFits(CGSize(width: contentWidth, height: .greatestFiniteMagnitude))
-        let contentMax = max(headerWidth, bodySize.width)
+        let contentMax = max(headerWidth, replyWidth, bodySize.width)
         return min(maxWidth, max(minWidth, contentMax + (currentContentPaddingHorizontal * 2)))
     }
 
@@ -1879,6 +1994,15 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         return max(0, measured.height)
     }
 
+    @objc private func handleBodyTap(_ recognizer: UITapGestureRecognizer) {
+        if recognizer.state == .ended,
+           let generatedURL = Self.generatedTextLinkURL(in: bodyLabel, at: recognizer.location(in: bodyLabel)) {
+            _ = GeneratedTextLinkActivationRouter.openGeneratedLink(generatedURL, bodyLabel)
+            return
+        }
+        handleBubbleTap()
+    }
+
     @objc private func handleBubbleTap() {
         if suppressExpandTapForLinkCards {
             return
@@ -1887,6 +2011,48 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         if dynamicContentScrollView.contentSize.height > dynamicContentScrollView.bounds.height + 1 {
             onRequestExpand?()
         }
+    }
+
+    static func generatedTextLinkURL(in textView: UITextView, at point: CGPoint) -> URL? {
+        guard let attributedText = textView.attributedText, attributedText.length > 0 else {
+            return nil
+        }
+
+        textView.layoutManager.ensureLayout(for: textView.textContainer)
+        let usedRect = textView.layoutManager.usedRect(for: textView.textContainer)
+        let location = CGPoint(
+            x: point.x - textView.textContainerInset.left + usedRect.origin.x,
+            y: point.y - textView.textContainerInset.top + usedRect.origin.y
+        )
+
+        var fraction: CGFloat = 0
+        let characterIndex = textView.layoutManager.characterIndex(
+            for: location,
+            in: textView.textContainer,
+            fractionOfDistanceBetweenInsertionPoints: &fraction
+        )
+        guard characterIndex < attributedText.length else {
+            return nil
+        }
+
+        var effectiveRange = NSRange(location: 0, length: 0)
+        guard let url = attributedText.attribute(.link, at: characterIndex, effectiveRange: &effectiveRange) as? URL,
+              effectiveRange.length > 0,
+              TextLinkURLTemplateRules.isGeneratedLink(in: attributedText, characterRange: effectiveRange) else {
+            return nil
+        }
+        let glyphRange = textView.layoutManager.glyphRange(
+            forCharacterRange: effectiveRange,
+            actualCharacterRange: nil
+        )
+        let glyphRect = textView.layoutManager.boundingRect(
+            forGlyphRange: glyphRange,
+            in: textView.textContainer
+        ).insetBy(dx: -2, dy: -4)
+        guard glyphRect.contains(location) else {
+            return nil
+        }
+        return url
     }
 
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
@@ -1943,17 +2109,18 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         guard let currentMessage else { return nil }
         var actions: [UIMenuElement] = []
         if let copyableReadableText = currentCopyableReadableText {
-            actions.append(UIAction(title: "Copy to Clipboard", image: UIImage(systemName: "doc.on.doc")) { _ in
+            actions.append(UIAction(title: "Copy message", image: UIImage(systemName: "doc.on.doc")) { _ in
                 UIPasteboard.general.string = copyableReadableText
             })
         }
         if currentMessage.role == .user {
-            actions.append(UIAction(title: "Insert into prompt", image: UIImage(systemName: "text.insert")) { [weak self] _ in
-                guard let self, let message = self.currentMessage else { return }
-                self.onInsertIntoPrompt?(message)
+            let message = currentMessage
+            let onInsertIntoPrompt = onInsertIntoPrompt
+            actions.append(UIAction(title: "Insert into prompt", image: UIImage(systemName: "text.insert")) { _ in
+                onInsertIntoPrompt?(message)
             })
         }
-        actions.append(UIAction(title: "Reference message", image: UIImage(systemName: "quote.bubble")) { [weak self] _ in
+        actions.append(UIAction(title: "Reply…", image: UIImage(systemName: "arrowshape.turn.up.left")) { [weak self] _ in
             guard let self, let message = self.currentMessage else { return }
             self.onReferenceMessage?(message)
         })
@@ -1966,9 +2133,26 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         primaryActionFor textItem: UITextItem,
         defaultAction: UIAction
     ) -> UIAction? {
-        UnifiedMarkdownRenderer.primaryActionForTextItem(textItem, defaultAction: defaultAction) { tappedURL in
+        UnifiedMarkdownRenderer.primaryActionForTextItem(textItem, defaultAction: defaultAction) { tappedURL, characterRange in
+            if TextLinkURLTemplateRules.isGeneratedLink(in: textView.attributedText, characterRange: characterRange) {
+                _ = GeneratedTextLinkActivationRouter.openGeneratedLink(tappedURL, textView)
+                return
+            }
             UIApplication.shared.open(tappedURL)
         }
+    }
+
+    func textView(
+        _ textView: UITextView,
+        shouldInteractWith URL: URL,
+        in characterRange: NSRange,
+        interaction: UITextItemInteraction
+    ) -> Bool {
+        guard TextLinkURLTemplateRules.isGeneratedLink(in: textView.attributedText, characterRange: characterRange) else {
+            return true
+        }
+        _ = GeneratedTextLinkActivationRouter.openGeneratedLink(URL, textView)
+        return false
     }
 
     private static func markdownStyle(
@@ -2025,8 +2209,27 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
             timestampHidden: timestampLabel.isHidden,
             timestampAlpha: timestampLabel.textColor.cgColor.alpha,
             headerWidth: headerStack.bounds.width,
-            metadataNeededWidth: metadataNeededWidth()
+            metadataNeededWidth: metadataNeededWidth(),
+            replyIndicatorHidden: replyIndicatorContainer.isHidden,
+            replyIndicatorText: currentReplyReference?.tokenLabel,
+            replyIndicatorRenderedText: replyIndicatorTextView.attributedText,
+            replyIndicatorLineLimit: replyIndicatorTextView.textContainer.maximumNumberOfLines,
+            replyIndicatorTextHeight: replyIndicatorTextView.bounds.height,
+            replyIndicatorTextLineHeight: replyIndicatorTextView.font?.lineHeight ?? UIFont.clawline(.timestamp).lineHeight,
+            replyIndicatorUncappedTextHeight: replyIndicatorUncappedTextHeightForTests(),
+            replyIndicatorChipHeight: replyIndicatorChipView.bounds.height
         )
+    }
+
+    private func replyIndicatorUncappedTextHeightForTests() -> CGFloat {
+        guard replyIndicatorTextView.bounds.width > 0 else { return 0 }
+        let originalLineLimit = replyIndicatorTextView.textContainer.maximumNumberOfLines
+        replyIndicatorTextView.textContainer.maximumNumberOfLines = 0
+        let height = replyIndicatorTextView.sizeThatFits(
+            CGSize(width: replyIndicatorTextView.bounds.width, height: .greatestFiniteMagnitude)
+        ).height
+        replyIndicatorTextView.textContainer.maximumNumberOfLines = originalLineLimit
+        return height
     }
 
     private func metadataNeededWidth() -> CGFloat {
@@ -2035,6 +2238,72 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
             + senderLabel.intrinsicContentSize.width
             + 8
             + timestampLabel.intrinsicContentSize.width
+    }
+
+    private func updateReplyIndicator() {
+        let shouldShow = currentMessage?.role == .user && currentReplyReference != nil
+        replyIndicatorContainer.isHidden = !shouldShow
+        replyIndicatorChipView.isHidden = !shouldShow
+        if let reference = currentReplyReference {
+            let label = reference.preview.isEmpty ? reference.tokenLabel : reference.preview
+            let font = UIFont.clawline(.timestamp)
+            replyIndicatorTextView.attributedText = UnifiedMarkdownRenderer.renderNSAttributedString(
+                markdown: MessageReferenceMarkdownDisplay.renderableMarkdown(label),
+                baseFont: font,
+                inkColor: UIColor.label,
+                lineSpacing: 1
+            ) ?? NSAttributedString(
+                string: label,
+                attributes: [
+                    .font: font,
+                    .foregroundColor: UIColor.label
+                ]
+            )
+        } else {
+            replyIndicatorTextView.attributedText = nil
+        }
+        updateReplyIndicatorTextHeightConstraint()
+        if let tokenLabel = currentReplyReference?.tokenLabel {
+            replyIndicatorChipView.accessibilityLabel = "Reply to \(tokenLabel)"
+        } else {
+            replyIndicatorChipView.accessibilityLabel = nil
+        }
+    }
+
+    private func updateReplyIndicatorTextHeightConstraint() {
+        guard !replyIndicatorContainer.isHidden,
+              (replyIndicatorTextView.attributedText?.length ?? 0) > 0 else {
+            replyIndicatorTextHeightConstraint?.constant = 0
+            return
+        }
+        let width = replyIndicatorTextWidthForMeasurement()
+        guard width > 1 else { return }
+        let fittingHeight = replyIndicatorTextView.sizeThatFits(
+            CGSize(width: width, height: .greatestFiniteMagnitude)
+        ).height
+        let targetHeight = ceil(fittingHeight)
+        guard abs((replyIndicatorTextHeightConstraint?.constant ?? 0) - targetHeight) > 0.5 else { return }
+        replyIndicatorTextHeightConstraint?.constant = targetHeight
+    }
+
+    private func replyIndicatorTextWidthForMeasurement() -> CGFloat {
+        if replyIndicatorTextView.bounds.width > 1 {
+            return replyIndicatorTextView.bounds.width
+        }
+        if replyIndicatorChipView.bounds.width > 1 {
+            let margins = replyIndicatorStack.directionalLayoutMargins
+            return replyIndicatorChipView.bounds.width
+                - margins.leading
+                - margins.trailing
+                - replyIndicatorIconView.bounds.width
+                - replyIndicatorStack.spacing
+        }
+        return currentEffectiveMaxWidth
+            - (currentContentPaddingHorizontal * 2)
+            - replyIndicatorStack.directionalLayoutMargins.leading
+            - replyIndicatorStack.directionalLayoutMargins.trailing
+            - 12
+            - replyIndicatorStack.spacing
     }
 
     private func scheduleTimestampRefreshIfNeeded(now: Date) {
@@ -2871,6 +3140,12 @@ enum ChatFlowUIKitTheme {
             : UIColor(red: 0.390, green: 0.420, blue: 0.445, alpha: 1)
     }
 
+    static func connectionReconnecting(isDark: Bool) -> UIColor {
+        isDark
+            ? UIColor(red: 0.92, green: 0.76, blue: 0.30, alpha: 1)
+            : UIColor(red: 0.89, green: 0.67, blue: 0.08, alpha: 1)
+    }
+
     static func failureText(isDark: Bool) -> UIColor {
         palette(isDark: isDark).failureText
     }
@@ -2988,6 +3263,7 @@ final class MessageBubbleUIKitCell: UICollectionViewCell {
                    onInteractiveCallback: ((String, String, JSONValue?) -> Void)?,
                    onInsertIntoPrompt: ((Message) -> Void)?,
                    onReferenceMessage: ((Message) -> Void)?,
+                   replyReference: PendingMessageReference? = nil,
                    onResend: (() -> Void)?) {
         messageId = message.id
         messageSnippet = String(message.content.prefix(80))
@@ -3014,6 +3290,7 @@ final class MessageBubbleUIKitCell: UICollectionViewCell {
             onInteractiveCallback: onInteractiveCallback,
             onInsertIntoPrompt: onInsertIntoPrompt,
             onReferenceMessage: onReferenceMessage,
+            replyReference: replyReference,
             onResend: onResend
         )
     }

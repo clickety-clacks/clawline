@@ -5,6 +5,8 @@
 //  Created by Mike Manzano on 1/7/26.
 //
 
+import Foundation
+
 #if os(iOS)
 import SwiftUI
 import UIKit
@@ -17,7 +19,6 @@ struct ClawlineApp: App {
     @State private var settingsManager: SettingsManager
     @State private var sonioxKeyStore: SonioxKeyStore
     @State private var cartesiaKeyStore: CartesiaKeyStore
-    @State private var watchConnectivityService: WatchConnectivityService
 
     private let deviceIdentifier: any DeviceIdentifying
     private let connectionService: any ConnectionServicing
@@ -56,43 +57,44 @@ struct ClawlineApp: App {
         let chatService = coreServices.chatService
         self.chatService = chatService
         self.uploadService = coreServices.uploadService
-        let watchConnectivityService = coreServices.watchConnectivityService
-        _watchConnectivityService = State(initialValue: watchConnectivityService)
-        watchConnectivityService.activate()
     }
 
     var body: some Scene {
         WindowGroup {
-            @Bindable var settingsManager = settingsManager
-            RootView(uploadService: uploadService)
-                .environment(authManager)
-                .environment(\.connectionService, connectionService)
-                .environment(\.deviceIdentifier, deviceIdentifier)
-                .environment(\.chatService, chatService)
-                .environment(\.settingsManager, settingsManager)
-                .sheet(isPresented: $settingsManager.isSettingsPresented) {
-                    SettingsView(settings: settingsManager)
-                }
-                // Clear first responders before the app backgrounds.
-                // UITextView.becomeFirstResponder triggers a synchronous pasteboard XPC call
-                // (UIKeyboardStateManager.canInsertAdaptiveImageGlyph). If the device locks
-                // while that XPC is in-flight, the pasteboard daemon suspends, the call never
-                // returns, and the watchdog kills the app (0x8BADF00D).
-                // Calling endEditing(true) on every window during willResignActive ensures no
-                // UITextView holds focus or can gain focus during the background transition.
-                .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
-                    UIApplication.shared.connectedScenes
-                        .compactMap { $0 as? UIWindowScene }
-                        .flatMap { $0.windows }
-                        .forEach { $0.endEditing(true) }
-                }
-
+            if isRunningUnitTests {
+                Color.clear
+            } else {
+                @Bindable var settingsManager = settingsManager
+                RootView(uploadService: uploadService)
+                    .environment(authManager)
+                    .environment(\.connectionService, connectionService)
+                    .environment(\.deviceIdentifier, deviceIdentifier)
+                    .environment(\.chatService, chatService)
+                    .environment(\.settingsManager, settingsManager)
+                    .sheet(isPresented: $settingsManager.isSettingsPresented) {
+                        SettingsView(settings: settingsManager)
+                    }
+                    // Clear first responders before the app backgrounds.
+                    // UITextView.becomeFirstResponder triggers a synchronous pasteboard XPC call
+                    // (UIKeyboardStateManager.canInsertAdaptiveImageGlyph). If the device locks
+                    // while that XPC is in-flight, the pasteboard daemon suspends, the call never
+                    // returns, and the watchdog kills the app (0x8BADF00D).
+                    // Calling endEditing(true) on every window during willResignActive ensures no
+                    // UITextView holds focus or can gain focus during the background transition.
+                    .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
+                        UIApplication.shared.connectedScenes
+                            .compactMap { $0 as? UIWindowScene }
+                            .flatMap { $0.windows }
+                            .forEach { $0.endEditing(true) }
+                    }
+            }
         }
         .commands {
             ClawlineAppCommands(settingsManager: settingsManager)
         }
     }
 }
+
 
 #if DEBUG
 private extension ClawlineApp {
@@ -172,3 +174,7 @@ private func setHostingBackgroundsClear(in view: UIView) {
     }
 }
 #endif
+
+private var isRunningUnitTests: Bool {
+    ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+}

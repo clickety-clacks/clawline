@@ -129,6 +129,90 @@ struct MessageInputBarBoundaryTests {
         #expect(layoutHostHeight == topMargin + availableHeightAboveComposer + 12)
     }
 
+    @Test("T354 notification short content does not add blank bottom tail")
+    func notificationShortContentDoesNotAddBlankBottomTail() {
+        let measuredContentHeight = CGFloat(52)
+        let contentMaxHeight = CGFloat(104)
+        let entriesNeedScroll = CrossChatNotificationEntrySurfaceGeometry.entriesNeedScroll(
+            measuredContentHeight: measuredContentHeight,
+            contentMaxHeight: contentMaxHeight
+        )
+
+        #expect(!entriesNeedScroll)
+        #expect(CrossChatNotificationEntrySurfaceGeometry.resolvedViewportHeight(
+            measuredContentHeight: measuredContentHeight,
+            contentMaxHeight: contentMaxHeight,
+            entriesNeedScroll: entriesNeedScroll
+        ) == nil)
+        #expect(CrossChatNotificationEntrySurfaceGeometry.bottomBreathingRoom(
+            entriesNeedScroll: entriesNeedScroll,
+            configuredBreathingRoom: 8
+        ) == CGFloat(0))
+    }
+
+    @Test("T354 notification scroll content keeps internal bottom breathing room")
+    func notificationScrollableContentKeepsInternalBottomBreathingRoom() {
+        let measuredContentHeight = CGFloat(180)
+        let contentMaxHeight = CGFloat(104)
+        let entriesNeedScroll = CrossChatNotificationEntrySurfaceGeometry.entriesNeedScroll(
+            measuredContentHeight: measuredContentHeight,
+            contentMaxHeight: contentMaxHeight
+        )
+
+        #expect(entriesNeedScroll)
+        #expect(CrossChatNotificationEntrySurfaceGeometry.resolvedViewportHeight(
+            measuredContentHeight: measuredContentHeight,
+            contentMaxHeight: contentMaxHeight,
+            entriesNeedScroll: entriesNeedScroll
+        ) == contentMaxHeight)
+        #expect(CrossChatNotificationEntrySurfaceGeometry.bottomBreathingRoom(
+            entriesNeedScroll: entriesNeedScroll,
+            configuredBreathingRoom: 8
+        ) == CGFloat(8))
+    }
+
+    @Test("Notification reply row preserves send tap target on narrow phone width")
+    func notificationReplyRowPreservesSendTapTargetOnNarrowPhoneWidth() {
+        let stackWidth = CrossChatNotificationGeometry.stackWidth(
+            maxContainerWidth: 320,
+            normalTrailingMargin: 6,
+            compactLeadingFitMargin: 24,
+            maxStackWidth: 562.5,
+            isCollapsed: false
+        )
+        let inputWidth = CrossChatNotificationGeometry.replyInputAvailableWidth(
+            stackWidth: stackWidth,
+            leadingPadding: 24,
+            trailingPadding: 12,
+            sendControlWidth: 44,
+            replyControlSpacing: 8
+        )
+
+        #expect(stackWidth == CGFloat(290))
+        #expect(inputWidth == CGFloat(202))
+    }
+
+    @Test("Notification reply row keeps send tap target when collapsed")
+    func notificationReplyRowKeepsSendTapTargetWhenCollapsed() {
+        let stackWidth = CrossChatNotificationGeometry.stackWidth(
+            maxContainerWidth: 320,
+            normalTrailingMargin: 6,
+            compactLeadingFitMargin: 24,
+            maxStackWidth: 562.5,
+            isCollapsed: true
+        )
+        let inputWidth = CrossChatNotificationGeometry.replyInputAvailableWidth(
+            stackWidth: stackWidth,
+            leadingPadding: 24,
+            trailingPadding: 12,
+            sendControlWidth: 44,
+            replyControlSpacing: 8
+        )
+
+        #expect(stackWidth == CGFloat(320))
+        #expect(inputWidth == CGFloat(232))
+    }
+
     @Test("Notification layout host keeps Ansible landscape safe area out of root width")
     func notificationLayoutHostKeepsAnsibleLandscapeSafeAreaOutOfRootWidth() {
         let viewportWidth = CGFloat(852)
@@ -145,8 +229,20 @@ struct MessageInputBarBoundaryTests {
         ) == stackWidth - peekWidth)
     }
 
-    @Test("T357 transcript collection frame stays inside landscape safe-area host")
-    func transcriptCollectionFrameStaysInsideLandscapeSafeAreaHost() {
+    @Test("T357 transcript collection frame fills compact landscape window from safe-area host")
+    func transcriptCollectionFrameFillsCompactLandscapeWindowFromSafeAreaHost() {
+        let targetFrame = MessageFlowCollectionViewController.targetCollectionFrame(
+            viewBounds: CGRect(x: 0, y: 0, width: 750, height: 402),
+            windowBounds: CGRect(x: 0, y: 0, width: 874, height: 402),
+            viewOriginInWindow: CGPoint(x: 62, y: 0),
+            fillsHorizontallyConstrainedHostToWindow: true
+        )
+
+        #expect(targetFrame == CGRect(x: -62, y: 0, width: 874, height: 402))
+    }
+
+    @Test("T357 transcript collection frame preserves constrained host outside compact landscape fill")
+    func transcriptCollectionFramePreservesConstrainedHostOutsideCompactLandscapeFill() {
         let targetFrame = MessageFlowCollectionViewController.targetCollectionFrame(
             viewBounds: CGRect(x: 0, y: 0, width: 750, height: 402),
             windowBounds: CGRect(x: 0, y: 0, width: 874, height: 402),
@@ -177,6 +273,85 @@ struct MessageInputBarBoundaryTests {
         )
 
         #expect(targetFrame == CGRect(x: 0, y: 0, width: 874, height: 402))
+    }
+
+    @Test("T357 compact landscape pinned chrome uses physical width")
+    func compactLandscapePinnedChromeUsesPhysicalWidth() {
+        #expect(ChatLandscapeWidthGeometry.shouldFillWindowWidth(
+            viewSize: CGSize(width: 750, height: 402),
+            windowSize: CGSize(width: 874, height: 402),
+            isCompactLandscape: true
+        ))
+        #expect(ChatLandscapeWidthGeometry.physicalWidth(
+            containerWidth: 750,
+            leadingSafeAreaInset: 62,
+            trailingSafeAreaInset: 62,
+            isCompactLandscape: true
+        ) == 874)
+        #expect(ChatLandscapeWidthGeometry.horizontalOffset(
+            leadingSafeAreaInset: 62,
+            trailingSafeAreaInset: 62,
+            isCompactLandscape: true
+        ) == 0)
+    }
+
+    @Test("T357 compact landscape message surface uses physical width")
+    func compactLandscapeMessageSurfaceUsesPhysicalWidth() throws {
+        let chatViewPath = URL(filePath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appending(path: "Clawline/Views/Chat/ChatView.swift")
+        let source = try String(contentsOf: chatViewPath, encoding: .utf8)
+
+        #expect(ChatLandscapeWidthGeometry.physicalWidth(
+            containerWidth: 750,
+            leadingSafeAreaInset: 62,
+            trailingSafeAreaInset: 62,
+            isCompactLandscape: true
+        ) == 874)
+        #expect(ChatLandscapeWidthGeometry.physicalWidth(
+            containerWidth: 402,
+            leadingSafeAreaInset: 0,
+            trailingSafeAreaInset: 0,
+            isCompactLandscape: true,
+            nativeWindowWidth: 874
+        ) == 874)
+        #expect(ChatLandscapeWidthGeometry.horizontalOffset(
+            containerWidth: 402,
+            leadingSafeAreaInset: 0,
+            trailingSafeAreaInset: 0,
+            isCompactLandscape: true,
+            nativeWindowWidth: 874
+        ) == 236)
+        #expect(ChatLandscapeWidthGeometry.shouldFillWindowWidth(
+            viewSize: CGSize(width: 402, height: 874),
+            windowSize: CGSize(width: 874, height: 402),
+            isCompactLandscape: true
+        ))
+        #expect(source.contains(".frame(width: chatSurfaceWidth)"))
+        #expect(source.contains(".offset(x: chatSurfaceOffset)"))
+    }
+
+    @Test("T357 asymmetric compact landscape chrome recenters to physical window")
+    func asymmetricCompactLandscapeChromeRecentersToPhysicalWindow() {
+        #expect(ChatLandscapeWidthGeometry.physicalWidth(
+            containerWidth: 750,
+            leadingSafeAreaInset: 44,
+            trailingSafeAreaInset: 80,
+            isCompactLandscape: true
+        ) == 874)
+        #expect(ChatLandscapeWidthGeometry.horizontalOffset(
+            leadingSafeAreaInset: 44,
+            trailingSafeAreaInset: 80,
+            isCompactLandscape: true
+        ) == 18)
+        #expect(ChatLandscapeWidthGeometry.horizontalOffset(
+            containerWidth: 750,
+            leadingSafeAreaInset: 44,
+            trailingSafeAreaInset: 80,
+            isCompactLandscape: true,
+            nativeWindowWidth: 800
+        ) == 18)
     }
 
     @Test("T357 docked landscape notification reserves trailing transcript clearance")

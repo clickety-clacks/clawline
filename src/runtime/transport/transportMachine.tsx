@@ -10,6 +10,7 @@ import {
   type JsonValue
 } from "../../protocol/chat-wire";
 import type { ClientAttachmentPayload } from "../../protocol/chat-wire";
+import type { MessageReferencePayload } from "../../protocol/chat-wire";
 import type { AuthSessionStore } from "../auth/authSessionStore";
 import type { ChatDomainStore } from "../chat/chatDomainStore";
 import type { IncomingMessageSource } from "../chat/chatDomainStore";
@@ -43,6 +44,7 @@ export interface SendMessageInput {
   attachments: ClientAttachmentPayload[];
   content: string;
   id: string;
+  references?: MessageReferencePayload[];
   sessionKey?: string;
 }
 
@@ -647,6 +649,7 @@ export function createTransportMachine({
           id: input.id,
           content: input.content,
           attachments: input.attachments,
+          references: input.references,
           sessionKey: input.sessionKey
         })
       );

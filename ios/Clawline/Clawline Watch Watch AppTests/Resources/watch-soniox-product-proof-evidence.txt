@@ -1,0 +1,28 @@
+Watch Soniox product proof evidence
+
+Date: 2026-05-17T20:41:25Z
+Worktree: /Users/mike/src/worktrees/clawline-watch-impl
+Starting commit: a05cb70bd09ad567833f7cfa9cf5347962fb4202
+Simulator: Apple Watch Series 11 (46mm), watchOS Simulator 26.4, UDID 5E7B5F58-A789-4973-9615-B22841D8E4BF
+
+Command shape:
+xcodebuildmcp simulator test --project-path ios/Clawline/Clawline.xcodeproj --scheme "Clawline Watch Watch App" --simulator-id 5E7B5F58-A789-4973-9615-B22841D8E4BF --json '{"testRunnerEnv":{"SONIOX_E2E_API_KEY":"<redacted real key>","SONIOX_E2E_PROOF_RUN_ID":"watch-soniox-product-proof-20260517T204125Z"},"extraArgs":["OTHER_SWIFT_FLAGS=-DSONIOX_PRODUCT_PROOF","-only-testing:Clawline Watch Watch AppTests/WatchSonioxProductProofTests","-only-testing:Clawline Watch Watch AppTests/WatchConnectionPresentationStateTests","-only-testing:Clawline Watch Watch AppUITests/Clawline_Watch_Watch_AppUITests"]}'
+
+Run evidence:
+The proof tests print non-secret WATCH_SONIOX_PRODUCT_PROOF lines containing the fresh run id, Soniox client_reference_id, streamed byte count, and returned transcript. The 2026-05-17T20:41:25Z run used client references watch-soniox-client-proof-watch-soniox-product-proof-20260517T204125Z and watch-soniox-voice-session-proof-watch-soniox-product-proof-20260517T204125Z, streamed the complete bundled proof audio, and received transcripts containing "Clawline Soniox Proof".
+
+Credential source:
+The key was read from a local Clawline simulator preferences file that stores soniox.apiKey. The key length was 64 characters. The key value was not printed or committed.
+
+Positive result:
+The focused Watch gate passed with credentials and proof run id injected: 34 tests, 34 passed, 0 failures, 0 skipped. This included WatchSonioxProductProofTests, WatchConnectionPresentationStateTests, and Clawline_Watch_Watch_AppUITests on Apple Watch Series 11 (46mm) watchOS Simulator 26.4.
+
+Negative prerequisite result:
+Running WatchSonioxProductProofTests without injected proof credentials failed: 2 tests, 0 passed, 2 failed, 0 skipped. Both failures were hard #require failures for missing SONIOX_E2E_API_KEY/TEST_RUNNER_SONIOX_E2E_API_KEY.
+
+Proof coverage:
+1. SonioxStreamingClient opened the production Soniox WebSocket, streamed bundled PCM proof audio through the production client path, finalized, and received a transcript containing "clawline".
+2. WatchVoiceSession.startTap read the Soniox key from WatchCredentialStore, started the production SonioxStreamingClient, streamed the bundled proof audio through the microphone-boundary audio source, finalized via WatchVoiceSession.stop, and published the final transcript through onTranscriptReady.
+
+Failure behavior:
+The proof test is compiled only for explicit product-proof runs with OTHER_SWIFT_FLAGS=-DSONIOX_PRODUCT_PROOF. Under that proof flag it uses #require for SONIOX_E2E_API_KEY/TEST_RUNNER_SONIOX_E2E_API_KEY, SONIOX_E2E_PROOF_RUN_ID/TEST_RUNNER_SONIOX_E2E_PROOF_RUN_ID, and the bundled proof WAV. Missing credentials, missing fresh proof run id, or missing proof audio fail the proof test; they do not skip green.

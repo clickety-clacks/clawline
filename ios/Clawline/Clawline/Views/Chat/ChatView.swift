@@ -193,6 +193,16 @@ enum SpatialViewportEdgeFadeMetrics {
     }
 }
 
+enum CrossChatNotificationOverlayLifecycle {
+    static func shouldResetCollapsedStateOnDisappear(hasVisibleBubbles: Bool) -> Bool {
+        !hasVisibleBubbles
+    }
+
+    static func shouldResetCollapsedStateOnBubbleCountChange(visibleBubbleCount: Int) -> Bool {
+        visibleBubbleCount == 0
+    }
+}
+
 @MainActor
 @Observable
 final class StreamPopupRouteController {
@@ -1258,6 +1268,12 @@ struct ChatView: View {
                     measuredHeightsBySourceChatId: crossChatNotificationMeasuredHeightsBySourceChatId,
                     keyboardOwnershipStore: keyboardOwnershipStore
                 )
+            }
+            .onChange(of: notificationShortcutVisibleCount) { _, visibleCount in
+                if CrossChatNotificationOverlayLifecycle
+                    .shouldResetCollapsedStateOnBubbleCountChange(visibleBubbleCount: visibleCount) {
+                    isCrossChatNotificationStackDocked = false
+                }
             }
         )
 
@@ -6477,8 +6493,12 @@ private struct CrossChatNotificationOverlay: View {
                 }
             }
             .onDisappear {
+                let shouldResetCollapsedState = CrossChatNotificationOverlayLifecycle
+                    .shouldResetCollapsedStateOnDisappear(hasVisibleBubbles: !visibleBubbles.isEmpty)
                 clearAllCollapsedPreviews()
-                isCollapsed = false
+                if shouldResetCollapsedState {
+                    isCollapsed = false
+                }
                 bubbleDragOffsetsBySourceChatId = [:]
                 dismissSwipeActiveSourceChatIds = []
                 clearAllGestureAxisLocks()

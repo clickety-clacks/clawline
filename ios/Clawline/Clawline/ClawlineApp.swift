@@ -5,6 +5,8 @@
 //  Created by Mike Manzano on 1/7/26.
 //
 
+import Foundation
+
 #if os(iOS)
 import SwiftUI
 import UIKit

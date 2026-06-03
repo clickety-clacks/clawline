@@ -129,6 +129,48 @@ struct MessageInputBarBoundaryTests {
         #expect(layoutHostHeight == topMargin + availableHeightAboveComposer + 12)
     }
 
+    @Test("T354 notification short content does not add blank bottom tail")
+    func notificationShortContentDoesNotAddBlankBottomTail() {
+        let measuredContentHeight = CGFloat(52)
+        let contentMaxHeight = CGFloat(104)
+        let entriesNeedScroll = CrossChatNotificationEntrySurfaceGeometry.entriesNeedScroll(
+            measuredContentHeight: measuredContentHeight,
+            contentMaxHeight: contentMaxHeight
+        )
+
+        #expect(!entriesNeedScroll)
+        #expect(CrossChatNotificationEntrySurfaceGeometry.resolvedViewportHeight(
+            measuredContentHeight: measuredContentHeight,
+            contentMaxHeight: contentMaxHeight,
+            entriesNeedScroll: entriesNeedScroll
+        ) == nil)
+        #expect(CrossChatNotificationEntrySurfaceGeometry.bottomBreathingRoom(
+            entriesNeedScroll: entriesNeedScroll,
+            configuredBreathingRoom: 8
+        ) == CGFloat(0))
+    }
+
+    @Test("T354 notification scroll content keeps internal bottom breathing room")
+    func notificationScrollableContentKeepsInternalBottomBreathingRoom() {
+        let measuredContentHeight = CGFloat(180)
+        let contentMaxHeight = CGFloat(104)
+        let entriesNeedScroll = CrossChatNotificationEntrySurfaceGeometry.entriesNeedScroll(
+            measuredContentHeight: measuredContentHeight,
+            contentMaxHeight: contentMaxHeight
+        )
+
+        #expect(entriesNeedScroll)
+        #expect(CrossChatNotificationEntrySurfaceGeometry.resolvedViewportHeight(
+            measuredContentHeight: measuredContentHeight,
+            contentMaxHeight: contentMaxHeight,
+            entriesNeedScroll: entriesNeedScroll
+        ) == contentMaxHeight)
+        #expect(CrossChatNotificationEntrySurfaceGeometry.bottomBreathingRoom(
+            entriesNeedScroll: entriesNeedScroll,
+            configuredBreathingRoom: 8
+        ) == CGFloat(8))
+    }
+
     @Test("Notification reply row preserves send tap target on narrow phone width")
     func notificationReplyRowPreservesSendTapTargetOnNarrowPhoneWidth() {
         let stackWidth = CrossChatNotificationGeometry.stackWidth(

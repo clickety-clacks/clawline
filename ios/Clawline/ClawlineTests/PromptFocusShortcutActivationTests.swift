@@ -924,6 +924,37 @@ struct PromptFocusShortcutActivationTests {
         #expect(CrossChatNotificationGlobalShortcut.Action.scrollUp.rootScrollIntent == .transcriptBubbleScrollBackward)
     }
 
+    @Test("T1154 visible notification Cmd-J/K fallback posts root fan-out scroll commands")
+    @MainActor
+    func visibleNotificationCommandJFallbackPostsRootFanOutScrollCommands() {
+        let store = KeyboardOwnershipSceneFactory.chatScene(
+            visibleNotificationSourceChatIds: ["notification-0"],
+            mentionPickerVisible: false,
+            composerFocused: true,
+            notificationReplyFocusedSourceChatId: nil,
+            actionMenuSourceChatId: nil
+        )
+
+        #expect(
+            CrossChatNotificationGlobalShortcut.notificationNames(
+                for: .scrollDown,
+                keyboardOwnershipStore: store
+            ) == [
+                .clawlineScrollNotificationDownCommand,
+                .clawlineScrollDownCommand
+            ]
+        )
+        #expect(
+            CrossChatNotificationGlobalShortcut.notificationNames(
+                for: .scrollUp,
+                keyboardOwnershipStore: store
+            ) == [
+                .clawlineScrollNotificationUpCommand,
+                .clawlineScrollUpCommand
+            ]
+        )
+    }
+
     @Test("Notification scroll resolver finds ancestor scroll view")
     @MainActor
     func notificationScrollResolverFindsAncestorScrollView() {

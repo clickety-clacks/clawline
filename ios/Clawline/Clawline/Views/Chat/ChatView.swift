@@ -194,8 +194,8 @@ enum SpatialViewportEdgeFadeMetrics {
 }
 
 enum CrossChatNotificationOverlayLifecycle {
-    static func shouldResetCollapsedStateOnDisappear(hasVisibleBubbles: Bool) -> Bool {
-        !hasVisibleBubbles
+    static func shouldResetCollapsedStateOnDisappear() -> Bool {
+        false
     }
 
     static func shouldResetCollapsedStateOnBubbleCountChange(visibleBubbleCount: Int) -> Bool {
@@ -6518,10 +6518,8 @@ private struct CrossChatNotificationOverlay: View {
                 }
             }
             .onDisappear {
-                let shouldResetCollapsedState = CrossChatNotificationOverlayLifecycle
-                    .shouldResetCollapsedStateOnDisappear(hasVisibleBubbles: !visibleBubbles.isEmpty)
                 clearAllCollapsedPreviews()
-                if shouldResetCollapsedState {
+                if CrossChatNotificationOverlayLifecycle.shouldResetCollapsedStateOnDisappear() {
                     isCollapsed = false
                 }
                 bubbleDragOffsetsBySourceChatId = [:]

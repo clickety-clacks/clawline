@@ -9,17 +9,13 @@ import Testing
 struct CrossChatNotificationOverlayLifecycleTests {
     @Test func browserSurfaceDisappearPreservesCollapsedStateWhileNotificationsRemainVisible() {
         #expect(
-            !CrossChatNotificationOverlayLifecycle.shouldResetCollapsedStateOnDisappear(
-                hasVisibleBubbles: true
-            )
+            !CrossChatNotificationOverlayLifecycle.shouldResetCollapsedStateOnDisappear()
         )
     }
 
-    @Test func emptyNotificationOverlayDisappearResetsCollapsedState() {
+    @Test func browserSurfaceDisappearPreservesCollapsedStateDuringTransientEmptyOverlay() {
         #expect(
-            CrossChatNotificationOverlayLifecycle.shouldResetCollapsedStateOnDisappear(
-                hasVisibleBubbles: false
-            )
+            !CrossChatNotificationOverlayLifecycle.shouldResetCollapsedStateOnDisappear()
         )
     }
 

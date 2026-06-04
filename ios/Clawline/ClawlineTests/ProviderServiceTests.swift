@@ -267,6 +267,44 @@ struct ProviderServiceTests {
         #expect(service.replayCursorSnapshot()[sessionKey] == nil)
     }
 
+    @Test("Prompt turn state events emit service events")
+    func promptTurnStateEventsEmitServiceEvents() async throws {
+        let mockSocket = MockWebSocketClient()
+        let connector = MockWebSocketConnector(client: mockSocket)
+        let service = ProviderChatService(
+            connector: connector,
+            deviceId: "device_prompt_turn_state",
+            baseURLProvider: { URL(string: "https://example.com")! }
+        )
+        var iterator = service.serviceEvents.makeAsyncIterator()
+        Task {
+            try await Task.sleep(forDuration: .milliseconds(20))
+            mockSocket.enqueue(text: #"{ "type": "auth_result", "success": true }"#)
+        }
+
+        try await service.connect(token: "jwt", lastMessageId: nil)
+        mockSocket.enqueue(
+            text: #"{ "type": "event", "event": "prompt_turn_state", "payload": { "messageId": "c_1", "sessionKey": "agent:main:main", "state": "failed", "terminalState": "failed", "correlationId": "corr_1", "clawlineMessageRowId": 42, "error": "clawline.promptTurn.noDelivery" } }"#
+        )
+
+        var event: ChatServiceEvent?
+        while let next = await iterator.next() {
+            if case .promptTurnState = next {
+                event = next
+                break
+            }
+        }
+        guard case .promptTurnState(let promptTurn) = event else {
+            Issue.record("Expected prompt turn state service event")
+            return
+        }
+
+        #expect(promptTurn.payload.messageId == "c_1")
+        #expect(promptTurn.payload.sessionKey == "agent:main:main")
+        #expect(promptTurn.payload.state == "failed")
+        #expect(promptTurn.payload.error == "clawline.promptTurn.noDelivery")
+    }
+
     @Test("Cache restore seeding cannot overwrite an advanced replay cursor")
     func cacheSeedDoesNotOverwriteAdvancedCursor() {
         let service = ProviderChatService(

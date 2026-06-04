@@ -229,6 +229,10 @@ struct ChatViewModelTests {
             viewModel.crossChatNotificationBubbles.first { $0.sourceChatId == sourceSessionKey }
         )
         #expect(sourceBubble.entries.map(\.content) == ["newer", "older"])
+        #expect(sourceBubble.entries.map(\.appendSeparatorTimestamp) == [
+            Date(timeIntervalSince1970: 11),
+            nil
+        ])
         let unrelatedBubble = try #require(
             viewModel.crossChatNotificationBubbles.first { $0.sourceChatId == otherSessionKey }
         )
@@ -1565,6 +1569,63 @@ struct ChatViewModelTests {
 
         #expect(viewModel.sendIndicatorState(for: messageId) == nil)
         #expect(viewModel.failureMessage(for: messageId) == nil)
+    }
+
+    @Test("Prompt turn failed state marks accepted send failed immediately")
+    @MainActor
+    func promptTurnFailedStateMarksAcceptedSendFailedImmediately() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        try await setReadyToSend(chatService: chatService, viewModel: viewModel)
+        viewModel.inputContent = NSAttributedString(string: "Accepted then failed")
+        viewModel.send()
+
+        let messageId = try await requireLastSentId(chatService)
+        chatService.emitServiceEvent(.messageAcked(id: messageId))
+        for _ in 0..<50 {
+            if viewModel.sendIndicatorState(for: messageId) == nil { break }
+            try await Task.sleep(forDuration: .milliseconds(20))
+        }
+
+        chatService.emitServiceEvent(
+            .promptTurnState(
+                PromptTurnStateEvent(
+                    type: "event",
+                    event: "prompt_turn_state",
+                    payload: .init(
+                        messageId: messageId,
+                        sessionKey: personalSessionKey,
+                        state: "failed",
+                        terminalState: "failed",
+                        correlationId: "corr_1",
+                        clawlineMessageRowId: 1,
+                        error: "clawline.promptTurn.noDelivery"
+                    )
+                )
+            )
+        )
+        for _ in 0..<50 {
+            if viewModel.sendIndicatorState(for: messageId) == .failed("clawline.promptTurn.noDelivery") {
+                return
+            }
+            try await Task.sleep(forDuration: .milliseconds(20))
+        }
+
+        Issue.record("Expected accepted send to show prompt-turn failure without waiting for reload")
     }
 
     @Test("Accepted replayed user message without final reply does not show failed indicator")

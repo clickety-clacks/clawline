@@ -577,6 +577,20 @@ struct StreamPageDotsViewTests {
         )
     }
 
+    @Test("T1136 tracked popup close restores composer from presentation flag")
+    func streamPopupTrackedCloseRestoresComposerFromPresentationFlag() {
+        #expect(
+            StreamPopupFocusHandoff.shouldRestoreComposerOnCloseAfterTrackedKeyboardState(
+                didDisplaceComposerFocus: true
+            )
+        )
+        #expect(
+            StreamPopupFocusHandoff.shouldRestoreComposerOnCloseAfterTrackedKeyboardState(
+                didDisplaceComposerFocus: false
+            ) == false
+        )
+    }
+
     @Test("T1146 stream switch preserves only pre-existing software keyboard state")
     func streamSwitchRestoresComposerOnlyWhenKeyboardWasAlreadyUp() {
         #expect(
@@ -588,6 +602,21 @@ struct StreamPageDotsViewTests {
             StreamSwitchKeyboardFocusPolicy.shouldRestoreComposerAfterSwitch(
                 wasSoftwareKeyboardVisible: false
             ) == false
+        )
+    }
+
+    @Test("T1136 popup close requests composer focus after popup dismissal")
+    func streamPopupCloseRequestsComposerFocusAfterDismissal() {
+        #expect(
+            StreamPopupFocusHandoff.closeActions(shouldRestoreComposerFocus: true) == [
+                .closePopup,
+                .requestComposerFocusAfterDismissal
+            ]
+        )
+        #expect(
+            StreamPopupFocusHandoff.closeActions(shouldRestoreComposerFocus: false) == [
+                .closePopup
+            ]
         )
     }
 

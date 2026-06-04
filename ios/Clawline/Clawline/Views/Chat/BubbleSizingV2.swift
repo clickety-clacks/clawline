@@ -160,6 +160,17 @@ enum BubbleSizingV2 {
         }
     }
 
+    static func finalOuterScrollViewportHeight(
+        plan: Plan,
+        measuredContentHeight: CGFloat,
+        provisionalViewportHeight: CGFloat
+    ) -> CGFloat {
+        guard !plan.allowsOuterScroll, !plan.isSingleLinkPreview else {
+            return provisionalViewportHeight
+        }
+        return max(44, measuredContentHeight)
+    }
+
     // Simple in-memory LRU cache (controller-owned). Correctness must not depend on retention.
     final class LRUCache<Key: Hashable, Value> {
         private struct Entry {

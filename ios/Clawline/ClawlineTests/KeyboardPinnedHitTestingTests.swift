@@ -173,6 +173,7 @@ private func footerButtons(in cell: SessionMetadataFooterCell) -> [UIButton] {
     allSubviews(in: cell)
         .compactMap { $0 as? UIButton }
         .filter { $0.isEnabled }
+        .filter { $0.accessibilityLabel != "Test menu" }
         .sorted {
             $0.convert($0.bounds, to: cell).minX < $1.convert($1.bounds, to: cell).minX
         }

@@ -114,18 +114,10 @@ final class MessageReferenceTextAttachment: NSTextAttachment {
     }
 
     private static func makeTokenImage(label: String) -> UIImage {
-        let font = UIFont.clawline(.secondaryLabel, weight: .semibold)
-        let paragraph = NSMutableParagraphStyle()
-        paragraph.lineBreakMode = .byTruncatingTail
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: font,
-            .foregroundColor: UIColor.label,
-            .paragraphStyle: paragraph
-        ]
-        let textSize = (label as NSString).boundingRect(
+        let attributedLabel = makeTokenAttributedLabel(label: label)
+        let textSize = attributedLabel.boundingRect(
             with: CGSize(width: Metrics.maxWidth - (Metrics.horizontalPadding * 2) - Metrics.iconSize - Metrics.iconSpacing, height: Metrics.height),
             options: [.usesLineFragmentOrigin, .usesFontLeading],
-            attributes: attributes,
             context: nil
         ).size
         let width = min(Metrics.maxWidth, max(Metrics.minWidth, ceil(textSize.width) + (Metrics.horizontalPadding * 2) + Metrics.iconSize + Metrics.iconSpacing))
@@ -151,13 +143,77 @@ final class MessageReferenceTextAttachment: NSTextAttachment {
                 width: rect.width - (Metrics.horizontalPadding * 2) - Metrics.iconSize - Metrics.iconSpacing,
                 height: rect.height - 12
             )
-            (label as NSString).draw(
+            attributedLabel.draw(
                 with: textRect,
                 options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine],
-                attributes: attributes,
                 context: nil
             )
             _ = context
         }
+    }
+
+    private static func makeTokenAttributedLabel(label: String) -> NSMutableAttributedString {
+        let font = UIFont.clawline(.secondaryLabel, weight: .semibold)
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineBreakMode = .byTruncatingTail
+        let attributedLabel = UnifiedMarkdownRenderer.renderNSAttributedString(
+            markdown: MessageReferenceMarkdownDisplay.renderableMarkdown(label),
+            baseFont: font,
+            inkColor: UIColor.label,
+            lineSpacing: 0
+        )?.mutableCopy() as? NSMutableAttributedString ?? NSMutableAttributedString(
+            string: label,
+            attributes: [
+                .font: font,
+                .foregroundColor: UIColor.label
+            ]
+        )
+        attributedLabel.addAttribute(
+            .paragraphStyle,
+            value: paragraph,
+            range: NSRange(location: 0, length: attributedLabel.length)
+        )
+        return attributedLabel
+    }
+}
+
+#if DEBUG
+extension MessageReferenceTextAttachment {
+    static func debugRenderedTokenLabelForTests(_ label: String) -> NSAttributedString {
+        makeTokenAttributedLabel(label: label)
+    }
+}
+#endif
+
+enum MessageReferenceMarkdownDisplay {
+    static func renderableMarkdown(_ text: String) -> String {
+        "\(text)\(closingEmphasisSuffix(for: text))"
+    }
+
+    private static func closingEmphasisSuffix(for text: String) -> String {
+        var stack: [String] = []
+        var index = text.startIndex
+        while index < text.endIndex {
+            if text[index...].hasPrefix("**") || text[index...].hasPrefix("__") {
+                let delimiter = String(text[index...].prefix(2))
+                if stack.last == delimiter {
+                    stack.removeLast()
+                } else {
+                    stack.append(delimiter)
+                }
+                index = text.index(index, offsetBy: 2)
+            } else if text[index] == "*" || text[index] == "_" {
+                let delimiter = String(text[index])
+                if stack.last == delimiter {
+                    stack.removeLast()
+                } else {
+                    stack.append(delimiter)
+                }
+                index = text.index(after: index)
+            } else {
+                index = text.index(after: index)
+            }
+        }
+        return stack.reversed().joined()
     }
 }

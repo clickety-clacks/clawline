@@ -5,7 +5,6 @@ struct ClawlineCoreRuntimeServices {
     let connectionService: any ConnectionServicing
     let chatService: ProviderChatService
     let uploadService: UploadService
-    let watchConnectivityService: any WatchConnectivityServicing
 }
 
 enum ClawlineCoreRuntimeServicesFactory {
@@ -38,22 +37,11 @@ enum ClawlineCoreRuntimeServicesFactory {
             auth: authManager,
             session: connector.tlsAwareURLSession
         )
-        #if os(iOS)
-            let watchConnectivityService: any WatchConnectivityServicing = WatchConnectivityService(
-                authManager: authManager,
-                sonioxKeyStore: sonioxKeyStore,
-                cartesiaKeyStore: cartesiaKeyStore,
-                chatService: chatService
-            )
-        #else
-            let watchConnectivityService: any WatchConnectivityServicing = StubWatchConnectivityService()
-        #endif
         return ClawlineCoreRuntimeServices(
             deviceIdentifier: device,
             connectionService: connectionService,
             chatService: chatService,
-            uploadService: uploadService,
-            watchConnectivityService: watchConnectivityService
+            uploadService: uploadService
         )
     }
 }

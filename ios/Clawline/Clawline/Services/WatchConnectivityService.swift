@@ -445,6 +445,8 @@ final class WatchConnectivityService: NSObject, WatchConnectivityServicing {
     private func serializeEvent(_ event: ChatServiceEvent) -> String? {
         var dict: [String: Any] = [:]
         switch event {
+        case .agentProgress, .promptTurnState:
+            return nil
         case .messageError(let messageId, let code, let message):
             dict["kind"] = "messageError"
             if let messageId { dict["messageId"] = messageId }
@@ -463,8 +465,6 @@ final class WatchConnectivityService: NSObject, WatchConnectivityServicing {
             dict["kind"] = "typingStateChanged"
             dict["isTyping"] = isTyping
             dict["sessionKey"] = sessionKey
-        case .agentProgress:
-            return nil
         case .streamSnapshot(let streams):
             dict["kind"] = "streamSnapshot"
             if let any = encodeToAny(streams) { dict["streams"] = any }

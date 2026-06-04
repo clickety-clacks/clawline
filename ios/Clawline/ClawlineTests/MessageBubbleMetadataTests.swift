@@ -194,6 +194,208 @@ struct MessageBubbleMetadataTests {
         #expect(state.replyIndicatorText?.contains("assistant:") == false)
     }
 
+    @Test("T1166: composer reply token renders markdown label")
+    func composerReplyTokenRendersMarkdownLabel() {
+        let rendered = MessageReferenceTextAttachment.debugRenderedTokenLabelForTests("Reply to **bold** _italic_")
+
+        #expect(rendered.string == "Reply to bold italic")
+        #expect(rendered.string.contains("**") == false)
+        #expect(rendered.string.contains("_") == false)
+        #expect(isBold("bold", in: rendered))
+    }
+
+    @Test("T1166: outgoing reply chip renders markdown with three-line cap")
+    func outgoingReplyChipRendersMarkdownWithThreeLineCap() {
+        let referenced = Message(
+            id: "s_markdown_reference",
+            role: .assistant,
+            content: "**Important** reply source with _markdown_ that is long enough to wrap across multiple chip lines before truncating inside the sent user bubble with additional rendered words for proof.",
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: "server:personal",
+            clientMessageId: "c_markdown_reference"
+        )
+        let bubble = configuredUserReplyBubble(
+            prompt: "Ok",
+            replyReference: PendingMessageReference(message: referenced),
+            maxWidth: 220
+        )
+
+        let state = bubble.debugMetadataStateForTests()
+        let rendered = state.replyIndicatorRenderedText
+
+        #expect(state.replyIndicatorHidden == false)
+        #expect(state.replyIndicatorLineLimit == 3)
+        #expect(state.replyIndicatorTextHeight <= (state.replyIndicatorTextLineHeight * 3) + 4)
+        #expect(state.replyIndicatorChipHeight <= state.replyIndicatorTextHeight + 14)
+        #expect(state.replyIndicatorUncappedTextHeight > state.replyIndicatorTextHeight)
+        #expect(rendered?.string.contains("Important reply source") == true)
+        #expect(rendered?.string.contains("**") == false)
+        #expect(rendered?.string.contains("_") == false)
+        if let rendered {
+            #expect(isBold("Important", in: rendered))
+        }
+    }
+
+    @Test("T1166: long markdown reply preview truncates after rendering")
+    func longMarkdownReplyPreviewTruncatesAfterRendering() {
+        let referenced = Message(
+            id: "s_long_markdown_reference",
+            role: .assistant,
+            content: "**\(Array(repeating: "markdown", count: 40).joined(separator: " "))**",
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: "server:personal",
+            clientMessageId: "c_long_markdown_reference"
+        )
+        let replyReference = PendingMessageReference(message: referenced)
+        let rendered = MessageReferenceTextAttachment.debugRenderedTokenLabelForTests(replyReference.preview)
+        let attachment = MessageReferenceTextAttachment(reference: replyReference)
+
+        #expect(replyReference.preview.count == PendingMessageReference.previewLimit)
+        #expect(rendered.string.contains("**") == false)
+        #expect(isBold("markdown", in: rendered))
+        #expect(attachment.referenceId == replyReference.id)
+        #expect(attachment.image != nil)
+        #expect(attachment.bounds.width <= 160)
+    }
+
+    @Test("T1166: reply chip text participates in user bubble preferred width")
+    func replyChipTextParticipatesInUserBubblePreferredWidth() {
+        let metrics = ChatFlowTheme.Metrics(isCompact: true)
+        let maxWidth: CGFloat = 320
+        let referenced = Message(
+            id: "s_wide_reference",
+            role: .assistant,
+            content: "A substantially longer rendered reply quote should widen the outgoing bubble even when the prompt text is short.",
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: "server:personal",
+            clientMessageId: "c_wide_reference"
+        )
+
+        let plainBubble = configuredUserReplyBubble(prompt: "Ok", replyReference: nil, maxWidth: maxWidth)
+        let replyBubble = configuredUserReplyBubble(
+            prompt: "Ok",
+            replyReference: PendingMessageReference(message: referenced),
+            maxWidth: maxWidth
+        )
+
+        let plainWidth = plainBubble.preferredWidth(maxWidth: maxWidth, minWidth: 120)
+        let replyWidth = replyBubble.preferredWidth(maxWidth: maxWidth, minWidth: 120)
+
+        #expect(replyWidth > plainWidth + metrics.bubblePaddingHorizontal)
+        #expect(replyWidth <= maxWidth)
+    }
+
+    @Test("BubbleSizingV2 does not preserve design cap as short bubble body height")
+    func bubbleSizingV2ShortBubbleViewportTracksMeasuredContent() {
+        let metrics = ChatFlowTheme.Metrics(isCompact: true)
+        let env = BubbleSizingV2.Environment(
+            containerWidth: 396,
+            containerHeight: 844,
+            singleLinkContainerHeight: 844,
+            topInset: 0,
+            bottomInset: 0,
+            truncationBottomInset: 0,
+            isVisionOS: false,
+            metricsFingerprint: 1
+        )
+        let heightPolicy = BubbleSizingV2.BubbleHeightPolicy.resolve(
+            metrics: metrics,
+            env: env,
+            isSingleLinkPreview: false,
+            prefersScreenAwareHeightCap: false,
+            allowsOuterScroll: false
+        )
+        let plan = BubbleSizingV2.Plan(
+            messageId: "short-bubble",
+            presentationFingerprint: 1,
+            sizeClass: .short,
+            isSingleLinkPreview: false,
+            isWide: false,
+            maxWidth: 396,
+            minWidth: 40,
+            heightPolicy: heightPolicy,
+            allowsOuterScroll: false,
+            linkPreviewURL: nil
+        )
+
+        let viewportHeight = BubbleSizingV2.finalOuterScrollViewportHeight(
+            plan: plan,
+            measuredContentHeight: 52,
+            provisionalViewportHeight: 1_980
+        )
+
+        #expect(viewportHeight == 52)
+    }
+
+    @Test("Reply quote text participates in normal bubble width")
+    func replyQuoteTextParticipatesInNormalBubbleWidth() {
+        let referenced = Message(
+            id: "s_width_reference",
+            role: .assistant,
+            content: "Referenced text whose reply chip should widen the outgoing bubble.",
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: "server:personal",
+            clientMessageId: "c_width_reference"
+        )
+        let replyReference = PendingMessageReference(message: referenced)
+        let message = Message(
+            id: "s_width_reply",
+            role: .user,
+            content: "Ok",
+            timestamp: Date(timeIntervalSince1970: 1_700_000_100),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: referenced.sessionKey,
+            replyToMessageId: referenced.id,
+            replyToClientMessageId: referenced.clientMessageId
+        )
+        let metrics = ChatFlowTheme.Metrics(isCompact: true)
+        var streamingState = StreamingTableParseState()
+        let presentation = MessagePresentationBuilder.build(
+            from: message,
+            metrics: metrics,
+            streamingState: &streamingState
+        )
+        let bubble = MessageBubbleUIKitView(frame: CGRect(x: 0, y: 0, width: 320, height: 1))
+
+        bubble.configure(
+            message: message,
+            presentation: presentation,
+            sizeClass: .short,
+            metrics: metrics,
+            maxWidth: 320,
+            bubbleSizingV2: nil,
+            showsHeader: false,
+            paddingScale: 1,
+            minWidthOverride: 40,
+            maxWidthOverride: 320,
+            useContinuousCorners: true,
+            isDark: false,
+            onRequestExpand: nil,
+            onRequestLayout: nil,
+            onInteractiveCallback: nil,
+            onInsertIntoPrompt: nil,
+            onReferenceMessage: nil,
+            replyReference: replyReference,
+            salientHighlightService: nil
+        )
+
+        #expect(bubble.preferredWidth(maxWidth: 320, minWidth: 40) > 120)
+    }
+
     @Test("Reply token stays compact for long referenced previews")
     func replyTokenStaysCompactForLongReferencedPreviews() {
         let referenced = Message(
@@ -452,5 +654,70 @@ struct MessageBubbleMetadataTests {
             }
         }
         return nil
+    }
+
+    private func configuredUserReplyBubble(
+        prompt: String,
+        replyReference: PendingMessageReference?,
+        maxWidth: CGFloat
+    ) -> MessageBubbleUIKitView {
+        let message = Message(
+            id: "s_reply_\(UUID().uuidString)",
+            role: .user,
+            content: prompt,
+            timestamp: Date(timeIntervalSince1970: 1_700_000_100),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: replyReference?.sessionKey ?? "server:personal",
+            replyToMessageId: replyReference?.llmVisibleMessageId,
+            replyToClientMessageId: replyReference?.clientMessageId
+        )
+        let metrics = ChatFlowTheme.Metrics(isCompact: true)
+        var streamingState = StreamingTableParseState()
+        let presentation = MessagePresentationBuilder.build(
+            from: message,
+            metrics: metrics,
+            streamingState: &streamingState
+        )
+        let bubble = MessageBubbleUIKitView(frame: CGRect(x: 0, y: 0, width: maxWidth, height: 1))
+        bubble.configure(
+            message: message,
+            presentation: presentation,
+            sizeClass: .short,
+            metrics: metrics,
+            maxWidth: maxWidth,
+            bubbleSizingV2: nil,
+            showsHeader: true,
+            paddingScale: 1,
+            minWidthOverride: 120,
+            maxWidthOverride: maxWidth,
+            useContinuousCorners: true,
+            isDark: false,
+            onRequestExpand: nil,
+            onRequestLayout: nil,
+            onInteractiveCallback: nil,
+            onInsertIntoPrompt: nil,
+            onReferenceMessage: nil,
+            replyReference: replyReference,
+            salientHighlightService: nil
+        )
+        let measured = bubble.systemLayoutSizeFitting(
+            CGSize(width: maxWidth, height: UIView.layoutFittingCompressedSize.height),
+            withHorizontalFittingPriority: .required,
+            verticalFittingPriority: .fittingSizeLevel
+        )
+        bubble.frame = CGRect(origin: .zero, size: measured)
+        bubble.layoutIfNeeded()
+        return bubble
+    }
+
+    private func isBold(_ substring: String, in attributed: NSAttributedString) -> Bool {
+        let range = (attributed.string as NSString).range(of: substring)
+        guard range.location != NSNotFound,
+              let font = attributed.attribute(.font, at: range.location, effectiveRange: nil) as? UIFont else {
+            return false
+        }
+        return font.fontDescriptor.symbolicTraits.contains(.traitBold)
     }
 }

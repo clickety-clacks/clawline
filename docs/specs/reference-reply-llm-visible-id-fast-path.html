@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Clawline Reference/Reply LLM-Visible ID Fast Path</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --fg: var(--clawline-fg, CanvasText);
+      --muted: color-mix(in srgb, var(--fg) 66%, transparent);
+      --line: color-mix(in srgb, var(--fg) 18%, transparent);
+      --soft: color-mix(in srgb, var(--fg) 7%, transparent);
+      --accent: #0f766e;
+      --warn: #b45309;
+      --bad: #b91c1c;
+      --good: #047857;
+      --code-bg: color-mix(in srgb, var(--fg) 8%, transparent);
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --accent: #2dd4bf;
+        --warn: #fbbf24;
+        --bad: #fb7185;
+        --good: #34d399;
+      }
+    }
+
+    html,
+    body {
+      margin: 0;
+      background: transparent;
+      color: var(--fg);
+      font: 15px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+    }
+
+    main {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 28px 18px 44px;
+    }
+
+    header {
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 18px;
+      margin-bottom: 20px;
+    }
+
+    h1 {
+      font-size: clamp(26px, 5vw, 42px);
+      line-height: 1.05;
+      margin: 0 0 12px;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      font-size: 19px;
+      margin: 28px 0 10px;
+      letter-spacing: 0;
+    }
+
+    h3 {
+      font-size: 16px;
+      margin: 18px 0 8px;
+      letter-spacing: 0;
+    }
+
+    p {
+      margin: 0 0 10px;
+    }
+
+    code,
+    pre {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.94em;
+    }
+
+    code {
+      background: var(--code-bg);
+      border-radius: 4px;
+      padding: 0.08em 0.3em;
+    }
+
+    pre {
+      overflow-x: auto;
+      padding: 12px;
+      background: var(--code-bg);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+
+    .lede {
+      font-size: 17px;
+      color: var(--muted);
+      max-width: 860px;
+    }
+
+    .status {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      margin: 18px 0 4px;
+    }
+
+    .metric,
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--soft);
+      padding: 12px;
+    }
+
+    .metric b {
+      display: block;
+      font-size: 13px;
+      color: var(--muted);
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+
+    .metric span {
+      display: block;
+      font-size: 17px;
+      font-weight: 700;
+    }
+
+    .good { color: var(--good); }
+    .bad { color: var(--bad); }
+    .warn { color: var(--warn); }
+    .accent { color: var(--accent); }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .req {
+      display: grid;
+      grid-template-columns: 84px minmax(0, 1fr);
+      gap: 12px;
+      border-top: 1px solid var(--line);
+      padding: 12px 0;
+    }
+
+    .req:first-child {
+      border-top: 0;
+    }
+
+    .id {
+      font-weight: 800;
+      color: var(--accent);
+    }
+
+    ul {
+      margin: 8px 0 0 18px;
+      padding: 0;
+    }
+
+    li {
+      margin: 6px 0;
+    }
+
+    @media (max-width: 720px) {
+      main {
+        padding: 20px 14px 36px;
+      }
+
+      .status,
+      .grid {
+        grid-template-columns: 1fr;
+      }
+
+      .req {
+        grid-template-columns: 1fr;
+        gap: 2px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>Clawline Reference/Reply LLM-Visible ID Fast Path</h1>
+      <p class="lede">This document captures the current reference/reply failure and Flynn's product fix. The core change is simple: every rendered message needs to carry the same id the LLM-side transcript can recognize, and replies should pass that id through as lightweight context instead of forcing provider-side transcript resolution.</p>
+      <div class="status" aria-label="Document status">
+        <div class="metric">
+          <b>Decision</b>
+          <span class="good">Use LLM-visible ids</span>
+        </div>
+        <div class="metric">
+          <b>Hot Path</b>
+          <span class="bad">No transcript scan</span>
+        </div>
+        <div class="metric">
+          <b>Old Messages</b>
+          <span class="warn">Reply button stays</span>
+        </div>
+      </div>
+    </header>
+
+    <section>
+      <h2>Situation</h2>
+      <p>On May 26, 2026, Flynn sent a Clawline prompt with a reference/reply attached. The prompt appeared to hang before becoming an agent/model turn. Gateway health was fine, OpenClaw had no running or queued tasks, and the latest user message was not persisted in the Clawline database.</p>
+      <p>The log path showed the inbound message entering the Clawline preprocessing stage named <code>resolve_references</code> and not reaching the later stages that persist, acknowledge, and dispatch the message.</p>
+      <div class="grid">
+        <div class="card">
+          <h3>What worked</h3>
+          <ul>
+            <li>Gateway HTTP and version endpoints were live.</li>
+            <li>The message reached Clawline inbound processing.</li>
+            <li>The UI knew which bubble Flynn was replying to.</li>
+          </ul>
+        </div>
+        <div class="card">
+          <h3>What failed</h3>
+          <ul>
+            <li>The message did not persist before reference resolution.</li>
+            <li>The provider attempted expensive reference lookup on the send path.</li>
+            <li>The LLM never received the prompt, so the reply context never mattered.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Observed Failure Shape</h2>
+      <p>The current resolver tries to turn a client-side reference into provider-readable context before the user message is acknowledged. When direct lookup fails, it can fall back to loading/scanning the referenced session transcript and Clawline event rows. In the observed stream, that meant thousands of rows and several megabytes of payload on the synchronous inbound path.</p>
+      <p>That architecture is backwards for this product need. Reply/reference is not a provider-owned lookup problem; it is a context pointer problem. The client already has the selected bubble. The missing bridge is the id that the LLM-visible transcript can recognize.</p>
+    </section>
+
+    <section>
+      <h2>Product Truth</h2>
+      <p>For Clawline reply/reference, success means the model sees enough structured context to understand that Flynn is replying to a prior message. It does not require the provider to prove the referenced message exists before accepting the send.</p>
+      <p>If the id is stale, invalid, or not present in the model's active context, the model can say it does not know what Flynn is referring to. That is a better product failure than blocking the send, scanning the transcript, or silently dropping the turn before it reaches the model.</p>
+    </section>
+
+    <section>
+      <h2>Required Fix</h2>
+      <div class="req">
+        <div class="id">RR-01</div>
+        <div>Every message delivered to a Clawline client must include an LLM-visible message id: the canonical id that the provider/model-side transcript will recognize when it appears in prompt context.</div>
+      </div>
+      <div class="req">
+        <div class="id">RR-02</div>
+        <div>The client must store that id on the rendered/local message model and use it when building reply/reference payloads. The local UI id, replay id, compact id, or temporary optimistic id is not enough for model-visible reply grounding.</div>
+      </div>
+      <div class="req">
+        <div class="id">RR-03</div>
+        <div>When Flynn replies to a message, the client sends lightweight structured metadata containing the LLM-visible id, optional role, and a bounded visible preview. The payload should identify the referenced message; it should not paste the whole referenced text into the composer.</div>
+      </div>
+      <div class="req">
+        <div class="id">RR-04</div>
+        <div>The provider/server must not semantically validate, hydrate, or resolve that id on the inbound hot path. It may enforce cheap shape and size limits, then persist/ack the user message normally and pass the metadata through to model context.</div>
+      </div>
+      <div class="req">
+        <div class="id">RR-05</div>
+        <div>No session-wide transcript scan, transcript-file read, or full event-row scan is allowed before message persistence/acknowledgement for reply/reference handling.</div>
+      </div>
+      <div class="req">
+        <div class="id">RR-06</div>
+        <div>The LLM context should explicitly expose the pointer, for example: <code>user is replying to message &lt;llmVisibleMessageId&gt;</code>, plus optional role/preview. The model decides whether that id is meaningful in its context.</div>
+      </div>
+      <div class="req">
+        <div class="id">RR-07</div>
+        <div>If a message does not have an LLM-visible id, the Reply button still appears in the UI. Activating it opens a dialog telling the user to update to the newest Clawline fork; it must not silently disappear or attempt the old slow resolver path.</div>
+      </div>
+      <div class="req">
+        <div class="id">RR-08</div>
+        <div>The missing-id dialog text should be direct: <code>Please update to the newest Clawline fork to reply to this message.</code></div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Suggested Payload Shape</h2>
+      <pre><code>{
+  "references": [
+    {
+      "kind": "reply",
+      "llmVisibleMessageId": "s_...",
+      "role": "assistant",
+      "preview": "Bounded visible snippet from the bubble"
+    }
+  ]
+}</code></pre>
+      <p>The exact field name can match the existing codebase if another canonical name already exists, but the invariant is fixed: the id sent back by the client must be the one the LLM-visible transcript can recognize.</p>
+    </section>
+
+    <section>
+      <h2>What Not To Build</h2>
+      <ul>
+        <li>Do not repair this by making provider-side fallback scanning faster.</li>
+        <li>Do not block send while trying to prove the referenced message exists.</li>
+        <li>Do not hide the Reply button for older messages that lack the new id.</li>
+        <li>Do not treat a UI token or sent-bubble indicator as proof unless the LLM-visible id reaches model context.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2>Acceptance Checks</h2>
+      <div class="req">
+        <div class="id">AC-01</div>
+        <div>A freshly loaded message bubble contains the LLM-visible id in client state and can send it back in a reply/reference payload.</div>
+      </div>
+      <div class="req">
+        <div class="id">AC-02</div>
+        <div>A reply/reference send persists and acknowledges before any expensive reference enrichment work can run.</div>
+      </div>
+      <div class="req">
+        <div class="id">AC-03</div>
+        <div>Provider logs for a reply/reference send show no full-session reference scan before persistence/acknowledgement.</div>
+      </div>
+      <div class="req">
+        <div class="id">AC-04</div>
+        <div>The model-visible prompt context contains the referenced LLM-visible id and bounded metadata.</div>
+      </div>
+      <div class="req">
+        <div class="id">AC-05</div>
+        <div>For an old/no-id message, the Reply button remains present and opens the update dialog instead of sending a broken reference or hiding the affordance.</div>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

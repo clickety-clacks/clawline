@@ -1,5 +1,5 @@
 //
-//  WatchNotifications.swift
+//  StoreNotifications.swift
 //  Clawline
 //
 

@@ -31,6 +31,12 @@ struct MessageBubbleMetadataDebugState {
     let metadataNeededWidth: CGFloat
     let replyIndicatorHidden: Bool
     let replyIndicatorText: String?
+    let replyIndicatorRenderedText: NSAttributedString?
+    let replyIndicatorLineLimit: Int
+    let replyIndicatorTextHeight: CGFloat
+    let replyIndicatorTextLineHeight: CGFloat
+    let replyIndicatorUncappedTextHeight: CGFloat
+    let replyIndicatorChipHeight: CGFloat
 }
 
 private final class BubbleSafeAreaNeutralScrollView: UIScrollView {
@@ -550,7 +556,8 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
     private let replyIndicatorChipView = UIView()
     private let replyIndicatorStack = UIStackView()
     private let replyIndicatorIconView = UIImageView()
-    private let replyIndicatorLabel = UILabel()
+    private let replyIndicatorTextView = UITextView()
+    private var replyIndicatorTextHeightConstraint: NSLayoutConstraint?
     private let headerMenuButton = UIButton(type: .custom)
     private let bodyLabel = UITextView()
     private let bodyTextContainer = UIView()
@@ -597,6 +604,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
     private var explicitIsDarkOverride: Bool?
     private var currentContentPaddingHorizontal: CGFloat = 16
     private var currentContentPaddingVertical: CGFloat = 14
+    private var currentEffectiveMaxWidth: CGFloat = 320
     private var contentLeadingConstraint: NSLayoutConstraint!
     private var contentTrailingConstraint: NSLayoutConstraint!
     private var contentTopConstraint: NSLayoutConstraint!
@@ -776,7 +784,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
 
         replyIndicatorStack.translatesAutoresizingMaskIntoConstraints = false
         replyIndicatorStack.axis = .horizontal
-        replyIndicatorStack.alignment = .center
+        replyIndicatorStack.alignment = .top
         replyIndicatorStack.spacing = 6
         replyIndicatorStack.isLayoutMarginsRelativeArrangement = true
         replyIndicatorStack.directionalLayoutMargins = NSDirectionalEdgeInsets(top: 6, leading: 10, bottom: 6, trailing: 10)
@@ -788,16 +796,24 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         replyIndicatorIconView.setContentHuggingPriority(.required, for: .horizontal)
         replyIndicatorIconView.setContentCompressionResistancePriority(.required, for: .horizontal)
 
-        replyIndicatorLabel.numberOfLines = 1
-        replyIndicatorLabel.lineBreakMode = .byTruncatingTail
-        replyIndicatorLabel.font = UIFont.clawline(.timestamp)
-        replyIndicatorLabel.adjustsFontForContentSizeCategory = true
-        replyIndicatorLabel.textColor = .label
-        replyIndicatorLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        replyIndicatorLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        replyIndicatorTextView.translatesAutoresizingMaskIntoConstraints = false
+        UnifiedMarkdownRenderer.configureTextView(
+            replyIndicatorTextView,
+            delegate: nil,
+            enableDataDetectors: false
+        )
+        replyIndicatorTextView.textContainer.maximumNumberOfLines = 3
+        replyIndicatorTextView.textContainer.lineBreakMode = .byTruncatingTail
+        replyIndicatorTextView.adjustsFontForContentSizeCategory = true
+        replyIndicatorTextView.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        replyIndicatorTextView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        let replyTextHeight = replyIndicatorTextView.heightAnchor.constraint(equalToConstant: 0)
+        replyTextHeight.priority = .required
+        replyTextHeight.isActive = true
+        replyIndicatorTextHeightConstraint = replyTextHeight
 
         replyIndicatorStack.addArrangedSubview(replyIndicatorIconView)
-        replyIndicatorStack.addArrangedSubview(replyIndicatorLabel)
+        replyIndicatorStack.addArrangedSubview(replyIndicatorTextView)
         replyIndicatorChipView.addSubview(replyIndicatorStack)
         replyIndicatorContainer.addSubview(replyIndicatorChipView)
         NSLayoutConstraint.activate([
@@ -807,6 +823,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
             replyIndicatorStack.bottomAnchor.constraint(equalTo: replyIndicatorChipView.bottomAnchor),
             replyIndicatorIconView.widthAnchor.constraint(equalToConstant: 12),
             replyIndicatorIconView.heightAnchor.constraint(equalToConstant: 12),
+            replyIndicatorIconView.topAnchor.constraint(equalTo: replyIndicatorTextView.firstBaselineAnchor, constant: -10),
             replyIndicatorChipView.leadingAnchor.constraint(equalTo: replyIndicatorContainer.leadingAnchor),
             replyIndicatorChipView.topAnchor.constraint(equalTo: replyIndicatorContainer.topAnchor),
             replyIndicatorChipView.bottomAnchor.constraint(equalTo: replyIndicatorContainer.bottomAnchor),
@@ -939,6 +956,13 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         ])
     }
 
+    private func makeFixedBubbleWidthConstraint(_ width: CGFloat) -> NSLayoutConstraint {
+        let constraint = bubbleBackgroundView.widthAnchor.constraint(equalToConstant: width)
+        constraint.identifier = "MessageBubbleUIKitView.fixedWidth"
+        constraint.priority = .defaultHigh
+        return constraint
+    }
+
     private static func linkPreviewWidthCap(metrics: ChatFlowTheme.Metrics) -> CGFloat {
         max(120, bubbleReferenceSize.width - (metrics.containerPadding * 2))
     }
@@ -1042,6 +1066,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         topHighlightMask.path = (hasTerminalSessionsForLayout || useContinuousCorners) ? path.cgPath : highlightMaskPath.cgPath
 
         updateTimestampVisibilityIfNeeded()
+        updateReplyIndicatorTextHeightConstraint()
         updateOuterScrollState()
     }
 
@@ -1108,6 +1133,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
 
         // Reset width constraints per size class.
         currentMetrics = metrics
+        currentEffectiveMaxWidth = effectiveMaxWidth
         minWidthConstraint.constant = effectiveMinWidth
         maxWidthConstraint.constant = effectiveMaxWidth
         fixedWidthConstraint?.isActive = false
@@ -1576,11 +1602,11 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         case .short:
             bodyMaxWidthConstraint?.isActive = false
             // Set fixed width to match measured preferredWidth for consistent sizing
-            fixedWidthConstraint = bubbleBackgroundView.widthAnchor.constraint(equalToConstant: effectiveMaxWidth)
+            fixedWidthConstraint = makeFixedBubbleWidthConstraint(effectiveMaxWidth)
             fixedWidthConstraint?.isActive = true
         case .medium:
             bodyMaxWidthConstraint?.isActive = false
-            fixedWidthConstraint = bubbleBackgroundView.widthAnchor.constraint(equalToConstant: effectiveMaxWidth)
+            fixedWidthConstraint = makeFixedBubbleWidthConstraint(effectiveMaxWidth)
             fixedWidthConstraint?.isActive = true
         case .long:
             let maxLineWidth = ChatFlowTheme.maxLineWidth(bodyFontSize: metrics.bodyFontSize)
@@ -1588,7 +1614,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
             let constraint = bodyLabel.widthAnchor.constraint(lessThanOrEqualToConstant: maxLineWidth)
             constraint.isActive = true
             bodyMaxWidthConstraint = constraint
-            fixedWidthConstraint = bubbleBackgroundView.widthAnchor.constraint(equalToConstant: effectiveMaxWidth)
+            fixedWidthConstraint = makeFixedBubbleWidthConstraint(effectiveMaxWidth)
             fixedWidthConstraint?.isActive = true
         }
 
@@ -2088,9 +2114,10 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
             })
         }
         if currentMessage.role == .user {
-            actions.append(UIAction(title: "Insert into prompt", image: UIImage(systemName: "text.insert")) { [weak self] _ in
-                guard let self, let message = self.currentMessage else { return }
-                self.onInsertIntoPrompt?(message)
+            let message = currentMessage
+            let onInsertIntoPrompt = onInsertIntoPrompt
+            actions.append(UIAction(title: "Insert into prompt", image: UIImage(systemName: "text.insert")) { _ in
+                onInsertIntoPrompt?(message)
             })
         }
         actions.append(UIAction(title: "Reply…", image: UIImage(systemName: "arrowshape.turn.up.left")) { [weak self] _ in
@@ -2184,8 +2211,25 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
             headerWidth: headerStack.bounds.width,
             metadataNeededWidth: metadataNeededWidth(),
             replyIndicatorHidden: replyIndicatorContainer.isHidden,
-            replyIndicatorText: replyIndicatorLabel.text
+            replyIndicatorText: currentReplyReference?.tokenLabel,
+            replyIndicatorRenderedText: replyIndicatorTextView.attributedText,
+            replyIndicatorLineLimit: replyIndicatorTextView.textContainer.maximumNumberOfLines,
+            replyIndicatorTextHeight: replyIndicatorTextView.bounds.height,
+            replyIndicatorTextLineHeight: replyIndicatorTextView.font?.lineHeight ?? UIFont.clawline(.timestamp).lineHeight,
+            replyIndicatorUncappedTextHeight: replyIndicatorUncappedTextHeightForTests(),
+            replyIndicatorChipHeight: replyIndicatorChipView.bounds.height
         )
+    }
+
+    private func replyIndicatorUncappedTextHeightForTests() -> CGFloat {
+        guard replyIndicatorTextView.bounds.width > 0 else { return 0 }
+        let originalLineLimit = replyIndicatorTextView.textContainer.maximumNumberOfLines
+        replyIndicatorTextView.textContainer.maximumNumberOfLines = 0
+        let height = replyIndicatorTextView.sizeThatFits(
+            CGSize(width: replyIndicatorTextView.bounds.width, height: .greatestFiniteMagnitude)
+        ).height
+        replyIndicatorTextView.textContainer.maximumNumberOfLines = originalLineLimit
+        return height
     }
 
     private func metadataNeededWidth() -> CGFloat {
@@ -2200,12 +2244,66 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         let shouldShow = currentMessage?.role == .user && currentReplyReference != nil
         replyIndicatorContainer.isHidden = !shouldShow
         replyIndicatorChipView.isHidden = !shouldShow
-        replyIndicatorLabel.text = currentReplyReference?.tokenLabel
+        if let reference = currentReplyReference {
+            let label = reference.preview.isEmpty ? reference.tokenLabel : reference.preview
+            let font = UIFont.clawline(.timestamp)
+            replyIndicatorTextView.attributedText = UnifiedMarkdownRenderer.renderNSAttributedString(
+                markdown: MessageReferenceMarkdownDisplay.renderableMarkdown(label),
+                baseFont: font,
+                inkColor: UIColor.label,
+                lineSpacing: 1
+            ) ?? NSAttributedString(
+                string: label,
+                attributes: [
+                    .font: font,
+                    .foregroundColor: UIColor.label
+                ]
+            )
+        } else {
+            replyIndicatorTextView.attributedText = nil
+        }
+        updateReplyIndicatorTextHeightConstraint()
         if let tokenLabel = currentReplyReference?.tokenLabel {
             replyIndicatorChipView.accessibilityLabel = "Reply to \(tokenLabel)"
         } else {
             replyIndicatorChipView.accessibilityLabel = nil
         }
+    }
+
+    private func updateReplyIndicatorTextHeightConstraint() {
+        guard !replyIndicatorContainer.isHidden,
+              (replyIndicatorTextView.attributedText?.length ?? 0) > 0 else {
+            replyIndicatorTextHeightConstraint?.constant = 0
+            return
+        }
+        let width = replyIndicatorTextWidthForMeasurement()
+        guard width > 1 else { return }
+        let fittingHeight = replyIndicatorTextView.sizeThatFits(
+            CGSize(width: width, height: .greatestFiniteMagnitude)
+        ).height
+        let targetHeight = ceil(fittingHeight)
+        guard abs((replyIndicatorTextHeightConstraint?.constant ?? 0) - targetHeight) > 0.5 else { return }
+        replyIndicatorTextHeightConstraint?.constant = targetHeight
+    }
+
+    private func replyIndicatorTextWidthForMeasurement() -> CGFloat {
+        if replyIndicatorTextView.bounds.width > 1 {
+            return replyIndicatorTextView.bounds.width
+        }
+        if replyIndicatorChipView.bounds.width > 1 {
+            let margins = replyIndicatorStack.directionalLayoutMargins
+            return replyIndicatorChipView.bounds.width
+                - margins.leading
+                - margins.trailing
+                - replyIndicatorIconView.bounds.width
+                - replyIndicatorStack.spacing
+        }
+        return currentEffectiveMaxWidth
+            - (currentContentPaddingHorizontal * 2)
+            - replyIndicatorStack.directionalLayoutMargins.leading
+            - replyIndicatorStack.directionalLayoutMargins.trailing
+            - 12
+            - replyIndicatorStack.spacing
     }
 
     private func scheduleTimestampRefreshIfNeeded(now: Date) {

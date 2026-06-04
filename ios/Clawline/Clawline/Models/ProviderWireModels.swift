@@ -132,6 +132,21 @@ struct AgentProgressItem: Codable, Equatable {
     let progressText: String?
 }
 
+struct PromptTurnStateEvent: Codable, Equatable {
+    let type: String
+    let event: String
+    let payload: Payload
+
+    struct Payload: Codable, Equatable {
+        let messageId: String
+        let sessionKey: String
+        let state: String
+        let terminalState: String?
+        let correlationId: String?
+        let clawlineMessageRowId: Int?
+        let error: String?
+    }
+}
 
 struct StreamReadStatePayload: Codable, Equatable {
     let type: String

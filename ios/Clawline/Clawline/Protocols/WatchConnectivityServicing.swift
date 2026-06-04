@@ -15,8 +15,6 @@ protocol WatchConnectivityServicing: AnyObject {
     /// Immediately push current credentials to Watch via transferUserInfo.
     /// No-op if Watch is not paired. (transferUserInfo queues for delivery.)
     func syncCredentials()
-
-    func activate()
 }
 
 /// Stub for previews and tests.
@@ -24,5 +22,4 @@ final class StubWatchConnectivityService: WatchConnectivityServicing {
     var isWatchPaired: Bool = false
     var isWatchReachable: Bool = false
     func syncCredentials() {}
-    func activate() {}
 }

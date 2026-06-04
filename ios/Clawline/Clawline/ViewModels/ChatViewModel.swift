@@ -20,6 +20,7 @@ struct CrossChatAssistantNotificationEntry: Identifiable, Equatable {
     let id: String
     var content: String
     var timestamp: Date
+    var appendSeparatorTimestamp: Date? = nil
 }
 
 struct CrossChatNotificationBubble: Identifiable, Equatable {
@@ -345,6 +346,12 @@ final class ChatViewModel: ChatViewModelHosting {
         }
     }
 
+    func requestCrossChatNotificationNavigation(to sourceChatId: String) {
+        guard !sourceChatId.isEmpty else { return }
+        ensureStreamEntry(for: sourceChatId)
+        requestStreamSwitch(to: sourceChatId, source: .programmatic)
+    }
+
     func streamPagerDidBeginInteraction() {
         isPagerInteracting = true
         pendingEngineActivationTask?.cancel()
@@ -376,9 +383,9 @@ final class ChatViewModel: ChatViewModelHosting {
             return
         }
         guard orderedSessionKeys.contains(sessionKey) else { return }
+        dismissCrossChatNotification(sourceChatId: sessionKey)
         guard engineActiveSessionKey != sessionKey else { return }
         applyActiveSessionKey(sessionKey)
-        dismissCrossChatNotification(sourceChatId: sessionKey)
         markSessionRead(sessionKey, preferServerTail: true)
         // Keep intent selection coherent for non-switch engine mutations (bootstrap/deletion fallback).
         // Stream-switch path still writes uiSelectedSessionKey explicitly before this runs.
@@ -1437,25 +1444,98 @@ final class ChatViewModel: ChatViewModelHosting {
 #if DEBUG
     func debugSeedCrossChatNotificationsForDockProof() {
         let now = Date()
+        let mainSessionKey = SessionKey.clawlineMain(userId: auth.currentUserId ?? "debug-user")
+        let alphaSessionKey = "agent:main:clawline:ui-test:s_t1174_a"
+        let betaSessionKey = "agent:main:clawline:ui-test:s_t1174_b"
+        let streams = [
+            StreamSession(
+                sessionKey: mainSessionKey,
+                displayName: "T1174 Main",
+                kind: "main",
+                orderIndex: 0,
+                isBuiltIn: true,
+                createdAt: now,
+                updatedAt: now
+            ),
+            StreamSession(
+                sessionKey: alphaSessionKey,
+                displayName: "T1174 Alpha Chat",
+                kind: "custom",
+                orderIndex: 1,
+                isBuiltIn: false,
+                createdAt: now,
+                updatedAt: now,
+                trackingMode: .adopted
+            ),
+            StreamSession(
+                sessionKey: betaSessionKey,
+                displayName: "T1174 Beta Chat",
+                kind: "custom",
+                orderIndex: 2,
+                isBuiltIn: false,
+                createdAt: now,
+                updatedAt: now,
+                trackingMode: .adopted
+            )
+        ]
+        for stream in streams {
+            streamsBySessionKey[stream.sessionKey] = stream
+            syntheticSessionKeys.insert(stream.sessionKey)
+            ensureSessionStorage(for: stream.sessionKey)
+        }
+        let alphaMessage = Message(
+            id: "s_t1174_alpha_chat_message",
+            role: .assistant,
+            content: "T1174 Alpha Chat proof message",
+            timestamp: now,
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: alphaSessionKey,
+            sender: nil
+        )
+        let betaMessage = Message(
+            id: "s_t1174_beta_chat_message",
+            role: .assistant,
+            content: "T1174 Beta Chat proof message",
+            timestamp: now,
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: betaSessionKey,
+            sender: nil
+        )
+        sessionMessages[alphaSessionKey] = [alphaMessage]
+        sessionMessages[betaSessionKey] = [betaMessage]
+        persistMessages([alphaMessage], for: alphaSessionKey)
+        persistMessages([betaMessage], for: betaSessionKey)
+        recalculateOrderedSessionKeys()
+        SessionRegistry.shared.replace(with: orderedStreams)
+        ensureDefaultActiveSessionIfNeeded()
+        if ProcessInfo.processInfo.arguments.contains("--debug-cross-chat-notification-dock-proof-start-on-alpha") {
+            setEngineActiveSessionKey(alphaSessionKey)
+            setUISelectedSessionKey(alphaSessionKey)
+        }
+
         crossChatNotificationBubblesBySourceChatId = [
-            "agent:main:clawline:ui-test:s_t1150_a": CrossChatNotificationBubble(
-                sourceChatId: "agent:main:clawline:ui-test:s_t1150_a",
-                sourceTitle: "T1150 Alpha",
+            alphaSessionKey: CrossChatNotificationBubble(
+                sourceChatId: alphaSessionKey,
+                sourceTitle: "T1174 Alpha",
                 entries: [
                     CrossChatAssistantNotificationEntry(
-                        id: "s_t1150_notification_a",
+                        id: "s_t1174_notification_a",
                         content: "Dock tap proof notification A",
                         timestamp: now
                     )
                 ],
                 lastAssistantActivityAt: now
             ),
-            "agent:main:clawline:ui-test:s_t1150_b": CrossChatNotificationBubble(
-                sourceChatId: "agent:main:clawline:ui-test:s_t1150_b",
-                sourceTitle: "T1150 Beta",
+            betaSessionKey: CrossChatNotificationBubble(
+                sourceChatId: betaSessionKey,
+                sourceTitle: "T1174 Beta",
                 entries: [
                     CrossChatAssistantNotificationEntry(
-                        id: "s_t1150_notification_b",
+                        id: "s_t1174_notification_b",
                         content: "Dock tap proof notification B",
                         timestamp: now.addingTimeInterval(-1)
                     )
@@ -2277,11 +2357,6 @@ final class ChatViewModel: ChatViewModelHosting {
         let title = stream(for: message.sessionKey)?.displayName
             ?? message.sender
             ?? message.sessionKey
-        let entry = CrossChatAssistantNotificationEntry(
-            id: message.id,
-            content: message.content,
-            timestamp: message.timestamp
-        )
         var bubble = crossChatNotificationBubblesBySourceChatId[message.sessionKey] ?? CrossChatNotificationBubble(
             sourceChatId: message.sessionKey,
             sourceTitle: title,
@@ -2289,6 +2364,15 @@ final class ChatViewModel: ChatViewModelHosting {
             lastAssistantActivityAt: message.timestamp
         )
         bubble.sourceTitle = title
+        let existingSeparatorTimestamp = bubble.entries.first(where: { $0.id == message.id })?.appendSeparatorTimestamp
+        let appendSeparatorTimestamp = existingSeparatorTimestamp
+            ?? (bubble.entries.contains { $0.id != message.id } ? message.timestamp : nil)
+        let entry = CrossChatAssistantNotificationEntry(
+            id: message.id,
+            content: message.content,
+            timestamp: message.timestamp,
+            appendSeparatorTimestamp: appendSeparatorTimestamp
+        )
         if let existingIndex = bubble.entries.firstIndex(where: { $0.id == message.id }) {
             bubble.entries.remove(at: existingIndex)
         }
@@ -3327,6 +3411,8 @@ final class ChatViewModel: ChatViewModelHosting {
             }
         case .agentProgress(let progress):
             handleAgentProgress(progress)
+        case .promptTurnState(let event):
+            handlePromptTurnState(event)
         case .connectionInterrupted(let reason):
             logger.info("connection interrupted reason=\(reason ?? "unknown", privacy: .public)")
             markPendingMessagesAsFailedForConnectionLoss()
@@ -3406,6 +3492,42 @@ final class ChatViewModel: ChatViewModelHosting {
             replaceAccessibleSessionKeys(with: info.sessionKeys)
             refreshTrackableSessions(reason: "sessionInfo")
             attemptPendingProvisionedSendIfPossible()
+        }
+    }
+
+    private func handlePromptTurnState(_ event: PromptTurnStateEvent) {
+        let state = event.payload.state.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let terminalState = event.payload.terminalState?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let messageId = event.payload.messageId
+        switch terminalState ?? state {
+        case "failed":
+            scheduleSessionStatusRefresh(for: event.payload.sessionKey, reason: "promptTurnFailed")
+            clearLiveProgress(messageId: messageId)
+            messageFailures[messageId] = MessageFailure(code: event.payload.error ?? "clawline.promptTurn.failed", message: nil)
+            if let pendingIndex = pendingLocalMessages.firstIndex(where: { $0.id == messageId }) {
+                pendingLocalMessages.remove(at: pendingIndex)
+            }
+            ackedPendingLocalMessageIDs.remove(messageId)
+            if activeClientMessageId == messageId {
+                activeClientMessageId = nil
+                activeCrossChatNotificationReplySourceChatId = nil
+                activeSendHasReachedTransport = false
+            }
+            isSending = false
+            bumpSendIndicatorRevision()
+        case "delivered", "canceled":
+            if let pendingIndex = pendingLocalMessages.firstIndex(where: { $0.id == messageId }) {
+                pendingLocalMessages.remove(at: pendingIndex)
+            }
+            ackedPendingLocalMessageIDs.remove(messageId)
+            if state == "canceled" {
+                markLocalMessageCanceled(id: messageId)
+            } else {
+                messageFailures.removeValue(forKey: messageId)
+                bumpSendIndicatorRevision()
+            }
+        default:
+            return
         }
     }
 

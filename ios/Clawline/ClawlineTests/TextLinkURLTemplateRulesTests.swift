@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import Testing
 import UIKit
 @testable import Clawline
@@ -163,6 +164,138 @@ struct TextLinkURLTemplateRulesTests {
         #expect(linkTarget("T1135", in: transcript) == linkTarget("T1135", in: notification))
     }
 
+    @Test("T1182: notification and full content renderers expose generated Text Link Rules")
+    @MainActor
+    func notificationAndFullContentRenderersExposeGeneratedTextLinkRules() throws {
+        let (notificationBlocks, expandedContent) = withConfiguredRules([.janusTrackerExample]) {
+            let notificationBlocks = CrossChatNotificationMarkdownRenderer.renderBlocks(
+                content: "Review T1182.",
+                messageID: "t1182_notification",
+                baseFont: .systemFont(ofSize: 15),
+                inkColor: .label,
+                lineSpacing: 0,
+                isDark: false
+            )
+            var streamingState = StreamingTableParseState()
+            let presentation = MessagePresentationBuilder.build(
+                from: Message(
+                    id: "t1182_full_content",
+                    role: .assistant,
+                    content: "Review T1182.",
+                    timestamp: Date(),
+                    streaming: false,
+                    attachments: [],
+                    deviceId: nil,
+                    sessionKey: "agent:main:clawline:user:s_t1182"
+                ),
+                metrics: ChatFlowTheme.Metrics(isCompact: false),
+                streamingState: &streamingState
+            )
+            let expandedContent = UnifiedMarkdownRenderer.makeContent(
+                presentation: presentation,
+                baseFont: UIFont.clawline(.bodyText),
+                inkColor: .label,
+                lineSpacing: 4,
+                stripDetectedURLs: false,
+                role: .assistant,
+                isDark: false
+            )
+            return (notificationBlocks, expandedContent)
+        }
+
+        let notification = try #require(firstAttributedText(in: notificationBlocks))
+        let expanded = try #require(firstAttributedText(in: expandedContent.renderedBlocks))
+        let expectedURL = URL(string: "https://tars.tail4105e8.ts.net:19443/tracker.html?id=T1182")
+
+        #expect(linkTarget("T1182", in: notification) == expectedURL)
+        #expect(linkTarget("T1182", in: expanded) == expectedURL)
+        #expect(TextLinkURLTemplateRules.isGeneratedLink(in: notification, characterRange: range("T1182", in: notification)))
+        #expect(TextLinkURLTemplateRules.isGeneratedLink(in: expanded, characterRange: range("T1182", in: expanded)))
+    }
+
+    @Test("T1182: full content layout uses compact width and regular reading width")
+    func fullContentLayoutUsesCompactWidthAndRegularReadingWidth() {
+        let compact = ExpandedMessageSheetLayout.resolve(
+            availableWidth: 390,
+            isCompact: true,
+            compactHorizontalPadding: 16,
+            regularOuterPadding: 28,
+            regularContentHorizontalPadding: 44,
+            regularReadingWidth: 720
+        )
+        let regular = ExpandedMessageSheetLayout.resolve(
+            availableWidth: 1_000,
+            isCompact: false,
+            compactHorizontalPadding: 16,
+            regularOuterPadding: 28,
+            regularContentHorizontalPadding: 44,
+            regularReadingWidth: 720
+        )
+        let constrainedRegular = ExpandedMessageSheetLayout.resolve(
+            availableWidth: 640,
+            isCompact: false,
+            compactHorizontalPadding: 16,
+            regularOuterPadding: 28,
+            regularContentHorizontalPadding: 44,
+            regularReadingWidth: 720
+        )
+
+        #expect(compact.outerHorizontalPadding == 0)
+        #expect(compact.contentWidth == 390)
+        #expect(regular.outerHorizontalPadding == 28)
+        #expect(regular.contentHorizontalPadding == 44)
+        #expect(regular.contentWidth == 720)
+        #expect(constrainedRegular.outerHorizontalPadding == 28)
+        #expect(constrainedRegular.contentWidth == 584)
+    }
+
+    @Test("T1182: selectable notification and full content text activates generated links internally")
+    @MainActor
+    func selectableTextActivatesGeneratedLinksInternally() throws {
+        let rendered = try withConfiguredRules([.janusTrackerExample]) {
+            try #require(makeRendered("Review T1182."))
+        }
+        let generatedURL = try #require(linkTarget("T1182", in: rendered))
+        let generatedRange = range("T1182", in: rendered)
+        var openedGeneratedURL: URL?
+        let originalGeneratedLinkOpener = GeneratedTextLinkActivationRouter.openGeneratedLink
+        GeneratedTextLinkActivationRouter.openGeneratedLink = { url, _ in
+            openedGeneratedURL = url
+            return true
+        }
+        defer {
+            GeneratedTextLinkActivationRouter.openGeneratedLink = originalGeneratedLinkOpener
+        }
+
+        let host = UIHostingController(
+            rootView: SelectableAttributedText(
+                attributedString: rendered,
+                alignment: .left,
+                colorScheme: .light,
+                onSelectionChange: { _ in },
+                onLinkTap: { _ in Issue.record("Generated links should not use the fallback link tap closure") }
+            )
+            .frame(width: 280)
+        )
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 120))
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        host.view.frame = window.bounds
+        host.view.setNeedsLayout()
+        host.view.layoutIfNeeded()
+
+        let textView = try #require(textViews(in: host.view).first)
+        let shouldInteract = textView.delegate?.textView?(
+            textView,
+            shouldInteractWith: generatedURL,
+            in: generatedRange,
+            interaction: UITextItemInteraction.invokeDefaultAction
+        )
+
+        #expect(shouldInteract == false)
+        #expect(openedGeneratedURL == generatedURL)
+    }
+
     @Test("V1135-01: generated text links suppress external text-view activation")
     @MainActor
     func generatedTextLinksSuppressExternalActivation() throws {
@@ -266,6 +399,26 @@ struct TextLinkURLTemplateRulesTests {
         let tokenRange = range(token, in: attributed)
         guard tokenRange.location != NSNotFound else { return nil }
         return attributed.attribute(.link, at: tokenRange.location, effectiveRange: nil) as? URL
+    }
+
+    private func firstAttributedText(in blocks: [RenderedMarkdownBlock]) -> NSAttributedString? {
+        for block in blocks {
+            if case .attributedText(let attributed) = block {
+                return attributed
+            }
+        }
+        return nil
+    }
+
+    private func textViews(in view: UIView) -> [UITextView] {
+        var matches: [UITextView] = []
+        if let textView = view as? UITextView {
+            matches.append(textView)
+        }
+        for subview in view.subviews {
+            matches.append(contentsOf: textViews(in: subview))
+        }
+        return matches
     }
 
     private func range(_ token: String, in attributed: NSAttributedString) -> NSRange {

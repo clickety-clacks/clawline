@@ -9,6 +9,37 @@ import Foundation
 import SwiftUI
 import UIKit
 
+struct ExpandedMessageSheetLayout: Equatable {
+    let outerHorizontalPadding: CGFloat
+    let contentHorizontalPadding: CGFloat
+    let contentWidth: CGFloat
+
+    static func resolve(
+        availableWidth: CGFloat,
+        isCompact: Bool,
+        compactHorizontalPadding: CGFloat,
+        regularOuterPadding: CGFloat,
+        regularContentHorizontalPadding: CGFloat,
+        regularReadingWidth: CGFloat
+    ) -> ExpandedMessageSheetLayout {
+        if isCompact {
+            return ExpandedMessageSheetLayout(
+                outerHorizontalPadding: 0,
+                contentHorizontalPadding: compactHorizontalPadding,
+                contentWidth: max(1, availableWidth)
+            )
+        }
+
+        let outerPadding = min(regularOuterPadding, max(0, availableWidth / 12))
+        let availableContentWidth = max(1, availableWidth - (outerPadding * 2))
+        return ExpandedMessageSheetLayout(
+            outerHorizontalPadding: outerPadding,
+            contentHorizontalPadding: regularContentHorizontalPadding,
+            contentWidth: min(regularReadingWidth, availableContentWidth)
+        )
+    }
+}
+
 struct ExpandedMessageSheet: View {
     let message: Message
     let presentation: MessagePresentation
@@ -20,22 +51,38 @@ struct ExpandedMessageSheet: View {
 
     @State private var dragOffset: CGFloat = 0
     private let dismissThreshold: CGFloat = 100
+    private let compactHorizontalPadding: CGFloat = 16
+    private let regularOuterPadding: CGFloat = 28
+    private let regularContentHorizontalPadding: CGFloat = 44
 
     private var isCompact: Bool { horizontalSizeClass == .compact }
     private var metrics: ChatFlowTheme.Metrics { ChatFlowTheme.Metrics(isCompact: isCompact) }
     private var effectiveColorScheme: ColorScheme { colorScheme }
+    private var expandedBodyFont: UIFont { UIFont.clawline(.bodyText) }
+    private var regularReadingWidth: CGFloat {
+        ChatFlowTheme.maxLineWidth(bodyFontSize: expandedBodyFont.pointSize)
+            + (regularContentHorizontalPadding * 2)
+    }
 
     var body: some View {
         let _ = fontScaleChangeSequence
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    header
-                    content
+            GeometryReader { proxy in
+                let layout = layoutMetrics(availableWidth: proxy.size.width)
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        header
+                        content
+                    }
+                    .padding(.horizontal, layout.contentHorizontalPadding)
+                    .padding(.vertical, 18)
+                    .frame(width: layout.contentWidth, alignment: .topLeading)
+                    .frame(maxWidth: .infinity, alignment: .top)
                 }
-                .padding()
+                .padding(.horizontal, layout.outerHorizontalPadding)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(sheetBackground)
             }
-            .background(sheetBackground)
             .navigationTitle(message.role == .user ? "Your Message" : message.displayName)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -62,6 +109,18 @@ struct ExpandedMessageSheet: View {
                         }
                     }
                 }
+        )
+        .presentationSizing(.fitted.fitted(horizontal: true, vertical: false))
+    }
+
+    private func layoutMetrics(availableWidth: CGFloat) -> ExpandedMessageSheetLayout {
+        ExpandedMessageSheetLayout.resolve(
+            availableWidth: availableWidth,
+            isCompact: isCompact,
+            compactHorizontalPadding: compactHorizontalPadding,
+            regularOuterPadding: regularOuterPadding,
+            regularContentHorizontalPadding: regularContentHorizontalPadding,
+            regularReadingWidth: regularReadingWidth
         )
     }
 

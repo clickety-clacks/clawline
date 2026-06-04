@@ -7882,9 +7882,8 @@ struct CrossChatNotificationBubbleView: View {
                 alignment: .left,
                 colorScheme: colorScheme,
                 onSelectionChange: { _ in },
-                onLinkTap: { _ in onNavigate() }
+                onLinkTap: { url in UIApplication.shared.open(url) }
             )
-            .allowsHitTesting(false)
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
         case .code(let language, let code):

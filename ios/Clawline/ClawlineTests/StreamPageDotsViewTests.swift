@@ -620,6 +620,28 @@ struct StreamPageDotsViewTests {
         )
     }
 
+    @Test("T1136 dots-indicator popup close preserves composer focus during dismissal")
+    func streamPopupDotsIndicatorClosePreservesComposerFocusDuringDismissal() {
+        #expect(
+            StreamPopupFocusHandoff.closeActions(
+                shouldRestoreComposerFocus: true,
+                preserveComposerFocusDuringDismissal: true
+            ) == [
+                .requestComposerFocusBeforeDismissal,
+                .closePopup,
+                .requestComposerFocusAfterDismissal
+            ]
+        )
+        #expect(
+            StreamPopupFocusHandoff.closeActions(
+                shouldRestoreComposerFocus: false,
+                preserveComposerFocusDuringDismissal: true
+            ) == [
+                .closePopup
+            ]
+        )
+    }
+
     @Test("T1146 stream pager does not dismiss the software keyboard")
     @MainActor
     func streamPagerDoesNotDismissSoftwareKeyboard() {

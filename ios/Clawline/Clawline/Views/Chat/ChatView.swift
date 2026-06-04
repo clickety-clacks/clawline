@@ -1180,10 +1180,31 @@ struct ChatView: View {
         let notificationOverlayMaxWidth = nativeWindowSize
             .map { min(geometry.size.width, min($0.width, $0.height)) }
             ?? geometry.size.width
+#elseif os(visionOS)
+        let notificationNativeWindowWidth = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first(where: { $0.activationState == .foregroundActive })
+            .flatMap { scene in
+                CrossChatNotificationGeometry.spatialNativeWindowWidth(
+                    keyWindowWidth: scene.windows.first(where: \.isKeyWindow)?.bounds.width,
+                    firstWindowWidth: scene.windows.first?.bounds.width
+                )
+            }
+        let notificationOverlayMaxWidth = CrossChatNotificationGeometry.spatialOverlayContainerWidth(
+            containerWidth: geometry.size.width,
+            nativeWindowWidth: notificationNativeWindowWidth
+        )
 #else
         let notificationOverlayMaxWidth = geometry.size.width
 #endif
+#if os(visionOS)
+        let notificationOverlayHorizontalCorrection = CrossChatNotificationGeometry.spatialOverlayHorizontalCorrection(
+            containerWidth: geometry.size.width,
+            resolvedContainerWidth: notificationOverlayMaxWidth
+        )
+#else
         let notificationOverlayHorizontalCorrection = notificationOverlayMaxWidth - geometry.size.width
+#endif
         let keyboardVisibleNotificationBubbles = CrossChatNotificationOverlay.visibleBubbles(
             maxContainerHeight: notificationOverlayMaxHeight,
             bubbles: viewModel.crossChatNotificationBubbles,
@@ -6000,6 +6021,21 @@ enum CrossChatNotificationGeometry {
         max(0, topMargin) + max(0, maxContainerHeight) + 12
     }
 
+    static func spatialNativeWindowWidth(keyWindowWidth: CGFloat?, firstWindowWidth: CGFloat?) -> CGFloat? {
+        keyWindowWidth ?? firstWindowWidth
+    }
+
+    static func spatialOverlayContainerWidth(containerWidth: CGFloat, nativeWindowWidth: CGFloat?) -> CGFloat {
+        max(max(0, containerWidth), max(0, nativeWindowWidth ?? 0))
+    }
+
+    static func spatialOverlayHorizontalCorrection(
+        containerWidth: CGFloat,
+        resolvedContainerWidth: CGFloat
+    ) -> CGFloat {
+        max(0, resolvedContainerWidth - max(0, containerWidth))
+    }
+
     static func transcriptTrailingClearance(
         isCompactLandscape: Bool,
         isNotificationDocked: Bool,
@@ -6034,6 +6070,15 @@ enum CrossChatNotificationGeometry {
         replyControlSpacing: CGFloat
     ) -> CGFloat {
         max(0, stackWidth - leadingPadding - trailingPadding - sendControlWidth - replyControlSpacing)
+    }
+
+    static func bubbleFrameWidth(
+        maxBubbleWidth: CGFloat,
+        visibleNotificationCount: Int,
+        isSpatial: Bool
+    ) -> CGFloat? {
+        guard isSpatial, visibleNotificationCount == 1 else { return nil }
+        return max(0, maxBubbleWidth)
     }
 
     static func collapsedOffset(
@@ -7336,6 +7381,8 @@ private struct CrossChatNotificationBubbleHeightPreferenceKey: PreferenceKey {
 }
 
 enum CrossChatNotificationMaterialStyle {
+    static let backgroundOpacity = 0.85
+
     static func accentOpacity(isSpatial: Bool) -> Double {
         isSpatial ? 0.60 : 0.40
     }
@@ -7493,6 +7540,14 @@ struct CrossChatNotificationBubbleView: View {
             font: replyFieldFont
         )
         return max(minimumHeight, measuredReplyFieldHeight)
+    }
+
+    private var resolvedBubbleFrameWidth: CGFloat? {
+        CrossChatNotificationGeometry.bubbleFrameWidth(
+            maxBubbleWidth: maxBubbleWidth,
+            visibleNotificationCount: visibleNotificationCount,
+            isSpatial: Self.isSpatialPlatform
+        )
     }
 
     private var renderedNotificationEntries: [CrossChatRenderedNotificationEntry] {
@@ -7699,6 +7754,7 @@ struct CrossChatNotificationBubbleView: View {
         .padding(.top, bubble.isReplying ? replyTopPadding : normalTopPadding)
         .padding(.bottom, bubble.isReplying ? replyBottomPadding : normalBottomPadding)
         .fixedSize(horizontal: false, vertical: true)
+        .frame(width: resolvedBubbleFrameWidth, alignment: .topLeading)
         .frame(maxWidth: maxBubbleWidth, alignment: .topLeading)
         .animation(resizeAnimation, value: bubble.isReplying)
         .animation(resizeAnimation, value: maxBubbleHeight)
@@ -7729,6 +7785,7 @@ struct CrossChatNotificationBubbleView: View {
             shape
                 .fill(spatialNotificationTintColor)
                 .background(.regularMaterial, in: shape)
+                .opacity(CrossChatNotificationMaterialStyle.backgroundOpacity)
         }
 #else
         .glassEffect(.regular, in: RoundedRectangle(cornerRadius: bubbleCornerRadius, style: .continuous))
@@ -7765,6 +7822,14 @@ struct CrossChatNotificationBubbleView: View {
             Button("Clear All Notifications", role: .destructive, action: onDismissAll)
             Button("Cancel", role: .cancel) {}
         }
+    }
+
+    private static var isSpatialPlatform: Bool {
+#if os(visionOS)
+        true
+#else
+        false
+#endif
     }
 
     @ViewBuilder

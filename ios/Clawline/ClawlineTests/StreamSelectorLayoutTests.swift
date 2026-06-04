@@ -188,6 +188,79 @@ struct StreamSelectorLayoutTests {
         #expect(unselected.strokeLineWidth == 0)
     }
 
+    @Test("T1186 Spatial popup selector selected row uses glass-visible highlight")
+    func spatialPopupSelectorSelectedRowUsesGlassVisibleHighlight() {
+        let spatial = StreamSelectorLayout.selectionHighlightStyle(
+            isSelected: true,
+            isDark: true,
+            isSpatial: true
+        )
+        let nonSpatialDark = StreamSelectorLayout.selectionHighlightStyle(
+            isSelected: true,
+            isDark: true,
+            isSpatial: false
+        )
+        let nonSpatialLight = StreamSelectorLayout.selectionHighlightStyle(
+            isSelected: true,
+            isDark: false,
+            isSpatial: false
+        )
+        let unselected = StreamSelectorLayout.selectionHighlightStyle(
+            isSelected: false,
+            isDark: true,
+            isSpatial: true
+        )
+
+        #expect(spatial.fillOpacity > nonSpatialDark.fillOpacity)
+        #expect(spatial.strokeOpacity > 0)
+        #expect(spatial.strokeLineWidth > 0)
+        #expect(nonSpatialDark.fillOpacity == 0.16)
+        #expect(nonSpatialLight.fillOpacity == 0.08)
+        #expect(nonSpatialDark.strokeOpacity == 0)
+        #expect(nonSpatialLight.strokeOpacity == 0)
+        #expect(nonSpatialDark.strokeLineWidth == 0)
+        #expect(nonSpatialLight.strokeLineWidth == 0)
+        #expect(unselected.fillOpacity == 0)
+        #expect(unselected.strokeOpacity == 0)
+        #expect(unselected.strokeLineWidth == 0)
+    }
+
+    @Test("T1188 popup selector resolves status dots for every filtered row")
+    func popupSelectorResolvesStatusDotsForEveryFilteredRow() {
+        let streams = (0..<12).map { index in
+            StreamSession(
+                sessionKey: "s_\(index)",
+                displayName: "Stream \(index)",
+                kind: "custom",
+                orderIndex: index,
+                isBuiltIn: false,
+                createdAt: Date(),
+                updatedAt: Date()
+            )
+        }
+        let lookup = StreamDotStateLookup { sessionKey in
+            switch sessionKey {
+            case "s_0":
+                return .unread
+            case "s_11":
+                return .userTail
+            default:
+                return .inactive
+            }
+        }
+
+        let dotStates = StreamSelectorLayout.dotStatesBySession(
+            streams: streams,
+            lookup: lookup
+        )
+
+        #expect(dotStates.count == streams.count)
+        #expect(dotStates["s_0"] == .unread)
+        #expect(dotStates["s_5"] == .inactive)
+        #expect(dotStates["s_11"] == .userTail)
+        #expect(Set(dotStates.keys) == Set(streams.map(\.sessionKey)))
+    }
+
     @Test("Short stream list uses content-driven height")
     func shortListUsesContentHeight() {
         let height = StreamSelectorLayout.containerHeight(

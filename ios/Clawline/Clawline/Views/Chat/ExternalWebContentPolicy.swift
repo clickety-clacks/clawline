@@ -7,6 +7,11 @@ import Foundation
 import SafariServices
 import UIKit
 
+enum ExternalWebContentGeneratedLinkOpenRoute {
+    case systemOpen
+    case safariViewController
+}
+
 enum ExternalWebContentPolicy {
     static func shouldOpenInBrowserSurface(_ url: URL) -> Bool {
         guard let host = url.host?.lowercased(), isLinkedInHost(host) else {
@@ -47,17 +52,18 @@ enum ExternalWebContentPolicy {
             return false
         }
 
-        #if os(visionOS)
-            showGeneratedLinkFailure(from: view, message: "Generated links are not supported in this browser surface.")
-            return false
-        #else
+        switch generatedLinkOpenRoute(isSpatial: isSpatialPlatform) {
+        case .systemOpen:
+            UIApplication.shared.open(url)
+            return true
+        case .safariViewController:
             guard let presentingViewController = view?.clawlineParentViewController else {
                 showGeneratedLinkFailure(from: view, message: "Clawline could not present the generated link.")
                 return false
             }
             presentingViewController.present(SFSafariViewController(url: url), animated: true)
             return true
-        #endif
+        }
     }
 
     @MainActor
@@ -76,6 +82,18 @@ enum ExternalWebContentPolicy {
 
     private static func isLinkedInHost(_ host: String) -> Bool {
         host == "linkedin.com" || host.hasSuffix(".linkedin.com")
+    }
+
+    static func generatedLinkOpenRoute(isSpatial: Bool) -> ExternalWebContentGeneratedLinkOpenRoute {
+        isSpatial ? .systemOpen : .safariViewController
+    }
+
+    private static var isSpatialPlatform: Bool {
+#if os(visionOS)
+        true
+#else
+        false
+#endif
     }
 }
 

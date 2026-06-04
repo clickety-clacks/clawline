@@ -254,6 +254,7 @@ final class StreamPopupRouteController {
 
 enum StreamPopupFocusHandoff {
     enum CloseAction: Equatable {
+        case requestComposerFocusBeforeDismissal
         case closePopup
         case requestComposerFocusAfterDismissal
     }
@@ -276,11 +277,13 @@ enum StreamPopupFocusHandoff {
     }
 
     static func closeActions(
-        shouldRestoreComposerFocus: Bool
+        shouldRestoreComposerFocus: Bool,
+        preserveComposerFocusDuringDismissal: Bool = false
     ) -> [CloseAction] {
-        shouldRestoreComposerFocus
-            ? [.closePopup, .requestComposerFocusAfterDismissal]
-            : [.closePopup]
+        guard shouldRestoreComposerFocus else { return [.closePopup] }
+        return preserveComposerFocusDuringDismissal
+            ? [.requestComposerFocusBeforeDismissal, .closePopup, .requestComposerFocusAfterDismissal]
+            : [.closePopup, .requestComposerFocusAfterDismissal]
     }
 }
 
@@ -2634,6 +2637,9 @@ struct ChatView: View {
             onClosePopup: {
                 closeStreamPopup()
             },
+            onClosePopupFromDotsIndicator: {
+                closeStreamPopup(preserveComposerFocusDuringDismissal: true)
+            },
             onTrackPickerDismiss: {
                 restoreFocusIfNeeded()
             },
@@ -2921,7 +2927,10 @@ struct ChatView: View {
     }
 
     @MainActor
-    private func closeStreamPopup(restoreComposerFocusIfNeeded: Bool = true) {
+    private func closeStreamPopup(
+        restoreComposerFocusIfNeeded: Bool = true,
+        preserveComposerFocusDuringDismissal: Bool = false
+    ) {
         let shouldRestoreComposer = restoreComposerFocusIfNeeded
             && StreamPopupFocusHandoff.shouldRestoreComposerOnCloseAfterTrackedKeyboardState(
                 didDisplaceComposerFocus: shouldRestoreFocusAfterStreamPopup
@@ -2930,8 +2939,13 @@ struct ChatView: View {
         streamPopupKeyboardDismissalTask?.cancel()
         streamPopupKeyboardDismissalTask = nil
 
-        for action in StreamPopupFocusHandoff.closeActions(shouldRestoreComposerFocus: shouldRestoreComposer) {
+        for action in StreamPopupFocusHandoff.closeActions(
+            shouldRestoreComposerFocus: shouldRestoreComposer,
+            preserveComposerFocusDuringDismissal: preserveComposerFocusDuringDismissal
+        ) {
             switch action {
+            case .requestComposerFocusBeforeDismissal:
+                focusRequestID &+= 1
             case .closePopup:
                 streamPopupRouteController.closePopup()
             case .requestComposerFocusAfterDismissal:
@@ -3358,6 +3372,7 @@ private struct StreamPopupTrigger: View {
     let onCancelScrub: () -> Void
     let onOpenPopup: () -> Void
     let onClosePopup: () -> Void
+    let onClosePopupFromDotsIndicator: () -> Void
     let onTrackPickerDismiss: () -> Void
     let onRequestTrackPicker: () -> Void
 
@@ -3368,7 +3383,11 @@ private struct StreamPopupTrigger: View {
             dotStateLookup: dotStateLookup,
             maxWidth: maxWidth,
             onTap: {
-                onOpenPopup()
+                if routeController.isPopupPresented {
+                    onClosePopupFromDotsIndicator()
+                } else {
+                    onOpenPopup()
+                }
             },
             onScrubPreview: onPreviewScrubStream,
             onScrubCommit: onCommitScrubStream,

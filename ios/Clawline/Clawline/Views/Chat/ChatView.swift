@@ -8756,6 +8756,22 @@ enum CrossChatNotificationGlobalShortcut {
                 }
             }
     }
+
+    static func notificationNames(
+        for action: Action,
+        keyboardOwnershipStore: KeyboardOwnershipStore
+    ) -> [Notification.Name] {
+        let decision = KeyboardCommandRouter.route(
+            intent: action.rootScrollIntent,
+            store: keyboardOwnershipStore
+        )
+        guard decision.outcome.containsHandledSurface(.transcript)
+            || decision.outcome.containsNotificationBubble else { return [] }
+        return ChatRootKeyboardCommandDispatch.notificationNames(
+            for: action.rootScrollIntent,
+            keyboardOwnershipStore: keyboardOwnershipStore
+        )
+    }
 }
 
 private struct CrossChatNotificationKeyboardShortcuts: View {
@@ -8846,14 +8862,8 @@ private struct CrossChatNotificationKeyboardShortcuts: View {
     }
 
     private func routeScrollShortcut(_ spec: CrossChatNotificationGlobalShortcut.Spec) {
-        let decision = KeyboardCommandRouter.route(
-            intent: spec.action.rootScrollIntent,
-            store: keyboardOwnershipStore
-        )
-        guard decision.outcome.containsHandledSurface(.transcript)
-            || decision.outcome.containsNotificationBubble else { return }
-        for name in ChatRootKeyboardCommandDispatch.notificationNames(
-            for: spec.action.rootScrollIntent,
+        for name in CrossChatNotificationGlobalShortcut.notificationNames(
+            for: spec.action,
             keyboardOwnershipStore: keyboardOwnershipStore
         ) {
             NotificationCenter.default.post(name: name, object: nil)

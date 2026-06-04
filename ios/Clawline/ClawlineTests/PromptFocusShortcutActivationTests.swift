@@ -920,8 +920,8 @@ struct PromptFocusShortcutActivationTests {
                 .init(input: "k", modifiers: .command, action: .scrollUp),
             ]
         )
-        #expect(CrossChatNotificationGlobalShortcut.Action.scrollDown.notificationScrollIntent == .notificationScrollForward)
-        #expect(CrossChatNotificationGlobalShortcut.Action.scrollUp.notificationScrollIntent == .notificationScrollBackward)
+        #expect(CrossChatNotificationGlobalShortcut.Action.scrollDown.rootScrollIntent == .transcriptBubbleScrollForward)
+        #expect(CrossChatNotificationGlobalShortcut.Action.scrollUp.rootScrollIntent == .transcriptBubbleScrollBackward)
     }
 
     @Test("Notification scroll resolver finds ancestor scroll view")

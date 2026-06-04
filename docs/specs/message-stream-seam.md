@@ -121,3 +121,4 @@ Implementation should not add unrelated stream UI behavior, notification behavio
 
 - T105-Q1: If the current message model cannot express a deterministic ordering conflict, which source field should become authoritative: provider sequence, timestamp, receive order, or another explicit field?
 - T105-Q2: Should direct-write enforcement be implemented as a unit/static test in the iOS test target, a repo script, or both?
+

@@ -8645,12 +8645,12 @@ enum CrossChatNotificationGlobalShortcut {
         case scrollDown
         case scrollUp
 
-        var rootScrollIntent: KeyboardCommandIntent {
+        var notificationScrollIntent: KeyboardCommandIntent {
             switch self {
             case .scrollDown:
-                return .transcriptBubbleScrollForward
+                return .notificationScrollForward
             case .scrollUp:
-                return .transcriptBubbleScrollBackward
+                return .notificationScrollBackward
             }
         }
     }
@@ -8766,12 +8766,12 @@ private struct CrossChatNotificationKeyboardShortcuts: View {
 
     private func routeScrollShortcut(_ spec: CrossChatNotificationGlobalShortcut.Spec) {
         let decision = KeyboardCommandRouter.route(
-            intent: spec.action.rootScrollIntent,
+            intent: spec.action.notificationScrollIntent,
             store: keyboardOwnershipStore
         )
         guard decision.outcome.containsHandledSurface(.transcript)
             || decision.outcome.containsNotificationBubble else { return }
-        NotificationCenter.default.post(name: .clawlineKeyboardCommandIntent, object: spec.action.rootScrollIntent)
+        NotificationCenter.default.post(name: .clawlineKeyboardCommandIntent, object: spec.action.notificationScrollIntent)
     }
 
     private func routeNotificationStackShortcut(

@@ -961,6 +961,30 @@ struct PromptFocusShortcutActivationTests {
         #expect(CrossChatNotificationGeometry.layoutHostWidth(maxContainerWidth: -10) == 0)
     }
 
+    @Test("T1183 compact notification height keeps current cap")
+    func compactNotificationHeightKeepsCurrentCap() {
+        #expect(CrossChatNotificationGeometry.bubbleMaxHeight(isCompactLayout: true) == 164)
+    }
+
+    @Test("T1183 non-compact notification height allows double cap")
+    func nonCompactNotificationHeightAllowsDoubleCap() {
+        #expect(
+            CrossChatNotificationGeometry.bubbleMaxHeight(isCompactLayout: false)
+                == CrossChatNotificationGeometry.bubbleMaxHeight(isCompactLayout: true) * 2
+        )
+    }
+
+    @Test("T1183 non-compact notification height still shrinks below cap")
+    func nonCompactNotificationHeightStillShrinksBelowCap() {
+        let nonCompactContentCap = CrossChatNotificationGeometry.bubbleMaxHeight(isCompactLayout: false) - 94
+        #expect(
+            CrossChatNotificationEntrySurfaceGeometry.entriesNeedScroll(
+                measuredContentHeight: 80,
+                contentMaxHeight: nonCompactContentCap
+            ) == false
+        )
+    }
+
     @Test("T373 Spatial notification material uses adaptive tint and stronger accent")
     func spatialNotificationMaterialUsesAdaptiveTintAndAccent() {
         #expect(CrossChatNotificationMaterialStyle.backgroundOpacity == 0.85)

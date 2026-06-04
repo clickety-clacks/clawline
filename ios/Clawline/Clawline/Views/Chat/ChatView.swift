@@ -1836,6 +1836,7 @@ struct ChatView: View {
                     topMargin: topMargin,
                     maxContainerHeight: maxContainerHeight,
                     maxContainerWidth: maxContainerWidth,
+                    isCompactLayout: horizontalSizeClass == .compact,
                     trailingSafeAreaInset: trailingSafeAreaInset,
                     normalTrailingMargin: normalTrailingMargin,
                     compactLeadingFitMargin: compactLeadingFitMargin,
@@ -6022,6 +6023,7 @@ final class CrossChatNotificationRenderedEntryCache {
 enum CrossChatNotificationGeometry {
     static let collapsedPeekWidth: CGFloat = 18
     static let swipeCompletionThreshold: CGFloat = 44
+    static let compactBubbleMaxHeight: CGFloat = 164
 
     static func layoutHostWidth(maxContainerWidth: CGFloat) -> CGFloat {
         max(0, maxContainerWidth)
@@ -6044,6 +6046,10 @@ enum CrossChatNotificationGeometry {
         resolvedContainerWidth: CGFloat
     ) -> CGFloat {
         max(0, resolvedContainerWidth - max(0, containerWidth))
+    }
+
+    static func bubbleMaxHeight(isCompactLayout: Bool) -> CGFloat {
+        isCompactLayout ? compactBubbleMaxHeight : compactBubbleMaxHeight * 2
     }
 
     static func transcriptTrailingClearance(
@@ -6178,6 +6184,7 @@ private struct CrossChatNotificationOverlay: View {
     let topMargin: CGFloat
     let maxContainerHeight: CGFloat
     let maxContainerWidth: CGFloat
+    let isCompactLayout: Bool
     let trailingSafeAreaInset: CGFloat
     let normalTrailingMargin: CGFloat
     let compactLeadingFitMargin: CGFloat
@@ -6204,7 +6211,7 @@ private struct CrossChatNotificationOverlay: View {
     static let minimumStackWidth: CGFloat = 280
     static let minVisibleBubbleHeight: CGFloat = 104
     private static let minReplyBubbleHeight: CGFloat = 104
-    private static let maxBubbleHeight: CGFloat = 164
+    private static let maxBubbleHeight: CGFloat = CrossChatNotificationGeometry.compactBubbleMaxHeight
     private static let bubbleSpacing: CGFloat = 10
     private static let maxStackWidth: CGFloat = 562.5
     private static let bubbleCornerRadius: CGFloat = 18
@@ -6317,7 +6324,7 @@ private struct CrossChatNotificationOverlay: View {
     }
 
     private var maxBubbleHeight: CGFloat {
-        Self.maxBubbleHeight
+        CrossChatNotificationGeometry.bubbleMaxHeight(isCompactLayout: isCompactLayout)
     }
 
     private var stackWidth: CGFloat {

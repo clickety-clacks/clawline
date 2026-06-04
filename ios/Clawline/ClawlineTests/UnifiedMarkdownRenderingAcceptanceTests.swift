@@ -597,6 +597,31 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
         #expect(linkTarget("details", in: textView.attributedText)?.absoluteString == "https://example.com")
     }
 
+    @Test("T1183 short notification bubble does not grow when max height grows")
+    @MainActor
+    func t1183_shortNotificationBubbleDoesNotGrowWhenMaxHeightGrows() {
+        let compactHost = UIHostingController(
+            rootView: notificationBubbleView(
+                content: "Short notification",
+                maxBubbleHeight: CrossChatNotificationGeometry.bubbleMaxHeight(isCompactLayout: true)
+            )
+        )
+        let nonCompactHost = UIHostingController(
+            rootView: notificationBubbleView(
+                content: "Short notification",
+                maxBubbleHeight: CrossChatNotificationGeometry.bubbleMaxHeight(isCompactLayout: false)
+            )
+        )
+
+        let fittingSize = CGSize(width: 360, height: UIView.layoutFittingCompressedSize.height)
+        let compactHeight = compactHost.sizeThatFits(in: fittingSize).height
+        let nonCompactHeight = nonCompactHost.sizeThatFits(in: fittingSize).height
+
+        #expect(compactHeight > 0)
+        #expect(abs(nonCompactHeight - compactHeight) <= 1)
+        #expect(nonCompactHeight < CrossChatNotificationGeometry.bubbleMaxHeight(isCompactLayout: true))
+    }
+
     @Test("T383 visible notification renders one attributed text view while dismissed renders none")
     @MainActor
     func t383_realNotificationBubbleDoesNotDuplicateAttributedTextViewsForMeasurement() throws {
@@ -785,6 +810,53 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
         let range = (attributed.string as NSString).range(of: token)
         guard range.location != NSNotFound else { return nil }
         return attributed.attribute(.link, at: range.location, effectiveRange: nil) as? URL
+    }
+
+    private func notificationBubbleView(content: String, maxBubbleHeight: CGFloat) -> some View {
+        CrossChatNotificationBubbleView(
+            bubble: CrossChatNotificationBubble(
+                sourceChatId: "agent:main:clawline:user:s_t1183_notification_height",
+                sourceTitle: "Side Thread",
+                entries: [
+                    CrossChatAssistantNotificationEntry(
+                        id: "s_t1183_entry",
+                        content: content,
+                        timestamp: Date()
+                    )
+                ],
+                lastAssistantActivityAt: Date()
+            ),
+            assignedNumber: 1,
+            visibleNotificationCount: 1,
+            showShortcutLabel: true,
+            maxBubbleHeight: maxBubbleHeight,
+            maxBubbleWidth: 360,
+            bubbleCornerRadius: 18,
+            isSending: false,
+            canCancelSend: false,
+            canSendReply: false,
+            connectionState: .connected,
+            replyDraft: .constant(""),
+            onDismiss: {},
+            onReply: {},
+            onCancelReply: {},
+            onDismissAll: {},
+            onNavigate: {},
+            onSendReply: {},
+            onCancelSend: {},
+            onReconnect: {},
+            onActivate: {},
+            onReplyFocusChange: { _ in },
+            isActionMenuOpen: false,
+            actionMenuSelection: .goToChat,
+            onActionMenuSelectionChange: { _ in },
+            onActionMenuAction: { _ in },
+            onRegisterScrollView: { _ in },
+            isDismissSwipeActive: false,
+            isContentScrollLocked: false,
+            onContentScrollDragChanged: { _ in },
+            onContentScrollDragEnded: {}
+        )
     }
 
     private func textViews(in view: UIView) -> [UITextView] {

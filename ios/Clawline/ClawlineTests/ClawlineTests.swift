@@ -10,9 +10,9 @@ import Testing
 @testable import Clawline
 
 struct ClawlineTests {
-    @Test("T167: default font scale keeps Catalyst in parity with iOS and iPad")
-    func scaledPointSizeKeepsPlatformDefaultParity() {
-        let suiteName = "ClawlineTests.T167.scaledPointSizeKeepsPlatformDefaultParity"
+    @Test("T167: font scale applies Catalyst platform delta before user multiplier")
+    func scaledPointSizeUsesCatalystPlatformDeltaAndPersistedScale() {
+        let suiteName = "ClawlineTests.T167.scaledPointSizeUsesCatalystPlatformDeltaAndPersistedScale"
         guard let defaults = UserDefaults(suiteName: suiteName) else {
             Issue.record("Failed to create isolated defaults suite")
             return
@@ -23,13 +23,19 @@ struct ClawlineTests {
         }
 
         let basePointSize: CGFloat = 20
+        let expectedDefault: CGFloat
+#if targetEnvironment(macCatalyst)
+        expectedDefault = 24
+#else
+        expectedDefault = 20
+#endif
 
-        #expect(AppFontScale.scaledPointSize(for: basePointSize, defaults: defaults) == basePointSize)
+        #expect(AppFontScale.scaledPointSize(for: basePointSize, defaults: defaults) == expectedDefault)
 
         AppFontScale.persist(1.5, defaults: defaults)
         #expect(
             AppFontScale.scaledPointSize(for: basePointSize, defaults: defaults)
-                == basePointSize * 1.5
+                == expectedDefault * 1.5
         )
     }
 

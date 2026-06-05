@@ -736,7 +736,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         layer.addSublayer(topHighlightLayer)
 
         contentStack.axis = .vertical
-        contentStack.spacing = 10
+        contentStack.spacing = 6
         contentStack.alignment = .fill
         contentStack.insetsLayoutMarginsFromSafeArea = false
         contentStack.preservesSuperviewLayoutMargins = false

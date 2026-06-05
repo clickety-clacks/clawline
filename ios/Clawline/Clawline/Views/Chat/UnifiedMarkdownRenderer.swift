@@ -96,7 +96,11 @@ private enum UnifiedMarkdownParser {
                 blocks.append(
                     .code(
                         language: normalizedLanguage(code.language),
-                        code: normalizeCodeBlockIndent(in: restoreProtectedPipes(in: code.code))
+                        code: displayMarkdown(
+                            fromPreprocessedMarkdown: normalizeCodeBlockIndent(
+                                in: restoreProtectedPipes(in: code.code)
+                            )
+                        )
                     )
                 )
                 continue
@@ -722,7 +726,7 @@ enum UnifiedMarkdownRenderer {
                     lineSpacing: options.lineSpacing,
                     markHighlightColor: options.markHighlightColor
                 ) ?? NSAttributedString(
-                    string: markdownSource,
+                    string: fallbackDisplayMarkdown(fromPreprocessedMarkdown: markdownSource),
                     attributes: baseAttributes(
                         baseFont: options.baseFont,
                         inkColor: options.inkColor,
@@ -850,6 +854,7 @@ enum UnifiedMarkdownRenderer {
         _ = TextLinkURLTemplateRules.applyConfiguredRules(to: nsAttributed)
         applyHeadingStyles(markdown: markdownForRender, nsAttributed: nsAttributed, baseFont: baseFont)
         applyMarkHighlights(nsAttributed: nsAttributed, color: markHighlightColor)
+        removeIndentedLiteralSentinels(nsAttributed)
 
         let rendered = NSAttributedString(attributedString: nsAttributed)
         if markdownForRender.count <= attributedMarkdownCacheMaxSourceLength {
@@ -1069,6 +1074,22 @@ enum UnifiedMarkdownRenderer {
             return indentedLiteralSentinel + line
         }
         return transformed.joined(separator: "\n")
+    }
+
+    private static func removeIndentedLiteralSentinels(_ attributed: NSMutableAttributedString) {
+        let sentinel = indentedLiteralSentinel
+        while true {
+            let range = (attributed.string as NSString).range(of: sentinel)
+            guard range.location != NSNotFound else { break }
+            attributed.deleteCharacters(in: range)
+        }
+    }
+
+    private static func fallbackDisplayMarkdown(fromPreprocessedMarkdown markdown: String) -> String {
+        markdown
+            .replacingOccurrences(of: markOpenSentinel, with: "")
+            .replacingOccurrences(of: markCloseSentinel, with: "")
+            .replacingOccurrences(of: indentedLiteralSentinel, with: "")
     }
 
     private static func preprocessMarkHighlightSyntax(_ markdown: String) -> String {

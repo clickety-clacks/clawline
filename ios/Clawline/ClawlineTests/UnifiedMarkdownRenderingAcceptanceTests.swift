@@ -413,11 +413,39 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
         """
         let rendered = renderMarkdownForTests(markdown: markdown, options: bubbleOptions())
         let text = joinedText(from: rendered)
+        let codeValues = rendered.compactMap { block -> String? in
+            if case .code(_, let code) = block {
+                return code
+            }
+            return nil
+        }
 
         #expect(text.contains("• Bullet"))
         #expect(text.contains("⸻"))
         #expect(text.contains("    - literal"))
         #expect(!text.contains("• literal"))
+        #expect(!text.contains("\u{F0002}"))
+        #expect(!text.unicodeScalars.contains { scalar in
+            (0xE000...0xF8FF).contains(Int(scalar.value))
+        })
+
+        let fenced = renderMarkdownForTests(
+            markdown: """
+            ```text
+                - literal
+            ```
+            """,
+            options: bubbleOptions()
+        )
+        let fencedCodeValues = fenced.compactMap { block -> String? in
+            if case .code(_, let code) = block {
+                return code
+            }
+            return nil
+        }
+        #expect(codeValues.isEmpty)
+        #expect(fencedCodeValues.map { $0.trimmingCharacters(in: .newlines) } == ["    - literal"])
+        #expect(!fencedCodeValues.joined().contains("\u{F0002}"))
     }
 
     @Test("T137: ordered list markers render as 1,2,3 instead of repeating 1")

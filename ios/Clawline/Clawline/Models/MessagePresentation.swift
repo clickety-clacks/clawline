@@ -985,6 +985,7 @@ enum MessagePresentationBuilder {
         let mediaURLStrings = Set(mediaURLs.map(\.absoluteString))
         attributed.enumerateAttribute(.link, in: NSRange(location: 0, length: attributed.length)) { value, range, _ in
             guard let value else { return }
+            guard !TextLinkURLTemplateRules.isGeneratedLink(in: attributed, characterRange: range) else { return }
             let href: String
             if let url = value as? URL {
                 href = url.absoluteString

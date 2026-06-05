@@ -8,6 +8,7 @@ import Foundation
 import UIKit
 @testable import Clawline
 
+@Suite(.serialized)
 struct MessagePresentationURLBoundaryTests {
     @Test("Direct image URL content renders as remote image media")
     func directImageURLContentRendersAsRemoteImageMedia() {
@@ -234,6 +235,28 @@ struct MessagePresentationURLBoundaryTests {
         #expect(presentation.parts.contains(where: { part in
             if case .markdown(let text) = part {
                 return text.contains("Ticker update") && text.contains("Details")
+            }
+            return false
+        }))
+    }
+
+    @Test("Generated text link rule URLs stay out of detected card URLs")
+    @MainActor
+    func generatedTextLinkRuleURLsStayOutOfDetectedCardURLs() {
+        let originalRules = TextLinkURLTemplateRules.configuredRules
+        TextLinkURLTemplateRules.configuredRules = [.janusTrackerExample]
+        defer { TextLinkURLTemplateRules.configuredRules = originalRules }
+
+        let presentation = buildPresentation(content: "Review T1201.")
+
+        #expect(presentation.detectedURLs.isEmpty)
+        #expect(!presentation.parts.contains(where: { part in
+            if case .linkPreview = part { return true }
+            return false
+        }))
+        #expect(presentation.parts.contains(where: { part in
+            if case .markdown(let text) = part {
+                return text == "Review T1201."
             }
             return false
         }))

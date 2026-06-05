@@ -203,6 +203,21 @@ enum CrossChatNotificationOverlayLifecycle {
     }
 }
 
+enum CrossChatNotificationNavigationDockPolicy {
+    enum Origin {
+        case ordinaryChatNavigation
+        case notificationNavigation
+    }
+
+    static func shouldDock(
+        origin: Origin,
+        isSwitchingChats: Bool,
+        hasNotifications: Bool
+    ) -> Bool {
+        origin == .notificationNavigation && isSwitchingChats && hasNotifications
+    }
+}
+
 @MainActor
 @Observable
 final class StreamPopupRouteController {
@@ -2691,10 +2706,7 @@ struct ChatView: View {
         } else {
             streamSwitchComposerFocusRestore = nil
         }
-        if viewModel.uiSelectedSessionKey != sessionKey,
-           !viewModel.crossChatNotificationBubbles.isEmpty {
-            isCrossChatNotificationStackDocked = true
-        }
+        // V307-28: ordinary chat navigation must not dock an undocked notification stack.
         viewModel.requestStreamSwitch(
             to: sessionKey,
             source: source
@@ -2710,8 +2722,12 @@ struct ChatView: View {
         } else {
             streamSwitchComposerFocusRestore = nil
         }
-        if viewModel.uiSelectedSessionKey != sourceChatId,
-           !viewModel.crossChatNotificationBubbles.isEmpty {
+        // V307-28: only notification body/action-menu navigation may dock for preservation.
+        if CrossChatNotificationNavigationDockPolicy.shouldDock(
+            origin: .notificationNavigation,
+            isSwitchingChats: viewModel.uiSelectedSessionKey != sourceChatId,
+            hasNotifications: !viewModel.crossChatNotificationBubbles.isEmpty
+        ) {
             isCrossChatNotificationStackDocked = true
         }
         viewModel.requestCrossChatNotificationNavigation(to: sourceChatId)

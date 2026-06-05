@@ -374,7 +374,7 @@ enum MessagePresentationBuilder {
 
                         let remoteImageExtraction = extractRemoteImageURLs(from: inlineImageExtraction.markdownSource)
                         remoteImageURLs.append(contentsOf: remoteImageExtraction.urls)
-                        detectedURLOccurrences.append(contentsOf: extractMarkdownURLs(from: remoteImageExtraction.markdownSource))
+                        detectedURLOccurrences.append(contentsOf: extractRenderedURLs(from: attributedText))
                     }
                     let trimmed = source.trimmingCharacters(in: .whitespacesAndNewlines)
                     guard !trimmed.isEmpty else { continue }
@@ -962,6 +962,47 @@ enum MessagePresentationBuilder {
         // extracted set so these URLs also produce link cards.
         let plainText = NSAttributedString(attributed).string
         let detectedBareURLs = extractURLs(from: plainText)
+        let seen = Set(urls.map(\.absoluteString))
+        for url in detectedBareURLs where !seen.contains(url.absoluteString)
+            && !seen.contains(where: { seenURL in
+                seenURL.hasPrefix(url.absoluteString) && seenURL.dropFirst(url.absoluteString.count).allSatisfy { $0 == "=" }
+            }) {
+            urls.append(url)
+        }
+
+        return urls
+    }
+
+    private static func extractRenderedURLs(from attributed: NSAttributedString) -> [URL] {
+        let text = attributed.string
+        var urls: [URL] = []
+        attributed.enumerateAttribute(.link, in: NSRange(location: 0, length: attributed.length)) { value, range, _ in
+            guard let value else { return }
+            let href: String
+            if let url = value as? URL {
+                href = url.absoluteString
+            } else if let string = value as? String {
+                href = string
+            } else {
+                return
+            }
+            let displayedText = range.location != NSNotFound && NSMaxRange(range) <= (text as NSString).length
+                ? (text as NSString).substring(with: range)
+                : href
+            let previousRunText = wrappedMarkPrefix(in: text, matchRange: range)
+            let validatedURL = wrappedMarkTrimmedURL(
+                    displayedText: displayedText,
+                    href: href,
+                    previousRunText: previousRunText
+                )
+                ?? sanitizedDetectedURL(from: displayedText)
+                ?? sanitizedDetectedURL(from: href)
+                ?? validatedDetectedURL(from: href)
+            guard let validatedURL else { return }
+            urls.append(sanitizedDetectedURL(from: validatedURL.absoluteString) ?? validatedURL)
+        }
+
+        let detectedBareURLs = extractURLs(from: text)
         let seen = Set(urls.map(\.absoluteString))
         for url in detectedBareURLs where !seen.contains(url.absoluteString)
             && !seen.contains(where: { seenURL in

@@ -203,6 +203,20 @@ struct MessagePresentationURLBoundaryTests {
         #expect(presentation.detectedURLs.map { $0.absoluteString } == [url])
     }
 
+    @Test("Markdown link hrefs still render as link previews")
+    func markdownLinkHrefsStillRenderAsLinkPreviews() {
+        let url = "https://example.com/ticker/latest.html"
+        let presentation = buildPresentation(content: "[Ticker update](\(url))")
+
+        #expect(presentation.parts.contains(where: { part in
+            if case .linkPreview(let detected) = part {
+                return detected.absoluteString == url
+            }
+            return false
+        }))
+        #expect(presentation.detectedURLs.map { $0.absoluteString } == [url])
+    }
+
     @Test("Direct image URLs inside code blocks stay code")
     func directImageURLsInsideCodeBlocksStayCode() {
         let imageURL = "https://example.com/ticker/latest.png"

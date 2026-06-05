@@ -162,6 +162,47 @@ struct UnifiedMarkdownRendererMarkTests {
         #expect(rgb(renderedText, at: focusRange.location) == RGB(red: 158, green: 62, blue: 28))
     }
 
+    @Test("User bubble markdown rendering removes mark delimiters")
+    func userBubbleMarkdownRenderingRemovesMarkDelimiters() {
+        let message = Message(
+            id: "s_user_mark_route",
+            role: .user,
+            content: "==Root cause:== user bubble path",
+            timestamp: Date(),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: "agent:main:clawline:user:main",
+            replyToMessageId: "llm_reply_target"
+        )
+        var state = StreamingTableParseState()
+        let presentation = MessagePresentationBuilder.build(
+            from: message,
+            metrics: ChatFlowTheme.Metrics(isCompact: true),
+            streamingState: &state
+        )
+
+        let content = UnifiedMarkdownRenderer.makeContent(
+            presentation: presentation,
+            baseFont: UIFont.systemFont(ofSize: 15, weight: .regular),
+            inkColor: .black,
+            lineSpacing: 4,
+            stripDetectedURLs: false,
+            role: message.role,
+            isDark: false
+        )
+
+        guard case .attributedText(let renderedText)? = content.renderedBlocks.first else {
+            Issue.record("Expected attributed text block")
+            return
+        }
+
+        #expect(renderedText.string == "Root cause: user bubble path")
+        let rootCauseRange = (renderedText.string as NSString).range(of: "Root cause:")
+        #expect(rootCauseRange.location != NSNotFound)
+        #expect(rgb(renderedText, at: rootCauseRange.location) == RGB(red: 158, green: 62, blue: 28))
+    }
+
     @Test("Link spans stop before trailing backticks in assistant markdown rendering")
     func assistantMarkdownRenderingTrimsBacktickLinkSpan() {
         let rust = SalientHighlightApplier.highlightColor(isDark: false)

@@ -27,7 +27,10 @@ struct MessagePresentationURLBoundaryTests {
         #expect(presentation.detectedURLs.isEmpty)
         #expect(presentation.hasMediaOnly)
         #expect(!presentation.hasTextualContent)
-        #expect(presentation.markdownRenderPlan.blocks.isEmpty)
+        #expect(!presentation.parts.contains(where: { part in
+            if case .markdown = part { return true }
+            return false
+        }))
     }
 
     @Test("Direct image URL preserves caption text without URL markdown")
@@ -108,7 +111,10 @@ struct MessagePresentationURLBoundaryTests {
         #expect(attachment.data == Data(base64Encoded: Self.onePixelPNGBase64))
         #expect(presentation.hasMediaOnly)
         #expect(!presentation.hasTextualContent)
-        #expect(presentation.markdownRenderPlan.blocks.isEmpty)
+        #expect(!presentation.parts.contains(where: { part in
+            if case .markdown = part { return true }
+            return false
+        }))
     }
 
     @Test("Inline image data URL suppresses generated attachment summary text")

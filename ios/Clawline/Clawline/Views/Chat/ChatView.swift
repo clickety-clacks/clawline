@@ -5891,27 +5891,22 @@ enum CrossChatNotificationMarkdownRenderer {
         isDark: Bool
     ) -> [RenderedMarkdownBlock] {
         let markdown = content.isEmpty ? "Assistant reply" : content
-        let plan = UnifiedMarkdownParser.parse(
-            markdown: markdown,
-            messageID: messageID,
-            metrics: metrics
-        )
-        let rendered = UnifiedMarkdownRenderer.render(
-            plan: plan,
+        let content = UnifiedMarkdownRenderer.makeContent(
+            messageText: markdown,
+            context: MarkdownMessageRenderContext(
+                role: .assistant,
+                messageID: messageID,
+                metrics: metrics
+            ),
             baseFont: baseFont,
             inkColor: inkColor,
             lineSpacing: lineSpacing,
             stripDetectedURLs: false,
-            role: .assistant,
             isDark: isDark
         )
+        let rendered = content.renderedBlocks
         guard !rendered.isEmpty else {
-            let attributed = UnifiedMarkdownRenderer.renderNSAttributedString(
-                markdown: markdown,
-                baseFont: baseFont,
-                inkColor: inkColor,
-                lineSpacing: lineSpacing
-            ) ?? NSAttributedString(
+            let attributed = content.firstAttributedText ?? NSAttributedString(
                 string: markdown,
                 attributes: [
                     .font: baseFont,

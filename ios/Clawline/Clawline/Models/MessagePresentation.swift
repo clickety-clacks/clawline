@@ -104,7 +104,7 @@ struct StreamingTableParseState {
 
 struct MessagePresentation: Equatable {
     let parts: [MessagePart]
-    let markdownRenderPlan: MarkdownRenderPlan
+    let copyableReadableText: String?
     let wordCount: Int
     let hasTextualContent: Bool
     let isEmojiOnly: Bool
@@ -120,7 +120,7 @@ struct MessagePresentation: Equatable {
 
     init(
         parts: [MessagePart],
-        markdownRenderPlan: MarkdownRenderPlan = .empty,
+        copyableReadableText: String? = nil,
         wordCount: Int,
         hasTextualContent: Bool,
         isEmojiOnly: Bool,
@@ -130,7 +130,7 @@ struct MessagePresentation: Equatable {
         hasSingleURL: Bool
     ) {
         self.parts = parts
-        self.markdownRenderPlan = markdownRenderPlan
+        self.copyableReadableText = copyableReadableText
         self.wordCount = wordCount
         self.hasTextualContent = hasTextualContent
         self.isEmojiOnly = isEmojiOnly
@@ -142,55 +142,6 @@ struct MessagePresentation: Equatable {
 }
 
 extension MessagePresentation {
-    var copyableReadableText: String? {
-        let components = markdownRenderPlan.blocks.compactMap { block -> String? in
-            switch block {
-            case .richText(let markdownSource):
-                return copyablePlainText(fromMarkdown: markdownSource)
-            case .code(_, let code):
-                let trimmed = code.trimmingCharacters(in: .whitespacesAndNewlines)
-                return trimmed.isEmpty ? nil : trimmed
-            case .table(let model):
-                let text = copyablePlainText(from: model)
-                return text.isEmpty ? nil : text
-            }
-        }
-
-        let text = components
-            .filter { !$0.isEmpty }
-            .joined(separator: "\n\n")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        return text.isEmpty ? nil : text
-    }
-
-    private func copyablePlainText(fromMarkdown source: String) -> String {
-        if let attributed = try? AttributedString(
-            markdown: source,
-            options: .init(interpretedSyntax: .full)
-        ) {
-            return NSAttributedString(attributed).string.trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-        return source.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private func copyablePlainText(from model: TableModel) -> String {
-        var lines: [String] = []
-        if let header = model.header {
-            let headerText = header.map(\.plainText).joined(separator: "\t")
-            if !headerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                lines.append(headerText)
-            }
-        }
-        for row in model.rows {
-            let rowText = row.cells.map(\.plainText).joined(separator: "\t")
-            if !rowText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                lines.append(rowText)
-            }
-        }
-        return lines
-            .joined(separator: "\n")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-    }
 }
 
 enum MessagePart: Equatable {
@@ -206,26 +157,6 @@ enum MessagePart: Equatable {
     case terminalSession(TerminalSessionDescriptor)
     case interactiveHTML(InteractiveHTMLDescriptor)
     case inlineEmoji(String)
-}
-
-enum MarkdownRenderBlock: Equatable {
-    case richText(markdownSource: String)
-    case code(language: String?, code: String)
-    case table(TableModel)
-}
-
-struct MarkdownRenderPlan: Equatable {
-    let blocks: [MarkdownRenderBlock]
-    let plainTextForMetrics: String
-    let containsTextualContent: Bool
-    let isEmojiOnly: Bool
-
-    nonisolated static let empty = MarkdownRenderPlan(
-        blocks: [],
-        plainTextForMetrics: "",
-        containsTextualContent: false,
-        isEmojiOnly: false
-    )
 }
 
 struct MarkdownRenderOptions: Equatable {
@@ -346,11 +277,33 @@ enum MessagePresentationBuilder {
         metrics: ChatFlowTheme.Metrics,
         streamingState: inout StreamingTableParseState
     ) -> MessagePresentation {
-        let parsedMarkdownPlan = UnifiedMarkdownParser.parse(
-            markdown: message.content,
-            messageID: message.id,
-            metrics: metrics
+        let markdownContent = UnifiedMarkdownRenderer.makeContent(
+            messageText: message.content,
+            context: MarkdownMessageRenderContext(
+                role: message.role,
+                messageID: message.id,
+                metrics: metrics
+            ),
+            baseFont: UIFont.systemFont(ofSize: metrics.bodyFontSize),
+            inkColor: .label,
+            lineSpacing: 0,
+            stripDetectedURLs: false,
+            isDark: false
         )
+        return buildPrepared(
+            from: message,
+            metrics: metrics,
+            streamingState: &streamingState,
+            renderedBlocks: markdownContent.renderedBlocks
+        )
+    }
+
+    private static func buildPrepared(
+        from message: Message,
+        metrics: ChatFlowTheme.Metrics,
+        streamingState: inout StreamingTableParseState,
+        renderedBlocks: [RenderedMarkdownBlock]
+    ) -> MessagePresentation {
         let terminalAllowed = SessionKey.isClawlinePersonalDM(message.sessionKey)
         let attachmentBuckets = partitionAttachments(
             from: message.attachments,
@@ -361,16 +314,29 @@ enum MessagePresentationBuilder {
         var hasRenderableAttachments = !attachmentBuckets.richParts.isEmpty || !imageAttachments.isEmpty || !fileAttachments.isEmpty
         var parts: [MessagePart] = []
         var markdownParts: [MessagePart] = []
-        var effectiveBlocks: [MarkdownRenderBlock] = []
         var plainTextForMetricsParts: [String] = []
+        var copyableTextParts: [String] = []
         var remoteImageURLs: [URL] = []
-        var emojiOnly = parsedMarkdownPlan.isEmojiOnly
+        var emojiOnly = false
         var hasBlockedParts = hasRenderableAttachments
         var detectedURLOccurrences: [URL] = []
         let suppressTextForFiles = shouldSuppressTextForFileAttachments(
             content: message.content,
             fileAttachments: fileAttachments
         )
+        let messageInlineImageExtraction = extractInlineImagePayloads(
+            from: message.content,
+            messageID: message.id,
+            startingAt: imageAttachments.count
+        )
+        let messageRemoteImageExtraction = extractRemoteImageURLs(from: messageInlineImageExtraction.markdownSource)
+        let hasCodeBlock = renderedBlocks.contains { block in
+            if case .code = block { return true }
+            return false
+        }
+        let shouldUseMessageMediaExtraction = !messageInlineImageExtraction.attachments.isEmpty
+            || !messageRemoteImageExtraction.urls.isEmpty
+        let shouldExtractMessageMedia = shouldUseMessageMediaExtraction && !hasCodeBlock
 
         // Rich document attachments share one MIME dispatch path.
         for richPart in attachmentBuckets.richParts {
@@ -378,45 +344,69 @@ enum MessagePresentationBuilder {
             hasBlockedParts = true
         }
 
-        if !suppressTextForFiles {
-            for block in parsedMarkdownPlan.blocks {
-                switch block {
-                case .richText(let source):
-                    let inlineImageExtraction = extractInlineImagePayloads(
-                        from: source,
-                        messageID: message.id,
-                        startingAt: imageAttachments.count
-                    )
-                    imageAttachments.append(contentsOf: inlineImageExtraction.attachments)
-                    if !inlineImageExtraction.attachments.isEmpty {
-                        hasRenderableAttachments = true
-                        hasBlockedParts = true
-                    }
+        if shouldExtractMessageMedia {
+            imageAttachments.append(contentsOf: messageInlineImageExtraction.attachments)
+            remoteImageURLs.append(contentsOf: messageRemoteImageExtraction.urls)
+            if !messageInlineImageExtraction.attachments.isEmpty {
+                hasRenderableAttachments = true
+                hasBlockedParts = true
+            }
+        }
 
-                    let remoteImageExtraction = extractRemoteImageURLs(from: inlineImageExtraction.markdownSource)
-                    remoteImageURLs.append(contentsOf: remoteImageExtraction.urls)
-                    detectedURLOccurrences.append(contentsOf: extractMarkdownURLs(from: remoteImageExtraction.markdownSource))
-                    let trimmed = remoteImageExtraction.markdownSource.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !suppressTextForFiles {
+            for block in renderedBlocks {
+                switch block {
+                case .attributedText(let attributedText):
+                    let source = shouldExtractMessageMedia
+                        ? messageRemoteImageExtraction.markdownSource
+                        : attributedText.string
+                    if !shouldExtractMessageMedia {
+                        let inlineImageExtraction = extractInlineImagePayloads(
+                            from: source,
+                            messageID: message.id,
+                            startingAt: imageAttachments.count
+                        )
+                        imageAttachments.append(contentsOf: inlineImageExtraction.attachments)
+                        if !inlineImageExtraction.attachments.isEmpty {
+                            hasRenderableAttachments = true
+                            hasBlockedParts = true
+                        }
+
+                        let remoteImageExtraction = extractRemoteImageURLs(from: inlineImageExtraction.markdownSource)
+                        remoteImageURLs.append(contentsOf: remoteImageExtraction.urls)
+                        detectedURLOccurrences.append(contentsOf: extractMarkdownURLs(from: remoteImageExtraction.markdownSource))
+                    }
+                    let trimmed = source.trimmingCharacters(in: .whitespacesAndNewlines)
                     guard !trimmed.isEmpty else { continue }
                     if hasRenderableAttachments, isAttachmentSummaryLine(trimmed) {
                         continue
                     }
-                    effectiveBlocks.append(.richText(markdownSource: trimmed))
-                    plainTextForMetricsParts.append(markdownPlainText(from: trimmed))
-                    if EmojiOnlyClassifier.isEmojiOnly(trimmed) {
-                        markdownParts.append(.inlineEmoji(trimmed))
+                    let displayText = trimmed
+                    let plainText = markdownPlainText(from: displayText)
+                    plainTextForMetricsParts.append(plainText)
+                    if !plainText.isEmpty {
+                        copyableTextParts.append(plainText)
+                    }
+                    if EmojiOnlyClassifier.isEmojiOnly(displayText) {
+                        markdownParts.append(.inlineEmoji(displayText))
                     } else {
-                        markdownParts.append(.markdown(trimmed))
+                        markdownParts.append(.markdown(displayText))
                     }
                 case .code(let language, let code):
-                    effectiveBlocks.append(block)
-                    plainTextForMetricsParts.append(code.trimmingCharacters(in: .whitespacesAndNewlines))
+                    let trimmedCode = code.trimmingCharacters(in: .whitespacesAndNewlines)
+                    plainTextForMetricsParts.append(trimmedCode)
+                    if !trimmedCode.isEmpty {
+                        copyableTextParts.append(trimmedCode)
+                    }
                     markdownParts.append(.code(language: language, code: code))
                     hasBlockedParts = true
                     emojiOnly = false
                 case .table(let model):
-                    effectiveBlocks.append(block)
-                    plainTextForMetricsParts.append(tablePlainText(from: model))
+                    let tableText = tablePlainText(from: model)
+                    plainTextForMetricsParts.append(tableText)
+                    if !tableText.isEmpty {
+                        copyableTextParts.append(tableCopyableText(from: model))
+                    }
                     markdownParts.append(.table(model))
                     hasBlockedParts = true
                     emojiOnly = false
@@ -432,20 +422,12 @@ enum MessagePresentationBuilder {
             .filter { !$0.isEmpty }
             .joined(separator: " ")
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        let markdownPlan = suppressTextForFiles ? .empty : MarkdownRenderPlan(
-            blocks: effectiveBlocks,
-            plainTextForMetrics: effectivePlainTextForMetrics,
-            containsTextualContent: !effectivePlainTextForMetrics.isEmpty,
-            isEmojiOnly: !effectivePlainTextForMetrics.isEmpty
-                && effectiveBlocks.allSatisfy { block in
-                    if case .richText(let source) = block {
-                        return EmojiOnlyClassifier.isEmojiOnly(markdownPlainText(from: source))
-                    }
-                    return false
-                }
-        )
-        let hasTextual = markdownPlan.containsTextualContent
-        emojiOnly = markdownPlan.isEmojiOnly
+        let hasTextual = !effectivePlainTextForMetrics.isEmpty
+        emojiOnly = hasTextual
+            && markdownParts.allSatisfy { part in
+                if case .inlineEmoji = part { return true }
+                return false
+            }
 
         // Preserve first-seen order for UI, but provide a stable unique list for sizing/cards.
         var uniqueURLs: [URL] = []
@@ -488,14 +470,18 @@ enum MessagePresentationBuilder {
         }
         let hasTerminal = parts.contains(where: { if case .terminalSession = $0 { return true }; return false })
 
-        let plainWordCount = stripMarkdownMarkers(from: markdownPlan.plainTextForMetrics)
+        let plainWordCount = stripMarkdownMarkers(from: effectivePlainTextForMetrics)
             .components(separatedBy: CharacterSet.whitespacesAndNewlines)
             .filter { !$0.isEmpty }
             .count
+        let copyableReadableText = copyableTextParts
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
 
         return MessagePresentation(
             parts: parts,
-            markdownRenderPlan: suppressTextForFiles ? .empty : markdownPlan,
+            copyableReadableText: copyableReadableText.isEmpty ? nil : copyableReadableText,
             wordCount: plainWordCount,
             hasTextualContent: hasTextual,
             isEmojiOnly: emojiOnly && hasTextual,
@@ -735,6 +721,23 @@ enum MessagePresentationBuilder {
         return components.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    private static func tableCopyableText(from model: TableModel) -> String {
+        var lines: [String] = []
+        if let header = model.header {
+            let headerText = header.map(\.plainText).joined(separator: "\t")
+            if !headerText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                lines.append(headerText)
+            }
+        }
+        for row in model.rows {
+            let rowText = row.cells.map(\.plainText).joined(separator: "\t")
+            if !rowText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                lines.append(rowText)
+            }
+        }
+        return lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     private static func partitionAttachments(
         from attachments: [Attachment],
         terminalAllowed: Bool
@@ -950,7 +953,7 @@ enum MessagePresentationBuilder {
                 ?? sanitizedDetectedURL(from: url.absoluteString)
                 ?? validatedDetectedURL(from: url.absoluteString)
             guard let validatedURL else { continue }
-            urls.append(validatedURL)
+            urls.append(sanitizedDetectedURL(from: validatedURL.absoluteString) ?? validatedURL)
         }
 
         // Bare URLs (e.g. `http://host:port`) are not recognized as links by the
@@ -960,7 +963,10 @@ enum MessagePresentationBuilder {
         let plainText = NSAttributedString(attributed).string
         let detectedBareURLs = extractURLs(from: plainText)
         let seen = Set(urls.map(\.absoluteString))
-        for url in detectedBareURLs where !seen.contains(url.absoluteString) {
+        for url in detectedBareURLs where !seen.contains(url.absoluteString)
+            && !seen.contains(where: { seenURL in
+                seenURL.hasPrefix(url.absoluteString) && seenURL.dropFirst(url.absoluteString.count).allSatisfy { $0 == "=" }
+            }) {
             urls.append(url)
         }
 

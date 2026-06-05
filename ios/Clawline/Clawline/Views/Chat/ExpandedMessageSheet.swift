@@ -137,12 +137,16 @@ struct ExpandedMessageSheet: View {
 
     private var content: some View {
         let markdownContent = UnifiedMarkdownRenderer.makeContent(
-            presentation: presentation,
+            messageText: message.content,
+            context: MarkdownMessageRenderContext(
+                role: message.role,
+                messageID: message.id,
+                metrics: ChatFlowTheme.Metrics(isCompact: false)
+            ),
             baseFont: UIFont.clawline(.bodyText),
             inkColor: UIColor(ChatFlowTheme.ink(effectiveColorScheme)),
             lineSpacing: 4,
             stripDetectedURLs: false,
-            role: message.role,
             isDark: effectiveColorScheme == .dark
         )
         return VStack(alignment: .leading, spacing: 12) {

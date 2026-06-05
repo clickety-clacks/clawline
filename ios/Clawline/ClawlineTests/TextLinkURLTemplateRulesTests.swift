@@ -199,27 +199,33 @@ struct TextLinkURLTemplateRulesTests {
                 isDark: false
             )
             var streamingState = StreamingTableParseState()
+            let expandedMessage = Message(
+                id: "t1182_full_content",
+                role: .assistant,
+                content: "Review T1182.",
+                timestamp: Date(),
+                streaming: false,
+                attachments: [],
+                deviceId: nil,
+                sessionKey: "agent:main:clawline:user:s_t1182"
+            )
+            let metrics = ChatFlowTheme.Metrics(isCompact: false)
             let presentation = MessagePresentationBuilder.build(
-                from: Message(
-                    id: "t1182_full_content",
-                    role: .assistant,
-                    content: "Review T1182.",
-                    timestamp: Date(),
-                    streaming: false,
-                    attachments: [],
-                    deviceId: nil,
-                    sessionKey: "agent:main:clawline:user:s_t1182"
-                ),
-                metrics: ChatFlowTheme.Metrics(isCompact: false),
+                from: expandedMessage,
+                metrics: metrics,
                 streamingState: &streamingState
             )
             let expandedContent = UnifiedMarkdownRenderer.makeContent(
-                presentation: presentation,
+                messageText: expandedMessage.content,
+                context: MarkdownMessageRenderContext(
+                    role: expandedMessage.role,
+                    messageID: expandedMessage.id,
+                    metrics: metrics
+                ),
                 baseFont: UIFont.clawline(.bodyText),
                 inkColor: .label,
                 lineSpacing: 4,
                 stripDetectedURLs: false,
-                role: .assistant,
                 isDark: false
             )
             return (notificationBlocks, expandedContent)
@@ -507,7 +513,7 @@ struct TextLinkURLTemplateRulesTests {
     }
 
     private func makeRendered(_ markdown: String) -> NSAttributedString? {
-        UnifiedMarkdownRenderer.renderNSAttributedString(
+        attributedMarkdownForTests(
             markdown: markdown,
             baseFont: .systemFont(ofSize: 15),
             inkColor: .label,

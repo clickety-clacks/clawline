@@ -156,12 +156,20 @@ final class MessageReferenceTextAttachment: NSTextAttachment {
         let font = UIFont.clawline(.secondaryLabel, weight: .semibold)
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineBreakMode = .byTruncatingTail
-        let attributedLabel = UnifiedMarkdownRenderer.renderNSAttributedString(
-            markdown: MessageReferenceMarkdownDisplay.renderableMarkdown(label),
+        let content = UnifiedMarkdownRenderer.makeContent(
+            messageText: MessageReferenceMarkdownDisplay.renderableMarkdown(label),
+            context: MarkdownMessageRenderContext(
+                role: .user,
+                messageID: "pending-reference-\(label)",
+                metrics: ChatFlowTheme.Metrics(isCompact: true)
+            ),
             baseFont: font,
             inkColor: UIColor.label,
-            lineSpacing: 0
-        )?.mutableCopy() as? NSMutableAttributedString ?? NSMutableAttributedString(
+            lineSpacing: 0,
+            stripDetectedURLs: false,
+            isDark: UITraitCollection.current.userInterfaceStyle == .dark
+        )
+        let attributedLabel = content.firstAttributedText?.mutableCopy() as? NSMutableAttributedString ?? NSMutableAttributedString(
             string: label,
             attributes: [
                 .font: font,

@@ -28,8 +28,8 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
         let plan = UnifiedMarkdownParser.parse(markdown: markdown, messageID: "r48_01", metrics: metrics)
         #expect(sequence(for: plan.blocks) == [.richText, .code, .richText, .table, .richText])
 
-        let bubble = UnifiedMarkdownRenderer.render(plan: plan, options: bubbleOptions())
-        let expanded = UnifiedMarkdownRenderer.render(plan: plan, options: expandedOptions())
+        let bubble = renderMarkdownForTests(plan: plan, options: bubbleOptions())
+        let expanded = renderMarkdownForTests(plan: plan, options: expandedOptions())
         #expect(sequence(for: bubble) == [.attributedText, .code, .attributedText, .table, .attributedText])
         #expect(sequence(for: expanded) == [.attributedText, .code, .attributedText, .table, .attributedText])
     }
@@ -41,8 +41,8 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
             .joined(separator: "\n\n")
         let plan = UnifiedMarkdownParser.parse(markdown: markdown, messageID: "r48_02", metrics: metrics)
 
-        let bubble = UnifiedMarkdownRenderer.render(plan: plan, options: bubbleOptions())
-        let expanded = UnifiedMarkdownRenderer.render(plan: plan, options: expandedOptions())
+        let bubble = renderMarkdownForTests(plan: plan, options: bubbleOptions())
+        let expanded = renderMarkdownForTests(plan: plan, options: expandedOptions())
         #expect(bubble.count == expanded.count)
         #expect(expanded.count == plan.blocks.count)
     }
@@ -68,8 +68,8 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
         """
         let plan = UnifiedMarkdownParser.parse(markdown: markdown, messageID: "r48_03", metrics: metrics)
 
-        let bubble = UnifiedMarkdownRenderer.render(plan: plan, options: bubbleOptions())
-        let expanded = UnifiedMarkdownRenderer.render(plan: plan, options: expandedOptions())
+        let bubble = renderMarkdownForTests(plan: plan, options: bubbleOptions())
+        let expanded = renderMarkdownForTests(plan: plan, options: expandedOptions())
         #expect(sequence(for: bubble) == sequence(for: expanded))
 
         let bubbleText = joinedText(from: bubble)
@@ -182,7 +182,7 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
         ```
         """
         let plan = UnifiedMarkdownParser.parse(markdown: markdown, messageID: "hl_01", metrics: metrics)
-        let rendered = UnifiedMarkdownRenderer.render(
+        let rendered = renderMarkdownForTests(
             plan: plan,
             options: MarkdownRenderOptions(
                 baseFont: UIFont.systemFont(ofSize: 15, weight: .regular),
@@ -227,22 +227,16 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
 
         let plan = UnifiedMarkdownParser.parse(markdown: markdown, messageID: "em_02", metrics: metrics)
         let content = UnifiedMarkdownRenderer.makeContent(
-            presentation: MessagePresentation(
-                parts: [.inlineEmoji("😀"), .inlineEmoji("😁")],
-                markdownRenderPlan: plan,
-                wordCount: 0,
-                hasTextualContent: true,
-                isEmojiOnly: true,
-                hasMediaOnly: false,
-                detectedURLs: [],
-                detectedURLCount: 0,
-                hasSingleURL: false
+            messageText: markdown,
+            context: MarkdownMessageRenderContext(
+                role: .assistant,
+                messageID: "em_02",
+                metrics: metrics
             ),
             baseFont: UIFont.systemFont(ofSize: metrics.bodyFontSize, weight: .regular),
             inkColor: .black,
             lineSpacing: 4,
             stripDetectedURLs: false,
-            role: .assistant,
             isDark: false
         )
 
@@ -315,8 +309,8 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
         """
 
         let plan = UnifiedMarkdownParser.parse(markdown: markdown, messageID: "blk_01", metrics: metrics)
-        let bubble = UnifiedMarkdownRenderer.render(plan: plan, options: bubbleOptions())
-        let expanded = UnifiedMarkdownRenderer.render(plan: plan, options: expandedOptions())
+        let bubble = renderMarkdownForTests(plan: plan, options: bubbleOptions())
+        let expanded = renderMarkdownForTests(plan: plan, options: expandedOptions())
 
         #expect(sequence(for: bubble) == sequence(for: expanded))
         #expect(bubble.filter { if case .attributedText = $0 { return true }; return false }.count >= 6)
@@ -354,7 +348,7 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
         - Gamma
         """
         let plan = UnifiedMarkdownParser.parse(markdown: markdown, messageID: "ul_01", metrics: metrics)
-        let rendered = UnifiedMarkdownRenderer.render(plan: plan, options: expandedOptions())
+        let rendered = renderMarkdownForTests(plan: plan, options: expandedOptions())
         let text = joinedText(from: rendered)
 
         #expect(text.contains("Alpha"))
@@ -388,7 +382,13 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
             metrics: metrics,
             streamingState: &state
         )
-        let rendered = UnifiedMarkdownRenderer.render(plan: presentation.markdownRenderPlan, options: bubbleOptions())
+        let rendered = renderMarkdownForTests(
+            plan: .empty,
+            options: bubbleOptions(),
+            messageText: message.content,
+            role: message.role,
+            messageID: message.id
+        )
 
         guard case .attributedText(let attributed)? = rendered.first else {
             Issue.record("Expected bubble markdown to render as attributed text")
@@ -417,7 +417,7 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
             containsTextualContent: true,
             isEmojiOnly: false
         )
-        let rendered = UnifiedMarkdownRenderer.render(plan: plan, options: bubbleOptions())
+        let rendered = renderMarkdownForTests(plan: plan, options: bubbleOptions())
         let text = joinedText(from: rendered)
 
         #expect(text.contains("• Bullet"))
@@ -434,7 +434,7 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
           1. Third
         """
         let plan = UnifiedMarkdownParser.parse(markdown: markdown, messageID: "t137", metrics: metrics)
-        let rendered = UnifiedMarkdownRenderer.render(plan: plan, options: expandedOptions())
+        let rendered = renderMarkdownForTests(plan: plan, options: expandedOptions())
         let text = joinedText(from: rendered)
 
         #expect(text.contains("1. First"))

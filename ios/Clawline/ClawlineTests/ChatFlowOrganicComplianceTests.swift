@@ -168,7 +168,7 @@ struct ChatFlowOrganicComplianceTests {
         #expect(codeBlocks[1].1.contains("print(\"second\")"))
 
         let renderedText = renderedMarkdownText(
-            from: presentation,
+            from: message,
             stripDetectedURLs: false
         )
         #expect(renderedText.contains("Intro paragraph."))
@@ -181,9 +181,8 @@ struct ChatFlowOrganicComplianceTests {
     @Test("Bubble and expanded text extraction both preserve URLs")
     func textExtractionPreservesURLsAcrossSurfaces() {
         let message = sampleMessage(content: "See https://a.example and https://b.example")
-        let presentation = buildPresentation(message)
-        let bubbleText = renderedMarkdownText(from: presentation, stripDetectedURLs: false)
-        let expandedText = renderedMarkdownText(from: presentation, stripDetectedURLs: false)
+        let bubbleText = renderedMarkdownText(from: message, stripDetectedURLs: false)
+        let expandedText = renderedMarkdownText(from: message, stripDetectedURLs: false)
 
         #expect(bubbleText.contains("https://a.example"))
         #expect(bubbleText.contains("https://b.example"))
@@ -406,24 +405,28 @@ struct ChatFlowOrganicComplianceTests {
 
     @Test("Bug T190: URLs inside inline code stay tappable without preview extraction")
     func messagePresentationKeepsInlineCodeURLsTappable() {
-        let presentation = buildPresentation(sampleMessage(content: "Visit `https://example.com/path` now"))
+        let message = sampleMessage(content: "Visit `https://example.com/path` now")
+        let presentation = buildPresentation(message)
 
         #expect(presentation.detectedURLs.isEmpty)
         #expect(!presentation.parts.contains(where: { part in
             if case .linkPreview = part { return true }
             return false
         }))
-        #expect(renderedMarkdownText(from: presentation, stripDetectedURLs: false) == "Visit https://example.com/path now")
+        #expect(renderedMarkdownText(from: message, stripDetectedURLs: false) == "Visit https://example.com/path now")
 
-        let rendered = UnifiedMarkdownRenderer.render(
-            plan: presentation.markdownRenderPlan,
+        let rendered = renderMarkdownForTests(
+            plan: .empty,
             options: MarkdownRenderOptions(
                 baseFont: UIFont.systemFont(ofSize: ChatFlowTheme.Metrics(isCompact: true).bodyFontSize, weight: .regular),
                 inkColor: .black,
                 lineSpacing: 4,
                 stripDetectedURLs: false,
                 markHighlightColor: nil
-            )
+            ),
+            messageText: message.content,
+            role: message.role,
+            messageID: message.id
         )
         guard case .attributedText(let attributed)? = rendered.first else {
             Issue.record("Expected attributed text block")
@@ -437,7 +440,8 @@ struct ChatFlowOrganicComplianceTests {
 
     @Test("Bug T190: URL detection respects markdown boundaries after links")
     func messagePresentationStopsDetectedURLsAtMarkdownBoundaries() {
-        let presentation = buildPresentation(sampleMessage(content: "Visit https://example.com/html**URL** now"))
+        let message = sampleMessage(content: "Visit https://example.com/html**URL** now")
+        let presentation = buildPresentation(message)
 
         #expect(presentation.detectedURLs.map(\.absoluteString) == ["https://example.com/html"])
         #expect(presentation.parts.contains(where: { part in
@@ -446,12 +450,13 @@ struct ChatFlowOrganicComplianceTests {
             }
             return false
         }))
-        #expect(renderedMarkdownText(from: presentation, stripDetectedURLs: false) == "Visit https://example.com/htmlURL now")
+        #expect(renderedMarkdownText(from: message, stripDetectedURLs: false) == "Visit https://example.com/htmlURL now")
     }
 
     @Test("Bug T190: Markdown link runs strip trailing backticks before preview extraction")
     func messagePresentationStripsTrailingBackticksFromMarkdownDetectedURLs() {
-        let presentation = buildPresentation(sampleMessage(content: "http://tars:18800/www/tracker-dashboard.html`"))
+        let message = sampleMessage(content: "http://tars:18800/www/tracker-dashboard.html`")
+        let presentation = buildPresentation(message)
 
         #expect(presentation.detectedURLs.map(\.absoluteString) == ["http://tars:18800/www/tracker-dashboard.html"])
         #expect(presentation.parts.contains(where: { part in
@@ -460,17 +465,20 @@ struct ChatFlowOrganicComplianceTests {
             }
             return false
         }))
-        #expect(renderedMarkdownText(from: presentation, stripDetectedURLs: false) == "http://tars:18800/www/tracker-dashboard.html`")
+        #expect(renderedMarkdownText(from: message, stripDetectedURLs: false) == "http://tars:18800/www/tracker-dashboard.html`")
 
-        let rendered = UnifiedMarkdownRenderer.render(
-            plan: presentation.markdownRenderPlan,
+        let rendered = renderMarkdownForTests(
+            plan: .empty,
             options: MarkdownRenderOptions(
                 baseFont: UIFont.systemFont(ofSize: ChatFlowTheme.Metrics(isCompact: true).bodyFontSize, weight: .regular),
                 inkColor: .black,
                 lineSpacing: 4,
                 stripDetectedURLs: false,
                 markHighlightColor: nil
-            )
+            ),
+            messageText: message.content,
+            role: message.role,
+            messageID: message.id
         )
         guard case .attributedText(let attributed)? = rendered.first else {
             Issue.record("Expected attributed text block")
@@ -488,7 +496,8 @@ struct ChatFlowOrganicComplianceTests {
 
     @Test("Bug T190: Markdown link runs stop at highlight delimiters")
     func messagePresentationStripsHighlightDelimitersFromMarkdownDetectedURLs() {
-        let presentation = buildPresentation(sampleMessage(content: "http://example.com==nice=="))
+        let message = sampleMessage(content: "http://example.com==nice==")
+        let presentation = buildPresentation(message)
 
         #expect(presentation.detectedURLs.map(\.absoluteString) == ["http://example.com"])
         #expect(presentation.parts.contains(where: { part in
@@ -497,17 +506,20 @@ struct ChatFlowOrganicComplianceTests {
             }
             return false
         }))
-        #expect(renderedMarkdownText(from: presentation, stripDetectedURLs: false) == "http://example.com==nice==")
+        #expect(renderedMarkdownText(from: message, stripDetectedURLs: false) == "http://example.comnice")
 
-        let rendered = UnifiedMarkdownRenderer.render(
-            plan: presentation.markdownRenderPlan,
+        let rendered = renderMarkdownForTests(
+            plan: .empty,
             options: MarkdownRenderOptions(
                 baseFont: UIFont.systemFont(ofSize: ChatFlowTheme.Metrics(isCompact: true).bodyFontSize, weight: .regular),
                 inkColor: .black,
                 lineSpacing: 4,
                 stripDetectedURLs: false,
                 markHighlightColor: nil
-            )
+            ),
+            messageText: message.content,
+            role: message.role,
+            messageID: message.id
         )
         guard case .attributedText(let attributed)? = rendered.first else {
             Issue.record("Expected attributed text block")
@@ -517,10 +529,9 @@ struct ChatFlowOrganicComplianceTests {
         let urlRange = text.range(of: "http://example.com")
         let delimiterRange = text.range(of: "==")
         #expect(urlRange.location != NSNotFound)
-        #expect(delimiterRange.location != NSNotFound)
+        #expect(delimiterRange.location == NSNotFound)
         #expect(attributed.attribute(.link, at: urlRange.location, effectiveRange: nil) != nil)
         #expect(attributed.attribute(.link, at: urlRange.location + urlRange.length - 1, effectiveRange: nil) != nil)
-        #expect(attributed.attribute(.link, at: delimiterRange.location, effectiveRange: nil) == nil)
     }
 
     @Test("Bug T190: Markdown link runs stop at adjacent highlight delimiters without whitespace")
@@ -534,13 +545,14 @@ struct ChatFlowOrganicComplianceTests {
             }
             return false
         }))
-        #expect(renderedMarkdownText(from: presentation, stripDetectedURLs: false) == "http://example.com==text==")
+        #expect(renderedMarkdownText(from: sampleMessage(content: "http://example.com==text=="), stripDetectedURLs: false) == "http://example.comtext")
     }
 
     @Test("Bug T190: Legitimate query values containing double equals are preserved")
     func messagePresentationPreservesURLsContainingDoubleEquals() {
         let url = "https://example.com/path?token=YWJjZA=="
-        let presentation = buildPresentation(sampleMessage(content: url))
+        let message = sampleMessage(content: url)
+        let presentation = buildPresentation(message)
 
         #expect(presentation.detectedURLs.map(\.absoluteString) == [url])
         #expect(presentation.parts.contains(where: { part in
@@ -549,7 +561,7 @@ struct ChatFlowOrganicComplianceTests {
             }
             return false
         }))
-        #expect(renderedMarkdownText(from: presentation, stripDetectedURLs: false) == url)
+        #expect(renderedMarkdownText(from: message, stripDetectedURLs: false) == url)
     }
 
     @Test("Doc §5: Link previews disabled by setting")
@@ -1210,7 +1222,7 @@ struct ChatFlowOrganicComplianceTests {
         )
     }
 
-    private func renderedMarkdownText(from presentation: MessagePresentation, stripDetectedURLs: Bool) -> String {
+    private func renderedMarkdownText(from message: Message, stripDetectedURLs: Bool) -> String {
         let options = MarkdownRenderOptions(
             baseFont: UIFont.systemFont(ofSize: ChatFlowTheme.Metrics(isCompact: true).bodyFontSize, weight: .regular),
             inkColor: .black,
@@ -1218,9 +1230,12 @@ struct ChatFlowOrganicComplianceTests {
             stripDetectedURLs: stripDetectedURLs,
             markHighlightColor: nil
         )
-        let rendered = UnifiedMarkdownRenderer.render(
-            plan: presentation.markdownRenderPlan,
-            options: options
+        let rendered = renderMarkdownForTests(
+            plan: .empty,
+            options: options,
+            messageText: message.content,
+            role: message.role,
+            messageID: message.id
         )
         let combined = NSMutableAttributedString()
         for block in rendered {
@@ -1253,7 +1268,6 @@ struct ChatFlowOrganicComplianceTests {
         }
         return MessagePresentation(
             parts: filtered,
-            markdownRenderPlan: presentation.markdownRenderPlan,
             wordCount: presentation.wordCount,
             hasTextualContent: presentation.hasTextualContent,
             isEmojiOnly: presentation.isEmojiOnly,

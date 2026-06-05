@@ -1198,12 +1198,16 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
 
         let markdownStyle = Self.markdownStyle(for: sizeClass, metrics: metrics)
         let markdownContent = UnifiedMarkdownRenderer.makeContent(
-            presentation: presentation,
+            messageText: message.content,
+            context: MarkdownMessageRenderContext(
+                role: message.role,
+                messageID: message.id,
+                metrics: metrics
+            ),
             baseFont: markdownStyle.baseFont,
             inkColor: contentColor,
             lineSpacing: markdownStyle.lineSpacing,
             stripDetectedURLs: false,
-            role: message.role,
             isDark: effectiveIsDark
         )
 
@@ -2280,12 +2284,20 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         if let reference = currentReplyReference {
             let label = reference.preview.isEmpty ? reference.tokenLabel : reference.preview
             let font = UIFont.clawline(.timestamp)
-            replyIndicatorTextView.attributedText = UnifiedMarkdownRenderer.renderNSAttributedString(
-                markdown: MessageReferenceMarkdownDisplay.renderableMarkdown(label),
+            let content = UnifiedMarkdownRenderer.makeContent(
+                messageText: MessageReferenceMarkdownDisplay.renderableMarkdown(label),
+                context: MarkdownMessageRenderContext(
+                    role: .user,
+                    messageID: "reply-reference-\(reference.id.uuidString)",
+                    metrics: ChatFlowTheme.Metrics(isCompact: true)
+                ),
                 baseFont: font,
                 inkColor: UIColor.label,
-                lineSpacing: 1
-            ) ?? NSAttributedString(
+                lineSpacing: 1,
+                stripDetectedURLs: false,
+                isDark: traitCollection.userInterfaceStyle == .dark
+            )
+            replyIndicatorTextView.attributedText = content.firstAttributedText ?? NSAttributedString(
                 string: label,
                 attributes: [
                     .font: font,

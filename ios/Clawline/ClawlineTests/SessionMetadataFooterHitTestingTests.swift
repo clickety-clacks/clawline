@@ -144,6 +144,29 @@ struct SessionMetadataFooterHitTestingTests {
         #expect(SessionMetadataFooterCell.fadeRevealRange == 78)
     }
 
+    @Test("T1184 Spatial footer text stays white across theme states")
+    func spatialFooterTextStaysWhiteAcrossThemeStates() throws {
+        #expect(SessionMetadataFooterCell.textColor(isDark: false, isSpatial: true).isEqual(UIColor.white))
+        #expect(SessionMetadataFooterCell.textColor(isDark: true, isSpatial: true).isEqual(UIColor.white))
+        #expect(SessionMetadataFooterCell.textColor(isDark: false, isSpatial: false).isEqual(UIColor.white) == false)
+
+        for isDark in [false, true] {
+            let cell = makeConfiguredCell(authMode: "oauth", isDark: isDark, isSpatial: true)
+            let buttons = allSubviews(in: cell).compactMap { $0 as? UIButton }
+            let labels = allSubviews(in: cell).compactMap { $0 as? UILabel }
+
+            for button in buttons {
+                let foreground = try #require(button.configuration?.baseForegroundColor)
+                #expect(foreground.isEqual(UIColor.white))
+                #expect(button.tintColor.isEqual(UIColor.white))
+            }
+
+            for label in labels {
+                #expect(label.textColor.isEqual(UIColor.white))
+            }
+        }
+    }
+
     @Test("Footer shows version build line and test menu")
     func footerShowsVersionBuildLineAndTestMenu() throws {
         let cell = makeConfiguredCell()
@@ -274,7 +297,7 @@ struct SessionMetadataFooterHitTestingTests {
     }
 }
 
-private func makeConfiguredCell(authMode: String? = nil, isDark: Bool = false) -> SessionMetadataFooterCell {
+private func makeConfiguredCell(authMode: String? = nil, isDark: Bool = false, isSpatial: Bool = false) -> SessionMetadataFooterCell {
     let status = makeStatus(authMode: authMode)
     let cell = SessionMetadataFooterCell(
         frame: CGRect(
@@ -284,7 +307,7 @@ private func makeConfiguredCell(authMode: String? = nil, isDark: Bool = false) -
             height: SessionMetadataFooterCell.height(for: status)
         )
     )
-    cell.configure(status: status, isDark: isDark, onSelect: { _, _, _, _ in })
+    cell.configure(status: status, isDark: isDark, isSpatial: isSpatial, onSelect: { _, _, _, _ in })
     cell.setNeedsLayout()
     cell.layoutIfNeeded()
     return cell

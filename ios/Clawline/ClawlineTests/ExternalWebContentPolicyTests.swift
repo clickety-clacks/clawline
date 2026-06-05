@@ -27,4 +27,26 @@ struct ExternalWebContentPolicyTests {
         #expect(ExternalWebContentPolicy.shouldOpenInBrowserSurface(checkpointURL))
         #expect(!ExternalWebContentPolicy.shouldOpenInBrowserSurface(nonLinkedInURL))
     }
+
+    @Test("T1187 generated text links use system open on Spatial browser surfaces")
+    func generatedTextLinksUseSystemOpenOnSpatialBrowserSurfaces() {
+        let spatialUsesSystemOpen: Bool
+        switch ExternalWebContentPolicy.generatedLinkOpenRoute(isSpatial: true) {
+        case .systemOpen:
+            spatialUsesSystemOpen = true
+        case .safariViewController:
+            spatialUsesSystemOpen = false
+        }
+
+        let iPhoneUsesSafariViewController: Bool
+        switch ExternalWebContentPolicy.generatedLinkOpenRoute(isSpatial: false) {
+        case .systemOpen:
+            iPhoneUsesSafariViewController = false
+        case .safariViewController:
+            iPhoneUsesSafariViewController = true
+        }
+
+        #expect(spatialUsesSystemOpen)
+        #expect(iPhoneUsesSafariViewController)
+    }
 }

@@ -5863,6 +5863,22 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         isDark ? 0.90 : 0.84
     }
 
+    static func textColor(isDark: Bool, isSpatial: Bool) -> UIColor {
+        if isSpatial {
+            return .white
+        }
+        let palette = ChatFlowUIKitTheme.palette(isDark: isDark)
+        return palette.textMuted.withAlphaComponent(Self.textAlpha(isDark: isDark))
+    }
+
+    private static var isSpatialPlatform: Bool {
+#if os(visionOS)
+        true
+#else
+        false
+#endif
+    }
+
     private final class FooterButton: UIButton {
         override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
             guard self.point(inside: point, with: event) else { return nil }
@@ -5942,11 +5958,11 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
     func configure(
         status: SessionStatus?,
         isDark: Bool,
+        isSpatial: Bool = SessionMetadataFooterCell.isSpatialPlatform,
         onSelect: (@MainActor (String, SessionControlAction, String?, Bool?) -> Void)?,
         onTestMenuSelect: (@MainActor (FooterTestMenuAction) -> Void)? = nil
     ) {
-        let palette = ChatFlowUIKitTheme.palette(isDark: isDark)
-        let textColor = palette.textMuted.withAlphaComponent(Self.textAlpha(isDark: isDark))
+        let textColor = Self.textColor(isDark: isDark, isSpatial: isSpatial)
         for view in controlsStackView.arrangedSubviews {
             controlsStackView.removeArrangedSubview(view)
             view.removeFromSuperview()
@@ -5957,7 +5973,8 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         }
         let items = Self.footerItems(for: status, isDark: isDark)
         for item in items {
-            controlsStackView.addArrangedSubview(footerView(for: item, status: status, color: item.textColor ?? textColor, onSelect: onSelect))
+            let itemColor = isSpatial ? textColor : (item.textColor ?? textColor)
+            controlsStackView.addArrangedSubview(footerView(for: item, status: status, color: itemColor, onSelect: onSelect))
         }
         versionStackView.addArrangedSubview(versionLabel(color: textColor))
         versionStackView.addArrangedSubview(testMenuButton(color: textColor, onSelect: onTestMenuSelect))
@@ -6047,11 +6064,11 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
         color: UIColor,
         onSelect: (@MainActor (String, SessionControlAction, String?, Bool?) -> Void)?
     ) -> UIView {
-        if item.action == nil, let textColor = item.textColor {
+        if item.action == nil, item.textColor != nil {
             let label = UILabel()
             label.text = item.text
             label.font = Self.footerFont
-            label.textColor = textColor
+            label.textColor = color
             label.adjustsFontForContentSizeCategory = true
             label.lineBreakMode = .byTruncatingTail
             label.textAlignment = .center

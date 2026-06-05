@@ -155,10 +155,17 @@ struct StreamManagerSheet: View {
             // Trust the allocated size. If the popover system gives us less than our ideal,
             // the List viewport shrinks to match instead of overflowing into the popup chrome.
             let containerHeight = geometry.size.height
+            let rowDotStates = StreamSelectorLayout.dotStatesBySession(
+                streams: filteredStreams,
+                lookup: dotStateLookup
+            )
             VStack(spacing: 0) {
                 List {
                     ForEach(filteredStreams) { stream in
-                        streamRow(for: stream)
+                        streamRow(
+                            for: stream,
+                            dotState: rowDotStates[stream.sessionKey] ?? .inactive
+                        )
                     }
 
                     ForEach(filteredPendingCreateRows) { pendingRow in
@@ -375,8 +382,8 @@ struct StreamManagerSheet: View {
     }
 
     @ViewBuilder
-    private func streamRow(for stream: StreamSession) -> some View {
-        rowContent(for: stream)
+    private func streamRow(for stream: StreamSession, dotState: StreamDotState) -> some View {
+        rowContent(for: stream, dotState: dotState)
             .frame(height: listRowHeight, alignment: .center)
             .listRowInsets(
                 EdgeInsets(
@@ -421,7 +428,7 @@ struct StreamManagerSheet: View {
     }
 
     @ViewBuilder
-    private func rowContent(for stream: StreamSession) -> some View {
+    private func rowContent(for stream: StreamSession, dotState: StreamDotState) -> some View {
         if activeEditor == .renaming(stream.sessionKey) {
             TextField("Stream name", text: $draftName)
                 .font(.clawline(.subsectionHeader))
@@ -439,7 +446,6 @@ struct StreamManagerSheet: View {
             } label: {
                 HStack(spacing: 10) {
                     let isActive = stream.sessionKey == viewModel.uiSelectedSessionKey
-                    let dotState = dotStateLookup(stream.sessionKey)
                     Circle()
                         .fill(
                             StreamDotColor.resolve(
@@ -474,9 +480,30 @@ struct StreamManagerSheet: View {
         }
     }
 
-    private func rowBackground(for stream: StreamSession) -> Color {
-        guard selectedStreamSessionKey == stream.sessionKey else { return .clear }
-        return Color.primary.opacity(colorScheme == .dark ? 0.16 : 0.08)
+    private func rowBackground(for stream: StreamSession) -> some View {
+        let highlight = StreamSelectorLayout.selectionHighlightStyle(
+            isSelected: selectedStreamSessionKey == stream.sessionKey,
+            isDark: colorScheme == .dark,
+            isSpatial: Self.isSpatialPlatform
+        )
+        return RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .fill(Color.primary.opacity(highlight.fillOpacity))
+            .overlay {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(
+                        Color.primary.opacity(highlight.strokeOpacity),
+                        lineWidth: highlight.strokeLineWidth
+                    )
+            }
+            .padding(.vertical, 2)
+    }
+
+    private static var isSpatialPlatform: Bool {
+#if os(visionOS)
+        true
+#else
+        false
+#endif
     }
 
     private func beginRenaming(_ stream: StreamSession) {
@@ -1090,6 +1117,35 @@ private extension View {
 }
 
 enum StreamSelectorLayout {
+    struct SelectionHighlightStyle: Equatable {
+        let fillOpacity: CGFloat
+        let strokeOpacity: CGFloat
+        let strokeLineWidth: CGFloat
+    }
+
+    static func dotStatesBySession(
+        streams: [StreamSession],
+        lookup: StreamDotStateLookup
+    ) -> [String: StreamDotState] {
+        Dictionary(uniqueKeysWithValues: streams.map { stream in
+            (stream.sessionKey, lookup(stream.sessionKey))
+        })
+    }
+
+    static func selectionHighlightStyle(
+        isSelected: Bool,
+        isDark: Bool,
+        isSpatial: Bool
+    ) -> SelectionHighlightStyle {
+        guard isSelected else {
+            return SelectionHighlightStyle(fillOpacity: 0, strokeOpacity: 0, strokeLineWidth: 0)
+        }
+        if isSpatial {
+            return SelectionHighlightStyle(fillOpacity: 0.24, strokeOpacity: 0.40, strokeLineWidth: 1)
+        }
+        return SelectionHighlightStyle(fillOpacity: isDark ? 0.16 : 0.08, strokeOpacity: 0, strokeLineWidth: 0)
+    }
+
     static func popupWidth(
         longestItemWidth: CGFloat,
         minimumPopoverWidth: CGFloat,

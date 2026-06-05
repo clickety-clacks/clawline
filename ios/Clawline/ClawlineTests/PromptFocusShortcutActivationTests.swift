@@ -963,6 +963,7 @@ struct PromptFocusShortcutActivationTests {
 
     @Test("T373 Spatial notification material uses adaptive tint and stronger accent")
     func spatialNotificationMaterialUsesAdaptiveTintAndAccent() {
+        #expect(CrossChatNotificationMaterialStyle.backgroundOpacity == 0.85)
         #expect(CrossChatNotificationMaterialStyle.accentOpacity(isSpatial: true) == 0.60)
         #expect(CrossChatNotificationMaterialStyle.accentOpacity(isSpatial: false) == 0.40)
         #expect(CrossChatNotificationMaterialStyle.spatialTintOpacity(for: .light) > CrossChatNotificationMaterialStyle.spatialTintOpacity(for: .dark))

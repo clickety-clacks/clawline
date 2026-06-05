@@ -115,6 +115,88 @@ struct MessageInputBarBoundaryTests {
         ) == viewportWidth)
     }
 
+    @Test("T1185 Spatial notification overlay docks to native window width")
+    func spatialNotificationOverlayDocksToNativeWindowWidth() {
+        let hostWidth = CGFloat(720)
+        let nativeWindowWidth = CGFloat(960)
+        let resolvedWidth = CrossChatNotificationGeometry.spatialOverlayContainerWidth(
+            containerWidth: hostWidth,
+            nativeWindowWidth: nativeWindowWidth
+        )
+
+        #expect(resolvedWidth == nativeWindowWidth)
+        #expect(CrossChatNotificationGeometry.spatialOverlayHorizontalCorrection(
+            containerWidth: hostWidth,
+            resolvedContainerWidth: resolvedWidth
+        ) == nativeWindowWidth - hostWidth)
+    }
+
+    @Test("T1185 Spatial notification window width tolerates key-window handoff")
+    func spatialNotificationWindowWidthToleratesKeyWindowHandoff() {
+        #expect(CrossChatNotificationGeometry.spatialNativeWindowWidth(
+            keyWindowWidth: 960,
+            firstWindowWidth: 720
+        ) == 960)
+        #expect(CrossChatNotificationGeometry.spatialNativeWindowWidth(
+            keyWindowWidth: nil,
+            firstWindowWidth: 960
+        ) == 960)
+    }
+
+    @Test("T1185 Spatial notification overlay stays inside host without a wider native window")
+    func spatialNotificationOverlayStaysInsideHostWithoutWiderNativeWindow() {
+        let hostWidth = CGFloat(720)
+
+        #expect(CrossChatNotificationGeometry.spatialOverlayContainerWidth(
+            containerWidth: hostWidth,
+            nativeWindowWidth: nil
+        ) == hostWidth)
+        #expect(CrossChatNotificationGeometry.spatialOverlayContainerWidth(
+            containerWidth: hostWidth,
+            nativeWindowWidth: 680
+        ) == hostWidth)
+        #expect(CrossChatNotificationGeometry.spatialOverlayHorizontalCorrection(
+            containerWidth: hostWidth,
+            resolvedContainerWidth: hostWidth
+        ) == 0)
+    }
+
+    @Test("T1185 Spatial notification stack uses resolved window width before capping")
+    func spatialNotificationStackUsesResolvedWindowWidthBeforeCapping() {
+        let resolvedWidth = CrossChatNotificationGeometry.spatialOverlayContainerWidth(
+            containerWidth: 360,
+            nativeWindowWidth: 720
+        )
+        let stackWidth = CrossChatNotificationGeometry.stackWidth(
+            maxContainerWidth: resolvedWidth,
+            normalTrailingMargin: 12,
+            compactLeadingFitMargin: 0,
+            maxStackWidth: 562.5,
+            isCollapsed: false
+        )
+
+        #expect(stackWidth == CGFloat(562.5))
+    }
+
+    @Test("T1185 Spatial single notification occupies resolved stack width")
+    func spatialSingleNotificationOccupiesResolvedStackWidth() {
+        #expect(CrossChatNotificationGeometry.bubbleFrameWidth(
+            maxBubbleWidth: 562.5,
+            visibleNotificationCount: 1,
+            isSpatial: true
+        ) == CGFloat(562.5))
+        #expect(CrossChatNotificationGeometry.bubbleFrameWidth(
+            maxBubbleWidth: 562.5,
+            visibleNotificationCount: 2,
+            isSpatial: true
+        ) == nil)
+        #expect(CrossChatNotificationGeometry.bubbleFrameWidth(
+            maxBubbleWidth: 562.5,
+            visibleNotificationCount: 1,
+            isSpatial: false
+        ) == nil)
+    }
+
     @Test("T354 notification layout host height excludes motion overflow")
     func notificationLayoutHostHeightExcludesMotionOverflow() {
         let topMargin = CGFloat(8)

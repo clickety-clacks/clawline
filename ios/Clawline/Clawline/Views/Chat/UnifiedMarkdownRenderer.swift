@@ -180,6 +180,7 @@ private enum UnifiedMarkdownParser {
     }
 
     nonisolated private static func markdownPlainText(from source: String) -> String {
+        let source = displayMarkdown(fromPreprocessedMarkdown: source)
         if let attributed = try? AttributedString(
             markdown: source,
             options: .init(interpretedSyntax: .full)
@@ -311,6 +312,7 @@ private enum UnifiedMarkdownParser {
         markdown
             .replacingOccurrences(of: "\u{F0000}", with: "")
             .replacingOccurrences(of: "\u{F0001}", with: "")
+            .replacingOccurrences(of: UnifiedMarkdownRenderer.indentedLiteralSentinel, with: "")
     }
 
     nonisolated private static func tableCellMarkdown(from cell: Table.Cell) -> String {
@@ -588,6 +590,7 @@ struct MarkdownMessageRenderContext {
 enum UnifiedMarkdownRenderer {
     nonisolated private static let markOpenSentinel = "\u{F0000}"
     nonisolated private static let markCloseSentinel = "\u{F0001}"
+    nonisolated fileprivate static let indentedLiteralSentinel = "\u{F0002}"
     nonisolated private static let markdownLinkBoundaryTokens = [markOpenSentinel, markCloseSentinel]
     private static let attributedMarkdownCache: NSCache<NSString, NSAttributedString> = {
         let cache = NSCache<NSString, NSAttributedString>()
@@ -1053,7 +1056,19 @@ enum UnifiedMarkdownRenderer {
     }
 
     private static func preprocessClawlineMarkdownDialect(_ markdown: String) -> String {
-        preprocessMarkHighlightSyntax(markdown)
+        preserveIndentedHyphenLiteralLines(preprocessMarkHighlightSyntax(markdown))
+    }
+
+    private static func preserveIndentedHyphenLiteralLines(_ markdown: String) -> String {
+        let lines = markdown.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        let transformed = lines.map { line -> String in
+            let leadingSpaces = line.prefix { $0 == " " }.count
+            guard leadingSpaces >= 4 else { return line }
+            let remainder = line.dropFirst(leadingSpaces)
+            guard remainder.hasPrefix("- ") else { return line }
+            return indentedLiteralSentinel + line
+        }
+        return transformed.joined(separator: "\n")
     }
 
     private static func preprocessMarkHighlightSyntax(_ markdown: String) -> String {

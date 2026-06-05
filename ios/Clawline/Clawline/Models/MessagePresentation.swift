@@ -928,54 +928,6 @@ enum MessagePresentationBuilder {
         return urls
     }
 
-    private static func extractMarkdownURLs(from source: String) -> [URL] {
-        guard let attributed = try? AttributedString(
-            markdown: source,
-            options: .init(interpretedSyntax: .full)
-        ) else {
-            return extractURLs(from: markdownPlainText(from: source))
-        }
-
-        let runs = attributed.runs.map { run in
-            (
-                text: String(attributed[run.range].characters),
-                link: run.link
-            )
-        }
-        var urls: [URL] = []
-        for index in runs.indices {
-            guard let url = runs[index].link else { continue }
-            let displayedText = runs[index].text
-            let previousRunText = index > 0 ? runs[index - 1].text : nil
-            let validatedURL = wrappedMarkTrimmedURL(
-                    displayedText: displayedText,
-                    href: url.absoluteString,
-                    previousRunText: previousRunText
-                )
-                ?? sanitizedDetectedURL(from: displayedText)
-                ?? sanitizedDetectedURL(from: url.absoluteString)
-                ?? validatedDetectedURL(from: url.absoluteString)
-            guard let validatedURL else { continue }
-            urls.append(sanitizedDetectedURL(from: validatedURL.absoluteString) ?? validatedURL)
-        }
-
-        // Bare URLs (e.g. `http://host:port`) are not recognized as links by the
-        // CommonMark parser, but NSDataDetector *does* detect them—matching
-        // UITextView's `.link` data-detector behavior.  Supplement the markdown-
-        // extracted set so these URLs also produce link cards.
-        let plainText = NSAttributedString(attributed).string
-        let detectedBareURLs = extractURLs(from: plainText)
-        let seen = Set(urls.map(\.absoluteString))
-        for url in detectedBareURLs where !seen.contains(url.absoluteString)
-            && !seen.contains(where: { seenURL in
-                seenURL.hasPrefix(url.absoluteString) && seenURL.dropFirst(url.absoluteString.count).allSatisfy { $0 == "=" }
-            }) {
-            urls.append(url)
-        }
-
-        return urls
-    }
-
     private static func extractRenderedURLs(
         from attributed: NSAttributedString,
         excludingMediaURLs mediaURLs: [URL] = []

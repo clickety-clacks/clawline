@@ -444,25 +444,16 @@ struct StreamManagerSheet: View {
                 let selectedSessionKey = stream.sessionKey
                 onSelectStream(selectedSessionKey)
             } label: {
+                let isActive = stream.sessionKey == viewModel.uiSelectedSessionKey
+                let dotIdentity = StreamPopupRowStatusDotIdentity(
+                    sessionKey: stream.sessionKey
+                )
                 HStack(spacing: 10) {
-                    let isActive = stream.sessionKey == viewModel.uiSelectedSessionKey
-                    Circle()
-                        .fill(
-                            StreamDotColor.resolve(
-                                isActive: isActive,
-                                dotState: dotState,
-                                colorScheme: colorScheme
-                            )
-                        )
-                        .frame(width: 8, height: 8)
-                        .shadow(
-                            color: isActive ? StreamDotColor.activeGlow(colorScheme: colorScheme) : .clear,
-                            radius: isActive ? StreamDotColor.activeOuterGlowRadius(colorScheme: colorScheme) : 0
-                        )
-                        .shadow(
-                            color: isActive ? StreamDotColor.activeGlow(colorScheme: colorScheme) : .clear,
-                            radius: isActive ? StreamDotColor.activeInnerGlowRadius(colorScheme: colorScheme) : 0
-                        )
+                    StreamPopupRowStatusDot(
+                        isActive: isActive,
+                        dotState: dotState,
+                        colorScheme: colorScheme
+                    )
                     Text(stream.displayName)
                         .font(.clawline(.subsectionHeader).weight(isActive ? .semibold : .regular))
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -472,6 +463,7 @@ struct StreamManagerSheet: View {
                             .tint(.secondary)
                     }
                 }
+                .id(dotIdentity)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
             }
@@ -642,6 +634,36 @@ struct StreamManagerSheet: View {
             .allowsHitTesting(false)
     }
 
+}
+
+struct StreamPopupRowStatusDotIdentity: Hashable {
+    let sessionKey: String
+}
+
+private struct StreamPopupRowStatusDot: View {
+    let isActive: Bool
+    let dotState: StreamDotState
+    let colorScheme: ColorScheme
+
+    var body: some View {
+        Circle()
+            .fill(
+                StreamDotColor.resolve(
+                    isActive: isActive,
+                    dotState: dotState,
+                    colorScheme: colorScheme
+                )
+            )
+            .frame(width: 8, height: 8)
+            .shadow(
+                color: isActive ? StreamDotColor.activeGlow(colorScheme: colorScheme) : .clear,
+                radius: isActive ? StreamDotColor.activeOuterGlowRadius(colorScheme: colorScheme) : 0
+            )
+            .shadow(
+                color: isActive ? StreamDotColor.activeGlow(colorScheme: colorScheme) : .clear,
+                radius: isActive ? StreamDotColor.activeInnerGlowRadius(colorScheme: colorScheme) : 0
+            )
+    }
 }
 
 struct TrackPickerSheet: View {

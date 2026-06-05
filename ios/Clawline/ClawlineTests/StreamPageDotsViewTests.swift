@@ -695,6 +695,18 @@ struct StreamPageDotsViewTests {
         #expect(Self.rgb(color) == Self.rgb(ChatFlowTheme.unreadIndicator(.light)))
     }
 
+    @Test("T1188 popup row dot identity includes materialized session")
+    func popupRowDotIdentityIncludesMaterializedSession() {
+        let first = StreamPopupRowStatusDotIdentity(
+            sessionKey: "agent:main:clawline:user:s_initial"
+        )
+        let scrolledIn = StreamPopupRowStatusDotIdentity(
+            sessionKey: "agent:main:clawline:user:s_scrolled"
+        )
+
+        #expect(first != scrolledIn)
+    }
+
     @Test("Offscreen unread edge bloom is blurred behind the glass")
     func offscreenUnreadEdgeBloomUsesBlur() {
         #expect(StreamPageDotsView.unreadEdgeBloomOpacity(colorScheme: .light) == 0.40)

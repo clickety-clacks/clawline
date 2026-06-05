@@ -178,7 +178,7 @@ struct ChatViewModelTests {
         #expect(viewModel.messages.isEmpty)
     }
 
-    @Test("T375 notification navigation dismisses target notification and preserves unrelated content")
+    @Test("T307/V307-28 navigation dismisses target notification and preserves unrelated content")
     @MainActor
     func notificationNavigationDismissesTargetNotificationAndPreservesUnrelatedContent() async throws {
         resetChatPersistence()
@@ -186,11 +186,20 @@ struct ChatViewModelTests {
         auth.storeCredentials(token: "jwt", userId: "user")
         let sourceSessionKey = "agent:main:clawline:user:s_source"
         let otherSessionKey = "agent:main:clawline:user:s_other"
+        let overflowSessionKeys = (0..<12).map { "agent:main:clawline:user:s_overflow_\($0)" }
         let streams = [
             makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
             makeStreamSession(sessionKey: sourceSessionKey, displayName: "Source", kind: "custom", orderIndex: 1, isBuiltIn: false),
             makeStreamSession(sessionKey: otherSessionKey, displayName: "Other", kind: "custom", orderIndex: 2, isBuiltIn: false),
-        ]
+        ] + overflowSessionKeys.enumerated().map { index, sessionKey in
+            makeStreamSession(
+                sessionKey: sessionKey,
+                displayName: "Overflow \(index)",
+                kind: "custom",
+                orderIndex: index + 3,
+                isBuiltIn: false
+            )
+        }
         let chatService = TestChatService()
         chatService.streams = streams
         let viewModel = ChatViewModel(
@@ -212,7 +221,7 @@ struct ChatViewModelTests {
             if viewModel.stream(for: sourceSessionKey) != nil { break }
             try await Task.sleep(for: .milliseconds(10))
         }
-        try #require(viewModel.stream(for: sourceSessionKey))
+        _ = try #require(viewModel.stream(for: sourceSessionKey))
 
         let userPayload = #"{"type":"message","id":"u_other","role":"user","content":"user echo","timestamp":9000,"streaming":false,"sessionKey":"\#(sourceSessionKey)","attachments":[]}"#
         chatService.emitLifecycleEvent(.init(epoch: 1, payload: .serverMessage(data: Data(userPayload.utf8))))
@@ -222,11 +231,16 @@ struct ChatViewModelTests {
         chatService.emitLifecycleEvent(.init(epoch: 1, payload: .serverMessage(data: Data(secondPayload.utf8))))
         let otherPayload = #"{"type":"message","id":"s_other_notification","role":"assistant","content":"unrelated","timestamp":12000,"streaming":false,"sessionKey":"\#(otherSessionKey)","attachments":[]}"#
         chatService.emitLifecycleEvent(.init(epoch: 1, payload: .serverMessage(data: Data(otherPayload.utf8))))
+        for (index, sessionKey) in overflowSessionKeys.enumerated() {
+            let payload = #"{"type":"message","id":"s_overflow_\#(index)","role":"assistant","content":"overflow \#(index)","timestamp":\#(13000 + index),"streaming":false,"sessionKey":"\#(sessionKey)","attachments":[]}"#
+            chatService.emitLifecycleEvent(.init(epoch: 1, payload: .serverMessage(data: Data(payload.utf8))))
+        }
 
         for _ in 0..<50 {
-            if viewModel.crossChatNotificationBubbles.count == 2 { break }
+            if viewModel.crossChatNotificationBubbles.count == 2 + overflowSessionKeys.count { break }
             try await Task.sleep(for: .milliseconds(10))
         }
+        #expect(viewModel.crossChatNotificationBubbles.count == 2 + overflowSessionKeys.count)
         let sourceBubble = try #require(
             viewModel.crossChatNotificationBubbles.first { $0.sourceChatId == sourceSessionKey }
         )
@@ -246,8 +260,9 @@ struct ChatViewModelTests {
         )
         #expect(viewModel.uiSelectedSessionKey == sourceSessionKey)
         #expect(!viewModel.crossChatNotificationBubbles.map(\.sourceChatId).contains(sourceSessionKey))
-        #expect(viewModel.crossChatNotificationBubbles.map(\.sourceChatId) == [otherSessionKey])
-        #expect(viewModel.crossChatNotificationBubbles.first?.entries.map(\.content) == ["unrelated"])
+        #expect(viewModel.crossChatNotificationBubbles.map(\.sourceChatId).contains(otherSessionKey))
+        #expect(Set(viewModel.crossChatNotificationBubbles.map(\.sourceChatId)).isSuperset(of: Set(overflowSessionKeys)))
+        #expect(viewModel.crossChatNotificationBubbles.first { $0.sourceChatId == otherSessionKey }?.entries.map(\.content) == ["unrelated"])
     }
 
     @Test("T307 assistant notifications dismiss when source disappears from stream snapshot")

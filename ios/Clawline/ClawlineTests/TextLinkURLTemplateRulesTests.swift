@@ -31,6 +31,28 @@ struct TextLinkURLTemplateRulesTests {
         #expect(linkTarget("T1135abc", in: rendered) == nil)
     }
 
+    @Test("T1192: rule display mode is direct by default and Codable")
+    func ruleDisplayModeDefaultsToDirectAndCodable() throws {
+        let legacyJSON = """
+        [{"id":"legacy","enabled":true,"pattern":"T([0-9]+)","urlTemplate":"https://example.com/{match}"}]
+        """.data(using: .utf8)!
+        let decoded = try JSONDecoder().decode([TextLinkURLTemplateRule].self, from: legacyJSON)
+
+        #expect(decoded.first?.displayMode == .direct)
+
+        let popupRule = TextLinkURLTemplateRule(
+            id: "popup",
+            enabled: true,
+            pattern: #"T([0-9]+)"#,
+            urlTemplate: "https://example.com/{match}",
+            displayMode: .popup
+        )
+        let encoded = try JSONEncoder().encode([popupRule])
+        let roundTrip = try JSONDecoder().decode([TextLinkURLTemplateRule].self, from: encoded)
+
+        #expect(roundTrip.first?.displayMode == .popup)
+    }
+
     @Test("V1135-01: capture placeholders and unsafe characters are percent encoded")
     func capturePlaceholdersAndUnsafeCharactersAreEncoded() {
         let attributed = NSMutableAttributedString(string: "Open J:abc /?&=%#\u{0007}.")
@@ -213,6 +235,41 @@ struct TextLinkURLTemplateRulesTests {
         #expect(TextLinkURLTemplateRules.isGeneratedLink(in: expanded, characterRange: range("T1182", in: expanded)))
     }
 
+    @Test("T1192: generated link metadata carries each rule display mode")
+    @MainActor
+    func generatedLinkMetadataCarriesRuleDisplayMode() throws {
+        let rules = [
+            TextLinkURLTemplateRule(
+                id: "modal-ticket",
+                enabled: true,
+                pattern: #"\bM([0-9]+)\b"#,
+                urlTemplate: "https://example.com/modal/{match}",
+                displayMode: .modal
+            ),
+            TextLinkURLTemplateRule(
+                id: "popup-ticket",
+                enabled: true,
+                pattern: #"\bP([0-9]+)\b"#,
+                urlTemplate: "https://example.com/popup/{match}",
+                displayMode: .popup
+            ),
+            TextLinkURLTemplateRule(
+                id: "direct-ticket",
+                enabled: true,
+                pattern: #"\bD([0-9]+)\b"#,
+                urlTemplate: "https://example.com/direct/{match}",
+                displayMode: .direct
+            ),
+        ]
+        let rendered = try withConfiguredRules(rules) {
+            try #require(makeRendered("Review M1192, P1192, and D1192."))
+        }
+
+        #expect(TextLinkURLTemplateRules.displayMode(in: rendered, characterRange: range("M1192", in: rendered)) == .modal)
+        #expect(TextLinkURLTemplateRules.displayMode(in: rendered, characterRange: range("P1192", in: rendered)) == .popup)
+        #expect(TextLinkURLTemplateRules.displayMode(in: rendered, characterRange: range("D1192", in: rendered)) == .direct)
+    }
+
     @Test("T1182: full content layout uses compact width and regular reading width")
     func fullContentLayoutUsesCompactWidthAndRegularReadingWidth() {
         let compact = ExpandedMessageSheetLayout.resolve(
@@ -294,6 +351,67 @@ struct TextLinkURLTemplateRulesTests {
 
         #expect(shouldInteract == false)
         #expect(openedGeneratedURL == generatedURL)
+    }
+
+    @Test("T1192: chat generated link taps honor direct, modal, and popup display modes")
+    @MainActor
+    func chatGeneratedLinkTapsHonorDisplayModes() throws {
+        let cases: [(TextLinkResolvedURLDisplayMode, String)] = [
+            (.direct, "D1192"),
+            (.modal, "M1192"),
+            (.popup, "P1192"),
+        ]
+        let rules = cases.map { mode, token in
+            TextLinkURLTemplateRule(
+                id: "\(mode.rawValue)-ticket",
+                enabled: true,
+                pattern: #"\#(token)"#,
+                urlTemplate: "https://example.com/\(mode.rawValue)/{match}",
+                displayMode: mode
+            )
+        }
+        let rendered = try withConfiguredRules(rules) {
+            try #require(makeRendered("Open D1192 M1192 P1192."))
+        }
+
+        var directURLs: [URL] = []
+        var modalURLs: [URL] = []
+        var popupURLs: [URL] = []
+        let originalGeneratedLinkOpener = GeneratedTextLinkActivationRouter.openGeneratedLink
+        let originalModalPresenter = GeneratedTextLinkActivationRouter.presentResolvedURLModal
+        let originalPopupPresenter = GeneratedTextLinkActivationRouter.presentResolvedURLPopup
+        GeneratedTextLinkActivationRouter.openGeneratedLink = { url, _ in
+            directURLs.append(url)
+            return true
+        }
+        GeneratedTextLinkActivationRouter.presentResolvedURLModal = { url, _ in
+            modalURLs.append(url)
+            return true
+        }
+        GeneratedTextLinkActivationRouter.presentResolvedURLPopup = { url, _ in
+            popupURLs.append(url)
+            return true
+        }
+        defer {
+            GeneratedTextLinkActivationRouter.openGeneratedLink = originalGeneratedLinkOpener
+            GeneratedTextLinkActivationRouter.presentResolvedURLModal = originalModalPresenter
+            GeneratedTextLinkActivationRouter.presentResolvedURLPopup = originalPopupPresenter
+        }
+
+        let textView = UITextView()
+        textView.attributedText = rendered
+        let bubble = MessageBubbleUIKitView()
+
+        for (mode, token) in cases {
+            let tokenRange = range(token, in: rendered)
+            let url = try #require(linkTarget(token, in: rendered))
+            #expect(!bubble.textView(textView, shouldInteractWith: url, in: tokenRange, interaction: .invokeDefaultAction))
+            #expect(TextLinkURLTemplateRules.displayMode(in: rendered, characterRange: tokenRange) == mode)
+        }
+
+        #expect(directURLs.map(\.absoluteString) == ["https://example.com/direct/D1192"])
+        #expect(modalURLs.map(\.absoluteString) == ["https://example.com/modal/M1192"])
+        #expect(popupURLs.map(\.absoluteString) == ["https://example.com/popup/P1192"])
     }
 
     @Test("V1135-01: generated text links suppress external text-view activation")
@@ -384,6 +502,8 @@ struct TextLinkURLTemplateRulesTests {
         #expect(source.contains(".confirmationDialog("))
         #expect(source.contains("settings.deleteTextLinkURLTemplateRule(id: rulePendingDeletion.id)"))
         #expect(source.contains("TextLinkURLTemplateRules.validationMessage(for: rule)"))
+        #expect(source.contains("Picker(\"Display URL\", selection: $rule.displayMode)"))
+        #expect(source.contains("TextLinkResolvedURLDisplayMode.allCases"))
     }
 
     private func makeRendered(_ markdown: String) -> NSAttributedString? {

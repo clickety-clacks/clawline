@@ -111,7 +111,11 @@ struct SelectableAttributedText: UIViewRepresentable {
                 defaultAction: defaultAction,
                 openURL: { url, characterRange in
                     if TextLinkURLTemplateRules.isGeneratedLink(in: textView.attributedText, characterRange: characterRange) {
-                        _ = GeneratedTextLinkActivationRouter.openGeneratedLink(url, textView)
+                        _ = GeneratedTextLinkActivationRouter.activateGeneratedLink(
+                            url,
+                            displayMode: TextLinkURLTemplateRules.displayMode(in: textView.attributedText, characterRange: characterRange),
+                            from: textView
+                        )
                         return
                     }
                     self.onLinkTap(url)
@@ -128,7 +132,11 @@ struct SelectableAttributedText: UIViewRepresentable {
             guard TextLinkURLTemplateRules.isGeneratedLink(in: textView.attributedText, characterRange: characterRange) else {
                 return true
             }
-            _ = GeneratedTextLinkActivationRouter.openGeneratedLink(URL, textView)
+            _ = GeneratedTextLinkActivationRouter.activateGeneratedLink(
+                URL,
+                displayMode: TextLinkURLTemplateRules.displayMode(in: textView.attributedText, characterRange: characterRange),
+                from: textView
+            )
             return false
         }
 

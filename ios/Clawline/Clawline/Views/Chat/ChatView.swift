@@ -5942,6 +5942,7 @@ final class CrossChatNotificationRenderedEntryCache {
     ) -> [RenderedMarkdownBlock]
 
     private struct CacheKey: Hashable {
+        let scope: String
         let id: String
         let content: String
         let appendSeparatorTimestamp: Date?
@@ -5952,10 +5953,11 @@ final class CrossChatNotificationRenderedEntryCache {
         let isDark: Bool
     }
 
-    private var cachedEntries: [CacheKey: CrossChatRenderedNotificationEntry] = [:]
+    private static var cachedEntries: [CacheKey: CrossChatRenderedNotificationEntry] = [:]
 
     func entries(
         for sourceEntries: [CrossChatAssistantNotificationEntry],
+        cacheScope: String,
         baseFont: UIFont,
         inkColor: UIColor,
         lineSpacing: CGFloat,
@@ -5963,6 +5965,7 @@ final class CrossChatNotificationRenderedEntryCache {
     ) -> [CrossChatRenderedNotificationEntry] {
         entries(
             for: sourceEntries,
+            cacheScope: cacheScope,
             baseFont: baseFont,
             inkColor: inkColor,
             lineSpacing: lineSpacing,
@@ -5982,6 +5985,7 @@ final class CrossChatNotificationRenderedEntryCache {
 
     func entries(
         for sourceEntries: [CrossChatAssistantNotificationEntry],
+        cacheScope: String = "",
         baseFont: UIFont,
         inkColor: UIColor,
         lineSpacing: CGFloat,
@@ -5990,6 +5994,7 @@ final class CrossChatNotificationRenderedEntryCache {
     ) -> [CrossChatRenderedNotificationEntry] {
         let keys = sourceEntries.map { entry in
             CacheKey(
+                scope: cacheScope,
                 id: entry.id,
                 content: entry.content,
                 appendSeparatorTimestamp: entry.appendSeparatorTimestamp,
@@ -6001,9 +6006,11 @@ final class CrossChatNotificationRenderedEntryCache {
             )
         }
         let liveKeys = Set(keys)
-        cachedEntries = cachedEntries.filter { liveKeys.contains($0.key) }
+        Self.cachedEntries = Self.cachedEntries.filter { key, _ in
+            key.scope != cacheScope || liveKeys.contains(key)
+        }
         return zip(sourceEntries, keys).map { entry, key in
-            if let cachedEntry = cachedEntries[key] {
+            if let cachedEntry = Self.cachedEntries[key] {
                 return cachedEntry
             }
             let renderedEntry = CrossChatRenderedNotificationEntry(
@@ -6018,7 +6025,7 @@ final class CrossChatNotificationRenderedEntryCache {
                     isDark
                 )
             )
-            cachedEntries[key] = renderedEntry
+            Self.cachedEntries[key] = renderedEntry
             return renderedEntry
         }
     }
@@ -7586,6 +7593,7 @@ struct CrossChatNotificationBubbleView: View {
     private var renderedNotificationEntries: [CrossChatRenderedNotificationEntry] {
         renderedEntriesCache.entries(
             for: bubble.entries,
+            cacheScope: bubble.sourceChatId,
             baseFont: notificationUIFont(.secondaryLabel),
             inkColor: notificationBodyInkColor,
             lineSpacing: 2,

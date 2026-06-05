@@ -531,6 +531,56 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
         #expect(renderCallCount == 2)
     }
 
+    @Test("T1205 notification render cache survives rebuilt bubble view state")
+    @MainActor
+    func t1205_notificationRenderCacheSurvivesRebuiltBubbleViewState() {
+        let baseFont = UIFont.systemFont(ofSize: 15, weight: .regular)
+        let inkColor = UIColor.secondaryLabel
+        var renderCallCount = 0
+        let entries = [
+            CrossChatAssistantNotificationEntry(
+                id: "t1205_entry",
+                content: "Review T1205 and T1182.",
+                timestamp: Date()
+            )
+        ]
+
+        let renderer: CrossChatNotificationRenderedEntryCache.RenderBlocks = { content, _, _, _, _, _ in
+            renderCallCount += 1
+            return [.attributedText(NSAttributedString(string: content))]
+        }
+
+        _ = CrossChatNotificationRenderedEntryCache().entries(
+            for: entries,
+            cacheScope: "agent:main:clawline:user:s_t1205_stall",
+            baseFont: baseFont,
+            inkColor: inkColor,
+            lineSpacing: 2,
+            isDark: false,
+            renderBlocks: renderer
+        )
+        _ = CrossChatNotificationRenderedEntryCache().entries(
+            for: entries,
+            cacheScope: "agent:main:clawline:user:s_t1205_stall",
+            baseFont: baseFont,
+            inkColor: inkColor,
+            lineSpacing: 2,
+            isDark: false,
+            renderBlocks: renderer
+        )
+        _ = CrossChatNotificationRenderedEntryCache().entries(
+            for: entries,
+            cacheScope: "agent:main:clawline:user:s_t1205_other",
+            baseFont: baseFont,
+            inkColor: inkColor,
+            lineSpacing: 2,
+            isDark: false,
+            renderBlocks: renderer
+        )
+
+        #expect(renderCallCount == 2)
+    }
+
     @Test("T307 real notification bubble renders assistant markdown content")
     @MainActor
     func t307_realNotificationBubbleRendersAssistantMarkdownContent() throws {

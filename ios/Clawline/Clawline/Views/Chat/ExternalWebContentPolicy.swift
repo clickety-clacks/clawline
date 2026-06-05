@@ -102,6 +102,41 @@ enum GeneratedTextLinkActivationRouter {
     static var openGeneratedLink: (URL, UIView?) -> Bool = { url, view in
         ExternalWebContentPolicy.openGeneratedLinkBrowserSurface(for: url, from: view)
     }
+
+    @MainActor
+    static var presentResolvedURLModal: (URL, UIView?) -> Bool = { url, view in
+        guard let presenter = view?.clawlineParentViewController else { return false }
+        let alert = UIAlertController(title: "Resolved URL", message: url.absoluteString, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "Done", style: .default))
+        presenter.present(alert, animated: true)
+        return true
+    }
+
+    @MainActor
+    static var presentResolvedURLPopup: (URL, UIView?) -> Bool = { url, view in
+        guard let presenter = view?.clawlineParentViewController else { return false }
+        let controller = TextLinkResolvedURLPopupViewController(url: url)
+        controller.modalPresentationStyle = .overFullScreen
+        controller.modalTransitionStyle = .crossDissolve
+        presenter.present(controller, animated: true)
+        return true
+    }
+
+    @MainActor
+    static func activateGeneratedLink(
+        _ url: URL,
+        displayMode: TextLinkResolvedURLDisplayMode,
+        from view: UIView?
+    ) -> Bool {
+        switch displayMode {
+        case .direct:
+            return openGeneratedLink(url, view)
+        case .modal:
+            return presentResolvedURLModal(url, view)
+        case .popup:
+            return presentResolvedURLPopup(url, view)
+        }
+    }
 }
 
 extension UIView {
@@ -114,5 +149,87 @@ extension UIView {
             responder = current.next
         }
         return nil
+    }
+}
+
+final class TextLinkResolvedURLPopupViewController: UIViewController {
+    private let url: URL
+    private let panelView = UIView()
+    private let urlLabel = UILabel()
+    private let closeButton = UIButton(type: .system)
+
+    init(url: URL) {
+        self.url = url
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+
+        view.backgroundColor = UIColor.black.withAlphaComponent(0.28)
+
+        panelView.translatesAutoresizingMaskIntoConstraints = false
+        panelView.backgroundColor = .secondarySystemBackground
+        panelView.layer.cornerRadius = 20
+        panelView.layer.cornerCurve = .continuous
+        panelView.layer.shadowColor = UIColor.black.cgColor
+        panelView.layer.shadowOpacity = 0.18
+        panelView.layer.shadowRadius = 22
+        panelView.layer.shadowOffset = CGSize(width: 0, height: 12)
+        view.addSubview(panelView)
+
+        let titleLabel = UILabel()
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        titleLabel.text = "Resolved URL"
+        titleLabel.font = .preferredFont(forTextStyle: .headline)
+        titleLabel.adjustsFontForContentSizeCategory = true
+
+        urlLabel.translatesAutoresizingMaskIntoConstraints = false
+        urlLabel.text = url.absoluteString
+        urlLabel.font = .preferredFont(forTextStyle: .body)
+        urlLabel.adjustsFontForContentSizeCategory = true
+        urlLabel.numberOfLines = 0
+        urlLabel.lineBreakMode = .byCharWrapping
+        urlLabel.textColor = .label
+
+        closeButton.translatesAutoresizingMaskIntoConstraints = false
+        closeButton.setImage(UIImage(systemName: "xmark.circle.fill"), for: .normal)
+        closeButton.accessibilityLabel = "Close resolved URL popup"
+        closeButton.addTarget(self, action: #selector(close), for: .touchUpInside)
+
+        panelView.addSubview(titleLabel)
+        panelView.addSubview(urlLabel)
+        panelView.addSubview(closeButton)
+
+        NSLayoutConstraint.activate([
+            panelView.centerXAnchor.constraint(equalTo: view.safeAreaLayoutGuide.centerXAnchor),
+            panelView.centerYAnchor.constraint(equalTo: view.safeAreaLayoutGuide.centerYAnchor),
+            panelView.leadingAnchor.constraint(greaterThanOrEqualTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 18),
+            panelView.trailingAnchor.constraint(lessThanOrEqualTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -18),
+            panelView.widthAnchor.constraint(lessThanOrEqualToConstant: 520),
+
+            titleLabel.topAnchor.constraint(equalTo: panelView.topAnchor, constant: 18),
+            titleLabel.leadingAnchor.constraint(equalTo: panelView.leadingAnchor, constant: 20),
+            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: closeButton.leadingAnchor, constant: -12),
+
+            closeButton.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
+            closeButton.trailingAnchor.constraint(equalTo: panelView.trailingAnchor, constant: -18),
+            closeButton.widthAnchor.constraint(equalToConstant: 32),
+            closeButton.heightAnchor.constraint(equalToConstant: 32),
+
+            urlLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 14),
+            urlLabel.leadingAnchor.constraint(equalTo: panelView.leadingAnchor, constant: 20),
+            urlLabel.trailingAnchor.constraint(equalTo: panelView.trailingAnchor, constant: -20),
+            urlLabel.bottomAnchor.constraint(equalTo: panelView.bottomAnchor, constant: -20),
+        ])
+    }
+
+    @objc private func close() {
+        dismiss(animated: true)
     }
 }

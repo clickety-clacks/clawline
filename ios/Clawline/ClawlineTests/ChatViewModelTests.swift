@@ -58,6 +58,7 @@ struct ChatViewModelTests {
         )
         defer { viewModel.onDisappear() }
 
+        await viewModel.activate(origin: "test.t105.serverEchoCanonicalSession")
         await viewModel.onAppear()
         chatService.emitServiceEvent(.streamSnapshot(streams))
         try await setReadyToSend(chatService: chatService, viewModel: viewModel)
@@ -108,6 +109,7 @@ struct ChatViewModelTests {
         defer { viewModel.onDisappear() }
 
         await viewModel.activate(origin: "test.crossChatMentionSendUsesOnlyContentAfterChip")
+        await viewModel.activate(origin: "test.t105.retryAppendsNewClientIdAtTail")
         await viewModel.onAppear()
         chatService.emitServiceEvent(.streamSnapshot(streams))
         try await setReadyToSend(chatService: chatService, viewModel: viewModel)

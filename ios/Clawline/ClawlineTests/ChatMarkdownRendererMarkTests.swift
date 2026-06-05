@@ -65,15 +65,14 @@ struct UnifiedMarkdownRendererMarkTests {
     @Test("UnifiedMarkdownRenderer strips mark delimiters without assistant highlight color")
     func unifiedMarkdownRendererStripsMarkDelimitersWithoutHighlightColor() {
         let disabled = renderMarkdownForTests(
-            plan: .empty,
+            markdown: "==focus==",
             options: MarkdownRenderOptions(
                 baseFont: UIFont.systemFont(ofSize: 15, weight: .regular),
                 inkColor: .black,
                 lineSpacing: 4,
                 stripDetectedURLs: false,
                 markHighlightColor: nil
-            ),
-            messageText: "==focus=="
+            )
         )
         #expect(disabled.count == 1)
         guard case .attributedText(let disabledText)? = disabled.first else {
@@ -83,7 +82,7 @@ struct UnifiedMarkdownRendererMarkTests {
         #expect(disabledText.string == "focus")
 
         let enabled = renderMarkdownForTests(
-            plan: .empty,
+            markdown: "==focus==",
             options: MarkdownRenderOptions(
                 baseFont: UIFont.systemFont(ofSize: 15, weight: .regular),
                 inkColor: .black,
@@ -91,7 +90,6 @@ struct UnifiedMarkdownRendererMarkTests {
                 stripDetectedURLs: false,
                 markHighlightColor: rustColor(isDark: false)
             ),
-            messageText: "==focus==",
             role: .assistant
         )
         guard case .attributedText(let enabledText)? = enabled.first else {
@@ -129,7 +127,7 @@ struct UnifiedMarkdownRendererMarkTests {
         }))
 
         let rendered = renderMarkdownForTests(
-            plan: .empty,
+            markdown: message.content,
             options: MarkdownRenderOptions(
                 baseFont: UIFont.systemFont(ofSize: 15, weight: .regular),
                 inkColor: .black,
@@ -137,7 +135,6 @@ struct UnifiedMarkdownRendererMarkTests {
                 stripDetectedURLs: false,
                 markHighlightColor: rustColor(isDark: false)
             ),
-            messageText: message.content,
             role: message.role,
             messageID: message.id
         )

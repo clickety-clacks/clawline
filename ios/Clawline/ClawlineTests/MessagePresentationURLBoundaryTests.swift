@@ -217,6 +217,28 @@ struct MessagePresentationURLBoundaryTests {
         #expect(presentation.detectedURLs.map { $0.absoluteString } == [url])
     }
 
+    @Test("Mixed image media and Markdown link href keeps non-image card URL")
+    func mixedImageMediaAndMarkdownLinkHrefKeepsNonImageCardURL() {
+        let imageURL = "https://example.com/ticker/latest.png"
+        let linkURL = "https://example.com/ticker/latest.html"
+        let presentation = buildPresentation(content: "Ticker update\n\(imageURL)\n[Details](\(linkURL))")
+
+        #expect(presentation.parts.contains(where: { part in
+            if case .remoteImage(let url) = part {
+                return url.absoluteString == imageURL
+            }
+            return false
+        }))
+        #expect(presentation.detectedURLs.map { $0.absoluteString } == [linkURL])
+        #expect(!presentation.detectedURLs.map(\.absoluteString).contains(imageURL))
+        #expect(presentation.parts.contains(where: { part in
+            if case .markdown(let text) = part {
+                return text.contains("Ticker update") && text.contains("Details")
+            }
+            return false
+        }))
+    }
+
     @Test("Direct image URLs inside code blocks stay code")
     func directImageURLsInsideCodeBlocksStayCode() {
         let imageURL = "https://example.com/ticker/latest.png"

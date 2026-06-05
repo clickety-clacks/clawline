@@ -25,11 +25,8 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
         Tail text.
         """
 
-        let plan = UnifiedMarkdownParser.parse(markdown: markdown, messageID: "r48_01", metrics: metrics)
-        #expect(sequence(for: plan.blocks) == [.richText, .code, .richText, .table, .richText])
-
-        let bubble = renderMarkdownForTests(plan: plan, options: bubbleOptions())
-        let expanded = renderMarkdownForTests(plan: plan, options: expandedOptions())
+        let bubble = renderMarkdownForTests(markdown: markdown, options: bubbleOptions())
+        let expanded = renderMarkdownForTests(markdown: markdown, options: expandedOptions())
         #expect(sequence(for: bubble) == [.attributedText, .code, .attributedText, .table, .attributedText])
         #expect(sequence(for: expanded) == [.attributedText, .code, .attributedText, .table, .attributedText])
     }
@@ -39,12 +36,9 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
         let markdown = (1...80)
             .map { "Paragraph \($0) with **markdown** and https://example.com/\($0)" }
             .joined(separator: "\n\n")
-        let plan = UnifiedMarkdownParser.parse(markdown: markdown, messageID: "r48_02", metrics: metrics)
-
-        let bubble = renderMarkdownForTests(plan: plan, options: bubbleOptions())
-        let expanded = renderMarkdownForTests(plan: plan, options: expandedOptions())
+        let bubble = renderMarkdownForTests(markdown: markdown, options: bubbleOptions())
+        let expanded = renderMarkdownForTests(markdown: markdown, options: expandedOptions())
         #expect(bubble.count == expanded.count)
-        #expect(expanded.count == plan.blocks.count)
     }
 
     @Test("R48-03: bubble and expanded share one plan and preserve the same text content")
@@ -66,10 +60,8 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
         | --- | --- |
         | a | b |
         """
-        let plan = UnifiedMarkdownParser.parse(markdown: markdown, messageID: "r48_03", metrics: metrics)
-
-        let bubble = renderMarkdownForTests(plan: plan, options: bubbleOptions())
-        let expanded = renderMarkdownForTests(plan: plan, options: expandedOptions())
+        let bubble = renderMarkdownForTests(markdown: markdown, options: bubbleOptions())
+        let expanded = renderMarkdownForTests(markdown: markdown, options: expandedOptions())
         #expect(sequence(for: bubble) == sequence(for: expanded))
 
         let bubbleText = joinedText(from: bubble)
@@ -88,8 +80,8 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
 
         trailing prose
         """
-        let plan = UnifiedMarkdownParser.parse(markdown: markdown, messageID: "r50_01", metrics: metrics)
-        #expect(sequence(for: plan.blocks) == [.code, .richText])
+        let rendered = renderMarkdownForTests(markdown: markdown, options: expandedOptions())
+        #expect(sequence(for: rendered) == [.code, .attributedText])
     }
 
     @Test("R50-02: colon-prefixed line before fence keeps stable classification")
@@ -102,8 +94,8 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
         ```
         done
         """
-        let plan = UnifiedMarkdownParser.parse(markdown: markdown, messageID: "r50_02", metrics: metrics)
-        #expect(sequence(for: plan.blocks) == [.richText, .code, .richText])
+        let rendered = renderMarkdownForTests(markdown: markdown, options: expandedOptions())
+        #expect(sequence(for: rendered) == [.attributedText, .code, .attributedText])
     }
 
     @Test("R50-03: valid weird fence is code; malformed fence falls back to rich text")
@@ -118,10 +110,10 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
         alpha
         """
 
-        let validPlan = UnifiedMarkdownParser.parse(markdown: valid, messageID: "r50_03_valid", metrics: metrics)
-        let invalidPlan = UnifiedMarkdownParser.parse(markdown: invalid, messageID: "r50_03_invalid", metrics: metrics)
-        #expect(sequence(for: validPlan.blocks) == [.code])
-        #expect(sequence(for: invalidPlan.blocks) == [.richText])
+        let validRendered = renderMarkdownForTests(markdown: valid, options: expandedOptions())
+        let invalidRendered = renderMarkdownForTests(markdown: invalid, options: expandedOptions())
+        #expect(sequence(for: validRendered) == [.code])
+        #expect(sequence(for: invalidRendered) == [.attributedText])
     }
 
     @Test("R50-04: multiple fenced blocks remain ordered")
@@ -141,8 +133,8 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
 
         end
         """
-        let plan = UnifiedMarkdownParser.parse(markdown: markdown, messageID: "r50_04", metrics: metrics)
-        #expect(sequence(for: plan.blocks) == [.richText, .code, .richText, .code, .richText])
+        let rendered = renderMarkdownForTests(markdown: markdown, options: expandedOptions())
+        #expect(sequence(for: rendered) == [.attributedText, .code, .attributedText, .code, .attributedText])
     }
 
     @Test("T169: heavily-indented fenced code trims shared left gutter")
@@ -155,9 +147,8 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
         ```
         """
 
-        let plan = UnifiedMarkdownParser.parse(markdown: markdown, messageID: "t169", metrics: metrics)
-
-        guard case .code(let language, let code)? = plan.blocks.first else {
+        let rendered = renderMarkdownForTests(markdown: markdown, options: expandedOptions())
+        guard case .code(let language, let code)? = rendered.first else {
             Issue.record("Expected first block to be code")
             return
         }
@@ -181,9 +172,8 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
         print("ok")
         ```
         """
-        let plan = UnifiedMarkdownParser.parse(markdown: markdown, messageID: "hl_01", metrics: metrics)
         let rendered = renderMarkdownForTests(
-            plan: plan,
+            markdown: markdown,
             options: MarkdownRenderOptions(
                 baseFont: UIFont.systemFont(ofSize: 15, weight: .regular),
                 inkColor: .black,
@@ -208,13 +198,30 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
         #expect(codeBlocks[0].contains("==code=="))
     }
 
-    @Test("EM-01: parser emoji-only metric is limited to 1-3 emoji characters")
-    func em_01_parserEmojiOnlyBounds() {
-        let three = UnifiedMarkdownParser.parse(markdown: "😀😁😂", messageID: "em_01_3", metrics: metrics)
-        #expect(three.isEmojiOnly)
+    @Test("EM-01: renderer emoji-only handling is limited to 1-3 emoji characters")
+    func em_01_rendererEmojiOnlyBounds() {
+        let three = UnifiedMarkdownRenderer.makeContent(
+            messageText: "😀😁😂",
+            context: MarkdownMessageRenderContext(role: .assistant, messageID: "em_01_3", metrics: metrics),
+            baseFont: UIFont.systemFont(ofSize: metrics.bodyFontSize, weight: .regular),
+            inkColor: .black,
+            lineSpacing: 4,
+            stripDetectedURLs: false,
+            isDark: false
+        )
+        #expect(three.joinedInlineEmojiValues == "😀😁😂")
 
-        let four = UnifiedMarkdownParser.parse(markdown: "😀😁😂🤣", messageID: "em_01_4", metrics: metrics)
-        #expect(!four.isEmojiOnly)
+        let four = UnifiedMarkdownRenderer.makeContent(
+            messageText: "😀😁😂🤣",
+            context: MarkdownMessageRenderContext(role: .assistant, messageID: "em_01_4", metrics: metrics),
+            baseFont: UIFont.systemFont(ofSize: metrics.bodyFontSize, weight: .regular),
+            inkColor: .black,
+            lineSpacing: 4,
+            stripDetectedURLs: false,
+            isDark: false
+        )
+        #expect(four.joinedInlineEmojiValues == nil)
+        #expect(four.hasNonEmptyAttributedText)
     }
 
     @Test("EM-02: emoji-only messages preserve all inline blocks across surfaces")
@@ -225,7 +232,6 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
         😁
         """
 
-        let plan = UnifiedMarkdownParser.parse(markdown: markdown, messageID: "em_02", metrics: metrics)
         let content = UnifiedMarkdownRenderer.makeContent(
             messageText: markdown,
             context: MarkdownMessageRenderContext(
@@ -250,12 +256,9 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
         | --- |
         | 1 | 2 |
         """
-        let plan = UnifiedMarkdownParser.parse(markdown: markdown, messageID: "tb_01", metrics: metrics)
-        #expect(!plan.blocks.contains(where: { if case .table = $0 { return true }; return false }))
-        let combined = plan.blocks.compactMap { block -> String? in
-            if case .richText(let source) = block { return source }
-            return nil
-        }.joined(separator: "\n")
+        let rendered = renderMarkdownForTests(markdown: markdown, options: expandedOptions())
+        #expect(!rendered.contains(where: { if case .table = $0 { return true }; return false }))
+        let combined = joinedText(from: rendered)
         #expect(combined.contains("| A | B |"))
         #expect(combined.contains("| 1 | 2 |"))
     }
@@ -267,9 +270,9 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
         | --- | --- |
         | `x` | **y** |
         """
-        let plan = UnifiedMarkdownParser.parse(markdown: markdown, messageID: "tb_02", metrics: metrics)
+        let rendered = renderMarkdownForTests(markdown: markdown, options: expandedOptions())
 
-        guard case .table(let model)? = plan.blocks.first else {
+        guard case .table(let model)? = rendered.first else {
             Issue.record("Expected first block to be table")
             return
         }
@@ -308,9 +311,8 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
         Tail paragraph.
         """
 
-        let plan = UnifiedMarkdownParser.parse(markdown: markdown, messageID: "blk_01", metrics: metrics)
-        let bubble = renderMarkdownForTests(plan: plan, options: bubbleOptions())
-        let expanded = renderMarkdownForTests(plan: plan, options: expandedOptions())
+        let bubble = renderMarkdownForTests(markdown: markdown, options: bubbleOptions())
+        let expanded = renderMarkdownForTests(markdown: markdown, options: expandedOptions())
 
         #expect(sequence(for: bubble) == sequence(for: expanded))
         #expect(bubble.filter { if case .attributedText = $0 { return true }; return false }.count >= 6)
@@ -347,8 +349,7 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
           - Nested Beta Two
         - Gamma
         """
-        let plan = UnifiedMarkdownParser.parse(markdown: markdown, messageID: "ul_01", metrics: metrics)
-        let rendered = renderMarkdownForTests(plan: plan, options: expandedOptions())
+        let rendered = renderMarkdownForTests(markdown: markdown, options: expandedOptions())
         let text = joinedText(from: rendered)
 
         #expect(text.contains("Alpha"))
@@ -383,9 +384,8 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
             streamingState: &state
         )
         let rendered = renderMarkdownForTests(
-            plan: .empty,
+            markdown: message.content,
             options: bubbleOptions(),
-            messageText: message.content,
             role: message.role,
             messageID: message.id
         )
@@ -411,17 +411,11 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
         - - -
             - literal
         """
-        let plan = MarkdownRenderPlan(
-            blocks: [.richText(markdownSource: markdown)],
-            plainTextForMetrics: markdown,
-            containsTextualContent: true,
-            isEmojiOnly: false
-        )
-        let rendered = renderMarkdownForTests(plan: plan, options: bubbleOptions())
+        let rendered = renderMarkdownForTests(markdown: markdown, options: bubbleOptions())
         let text = joinedText(from: rendered)
 
         #expect(text.contains("• Bullet"))
-        #expect(text.contains("- - -"))
+        #expect(text.contains("⸻"))
         #expect(text.contains("    - literal"))
         #expect(!text.contains("• literal"))
     }
@@ -433,8 +427,7 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
          1. Second
           1. Third
         """
-        let plan = UnifiedMarkdownParser.parse(markdown: markdown, messageID: "t137", metrics: metrics)
-        let rendered = renderMarkdownForTests(plan: plan, options: expandedOptions())
+        let rendered = renderMarkdownForTests(markdown: markdown, options: expandedOptions())
         let text = joinedText(from: rendered)
 
         #expect(text.contains("1. First"))
@@ -755,29 +748,10 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
         #expect(try #require(notificationTextViews.first).isHidden == false)
     }
 
-    private enum BlockType: Equatable {
-        case richText
-        case code
-        case table
-    }
-
     private enum RenderedType: Equatable {
         case attributedText
         case code
         case table
-    }
-
-    private func sequence(for blocks: [MarkdownRenderBlock]) -> [BlockType] {
-        blocks.map { block in
-            switch block {
-            case .richText:
-                return .richText
-            case .code:
-                return .code
-            case .table:
-                return .table
-            }
-        }
     }
 
     private func sequence(for blocks: [RenderedMarkdownBlock]) -> [RenderedType] {

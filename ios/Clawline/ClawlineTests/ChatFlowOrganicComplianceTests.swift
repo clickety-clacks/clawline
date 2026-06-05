@@ -416,7 +416,7 @@ struct ChatFlowOrganicComplianceTests {
         #expect(renderedMarkdownText(from: message, stripDetectedURLs: false) == "Visit https://example.com/path now")
 
         let rendered = renderMarkdownForTests(
-            plan: .empty,
+            markdown: message.content,
             options: MarkdownRenderOptions(
                 baseFont: UIFont.systemFont(ofSize: ChatFlowTheme.Metrics(isCompact: true).bodyFontSize, weight: .regular),
                 inkColor: .black,
@@ -424,7 +424,6 @@ struct ChatFlowOrganicComplianceTests {
                 stripDetectedURLs: false,
                 markHighlightColor: nil
             ),
-            messageText: message.content,
             role: message.role,
             messageID: message.id
         )
@@ -468,7 +467,7 @@ struct ChatFlowOrganicComplianceTests {
         #expect(renderedMarkdownText(from: message, stripDetectedURLs: false) == "http://tars:18800/www/tracker-dashboard.html`")
 
         let rendered = renderMarkdownForTests(
-            plan: .empty,
+            markdown: message.content,
             options: MarkdownRenderOptions(
                 baseFont: UIFont.systemFont(ofSize: ChatFlowTheme.Metrics(isCompact: true).bodyFontSize, weight: .regular),
                 inkColor: .black,
@@ -476,7 +475,6 @@ struct ChatFlowOrganicComplianceTests {
                 stripDetectedURLs: false,
                 markHighlightColor: nil
             ),
-            messageText: message.content,
             role: message.role,
             messageID: message.id
         )
@@ -509,7 +507,7 @@ struct ChatFlowOrganicComplianceTests {
         #expect(renderedMarkdownText(from: message, stripDetectedURLs: false) == "http://example.comnice")
 
         let rendered = renderMarkdownForTests(
-            plan: .empty,
+            markdown: message.content,
             options: MarkdownRenderOptions(
                 baseFont: UIFont.systemFont(ofSize: ChatFlowTheme.Metrics(isCompact: true).bodyFontSize, weight: .regular),
                 inkColor: .black,
@@ -517,7 +515,6 @@ struct ChatFlowOrganicComplianceTests {
                 stripDetectedURLs: false,
                 markHighlightColor: nil
             ),
-            messageText: message.content,
             role: message.role,
             messageID: message.id
         )
@@ -1231,9 +1228,8 @@ struct ChatFlowOrganicComplianceTests {
             markHighlightColor: nil
         )
         let rendered = renderMarkdownForTests(
-            plan: .empty,
+            markdown: message.content,
             options: options,
-            messageText: message.content,
             role: message.role,
             messageID: message.id
         )

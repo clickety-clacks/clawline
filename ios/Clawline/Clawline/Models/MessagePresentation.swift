@@ -374,8 +374,11 @@ enum MessagePresentationBuilder {
 
                         let remoteImageExtraction = extractRemoteImageURLs(from: inlineImageExtraction.markdownSource)
                         remoteImageURLs.append(contentsOf: remoteImageExtraction.urls)
-                        detectedURLOccurrences.append(contentsOf: extractRenderedURLs(from: attributedText))
                     }
+                    detectedURLOccurrences.append(contentsOf: extractRenderedURLs(
+                        from: attributedText,
+                        excludingMediaURLs: shouldExtractMessageMedia ? remoteImageURLs : []
+                    ))
                     let trimmed = source.trimmingCharacters(in: .whitespacesAndNewlines)
                     guard !trimmed.isEmpty else { continue }
                     if hasRenderableAttachments, isAttachmentSummaryLine(trimmed) {
@@ -973,9 +976,13 @@ enum MessagePresentationBuilder {
         return urls
     }
 
-    private static func extractRenderedURLs(from attributed: NSAttributedString) -> [URL] {
+    private static func extractRenderedURLs(
+        from attributed: NSAttributedString,
+        excludingMediaURLs mediaURLs: [URL] = []
+    ) -> [URL] {
         let text = attributed.string
         var urls: [URL] = []
+        let mediaURLStrings = Set(mediaURLs.map(\.absoluteString))
         attributed.enumerateAttribute(.link, in: NSRange(location: 0, length: attributed.length)) { value, range, _ in
             guard let value else { return }
             let href: String
@@ -999,7 +1006,9 @@ enum MessagePresentationBuilder {
                 ?? sanitizedDetectedURL(from: href)
                 ?? validatedDetectedURL(from: href)
             guard let validatedURL else { return }
-            urls.append(sanitizedDetectedURL(from: validatedURL.absoluteString) ?? validatedURL)
+            let sanitizedURL = sanitizedDetectedURL(from: validatedURL.absoluteString) ?? validatedURL
+            guard !shouldExcludeRenderedURL(sanitizedURL, mediaURLStrings: mediaURLStrings) else { return }
+            urls.append(sanitizedURL)
         }
 
         let detectedBareURLs = extractURLs(from: text)
@@ -1007,11 +1016,16 @@ enum MessagePresentationBuilder {
         for url in detectedBareURLs where !seen.contains(url.absoluteString)
             && !seen.contains(where: { seenURL in
                 seenURL.hasPrefix(url.absoluteString) && seenURL.dropFirst(url.absoluteString.count).allSatisfy { $0 == "=" }
-            }) {
+            })
+            && !shouldExcludeRenderedURL(url, mediaURLStrings: mediaURLStrings) {
             urls.append(url)
         }
 
         return urls
+    }
+
+    private static func shouldExcludeRenderedURL(_ url: URL, mediaURLStrings: Set<String>) -> Bool {
+        mediaURLStrings.contains(url.absoluteString) || isDirectImageURL(url)
     }
 
     private static func sanitizedDetectedURL(from rawMatch: String) -> URL? {

@@ -59,9 +59,7 @@ enum UnifiedMarkdownRenderer {
             inkColor: inkColor,
             lineSpacing: lineSpacing,
             stripDetectedURLs: stripDetectedURLs,
-            markHighlightColor: role == .assistant
-                ? SalientHighlightApplier.highlightColor(isDark: isDark)
-                : nil
+            markHighlightColor: SalientHighlightApplier.highlightColor(isDark: isDark)
         )
     }
 

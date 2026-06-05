@@ -283,6 +283,17 @@ struct BubbleScrollTests {
         #expect(abs(scroll.contentOffset.y) < 0.5)
     }
 
+    @Test("T1193: Production text bubble metrics stay compact")
+    func productionTextBubbleMetricsStayCompact() {
+        let compact = ChatFlowTheme.Metrics(isCompact: true)
+        let regular = ChatFlowTheme.Metrics(isCompact: false)
+
+        #expect(compact.bubblePaddingVertical == 8)
+        #expect(compact.bubblePaddingHorizontal == 10)
+        #expect(regular.bubblePaddingVertical == 10)
+        #expect(regular.bubblePaddingHorizontal == 14)
+    }
+
     @Test("BubbleSizingV2 live short-bubble remeasure keeps plan min width below legacy floor")
     func bubbleSizingV2LiveRemeasureUsesPlanMinWidth() {
         let abovePlanMin = MessageFlowCollectionViewController.enforcedLiveMeasuredWidth(

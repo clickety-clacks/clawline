@@ -126,8 +126,8 @@ enum ChatFlowTheme {
         var flowGap: CGFloat { isCompact ? 12 : 16 }
         var containerPadding: CGFloat { isCompact ? 12 : 24 }
         var inputBarPaddingHorizontal: CGFloat { isCompact ? 24 : 24 }
-        var bubblePaddingVertical: CGFloat { isCompact ? 14 : 16 }
-        var bubblePaddingHorizontal: CGFloat { isCompact ? 12 : 20 }
+        var bubblePaddingVertical: CGFloat { isCompact ? 8 : 10 }
+        var bubblePaddingHorizontal: CGFloat { isCompact ? 10 : 14 }
         var shortFontSize: CGFloat { UIFont.clawline(.shortMessage).pointSize }
         var mediumFontSize: CGFloat { UIFont.clawline(.mediumMessage).pointSize }
         var bodyFontSize: CGFloat { UIFont.clawline(.bodyText).pointSize }

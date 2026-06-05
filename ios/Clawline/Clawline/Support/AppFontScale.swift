@@ -12,6 +12,13 @@ enum AppFontScale {
     nonisolated static let step: CGFloat = 0.1
     nonisolated static let minimum: CGFloat = 0.8
     nonisolated static let maximum: CGFloat = 1.6
+    nonisolated static let platformBasePointDelta: CGFloat = {
+#if targetEnvironment(macCatalyst)
+        4.0
+#else
+        0.0
+#endif
+    }()
 #if targetEnvironment(macCatalyst)
     private nonisolated static let activeValueStore = ActiveValueStore()
 #endif
@@ -58,7 +65,7 @@ enum AppFontScale {
         for basePointSize: CGFloat,
         defaults: UserDefaults = .standard
     ) -> CGFloat {
-        basePointSize * currentValue(defaults: defaults)
+        (basePointSize + platformBasePointDelta) * currentValue(defaults: defaults)
     }
 
     nonisolated static func toastMessage(for value: CGFloat) -> String {

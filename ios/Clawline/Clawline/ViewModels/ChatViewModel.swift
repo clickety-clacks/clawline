@@ -1490,7 +1490,6 @@ final class ChatViewModel: ChatViewModelHosting {
         for stream in streams {
             streamsBySessionKey[stream.sessionKey] = stream
             syntheticSessionKeys.insert(stream.sessionKey)
-            ensureSessionStorage(for: stream.sessionKey)
         }
         let alphaMessage = Message(
             id: "s_t1174_alpha_chat_message",

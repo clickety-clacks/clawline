@@ -8404,7 +8404,7 @@ enum CrossChatNotificationActionMenuItem: CaseIterable, Identifiable {
         case .goToChat:
             return nil
         case .reply:
-            return "⇧⌘\(assignedNumber)"
+            return "⌥⌘\(assignedNumber)"
         case .dismiss:
             return "⌥⇧⌘\(assignedNumber)"
         }
@@ -8797,7 +8797,7 @@ private struct CrossChatNotificationKeyboardShortcuts: View {
                             )
                         }
                     }
-                        .keyboardShortcut(KeyEquivalent(Character("\(index)")), modifiers: [.command, .shift])
+                        .keyboardShortcut(KeyEquivalent(Character("\(index)")), modifiers: [.command, .option])
                     Button("") {
                         routeAssignedShortcut(.notificationAssignedDismiss(index), index: index) {
                             NotificationCenter.default.post(

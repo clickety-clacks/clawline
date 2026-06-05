@@ -540,6 +540,11 @@ struct PromptFocusShortcutActivationTests {
             })
             #expect(notificationCommandSpecs.contains { spec in
                 spec.input == "\(index)"
+                    && spec.modifierFlags == [.command, .alternate]
+                    && spec.action.selector == #selector(UIResponder.clawlineNotificationNumberCommand(_:))
+            })
+            #expect(!notificationCommandSpecs.contains { spec in
+                spec.input == "\(index)"
                     && spec.modifierFlags == [.command, .shift]
                     && spec.action.selector == #selector(UIResponder.clawlineNotificationNumberCommand(_:))
             })
@@ -821,7 +826,7 @@ struct PromptFocusShortcutActivationTests {
         responder.clawlineNotificationNumberCommand(
             UIKeyCommand(
                 input: "3",
-                modifierFlags: [.command, .shift],
+                modifierFlags: [.command, .alternate],
                 action: #selector(UIResponder.clawlineNotificationNumberCommand(_:))
             )
         )
@@ -838,6 +843,23 @@ struct PromptFocusShortcutActivationTests {
             .notificationAssignedReply(3),
             .notificationAssignedDismiss(3)
         ])
+
+        posted.removeAll()
+        responder.clawlineNotificationNumberCommand(
+            UIKeyCommand(
+                input: "3",
+                modifierFlags: [.command, .shift],
+                action: #selector(UIResponder.clawlineNotificationNumberCommand(_:))
+            )
+        )
+        responder.clawlineNotificationNumberCommand(
+            UIKeyCommand(
+                input: "#",
+                modifierFlags: [.command, .shift],
+                action: #selector(UIResponder.clawlineNotificationNumberCommand(_:))
+            )
+        )
+        #expect(posted.isEmpty)
     }
 
     @Test("Notification scroll responders normalize physical Cmd-J/K through root fan-out intents")

@@ -294,6 +294,58 @@ struct BubbleScrollTests {
         #expect(regular.bubblePaddingHorizontal == 14)
     }
 
+    @Test("T1193: Production markdown body block spacing stays compact")
+    @MainActor
+    func productionMarkdownBodyBlockSpacingStaysCompact() {
+        let metrics = ChatFlowTheme.Metrics(isCompact: false)
+        let message = Message(
+            id: "t1193-markdown-body-spacing",
+            role: .assistant,
+            content: """
+            First paragraph in a realistic transcript bubble.
+
+            Second paragraph should not create a loose body gap.
+
+            ```swift
+            let value = "code block"
+            ```
+            """,
+            timestamp: Date(),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: "agent:main:clawline:flynn:s_111df227"
+        )
+        let presentation = buildPresentation(message, metrics: metrics, enableLinkPreviews: false)
+        let bubble = MessageBubbleUIKitView(frame: CGRect(x: 0, y: 0, width: 360, height: 1))
+
+        bubble.configure(
+            message: message,
+            presentation: presentation,
+            sizeClass: MessageFlowRules.sizeClass(for: presentation),
+            metrics: metrics,
+            maxWidth: 360,
+            truncationHeightOverride: 1000,
+            bubbleSizingV2: nil,
+            showsHeader: true,
+            paddingScale: 1,
+            minWidthOverride: nil,
+            maxWidthOverride: nil,
+            useContinuousCorners: true,
+            isDark: false,
+            onRequestExpand: nil,
+            onRequestLayout: nil,
+            onInteractiveCallback: nil
+        )
+
+        guard let bodyStack = markdownBodyStack(in: bubble, arrangedSubviewCountAtLeast: 2) else {
+            Issue.record("Expected production markdown body stack with multiple rendered blocks")
+            return
+        }
+
+        #expect(bodyStack.spacing == 6)
+    }
+
     @Test("BubbleSizingV2 live short-bubble remeasure keeps plan min width below legacy floor")
     func bubbleSizingV2LiveRemeasureUsesPlanMinWidth() {
         let abovePlanMin = MessageFlowCollectionViewController.enforcedLiveMeasuredWidth(
@@ -1168,6 +1220,21 @@ struct BubbleScrollTests {
         }
         for sub in view.subviews {
             if let found = linkPreviewView(in: sub) {
+                return found
+            }
+        }
+        return nil
+    }
+
+    private func markdownBodyStack(in view: UIView, arrangedSubviewCountAtLeast minimumCount: Int) -> UIStackView? {
+        if let stack = view as? UIStackView,
+           stack.axis == .vertical,
+           stack.superview is UIScrollView,
+           stack.arrangedSubviews.count >= minimumCount {
+            return stack
+        }
+        for sub in view.subviews {
+            if let found = markdownBodyStack(in: sub, arrangedSubviewCountAtLeast: minimumCount) {
                 return found
             }
         }

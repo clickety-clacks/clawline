@@ -52,6 +52,66 @@ struct KeyboardCommandRouterTests {
         assertRoute(.textModifiedNewline, in: store, isHandledBy: .notificationReply("n0"), rule: "PR-05")
     }
 
+    @Test("T1210 selector plain number shortcuts override notification open only while selector owns slot")
+    func selectorPlainNumberShortcutsOverrideNotificationOpenOnlyWhileSelectorOwnsSlot() {
+        var selectorStore = KeyboardOwnershipSceneFactory.chatScene(
+            visibleNotificationSourceChatIds: ["n0", "n1"],
+            mentionPickerVisible: false,
+            composerFocused: true,
+            notificationReplyFocusedSourceChatId: nil,
+            actionMenuSourceChatId: nil
+        )
+        let selectorKeys = ["s_first", "s_second"]
+        for record in StreamSelectorShortcutMap.records(selectableSessionKeys: selectorKeys) {
+            selectorStore.register(record)
+        }
+        selectorStore.setChatSelectorShortcutMap(
+            StreamSelectorShortcutMap.shortcutMap(selectableSessionKeys: selectorKeys)
+        )
+
+        assertRoute(.notificationAssignedOpen(1), in: selectorStore, isHandledBy: .chatSelectorRow("s_first"), rule: "PR-00")
+        assertRoute(.notificationAssignedReply(1), in: selectorStore, isHandledBy: .notificationBubble("n1"), rule: "PR-03")
+        assertRoute(.notificationAssignedDismiss(1), in: selectorStore, isHandledBy: .notificationBubble("n1"), rule: "PR-03")
+
+        let closedStore = KeyboardOwnershipSceneFactory.chatScene(
+            visibleNotificationSourceChatIds: ["n0", "n1"],
+            mentionPickerVisible: false,
+            composerFocused: true,
+            notificationReplyFocusedSourceChatId: nil,
+            actionMenuSourceChatId: nil
+        )
+        assertRoute(.notificationAssignedOpen(1), in: closedStore, isHandledBy: .notificationBubble("n1"), rule: "PR-03")
+    }
+
+    @Test("T1210 chat scene factory installs selector shortcut ownership into root store")
+    func chatSceneFactoryInstallsSelectorShortcutOwnershipIntoRootStore() {
+        let store = KeyboardOwnershipSceneFactory.chatScene(
+            visibleNotificationSourceChatIds: ["n0", "n1"],
+            visibleChatSelectorSessionKeys: ["s_first", "s_second"],
+            mentionPickerVisible: false,
+            composerFocused: true,
+            notificationReplyFocusedSourceChatId: nil,
+            actionMenuSourceChatId: nil
+        )
+
+        assertRoute(.notificationAssignedOpen(1), in: store, isHandledBy: .chatSelectorRow("s_first"), rule: "PR-00")
+        assertRoute(.notificationAssignedReply(1), in: store, isHandledBy: .notificationBubble("n1"), rule: "PR-03")
+    }
+
+    @Test("T1210 selector map follows filtered visible ordering and maps tenth row to slot zero")
+    func selectorMapFollowsFilteredVisibleOrderingAndMapsTenthRowToZero() {
+        let filteredKeys = (0..<12).map { "filtered_\($0)" }
+        let map = StreamSelectorShortcutMap.shortcutMap(selectableSessionKeys: filteredKeys)
+        let store = StreamSelectorShortcutMap.store(selectableSessionKeys: filteredKeys)
+
+        #expect(map[1] == .chatSelectorRow("filtered_0"))
+        #expect(map[9] == .chatSelectorRow("filtered_8"))
+        #expect(map[0] == .chatSelectorRow("filtered_9"))
+        #expect(map.values.contains(.chatSelectorRow("filtered_10")) == false)
+        assertRoute(.notificationAssignedOpen(0), in: store, isHandledBy: .chatSelectorRow("filtered_9"), rule: "PR-00")
+        #expect(KeyboardCommandRouter.route(intent: .notificationAssignedOpen(4), store: StreamSelectorShortcutMap.store(selectableSessionKeys: [])).outcome == .fallthroughToDefault)
+    }
+
     @Test("T343 VG-03 mention picker open close cannot poison notification scroll ownership")
     func mentionPickerOpenCloseCannotPoisonNotificationScrollOwnership() {
         let openStore = KeyboardOwnershipSceneFactory.chatScene(

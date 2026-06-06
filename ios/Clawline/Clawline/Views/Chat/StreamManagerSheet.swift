@@ -7,6 +7,9 @@
 
 import SwiftUI
 import UIKit
+#if canImport(GameController)
+import GameController
+#endif
 
 enum StreamPopupSearchPresentationFocusPolicy {
     static func shouldRenderSearchTextFieldOnInitialPresentation(searchFocusRequestID: Int?) -> Bool {
@@ -27,11 +30,13 @@ struct StreamManagerSheet: View {
     let onSelectStream: (String) -> Void
     let onRequestTrackPicker: () -> Void
     let onConsumeSearchFocusRequest: () -> Void
+    let onShortcutOwnershipChange: ([String]) -> Void
 
     @State private var draftName = ""
     @State private var searchQuery = ""
     @State private var activeEditor: EditorMode?
     @State private var isWorking = false
+    @State private var resolvedHardwareKeyboardShortcutsAvailable = false
     @State private var removingSessionKeys: Set<String> = []
     @State private var pendingCreateRows: [PendingCreateRow] = []
     @State private var pendingRemovalStream: StreamSession?
@@ -66,6 +71,7 @@ struct StreamManagerSheet: View {
     private let rowDotDiameter: CGFloat = 8
     private let rowContentSpacing: CGFloat = 10
     private let rowTrailingAccessoryReserve: CGFloat = 28
+    private let shortcutLabelReservedWidth: CGFloat = 58
 
     private var maximumPopoverWidth: CGFloat {
         max(baselineMaximumPopoverWidth, floor(maxAvailableWidth * 0.8))
@@ -115,6 +121,26 @@ struct StreamManagerSheet: View {
 
     private var filteredStreamSessionKeys: [String] {
         filteredStreams.map(\.sessionKey)
+    }
+
+    private var selectorShortcutsAvailable: Bool {
+        resolvedHardwareKeyboardShortcutsAvailable
+    }
+
+    private var selectableShortcutSessionKeys: [String] {
+        guard selectorShortcutsAvailable, !isWorking else { return [] }
+        return filteredStreamSessionKeys.filter { sessionKey in
+            !removingSessionKeys.contains(sessionKey) && activeEditor != .renaming(sessionKey)
+        }
+    }
+
+    private var selectorShortcutSlots: [Int] {
+        StreamSelectorShortcutMap.orderedSlots.filter { slot in
+            StreamSelectorShortcutMap.sessionKey(
+                forSlot: slot,
+                selectableSessionKeys: selectableShortcutSessionKeys
+            ) != nil
+        }
     }
 
     private var filteredPendingCreateRows: [PendingCreateRow] {
@@ -258,11 +284,17 @@ struct StreamManagerSheet: View {
                 .stroke(Color.white.opacity(0.10), lineWidth: 0.5)
                 .allowsHitTesting(false)
         )
+        .background {
+            selectorShortcutButtons
+        }
         .onAppear {
+            resolvedHardwareKeyboardShortcutsAvailable = CrossChatShortcutLabelAvailability.current
+            publishShortcutOwnership()
             syncSelectionWithFilteredStreams()
             handleInitialSearchFocus(searchFocusRequestID)
         }
         .onDisappear {
+            onShortcutOwnershipChange([])
             resetInlineEditing()
             searchQuery = ""
             isSearchFieldFocused = false
@@ -275,10 +307,25 @@ struct StreamManagerSheet: View {
         }
         .onChange(of: searchQuery) { _, _ in
             syncSelectionWithFilteredStreams()
+            publishShortcutOwnership()
         }
         .onChange(of: streams.map(\.sessionKey)) { _, _ in
             syncSelectionWithFilteredStreams()
+            publishShortcutOwnership()
         }
+        .onChange(of: selectableShortcutSessionKeys) { _, _ in
+            publishShortcutOwnership()
+        }
+#if os(iOS) && !targetEnvironment(macCatalyst) && canImport(GameController)
+        .onReceive(NotificationCenter.default.publisher(for: .GCKeyboardDidConnect)) { _ in
+            resolvedHardwareKeyboardShortcutsAvailable = CrossChatShortcutLabelAvailability.current
+            publishShortcutOwnership()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .GCKeyboardDidDisconnect)) { _ in
+            resolvedHardwareKeyboardShortcutsAvailable = CrossChatShortcutLabelAvailability.current
+            publishShortcutOwnership()
+        }
+#endif
         .alert(
             pendingRemovalTitle,
             isPresented: Binding(
@@ -367,6 +414,29 @@ struct StreamManagerSheet: View {
         .overlay(alignment: .top) {
             sectionSeparator
         }
+    }
+
+    private var selectorShortcutButtons: some View {
+        Group {
+            if selectorShortcutsAvailable {
+                ForEach(selectorShortcutSlots, id: \.self) { slot in
+                    Button("") {
+                        NotificationCenter.default.post(
+                            name: .clawlineKeyboardCommandIntent,
+                            object: KeyboardCommandIntent.notificationAssignedOpen(slot)
+                        )
+                    }
+                    .keyboardShortcut(
+                        KeyEquivalent(Character("\(slot)")),
+                        modifiers: .command
+                    )
+                    .accessibilityHidden(true)
+                }
+            }
+        }
+        .frame(width: 0, height: 0)
+        .opacity(0)
+        .allowsHitTesting(false)
     }
 
     @ViewBuilder
@@ -489,6 +559,7 @@ struct StreamManagerSheet: View {
                             .controlSize(.small)
                             .tint(.secondary)
                     }
+                    shortcutLabel(for: stream)
                 }
                 .id(dotIdentity)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
@@ -496,6 +567,20 @@ struct StreamManagerSheet: View {
             }
             .buttonStyle(.plain)
             .disabled(isWorking || isRemovingStream(stream.sessionKey))
+            .accessibilityHint(accessibilityShortcutLabel(for: stream).map { "Shortcut \($0)" } ?? "")
+        }
+    }
+
+    @ViewBuilder
+    private func shortcutLabel(for stream: StreamSession) -> some View {
+        if let label = shortcutLabelText(for: stream) {
+            Text(label)
+                .font(.clawline(.secondaryLabel))
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .frame(width: shortcutLabelReservedWidth, alignment: .trailing)
+                .accessibilityLabel(label.replacingOccurrences(of: "Cmd-", with: "Command "))
         }
     }
 
@@ -630,6 +715,23 @@ struct StreamManagerSheet: View {
         onSelectStream(selectedStreamSessionKey)
     }
 
+    private func publishShortcutOwnership() {
+        onShortcutOwnershipChange(selectableShortcutSessionKeys)
+    }
+
+    private func shortcutLabelText(for stream: StreamSession) -> String? {
+        guard selectorShortcutsAvailable,
+              let slot = StreamSelectorShortcutMap.slot(
+                forSessionKey: stream.sessionKey,
+                selectableSessionKeys: selectableShortcutSessionKeys
+              ) else { return nil }
+        return "Cmd-\(slot)"
+    }
+
+    private func accessibilityShortcutLabel(for stream: StreamSession) -> String? {
+        shortcutLabelText(for: stream)?.replacingOccurrences(of: "Cmd-", with: "Command ")
+    }
+
     private func renameStream(_ stream: StreamSession) async {
         let trimmed = draftName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
@@ -676,6 +778,60 @@ struct StreamManagerSheet: View {
 
 struct StreamPopupRowStatusDotIdentity: Hashable {
     let sessionKey: String
+}
+
+enum StreamSelectorShortcutMap {
+    static let orderedSlots = [1, 2, 3, 4, 5, 6, 7, 8, 9, 0]
+
+    static func shortcutMap(selectableSessionKeys: [String]) -> [Int: KeyboardSurfaceId] {
+        Dictionary(
+            uniqueKeysWithValues: zip(orderedSlots, selectableSessionKeys.prefix(orderedSlots.count))
+                .map { slot, sessionKey in
+                    (slot, KeyboardSurfaceId.chatSelectorRow(sessionKey))
+                }
+        )
+    }
+
+    static func records(selectableSessionKeys: [String]) -> [KeyboardSurfaceRecord] {
+        selectableSessionKeys.prefix(orderedSlots.count).map { sessionKey in
+            KeyboardSurfaceRecord(
+                surfaceId: .chatSelectorRow(sessionKey),
+                surfaceKind: .chatSelector,
+                parentSurfaceId: nil,
+                lifecycleToken: "chat-selector-row:\(sessionKey)",
+                visible: true,
+                active: true,
+                focusedHint: false,
+                commandFamilies: [.chatSelectorAssigned],
+                domainRef: sessionKey
+            )
+        }
+    }
+
+    static func store(selectableSessionKeys: [String]) -> KeyboardOwnershipStore {
+        var store = KeyboardOwnershipStore()
+        store.synchronize(
+            records: records(selectableSessionKeys: selectableSessionKeys),
+            notificationShortcutMap: [:],
+            chatSelectorShortcutMap: shortcutMap(selectableSessionKeys: selectableSessionKeys)
+        )
+        return store
+    }
+
+    static func slot(forSessionKey sessionKey: String, selectableSessionKeys: [String]) -> Int? {
+        guard let index = selectableSessionKeys.prefix(orderedSlots.count).firstIndex(of: sessionKey) else {
+            return nil
+        }
+        return orderedSlots[index]
+    }
+
+    static func sessionKey(forSlot slot: Int, selectableSessionKeys: [String]) -> String? {
+        guard let index = orderedSlots.firstIndex(of: slot),
+              selectableSessionKeys.indices.contains(index) else {
+            return nil
+        }
+        return selectableSessionKeys[index]
+    }
 }
 
 private struct StreamPopupRowStatusDot: View {

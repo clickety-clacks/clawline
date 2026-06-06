@@ -18,7 +18,7 @@ import os.log
 
 private let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "ChatView")
 
-private enum CrossChatShortcutLabelAvailability {
+enum CrossChatShortcutLabelAvailability {
     static var current: Bool {
 #if targetEnvironment(macCatalyst)
         true
@@ -348,6 +348,7 @@ struct ChatView: View {
     @State private var activeSheet: ChatSheet?
     @State private var isAttachmentMenuPresented = false
     @State private var streamPopupRouteController = StreamPopupRouteController()
+    @State private var streamSelectorShortcutSessionKeys: [String] = []
     @State private var isPhotosPickerPresented = false
     @State private var isFileImporterPresented = false
     @State private var isCancelCurrentPromptDialogPresented = false
@@ -1254,6 +1255,7 @@ struct ChatView: View {
         }()
         let keyboardOwnershipStore = KeyboardOwnershipSceneFactory.chatScene(
             visibleNotificationSourceChatIds: keyboardVisibleNotificationSourceChatIds,
+            visibleChatSelectorSessionKeys: streamSelectorShortcutSessionKeys,
             mentionPickerVisible: isMentionPickerVisible,
             mentionPickerHasCompletion: !mentionPickerStreams.isEmpty,
             composerFocused: isInputFocused,
@@ -1261,6 +1263,11 @@ struct ChatView: View {
             notificationReplySourceChatIds: keyboardVisibleReplySourceChatIds,
             notificationReplyFocusedSourceChatId: crossChatNotificationFocusedReplySourceChatId,
             actionMenuSourceChatId: crossChatNotificationActionMenuSourceChatId
+        )
+        let selectorOverriddenPlainNumberSlots = Set(
+            StreamSelectorShortcutMap.shortcutMap(
+                selectableSessionKeys: streamSelectorShortcutSessionKeys
+            ).keys
         )
         let cancelCurrentPromptDialogCanCancel = cancelCurrentPromptSessionKey.map { sessionKey in
             cancelCurrentPromptRequiresVisibleTyping
@@ -1306,7 +1313,8 @@ struct ChatView: View {
                     actionMenuSourceChatId: $crossChatNotificationActionMenuSourceChatId,
                     focusedSourceChatId: $crossChatNotificationFocusedSourceChatId,
                     focusedReplySourceChatId: $crossChatNotificationFocusedReplySourceChatId,
-                    keyboardOwnershipStore: keyboardOwnershipStore
+                    keyboardOwnershipStore: keyboardOwnershipStore,
+                    disabledPlainNumberShortcutSlots: selectorOverriddenPlainNumberSlots
                 )
                 .offset(x: notificationOverlayHorizontalCorrection)
             }
@@ -1842,7 +1850,8 @@ struct ChatView: View {
         actionMenuSourceChatId: Binding<String?>,
         focusedSourceChatId: Binding<String?>,
         focusedReplySourceChatId: Binding<String?>,
-        keyboardOwnershipStore: KeyboardOwnershipStore
+        keyboardOwnershipStore: KeyboardOwnershipStore,
+        disabledPlainNumberShortcutSlots: Set<Int>
     ) -> AnyView {
         AnyView(
             ZStack(alignment: .topTrailing) {
@@ -1862,6 +1871,7 @@ struct ChatView: View {
                     focusedSourceChatId: focusedSourceChatId,
                     focusedReplySourceChatId: focusedReplySourceChatId,
                     keyboardOwnershipStore: keyboardOwnershipStore,
+                    disabledPlainNumberShortcutSlots: disabledPlainNumberShortcutSlots,
                     onNavigateToSource: { sourceChatId in
                         navigateToCrossChatNotificationSource(sourceChatId)
                     }
@@ -1955,6 +1965,13 @@ struct ChatView: View {
         _ intent: KeyboardCommandIntent,
         keyboardOwnershipStore: KeyboardOwnershipStore
     ) {
+        if case .handled(.chatSelectorRow(let sessionKey)) = KeyboardCommandRouter
+            .route(intent: intent, store: keyboardOwnershipStore)
+            .outcome {
+            closeStreamPopup()
+            selectStream(sessionKey, source: .programmatic)
+            return
+        }
         let notificationNames = ChatRootKeyboardCommandDispatch.notificationNames(
             for: intent,
             keyboardOwnershipStore: keyboardOwnershipStore
@@ -2690,7 +2707,10 @@ struct ChatView: View {
             onTrackPickerDismiss: {
                 restoreFocusIfNeeded()
             },
-            onRequestTrackPicker: presentTrackPickerFromStreamPopup
+            onRequestTrackPicker: presentTrackPickerFromStreamPopup,
+            onShortcutOwnershipChange: { sessionKeys in
+                streamSelectorShortcutSessionKeys = sessionKeys
+            }
         )
     }
 
@@ -3423,6 +3443,7 @@ private struct StreamPopupTrigger: View {
     let onClosePopupFromDotsIndicator: () -> Void
     let onTrackPickerDismiss: () -> Void
     let onRequestTrackPicker: () -> Void
+    let onShortcutOwnershipChange: ([String]) -> Void
 
     var body: some View {
         StreamPageDotsView(
@@ -3475,7 +3496,8 @@ private struct StreamPopupTrigger: View {
                 },
                 onConsumeSearchFocusRequest: {
                     routeController.consumeSearchFocusRequest()
-                }
+                },
+                onShortcutOwnershipChange: onShortcutOwnershipChange
             )
             .presentationCompactAdaptation(.popover)
             .streamManagerPopoverBackgroundInteraction()
@@ -6218,6 +6240,7 @@ private struct CrossChatNotificationOverlay: View {
     @Binding var focusedSourceChatId: String?
     @Binding var focusedReplySourceChatId: String?
     var keyboardOwnershipStore = KeyboardOwnershipStore()
+    let disabledPlainNumberShortcutSlots: Set<Int>
     let onNavigateToSource: (String) -> Void
     @State private var showShortcutLabels = CrossChatShortcutLabelAvailability.current
     @State private var actionMenuSelection: CrossChatNotificationActionMenuItem = .goToChat
@@ -6432,6 +6455,7 @@ private struct CrossChatNotificationOverlay: View {
                             assignedNumber: index,
                             visibleNotificationCount: visibleBubbles.count,
                             showShortcutLabel: showShortcutLabels,
+                            isShortcutLabelDisabled: disabledPlainNumberShortcutSlots.contains(index),
                             maxBubbleHeight: maxBubbleHeight,
                             maxBubbleWidth: stackWidth,
                             bubbleCornerRadius: Self.bubbleCornerRadius,
@@ -7441,6 +7465,7 @@ struct CrossChatNotificationBubbleView: View {
     let assignedNumber: Int
     let visibleNotificationCount: Int
     let showShortcutLabel: Bool
+    let isShortcutLabelDisabled: Bool
     let maxBubbleHeight: CGFloat
     let maxBubbleWidth: CGFloat
     let bubbleCornerRadius: CGFloat
@@ -7554,6 +7579,14 @@ struct CrossChatNotificationBubbleView: View {
         )
     }
 
+    private var shortcutLabelText: String {
+        "⌘\(assignedNumber)"
+    }
+
+    private var shortcutAccessibilityText: String {
+        "Command \(assignedNumber)"
+    }
+
     private var notificationBodyInkColor: UIColor {
         UIColor.label.withAlphaComponent(colorScheme == .dark ? 0.82 : 0.74)
     }
@@ -7619,11 +7652,17 @@ struct CrossChatNotificationBubbleView: View {
         VStack(alignment: .leading, spacing: bubble.isReplying ? 4 : normalContentSpacing) {
             HStack(spacing: 8) {
                 if showShortcutLabel {
-                    Text("⌘\(assignedNumber)")
+                    Text(shortcutLabelText)
                         .font(notificationFont(.secondaryLabel))
                         .monospacedDigit()
                         .lineLimit(1)
-                        .accessibilityLabel("Shortcut Command \(assignedNumber)")
+                        .foregroundStyle(isShortcutLabelDisabled ? .tertiary : .primary)
+                        .opacity(isShortcutLabelDisabled ? 0.42 : 1)
+                        .accessibilityLabel(
+                            isShortcutLabelDisabled
+                                ? "\(shortcutAccessibilityText) temporarily unavailable while chat selector is open"
+                                : "Shortcut \(shortcutAccessibilityText)"
+                        )
                 }
 
                 Text(bubble.sourceTitle)
@@ -8878,11 +8917,17 @@ private struct CrossChatNotificationKeyboardShortcuts: View {
         index: Int,
         perform action: () -> Void
     ) {
-        guard visibleBubbles.indices.contains(index),
-              case .handled(.notificationBubble(_)) = KeyboardCommandRouter
-                .route(intent: intent, store: keyboardOwnershipStore)
-                .outcome else { return }
-        action()
+        guard visibleBubbles.indices.contains(index) else { return }
+        switch KeyboardCommandRouter.route(intent: intent, store: keyboardOwnershipStore).outcome {
+        case .handled(.notificationBubble(_)):
+            action()
+        case .handled(.chatSelectorRow(_)):
+            if case .notificationAssignedOpen = intent {
+                NotificationCenter.default.post(name: .clawlineKeyboardCommandIntent, object: intent)
+            }
+        default:
+            return
+        }
     }
 
     private func routeScrollShortcut(_ spec: CrossChatNotificationGlobalShortcut.Spec) {

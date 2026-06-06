@@ -621,7 +621,7 @@ enum MessagePresentationBuilder {
         let isBase64 = metadataParts.dropFirst().contains { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "base64" }
         let decodedData: Data?
         if isBase64 {
-            decodedData = Data(base64Encoded: payload, options: [.ignoreUnknownCharacters])
+            decodedData = Data(base64Encoded: payload)
         } else {
             decodedData = percentDecodedData(from: payload)
         }

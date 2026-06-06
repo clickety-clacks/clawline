@@ -128,6 +128,23 @@ struct MessagePresentationURLBoundaryTests {
         }))
     }
 
+    @Test("Malformed base64 inline image data URL remains textual")
+    func malformedBase64InlineImageDataURLRemainsTextual() {
+        let invalidImageURL = "data:image/png;base64,\(Self.onePixelPNGBase64)!!!!"
+        let presentation = buildPresentation(content: invalidImageURL)
+
+        #expect(!presentation.parts.contains(where: { part in
+            if case .image = part { return true }
+            return false
+        }))
+        #expect(presentation.parts.contains(where: { part in
+            if case .markdown(let text) = part {
+                return text.contains(invalidImageURL)
+            }
+            return false
+        }))
+    }
+
     @Test("Inline image data URLs inside code blocks stay code")
     func inlineImageDataURLsInsideCodeBlocksStayCode() {
         let imageURL = "data:image/png;base64,\(Self.onePixelPNGBase64)"

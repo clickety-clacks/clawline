@@ -555,6 +555,18 @@ struct StreamPageDotsViewTests {
         #expect(StreamPopupFocusHandoff.shouldFocusSearchOnOpen(isSoftwareKeyboardVisible: false) == false)
     }
 
+    @Test("T1136 keyboard-down popup presentation keeps filter out of initial focus")
+    func keyboardDownPopupPresentationKeepsFilterOutOfInitialFocus() {
+        #expect(
+            StreamPopupSearchPresentationFocusPolicy
+                .shouldRenderSearchTextFieldOnInitialPresentation(searchFocusRequestID: nil) == false
+        )
+        #expect(
+            StreamPopupSearchPresentationFocusPolicy
+                .shouldRenderSearchTextFieldOnInitialPresentation(searchFocusRequestID: 1)
+        )
+    }
+
     @Test("T1136 stream popup restores composer only for displaced focus while keyboard remains visible")
     func streamPopupRestoresComposerOnlyForDisplacedFocusWhileKeyboardVisible() {
         #expect(

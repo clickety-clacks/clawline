@@ -574,7 +574,7 @@ enum MessagePresentationBuilder {
     }
 
     private static func markdownInlineImageMatches(in source: String) -> [(range: Range<String.Index>, payload: InlineImagePayload)] {
-        guard let regex = try? NSRegularExpression(pattern: #"!\[[^\]]*\]\((data:image\/[^)\s]+)(?:\s+"[^"]*")?\)"#) else {
+        guard let regex = try? NSRegularExpression(pattern: #"!\[[^\]]*\]\((data:image\/[A-Za-z0-9.+-]+(?:;[^,\)]*)?,.*?)(?:\s+"[^"]*")?\)"#, options: [.dotMatchesLineSeparators]) else {
             return []
         }
         let nsRange = NSRange(source.startIndex..<source.endIndex, in: source)
@@ -621,7 +621,7 @@ enum MessagePresentationBuilder {
         let isBase64 = metadataParts.dropFirst().contains { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "base64" }
         let decodedData: Data?
         if isBase64 {
-            decodedData = Data(base64Encoded: payload)
+            decodedData = Data(base64Encoded: payload.filter { !$0.isWhitespace })
         } else {
             decodedData = percentDecodedData(from: payload)
         }

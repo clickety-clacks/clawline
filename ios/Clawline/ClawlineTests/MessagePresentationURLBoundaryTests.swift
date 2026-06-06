@@ -81,6 +81,23 @@ struct MessagePresentationURLBoundaryTests {
         #expect(presentation.hasTextualContent)
     }
 
+    @Test("Line-wrapped generated markdown inline image data URL renders as attachment image media")
+    func lineWrappedGeneratedMarkdownInlineImageDataURLRendersAsAttachmentImageMedia() throws {
+        let wrappedBase64 = Self.onePixelPNGBase64.chunked(every: 24).joined(separator: "\n")
+        let imageURL = "data:image/png;base64,\(wrappedBase64)"
+        let presentation = buildPresentation(content: "Generated image:\n![Generated](\(imageURL))")
+        let attachment = try #require(singleImageAttachment(in: presentation))
+
+        #expect(attachment.mimeType == "image/png")
+        #expect(attachment.data == Data(base64Encoded: Self.onePixelPNGBase64))
+        #expect(!presentation.parts.contains(where: { part in
+            if case .markdown(let text) = part {
+                return text.contains("data:image") || text.contains("iVBOR")
+            }
+            return false
+        }))
+    }
+
     @Test("Bare inline image data URL content renders as media-only attachment image")
     func bareInlineImageDataURLContentRendersAsMediaOnlyAttachmentImage() throws {
         let imageURL = "data:image/png,\(Self.percentEncodedOnePixelPNG())"
@@ -320,4 +337,14 @@ struct MessagePresentationURLBoundaryTests {
     private static let onePixelPNGBase64 = """
     iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=
     """
+}
+
+private extension String {
+    func chunked(every count: Int) -> [String] {
+        stride(from: 0, to: self.count, by: count).map { offset in
+            let start = index(startIndex, offsetBy: offset)
+            let end = index(start, offsetBy: Swift.min(count, distance(from: start, to: endIndex)))
+            return String(self[start..<end])
+        }
+    }
 }

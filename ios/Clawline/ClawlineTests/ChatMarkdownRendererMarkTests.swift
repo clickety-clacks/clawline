@@ -161,20 +161,19 @@ struct UnifiedMarkdownRendererMarkTests {
             sessionKey: "agent:main:clawline:user:main",
             replyToMessageId: "llm_reply_target"
         )
-        var state = StreamingTableParseState()
-        let presentation = MessagePresentationBuilder.build(
-            from: message,
-            metrics: ChatFlowTheme.Metrics(isCompact: true),
-            streamingState: &state
-        )
+        let metrics = ChatFlowTheme.Metrics(isCompact: true)
 
         let content = UnifiedMarkdownRenderer.makeContent(
-            presentation: presentation,
+            messageText: message.content,
+            context: MarkdownMessageRenderContext(
+                role: message.role,
+                messageID: message.id,
+                metrics: metrics
+            ),
             baseFont: UIFont.systemFont(ofSize: 15, weight: .regular),
             inkColor: .black,
             lineSpacing: 4,
             stripDetectedURLs: false,
-            role: message.role,
             isDark: false
         )
 

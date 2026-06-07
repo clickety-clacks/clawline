@@ -121,6 +121,26 @@ describe("chat-wire protocol fixtures", () => {
     expect(JSON.parse(serializeClientMessage(payload))).toEqual(payload);
   });
 
+  it("serializes lightweight reply reference metadata", () => {
+    const payload = {
+      type: "message" as const,
+      id: "c_102",
+      content: "replying here",
+      attachments: [],
+      sessionKey: "agent:main:clawline:user_1:main",
+      references: [
+        {
+          kind: "reply" as const,
+          llmVisibleMessageId: "llm_s_101",
+          role: "assistant" as const,
+          preview: "Bounded visible snippet from the bubble"
+        }
+      ]
+    };
+
+    expect(JSON.parse(serializeClientMessage(payload))).toEqual(payload);
+  });
+
   it("serializes client stream_read payloads", () => {
     const payload = {
       type: "stream_read" as const,
@@ -169,6 +189,33 @@ describe("chat-wire protocol fixtures", () => {
     ).toEqual({
       type: "message",
       id: "s_live_1",
+      role: "assistant",
+      content: "hello from provider",
+      timestamp: 1774910000000,
+      streaming: false,
+      sessionKey: "agent:main:clawline:flynn:main",
+      attachments: []
+    });
+  });
+
+  it("parses server messages with llm-visible ids", () => {
+    expect(
+      parseServerPayload(
+        JSON.stringify({
+          type: "message",
+          id: "s_live_2",
+          llmVisibleMessageId: "llm_s_live_2",
+          role: "assistant",
+          content: "hello from provider",
+          timestamp: 1774910000000,
+          streaming: false,
+          sessionKey: "agent:main:clawline:flynn:main"
+        })
+      )
+    ).toEqual({
+      type: "message",
+      id: "s_live_2",
+      llmVisibleMessageId: "llm_s_live_2",
       role: "assistant",
       content: "hello from provider",
       timestamp: 1774910000000,

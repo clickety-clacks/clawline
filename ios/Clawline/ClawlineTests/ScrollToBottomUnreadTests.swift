@@ -121,6 +121,7 @@ struct ScrollToBottomUnreadTests {
         let bottomInset: CGFloat = 180
         let footerHeight = SessionMetadataFooterCell.topPadding
             + SessionMetadataFooterCell.actionRegionHeight
+            + SessionMetadataFooterCell.versionRowHeight
             + SessionMetadataFooterCell.bottomPadding
         let restingContentHeight = MessageFlowCollectionViewController.restingBottomContentHeight(
             contentSizeHeight: contentHeight,
@@ -200,5 +201,32 @@ struct ScrollToBottomUnreadTests {
             restingBottomOffsetY: restingBottom,
             trueBottomOffsetY: trueBottom
         ) == 1)
+    }
+
+    @Test("Bounds-only layout changes skip redundant snapshot update")
+    func boundsOnlyLayoutChangeSkipsSnapshotUpdate() {
+        let shouldRunUpdate = MessageFlowCollectionViewController.shouldRunUpdateAfterBoundsChange(
+            measurementInputsChanged: false,
+            hadPendingFullReconfigure: false
+        )
+        #expect(shouldRunUpdate == false)
+    }
+
+    @Test("Bounds change refreshes snapshot when measurement inputs changed")
+    func boundsChangeRefreshesWhenMeasurementInputsChanged() {
+        let shouldRunUpdate = MessageFlowCollectionViewController.shouldRunUpdateAfterBoundsChange(
+            measurementInputsChanged: true,
+            hadPendingFullReconfigure: false
+        )
+        #expect(shouldRunUpdate == true)
+    }
+
+    @Test("Bounds change preserves pending full reconfigure")
+    func boundsChangePreservesPendingFullReconfigure() {
+        let shouldRunUpdate = MessageFlowCollectionViewController.shouldRunUpdateAfterBoundsChange(
+            measurementInputsChanged: false,
+            hadPendingFullReconfigure: true
+        )
+        #expect(shouldRunUpdate == true)
     }
 }

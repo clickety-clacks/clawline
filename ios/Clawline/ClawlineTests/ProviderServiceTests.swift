@@ -157,7 +157,11 @@ struct ProviderServiceTests {
         #expect(connector.connectedURL?.absoluteString == "wss://example.com/ws")
         #expect(mockSocket.sentTexts.contains { $0.contains("\"type\":\"auth\"") })
         #expect(mockSocket.sentTexts.allSatisfy { !$0.contains("\"lastMessageId\"") })
-        #expect(mockSocket.sentTexts.contains { $0.contains("\"clientFeatures\":[\"terminal_bubbles_v1\"]") })
+        let auth = try #require(mockSocket.sentTexts.first(where: { $0.contains("\"type\":\"auth\"") }))
+        let payload = try jsonObject(auth)
+        let clientFeatures = try #require(payload["clientFeatures"] as? [String])
+        #expect(clientFeatures.contains("terminal_bubbles_v1"))
+        #expect(clientFeatures.contains("live_agent_progress_v1"))
         #expect(message?.content == "Hi")
     }
 
@@ -221,6 +225,85 @@ struct ProviderServiceTests {
         mockSocket.enqueue(text: #"{ "type": "message", "id": "s_shared_reply", "role": "assistant", "content": "Final", "timestamp": 1700000001000, "streaming": false, "sessionKey": "agent:main:clawline:user:main", "attachments": [] }"#)
         _ = await iterator.next()
         #expect(service.replayCursorSnapshot()[sessionKey] == "s_shared_reply")
+    }
+
+    @Test("Agent progress emits service event without advancing replay cursor")
+    func agentProgressDoesNotAdvanceReplayCursor() async throws {
+        let mockSocket = MockWebSocketClient()
+        let connector = MockWebSocketConnector(client: mockSocket)
+        let service = ProviderChatService(
+            connector: connector,
+            deviceId: "device_progress_cursor",
+            baseURLProvider: { URL(string: "https://example.com")! }
+        )
+        defer { service.clearReplayCursors() }
+
+        let sessionKey = "agent:main:clawline:user:main"
+        var iterator = service.serviceEvents.makeAsyncIterator()
+        Task {
+            try await Task.sleep(forDuration: .milliseconds(20))
+            mockSocket.enqueue(text: #"{ "type": "auth_result", "success": true }"#)
+        }
+
+        try await service.connect(token: "jwt", lastMessageId: nil)
+        mockSocket.enqueue(
+            text: #"{ "type": "agent_progress", "version": 1, "sessionKey": "agent:main:clawline:user:main", "runId": "run_1", "messageId": "c_1", "seq": 2, "timestamp": 1700000000000, "state": "running", "event": { "kind": "item", "phase": "start", "status": "running", "title": "Reading files", "summary": "Reading files" } }"#
+        )
+
+        var event: ChatServiceEvent?
+        while let next = await iterator.next() {
+            if case .agentProgress = next {
+                event = next
+                break
+            }
+        }
+        guard case .agentProgress(let progress) = event else {
+            Issue.record("Expected agent progress service event")
+            return
+        }
+        #expect(progress.sessionKey == sessionKey)
+        #expect(progress.runId == "run_1")
+        #expect(progress.seq == 2)
+        #expect(progress.event?.summary == "Reading files")
+        #expect(service.replayCursorSnapshot()[sessionKey] == nil)
+    }
+
+    @Test("Prompt turn state events emit service events")
+    func promptTurnStateEventsEmitServiceEvents() async throws {
+        let mockSocket = MockWebSocketClient()
+        let connector = MockWebSocketConnector(client: mockSocket)
+        let service = ProviderChatService(
+            connector: connector,
+            deviceId: "device_prompt_turn_state",
+            baseURLProvider: { URL(string: "https://example.com")! }
+        )
+        var iterator = service.serviceEvents.makeAsyncIterator()
+        Task {
+            try await Task.sleep(forDuration: .milliseconds(20))
+            mockSocket.enqueue(text: #"{ "type": "auth_result", "success": true }"#)
+        }
+
+        try await service.connect(token: "jwt", lastMessageId: nil)
+        mockSocket.enqueue(
+            text: #"{ "type": "event", "event": "prompt_turn_state", "payload": { "messageId": "c_1", "sessionKey": "agent:main:main", "state": "failed", "terminalState": "failed", "correlationId": "corr_1", "clawlineMessageRowId": 42, "error": "clawline.promptTurn.noDelivery" } }"#
+        )
+
+        var event: ChatServiceEvent?
+        while let next = await iterator.next() {
+            if case .promptTurnState = next {
+                event = next
+                break
+            }
+        }
+        guard case .promptTurnState(let promptTurn) = event else {
+            Issue.record("Expected prompt turn state service event")
+            return
+        }
+
+        #expect(promptTurn.payload.messageId == "c_1")
+        #expect(promptTurn.payload.sessionKey == "agent:main:main")
+        #expect(promptTurn.payload.state == "failed")
+        #expect(promptTurn.payload.error == "clawline.promptTurn.noDelivery")
     }
 
     @Test("Cache restore seeding cannot overwrite an advanced replay cursor")
@@ -905,6 +988,7 @@ struct ProviderServiceTests {
                 "fallbackModels": null,
                 "provider": "anthropic",
                 "harness": null,
+                "authMode": "oauth",
                 "reasoningLevel": null,
                 "thinkingLevel": "high",
                 "fastMode": true,
@@ -980,6 +1064,7 @@ struct ProviderServiceTests {
         #expect(status.sessionKey == sessionKey)
         #expect(status.display.provider == "anthropic")
         #expect(status.display.model == "claude-sonnet-4.6")
+        #expect(status.display.authMode == "oauth")
         #expect(status.display.thinkingLevel == "high")
         #expect(status.display.fastMode == true)
         #expect(status.run.state == .running)

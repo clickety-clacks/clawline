@@ -36,6 +36,39 @@ struct MessageBubbleShadowTests {
         #expect(Self.rgba(colors[1]) == (36, 51, 34, 255))
     }
 
+    @Test("Canceled prompt bubble uses gray ghost fill")
+    func canceledPromptBubbleUsesGrayGhostFill() {
+        let lightColors = ChatFlowUIKitTheme.canceledBubbleGradient(isDark: false)
+        let darkColors = ChatFlowUIKitTheme.canceledBubbleGradient(isDark: true)
+
+        #expect(Self.rgba(lightColors[0]) == (227, 229, 230, 255))
+        #expect(Self.rgba(lightColors[1]) == (217, 220, 221, 255))
+        #expect(Self.rgba(darkColors[0]) == (38, 39, 41, 255))
+        #expect(Self.rgba(darkColors[1]) == (29, 30, 31, 255))
+    }
+
+    @Test("Legacy messages decode as normal delivery state")
+    func legacyMessagesDecodeAsNormalDeliveryState() throws {
+        let json = """
+        {
+          "id": "s_legacy",
+          "role": "user",
+          "content": "legacy",
+          "timestamp": 1700000000,
+          "streaming": false,
+          "attachments": [],
+          "deviceId": "device",
+          "sessionKey": "agent:main:clawline:user:s_personal"
+        }
+        """
+
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .secondsSince1970
+        let message = try decoder.decode(Message.self, from: Data(json.utf8))
+
+        #expect(message.deliveryState == .normal)
+    }
+
     private static func rgba(_ color: UIColor) -> (r: Int, g: Int, b: Int, a: Int) {
         var red: CGFloat = 0
         var green: CGFloat = 0

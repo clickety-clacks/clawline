@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>T120 — Stream Lifecycle Spec v2 (recovered)</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 820px; margin: 0 auto; padding: 24px 24px 80px; background: #0d1117; color: #e6edf3; line-height: 1.65; }
+  h1 { font-size: 1.5em; color: #f0f6fc; border-bottom: 1px solid #30363d; padding-bottom: 12px; margin-top: 0; }
+  h2 { font-size: 1.15em; color: #58a6ff; margin-top: 2em; border-left: 3px solid #58a6ff; padding-left: 10px; }
+  h3 { font-size: 1em; color: #79c0ff; margin-top: 1.2em; }
+  p { margin: 5px 0; color: #c9d1d9; }
+  li { margin: 3px 0; color: #c9d1d9; }
+  pre { background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 16px; overflow-x: auto; margin: 12px 0; }
+  code { font-family: 'SF Mono', Menlo, monospace; font-size: 0.83em; color: #79c0ff; background: #161b22; padding: 1px 4px; border-radius: 3px; }
+  pre code { color: #e6edf3; background: none; padding: 0; }
+  strong { color: #f0f6fc; }
+  .badge { display: inline-block; background: #238636; color: #fff; font-size: 0.75em; padding: 2px 8px; border-radius: 12px; margin-left: 8px; vertical-align: middle; }
+</style>
+</head>
+<body>
+<h1>Stream Lifecycle Spec (Server-Side)</h1>
+
+<p>Status: Approved for implementation</p>
+<p>Last updated: 2026-05-30 (Spec Review closed; original spec date 2026-02-24)</p>
+<p>Related: clickety-clacks/clawline#116, #115</p>
+<p>Depends on: <code>specs/multi-stream.md</code>, <code>provider-architecture.md</code>, <code>specs/clawline-invariants.md</code></p>
+
+<p>Phase note:</p>
+<li>Phase A = existing multi-stream CRUD baseline in `multi-stream.md`.</li>
+<li>Phase B = fork/merge behavior defined in this spec.</li>
+
+<h2>1. Goal</h2>
+
+<p>Enable CLU to manage stream lifecycle from the server side for a user without requiring the iOS client bearer token, covering:</p>
+<li>Create/rename/delete stream via provider API.</li>
+<li>Auth for server-side stream management.</li>
+<li>Fork stream flow (Phase B): branch a conversation into a new stream with carried context.</li>
+<li>Merge stream flow (Phase B): converge two streams after a topic resolves.</li>
+
+<h2>2. Non-Goals</h2>
+
+<li>Replacing existing client-side `/api/streams` user-auth endpoints.</li>
+<li>Redesigning session key format (session keys remain canonical IDs).</li>
+<li>UI specification for iOS fork/merge controls.</li>
+<li>Full CRDT/three-way semantic merge of message history.</li>
+<li>Automatic background stream deletion/cleanup.</li>
+
+<h2>3. Current State Summary</h2>
+
+<li>`channel-create`, `channel-edit`, and `channel-delete` exist in provider `actions.ts`.</li>
+<li>Those actions call `callStreamApi()` with bearer auth available only to the iOS app.</li>
+<li>CLU can read stream rows from SQLite (`stream_sessions`) but cannot mutate streams.</li>
+
+<h2>4. Invariants (Binding)</h2>
+
+<li>Session keys remain the only stream routing identifiers.</li>
+<li>Built-in stream protections from Phase A remain in force.</li>
+<li>Stream lifecycle mutations are explicit API actions; no autonomous expiry/deletion jobs are introduced.</li>
+<li>Fork and merge emit explicit stream-topology events, same as create/rename/delete.</li>
+
+<h2>5. Auth Model (Recommended)</h2>
+
+<h2>5.1 Model</h2>
+
+<p>Use a single provider-side secret header for server-side calls:</p>
+<li>Header: `X-CLU-Secret: &lt;secret&gt;`</li>
+<li>Secret config key: `clawline.server.cluSecret`</li>
+<li>Secret source: provider config/runtime env only (never sent to iOS client)</li>
+
+<p>This secret allows CLU to bypass the iOS bearer-token requirement for server lifecycle endpoints.</p>
+
+<h2>5.2 Secret requirements</h2>
+
+<li>Minimum entropy: 128 bits.</li>
+<li>Minimum length: 22 chars base64url (or equivalent entropy string).</li>
+<li>Secret must not be checked into source control.</li>
+<li>Rotation: provider supports rotation via restart or config reload.</li>
+
+<h2>5.3 Validation rules</h2>
+
+<li>Missing/invalid `X-CLU-Secret` returns `403 clu_secret_invalid`.</li>
+<li>Valid secret proceeds to normal stream guardrails (built-in protection, last-stream protection, etc.).</li>
+<li>Every endpoint path includes `:userId`; provider must reject unknown user with `404 user_not_found`.</li>
+
+<h2>5.4 Transport expectation</h2>
+
+<li>Default deployment is local/private network per provider architecture.</li>
+<li>TLS termination remains operator-managed and out of scope for this spec.</li>
+
+<h2>6. API Surface (Provider)</h2>
+
+<p>All endpoints below are provider endpoints and require <code>X-CLU-Secret</code>.</p>
+
+<h2>6.1 Create stream</h2>
+
+<p><code>POST /api/server/users/:userId/streams</code></p>
+
+<p>Request:</p>
+<pre><code class="json">
+{
+  &quot;displayName&quot;: &quot;Loupe&quot;,
+  &quot;idempotencyKey&quot;: &quot;req_123&quot;
+}
+</code></pre>
+
+<p>Response <code>201</code>: stream payload matches Phase A stream schema.</p>
+
+<p>Errors:</p>
+<li>`404 user_not_found`</li>
+<li>`400 invalid_display_name`</li>
+<li>`409 stream_limit_reached`</li>
+
+<h2>6.2 Rename stream</h2>
+
+<p><code>PATCH /api/server/users/:userId/streams/:sessionKey</code></p>
+
+<p>Request:</p>
+<pre><code class="json">
+{
+  &quot;displayName&quot;: &quot;Deploy Log&quot;
+}
+</code></pre>
+
+<p>Response <code>200</code>: updated stream payload.</p>
+
+<p>Errors:</p>
+<li>`404 user_not_found`</li>
+<li>`404 stream_not_found`</li>
+<li>`409 built_in_stream_rename_forbidden`</li>
+
+<h2>6.3 Delete stream</h2>
+
+<p><code>DELETE /api/server/users/:userId/streams/:sessionKey</code></p>
+
+<p>Header:</p>
+<li>`X-Idempotency-Key: req_456`</li>
+
+<p>Response <code>200</code>:</p>
+<pre><code class="json">
+{
+  &quot;deletedSessionKey&quot;: &quot;agent:main:clawline:flynn:s_8fa12c44&quot;
+}
+</code></pre>
+
+<p>Errors:</p>
+<li>`404 user_not_found`</li>
+<li>`404 stream_not_found`</li>
+<li>`409 built_in_stream_delete_forbidden`</li>
+<li>`409 last_stream_delete_forbidden`</li>
+
+<h2>6.4 Idempotency contract</h2>
+
+<p>Applies to create/delete/fork/merge.</p>
+
+<li>Scope key by `(userId, endpoint, idempotencyKey)`.</li>
+<li>First successful request stores canonical response JSON.</li>
+<li>Exact replay returns stored response with original status.</li>
+<li>Same key with different normalized request body returns `409 idempotency_key_reused`.</li>
+<li>Retention: 7 days (reuse existing `stream_idempotency` table and cleanup policy).</li>
+
+<h2>7. Fork (Phase B)</h2>
+
+<h2>7.1 Endpoint</h2>
+
+<p><code>POST /api/server/users/:userId/streams/:sessionKey/fork</code></p>
+
+<p>Request:</p>
+<pre><code class="json">
+{
+  &quot;displayName&quot;: &quot;Parser Refactor&quot;,
+  &quot;seed&quot;: {
+    &quot;summary&quot;: &quot;This branch tracks parser refactor decisions and follow-up tasks.&quot;,
+    &quot;sourceMessageIds&quot;: [&quot;s_101&quot;, &quot;s_102&quot;, &quot;s_109&quot;],
+    &quot;quotedSnippets&quot;: [
+      {
+        &quot;messageId&quot;: &quot;s_102&quot;,
+        &quot;text&quot;: &quot;This conversation deserves its own stream.&quot;
+      }
+    ]
+  },
+  &quot;idempotencyKey&quot;: &quot;req_789&quot;
+}
+</code></pre>
+
+<p>Response <code>201</code>:</p>
+<pre><code class="json">
+{
+  &quot;forkedFrom&quot;: &quot;agent:main:clawline:flynn:main&quot;,
+  &quot;stream&quot;: {
+    &quot;sessionKey&quot;: &quot;agent:main:clawline:flynn:s_a1b2c3d4&quot;,
+    &quot;displayName&quot;: &quot;Parser Refactor&quot;,
+    &quot;kind&quot;: &quot;custom&quot;,
+    &quot;orderIndex&quot;: 5,
+    &quot;isBuiltIn&quot;: false,
+    &quot;createdAt&quot;: 1771905600000,
+    &quot;updatedAt&quot;: 1771905600000
+  },
+  &quot;seedMessageId&quot;: &quot;s_5001&quot;
+}
+</code></pre>
+
+<p>Errors:</p>
+<li>`404 user_not_found`</li>
+<li>`404 stream_not_found`</li>
+<li>`422 fork_source_message_not_found`</li>
+<li>`422 fork_quote_message_mismatch`</li>
+<li>`422 fork_seed_too_large`</li>
+
+<h2>7.2 Fork semantics</h2>
+
+<li>Provider creates child stream and appends at end (`orderIndex = max + 1`).</li>
+<li>Provider validates every `sourceMessageId` exists in parent stream.</li>
+<li>Provider validates every `quotedSnippets[].messageId` is present in `sourceMessageIds`.</li>
+<li>Provider enforces bounded fork seed payloads: `summary` max 2,000 chars, `sourceMessageIds` max 20, `quotedSnippets` max 5, and each quoted snippet `text` max 500 chars.</li>
+<li>Provider writes one seed message to child stream containing summary and references.</li>
+<li>Provider writes one parent note: `Forked to &lt;displayName&gt;` with child `sessionKey`.</li>
+<li>No historical message copy.</li>
+<li>Provider emits:</li>
+<li>`stream_created`</li>
+<li>`stream_forked` with `{ parentSessionKey, childSessionKey, seedMessageId }`</li>
+
+<h2>8. Merge (Phase B)</h2>
+
+<h2>8.1 Endpoint</h2>
+
+<p><code>POST /api/server/users/:userId/streams/merge</code></p>
+
+<p>Request:</p>
+<pre><code class="json">
+{
+  &quot;sourceSessionKey&quot;: &quot;agent:main:clawline:flynn:s_a1b2c3d4&quot;,
+  &quot;targetSessionKey&quot;: &quot;agent:main:clawline:flynn:main&quot;,
+  &quot;summary&quot;: &quot;Parser refactor complete. Decision: keep incremental tokenizer path.&quot;,
+  &quot;closeSource&quot;: true,
+  &quot;idempotencyKey&quot;: &quot;req_999&quot;
+}
+</code></pre>
+
+<p>Response <code>200</code>:</p>
+<pre><code class="json">
+{
+  &quot;merged&quot;: true,
+  &quot;mergeMessageId&quot;: &quot;s_6001&quot;,
+  &quot;sourceSessionKey&quot;: &quot;agent:main:clawline:flynn:s_a1b2c3d4&quot;,
+  &quot;targetSessionKey&quot;: &quot;agent:main:clawline:flynn:main&quot;,
+  &quot;sourceClosed&quot;: true
+}
+</code></pre>
+
+<p>Errors:</p>
+<li>`404 user_not_found`</li>
+<li>`404 stream_not_found`</li>
+<li>`422 merge_source_target_same`</li>
+<li>`409 built_in_stream_close_forbidden`</li>
+
+<h2>8.2 Merge semantics</h2>
+
+<li>Provider writes one merge summary message into target stream.</li>
+<li>Provider always writes one source-stream note that references target stream.</li>
+<li>If `closeSource=true`, provider marks source stream `status=closed` (read-only); merge does not hard-delete source.</li>
+<li>Phase B does not add a reopen endpoint. Reopening closed merged streams is deferred until a product need exists; users can still explicitly delete permitted closed custom streams.</li>
+<li>Built-in streams may be merge targets.</li>
+<li>Built-in streams may not be closed by merge (`closeSource=true` forbidden when source is built-in).</li>
+<li>Provider emits:</li>
+<li>`stream_merged` with `{ sourceSessionKey, targetSessionKey, mergeMessageId, sourceClosed }`</li>
+<li>`stream_updated` if source stream status changes.</li>
+
+<h2>9. Data Model Additions (Provider DB)</h2>
+
+<h2>9.1 `stream_sessions` additive fields</h2>
+
+<li>`createdBy TEXT NOT NULL DEFAULT &#x27;user&#x27;` (`user | clu`)</li>
+<li>`status TEXT NOT NULL DEFAULT &#x27;active&#x27;` (`active | closed`)</li>
+
+<p>Migration note:</p>
+<li>Existing rows remain `createdBy=&#x27;user&#x27;` by default (historical iOS-created/custom streams).</li>
+
+<p><code>closed</code> semantics:</p>
+<li>Closed streams remain visible in `GET /api/streams` and WS snapshots.</li>
+<li>Closed streams are read-only for new message sends.</li>
+<li>Closed streams are still deletable through explicit delete endpoint (unless built-in protections apply).</li>
+
+<h2>9.2 New table `stream_lineage`</h2>
+
+<pre><code class="sql">
+CREATE TABLE IF NOT EXISTS stream_lineage (
+  userId TEXT NOT NULL,
+  relationId TEXT NOT NULL,
+  relationType TEXT NOT NULL,    -- fork | merge
+  sourceSessionKey TEXT NOT NULL,
+  targetSessionKey TEXT NOT NULL,
+  contextJson TEXT,
+  createdAt INTEGER NOT NULL,
+  PRIMARY KEY (userId, relationId)
+);
+</code></pre>
+
+<p>Persistence rule:</p>
+<li>Lineage writes are idempotent with request idempotency (same replay must not duplicate row or fail).</li>
+
+<p>Purpose:</p>
+<li>Track fork/merge lineage.</li>
+<li>Support future parent/child and merge navigation.</li>
+
+<h2>10. WebSocket Event Additions</h2>
+
+<p>New S2C events:</p>
+<li>`stream_forked`</li>
+<li>`stream_merged`</li>
+
+<p>Payloads:</p>
+
+<pre><code class="json">
+{
+  &quot;type&quot;: &quot;stream_forked&quot;,
+  &quot;parentSessionKey&quot;: &quot;agent:main:clawline:flynn:main&quot;,
+  &quot;childSessionKey&quot;: &quot;agent:main:clawline:flynn:s_a1b2c3d4&quot;,
+  &quot;seedMessageId&quot;: &quot;s_5001&quot;
+}
+</code></pre>
+
+<pre><code class="json">
+{
+  &quot;type&quot;: &quot;stream_merged&quot;,
+  &quot;sourceSessionKey&quot;: &quot;agent:main:clawline:flynn:s_a1b2c3d4&quot;,
+  &quot;targetSessionKey&quot;: &quot;agent:main:clawline:flynn:main&quot;,
+  &quot;mergeMessageId&quot;: &quot;s_6001&quot;,
+  &quot;sourceClosed&quot;: true
+}
+</code></pre>
+
+<p>Delivery rule:</p>
+<li>Broadcast to all active authenticated sockets for that `userId`.</li>
+<li>Offline clients reconcile via normal reconnect snapshot/replay path.</li>
+
+<h2>11. OpenClaw Core vs Clawline Provider Boundary</h2>
+
+<h2>11.1 Decision</h2>
+
+<p>This is <strong>100% Clawline provider work</strong> for #116.</p>
+
+<p>No OpenClaw core changes are required.</p>
+
+<h2>11.2 Why no core change is needed</h2>
+
+<li>Stream lifecycle behavior is Clawline-domain logic already implemented in provider stream actions.</li>
+<li>`X-CLU-Secret` validation is provider-specific endpoint policy, not shared core protocol behavior.</li>
+<li>Fork/merge semantics are Clawline stream-topology features within provider storage/events.</li>
+
+<h2>11.3 What would force a core change later</h2>
+
+<p>Core change is only needed if one of these becomes a requirement:</p>
+<li>A provider-agnostic server-auth mechanism shared by multiple plugins/providers.</li>
+<li>Core-level authorization middleware that must own secret validation.</li>
+<li>Core protocol additions that all clients/providers must understand.</li>
+
+<p>None of these are required for this issue.</p>
+
+<h2>12. Security and Guardrails</h2>
+
+<li>`X-CLU-Secret` must be configured out-of-band and not exposed to clients.</li>
+<li>Provider logs all server-side lifecycle mutations with `actor=clu`.</li>
+<li>Rate limits (keyed by `userId` path parameter):</li>
+<li>create: 20/min/user</li>
+<li>rename: 30/min/user</li>
+<li>delete: 10/min/user</li>
+<li>fork: 10/min/user</li>
+<li>merge: 10/min/user</li>
+<li>All mutating endpoints require idempotency keys.</li>
+
+<h2>13. Acceptance Checks</h2>
+
+<li>CLU can create, rename, delete custom streams via provider server-side API using `X-CLU-Secret` only.</li>
+<li>Invalid/missing secret is rejected with `403 clu_secret_invalid`.</li>
+<li>Unknown `userId` is rejected with `404 user_not_found`.</li>
+<li>Built-in and last-stream protections still apply to server-side calls.</li>
+<li>Fork validates source references, creates child stream, writes child seed context, and parent reference note.</li>
+<li>Merge validates source/target constraints, writes target summary, writes source note, and optionally closes source.</li>
+<li>WS broadcasts lifecycle changes to all authenticated user clients and reconnect path reconciles state.</li>
+<li>Idempotency replay returns original result for create/delete/fork/merge.</li>
+<li>Implementation lands fully in Clawline provider; no OpenClaw core changes.</li>
+
+<h2>14. Implementation Handoff</h2>
+
+<li>Add provider endpoints near existing `/api/streams` handlers and route through shared stream mutation code paths.</li>
+<li>Add provider config key `clawline.server.cluSecret` with validation on startup.</li>
+<li>Add tests for secret validation (`403`), unknown user (`404`), idempotency replay, fork/merge validation, and closed-stream behavior.</li>
+<li>Keep `sessionKey` as canonical key in all payloads, routes, and DB records.</li>
+
+<h2>15. Spec Review Decisions</h2>
+
+<li>SRD1: Source-stream reopen after merge is deferred out of Phase B. Closed merged streams stay visible/read-only and remain explicitly deletable where normal delete guardrails allow it.</li>
+<li>SRD2: Fork seed payloads have explicit limits: summary 2,000 chars, 20 source message IDs, 5 quoted snippets, 500 chars per quoted snippet.</li>
+
+</body>
+</html>

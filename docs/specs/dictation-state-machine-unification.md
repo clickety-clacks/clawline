@@ -47,6 +47,38 @@ After the refactor:
 
 This is one state machine with thin adapters, not one giant UIKit god object.
 
+## Audit Clarification: Split Seams, Not Product Authority
+
+The refined architecture decision is:
+- keep one authoritative product reducer / state machine for the live dictation interaction
+- do not split lifecycle ownership and transcript ownership into independent product owners
+- factor the implementation behind thin seams so transcript math, transport, UIKit text application, presentation motion, and keyboard layout can change independently
+
+The target product-owner seam is `DictationSessionMachine`. The existing `DictationCoordinator` / `DictationSession` may implement this seam during migration, but its responsibility is the product reducer, not a UIKit god object.
+
+These seam names are logical architecture seams, not a requirement to create new top-level types. Existing types may implement one or more seams during migration, and the concrete implementation shape is left to the senior engineer as long as the ownership boundaries hold. Do not create duplicate owners just to match these names.
+
+### Required Seams and Ownership
+
+| Seam | Owner | Owns | Must Not Own |
+| --- | --- | --- | --- |
+| `DictationSessionMachine` | single authoritative product reducer | `LifecyclePhase`, `PendingAction`, `TranscriptOwnership`, activation context, legal transitions, stop/pause/error outcomes, and product projection | UIKit view references, Soniox socket mechanics, text mutation mechanics, keyboard geometry |
+| `TranscriptEngine` | machine-owned domain helper | token reconciliation, committed/provisional window math, long-dictation range math, re-anchor math, and `TextApplicationPlan` creation | UIKit text views, keyboard/focus/layout state, transport lifecycle |
+| `ComposeSurfaceApplicator` | UIKit compose text helper | weak host/text-view binding, exact application of a machine-provided text plan, snapshot restore, and local programmatic-edit feedback suppression | insertion anchors, transcript ownership, suppression policy, semantic selection policy |
+| `DictationTransportDriver` | transport adapter | Soniox/audio capture tasks, connect/finalize/close mechanics, and typed transport/audio events emitted to the machine | product decisions such as pause vs stop, error presentation, transcript mutation, surface policy |
+| `DictationPresentationAdapter` / `DictationMotion` | gesture and presentation adapter | drag progress, settle animation, local interaction locks, and gesture intents | lifecycle truth, listening readiness truth, transcript ownership, keyboard layout truth |
+| `ChatKeyboardLayoutCoordinator` | derived keyboard/input-bar layout owner | input-bar gap/inset application from `ChatView`-provided keyboard metrics plus presentation-provided surface metrics | raw keyboard observations, dictation product state, transcript routing, lifecycle inference from `isSurfaceVisible` |
+
+`DictationSessionMachine` is the only product decision owner. The other seams are adapters or helpers that either report typed observations/events to the machine or apply machine-issued plans.
+
+### Prior Split Clarification
+
+The earlier bridge split addressed a real symptom but put the boundary in the wrong place: `ComposeInputDictationBridge` became a transcript reconciliation owner, even though insertion anchors, provisional spans, endpoint suppression, and replacement windows are dictation-domain state.
+
+The later unification partially corrected that by moving transcript ownership into the coordinator and shrinking the bridge into `DictationTranscriptApplicator`-style text application. That direction is correct.
+
+The current architecture remains incomplete because lifecycle, projection, transport, transcript reconciliation, UIKit text application, motion, and keyboard-layout-adjacent state are still too coupled in and around the coordinator. Follow-on work should sharpen and factor the active state machine; it should not restore bridge-owned transcript policy or split lifecycle/transcript into separate authoritative product machines.
+
 ## Unified Machine
 
 ### Owner

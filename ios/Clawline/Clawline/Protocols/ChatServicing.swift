@@ -32,6 +32,8 @@ enum ConnectionState: Equatable {
 enum ChatServiceEvent: Equatable {
     case messageError(messageId: String?, code: String, message: String?)
     case messageAcked(id: String)
+    case agentProgress(AgentProgressEvent)
+    case promptTurnState(PromptTurnStateEvent)
     case connectionInterrupted(reason: String?)
     case userInfo(ChatUserInfo)
     case typingStateChanged(isTyping: Bool, sessionKey: String)
@@ -63,6 +65,7 @@ protocol ChatServicing: AnyObject {
     var lifecycleTransportEvents: AsyncStream<LifecycleTransportEvent> { get }
     var isTransportReadyForSend: Bool { get }
 
+    func connect(token: String, lastMessageId: String?) async throws
     func startConnectionAttempt(epoch: Int, lastMessageId: String?, token: String)
     func stopConnectionAttempt()
     func disconnect()
@@ -74,7 +77,8 @@ protocol ChatServicing: AnyObject {
         id: String,
         content: String,
         attachments: [WireAttachment],
-        sessionKey: String?
+        sessionKey: String?,
+        references: [MessageReferenceContext]
     ) async throws
 
     func sendInteractiveCallback(

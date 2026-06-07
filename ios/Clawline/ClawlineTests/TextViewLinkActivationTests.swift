@@ -8,7 +8,7 @@ struct TextViewLinkActivationTests {
     @MainActor
     func renderedLinksKeepURLAttributesForTextViewActivation() {
         let url = URL(string: "https://example.com/release-triggered-link")!
-        let rendered = UnifiedMarkdownRenderer.renderNSAttributedString(
+        let rendered = attributedMarkdownForTests(
             markdown: "Open \(url.absoluteString)",
             baseFont: .systemFont(ofSize: 15),
             inkColor: .label,

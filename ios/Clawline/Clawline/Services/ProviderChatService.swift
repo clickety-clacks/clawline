@@ -43,361 +43,7 @@ private final class AsyncStreamBroadcaster<Element> {
     }
 }
 
-enum TransportOwnerMode {
-    case managed
-    case standalone
-}
-
-class ProviderChatService: ChatServicing {
-    fileprivate actor TransportSessionCoordinator {
-        struct AttemptState {
-            let mode: TransportOwnerMode
-            let generation: UUID
-            let token: String
-            let lastMessageId: String?
-            let managedEpoch: Int?
-            var task: Task<Void, Never>?
-            var waiters: [CheckedContinuation<Void, Swift.Error>]
-        }
-
-        struct SessionState {
-            let mode: TransportOwnerMode
-            let generation: UUID
-            let token: String
-            let managedEpoch: Int?
-            var sentMessageIDs: Set<String>
-        }
-
-        struct AuthResultResolution {
-            let shouldProcess: Bool
-        }
-
-        struct FailureResolution {
-            let shouldProcess: Bool
-        }
-
-        struct SocketCloseResolution {
-            let shouldProcess: Bool
-            let shouldNotifyDisconnect: Bool
-            let pendingDisconnectReason: String?
-            let rejectionError: ProviderChatService.Error?
-        }
-
-        private let mode: TransportOwnerMode
-        private var socket: (any WebSocketClient)?
-        private var receiveTask: Task<Void, Never>?
-        private var authContinuation: CheckedContinuation<Void, Swift.Error>?
-        private var authToken: String?
-        private var shouldNotifyDisconnect = true
-        private var pendingDisconnectReason: String?
-        private var attemptState: AttemptState?
-        private var sessionState: SessionState?
-
-        init(mode: TransportOwnerMode) {
-            self.mode = mode
-        }
-
-        func currentControlPlaneToken() -> String? {
-            authToken
-        }
-
-        func currentGeneration() -> UUID? {
-            sessionState?.generation ?? attemptState?.generation
-        }
-
-        func beginManagedAttempt(epoch: Int, token: String, lastMessageId: String?) -> UUID {
-            resetTransportState(closeSocket: true)
-            let generation = UUID()
-            attemptState = AttemptState(
-                mode: .managed,
-                generation: generation,
-                token: token,
-                lastMessageId: lastMessageId,
-                managedEpoch: epoch,
-                task: nil,
-                waiters: []
-            )
-            shouldNotifyDisconnect = false
-            pendingDisconnectReason = nil
-            return generation
-        }
-
-        func prepareStandaloneConnect(
-            token: String,
-            lastMessageId: String?
-        ) -> (generation: UUID?, shouldJoinExisting: Bool, shouldReuseConnected: Bool) {
-            if let sessionState {
-                switch sessionState.mode {
-                case .standalone:
-                    return (nil, false, true)
-                case .managed:
-                    break
-                }
-            }
-            if let attemptState {
-                switch attemptState.mode {
-                case .standalone:
-                    return (nil, true, false)
-                case .managed:
-                    break
-                }
-            }
-
-            resetTransportState(closeSocket: true)
-            let generation = UUID()
-            attemptState = AttemptState(
-                mode: .standalone,
-                generation: generation,
-                token: token,
-                lastMessageId: lastMessageId,
-                managedEpoch: nil,
-                task: nil,
-                waiters: []
-            )
-            shouldNotifyDisconnect = true
-            pendingDisconnectReason = nil
-            return (generation, false, false)
-        }
-
-        func attachAttemptTask(_ task: Task<Void, Never>, generation: UUID) -> Bool {
-            guard var attemptState, attemptState.generation == generation else {
-                task.cancel()
-                return false
-            }
-            attemptState.task = task
-            self.attemptState = attemptState
-            return true
-        }
-
-        func cancelAttempt() {
-            attemptState?.task?.cancel()
-            finishAttemptWaiters(Result<Void, Swift.Error>.failure(ProviderChatService.Error.notConnected))
-        }
-
-        func waitForStandaloneAttemptToFinish() async throws {
-            if let sessionState, authToken != nil {
-                switch sessionState.mode {
-                case .standalone:
-                    return
-                case .managed:
-                    break
-                }
-            }
-            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Swift.Error>) in
-                guard var attemptState else {
-                    continuation.resume(throwing: ProviderChatService.Error.notConnected)
-                    return
-                }
-                switch attemptState.mode {
-                case .standalone:
-                    break
-                case .managed:
-                    continuation.resume(throwing: ProviderChatService.Error.notConnected)
-                    return
-                }
-                attemptState.waiters.append(continuation)
-                self.attemptState = attemptState
-            }
-        }
-
-        private func finishAttemptWaiters(_ result: Result<Void, Swift.Error>) {
-            guard var attemptState else { return }
-            let waiters = attemptState.waiters
-            attemptState.waiters.removeAll()
-            attemptState.task = nil
-            self.attemptState = attemptState
-            for waiter in waiters {
-                switch result {
-                case .success:
-                    waiter.resume()
-                case .failure(let error):
-                    waiter.resume(throwing: error)
-                }
-            }
-        }
-
-        func registerSocket(_ socket: any WebSocketClient, generation: UUID) -> Bool {
-            guard currentGeneration() == generation else {
-                socket.close(with: .normalClosure)
-                return false
-            }
-            self.socket = socket
-            return true
-        }
-
-        func registerReceiveTask(_ task: Task<Void, Never>, generation: UUID) -> Bool {
-            guard currentGeneration() == generation else {
-                task.cancel()
-                return false
-            }
-            receiveTask = task
-            return true
-        }
-
-        func installAuthContinuation(
-            _ continuation: CheckedContinuation<Void, Swift.Error>,
-            generation: UUID
-        ) -> Bool {
-            guard currentGeneration() == generation else {
-                continuation.resume(throwing: ProviderChatService.Error.notConnected)
-                return false
-            }
-            authContinuation = continuation
-            return true
-        }
-
-        func resolveAuthContinuation(with result: Result<Void, Swift.Error>) {
-            guard let continuation = authContinuation else { return }
-            authContinuation = nil
-            switch result {
-            case .success:
-                continuation.resume()
-            case .failure(let error):
-                continuation.resume(throwing: error)
-            }
-        }
-
-        func applyAuthSuccess(generation: UUID) -> AuthResultResolution {
-            guard let attemptState, attemptState.generation == generation else {
-                return AuthResultResolution(shouldProcess: false)
-            }
-            authToken = attemptState.token
-            sessionState = SessionState(
-                mode: attemptState.mode,
-                generation: generation,
-                token: attemptState.token,
-                managedEpoch: attemptState.managedEpoch,
-                sentMessageIDs: []
-            )
-            resolveAuthContinuation(with: .success(()))
-            finishAttemptWaiters(.success(()))
-            self.attemptState = nil
-            return AuthResultResolution(shouldProcess: true)
-        }
-
-        func applyAuthFailure(generation: UUID, error: Swift.Error) -> FailureResolution {
-            guard currentGeneration() == generation else {
-                return FailureResolution(shouldProcess: false)
-            }
-            resolveAuthContinuation(with: .failure(error))
-            finishAttemptWaiters(.failure(error))
-            return FailureResolution(shouldProcess: true)
-        }
-
-        func shouldProcess(generation: UUID?) -> Bool {
-            guard let generation else { return true }
-            return currentGeneration() == generation
-        }
-
-        func applyDisconnect(shouldNotify: Bool, reason: String? = nil) {
-            self.shouldNotifyDisconnect = shouldNotify
-            pendingDisconnectReason = reason
-            resetTransportState(closeSocket: true)
-        }
-
-        func clearActiveTransportPreservingAttempt(shouldNotify: Bool, reason: String? = nil) {
-            self.shouldNotifyDisconnect = shouldNotify
-            pendingDisconnectReason = reason
-            resolveAuthContinuation(with: .failure(ProviderChatService.Error.notConnected))
-            receiveTask?.cancel()
-            receiveTask = nil
-            socket?.close(with: .normalClosure)
-            socket = nil
-            authToken = nil
-            sessionState = nil
-        }
-
-        func applySocketClose(generation: UUID?, closeInfo: WebSocketCloseInfo?) -> SocketCloseResolution {
-            guard shouldProcess(generation: generation) else {
-                return SocketCloseResolution(
-                    shouldProcess: false,
-                    shouldNotifyDisconnect: false,
-                    pendingDisconnectReason: nil,
-                    rejectionError: nil
-                )
-            }
-
-            let rejectionError: ProviderChatService.Error? = {
-                guard let closeInfo else { return nil }
-                guard closeInfo.code == 1008 else { return nil }
-                guard let reason = closeInfo.reason?.lowercased() else { return nil }
-                if reason == "pairing required" || reason.hasPrefix("invalid connect params") {
-                    return .policyViolation(code: closeInfo.code ?? 1008, reason: closeInfo.reason)
-                }
-                return nil
-            }()
-
-            if let rejectionError {
-                resolveAuthContinuation(with: .failure(rejectionError))
-            } else {
-                resolveAuthContinuation(with: .failure(ProviderChatService.Error.notConnected))
-            }
-
-            let shouldNotifyDisconnect = self.shouldNotifyDisconnect
-            let pendingDisconnectReason = self.pendingDisconnectReason
-            if attemptState != nil, sessionState == nil {
-                receiveTask?.cancel()
-                receiveTask = nil
-                socket = nil
-                authToken = nil
-                sessionState = nil
-            } else {
-                resetTransportState(closeSocket: false)
-            }
-            self.shouldNotifyDisconnect = true
-            self.pendingDisconnectReason = nil
-
-            return SocketCloseResolution(
-                shouldProcess: true,
-                shouldNotifyDisconnect: shouldNotifyDisconnect,
-                pendingDisconnectReason: pendingDisconnectReason,
-                rejectionError: rejectionError
-            )
-        }
-
-        func reserveOutboundMessage(id: String) throws -> Bool {
-            guard socket != nil else {
-                throw ProviderChatService.Error.notConnected
-            }
-            if var sessionState {
-                if sessionState.sentMessageIDs.contains(id) {
-                    return false
-                }
-                sessionState.sentMessageIDs.insert(id)
-                self.sessionState = sessionState
-            }
-            return true
-        }
-
-        func rollbackOutboundMessage(id: String) {
-            guard var sessionState else { return }
-            sessionState.sentMessageIDs.remove(id)
-            self.sessionState = sessionState
-        }
-
-        func send(text: String) async throws {
-            guard let socket else {
-                throw ProviderChatService.Error.notConnected
-            }
-            try await socket.send(text: text)
-        }
-
-        private func resetTransportState(closeSocket: Bool) {
-            attemptState?.task?.cancel()
-            finishAttemptWaiters(.failure(ProviderChatService.Error.notConnected))
-            resolveAuthContinuation(with: .failure(ProviderChatService.Error.notConnected))
-            receiveTask?.cancel()
-            receiveTask = nil
-            if closeSocket {
-                socket?.close(with: .normalClosure)
-            }
-            socket = nil
-            authToken = nil
-            attemptState = nil
-            sessionState = nil
-        }
-    }
-
+final class ProviderChatService: ChatServicing {
     private let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "ProviderChatService")
     private let messageLogger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "MessagePipeline")
     enum Error: Swift.Error, LocalizedError {
@@ -551,24 +197,18 @@ class ProviderChatService: ChatServicing {
         }
     }
 
-    private struct PendingMessage {
-        let payload: ClientMessagePayload
-        var retryTask: Task<Void, Never>?
-    }
-
-    fileprivate let connector: any WebSocketConnecting
-    fileprivate let deviceId: String
-    fileprivate let baseURLProvider: () -> URL?
-    fileprivate let userIdProvider: () -> String?
-    fileprivate let authTokenProvider: @Sendable () async -> String?
+    private let connector: any WebSocketConnecting
+    private let deviceId: String
+    private let baseURLProvider: () -> URL?
+    private let userIdProvider: () -> String?
+    private let authTokenProvider: @Sendable () async -> String?
     private let adoptedSessionKeysProvider: @Sendable () -> [String]
-    fileprivate let streamAPIClient: StreamAPIClient
-    fileprivate let encoder: JSONEncoder
-    fileprivate let decoder: JSONDecoder
-    fileprivate let replayCursorDefaults = UserDefaults.standard
-    fileprivate let supportedClientFeatures = ["terminal_bubbles_v1"]
-    fileprivate let authTimeout: Duration = .seconds(12)
-    fileprivate let transportSessionCoordinator: TransportSessionCoordinator
+    private let streamAPIClient: StreamAPIClient
+    private let encoder: JSONEncoder
+    private let decoder: JSONDecoder
+    private let replayCursorDefaults = UserDefaults.standard
+    private let supportedClientFeatures = ["terminal_bubbles_v1", "live_agent_progress_v1"]
+    private let authTimeout: Duration = .seconds(12)
 
     private let messageBroadcaster = AsyncStreamBroadcaster<Message>()
     private let stateBroadcaster = AsyncStreamBroadcaster<ConnectionState>()
@@ -576,15 +216,26 @@ class ProviderChatService: ChatServicing {
     private let lifecycleTransportEventBroadcaster = AsyncStreamBroadcaster<LifecycleTransportEvent>()
     private var lastConnectionState: ConnectionState = .disconnected
 
+    private var socket: (any WebSocketClient)?
+    private var receiveTask: Task<Void, Never>?
+    private var authContinuation: CheckedContinuation<Void, Swift.Error>?
     private var authTimeoutTask: Task<Void, Never>?
-    private var pendingMessages: [String: PendingMessage] = [:]
+    private var pendingMessages: Set<String> = []
+    private var sentMessageIDs: Set<String> = []
+    private var shouldNotifyDisconnect = true
+    private var pendingDisconnectReason: String?
+    private var isConnecting = false
+    private var connectAttemptTask: Task<Void, Never>?
+    private var activeLifecycleConnectionToken: UUID?
+    private var authToken: String?
     private var replayCursorBySessionKey: [String: String] = [:]
     private var knownSessionKeys: Set<String> = []
 
     private static let serverEventIDPrefix = "s_"
 
     var isTransportReadyForSend: Bool {
-        lastConnectionState == .connected
+        guard socket != nil, authToken != nil else { return false }
+        return lastConnectionState == .connected
     }
 
     init(connector: any WebSocketConnecting,
@@ -596,30 +247,6 @@ class ProviderChatService: ChatServicing {
          streamAPIClient: StreamAPIClient? = nil,
          encoder: JSONEncoder = JSONEncoder(),
          decoder: JSONDecoder = JSONDecoder()) {
-        self.transportSessionCoordinator = TransportSessionCoordinator(mode: .managed)
-        self.connector = connector
-        self.deviceId = deviceId
-        self.baseURLProvider = baseURLProvider
-        self.userIdProvider = userIdProvider
-        self.authTokenProvider = authTokenProvider
-        self.adoptedSessionKeysProvider = adoptedSessionKeysProvider
-        self.encoder = encoder
-        self.decoder = decoder
-        self.streamAPIClient = streamAPIClient ?? StreamAPIClient(baseURLProvider: baseURLProvider)
-        self.replayCursorBySessionKey = restoreReplayCursorSnapshot()
-    }
-
-    fileprivate init(connector: any WebSocketConnecting,
-                     deviceId: String,
-                     transportOwnerMode: TransportOwnerMode,
-                     baseURLProvider: @escaping () -> URL? = { ProviderBaseURLStore.baseURL },
-                     userIdProvider: @escaping () -> String? = { nil },
-                     authTokenProvider: @escaping @Sendable () async -> String? = { nil },
-                     adoptedSessionKeysProvider: @escaping @Sendable () -> [String] = { [] },
-                     streamAPIClient: StreamAPIClient? = nil,
-                     encoder: JSONEncoder = JSONEncoder(),
-                     decoder: JSONDecoder = JSONDecoder()) {
-        self.transportSessionCoordinator = TransportSessionCoordinator(mode: transportOwnerMode)
         self.connector = connector
         self.deviceId = deviceId
         self.baseURLProvider = baseURLProvider
@@ -756,8 +383,7 @@ class ProviderChatService: ChatServicing {
     }
 
     private func resolveControlPlaneToken() async -> String? {
-        if let authToken = await transportSessionCoordinator.currentControlPlaneToken(),
-           !authToken.isEmpty {
+        if let authToken, !authToken.isEmpty {
             return authToken
         }
         guard let fallback = await authTokenProvider() else {
@@ -767,7 +393,15 @@ class ProviderChatService: ChatServicing {
         return trimmed.isEmpty ? nil : trimmed
     }
 
-    fileprivate func performStandaloneConnect(token: String, lastMessageId: String?) async throws {
+    func connect(token: String, lastMessageId: String?) async throws {
+        if isConnecting {
+            logger.info("connect suppressed: already connecting")
+            resolveAuthContinuation(with: .failure(Error.notConnected))
+            return
+        }
+        isConnecting = true
+        defer { isConnecting = false }
+
         guard let baseURL = baseURLProvider() else {
             throw Error.missingBaseURL
         }
@@ -776,42 +410,31 @@ class ProviderChatService: ChatServicing {
             throw Error.missingBaseURL
         }
 
-        let generation = await transportSessionCoordinator.currentGeneration()
+        try await teardownConnection()
+        shouldNotifyDisconnect = true
+        pendingDisconnectReason = nil
 
         var lastError: Swift.Error?
         for (index, wsURL) in wsURLs.enumerated() {
             logger.info("connect start attempt=\(index + 1, privacy: .public)/\(wsURLs.count, privacy: .public) ws=\(wsURL.absoluteString, privacy: .public)")
             updateState(.connecting)
             do {
+                authToken = token
                 let client = try await connector.connect(to: wsURL)
-                guard let generation,
-                      await transportSessionCoordinator.registerSocket(client, generation: generation) else {
-                    continue
-                }
-                startListening(on: client, generation: generation, lifecycleEpoch: nil)
-                try await awaitAuthResult(
-                    client: client,
-                    generation: generation,
-                    token: token,
-                    forcedLastMessageId: lastMessageId
-                )
+                socket = client
+                startListening(on: client)
+                try await awaitAuthResult(client: client, token: token, lastMessageId: lastMessageId)
                 return
             } catch {
                 lastError = error
                 if index < wsURLs.count - 1, shouldFallbackToNextTransport(after: error) {
                     logger.warning("connect fallback after \(error.localizedDescription, privacy: .public)")
-                    await transportSessionCoordinator.clearActiveTransportPreservingAttempt(
-                        shouldNotify: false,
-                        reason: error.localizedDescription
-                    )
+                    performDisconnect(shouldNotify: false)
                     continue
                 }
                 logger.info("state -> failed (connect/auth) error=\(error.localizedDescription, privacy: .public)")
                 updateState(.failed(error))
-                await transportSessionCoordinator.applyDisconnect(
-                    shouldNotify: false,
-                    reason: error.localizedDescription
-                )
+                performDisconnect(shouldNotify: false, reason: error.localizedDescription)
                 throw error
             }
         }
@@ -820,72 +443,24 @@ class ProviderChatService: ChatServicing {
     }
 
     func startConnectionAttempt(epoch: Int, lastMessageId: String?, token: String) {
-        Task { [weak self] in
-            guard let self else { return }
-            let generation = await self.transportSessionCoordinator.beginManagedAttempt(
-                epoch: epoch,
-                token: token,
-                lastMessageId: lastMessageId
-            )
-            await MainActor.run {
-                self.updateState(.connecting)
-            }
-            let task = Task { [weak self] in
-                guard let self else { return }
-                await self.runLifecycleConnectAttempt(epoch: epoch, lastMessageId: lastMessageId, token: token)
-            }
-            _ = await self.transportSessionCoordinator.attachAttemptTask(task, generation: generation)
+        connectAttemptTask?.cancel()
+        activeLifecycleConnectionToken = nil
+        connectAttemptTask = Task { [weak self] in
+            await self?.runLifecycleConnectAttempt(epoch: epoch, lastMessageId: lastMessageId, token: token)
         }
-    }
-
-    /// Synchronous connect used by tests and standalone callers.
-    /// Establishes a WebSocket connection, authenticates, and returns once the
-    /// auth handshake completes (or throws on failure).
-    func connect(token: String, lastMessageId: String?) async throws {
-        let admission = await transportSessionCoordinator.prepareStandaloneConnect(
-            token: token,
-            lastMessageId: lastMessageId
-        )
-        if admission.shouldReuseConnected { return }
-        if let generation = admission.generation {
-            let task = Task { [weak self] in
-                guard let self else { return }
-                do {
-                    try await self.performStandaloneConnect(token: token, lastMessageId: lastMessageId)
-                } catch {
-                    await self.transportSessionCoordinator.applyDisconnect(
-                        shouldNotify: false,
-                        reason: error.localizedDescription
-                    )
-                }
-            }
-            _ = await transportSessionCoordinator.attachAttemptTask(task, generation: generation)
-        }
-        try await transportSessionCoordinator.waitForStandaloneAttemptToFinish()
     }
 
     func stopConnectionAttempt() {
-        Task { [weak self] in
-            guard let self else { return }
-            await self.transportSessionCoordinator.cancelAttempt()
-            await self.transportSessionCoordinator.applyDisconnect(shouldNotify: false)
-            await MainActor.run {
-                self.updateState(.disconnected)
-            }
-        }
+        connectAttemptTask?.cancel()
+        connectAttemptTask = nil
+        performDisconnect(shouldNotify: false)
     }
 
     func disconnect() {
         logger.info("disconnect requested")
-        cancelAuthTimeout()
-        Task { [weak self] in
-            guard let self else { return }
-            await self.transportSessionCoordinator.cancelAttempt()
-            await self.transportSessionCoordinator.applyDisconnect(shouldNotify: false)
-            await MainActor.run {
-                self.updateState(.disconnected)
-            }
-        }
+        connectAttemptTask?.cancel()
+        connectAttemptTask = nil
+        performDisconnect(shouldNotify: false)
     }
 
     func replayCursorSnapshot() -> [String: String] {
@@ -929,10 +504,17 @@ class ProviderChatService: ChatServicing {
 
     private func performDisconnect(shouldNotify: Bool, reason: String? = nil) {
         logger.info("performDisconnect notify=\(shouldNotify, privacy: .public) reason=\(reason ?? "nil", privacy: .public)")
-        cancelAuthTimeout()
+        shouldNotifyDisconnect = shouldNotify
+        pendingDisconnectReason = reason
+        activeLifecycleConnectionToken = nil
+        resolveAuthContinuation(with: .failure(Error.notConnected))
+        receiveTask?.cancel()
+        receiveTask = nil
+        socket?.close(with: .normalClosure)
+        socket = nil
+        authToken = nil
         if !pendingMessages.isEmpty {
-            for (messageId, pending) in pendingMessages {
-                pending.retryTask?.cancel()
+            for messageId in pendingMessages {
                 emitServiceEvent(.messageError(
                     messageId: messageId,
                     code: "connection_lost",
@@ -941,9 +523,6 @@ class ProviderChatService: ChatServicing {
             }
         }
         pendingMessages.removeAll()
-        Task {
-            await transportSessionCoordinator.applyDisconnect(shouldNotify: shouldNotify, reason: reason)
-        }
         logger.info("state -> disconnected (performDisconnect)")
         updateState(.disconnected)
     }
@@ -952,13 +531,16 @@ class ProviderChatService: ChatServicing {
         id: String,
         content: String,
         attachments: [WireAttachment],
-        sessionKey: String?
+        sessionKey: String?,
+        references: [MessageReferenceContext] = []
     ) async throws {
+        guard let socket else {
+            throw Error.notConnected
+        }
         guard id.hasPrefix("c_") else {
             throw Error.invalidMessageId
         }
-        let shouldSend = try await transportSessionCoordinator.reserveOutboundMessage(id: id)
-        if !shouldSend {
+        if sentMessageIDs.contains(id) {
             logger.warning("duplicate outbound message suppressed id=\(id, privacy: .public)")
             return
         }
@@ -967,7 +549,8 @@ class ProviderChatService: ChatServicing {
             id: id,
             content: content,
             attachments: attachments,
-            sessionKey: sessionKey
+            sessionKey: sessionKey,
+            references: references
         )
         let data = try encoder.encode(payload)
         guard let text = String(data: data, encoding: .utf8) else {
@@ -978,15 +561,12 @@ class ProviderChatService: ChatServicing {
             )
         }
 
-        pendingMessages[id]?.retryTask?.cancel()
-        pendingMessages[id] = PendingMessage(payload: payload, retryTask: nil)
+        sentMessageIDs.insert(id)
+        pendingMessages.insert(id)
         do {
-            try await transportSessionCoordinator.send(text: text)
+            try await socket.send(text: text)
         } catch {
-            await transportSessionCoordinator.rollbackOutboundMessage(id: id)
-            if let pending = pendingMessages.removeValue(forKey: id) {
-                pending.retryTask?.cancel()
-            }
+            pendingMessages.remove(id)
             throw error
         }
     }
@@ -996,6 +576,9 @@ class ProviderChatService: ChatServicing {
         action: String,
         data: JSONValue?
     ) async throws {
+        guard let socket else {
+            throw Error.notConnected
+        }
         let payload = InteractiveCallbackOutboundPayload(
             messageId: sourceMessageId,
             payload: .init(action: action, data: data)
@@ -1008,10 +591,13 @@ class ProviderChatService: ChatServicing {
                 message: "Failed to encode interactive callback payload."
             )
         }
-        try await transportSessionCoordinator.send(text: text)
+        try await socket.send(text: text)
     }
 
     func publishReadState(sessionKey: String, lastReadMessageId: String) async throws {
+        guard let socket else {
+            throw Error.notConnected
+        }
         let payload = ClientStreamReadPayload(sessionKey: sessionKey, lastReadMessageId: lastReadMessageId)
         let encoded = try encoder.encode(payload)
         guard let text = String(data: encoded, encoding: .utf8) else {
@@ -1023,7 +609,7 @@ class ProviderChatService: ChatServicing {
                 message: "Failed to encode stream read payload."
             )
         }
-        try await transportSessionCoordinator.send(text: text)
+        try await socket.send(text: text)
     }
 
     // MARK: - Internal helpers
@@ -1065,10 +651,6 @@ class ProviderChatService: ChatServicing {
                     failureReason: .protocolMismatch
                 )
             )
-            await transportSessionCoordinator.applyDisconnect(
-                shouldNotify: false,
-                reason: Error.missingBaseURL.localizedDescription
-            )
             return
         }
         let wsURLs = makeWebSocketURLs(from: baseURL)
@@ -1083,16 +665,11 @@ class ProviderChatService: ChatServicing {
                     failureReason: .protocolMismatch
                 )
             )
-            await transportSessionCoordinator.applyDisconnect(
-                shouldNotify: false,
-                reason: Error.missingBaseURL.localizedDescription
-            )
             return
         }
 
-        guard let generation = await transportSessionCoordinator.currentGeneration() else {
-            return
-        }
+        performDisconnect(shouldNotify: false)
+        shouldNotifyDisconnect = false
 
         for (index, wsURL) in wsURLs.enumerated() {
             if Task.isCancelled { return }
@@ -1100,36 +677,29 @@ class ProviderChatService: ChatServicing {
                 logger.info("lifecycle attempt epoch=\(epoch, privacy: .public) connect \(index + 1, privacy: .public)/\(wsURLs.count, privacy: .public) ws=\(wsURL.absoluteString, privacy: .public)")
                 let client = try await connector.connect(to: wsURL)
                 if Task.isCancelled { return }
-                guard await transportSessionCoordinator.registerSocket(client, generation: generation) else {
-                    continue
-                }
-                startListening(on: client, generation: generation, lifecycleEpoch: epoch)
+                let connectionToken = UUID()
+                activeLifecycleConnectionToken = connectionToken
+                socket = client
+                startLifecycleListening(on: client, epoch: epoch, connectionToken: connectionToken)
                 emitLifecycleEvent(
                     epoch: epoch,
                     payload: .transportOpened,
-                    generation: generation
+                    lifecycleConnectionToken: connectionToken
                 )
-                try await awaitAuthResult(
-                    client: client,
-                    generation: generation,
-                    token: token,
-                    forcedLastMessageId: lastMessageId
-                )
+                try await sendAuth(client: client, token: token, lastMessageId: lastMessageId)
                 return
             } catch {
                 if index < wsURLs.count - 1, shouldFallbackToNextTransport(after: error) {
-                    await transportSessionCoordinator.clearActiveTransportPreservingAttempt(
-                        shouldNotify: false,
-                        reason: error.localizedDescription
-                    )
+                    performDisconnect(shouldNotify: false)
+                    shouldNotifyDisconnect = false
                     continue
                 }
                 emitLifecycleEvent(
                     epoch: epoch,
                     payload: .transportClosed(reason: .error),
-                    generation: generation
+                    lifecycleConnectionToken: activeLifecycleConnectionToken
                 )
-                await transportSessionCoordinator.applyDisconnect(shouldNotify: false)
+                performDisconnect(shouldNotify: false)
                 return
             }
         }
@@ -1183,27 +753,34 @@ class ProviderChatService: ChatServicing {
             }
     }
 
-    private func startListening(on client: any WebSocketClient, generation: UUID, lifecycleEpoch: Int?) {
-        let task = Task { [weak self] in
+    private func startListening(on client: any WebSocketClient) {
+        receiveTask = Task { [weak self] in
             guard let self else { return }
             var iterator = client.incomingTextMessages.makeAsyncIterator()
             while let text = await iterator.next() {
-                await handle(text: text, generation: generation, lifecycleEpoch: lifecycleEpoch)
+                handle(text: text, lifecycleEpoch: nil, lifecycleConnectionToken: nil)
             }
-            await handleSocketClose(
-                closeInfo: client.lastCloseInfo,
-                generation: generation,
-                lifecycleEpoch: lifecycleEpoch
-            )
-        }
-        Task {
-            await transportSessionCoordinator.registerReceiveTask(task, generation: generation)
+            handleSocketClose(closeInfo: client.lastCloseInfo, lifecycleEpoch: nil, lifecycleConnectionToken: nil)
         }
     }
 
-    private func handle(text: String, generation: UUID, lifecycleEpoch: Int?) async {
-        guard await transportSessionCoordinator.shouldProcess(generation: generation) else {
-            logger.debug("dropping stale inbound frame")
+    private func startLifecycleListening(on client: any WebSocketClient, epoch: Int, connectionToken: UUID) {
+        receiveTask = Task { [weak self] in
+            guard let self else { return }
+            var iterator = client.incomingTextMessages.makeAsyncIterator()
+            while let text = await iterator.next() {
+                handle(text: text, lifecycleEpoch: epoch, lifecycleConnectionToken: connectionToken)
+            }
+            handleSocketClose(
+                closeInfo: client.lastCloseInfo,
+                lifecycleEpoch: epoch,
+                lifecycleConnectionToken: connectionToken
+            )
+        }
+    }
+
+    private func handle(text: String, lifecycleEpoch: Int?, lifecycleConnectionToken: UUID?) {
+        if let lifecycleConnectionToken, !isCurrentLifecycleConnectionToken(lifecycleConnectionToken) {
             return
         }
         guard let data = text.data(using: .utf8) else {
@@ -1221,24 +798,26 @@ class ProviderChatService: ChatServicing {
 
         switch envelope.type {
         case "auth_result":
-            await handleAuthResult(
+            handleAuthResult(
                 data: data,
-                generation: generation,
-                lifecycleEpoch: lifecycleEpoch
+                lifecycleEpoch: lifecycleEpoch,
+                lifecycleConnectionToken: lifecycleConnectionToken
             )
         case "message":
-            await handleMessage(
+            handleMessage(
                 data: data,
-                generation: generation,
-                lifecycleEpoch: lifecycleEpoch
+                lifecycleEpoch: lifecycleEpoch,
+                lifecycleConnectionToken: lifecycleConnectionToken
             )
         case "ack":
             handleAck(data: data)
+        case "agent_progress":
+            handleAgentProgress(data: data)
         case "error":
-            await handleServerError(
+            handleServerError(
                 data: data,
-                generation: generation,
-                lifecycleEpoch: lifecycleEpoch
+                lifecycleEpoch: lifecycleEpoch,
+                lifecycleConnectionToken: lifecycleConnectionToken
             )
         case "user_info":
             handleUserInfo(data: data)
@@ -1259,7 +838,7 @@ class ProviderChatService: ChatServicing {
         case "stream_tail_state":
             handleStreamTailState(data: data)
         case "sync_complete":
-            handleSyncComplete(data: data, generation: generation, lifecycleEpoch: lifecycleEpoch)
+            handleSyncComplete(data: data, lifecycleEpoch: lifecycleEpoch, lifecycleConnectionToken: lifecycleConnectionToken)
         case "event":
             handleEvent(data: data)
         default:
@@ -1267,7 +846,7 @@ class ProviderChatService: ChatServicing {
         }
     }
 
-    private func handleAuthResult(data: Data, generation: UUID, lifecycleEpoch: Int?) async {
+    private func handleAuthResult(data: Data, lifecycleEpoch: Int?, lifecycleConnectionToken: UUID?) {
         let result: AuthResultPayload
         do {
             result = try decoder.decode(AuthResultPayload.self, from: data)
@@ -1285,12 +864,11 @@ class ProviderChatService: ChatServicing {
                     historyReset: result.historyReset,
                     failureReason: authFailureReason(from: result.reason)
                 ),
-                generation: generation
+                lifecycleConnectionToken: lifecycleConnectionToken
             )
         }
         if result.success {
-            let resolution = await applyAuthSuccess(generation: generation)
-            guard resolution.shouldProcess else { return }
+            resolveAuthContinuation(with: .success(()))
             logger.info("state -> connected (auth success)")
             updateState(.connected)
             let supportsSessionProvisioning = result.features?.contains("session_info") ?? false
@@ -1313,35 +891,19 @@ class ProviderChatService: ChatServicing {
         } else {
             let reason = result.reason ?? "Unknown error"
             let error = Error.authFailed(reason)
-            let resolution = await applyAuthFailure(generation: generation, error: error)
-            guard resolution.shouldProcess else { return }
+            resolveAuthContinuation(with: .failure(error))
             logger.info("state -> failed (auth result) error=\(error.localizedDescription, privacy: .public)")
             updateState(.failed(error))
-            await transportSessionCoordinator.applyDisconnect(
-                shouldNotify: false,
-                reason: error.localizedDescription
-            )
-            if !pendingMessages.isEmpty {
-                for (messageId, pending) in pendingMessages {
-                    pending.retryTask?.cancel()
-                    emitServiceEvent(.messageError(
-                        messageId: messageId,
-                        code: "connection_lost",
-                        message: nil
-                    ))
-                }
-                pendingMessages.removeAll()
-            }
-            updateState(.disconnected)
+            performDisconnect(shouldNotify: false, reason: error.localizedDescription)
         }
     }
 
-    private func handleMessage(data: Data, generation: UUID, lifecycleEpoch: Int?) async {
+    private func handleMessage(data: Data, lifecycleEpoch: Int?, lifecycleConnectionToken: UUID?) {
         if let lifecycleEpoch {
             emitLifecycleEvent(
                 epoch: lifecycleEpoch,
                 payload: .serverMessage(data: data),
-                generation: generation
+                lifecycleConnectionToken: lifecycleConnectionToken
             )
             return
         }
@@ -1367,7 +929,7 @@ class ProviderChatService: ChatServicing {
         messageBroadcaster.send(message)
     }
 
-    private func handleSyncComplete(data: Data, generation: UUID, lifecycleEpoch: Int?) {
+    private func handleSyncComplete(data: Data, lifecycleEpoch: Int?, lifecycleConnectionToken: UUID?) {
         guard (try? decoder.decode(SyncCompletePayload.self, from: data)) != nil else {
             logger.warning("Dropping sync_complete payload: decode failed")
             return
@@ -1376,7 +938,7 @@ class ProviderChatService: ChatServicing {
             emitLifecycleEvent(
                 epoch: lifecycleEpoch,
                 payload: .syncComplete,
-                generation: generation
+                lifecycleConnectionToken: lifecycleConnectionToken
             )
         }
     }
@@ -1398,14 +960,33 @@ class ProviderChatService: ChatServicing {
     }
 
     private func handleAck(data: Data) {
-        guard let payload = try? decoder.decode(AckPayload.self, from: data) else { return }
-        if let pending = pendingMessages.removeValue(forKey: payload.id) {
-            pending.retryTask?.cancel()
+        let payload: AckPayload
+        do {
+            payload = try decoder.decode(AckPayload.self, from: data)
+        } catch {
+            logger.warning("Dropping ack payload: decode failed error=\(error.localizedDescription, privacy: .public)")
+            return
         }
+        pendingMessages.remove(payload.id)
         emitServiceEvent(.messageAcked(id: payload.id))
     }
 
-    private func handleServerError(data: Data, generation: UUID, lifecycleEpoch: Int?) async {
+    private func handleAgentProgress(data: Data) {
+        let payload: AgentProgressEvent
+        do {
+            payload = try decoder.decode(AgentProgressEvent.self, from: data)
+        } catch {
+            logger.warning("Dropping agent_progress payload: decode failed error=\(error.localizedDescription, privacy: .public)")
+            return
+        }
+        guard !payload.sessionKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            logger.warning("Dropping agent_progress: missing sessionKey")
+            return
+        }
+        emitServiceEvent(.agentProgress(payload))
+    }
+
+    private func handleServerError(data: Data, lifecycleEpoch: Int?, lifecycleConnectionToken: UUID?) {
         let payload: ErrorPayload
         do {
             payload = try decoder.decode(ErrorPayload.self, from: data)
@@ -1415,9 +996,7 @@ class ProviderChatService: ChatServicing {
         }
 
         if let messageId = payload.messageId {
-            if let pending = pendingMessages.removeValue(forKey: messageId) {
-                pending.retryTask?.cancel()
-            }
+            pendingMessages.remove(messageId)
             emitServiceEvent(.messageError(messageId: messageId, code: payload.code, message: payload.message))
             return
         }
@@ -1436,17 +1015,13 @@ class ProviderChatService: ChatServicing {
                         historyReset: nil,
                         failureReason: .rejected
                     ),
-                    generation: generation
+                    lifecycleConnectionToken: lifecycleConnectionToken
                 )
             }
-            let resolution = await applyAuthFailure(generation: generation, error: error)
-            guard resolution.shouldProcess else { return }
+            resolveAuthContinuation(with: .failure(error))
             logger.info("state -> failed (server error auth_failed) error=\(error.localizedDescription, privacy: .public)")
             updateState(.failed(error))
-            await transportSessionCoordinator.applyDisconnect(
-                shouldNotify: false,
-                reason: error.localizedDescription
-            )
+            performDisconnect(shouldNotify: false, reason: error.localizedDescription)
         case "token_revoked":
             let error = Error.tokenRevoked(message)
             if let lifecycleEpoch {
@@ -1459,17 +1034,13 @@ class ProviderChatService: ChatServicing {
                         historyReset: nil,
                         failureReason: .tokenRevoked
                     ),
-                    generation: generation
+                    lifecycleConnectionToken: lifecycleConnectionToken
                 )
             }
-            let resolution = await applyAuthFailure(generation: generation, error: error)
-            guard resolution.shouldProcess else { return }
+            resolveAuthContinuation(with: .failure(error))
             logger.info("state -> failed (server error token_revoked) error=\(error.localizedDescription, privacy: .public)")
             updateState(.failed(error))
-            await transportSessionCoordinator.applyDisconnect(
-                shouldNotify: false,
-                reason: error.localizedDescription
-            )
+            performDisconnect(shouldNotify: false, reason: error.localizedDescription)
         case "session_replaced":
             let error = Error.sessionReplaced
             if let lifecycleEpoch {
@@ -1482,16 +1053,12 @@ class ProviderChatService: ChatServicing {
                         historyReset: nil,
                         failureReason: .sessionReplaced
                     ),
-                    generation: generation
+                    lifecycleConnectionToken: lifecycleConnectionToken
                 )
             }
             logger.info("state -> failed (server error session_replaced)")
-            _ = await applyAuthFailure(generation: generation, error: error)
             updateState(.failed(error))
-            await transportSessionCoordinator.applyDisconnect(
-                shouldNotify: false,
-                reason: error.localizedDescription
-            )
+            performDisconnect(shouldNotify: false, reason: error.localizedDescription)
         case "invalid_message", "payload_too_large", "invalid_channel":
             let invalidLastMessageId = payload.code == "invalid_message"
                 && isInvalidLastMessageIdMessage(payload.message)
@@ -1510,19 +1077,15 @@ class ProviderChatService: ChatServicing {
                             historyReset: nil,
                             failureReason: .invalidLastMessageId
                         ),
-                        generation: generation
+                        lifecycleConnectionToken: lifecycleConnectionToken
                     )
                 } else {
-                    _ = await applyAuthFailure(
-                        generation: generation,
-                        error: Error.authFailed("Invalid lastMessageId")
-                    )
+                    resolveAuthContinuation(with: .failure(Error.authFailed("Invalid lastMessageId")))
                 }
             }
             logger.info("message-level error without messageId code=\(payload.code, privacy: .public)")
             if !pendingMessages.isEmpty {
-                for (messageId, pending) in pendingMessages {
-                    pending.retryTask?.cancel()
+                for messageId in pendingMessages {
                     emitServiceEvent(.messageError(
                         messageId: messageId,
                         code: payload.code,
@@ -1574,6 +1137,12 @@ class ProviderChatService: ChatServicing {
             if let sessionKey {
                 emitServiceEvent(.typingStateChanged(isTyping: payload.payload.isActive, sessionKey: sessionKey))
             }
+        case "prompt_turn_state":
+            guard let payload = try? decoder.decode(PromptTurnStateEvent.self, from: data) else {
+                logger.warning("Failed to decode prompt_turn_state event payload")
+                return
+            }
+            emitServiceEvent(.promptTurnState(payload))
         default:
             logger.debug("Unknown event type: \(envelope.event, privacy: .public)")
         }
@@ -1669,10 +1238,17 @@ class ProviderChatService: ChatServicing {
     private func emitLifecycleEvent(
         epoch: Int,
         payload: LifecycleTransportEvent.Payload,
-        generation: UUID? = nil
+        lifecycleConnectionToken: UUID? = nil
     ) {
-        let _ = generation
+        if let lifecycleConnectionToken, !isCurrentLifecycleConnectionToken(lifecycleConnectionToken) {
+            logger.debug("dropping stale lifecycle event epoch=\(epoch, privacy: .public)")
+            return
+        }
         lifecycleTransportEventBroadcaster.send(.init(epoch: epoch, payload: payload))
+    }
+
+    private func isCurrentLifecycleConnectionToken(_ token: UUID) -> Bool {
+        activeLifecycleConnectionToken == token
     }
 
     private func authFailureReason(from rawReason: String?) -> AuthFailureReason? {
@@ -1773,21 +1349,30 @@ class ProviderChatService: ChatServicing {
         return map
     }
 
-    private func handleSocketClose(closeInfo: WebSocketCloseInfo?, generation: UUID, lifecycleEpoch: Int?) async {
-        cancelAuthTimeout()
-        let resolution = await transportSessionCoordinator.applySocketClose(
-            generation: generation,
-            closeInfo: closeInfo
-        )
-        guard resolution.shouldProcess else {
+    private func handleSocketClose(closeInfo: WebSocketCloseInfo?, lifecycleEpoch: Int?, lifecycleConnectionToken: UUID?) {
+        if let lifecycleConnectionToken, !isCurrentLifecycleConnectionToken(lifecycleConnectionToken) {
             logger.debug("ignoring stale lifecycle socket close")
             return
+        }
+        let rejectionError: Error? = {
+            guard let closeInfo else { return nil }
+            guard closeInfo.code == 1008 else { return nil }
+            guard let reason = closeInfo.reason?.lowercased() else { return nil }
+            if reason == "pairing required" || reason.hasPrefix("invalid connect params") {
+                return Error.policyViolation(code: closeInfo.code ?? 1008, reason: closeInfo.reason)
+            }
+            return nil
+        }()
+
+        if let rejectionError {
+            resolveAuthContinuation(with: .failure(rejectionError))
+        } else {
+            resolveAuthContinuation(with: .failure(Error.notConnected))
         }
 
         // Notify the UI about each pending message that failed to send
         // This removes the optimistic placeholders so users know messages weren't delivered
-        for (messageId, pending) in pendingMessages {
-            pending.retryTask?.cancel()
+        for messageId in pendingMessages {
             emitServiceEvent(.messageError(
                 messageId: messageId,
                 code: "connection_lost",
@@ -1796,32 +1381,28 @@ class ProviderChatService: ChatServicing {
         }
         pendingMessages.removeAll()
 
-        if let rejectionError = resolution.rejectionError {
+        if let rejectionError {
             let closeCode = String(describing: closeInfo?.code)
             let closeReason = closeInfo?.reason ?? "nil"
             logger.info(
-                "state -> failed (socket close policy violation) notify=\(resolution.shouldNotifyDisconnect, privacy: .public) code=\(closeCode, privacy: .public) reason=\(closeReason, privacy: .public)"
+                "state -> failed (socket close policy violation) notify=\(self.shouldNotifyDisconnect, privacy: .public) code=\(closeCode, privacy: .public) reason=\(closeReason, privacy: .public)"
             )
             updateState(.failed(rejectionError))
-            if resolution.shouldNotifyDisconnect {
-                emitServiceEvent(
-                    .connectionInterrupted(
-                        reason: rejectionError.errorDescription ?? resolution.pendingDisconnectReason
-                    )
-                )
+            if shouldNotifyDisconnect {
+                emitServiceEvent(.connectionInterrupted(reason: rejectionError.errorDescription ?? pendingDisconnectReason))
             }
             if let lifecycleEpoch {
                 emitLifecycleEvent(
                     epoch: lifecycleEpoch,
                     payload: .transportClosed(reason: .error),
-                    generation: generation
+                    lifecycleConnectionToken: lifecycleConnectionToken
                 )
             }
         } else {
-            logger.info("state -> disconnected (socket close) notify=\(resolution.shouldNotifyDisconnect, privacy: .public)")
+            logger.info("state -> disconnected (socket close) notify=\(self.shouldNotifyDisconnect, privacy: .public)")
             updateState(.disconnected)
-            if resolution.shouldNotifyDisconnect {
-                emitServiceEvent(.connectionInterrupted(reason: resolution.pendingDisconnectReason))
+            if shouldNotifyDisconnect {
+                emitServiceEvent(.connectionInterrupted(reason: pendingDisconnectReason))
             }
             if let lifecycleEpoch {
                 let reason: TransportCloseReason = {
@@ -1832,38 +1413,29 @@ class ProviderChatService: ChatServicing {
                 emitLifecycleEvent(
                     epoch: lifecycleEpoch,
                     payload: .transportClosed(reason: reason),
-                    generation: generation
+                    lifecycleConnectionToken: lifecycleConnectionToken
                 )
             }
         }
+        shouldNotifyDisconnect = true
+        pendingDisconnectReason = nil
     }
 
     private func teardownConnection() async throws {
-        cancelAuthTimeout()
-        await transportSessionCoordinator.applyDisconnect(shouldNotify: false)
+        performDisconnect(shouldNotify: false)
     }
 
-    private func cancelAuthTimeout() {
+    private func resolveAuthContinuation(with result: Result<Void, Swift.Error>) {
         authTimeoutTask?.cancel()
         authTimeoutTask = nil
-    }
-
-    private func resolveAuthContinuation(with result: Result<Void, Swift.Error>) async {
-        cancelAuthTimeout()
-        await transportSessionCoordinator.resolveAuthContinuation(with: result)
-    }
-
-    private func applyAuthSuccess(generation: UUID) async -> TransportSessionCoordinator.AuthResultResolution {
-        cancelAuthTimeout()
-        return await transportSessionCoordinator.applyAuthSuccess(generation: generation)
-    }
-
-    private func applyAuthFailure(
-        generation: UUID,
-        error: Swift.Error
-    ) async -> TransportSessionCoordinator.FailureResolution {
-        cancelAuthTimeout()
-        return await transportSessionCoordinator.applyAuthFailure(generation: generation, error: error)
+        guard let continuation = authContinuation else { return }
+        authContinuation = nil
+        switch result {
+        case .success:
+            continuation.resume()
+        case .failure(let error):
+            continuation.resume(throwing: error)
+        }
     }
 
     private func mapStreamAPIError(_ error: Swift.Error) -> Swift.Error {
@@ -1876,43 +1448,23 @@ class ProviderChatService: ChatServicing {
         return error
     }
 
-    private func awaitAuthResult(
-        client: any WebSocketClient,
-        generation: UUID,
-        token: String,
-        forcedLastMessageId: String?
-    ) async throws {
+    private func awaitAuthResult(client: any WebSocketClient, token: String, lastMessageId: String?) async throws {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Swift.Error>) in
-            Task { [weak self] in
-                guard let self else {
-                    continuation.resume(throwing: Error.notConnected)
+            authContinuation = continuation
+            authTimeoutTask?.cancel()
+            authTimeoutTask = Task { @MainActor [authTimeout] in
+                do {
+                    try await Task.sleep(forDuration: authTimeout)
+                } catch {
                     return
                 }
-                let installed = await self.transportSessionCoordinator.installAuthContinuation(
-                    continuation,
-                    generation: generation
-                )
-                guard installed else { return }
-                self.cancelAuthTimeout()
-                let authTimeout = self.authTimeout
-                self.authTimeoutTask = Task { [weak self] in
-                    do {
-                        try await Task.sleep(forDuration: authTimeout)
-                    } catch {
-                        return
-                    }
-                    await self?.resolveAuthContinuation(with: .failure(Error.authTimeout))
-                }
+                self.resolveAuthContinuation(with: .failure(Error.authTimeout))
+            }
+            Task { @MainActor in
                 do {
-                    let replayCursorSnapshot = self.replayCursorSnapshot()
-                    let candidateLastMessageId = forcedLastMessageId ?? self.resolveAuthLastMessageId(
-                        replayCursorSnapshot: replayCursorSnapshot,
-                        knownSessionKeys: self.knownSessionKeys
-                    )
-                    let lastMessageId = self.normalizeServerEventID(candidateLastMessageId)
                     try await self.sendAuth(client: client, token: token, lastMessageId: lastMessageId)
                 } catch {
-                    await self.resolveAuthContinuation(with: .failure(error))
+                    self.resolveAuthContinuation(with: .failure(error))
                 }
             }
         }
@@ -1941,24 +1493,6 @@ class ProviderChatService: ChatServicing {
         replayCursorDefaults.set(data, forKey: replayCursorDefaultsKey())
     }
 
-    private func resolveAuthLastMessageId(
-        replayCursorSnapshot: [String: String],
-        knownSessionKeys: Set<String>
-    ) -> String? {
-        let normalizedKnownKeys = knownSessionKeys
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-        guard !normalizedKnownKeys.isEmpty else {
-            return nil
-        }
-        guard normalizedKnownKeys.allSatisfy({
-            guard let candidate = replayCursorSnapshot[$0] else { return false }
-            return normalizeServerEventID(candidate) != nil
-        }) else {
-            return nil
-        }
-        return replayCursorSnapshot.values.compactMap(normalizeServerEventID).max()
-    }
     private func normalizeServerEventID(_ raw: String?) -> String? {
         guard let raw else { return nil }
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1970,58 +1504,5 @@ class ProviderChatService: ChatServicing {
 
     private func isReplayCursorEvent(_ message: Message) -> Bool {
         normalizeServerEventID(message.id) != nil && !message.streaming
-    }
-}
-
-private final class StandaloneProviderTransportService: ProviderChatService, DirectChatConnecting {}
-
-final class ProviderDirectChatClient: DirectChatConnecting {
-    private let service: StandaloneProviderTransportService
-
-    init(connector: any WebSocketConnecting,
-         deviceId: String,
-         baseURLProvider: @escaping () -> URL? = { ProviderBaseURLStore.baseURL },
-         userIdProvider: @escaping () -> String? = { nil },
-         authTokenProvider: @escaping @Sendable () async -> String? = { nil },
-         streamAPIClient: StreamAPIClient? = nil,
-         encoder: JSONEncoder = JSONEncoder(),
-         decoder: JSONDecoder = JSONDecoder()) {
-        self.service = StandaloneProviderTransportService(
-            connector: connector,
-            deviceId: deviceId,
-            transportOwnerMode: .standalone,
-            baseURLProvider: baseURLProvider,
-            userIdProvider: userIdProvider,
-            authTokenProvider: authTokenProvider,
-            streamAPIClient: streamAPIClient,
-            encoder: encoder,
-            decoder: decoder
-        )
-    }
-
-    var incomingMessages: AsyncStream<Message> { service.incomingMessages }
-    var connectionState: AsyncStream<ConnectionState> { service.connectionState }
-    var serviceEvents: AsyncStream<ChatServiceEvent> { service.serviceEvents }
-
-    func connect(token: String, lastMessageId: String?) async throws {
-        try await service.connect(token: token, lastMessageId: lastMessageId)
-    }
-
-    func disconnect() {
-        service.disconnect()
-    }
-
-    func send(
-        id: String,
-        content: String,
-        attachments: [WireAttachment],
-        sessionKey: String?
-    ) async throws {
-        try await service.send(
-            id: id,
-            content: content,
-            attachments: attachments,
-            sessionKey: sessionKey
-        )
     }
 }

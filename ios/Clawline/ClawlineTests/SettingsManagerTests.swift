@@ -9,7 +9,7 @@ struct SettingsManagerTests {
         resetSonioxDefaultsForTest()
         defer { resetSonioxDefaultsForTest() }
 
-        let manager = SettingsManager(sonioxKeyStore: SonioxKeyStore(verifier: MockSettingsKeyVerifier()))
+        let manager = makeSettingsManager(sonioxVerifier: MockSettingsKeyVerifier())
         manager.sonioxAPIKey = ""
         #expect(manager.sonioxCTATitle == "Get Key")
 
@@ -23,7 +23,7 @@ struct SettingsManagerTests {
         resetSonioxDefaultsForTest()
         defer { resetSonioxDefaultsForTest() }
 
-        let manager = SettingsManager(sonioxKeyStore: SonioxKeyStore(verifier: MockSettingsKeyVerifier()))
+        let manager = makeSettingsManager(sonioxVerifier: MockSettingsKeyVerifier())
         manager.sonioxAPIKey = ""
 
         var openedURL: URL?
@@ -42,7 +42,7 @@ struct SettingsManagerTests {
         defer { resetSonioxDefaultsForTest() }
 
         let verifier = MockSettingsKeyVerifier(results: [true])
-        let manager = SettingsManager(sonioxKeyStore: SonioxKeyStore(verifier: verifier))
+        let manager = makeSettingsManager(sonioxVerifier: verifier)
         manager.sonioxAPIKey = "valid-key"
 
         let result = await manager.handleSonioxPrimaryAction { _ in }
@@ -58,7 +58,7 @@ struct SettingsManagerTests {
         defer { resetSonioxDefaultsForTest() }
 
         let verifier = MockSettingsKeyVerifier(results: [false])
-        let manager = SettingsManager(sonioxKeyStore: SonioxKeyStore(verifier: verifier))
+        let manager = makeSettingsManager(sonioxVerifier: verifier)
         manager.sonioxAPIKey = "bad-key"
 
         let result = await manager.verifySonioxKey()
@@ -84,6 +84,14 @@ private final class MockSettingsKeyVerifier: SonioxKeyVerifying {
         }
         return false
     }
+}
+
+@MainActor
+private func makeSettingsManager(sonioxVerifier: MockSettingsKeyVerifier) -> SettingsManager {
+    SettingsManager(
+        sonioxKeyStore: SonioxKeyStore(verifier: sonioxVerifier),
+        cartesiaKeyStore: CartesiaKeyStore(keychain: KeychainSecureStore())
+    )
 }
 
 private func resetSonioxDefaultsForTest() {

@@ -8,6 +8,7 @@ import {
   type StreamDotState,
   useChatDomainStore
 } from "../../runtime/chat/chatDomainStore";
+import { useCrossChatNotificationStore } from "../../runtime/chat/crossChatNotificationStore";
 import { useTransportMachine } from "../../runtime/transport/transportMachine";
 import {
   createStreamApiClient,
@@ -20,13 +21,17 @@ import {
   useChatSessionCoordinator,
   useChatSessionInteractionCoordinator
 } from "./useChatSessionCoordinator";
-import { useChatKeyboardShortcuts } from "./useChatKeyboardShortcuts";
+
+const SESSION_STATUS_REQUEST_TIMEOUT_MS = 2_000;
+const SESSION_STATUS_RUNNING_REFRESH_MS = 5_000;
+const SESSION_STATUS_RETRY_MS = 10_000;
 
 export function ChatRoute() {
   const navigate = useNavigate();
   const params = useParams();
   const { state: authState } = useAuthSessionStore();
   const { state: chatState, store: chatStore } = useChatDomainStore();
+  const { store: notificationStore } = useCrossChatNotificationStore();
   const { state: transportState, store: transportStore } = useTransportMachine();
   const [sessionStatusBySessionKey, setSessionStatusBySessionKey] = useState<
     Record<string, SessionStatusPayload>
@@ -113,7 +118,10 @@ export function ChatRoute() {
     async function refreshSessionStatus(sessionKey: string) {
       const abortController = new AbortController();
       abortControllers.add(abortController);
-      const timeoutId = window.setTimeout(() => abortController.abort(), 2_000);
+      const timeoutId = window.setTimeout(
+        () => abortController.abort(),
+        SESSION_STATUS_REQUEST_TIMEOUT_MS
+      );
       try {
         const status = await streamApiClient.fetchSessionStatus({
           serverUrl: statusServerUrl,
@@ -136,10 +144,25 @@ export function ChatRoute() {
         );
 
         if (runState === "running" || runState === "queued") {
-          timers.push(window.setTimeout(() => void refreshSessionStatus(sessionKey), 5_000));
+          timers.push(
+            window.setTimeout(
+              () => void refreshSessionStatus(sessionKey),
+              SESSION_STATUS_RUNNING_REFRESH_MS
+            )
+          );
         }
-      } catch {
+      } catch (error) {
         if (cancelled) {
+          return;
+        }
+
+        if (shouldRetrySessionStatus(error)) {
+          timers.push(
+            window.setTimeout(
+              () => void refreshSessionStatus(sessionKey),
+              SESSION_STATUS_RETRY_MS
+            )
+          );
           return;
         }
 
@@ -181,25 +204,11 @@ export function ChatRoute() {
     coordinator.requestSessionSwitch(sessionKey, source);
     navigate(`/chat/${sessionKey}`);
   };
-  const focusPromptInput = useCallback(() => {
-    document.getElementById("composer-input")?.focus({ preventScroll: true });
-  }, []);
-  const openSessionListFromShortcut = useCallback(() => {
-    coordinator.openSessionList();
-  }, [coordinator]);
-
   const interactionCoordinator = useChatSessionInteractionCoordinator({
     activeSessionKey,
     onSelectSession: handleSelectSession,
     orderedSessionKeys: chatState.streams.map((stream) => stream.sessionKey)
   });
-  useChatKeyboardShortcuts({
-    canOpenSessionList: chatState.streams.length > 0,
-    isShortcutSurfaceBlocked: coordinator.isSessionListOpen || coordinator.isStreamManagerOpen,
-    onFocusPromptInput: focusPromptInput,
-    onOpenSessionList: openSessionListFromShortcut
-  });
-
   const applySessionControl = useCallback(
     async (
       sessionKey: string,
@@ -229,6 +238,27 @@ export function ChatRoute() {
             ...current,
             [nextStatus.sessionKey]: nextStatus
           }));
+          return;
+        }
+
+        const abortController = new AbortController();
+        const timeoutId = window.setTimeout(
+          () => abortController.abort(),
+          SESSION_STATUS_REQUEST_TIMEOUT_MS
+        );
+        try {
+          const nextStatus = await streamApiClient.fetchSessionStatus({
+            serverUrl,
+            sessionKey,
+            signal: abortController.signal,
+            token
+          });
+          setSessionStatusBySessionKey((current) => ({
+            ...current,
+            [nextStatus.sessionKey]: nextStatus
+          }));
+        } finally {
+          window.clearTimeout(timeoutId);
         }
       } catch (error) {
         console.warn("Session control request failed", error);
@@ -260,6 +290,7 @@ export function ChatRoute() {
     });
 
     const lastReadMessageId = chatStore.markSessionRead(activeSessionKey);
+    notificationStore.dismissCrossChatNotification(activeSessionKey);
     if (
       lastReadMessageId &&
       chatState.provisionedSessionKeys.includes(activeSessionKey)
@@ -271,6 +302,7 @@ export function ChatRoute() {
     chatState.firstUnreadMessageIdBySessionKey,
     chatState.provisionedSessionKeys,
     chatStore,
+    notificationStore,
     transportStore
   ]);
 
@@ -296,6 +328,7 @@ export function ChatRoute() {
         chatLayoutStyle={interactionCoordinator.layoutStyle}
         keyboardInset={interactionCoordinator.keyboardInset}
         isSessionListOpen={coordinator.isSessionListOpen}
+        isStreamManagerOpen={coordinator.isStreamManagerOpen}
         onCloseSessionList={coordinator.closeSessionList}
         onChatPanelTouchCancel={interactionCoordinator.handleChatPanelTouchCancel}
         onChatPanelTouchEnd={interactionCoordinator.handleChatPanelTouchEnd}
@@ -376,4 +409,31 @@ function applyNetworkStatusDotStates(
   }
 
   return next;
+}
+
+function shouldRetrySessionStatus(error: unknown) {
+  if (error instanceof DOMException && error.name === "AbortError") {
+    return true;
+  }
+  if (error instanceof TypeError) {
+    return true;
+  }
+  if (isHttpStreamApiError(error)) {
+    return (
+      error.statusCode === 408 ||
+      error.statusCode === 429 ||
+      error.statusCode >= 500
+    );
+  }
+
+  return false;
+}
+
+function isHttpStreamApiError(error: unknown): error is { statusCode: number } {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "statusCode" in error &&
+    typeof error.statusCode === "number"
+  );
 }

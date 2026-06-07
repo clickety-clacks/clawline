@@ -29,21 +29,13 @@ final class AuthManager: AuthManaging {
         static let isAdmin = "auth.isAdmin"
     }
 
-#if DEBUG
-    static func resetPersistentCredentialsForTesting(
-        storage: UserDefaults = .standard,
-        secureStore: SecureStoring = KeychainSecureStore()
-    ) {
-        storage.removeObject(forKey: StorageKeys.token)
-        storage.removeObject(forKey: StorageKeys.userId)
-        storage.removeObject(forKey: StorageKeys.isAdmin)
-        secureStore.removeValue(forKey: StorageKeys.token)
-        secureStore.removeValue(forKey: StorageKeys.userId)
-        secureStore.removeValue(forKey: StorageKeys.isAdmin)
+    init(storage: UserDefaults = .standard) {
+        self.storage = storage
+        self.secureStore = KeychainSecureStore()
+        loadStoredCredentials()
     }
-#endif
 
-    init(storage: UserDefaults = .standard, secureStore: SecureStoring = KeychainSecureStore()) {
+    init(storage: UserDefaults, secureStore: SecureStoring) {
         self.storage = storage
         self.secureStore = secureStore
         loadStoredCredentials()

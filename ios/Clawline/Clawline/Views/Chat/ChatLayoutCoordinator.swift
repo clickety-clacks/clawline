@@ -103,6 +103,12 @@ struct ChatLayoutKey: Equatable {
     }
 }
 
+struct ChatKeyboardGeometryRefreshKey: Equatable {
+    let size: CGSize
+    let safeAreaBottom: CGFloat
+    let notificationVisibleCount: Int
+}
+
 protocol KeyboardPinnedContainerViewProtocol: AnyObject {
     var containerView: UIView { get }
     var barHeight: CGFloat { get }
@@ -188,6 +194,11 @@ final class ChatLayoutCoordinator {
     func scrollToMessageCentered(messageId: String, sessionKey: String, animated: Bool) {
         dispatchPrecondition(condition: .onQueue(.main))
         listViews[sessionKey]?.value?.scrollToMessageCentered(messageId: messageId, animated: animated)
+    }
+
+    func scrollToMessageCenteredIfMaterialized(messageId: String, sessionKey: String, animated: Bool) -> Bool {
+        dispatchPrecondition(condition: .onQueue(.main))
+        return listViews[sessionKey]?.value?.scrollToMessageCenteredIfMaterialized(messageId: messageId, animated: animated) ?? false
     }
 
     func flashMessage(messageId: String, sessionKey: String, isUnreadTap: Bool = false) {

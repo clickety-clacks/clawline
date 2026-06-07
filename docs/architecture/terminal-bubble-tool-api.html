@@ -1,0 +1,309 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Clawline Terminal Bubble Tool API Architecture</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page-fg: #1f2933;
+      --fg: var(--clawline-fg, var(--page-fg));
+      --muted: color-mix(in srgb, var(--fg) 66%, transparent);
+      --line: color-mix(in srgb, var(--fg) 18%, transparent);
+      --soft: color-mix(in srgb, var(--fg) 7%, transparent);
+      --accent: #d6a23d;
+      --bad: #d65f5f;
+      --good: #62b880;
+      --code-bg: color-mix(in srgb, var(--fg) 9%, transparent);
+    }
+    @media (prefers-color-scheme: dark) {
+      :root { --page-fg: #f4efe7; }
+    }
+    html, body {
+      margin: 0;
+      background: transparent;
+      color: var(--fg);
+      font: 15px/1.48 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+      letter-spacing: 0;
+    }
+    body { padding: 28px; }
+    main { max-width: 1120px; margin: 0 auto; }
+    header {
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 18px;
+      margin-bottom: 22px;
+    }
+    h1, h2, h3 { margin: 0; letter-spacing: 0; line-height: 1.14; }
+    h1 { font-size: 34px; font-weight: 740; }
+    h2 { font-size: 21px; margin-top: 30px; padding-top: 18px; border-top: 1px solid var(--line); }
+    h3 { font-size: 16px; margin-top: 18px; }
+    p { margin: 10px 0; }
+    .dek { color: var(--muted); font-size: 17px; max-width: 920px; margin-top: 10px; }
+    .meta {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 18px;
+    }
+    .metric {
+      border: 1px solid var(--line);
+      background: var(--soft);
+      border-radius: 8px;
+      padding: 10px 12px;
+      min-height: 54px;
+    }
+    .metric b { display: block; font-size: 12px; text-transform: uppercase; color: var(--muted); font-weight: 650; }
+    .metric span { display: block; margin-top: 4px; font-weight: 680; }
+    .callout {
+      border-left: 3px solid var(--accent);
+      background: color-mix(in srgb, var(--accent) 12%, transparent);
+      padding: 11px 14px;
+      margin: 16px 0;
+      border-radius: 0 8px 8px 0;
+    }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .box {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px;
+      background: var(--soft);
+    }
+    ul, ol { padding-left: 22px; margin: 10px 0; }
+    li { margin: 6px 0; }
+    code, pre {
+      font-family: "SF Mono", Menlo, Consolas, monospace;
+      font-size: 13px;
+      letter-spacing: 0;
+    }
+    code { background: var(--code-bg); border-radius: 5px; padding: 1px 4px; }
+    pre {
+      margin: 10px 0 0;
+      padding: 13px;
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--code-bg);
+      white-space: pre;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+    }
+    th, td {
+      border-bottom: 1px solid var(--line);
+      padding: 9px 10px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th { background: var(--soft); color: var(--muted); font-size: 12px; text-transform: uppercase; }
+    tr:last-child td { border-bottom: 0; }
+    .id { white-space: nowrap; font-weight: 720; color: var(--accent); }
+    .must { color: var(--good); font-weight: 720; }
+    .must-not { color: var(--bad); font-weight: 720; }
+    .small { color: var(--muted); font-size: 13px; }
+    @media (max-width: 760px) {
+      body { padding: 18px; }
+      h1 { font-size: 27px; }
+      .meta, .grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Clawline Terminal Bubble Tool API Architecture</h1>
+    <p class="dek">Formal source of truth for what terminal bubbles are for, how callers request them, and what Clawline must preserve when routing terminal sessions.</p>
+    <div class="meta">
+      <div class="metric"><b>Status</b><span>Approved; Tightening Applied</span></div>
+      <div class="metric"><b>Feature</b><span>T001 Terminal Bubbles</span></div>
+      <div class="metric"><b>Owner Surface</b><span>Clawline</span></div>
+      <div class="metric"><b>Last Updated</b><span>2026-05-17</span></div>
+    </div>
+  </header>
+
+  <section>
+    <h2>Purpose</h2>
+    <div class="callout">
+      Terminal bubbles exist so an agent or tool caller can put a live terminal session inside the current Clawline conversation while naming the exact machine and terminal session identity that should back it.
+    </div>
+    <p>This is not a decorative attachment type and not a generic remote shell picker. It is a product contract: a caller requests a terminal bubble for a specific destination and session identity, the provider provisions or attaches exactly that target, and the user sees a live terminal surface in the message stream.</p>
+    <p>The central invariant is simple: the bubble must represent the terminal the caller asked for. If Clawline silently creates a different tmux session, routes through a provider-global fallback, or forces callers to construct raw descriptors to get the right identity, the feature has failed.</p>
+  </section>
+
+  <section>
+    <h2>Product Invariants</h2>
+    <table>
+      <thead><tr><th>ID</th><th>Invariant</th><th>Meaning</th></tr></thead>
+      <tbody>
+        <tr><td class="id">TB-01</td><td>Caller intent is authoritative.</td><td>The structured tool request names the destination and, when supplied, the terminal/tmux session identity. Provider defaults may fill omissions, but may not override explicit caller intent.</td></tr>
+        <tr><td class="id">TB-02</td><td>Destination is per bubble.</td><td>A terminal bubble request carries its own destination. A provider-global tmux host setting is not allowed to be the hidden routing authority for new bubbles.</td></tr>
+        <tr><td class="id">TB-03</td><td>Session identity is first-class.</td><td>Callers must be able to name the terminal session identity through the structured API. Raw descriptor construction is an escape hatch, not the intended product path.</td></tr>
+        <tr><td class="id">TB-04</td><td>Unnamed requests stay in the login shell.</td><td>If the caller supplies no terminal session name, Clawline must connect to the requested destination and leave the user in the connected login shell. It must not automatically create or attach to a generated tmux session.</td></tr>
+        <tr><td class="id">TB-05</td><td>No false success.</td><td>If the requested destination or session cannot be reached/provisioned, the bubble must fail visibly for that exact request. It must not fall back to another machine or a new unrelated session.</td></tr>
+        <tr><td class="id">TB-06</td><td>The provider owns terminal transport.</td><td>The client renders and interacts with the terminal bubble. The provider owns SSH/tmux attach/provisioning and proxies PTY bytes over the terminal WebSocket.</td></tr>
+        <tr><td class="id">TB-07</td><td>Descriptor truth survives reconnect.</td><td>The message attachment descriptor and provider session record must preserve destination and session identity so reload/reconnect/auth attach to the same target.</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>Correct Tool API</h2>
+    <p>Terminal bubbles are sent through the Clawline message tool as a structured <code>sendAttachment</code> action. The API must support terminal-specific fields directly; callers must not need to hand-build the terminal descriptor JSON to express the normal product path.</p>
+
+    <h3>Required API Shape</h3>
+    <pre><code>{
+  "action": "sendAttachment",
+  "contentType": "application/vnd.clawline.terminal-session+json",
+  "destination": {
+    "address": "clu@racter"
+  },
+  "terminalSession": {
+    "name": "clawline-font-check"
+  },
+  "title": "racter · clawline-font-check"
+}</code></pre>
+
+    <table>
+      <thead><tr><th>ID</th><th>Field</th><th>Requirement</th></tr></thead>
+      <tbody>
+        <tr><td class="id">API-01</td><td><code>action</code></td><td>Must be <code>sendAttachment</code> for terminal bubble creation.</td></tr>
+        <tr><td class="id">API-02</td><td><code>contentType</code></td><td>Must be <code>application/vnd.clawline.terminal-session+json</code>. This MIME type is how clients identify terminal bubbles.</td></tr>
+        <tr><td class="id">API-03</td><td><code>destination.address</code></td><td>Required for new terminal bubbles. It names the concrete provider-reachable target, such as <code>clu@racter</code>, <code>mike@eezo</code>, or another authorized SSH/tmux endpoint.</td></tr>
+        <tr><td class="id">API-04</td><td><code>terminalSession.name</code></td><td>Optional. When supplied, it is the caller-requested terminal/tmux session identity and must be preserved. When absent, no tmux session is implied; the terminal opens at the destination login shell.</td></tr>
+        <tr><td class="id">API-05</td><td><code>title</code></td><td>Optional presentation text. It may default from destination/session, but it must never be used as routing truth.</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Compatibility Alias</h3>
+    <p><code>terminalSession.name</code> is the documented product-facing field. It names the backing terminal/tmux session the caller wants the provider to attach or provision.</p>
+    <p>If the implementation accepts lower-level legacy names, <code>terminalSessionId</code> and <code>tmuxSessionName</code> are compatibility aliases only. Alias resolution must be strict: if <code>terminalSession.name</code>, <code>terminalSessionId</code>, and/or <code>tmuxSessionName</code> are supplied together and disagree, the request must fail visibly before emitting a bubble. The provider must not silently choose one value.</p>
+    <table>
+      <thead><tr><th>ID</th><th>Alias Rule</th><th>Acceptance</th></tr></thead>
+      <tbody>
+        <tr><td class="id">API-06</td><td><code>terminalSession.name</code> has precedence only when aliases are absent or equal.</td><td>Equal duplicate values normalize to one requested session name.</td></tr>
+        <tr><td class="id">API-07</td><td>Conflicting alias values fail the request visibly.</td><td>A request with <code>terminalSession.name: "a"</code> and <code>tmuxSessionName: "b"</code> returns a structured error and creates no misleading terminal bubble.</td></tr>
+        <tr><td class="id">API-08</td><td><code>tmuxSessionName</code> remains an accepted compatibility alias, not the documented product field.</td><td>New T001 callers use <code>terminalSession.name</code>; old callers are tolerated only when unambiguous.</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>Descriptor Contract</h2>
+    <p>The provider emits a terminal-session document attachment. The descriptor is the durable artifact the client renders and uses to authenticate the separate terminal WebSocket.</p>
+    <pre><code>{
+  "version": 3,
+  "terminalSessionId": "termmsg_9a0f6b",
+  "title": "racter · clawline-font-check",
+  "destination": {
+    "address": "clu@racter"
+  },
+  "terminalSession": {
+    "name": "clawline-font-check",
+    "provisioning": "attach_or_create"
+  },
+  "provider": {
+    "baseUrl": "https://provider.example",
+    "wsPath": "/ws/terminal"
+  },
+  "capabilities": {
+    "interactive": true,
+    "supportsBinaryFrames": true,
+    "supportsResize": true,
+    "supportsDetach": true
+  },
+  "auth": {
+    "mode": "chat_token"
+  }
+}</code></pre>
+
+    <table>
+      <thead><tr><th>ID</th><th>Descriptor Rule</th><th>Reason</th></tr></thead>
+      <tbody>
+        <tr><td class="id">DESC-01</td><td><code>version: 3</code> means destination-and-session-aware terminal descriptor.</td><td>Version 2 only established explicit destination; version 3 closes the structured session identity gap.</td></tr>
+        <tr><td class="id">DESC-02</td><td><code>terminalSessionId</code> remains the protocol/auth lookup id.</td><td>The terminal WebSocket can stay keyed by an opaque message/session id without conflating that id with the tmux name.</td></tr>
+        <tr><td class="id">DESC-03</td><td><code>terminalSession.name</code> is the requested backing session identity.</td><td>This is what the provider attaches/provisions on the destination. It may equal the auth id, but does not have to.</td></tr>
+        <tr><td class="id">DESC-04</td><td>The descriptor must preserve <code>destination.address</code> and <code>terminalSession.name</code>.</td><td>Reload, reconnect, and historical rendering need the same target truth the original request carried.</td></tr>
+        <tr><td class="id">DESC-05</td><td>The client must not infer destination or session identity from title, provider URL, or auth id.</td><td>Those fields are not routing truth.</td></tr>
+        <tr><td class="id">DESC-06</td><td>Legacy v1/v2 descriptors are visibly legacy or unknown when target truth is missing.</td><td>Fallback behavior may preserve old bubbles, but new structured T001 requests must not use legacy/unknown descriptors as product evidence.</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>Provider Behavior</h2>
+    <table>
+      <thead><tr><th>ID</th><th>Requirement</th><th>Acceptance</th></tr></thead>
+      <tbody>
+        <tr><td class="id">PROV-01</td><td>On structured request, validate <code>destination.address</code> and optional <code>terminalSession.name</code>.</td><td>Invalid, unauthorized, or internally conflicting target fields fail before a misleading bubble is emitted. The structured error includes the supplied <code>destination.address</code> and, when supplied, <code>terminalSession.name</code>.</td></tr>
+        <tr><td class="id">PROV-02</td><td>Persist a session record containing owner, chat session, descriptor id, destination address, requested terminal session name, title, timestamps, and lifecycle state.</td><td>Provider restart or terminal reconnect can restore the exact target.</td></tr>
+        <tr><td class="id">PROV-03</td><td>Attach/provision against the requested destination and terminal session name.</td><td>A request for <code>clu@racter</code> + <code>clawline-font-check</code> uses <code>attach_or_create</code> by default: attach to that named session if it exists, otherwise create that named session on the requested destination. If either path fails, fail visibly for that exact target.</td></tr>
+        <tr><td class="id">PROV-04</td><td>Do not create a tmux session when <code>terminalSession.name</code> is absent.</td><td>Unnamed requests connect to the destination login shell. Random/generated tmux session names are not a fallback.</td></tr>
+        <tr><td class="id">PROV-05</td><td>Do not use provider-global fallback to satisfy explicit destination/session requests.</td><td>Fallback can support legacy v1/v2 descriptors only when the descriptor lacks required target truth and the UI labels that limitation honestly.</td></tr>
+        <tr><td class="id">PROV-06</td><td>Return terminal errors with the requested destination/session in structured diagnostic context.</td><td>Every structured failure includes <code>destination.address</code> and, when supplied, <code>terminalSession.name</code>. Flynn and agents can tell whether the exact requested target failed instead of guessing from title/text.</td></tr>
+        <tr><td class="id">PROV-07</td><td>Reserve stricter provisioning modes for future explicit API expansion.</td><td><code>attach_existing</code> and <code>create</code> are not v3 defaults. They may be added later only if callers need stricter semantics than <code>attach_or_create</code>.</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>Client Behavior</h2>
+    <table>
+      <thead><tr><th>ID</th><th>Requirement</th><th>Acceptance</th></tr></thead>
+      <tbody>
+        <tr><td class="id">CLIENT-01</td><td>Detect terminal bubbles by MIME type.</td><td><code>application/vnd.clawline.terminal-session+json</code> renders as a terminal bubble, not a generic document preview.</td></tr>
+        <tr><td class="id">CLIENT-02</td><td>Use the terminal WebSocket for PTY traffic.</td><td>Chat WebSocket and terminal WebSocket remain separate; binary PTY traffic is not routed through chat messages.</td></tr>
+        <tr><td class="id">CLIENT-03</td><td>Authenticate terminal WebSocket with descriptor protocol id and normal chat auth.</td><td>The provider resolves the persisted destination/session record. The client does not resend a second routing hint at auth time.</td></tr>
+        <tr><td class="id">CLIENT-04</td><td>Display target truth from descriptor fields only.</td><td>Destination/session labels match the actual descriptor or are explicitly unknown for legacy bubbles.</td></tr>
+        <tr><td class="id">CLIENT-05</td><td>Resize and input are sent only after terminal auth is ready.</td><td>No race where resize/input causes a disconnected terminal or false reconnect loop.</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>Non-Goals</h2>
+    <ul>
+      <li><span class="must-not">Not</span> a Surf Ace native-pane launch API. Surf Ace can review whether this API is sane, but T001 is Clawline terminal bubbles.</li>
+      <li><span class="must-not">Not</span> a registry or picker for all possible machines. The initial contract is direct destination strings authorized by provider policy.</li>
+      <li><span class="must-not">Not</span> a client-side SSH feature. Clawline clients render; providers connect.</li>
+      <li><span class="must-not">Not</span> proof if it works only through raw descriptor injection or temporary harness state.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Verification Matrix</h2>
+    <table>
+      <thead><tr><th>ID</th><th>Proof</th><th>Pass Condition</th></tr></thead>
+      <tbody>
+        <tr><td class="id">V-TB-01</td><td>Structured tool request with destination only.</td><td>Provider creates a new terminal session on the requested destination, records descriptor truth, and terminal input reaches that host.</td></tr>
+        <tr><td class="id">V-TB-02</td><td>Structured tool request with destination plus session name.</td><td>Provider uses <code>attach_or_create</code> for that exact named tmux session; no random <code>term_*</code> replacement.</td></tr><tr><td class="id">V-TB-02A</td><td>Structured tool request with destination and no session name.</td><td>Provider opens the destination login shell directly and does not create, attach, or name a tmux session.</td></tr>
+        <tr><td class="id">V-TB-03</td><td>Wrong or unauthorized destination.</td><td>Bubble fails visibly for the requested target and does not fall back globally.</td></tr>
+        <tr><td class="id">V-TB-04</td><td>Reload/reconnect.</td><td>Existing bubble reconnects to the same destination/session from persisted descriptor/record truth.</td></tr>
+        <tr><td class="id">V-TB-05</td><td>Real client path.</td><td>Evidence comes from normal <code>message.sendAttachment</code> structured API through a real Clawline client/provider path, not demo insertion or raw DB state.</td></tr>
+        <tr><td class="id">V-TB-06</td><td>Conflicting alias fields.</td><td>Provider returns a visible structured error containing the requested destination/session fields and emits no terminal bubble.</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section>
+    <h2>Review Resolution</h2>
+    <table>
+      <thead><tr><th>ID</th><th>Resolution</th><th>Status</th></tr></thead>
+      <tbody>
+        <tr><td class="id">RQ-01</td><td><code>terminalSession.name</code> is the stable product-facing field. <code>terminalSessionId</code> remains the opaque protocol/auth/record lookup id. <code>tmuxSessionName</code> is implementation-specific and may only be a compatibility alias.</td><td>Resolved</td></tr>
+        <tr><td class="id">RQ-02</td><td><code>attach_or_create</code> is the T001 default only when <code>terminalSession.name</code> is supplied. Without a session name, the terminal opens in the destination login shell and does not create a tmux session.</td><td>Resolved by Flynn correction</td></tr>
+        <tr><td class="id">RQ-03</td><td><code>version: 3</code> cleanly marks destination-and-session-aware descriptors. Legacy v1/v2 fallback must be visibly legacy/unknown and cannot prove new structured T001 behavior.</td><td>Resolved</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <footer class="small">
+    Source material: T001 tracker API notes, terminal-bubble-routing spec, terminal-bubbles implementation details, and Flynn's 2026-05-17 correction that caller-specified terminal/tmux session identity is the core requirement, not an optional enhancement.
+  </footer>
+</main>
+</body>
+</html>

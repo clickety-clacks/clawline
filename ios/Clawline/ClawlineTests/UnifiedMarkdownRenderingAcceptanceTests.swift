@@ -1,5 +1,7 @@
 import Testing
+import SwiftUI
 import UIKit
+import XCTest
 @testable import Clawline
 
 struct UnifiedMarkdownRenderingAcceptanceTests {
@@ -23,11 +25,8 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
         Tail text.
         """
 
-        let plan = UnifiedMarkdownParser.parse(markdown: markdown, messageID: "r48_01", metrics: metrics)
-        #expect(sequence(for: plan.blocks) == [.richText, .code, .richText, .table, .richText])
-
-        let bubble = UnifiedMarkdownRenderer.render(plan: plan, options: bubbleOptions())
-        let expanded = UnifiedMarkdownRenderer.render(plan: plan, options: expandedOptions())
+        let bubble = renderMarkdownForTests(markdown: markdown, options: bubbleOptions())
+        let expanded = renderMarkdownForTests(markdown: markdown, options: expandedOptions())
         #expect(sequence(for: bubble) == [.attributedText, .code, .attributedText, .table, .attributedText])
         #expect(sequence(for: expanded) == [.attributedText, .code, .attributedText, .table, .attributedText])
     }
@@ -37,12 +36,9 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
         let markdown = (1...80)
             .map { "Paragraph \($0) with **markdown** and https://example.com/\($0)" }
             .joined(separator: "\n\n")
-        let plan = UnifiedMarkdownParser.parse(markdown: markdown, messageID: "r48_02", metrics: metrics)
-
-        let bubble = UnifiedMarkdownRenderer.render(plan: plan, options: bubbleOptions())
-        let expanded = UnifiedMarkdownRenderer.render(plan: plan, options: expandedOptions())
+        let bubble = renderMarkdownForTests(markdown: markdown, options: bubbleOptions())
+        let expanded = renderMarkdownForTests(markdown: markdown, options: expandedOptions())
         #expect(bubble.count == expanded.count)
-        #expect(expanded.count == plan.blocks.count)
     }
 
     @Test("R48-03: bubble and expanded share one plan and preserve the same text content")
@@ -64,10 +60,8 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
         | --- | --- |
         | a | b |
         """
-        let plan = UnifiedMarkdownParser.parse(markdown: markdown, messageID: "r48_03", metrics: metrics)
-
-        let bubble = UnifiedMarkdownRenderer.render(plan: plan, options: bubbleOptions())
-        let expanded = UnifiedMarkdownRenderer.render(plan: plan, options: expandedOptions())
+        let bubble = renderMarkdownForTests(markdown: markdown, options: bubbleOptions())
+        let expanded = renderMarkdownForTests(markdown: markdown, options: expandedOptions())
         #expect(sequence(for: bubble) == sequence(for: expanded))
 
         let bubbleText = joinedText(from: bubble)
@@ -86,8 +80,8 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
 
         trailing prose
         """
-        let plan = UnifiedMarkdownParser.parse(markdown: markdown, messageID: "r50_01", metrics: metrics)
-        #expect(sequence(for: plan.blocks) == [.code, .richText])
+        let rendered = renderMarkdownForTests(markdown: markdown, options: expandedOptions())
+        #expect(sequence(for: rendered) == [.code, .attributedText])
     }
 
     @Test("R50-02: colon-prefixed line before fence keeps stable classification")
@@ -100,8 +94,8 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
         ```
         done
         """
-        let plan = UnifiedMarkdownParser.parse(markdown: markdown, messageID: "r50_02", metrics: metrics)
-        #expect(sequence(for: plan.blocks) == [.richText, .code, .richText])
+        let rendered = renderMarkdownForTests(markdown: markdown, options: expandedOptions())
+        #expect(sequence(for: rendered) == [.attributedText, .code, .attributedText])
     }
 
     @Test("R50-03: valid weird fence is code; malformed fence falls back to rich text")
@@ -116,10 +110,10 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
         alpha
         """
 
-        let validPlan = UnifiedMarkdownParser.parse(markdown: valid, messageID: "r50_03_valid", metrics: metrics)
-        let invalidPlan = UnifiedMarkdownParser.parse(markdown: invalid, messageID: "r50_03_invalid", metrics: metrics)
-        #expect(sequence(for: validPlan.blocks) == [.code])
-        #expect(sequence(for: invalidPlan.blocks) == [.richText])
+        let validRendered = renderMarkdownForTests(markdown: valid, options: expandedOptions())
+        let invalidRendered = renderMarkdownForTests(markdown: invalid, options: expandedOptions())
+        #expect(sequence(for: validRendered) == [.code])
+        #expect(sequence(for: invalidRendered) == [.attributedText])
     }
 
     @Test("R50-04: multiple fenced blocks remain ordered")
@@ -139,8 +133,8 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
 
         end
         """
-        let plan = UnifiedMarkdownParser.parse(markdown: markdown, messageID: "r50_04", metrics: metrics)
-        #expect(sequence(for: plan.blocks) == [.richText, .code, .richText, .code, .richText])
+        let rendered = renderMarkdownForTests(markdown: markdown, options: expandedOptions())
+        #expect(sequence(for: rendered) == [.attributedText, .code, .attributedText, .code, .attributedText])
     }
 
     @Test("T169: heavily-indented fenced code trims shared left gutter")
@@ -153,9 +147,8 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
         ```
         """
 
-        let plan = UnifiedMarkdownParser.parse(markdown: markdown, messageID: "t169", metrics: metrics)
-
-        guard case .code(let language, let code)? = plan.blocks.first else {
+        let rendered = renderMarkdownForTests(markdown: markdown, options: expandedOptions())
+        guard case .code(let language, let code)? = rendered.first else {
             Issue.record("Expected first block to be code")
             return
         }
@@ -179,9 +172,8 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
         print("ok")
         ```
         """
-        let plan = UnifiedMarkdownParser.parse(markdown: markdown, messageID: "hl_01", metrics: metrics)
-        let rendered = UnifiedMarkdownRenderer.render(
-            plan: plan,
+        let rendered = renderMarkdownForTests(
+            markdown: markdown,
             options: MarkdownRenderOptions(
                 baseFont: UIFont.systemFont(ofSize: 15, weight: .regular),
                 inkColor: .black,
@@ -206,13 +198,30 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
         #expect(codeBlocks[0].contains("==code=="))
     }
 
-    @Test("EM-01: parser emoji-only metric is limited to 1-3 emoji characters")
-    func em_01_parserEmojiOnlyBounds() {
-        let three = UnifiedMarkdownParser.parse(markdown: "😀😁😂", messageID: "em_01_3", metrics: metrics)
-        #expect(three.isEmojiOnly)
+    @Test("EM-01: renderer emoji-only handling is limited to 1-3 emoji characters")
+    func em_01_rendererEmojiOnlyBounds() {
+        let three = UnifiedMarkdownRenderer.makeContent(
+            messageText: "😀😁😂",
+            context: MarkdownMessageRenderContext(role: .assistant, messageID: "em_01_3", metrics: metrics),
+            baseFont: UIFont.systemFont(ofSize: metrics.bodyFontSize, weight: .regular),
+            inkColor: .black,
+            lineSpacing: 4,
+            stripDetectedURLs: false,
+            isDark: false
+        )
+        #expect(three.joinedInlineEmojiValues == "😀😁😂")
 
-        let four = UnifiedMarkdownParser.parse(markdown: "😀😁😂🤣", messageID: "em_01_4", metrics: metrics)
-        #expect(!four.isEmojiOnly)
+        let four = UnifiedMarkdownRenderer.makeContent(
+            messageText: "😀😁😂🤣",
+            context: MarkdownMessageRenderContext(role: .assistant, messageID: "em_01_4", metrics: metrics),
+            baseFont: UIFont.systemFont(ofSize: metrics.bodyFontSize, weight: .regular),
+            inkColor: .black,
+            lineSpacing: 4,
+            stripDetectedURLs: false,
+            isDark: false
+        )
+        #expect(four.joinedInlineEmojiValues == nil)
+        #expect(four.hasNonEmptyAttributedText)
     }
 
     @Test("EM-02: emoji-only messages preserve all inline blocks across surfaces")
@@ -223,24 +232,17 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
         😁
         """
 
-        let plan = UnifiedMarkdownParser.parse(markdown: markdown, messageID: "em_02", metrics: metrics)
         let content = UnifiedMarkdownRenderer.makeContent(
-            presentation: MessagePresentation(
-                parts: [.inlineEmoji("😀"), .inlineEmoji("😁")],
-                markdownRenderPlan: plan,
-                wordCount: 0,
-                hasTextualContent: true,
-                isEmojiOnly: true,
-                hasMediaOnly: false,
-                detectedURLs: [],
-                detectedURLCount: 0,
-                hasSingleURL: false
+            messageText: markdown,
+            context: MarkdownMessageRenderContext(
+                role: .assistant,
+                messageID: "em_02",
+                metrics: metrics
             ),
             baseFont: UIFont.systemFont(ofSize: metrics.bodyFontSize, weight: .regular),
             inkColor: .black,
             lineSpacing: 4,
             stripDetectedURLs: false,
-            role: .assistant,
             isDark: false
         )
 
@@ -254,12 +256,9 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
         | --- |
         | 1 | 2 |
         """
-        let plan = UnifiedMarkdownParser.parse(markdown: markdown, messageID: "tb_01", metrics: metrics)
-        #expect(!plan.blocks.contains(where: { if case .table = $0 { return true }; return false }))
-        let combined = plan.blocks.compactMap { block -> String? in
-            if case .richText(let source) = block { return source }
-            return nil
-        }.joined(separator: "\n")
+        let rendered = renderMarkdownForTests(markdown: markdown, options: expandedOptions())
+        #expect(!rendered.contains(where: { if case .table = $0 { return true }; return false }))
+        let combined = joinedText(from: rendered)
         #expect(combined.contains("| A | B |"))
         #expect(combined.contains("| 1 | 2 |"))
     }
@@ -271,9 +270,9 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
         | --- | --- |
         | `x` | **y** |
         """
-        let plan = UnifiedMarkdownParser.parse(markdown: markdown, messageID: "tb_02", metrics: metrics)
+        let rendered = renderMarkdownForTests(markdown: markdown, options: expandedOptions())
 
-        guard case .table(let model)? = plan.blocks.first else {
+        guard case .table(let model)? = rendered.first else {
             Issue.record("Expected first block to be table")
             return
         }
@@ -312,9 +311,8 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
         Tail paragraph.
         """
 
-        let plan = UnifiedMarkdownParser.parse(markdown: markdown, messageID: "blk_01", metrics: metrics)
-        let bubble = UnifiedMarkdownRenderer.render(plan: plan, options: bubbleOptions())
-        let expanded = UnifiedMarkdownRenderer.render(plan: plan, options: expandedOptions())
+        let bubble = renderMarkdownForTests(markdown: markdown, options: bubbleOptions())
+        let expanded = renderMarkdownForTests(markdown: markdown, options: expandedOptions())
 
         #expect(sequence(for: bubble) == sequence(for: expanded))
         #expect(bubble.filter { if case .attributedText = $0 { return true }; return false }.count >= 6)
@@ -351,8 +349,7 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
           - Nested Beta Two
         - Gamma
         """
-        let plan = UnifiedMarkdownParser.parse(markdown: markdown, messageID: "ul_01", metrics: metrics)
-        let rendered = UnifiedMarkdownRenderer.render(plan: plan, options: expandedOptions())
+        let rendered = renderMarkdownForTests(markdown: markdown, options: expandedOptions())
         let text = joinedText(from: rendered)
 
         #expect(text.contains("Alpha"))
@@ -364,6 +361,93 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
         #expect(!text.contains("AlphaBetaNested Beta OneNested Beta TwoGamma"))
     }
 
+    @Test("T340: hyphen unordered list renders as bullets in chat bubble markdown")
+    func t340_hyphenUnorderedListRendersAsBullets() {
+        let message = Message(
+            id: "t340",
+            role: .assistant,
+            content: """
+            Intro with **bold** and [link](https://example.com).
+            - Alpha `code`
+            - Beta
+            """,
+            timestamp: Date(),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: "agent:main:clawline:user:main"
+        )
+        var state = StreamingTableParseState()
+        let presentation = MessagePresentationBuilder.build(
+            from: message,
+            metrics: metrics,
+            streamingState: &state
+        )
+        let rendered = renderMarkdownForTests(
+            markdown: message.content,
+            options: bubbleOptions(),
+            role: message.role,
+            messageID: message.id
+        )
+
+        guard case .attributedText(let attributed)? = rendered.first else {
+            Issue.record("Expected bubble markdown to render as attributed text")
+            return
+        }
+        let text = joinedText(from: rendered)
+
+        #expect(attributed.string.contains("Intro with bold and link."))
+        #expect(text.contains("• Alpha code"))
+        #expect(text.contains("• Beta"))
+        #expect(!text.contains("- Alpha"))
+        #expect(isBold("bold", in: attributed))
+        #expect(linkTarget("link", in: attributed)?.absoluteString == "https://example.com")
+    }
+
+    @Test("T340: hyphen bullet normalization preserves thematic breaks and indented literals")
+    func t340_hyphenBulletNormalizationStaysScoped() {
+        let markdown = """
+        - Bullet
+        - - -
+            - literal
+        """
+        let rendered = renderMarkdownForTests(markdown: markdown, options: bubbleOptions())
+        let text = joinedText(from: rendered)
+        let codeValues = rendered.compactMap { block -> String? in
+            if case .code(_, let code) = block {
+                return code
+            }
+            return nil
+        }
+
+        #expect(text.contains("• Bullet"))
+        #expect(text.contains("⸻"))
+        #expect(text.contains("    - literal"))
+        #expect(!text.contains("• literal"))
+        #expect(!text.contains("\u{F0002}"))
+        #expect(!text.unicodeScalars.contains { scalar in
+            (0xE000...0xF8FF).contains(Int(scalar.value))
+        })
+
+        let fenced = renderMarkdownForTests(
+            markdown: """
+            ```text
+                - literal
+            ```
+            """,
+            options: bubbleOptions()
+        )
+        let fencedCodeValues = fenced.compactMap { block -> String? in
+            if case .code(_, let code) = block {
+                return code
+            }
+            return nil
+        }
+        #expect(codeValues.isEmpty)
+        #expect(fencedCodeValues.map { $0.trimmingCharacters(in: .newlines) } == ["    - literal"])
+        #expect(!fencedCodeValues.joined().contains("\u{F0002}"))
+    }
+
     @Test("T137: ordered list markers render as 1,2,3 instead of repeating 1")
     func t137_orderedListMarkersIncrement() {
         let markdown = """
@@ -371,8 +455,7 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
          1. Second
           1. Third
         """
-        let plan = UnifiedMarkdownParser.parse(markdown: markdown, messageID: "t137", metrics: metrics)
-        let rendered = UnifiedMarkdownRenderer.render(plan: plan, options: expandedOptions())
+        let rendered = renderMarkdownForTests(markdown: markdown, options: expandedOptions())
         let text = joinedText(from: rendered)
 
         #expect(text.contains("1. First"))
@@ -381,29 +464,322 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
         #expect(containsInOrder(text, tokens: ["1. First", "2. Second", "3. Third"]))
     }
 
-    private enum BlockType: Equatable {
-        case richText
-        case code
-        case table
+    @Test("T307 notification content uses the unified assistant markdown renderer")
+    func t307_notificationContentUsesUnifiedAssistantMarkdownRenderer() {
+        let rendered = CrossChatNotificationMarkdownRenderer.renderBlocks(
+            content: """
+            Side **notification** with [details](https://example.com)
+
+            ```swift
+            print("notification")
+            ```
+            """,
+            messageID: "t307_notification_markdown",
+            baseFont: UIFont.systemFont(ofSize: 15, weight: .regular),
+            inkColor: .secondaryLabel,
+            lineSpacing: 2,
+            isDark: false
+        )
+
+        #expect(sequence(for: rendered) == [.attributedText, .code])
+        let firstBlock = rendered.first
+        guard case .attributedText(let attributed) = firstBlock else {
+            Issue.record("Expected first notification block to be rendered attributed text")
+            return
+        }
+        #expect(attributed.string.contains("Side notification with details"))
+        #expect(isBold("notification", in: attributed))
+        #expect(linkTarget("details", in: attributed)?.absoluteString == "https://example.com")
+    }
+
+    @Test("T1133 notification render cache reuses rendered markdown across body passes")
+    @MainActor
+    func t1133_notificationRenderCacheReusesRenderedMarkdownAcrossBodyPasses() {
+        let cache = CrossChatNotificationRenderedEntryCache()
+        let baseFont = UIFont.systemFont(ofSize: 15, weight: .regular)
+        let inkColor = UIColor.secondaryLabel
+        var renderCallCount = 0
+        let entries = [
+            CrossChatAssistantNotificationEntry(
+                id: "t1133_entry",
+                content: "Cached **notification**",
+                timestamp: Date()
+            )
+        ]
+
+        let renderer: CrossChatNotificationRenderedEntryCache.RenderBlocks = { content, _, _, _, _, _ in
+            renderCallCount += 1
+            return [.attributedText(NSAttributedString(string: content))]
+        }
+
+        let first = cache.entries(
+            for: entries,
+            baseFont: baseFont,
+            inkColor: inkColor,
+            lineSpacing: 2,
+            isDark: false,
+            renderBlocks: renderer
+        )
+        let second = cache.entries(
+            for: entries,
+            baseFont: baseFont,
+            inkColor: inkColor,
+            lineSpacing: 2,
+            isDark: false,
+            renderBlocks: renderer
+        )
+
+        #expect(renderCallCount == 1)
+        #expect(first.first?.id == "t1133_entry")
+        #expect(second.first?.id == "t1133_entry")
+
+        let changedEntries = [
+            CrossChatAssistantNotificationEntry(
+                id: "t1133_entry",
+                content: "Changed **notification**",
+                timestamp: Date()
+            )
+        ]
+        _ = cache.entries(
+            for: changedEntries,
+            baseFont: baseFont,
+            inkColor: inkColor,
+            lineSpacing: 2,
+            isDark: false,
+            renderBlocks: renderer
+        )
+
+        #expect(renderCallCount == 2)
+    }
+
+    @Test("T1205 notification render cache survives rebuilt bubble view state")
+    @MainActor
+    func t1205_notificationRenderCacheSurvivesRebuiltBubbleViewState() {
+        let baseFont = UIFont.systemFont(ofSize: 15, weight: .regular)
+        let inkColor = UIColor.secondaryLabel
+        var renderCallCount = 0
+        let entries = [
+            CrossChatAssistantNotificationEntry(
+                id: "t1205_entry",
+                content: "Review T1205 and T1182.",
+                timestamp: Date()
+            )
+        ]
+
+        let renderer: CrossChatNotificationRenderedEntryCache.RenderBlocks = { content, _, _, _, _, _ in
+            renderCallCount += 1
+            return [.attributedText(NSAttributedString(string: content))]
+        }
+
+        _ = CrossChatNotificationRenderedEntryCache().entries(
+            for: entries,
+            cacheScope: "agent:main:clawline:user:s_t1205_stall",
+            baseFont: baseFont,
+            inkColor: inkColor,
+            lineSpacing: 2,
+            isDark: false,
+            renderBlocks: renderer
+        )
+        _ = CrossChatNotificationRenderedEntryCache().entries(
+            for: entries,
+            cacheScope: "agent:main:clawline:user:s_t1205_stall",
+            baseFont: baseFont,
+            inkColor: inkColor,
+            lineSpacing: 2,
+            isDark: false,
+            renderBlocks: renderer
+        )
+        _ = CrossChatNotificationRenderedEntryCache().entries(
+            for: entries,
+            cacheScope: "agent:main:clawline:user:s_t1205_other",
+            baseFont: baseFont,
+            inkColor: inkColor,
+            lineSpacing: 2,
+            isDark: false,
+            renderBlocks: renderer
+        )
+
+        #expect(renderCallCount == 2)
+    }
+
+    @Test("T307 real notification bubble renders assistant markdown content")
+    @MainActor
+    func t307_realNotificationBubbleRendersAssistantMarkdownContent() throws {
+        let bubble = CrossChatNotificationBubble(
+            sourceChatId: "agent:main:clawline:user:s_markdown_notification",
+            sourceTitle: "Side Thread",
+            entries: [
+                CrossChatAssistantNotificationEntry(
+                    id: "s_markdown_entry",
+                    content: "Side **notification** with [details](https://example.com)",
+                    timestamp: Date()
+                )
+            ],
+            lastAssistantActivityAt: Date()
+        )
+        let host = UIHostingController(
+            rootView: CrossChatNotificationBubbleView(
+                bubble: bubble,
+                assignedNumber: 1,
+                visibleNotificationCount: 1,
+                showShortcutLabel: true,
+                maxBubbleHeight: 205,
+                maxBubbleWidth: 360,
+                bubbleCornerRadius: 18,
+                isSending: false,
+                canCancelSend: false,
+                canSendReply: false,
+                connectionState: .connected,
+                replyDraft: .constant(""),
+                onDismiss: {},
+                onReply: {},
+                onCancelReply: {},
+                onDismissAll: {},
+                onNavigate: {},
+                onSendReply: {},
+                onCancelSend: {},
+                onReconnect: {},
+                onActivate: {},
+                onReplyFocusChange: { _ in },
+                isActionMenuOpen: false,
+                actionMenuSelection: .goToChat,
+                onActionMenuSelectionChange: { _ in },
+                onActionMenuAction: { _ in },
+                onRegisterScrollView: { _ in },
+                isDismissSwipeActive: false,
+                isContentScrollLocked: false,
+                onContentScrollDragChanged: { _ in },
+                onContentScrollDragEnded: {}
+            )
+        )
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 420, height: 320))
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        host.view.frame = window.bounds
+        host.view.setNeedsLayout()
+        host.view.layoutIfNeeded()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.15))
+        host.view.layoutIfNeeded()
+
+        let textView = try #require(textViews(in: host.view).first { textView in
+            textView.attributedText.string.contains("Side notification with details")
+        })
+        #expect(isBold("notification", in: textView.attributedText))
+        #expect(linkTarget("details", in: textView.attributedText)?.absoluteString == "https://example.com")
+    }
+
+    @Test("T1183 short notification bubble does not grow when max height grows")
+    @MainActor
+    func t1183_shortNotificationBubbleDoesNotGrowWhenMaxHeightGrows() {
+        let compactHost = UIHostingController(
+            rootView: notificationBubbleView(
+                content: "Short notification",
+                maxBubbleHeight: CrossChatNotificationGeometry.bubbleMaxHeight(isCompactLayout: true)
+            )
+        )
+        let nonCompactHost = UIHostingController(
+            rootView: notificationBubbleView(
+                content: "Short notification",
+                maxBubbleHeight: CrossChatNotificationGeometry.bubbleMaxHeight(isCompactLayout: false)
+            )
+        )
+
+        let fittingSize = CGSize(width: 360, height: UIView.layoutFittingCompressedSize.height)
+        let compactHeight = compactHost.sizeThatFits(in: fittingSize).height
+        let nonCompactHeight = nonCompactHost.sizeThatFits(in: fittingSize).height
+
+        #expect(compactHeight > 0)
+        #expect(abs(nonCompactHeight - compactHeight) <= 1)
+        #expect(nonCompactHeight < CrossChatNotificationGeometry.bubbleMaxHeight(isCompactLayout: true))
+    }
+
+    @Test("T383 visible notification renders one attributed text view while dismissed renders none")
+    @MainActor
+    func t383_realNotificationBubbleDoesNotDuplicateAttributedTextViewsForMeasurement() throws {
+        let notificationText = "Side notification with details"
+        let dismissedHost = UIHostingController(
+            rootView: Color.clear
+                .frame(width: 420, height: 320)
+        )
+        let dismissedWindow = UIWindow(frame: CGRect(x: 0, y: 0, width: 420, height: 320))
+        dismissedWindow.rootViewController = dismissedHost
+        dismissedWindow.makeKeyAndVisible()
+        dismissedHost.view.frame = dismissedWindow.bounds
+        dismissedHost.view.setNeedsLayout()
+        dismissedHost.view.layoutIfNeeded()
+
+        let dismissedTextViews = textViews(in: dismissedHost.view).filter { textView in
+            textView.attributedText.string.contains(notificationText)
+        }
+        #expect(dismissedTextViews.isEmpty)
+
+        let bubble = CrossChatNotificationBubble(
+            sourceChatId: "agent:main:clawline:user:s_t383_notification_perf",
+            sourceTitle: "Side Thread",
+            entries: [
+                CrossChatAssistantNotificationEntry(
+                    id: "s_t383_entry",
+                    content: "Side **notification** with [details](https://example.com)",
+                    timestamp: Date()
+                )
+            ],
+            lastAssistantActivityAt: Date()
+        )
+        let host = UIHostingController(
+            rootView: CrossChatNotificationBubbleView(
+                bubble: bubble,
+                assignedNumber: 1,
+                visibleNotificationCount: 1,
+                showShortcutLabel: true,
+                maxBubbleHeight: 205,
+                maxBubbleWidth: 360,
+                bubbleCornerRadius: 18,
+                isSending: false,
+                canCancelSend: false,
+                canSendReply: false,
+                connectionState: .connected,
+                replyDraft: .constant(""),
+                onDismiss: {},
+                onReply: {},
+                onCancelReply: {},
+                onDismissAll: {},
+                onNavigate: {},
+                onSendReply: {},
+                onCancelSend: {},
+                onReconnect: {},
+                onActivate: {},
+                onReplyFocusChange: { _ in },
+                isActionMenuOpen: false,
+                actionMenuSelection: .goToChat,
+                onActionMenuSelectionChange: { _ in },
+                onActionMenuAction: { _ in },
+                onRegisterScrollView: { _ in },
+                isDismissSwipeActive: false,
+                isContentScrollLocked: false,
+                onContentScrollDragChanged: { _ in },
+                onContentScrollDragEnded: {}
+            )
+        )
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 420, height: 320))
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        host.view.frame = window.bounds
+        host.view.setNeedsLayout()
+        host.view.layoutIfNeeded()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.15))
+        host.view.layoutIfNeeded()
+
+        let notificationTextViews = textViews(in: host.view).filter { textView in
+            textView.attributedText.string.contains(notificationText)
+        }
+        #expect(notificationTextViews.count == 1)
+        #expect(try #require(notificationTextViews.first).isHidden == false)
     }
 
     private enum RenderedType: Equatable {
         case attributedText
         case code
         case table
-    }
-
-    private func sequence(for blocks: [MarkdownRenderBlock]) -> [BlockType] {
-        blocks.map { block in
-            switch block {
-            case .richText:
-                return .richText
-            case .code:
-                return .code
-            case .table:
-                return .table
-            }
-        }
     }
 
     private func sequence(for blocks: [RenderedMarkdownBlock]) -> [RenderedType] {
@@ -458,5 +834,187 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
             searchStart = range.upperBound
         }
         return true
+    }
+
+    private func isBold(_ token: String, in attributed: NSAttributedString) -> Bool {
+        let range = (attributed.string as NSString).range(of: token)
+        guard range.location != NSNotFound else { return false }
+        var foundBold = false
+        attributed.enumerateAttribute(.font, in: range) { value, _, stop in
+            guard let font = value as? UIFont else { return }
+            if font.fontDescriptor.symbolicTraits.contains(.traitBold) {
+                foundBold = true
+                stop.pointee = true
+            }
+        }
+        if !foundBold {
+            attributed.enumerateAttribute(.inlinePresentationIntent, in: range) { value, _, stop in
+                if value != nil {
+                    foundBold = true
+                    stop.pointee = true
+                }
+            }
+        }
+        return foundBold
+    }
+
+    private func linkTarget(_ token: String, in attributed: NSAttributedString) -> URL? {
+        let range = (attributed.string as NSString).range(of: token)
+        guard range.location != NSNotFound else { return nil }
+        return attributed.attribute(.link, at: range.location, effectiveRange: nil) as? URL
+    }
+
+    private func notificationBubbleView(content: String, maxBubbleHeight: CGFloat) -> some View {
+        CrossChatNotificationBubbleView(
+            bubble: CrossChatNotificationBubble(
+                sourceChatId: "agent:main:clawline:user:s_t1183_notification_height",
+                sourceTitle: "Side Thread",
+                entries: [
+                    CrossChatAssistantNotificationEntry(
+                        id: "s_t1183_entry",
+                        content: content,
+                        timestamp: Date()
+                    )
+                ],
+                lastAssistantActivityAt: Date()
+            ),
+            assignedNumber: 1,
+            visibleNotificationCount: 1,
+            showShortcutLabel: true,
+            maxBubbleHeight: maxBubbleHeight,
+            maxBubbleWidth: 360,
+            bubbleCornerRadius: 18,
+            isSending: false,
+            canCancelSend: false,
+            canSendReply: false,
+            connectionState: .connected,
+            replyDraft: .constant(""),
+            onDismiss: {},
+            onReply: {},
+            onCancelReply: {},
+            onDismissAll: {},
+            onNavigate: {},
+            onSendReply: {},
+            onCancelSend: {},
+            onReconnect: {},
+            onActivate: {},
+            onReplyFocusChange: { _ in },
+            isActionMenuOpen: false,
+            actionMenuSelection: .goToChat,
+            onActionMenuSelectionChange: { _ in },
+            onActionMenuAction: { _ in },
+            onRegisterScrollView: { _ in },
+            isDismissSwipeActive: false,
+            isContentScrollLocked: false,
+            onContentScrollDragChanged: { _ in },
+            onContentScrollDragEnded: {}
+        )
+    }
+
+    private func textViews(in view: UIView) -> [UITextView] {
+        var result: [UITextView] = []
+        if let textView = view as? UITextView {
+            result.append(textView)
+        }
+        for subview in view.subviews {
+            result.append(contentsOf: textViews(in: subview))
+        }
+        return result
+    }
+}
+
+final class T383NotificationPerformanceProofTests: XCTestCase {
+    @MainActor
+    func testVisibleNotificationRendersOneAttributedTextViewWhileDismissedRendersNone() throws {
+        let notificationText = "Side notification with details"
+        let dismissedHost = UIHostingController(
+            rootView: Color.clear
+                .frame(width: 420, height: 320)
+        )
+        let dismissedWindow = UIWindow(frame: CGRect(x: 0, y: 0, width: 420, height: 320))
+        dismissedWindow.rootViewController = dismissedHost
+        dismissedWindow.makeKeyAndVisible()
+        dismissedHost.view.frame = dismissedWindow.bounds
+        dismissedHost.view.setNeedsLayout()
+        dismissedHost.view.layoutIfNeeded()
+
+        let dismissedTextViews = textViews(in: dismissedHost.view).filter { textView in
+            textView.attributedText.string.contains(notificationText)
+        }
+        XCTAssertTrue(dismissedTextViews.isEmpty)
+
+        let bubble = CrossChatNotificationBubble(
+            sourceChatId: "agent:main:clawline:user:s_t383_notification_perf",
+            sourceTitle: "Side Thread",
+            entries: [
+                CrossChatAssistantNotificationEntry(
+                    id: "s_t383_entry",
+                    content: "Side **notification** with [details](https://example.com)",
+                    timestamp: Date()
+                )
+            ],
+            lastAssistantActivityAt: Date()
+        )
+        let host = UIHostingController(
+            rootView: CrossChatNotificationBubbleView(
+                bubble: bubble,
+                assignedNumber: 1,
+                visibleNotificationCount: 1,
+                showShortcutLabel: true,
+                maxBubbleHeight: 205,
+                maxBubbleWidth: 360,
+                bubbleCornerRadius: 18,
+                isSending: false,
+                canCancelSend: false,
+                canSendReply: false,
+                connectionState: .connected,
+                replyDraft: .constant(""),
+                onDismiss: {},
+                onReply: {},
+                onCancelReply: {},
+                onDismissAll: {},
+                onNavigate: {},
+                onSendReply: {},
+                onCancelSend: {},
+                onReconnect: {},
+                onActivate: {},
+                onReplyFocusChange: { _ in },
+                isActionMenuOpen: false,
+                actionMenuSelection: .goToChat,
+                onActionMenuSelectionChange: { _ in },
+                onActionMenuAction: { _ in },
+                onRegisterScrollView: { _ in },
+                isDismissSwipeActive: false,
+                isContentScrollLocked: false,
+                onContentScrollDragChanged: { _ in },
+                onContentScrollDragEnded: {}
+            )
+        )
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 420, height: 320))
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        host.view.frame = window.bounds
+        host.view.setNeedsLayout()
+        host.view.layoutIfNeeded()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.15))
+        host.view.layoutIfNeeded()
+
+        let notificationTextViews = textViews(in: host.view).filter { textView in
+            textView.attributedText.string.contains(notificationText)
+        }
+        XCTAssertEqual(notificationTextViews.count, 1)
+        XCTAssertFalse(try XCTUnwrap(notificationTextViews.first).isHidden)
+    }
+
+    @MainActor
+    private func textViews(in view: UIView) -> [UITextView] {
+        var result: [UITextView] = []
+        if let textView = view as? UITextView {
+            result.append(textView)
+        }
+        for subview in view.subviews {
+            result.append(contentsOf: textViews(in: subview))
+        }
+        return result
     }
 }

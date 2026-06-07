@@ -103,6 +103,345 @@ struct BubbleScrollTests {
         #expect(measurementDetectors.allSatisfy { $0.isEmpty })
     }
 
+    @Test("BubbleSizingV2 short bubbles honor the plan min width instead of the legacy 120pt floor")
+    @MainActor
+    func bubbleSizingV2ShortBubbleUsesPlanMinWidthConstraint() {
+        let metrics = ChatFlowTheme.Metrics(isCompact: false)
+        let message = Message(
+            id: "bubble-v2-min-width",
+            role: .assistant,
+            content: "Short",
+            timestamp: Date(),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: "server:personal"
+        )
+        let presentation = buildPresentation(message, metrics: metrics, enableLinkPreviews: false)
+        let sizeClass = MessageFlowRules.sizeClass(for: presentation)
+        let env = BubbleSizingV2.Environment(
+            containerWidth: 320,
+            containerHeight: 640,
+            singleLinkContainerHeight: 640,
+            topInset: 0,
+            bottomInset: 0,
+            truncationBottomInset: 0,
+            isVisionOS: false,
+            metricsFingerprint: BubbleSizingV2.metricsFingerprint(metrics: metrics, traitCollection: UITraitCollection())
+        )
+        let heightPolicy = BubbleSizingV2.BubbleHeightPolicy.resolve(
+            metrics: metrics,
+            env: env,
+            isSingleLinkPreview: false,
+            prefersScreenAwareHeightCap: false,
+            allowsOuterScroll: false
+        )
+        let planMaxWidth: CGFloat = 200
+        let planMinWidth: CGFloat = 40
+        let plan = BubbleSizingV2.Plan(
+            messageId: message.id,
+            presentationFingerprint: 1,
+            sizeClass: sizeClass,
+            isSingleLinkPreview: false,
+            isWide: false,
+            maxWidth: planMaxWidth,
+            minWidth: planMinWidth,
+            heightPolicy: heightPolicy,
+            allowsOuterScroll: false,
+            linkPreviewURL: nil
+        )
+        let layoutState = BubbleSizingV2.LayoutState(
+            plan: plan,
+            measurement: BubbleSizingV2.Measurement(
+                measuredCellSize: CGSize(width: planMaxWidth, height: 72),
+                measuredBubbleWidth: planMaxWidth,
+                contentHeight: 24,
+                chromeHeight: 48,
+                outerScrollEnabled: false,
+                outerScrollViewportHeight: heightPolicy.heightCap,
+                isFinal: true
+            ),
+            linkPreviewCacheKey: nil,
+            linkPreviewEstimatedHeight: nil,
+            linkPreviewMinHeight: 40,
+            linkPreviewMaxHeight: heightPolicy.heightCap
+        )
+
+        let bubble = MessageBubbleUIKitView(frame: CGRect(x: 0, y: 0, width: planMaxWidth, height: 1))
+        bubble.configure(
+            message: message,
+            presentation: presentation,
+            sizeClass: sizeClass,
+            metrics: metrics,
+            maxWidth: planMaxWidth,
+            bubbleHeightPolicy: heightPolicy,
+            bubbleSizingV2: layoutState,
+            showsHeader: false,
+            paddingScale: 1,
+            minWidthOverride: nil,
+            maxWidthOverride: nil,
+            useContinuousCorners: true,
+            isDark: false,
+            onRequestExpand: nil,
+            onRequestLayout: nil,
+            onInteractiveCallback: nil
+        )
+
+        let preferred = bubble.preferredWidth(maxWidth: planMaxWidth, minWidth: planMinWidth)
+        let measured = bubble.systemLayoutSizeFitting(
+            CGSize(width: preferred, height: UIView.layoutFittingCompressedSize.height),
+            withHorizontalFittingPriority: .required,
+            verticalFittingPriority: .fittingSizeLevel
+        )
+
+        #expect(preferred >= planMinWidth)
+        #expect(preferred < 120)
+        #expect(abs(measured.width - preferred) < 0.5)
+    }
+
+    @Test("T1193/T149: Same message id in a different session resets stale inner bubble offset")
+    @MainActor
+    func sessionAwareReuseResetsOffsetForSameMessageId() {
+        let metrics = ChatFlowTheme.Metrics(isCompact: false)
+        let firstMessage = Message(
+            id: "shared-id",
+            role: .assistant,
+            content: Array(repeating: "This sentence is intentionally long for truncation coverage.", count: 36).joined(separator: " "),
+            timestamp: Date(),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: "agent:main:clawline:flynn:main"
+        )
+        let secondMessage = Message(
+            id: "shared-id",
+            role: .assistant,
+            content: "Short follow-up in a different session.",
+            timestamp: Date(),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: "agent:main:clawline:flynn:s_other"
+        )
+
+        let firstPresentation = buildPresentation(firstMessage, metrics: metrics, enableLinkPreviews: false)
+        let secondPresentation = buildPresentation(secondMessage, metrics: metrics, enableLinkPreviews: false)
+        let firstSizeClass = MessageFlowRules.sizeClass(for: firstPresentation)
+        let secondSizeClass = MessageFlowRules.sizeClass(for: secondPresentation)
+
+        let host = UIView(frame: CGRect(x: 0, y: 0, width: 360, height: 600))
+        host.layoutIfNeeded()
+        let bubble = MessageBubbleUIKitView(frame: CGRect(x: 0, y: 0, width: 320, height: 260))
+        host.addSubview(bubble)
+
+        bubble.configure(
+            message: firstMessage,
+            presentation: firstPresentation,
+            sizeClass: firstSizeClass,
+            metrics: metrics,
+            maxWidth: 320,
+            truncationHeightOverride: 140,
+            bubbleSizingV2: nil,
+            showsHeader: true,
+            paddingScale: 1,
+            minWidthOverride: nil,
+            maxWidthOverride: nil,
+            useContinuousCorners: true,
+            isDark: false,
+            onRequestExpand: nil,
+            onRequestLayout: nil,
+            onInteractiveCallback: nil
+        )
+        bubble.layoutIfNeeded()
+
+        guard let scroll = innerBubbleScrollView(in: bubble) else {
+            Issue.record("Expected inner bubble UIScrollView not found")
+            return
+        }
+        scroll.contentOffset = CGPoint(x: 0, y: 48)
+
+        bubble.configure(
+            message: secondMessage,
+            presentation: secondPresentation,
+            sizeClass: secondSizeClass,
+            metrics: metrics,
+            maxWidth: 320,
+            truncationHeightOverride: 240,
+            bubbleSizingV2: nil,
+            showsHeader: true,
+            paddingScale: 1,
+            minWidthOverride: nil,
+            maxWidthOverride: nil,
+            useContinuousCorners: true,
+            isDark: false,
+            onRequestExpand: nil,
+            onRequestLayout: nil,
+            onInteractiveCallback: nil
+        )
+        bubble.layoutIfNeeded()
+
+        #expect(abs(scroll.contentOffset.y) < 0.5)
+    }
+
+    @Test("T1193: Production text bubble metrics stay compact")
+    func productionTextBubbleMetricsStayCompact() {
+        let compact = ChatFlowTheme.Metrics(isCompact: true)
+        let regular = ChatFlowTheme.Metrics(isCompact: false)
+
+        #expect(compact.bubblePaddingVertical == 8)
+        #expect(compact.bubblePaddingHorizontal == 10)
+        #expect(regular.bubblePaddingVertical == 10)
+        #expect(regular.bubblePaddingHorizontal == 14)
+    }
+
+    @Test("BubbleSizingV2 live short-bubble remeasure keeps plan min width below legacy floor")
+    func bubbleSizingV2LiveRemeasureUsesPlanMinWidth() {
+        let abovePlanMin = MessageFlowCollectionViewController.enforcedLiveMeasuredWidth(
+            sizeClass: .short,
+            measuredWidth: 52,
+            maxWidth: 88,
+            minWidth: 40
+        )
+        let belowPlanMin = MessageFlowCollectionViewController.enforcedLiveMeasuredWidth(
+            sizeClass: .short,
+            measuredWidth: 20,
+            maxWidth: 88,
+            minWidth: 40
+        )
+        let mediumWidth = MessageFlowCollectionViewController.enforcedLiveMeasuredWidth(
+            sizeClass: .medium,
+            measuredWidth: 52,
+            maxWidth: 88,
+            minWidth: 40
+        )
+
+        #expect(abovePlanMin == 52)
+        #expect(belowPlanMin == 40)
+        #expect(mediumWidth == 88)
+    }
+
+    @Test("T330: UIKit fitting target can override fixed bubble width")
+    @MainActor
+    func fittingTargetCanOverrideFixedBubbleWidth() {
+        let metrics = ChatFlowTheme.Metrics(isCompact: false)
+        let message = Message(
+            id: "t330-fixed-width",
+            role: .assistant,
+            content: "This message is measured at the wide bubble width before UIKit asks the cell for a narrow fitting target.",
+            timestamp: Date(),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: "server:personal"
+        )
+        let presentation = buildPresentation(message, metrics: metrics, enableLinkPreviews: false)
+        let cell = MessageBubbleUIKitCell(frame: CGRect(x: 0, y: 0, width: 396, height: 120))
+        cell.contentView.frame = cell.bounds
+        cell.configure(
+            message: message,
+            presentation: presentation,
+            sendIndicatorState: nil,
+            isCompact: false,
+            maxWidth: 396,
+            showsHeader: false,
+            isDark: false,
+            onRequestExpand: nil,
+            onRequestLayout: nil,
+            onInteractiveCallback: nil,
+            onInsertIntoPrompt: nil,
+            onReferenceMessage: nil,
+            onResend: nil
+        )
+        cell.setNeedsLayout()
+        cell.layoutIfNeeded()
+
+        let fixedWidthConstraints = allConstraints(in: cell).filter {
+            $0.identifier == "MessageBubbleUIKitView.fixedWidth" && abs($0.constant - 396) < 0.5
+        }
+        let measured = cell.contentView.systemLayoutSizeFitting(
+            CGSize(width: 120, height: UIView.layoutFittingCompressedSize.height),
+            withHorizontalFittingPriority: .required,
+            verticalFittingPriority: .fittingSizeLevel
+        )
+
+        #expect(!fixedWidthConstraints.isEmpty)
+        #expect(fixedWidthConstraints.allSatisfy { $0.priority < .required })
+        #expect(measured.width <= 120.5)
+    }
+
+    @Test("T340: real chat bubble renders hyphen markdown bullets")
+    @MainActor
+    func t340HyphenMarkdownBulletsRenderInMessageBubbleUIKitView() {
+        let metrics = ChatFlowTheme.Metrics(isCompact: false)
+        let message = Message(
+            id: "t340-bubble-render",
+            role: .assistant,
+            content: """
+            Intro with **bold** and [link](https://example.com).
+            - Alpha `code`
+            - Beta
+            """,
+            timestamp: Date(),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: "server:personal"
+        )
+        let presentation = buildPresentation(message, metrics: metrics, enableLinkPreviews: false)
+        let sizeClass = MessageFlowRules.sizeClass(for: presentation)
+        let bubble = MessageBubbleUIKitView(frame: CGRect(x: 0, y: 0, width: 360, height: 1))
+
+        bubble.configure(
+            message: message,
+            presentation: presentation,
+            sizeClass: sizeClass,
+            metrics: metrics,
+            maxWidth: 360,
+            truncationHeightOverride: 1000,
+            bubbleSizingV2: nil,
+            showsHeader: true,
+            paddingScale: 1,
+            minWidthOverride: nil,
+            maxWidthOverride: nil,
+            useContinuousCorners: true,
+            isDark: false,
+            onRequestExpand: nil,
+            onRequestLayout: nil,
+            onInteractiveCallback: nil
+        )
+        let measured = bubble.systemLayoutSizeFitting(
+            CGSize(width: 360, height: UIView.layoutFittingCompressedSize.height),
+            withHorizontalFittingPriority: .required,
+            verticalFittingPriority: .fittingSizeLevel
+        )
+        bubble.frame = CGRect(origin: .zero, size: measured)
+        bubble.setNeedsLayout()
+        bubble.layoutIfNeeded()
+
+        let attributedRuns = textViews(in: bubble)
+            .compactMap(\.attributedText)
+            .filter { !$0.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        let combinedText = attributedRuns.map(\.string).joined(separator: "\n")
+
+        guard let bulletRun = attributedRuns.first(where: { $0.string.contains("Alpha") && $0.string.contains("Beta") }) else {
+            Issue.record("Expected rendered chat bubble text view for T340 content")
+            return
+        }
+        guard let introRun = attributedRuns.first(where: { $0.string.contains("Intro with bold and link.") }) else {
+            Issue.record("Expected rendered chat bubble prose text view for T340 content")
+            return
+        }
+
+        #expect(combinedText.contains("Intro with bold and link."))
+        #expect(combinedText.contains("• Alpha code"))
+        #expect(combinedText.contains("• Beta"))
+        #expect(!combinedText.contains("- Alpha"))
+        #expect(isBold("bold", in: introRun))
+        #expect(linkTarget("link", in: introRun)?.absoluteString == "https://example.com")
+        #expect(bulletRun.string.contains("• Alpha code"))
+        #expect(bulletRun.string.contains("• Beta"))
+    }
+
     @Test("T233: Popup viewer keeps smaller images at 1:1 scale")
     func imagePopupInitialScaleKeepsSmallImagesAtActualSize() {
         let scale = ImagePopupViewerLayout.initialZoomScale(
@@ -123,6 +462,41 @@ struct BubbleScrollTests {
         #expect(scale == 0.5)
     }
 
+    @Test("T233: Popup viewer uses fit-scaled content size for oversized images")
+    func imagePopupUsesFitScaledContentSizeForOversizedImages() {
+        let imageSize = CGSize(width: 1200, height: 900)
+        let viewportSize = CGSize(width: 600, height: 500)
+        let scale = ImagePopupViewerLayout.initialZoomScale(
+            imageSize: imageSize,
+            viewportSize: viewportSize
+        )
+        let contentSize = ImagePopupViewerLayout.zoomedContentSize(
+            imageSize: imageSize,
+            zoomScale: scale
+        )
+
+        #expect(contentSize.width == 600)
+        #expect(contentSize.height == 450)
+        #expect(contentSize.width <= viewportSize.width)
+        #expect(contentSize.height <= viewportSize.height)
+    }
+
+    @Test("T233: Popup viewer uses natural content size for smaller images")
+    func imagePopupUsesNaturalContentSizeForSmallerImages() {
+        let imageSize = CGSize(width: 320, height: 200)
+        let scale = ImagePopupViewerLayout.initialZoomScale(
+            imageSize: imageSize,
+            viewportSize: CGSize(width: 700, height: 500)
+        )
+        let contentSize = ImagePopupViewerLayout.zoomedContentSize(
+            imageSize: imageSize,
+            zoomScale: scale
+        )
+
+        #expect(scale == 1)
+        #expect(contentSize == imageSize)
+    }
+
     @Test("T233: Popup viewer centers content that is smaller than viewport")
     func imagePopupCentersSmallerScaledContent() {
         let insets = ImagePopupViewerLayout.centeredContentInset(
@@ -134,6 +508,38 @@ struct BubbleScrollTests {
         #expect(insets.right == 150)
         #expect(insets.top == 125)
         #expect(insets.bottom == 125)
+    }
+
+    @Test("T233: Popup viewer defers initial fit scale until viewport has bounds")
+    @MainActor
+    func imagePopupViewerDefersInitialFitScaleUntilViewportHasBounds() {
+        let renderer = UIGraphicsImageRenderer(size: CGSize(width: 1200, height: 900))
+        let image = renderer.image { context in
+            UIColor.red.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 1200, height: 900))
+        }
+        let controller = ImagePopupViewerController(image: image)
+        controller.loadViewIfNeeded()
+
+        controller.view.frame = CGRect(x: 0, y: 0, width: 0, height: 0)
+        controller.view.setNeedsLayout()
+        controller.view.layoutIfNeeded()
+
+        controller.view.frame = CGRect(x: 0, y: 0, width: 636, height: 536)
+        controller.view.setNeedsLayout()
+        controller.view.layoutIfNeeded()
+        let viewportSize = controller.debugScrollView.bounds.size
+        let expectedScale = ImagePopupViewerLayout.initialZoomScale(
+            imageSize: image.size,
+            viewportSize: viewportSize
+        )
+
+        #expect(viewportSize.width > 0)
+        #expect(viewportSize.height > 0)
+        #expect(expectedScale < 1)
+        #expect(abs(controller.debugScrollView.zoomScale - expectedScale) < 0.001)
+        #expect(controller.debugScrollView.contentSize.width <= viewportSize.width + 0.5)
+        #expect(controller.debugScrollView.contentSize.height <= viewportSize.height + 0.5)
     }
 
     @Test("T047/T046: Overflow-to-fit transition clears stale inner offset and fade state")
@@ -224,90 +630,6 @@ struct BubbleScrollTests {
 
         #expect(scroll.isScrollEnabled == false)
         #expect(fade.isHidden)
-        #expect(abs(scroll.contentOffset.y) < 0.5)
-    }
-
-    @Test("T149: Same message id in a different session resets stale inner bubble offset")
-    @MainActor
-    func sessionAwareReuseResetsOffsetForSameMessageId() {
-        let metrics = ChatFlowTheme.Metrics(isCompact: false)
-        let firstMessage = Message(
-            id: "shared-id",
-            role: .assistant,
-            content: Array(repeating: "This sentence is intentionally long for truncation coverage.", count: 36).joined(separator: " "),
-            timestamp: Date(),
-            streaming: false,
-            attachments: [],
-            deviceId: nil,
-            sessionKey: "agent:main:clawline:flynn:main"
-        )
-        let secondMessage = Message(
-            id: "shared-id",
-            role: .assistant,
-            content: "Short follow-up in a different session.",
-            timestamp: Date(),
-            streaming: false,
-            attachments: [],
-            deviceId: nil,
-            sessionKey: "agent:main:clawline:flynn:s_other"
-        )
-
-        let firstPresentation = buildPresentation(firstMessage, metrics: metrics, enableLinkPreviews: false)
-        let secondPresentation = buildPresentation(secondMessage, metrics: metrics, enableLinkPreviews: false)
-        let firstSizeClass = MessageFlowRules.sizeClass(for: firstPresentation)
-        let secondSizeClass = MessageFlowRules.sizeClass(for: secondPresentation)
-
-        let host = UIView(frame: CGRect(x: 0, y: 0, width: 360, height: 600))
-        host.layoutIfNeeded()
-        let bubble = MessageBubbleUIKitView(frame: CGRect(x: 0, y: 0, width: 320, height: 260))
-        host.addSubview(bubble)
-
-        bubble.configure(
-            message: firstMessage,
-            presentation: firstPresentation,
-            sizeClass: firstSizeClass,
-            metrics: metrics,
-            maxWidth: 320,
-            truncationHeightOverride: 140,
-            bubbleSizingV2: nil,
-            showsHeader: true,
-            paddingScale: 1,
-            minWidthOverride: nil,
-            maxWidthOverride: nil,
-            useContinuousCorners: true,
-            isDark: false,
-            onRequestExpand: nil,
-            onRequestLayout: nil,
-            onInteractiveCallback: nil
-        )
-        bubble.layoutIfNeeded()
-
-        guard let scroll = innerBubbleScrollView(in: bubble) else {
-            Issue.record("Expected inner bubble UIScrollView not found")
-            return
-        }
-        scroll.contentOffset = CGPoint(x: 0, y: 48)
-
-        bubble.configure(
-            message: secondMessage,
-            presentation: secondPresentation,
-            sizeClass: secondSizeClass,
-            metrics: metrics,
-            maxWidth: 320,
-            truncationHeightOverride: 240,
-            bubbleSizingV2: nil,
-            showsHeader: true,
-            paddingScale: 1,
-            minWidthOverride: nil,
-            maxWidthOverride: nil,
-            useContinuousCorners: true,
-            isDark: false,
-            onRequestExpand: nil,
-            onRequestLayout: nil,
-            onInteractiveCallback: nil
-        )
-        bubble.layoutIfNeeded()
-
         #expect(abs(scroll.contentOffset.y) < 0.5)
     }
 
@@ -871,6 +1193,27 @@ struct BubbleScrollTests {
         return result
     }
 
+    private func isBold(_ substring: String, in attributed: NSAttributedString) -> Bool {
+        let range = (attributed.string as NSString).range(of: substring)
+        guard range.location != NSNotFound,
+              let font = attributed.attribute(.font, at: range.location, effectiveRange: nil) as? UIFont else {
+            return false
+        }
+        return font.fontDescriptor.symbolicTraits.contains(.traitBold)
+    }
+
+    private func linkTarget(_ substring: String, in attributed: NSAttributedString) -> URL? {
+        let range = (attributed.string as NSString).range(of: substring)
+        guard range.location != NSNotFound else { return nil }
+        if let url = attributed.attribute(.link, at: range.location, effectiveRange: nil) as? URL {
+            return url
+        }
+        if let value = attributed.attribute(.link, at: range.location, effectiveRange: nil) as? String {
+            return URL(string: value)
+        }
+        return nil
+    }
+
     private func firstWebView(in view: UIView) -> WKWebView? {
         if let webView = view as? WKWebView {
             return webView
@@ -906,7 +1249,6 @@ struct BubbleScrollTests {
         }
         return MessagePresentation(
             parts: filtered,
-            markdownRenderPlan: presentation.markdownRenderPlan,
             wordCount: presentation.wordCount,
             hasTextualContent: presentation.hasTextualContent,
             isEmojiOnly: presentation.isEmojiOnly,

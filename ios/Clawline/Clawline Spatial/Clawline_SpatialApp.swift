@@ -50,8 +50,13 @@ struct Clawline_SpatialApp: App {
                 .environment(\.chatService, chatService)
                 .environment(\.settingsManager, settingsManager)
                 .environment(\.allowsTransparentWindowBackground, true)
+                .background {
+#if canImport(UIKit)
+                    SpatialWindowTransparencyInstaller()
+#endif
+                }
                 .overlay(alignment: .bottom) {
-                    SpatialWindowCornerResizeMarkers()
+                    ClawlineWindowCornerIndicators()
                 }
                 .sheet(isPresented: $settingsManager.isSettingsPresented) {
                     SettingsView(settings: settingsManager)
@@ -64,109 +69,110 @@ struct Clawline_SpatialApp: App {
     }
 }
 
-private struct SpatialWindowCornerResizeMarkers: View {
-    var body: some View {
-        HStack {
-            SpatialWindowCornerResizeMarker(edge: .leading)
-            Spacer(minLength: 0)
-            SpatialWindowCornerResizeMarker(edge: .trailing)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.horizontal, 1)
-        .padding(.bottom, 1)
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
-    }
-}
-
-private struct SpatialWindowCornerResizeMarker: View {
-    enum Edge {
-        case leading
-        case trailing
-    }
-
-    let edge: Edge
-
-    var body: some View {
-        Canvas { context, size in
-            var path = Path()
-            let strokeInset = lineWidth / 2
-            let minX = strokeInset
-            let maxX = size.width - strokeInset
-            let maxY = size.height - strokeInset
-            let radius = min(cornerRadius, size.width - lineWidth, size.height - lineWidth)
-            let verticalStartY = maxY - radius - armLength
-            let arcTopY = maxY - radius
-            let arcEndX = edge == .leading ? minX + radius : maxX - radius
-            let horizontalEndX = edge == .leading ? min(maxX, arcEndX + armLength) : max(minX, arcEndX - armLength)
-
-            switch edge {
-            case .leading:
-                path.move(to: CGPoint(x: minX, y: verticalStartY))
-                path.addLine(to: CGPoint(x: minX, y: arcTopY))
-                path.addArc(
-                    center: CGPoint(x: minX + radius, y: maxY - radius),
-                    radius: radius,
-                    startAngle: .degrees(180),
-                    endAngle: .degrees(90),
-                    clockwise: true
-                )
-            case .trailing:
-                path.move(to: CGPoint(x: maxX, y: verticalStartY))
-                path.addLine(to: CGPoint(x: maxX, y: arcTopY))
-                path.addArc(
-                    center: CGPoint(x: maxX - radius, y: maxY - radius),
-                    radius: radius,
-                    startAngle: .degrees(0),
-                    endAngle: .degrees(90),
-                    clockwise: false
-                )
-            }
-            path.addLine(to: CGPoint(x: horizontalEndX, y: maxY))
-
-            context.stroke(
-                path,
-                with: .color(.white.opacity(0.18)),
-                style: StrokeStyle(lineWidth: lineWidth, lineCap: .round, lineJoin: .round)
-            )
-        }
-        .frame(width: markerSize, height: markerSize)
-    }
-
-    private var markerSize: CGFloat { cornerRadius + armLength }
-    private var armLength: CGFloat { 18 }
-    private var cornerRadius: CGFloat { 45 }
-    private var lineWidth: CGFloat { 1.5 }
-}
-
 #if canImport(UIKit)
-private enum SpatialWindowTransparency {
+enum SpatialWindowTransparency {
+    @MainActor
     static func install() {
         UIView.appearance(whenContainedInInstancesOf: [UIHostingController<AnyView>.self]).backgroundColor = .clear
         UIScrollView.appearance(whenContainedInInstancesOf: [UIHostingController<AnyView>.self]).backgroundColor = .clear
         UIScrollView.appearance().backgroundColor = .clear
-        clearHostingBackgrounds()
+        UIWindow.appearance().backgroundColor = .clear
+        applyToConnectedWindows()
     }
 
-    private static func clearHostingBackgrounds() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            let scenes = UIApplication.shared.connectedScenes
-                .compactMap { $0 as? UIWindowScene }
-            for scene in scenes {
-                for window in scene.windows {
-                    setHostingBackgroundsClear(in: window)
-                }
+    @MainActor
+    static func applyStarting(at view: UIView) {
+        var candidate: UIView? = view
+        while let current = candidate {
+            if shouldForceTransparent(current) {
+                setTransparent(current)
+            }
+            candidate = current.superview
+        }
+        if let window = view.window {
+            apply(to: window)
+        }
+    }
+
+    @MainActor
+    static func apply(to window: UIWindow) {
+        setTransparent(window)
+        if let rootView = window.rootViewController?.view, shouldForceTransparent(rootView) {
+            setTransparent(rootView)
+        }
+        setHostingBackgroundsClear(in: window)
+    }
+
+    @MainActor
+    static func applyToConnectedWindows() {
+        let scenes = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+        for scene in scenes {
+            for window in scene.windows {
+                apply(to: window)
             }
         }
     }
 
-    private static func setHostingBackgroundsClear(in view: UIView) {
-        if String(describing: type(of: view)).contains("UIHostingView") {
-            view.backgroundColor = .clear
+    @MainActor
+    static func setHostingBackgroundsClear(in view: UIView) {
+        if shouldForceTransparent(view) {
+            setTransparent(view)
         }
         for subview in view.subviews {
             setHostingBackgroundsClear(in: subview)
         }
+    }
+
+    @MainActor
+    static func shouldForceTransparent(_ view: UIView) -> Bool {
+        view is UIWindow || String(describing: type(of: view)).contains("UIHostingView")
+    }
+
+    @MainActor
+    static func setTransparent(_ view: UIView) {
+        view.backgroundColor = .clear
+        view.isOpaque = false
+    }
+}
+
+private struct SpatialWindowTransparencyInstaller: UIViewRepresentable {
+    func makeUIView(context: Context) -> SpatialWindowTransparencyProbeView {
+        SpatialWindowTransparencyProbeView()
+    }
+
+    func updateUIView(_ uiView: SpatialWindowTransparencyProbeView, context: Context) {
+        SpatialWindowTransparency.applyStarting(at: uiView)
+    }
+}
+
+private final class SpatialWindowTransparencyProbeView: UIView {
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        SpatialWindowTransparency.setTransparent(self)
+        isUserInteractionEnabled = false
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        SpatialWindowTransparency.applyStarting(at: self)
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            SpatialWindowTransparency.applyStarting(at: self)
+        }
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        SpatialWindowTransparency.applyStarting(at: self)
+    }
+
+    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+        false
     }
 }
 #endif

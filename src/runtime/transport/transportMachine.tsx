@@ -10,9 +10,11 @@ import {
   type JsonValue
 } from "../../protocol/chat-wire";
 import type { ClientAttachmentPayload } from "../../protocol/chat-wire";
+import type { MessageReferencePayload } from "../../protocol/chat-wire";
 import type { AuthSessionStore } from "../auth/authSessionStore";
 import type { ChatDomainStore } from "../chat/chatDomainStore";
 import type { IncomingMessageSource } from "../chat/chatDomainStore";
+import type { CrossChatNotificationStore } from "../chat/crossChatNotificationStore";
 import { createStore } from "../shared/store";
 import { useStoreValue } from "../shared/useStoreValue";
 import {
@@ -42,6 +44,7 @@ export interface SendMessageInput {
   attachments: ClientAttachmentPayload[];
   content: string;
   id: string;
+  references?: MessageReferencePayload[];
   sessionKey?: string;
 }
 
@@ -61,6 +64,7 @@ export interface TransportMachine {
 interface CreateTransportMachineOptions {
   authSessionStore: AuthSessionStore;
   chatDomainStore: ChatDomainStore;
+  crossChatNotificationStore?: CrossChatNotificationStore;
   browserRuntime?: BrowserRuntime;
   clientFeatures?: string[];
   selectedSessionKeySource?: (
@@ -126,6 +130,7 @@ function readSelectedSessionKeyFromCurrentUrl(
 export function createTransportMachine({
   authSessionStore,
   chatDomainStore,
+  crossChatNotificationStore,
   browserRuntime = createBrowserRuntime(),
   clientFeatures,
   selectedSessionKeySource = readSelectedSessionKeyFromCurrentUrl,
@@ -197,12 +202,14 @@ export function createTransportMachine({
         });
       }
       chatDomainStore.reset();
+      crossChatNotificationStore?.reset();
       shouldResetChatBeforeNextAuth = true;
       return;
     }
 
     if (shouldResetChatBeforeNextAuth) {
       chatDomainStore.reset();
+      crossChatNotificationStore?.reset();
       shouldResetChatBeforeNextAuth = false;
     }
 
@@ -311,6 +318,7 @@ export function createTransportMachine({
           if (payload.success) {
             if (payload.historyReset || payload.replayTruncated) {
               chatDomainStore.resetForAuthoritativeReplay();
+              crossChatNotificationStore?.reset();
             }
 
             replayMessagesRemaining = payload.replayCount ?? 0;
@@ -325,6 +333,7 @@ export function createTransportMachine({
               sessionKeys: payload.sessionKeys,
               sessions: payload.sessions
             });
+            dismissUnavailableCrossChatNotifications();
             if (payload.streamReadStates) {
               chatDomainStore.applyStreamReadStateSnapshot(payload.streamReadStates);
             }
@@ -372,6 +381,12 @@ export function createTransportMachine({
             }
 
             chatDomainStore.applyIncomingMessage(messageInput);
+            crossChatNotificationStore?.applyIncomingMessage({
+              message: messageInput.message,
+              selectedSessionKey: messageInput.selectedSessionKey,
+              source: messageInput.source,
+              streams: chatDomainStore.getState().streams
+            });
             if (source === "replay") {
               replayMessagesRemaining -= 1;
               syncReplayProgress(trigger);
@@ -385,6 +400,7 @@ export function createTransportMachine({
               console.warn("clawline stream_snapshot", payload.streams);
             }
             chatDomainStore.applyStreamSnapshot(payload.streams);
+            dismissUnavailableCrossChatNotifications();
             syncReplayProgress(trigger);
             return;
           case "stream_created":
@@ -393,9 +409,11 @@ export function createTransportMachine({
             return;
           case "stream_deleted":
             chatDomainStore.removeStream(payload.sessionKey);
+            crossChatNotificationStore?.dismissCrossChatNotification(payload.sessionKey);
             return;
           case "session_info":
             chatDomainStore.applySessionInfo(payload);
+            dismissUnavailableCrossChatNotifications();
             syncReplayProgress(trigger);
             return;
           case "stream_read_state":
@@ -543,6 +561,12 @@ export function createTransportMachine({
       }
 
       chatDomainStore.applyIncomingMessage(entry.payload);
+      crossChatNotificationStore?.applyIncomingMessage({
+        message: entry.payload.message,
+        selectedSessionKey: entry.payload.selectedSessionKey,
+        source: entry.payload.source,
+        streams: chatDomainStore.getState().streams
+      });
       if (entry.payload.source === "replay" && replayMessagesRemaining > 0) {
         replayMessagesRemaining -= 1;
       }
@@ -553,6 +577,12 @@ export function createTransportMachine({
     if (queuedReplayMessages.length > 0) {
       scheduleReplayFlush(trigger);
     }
+  }
+
+  function dismissUnavailableCrossChatNotifications() {
+    crossChatNotificationStore?.dismissUnavailableNotifications(
+      chatDomainStore.getState().provisionedSessionKeys
+    );
   }
 
   function scheduleReconnect(retryAttempt: number) {
@@ -619,6 +649,7 @@ export function createTransportMachine({
           id: input.id,
           content: input.content,
           attachments: input.attachments,
+          references: input.references,
           sessionKey: input.sessionKey
         })
       );

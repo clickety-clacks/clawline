@@ -8,13 +8,19 @@
 import SwiftUI
 import UIKit
 
+enum StreamPopupSearchPresentationFocusPolicy {
+    static func shouldRenderSearchTextFieldOnInitialPresentation(searchFocusRequestID: Int?) -> Bool {
+        searchFocusRequestID != nil
+    }
+}
+
 struct StreamManagerSheet: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.settingsManager) private var settings
 
     @Bindable var viewModel: ChatViewModel
     let streams: [StreamSession]
-    let dotStatesBySession: [String: StreamDotState]
+    let dotStateLookup: StreamDotStateLookup
     let searchFocusRequestID: Int?
     let maxAvailableHeight: CGFloat
     let maxAvailableWidth: CGFloat
@@ -31,6 +37,7 @@ struct StreamManagerSheet: View {
     @State private var pendingRemovalStream: StreamSession?
     @State private var selectedStreamSessionKey: String?
     @State private var didActivateSelection = false
+    @State private var isSearchFieldFocusEnabled = false
     @FocusState private var focusedEditor: EditorMode?
     @FocusState private var isSearchFieldFocused: Bool
 
@@ -155,10 +162,17 @@ struct StreamManagerSheet: View {
             // Trust the allocated size. If the popover system gives us less than our ideal,
             // the List viewport shrinks to match instead of overflowing into the popup chrome.
             let containerHeight = geometry.size.height
+            let rowDotStates = StreamSelectorLayout.dotStatesBySession(
+                streams: filteredStreams,
+                lookup: dotStateLookup
+            )
             VStack(spacing: 0) {
                 List {
                     ForEach(filteredStreams) { stream in
-                        streamRow(for: stream)
+                        streamRow(
+                            for: stream,
+                            dotState: rowDotStates[stream.sessionKey] ?? .inactive
+                        )
                     }
 
                     ForEach(filteredPendingCreateRows) { pendingRow in
@@ -246,12 +260,13 @@ struct StreamManagerSheet: View {
         )
         .onAppear {
             syncSelectionWithFilteredStreams()
-            handleSearchFocusRequest(searchFocusRequestID)
+            handleInitialSearchFocus(searchFocusRequestID)
         }
         .onDisappear {
             resetInlineEditing()
             searchQuery = ""
             isSearchFieldFocused = false
+            isSearchFieldFocusEnabled = false
             selectedStreamSessionKey = nil
             didActivateSelection = false
         }
@@ -289,27 +304,18 @@ struct StreamManagerSheet: View {
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass")
                     .foregroundStyle(.secondary)
-                TextField("Filter…", text: $searchQuery)
-                    .font(.clawline(.uiLabel))
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .submitLabel(.go)
-                    .focused($isSearchFieldFocused)
-                    .onSubmit {
-                        selectHighlightedStream()
+                searchField
+                if !searchQuery.isEmpty {
+                    Button {
+                        searchQuery = ""
+                        focusSearchField()
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.secondary)
                     }
-                    .onKeyPress(.upArrow) {
-                        moveSelection(step: -1)
-                        return .handled
-                    }
-                    .onKeyPress(.downArrow) {
-                        moveSelection(step: 1)
-                        return .handled
-                    }
-                    .onKeyPress(.return) {
-                        selectHighlightedStream()
-                        return .handled
-                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Clear stream filter")
+                }
             }
             .padding(.horizontal, 12)
             .frame(maxWidth: .infinity)
@@ -364,8 +370,47 @@ struct StreamManagerSheet: View {
     }
 
     @ViewBuilder
-    private func streamRow(for stream: StreamSession) -> some View {
-        rowContent(for: stream)
+    private var searchField: some View {
+        if isSearchFieldFocusEnabled {
+            TextField("Filter…", text: $searchQuery)
+                .font(.clawline(.uiLabel))
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .submitLabel(.go)
+                .focused($isSearchFieldFocused)
+                .onSubmit {
+                    selectHighlightedStream()
+                }
+                .onKeyPress(.upArrow) {
+                    moveSelection(step: -1)
+                    return .handled
+                }
+                .onKeyPress(.downArrow) {
+                    moveSelection(step: 1)
+                    return .handled
+                }
+                .onKeyPress(.return) {
+                    selectHighlightedStream()
+                    return .handled
+                }
+        } else {
+            Button {
+                isSearchFieldFocusEnabled = true
+                focusSearchField()
+            } label: {
+                Text("Filter…")
+                    .font(.clawline(.uiLabel))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Filter streams")
+        }
+    }
+
+    @ViewBuilder
+    private func streamRow(for stream: StreamSession, dotState: StreamDotState) -> some View {
+        rowContent(for: stream, dotState: dotState)
             .frame(height: listRowHeight, alignment: .center)
             .listRowInsets(
                 EdgeInsets(
@@ -410,7 +455,7 @@ struct StreamManagerSheet: View {
     }
 
     @ViewBuilder
-    private func rowContent(for stream: StreamSession) -> some View {
+    private func rowContent(for stream: StreamSession, dotState: StreamDotState) -> some View {
         if activeEditor == .renaming(stream.sessionKey) {
             TextField("Stream name", text: $draftName)
                 .font(.clawline(.subsectionHeader))
@@ -426,26 +471,16 @@ struct StreamManagerSheet: View {
                 let selectedSessionKey = stream.sessionKey
                 onSelectStream(selectedSessionKey)
             } label: {
+                let isActive = stream.sessionKey == viewModel.uiSelectedSessionKey
+                let dotIdentity = StreamPopupRowStatusDotIdentity(
+                    sessionKey: stream.sessionKey
+                )
                 HStack(spacing: 10) {
-                    let isActive = stream.sessionKey == viewModel.uiSelectedSessionKey
-                    let dotState = dotStatesBySession[stream.sessionKey] ?? .inactive
-                    Circle()
-                        .fill(
-                            StreamDotColor.resolve(
-                                isActive: isActive,
-                                dotState: dotState,
-                                colorScheme: colorScheme
-                            )
-                        )
-                        .frame(width: 8, height: 8)
-                        .shadow(
-                            color: isActive ? StreamDotColor.activeGlow(colorScheme: colorScheme) : .clear,
-                            radius: isActive ? StreamDotColor.activeOuterGlowRadius(colorScheme: colorScheme) : 0
-                        )
-                        .shadow(
-                            color: isActive ? StreamDotColor.activeGlow(colorScheme: colorScheme) : .clear,
-                            radius: isActive ? StreamDotColor.activeInnerGlowRadius(colorScheme: colorScheme) : 0
-                        )
+                    StreamPopupRowStatusDot(
+                        isActive: isActive,
+                        dotState: dotState,
+                        colorScheme: colorScheme
+                    )
                     Text(stream.displayName)
                         .font(.clawline(.subsectionHeader).weight(isActive ? .semibold : .regular))
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -455,6 +490,7 @@ struct StreamManagerSheet: View {
                             .tint(.secondary)
                     }
                 }
+                .id(dotIdentity)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
             }
@@ -463,9 +499,30 @@ struct StreamManagerSheet: View {
         }
     }
 
-    private func rowBackground(for stream: StreamSession) -> Color {
-        guard selectedStreamSessionKey == stream.sessionKey else { return .clear }
-        return Color.primary.opacity(colorScheme == .dark ? 0.16 : 0.08)
+    private func rowBackground(for stream: StreamSession) -> some View {
+        let highlight = StreamSelectorLayout.selectionHighlightStyle(
+            isSelected: selectedStreamSessionKey == stream.sessionKey,
+            isDark: colorScheme == .dark,
+            isSpatial: Self.isSpatialPlatform
+        )
+        return RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .fill(Color.primary.opacity(highlight.fillOpacity))
+            .overlay {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(
+                        Color.primary.opacity(highlight.strokeOpacity),
+                        lineWidth: highlight.strokeLineWidth
+                    )
+            }
+            .padding(.vertical, 2)
+    }
+
+    private static var isSpatialPlatform: Bool {
+#if os(visionOS)
+        true
+#else
+        false
+#endif
     }
 
     private func beginRenaming(_ stream: StreamSession) {
@@ -520,6 +577,7 @@ struct StreamManagerSheet: View {
     }
 
     private func focusSearchField() {
+        isSearchFieldFocusEnabled = true
         Task { @MainActor in
             await Task.yield()
             isSearchFieldFocused = true
@@ -531,6 +589,16 @@ struct StreamManagerSheet: View {
         guard requestID != nil else { return }
         focusSearchField()
         onConsumeSearchFocusRequest()
+    }
+
+    private func handleInitialSearchFocus(_ requestID: Int?) {
+        isSearchFieldFocusEnabled = StreamPopupSearchPresentationFocusPolicy
+            .shouldRenderSearchTextFieldOnInitialPresentation(searchFocusRequestID: requestID)
+        guard requestID != nil else {
+            isSearchFieldFocused = false
+            return
+        }
+        handleSearchFocusRequest(requestID)
     }
 
     private func syncSelectionWithFilteredStreams() {
@@ -604,6 +672,36 @@ struct StreamManagerSheet: View {
             .allowsHitTesting(false)
     }
 
+}
+
+struct StreamPopupRowStatusDotIdentity: Hashable {
+    let sessionKey: String
+}
+
+private struct StreamPopupRowStatusDot: View {
+    let isActive: Bool
+    let dotState: StreamDotState
+    let colorScheme: ColorScheme
+
+    var body: some View {
+        Circle()
+            .fill(
+                StreamDotColor.resolve(
+                    isActive: isActive,
+                    dotState: dotState,
+                    colorScheme: colorScheme
+                )
+            )
+            .frame(width: 8, height: 8)
+            .shadow(
+                color: isActive ? StreamDotColor.activeGlow(colorScheme: colorScheme) : .clear,
+                radius: isActive ? StreamDotColor.activeOuterGlowRadius(colorScheme: colorScheme) : 0
+            )
+            .shadow(
+                color: isActive ? StreamDotColor.activeGlow(colorScheme: colorScheme) : .clear,
+                radius: isActive ? StreamDotColor.activeInnerGlowRadius(colorScheme: colorScheme) : 0
+            )
+    }
 }
 
 struct TrackPickerSheet: View {
@@ -1079,6 +1177,35 @@ private extension View {
 }
 
 enum StreamSelectorLayout {
+    struct SelectionHighlightStyle: Equatable {
+        let fillOpacity: CGFloat
+        let strokeOpacity: CGFloat
+        let strokeLineWidth: CGFloat
+    }
+
+    static func dotStatesBySession(
+        streams: [StreamSession],
+        lookup: StreamDotStateLookup
+    ) -> [String: StreamDotState] {
+        Dictionary(uniqueKeysWithValues: streams.map { stream in
+            (stream.sessionKey, lookup(stream.sessionKey))
+        })
+    }
+
+    static func selectionHighlightStyle(
+        isSelected: Bool,
+        isDark: Bool,
+        isSpatial: Bool
+    ) -> SelectionHighlightStyle {
+        guard isSelected else {
+            return SelectionHighlightStyle(fillOpacity: 0, strokeOpacity: 0, strokeLineWidth: 0)
+        }
+        if isSpatial {
+            return SelectionHighlightStyle(fillOpacity: 0.24, strokeOpacity: 0.40, strokeLineWidth: 1)
+        }
+        return SelectionHighlightStyle(fillOpacity: isDark ? 0.16 : 0.08, strokeOpacity: 0, strokeLineWidth: 0)
+    }
+
     static func popupWidth(
         longestItemWidth: CGFloat,
         minimumPopoverWidth: CGFloat,

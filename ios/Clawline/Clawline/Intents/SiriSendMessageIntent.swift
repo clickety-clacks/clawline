@@ -78,7 +78,7 @@ struct SendMessageIntent: AppIntent {
             connectTimeout: SiriSendTimeouts.connectSeconds,
             resourceTimeout: SiriSendTimeouts.resourceSeconds
         )
-        let chatService = ProviderDirectChatClient(
+        let chatService = ProviderChatService(
             connector: connector,
             deviceId: device.deviceId,
             userIdProvider: { authSnapshot.userId }
@@ -109,7 +109,8 @@ struct SendMessageIntent: AppIntent {
                     id: messageId,
                     content: content,
                     attachments: [],
-                    sessionKey: sessionKey
+                    sessionKey: sessionKey,
+                    references: []
                 )
             }
             NSLog("[SiriIntent][10] sent, waiting for ack")

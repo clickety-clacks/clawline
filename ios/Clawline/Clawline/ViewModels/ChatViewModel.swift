@@ -16,18 +16,106 @@ enum SendButtonConnectionState: Equatable {
     case disconnected
 }
 
-@MainActor
-protocol SendCommandPort: AnyObject {
-    func sendCommand()
+struct CrossChatAssistantNotificationEntry: Identifiable, Equatable {
+    let id: String
+    var content: String
+    var timestamp: Date
+    var appendSeparatorTimestamp: Date? = nil
 }
 
-@MainActor
-protocol ChatRuntimePort: AnyObject {
-    var sendButtonConnectionState: SendButtonConnectionState { get }
+struct CrossChatNotificationBubble: Identifiable, Equatable {
+    var id: String { sourceChatId }
+    let sourceChatId: String
+    var sourceTitle: String
+    var entries: [CrossChatAssistantNotificationEntry]
+    var lastAssistantActivityAt: Date
+    var isReplying: Bool = false
+    var replyDraft: String = ""
+}
+
+typealias CrossChatNotificationDismissAnimator = (_ updates: @escaping () -> Void) -> Void
+
+enum MessageSendIndicatorState: Equatable, Hashable {
+    case pending
+    case failed(String)
 }
 
 protocol ChatViewModelHosting: AnyObject {
     func handleSceneDidBecomeActive()
+}
+
+struct LiveAgentProgress: Equatable {
+    let sessionKey: String
+    let runId: String?
+    let messageId: String?
+    let seq: Int?
+    let summary: String
+    let isFailure: Bool
+}
+
+enum ImageAttachmentPreparer {
+    private static let modelAwareMaxImageDimension: CGFloat = 1568
+    private static let minImageDimension: CGFloat = 512
+    private static let initialJPEGQuality: CGFloat = 0.9
+    private static let minJPEGQuality: CGFloat = 0.58
+    private static let qualityStep: CGFloat = 0.08
+    private static let resizeStep: CGFloat = 0.85
+    private static let downscalePassLimit: Int = 12
+
+    @MainActor
+    static func prepareForModel(data: Data, mimeType: String) throws -> (data: Data, mimeType: String) {
+        guard PendingAttachment.inlineMimeTypes.contains(mimeType.lowercased()) else {
+            return (data, mimeType)
+        }
+        guard data.count > PendingAttachment.modelAwareMaxImageRawByteLimit else {
+            return (data, mimeType)
+        }
+        guard let image = UIImage(data: data) else {
+            return (data, mimeType)
+        }
+
+        var maxDim = modelAwareMaxImageDimension
+        var quality = initialJPEGQuality
+        var pass = 0
+
+        while pass < downscalePassLimit {
+            pass += 1
+            if let compressed = downscaleImage(image, maxDimension: maxDim, quality: quality),
+               compressed.count <= PendingAttachment.modelAwareMaxImageRawByteLimit {
+                return (compressed, "image/jpeg")
+            }
+            if quality > minJPEGQuality {
+                quality -= qualityStep
+            } else {
+                maxDim *= resizeStep
+                quality = initialJPEGQuality
+            }
+            if maxDim < minImageDimension {
+                break
+            }
+        }
+
+        throw AttachmentError.imageTooLargeForModel
+    }
+
+    @MainActor
+    private static func downscaleImage(_ image: UIImage, maxDimension: CGFloat, quality: CGFloat) -> Data? {
+        let size = image.size
+        let scale: CGFloat
+        if size.width > size.height {
+            scale = size.width > maxDimension ? maxDimension / size.width : 1
+        } else {
+            scale = size.height > maxDimension ? maxDimension / size.height : 1
+        }
+        let newSize = CGSize(width: (size.width * scale).rounded(), height: (size.height * scale).rounded())
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        let renderer = UIGraphicsImageRenderer(size: newSize, format: format)
+        let resized = renderer.image { _ in
+            image.draw(in: CGRect(origin: .zero, size: newSize))
+        }
+        return resized.jpegData(compressionQuality: quality)
+    }
 }
 
 // MARK: - Stream Switch State
@@ -41,16 +129,14 @@ protocol ChatViewModelHosting: AnyObject {
 
 @Observable
 @MainActor
-final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, SendCommandPort, ChatRuntimePort {
+final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
     private let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "MessagePipeline")
     private let instanceId = UUID().uuidString
     @MainActor
     private static var currentConnectionOwnerId: String?
-#if DEBUG
-    @MainActor
-    private static var connectionOwnershipDisabledForTesting = false
-#endif
+    static let missingReplyVisibleIdMessage = "Please update to the newest Clawline fork to reply to this message."
     private static let providerMaxTextMessageBytes = 65_536
+    private static let liveProgressStaleTimeout: Duration = .seconds(120)
     private static let richDocumentMimeTypesNeedingPayload: Set<String> = [
         InteractiveHTMLDescriptor.mimeType,
         TerminalSessionDescriptor.mimeType
@@ -89,18 +175,10 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
     }
 
     private var isConnectionOwner: Bool {
-#if DEBUG
-        if Self.connectionOwnershipDisabledForTesting {
-            return true
-        }
-#endif
-        return Self.currentConnectionOwnerId == instanceId
+        Self.currentConnectionOwnerId == instanceId
     }
 
     private func claimConnectionOwnership(reason: String) {
-#if DEBUG
-        guard !Self.connectionOwnershipDisabledForTesting else { return }
-#endif
         let previousOwner = Self.currentConnectionOwnerId ?? "none"
         Self.currentConnectionOwnerId = instanceId
         logger.info(
@@ -110,9 +188,6 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
     }
 
     private func releaseConnectionOwnershipIfNeeded(reason: String) {
-#if DEBUG
-        guard !Self.connectionOwnershipDisabledForTesting else { return }
-#endif
         guard Self.currentConnectionOwnerId == instanceId else { return }
         Self.currentConnectionOwnerId = nil
         logger.info(
@@ -120,13 +195,9 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         )
         emitPinpointLog(event: "connectionOwner_release", origin: reason)
     }
-
 #if DEBUG
-    static func setConnectionOwnershipDisabledForTesting(_ disabled: Bool) {
-        connectionOwnershipDisabledForTesting = disabled
-        if disabled {
-            currentConnectionOwnerId = nil
-        }
+    static func resetConnectionOwnershipForTesting() {
+        currentConnectionOwnerId = nil
     }
 #endif
     private(set) var messages: [Message] = []
@@ -135,6 +206,9 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
     private(set) var streamDotStateBySession: [String: StreamDotState] = [:]
     private(set) var lastReadMessageIdBySession: [String: String] = [:]
     private(set) var streamTailStateBySession: [String: StreamTailState] = [:]
+    private(set) var crossChatNotificationBubblesBySourceChatId: [String: CrossChatNotificationBubble] = [:]
+    var crossChatNotificationDismissAnimator: CrossChatNotificationDismissAnimator?
+    private var unavailableCrossChatNotificationSourceIds: Set<String> = []
     private var syntheticSessionKeys: Set<String> = []
     private var didRestoreActiveSessionKey = false
 
@@ -236,8 +310,12 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         }
     }
 
-    func requestStreamSwitch(to sessionKey: String, source: StreamSwitchSource) {
+    func requestStreamSwitch(
+        to sessionKey: String,
+        source: StreamSwitchSource
+    ) {
         guard orderedSessionKeys.contains(sessionKey) else { return }
+        dismissCrossChatNotification(sourceChatId: sessionKey)
 
         // Step 1-2: stream-switch intent + epoch bump.
         uiSwitchEpoch &+= 1
@@ -266,6 +344,12 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
                 scheduleDebouncedEngineActivation(target: sessionKey, epoch: epoch)
             }
         }
+    }
+
+    func requestCrossChatNotificationNavigation(to sourceChatId: String) {
+        guard !sourceChatId.isEmpty else { return }
+        ensureStreamEntry(for: sourceChatId)
+        requestStreamSwitch(to: sourceChatId, source: .programmatic)
     }
 
     func streamPagerDidBeginInteraction() {
@@ -299,6 +383,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
             return
         }
         guard orderedSessionKeys.contains(sessionKey) else { return }
+        dismissCrossChatNotification(sourceChatId: sessionKey)
         guard engineActiveSessionKey != sessionKey else { return }
         applyActiveSessionKey(sessionKey)
         markSessionRead(sessionKey, preferServerTail: true)
@@ -369,12 +454,9 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         StreamSwitchTiming.log("applyActiveSessionKey_enter", sessionKey: sessionKey)
         engineActiveSessionKey = sessionKey
         restoreCachedMessagesIfNeeded(for: sessionKey)
-        ensureSessionStorage(for: sessionKey)
         messages = sessionMessages[sessionKey] ?? []
         StreamSwitchTiming.log("messages_assigned", sessionKey: sessionKey)
         persistActiveSessionKey(sessionKey)
-        restoreLastServerMessageIdIfNeeded(for: sessionKey)
-        lastServerMessageId = lastServerMessageIdBySession[sessionKey]
     }
 
     private func clearActiveSession(clearPersistedActiveSessionKey: Bool = true) {
@@ -386,7 +468,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         pendingEngineActivationTask = nil
         engineActivationInFlightSessionKey = nil
         messages = []
-        lastServerMessageId = nil
+        clearAllLiveProgress()
         if clearPersistedActiveSessionKey {
             streamDefaults.removeObject(forKey: activeSessionDefaultsKey())
         }
@@ -470,41 +552,34 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
     var inputContent: NSAttributedString = NSAttributedString() {
         didSet {
             pruneAttachmentData()
+            pruneMessageReferenceData()
         }
     }
     var attachmentData: [UUID: PendingAttachment] = [:]
+    private var messageReferenceData: [UUID: PendingMessageReference] = [:]
     private(set) var pendingAttachmentStageCount: Int = 0
     private var stagedAttachmentProtection: Set<UUID> = []
     private(set) var isSending: Bool = false
+    private(set) var sendIndicatorRevision: Int = 0
     private(set) var isAssistantTyping: Bool = false
     private(set) var typingSessionKey: String?
+    private(set) var liveProgressBySessionKey: [String: LiveAgentProgress] = [:]
     private(set) var connectionState: ConnectionState = .disconnected
     private(set) var sendButtonConnectionState: SendButtonConnectionState = .disconnected
     private(set) var inputResetToken: Int = 0
     private(set) var sendTask: Task<Void, Never>?
+    var canCancelSend: Bool { isSending && !activeSendHasReachedTransport }
     /// Tracks if typing indicator was visible when a message arrives (for morph transition).
     private(set) var shouldMorphTypingIndicator: Bool = false
+    private var typingIndicatorMorphTargetMessageIdBySessionKey: [String: String] = [:]
     private var isRetired = false
 
-    private enum TemporarySendButtonDebugOverride: Equatable {
-        case connection(SendButtonConnectionState)
-        case sending
-        case preparing
-    }
-
-    private var temporarySendButtonOverride: TemporarySendButtonDebugOverride?
+    private var temporarySendButtonOverride: SendButtonConnectionState?
     private var temporarySendButtonOverrideTask: Task<Void, Never>?
     private let temporarySendButtonOverrideDuration: Duration = .seconds(5)
+    private var liveProgressTimeoutTasksBySessionKey: [String: Task<Void, Never>] = [:]
 
     private var transportSendButtonConnectionState: SendButtonConnectionState {
-        guard chatService.isTransportReadyForSend else {
-            switch connectionState {
-            case .connecting, .reconnecting:
-                return .reconnecting
-            case .connected, .disconnected, .failed:
-                return .disconnected
-            }
-        }
         switch connectionState {
         case .connected:
             return .connected
@@ -518,21 +593,8 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
     var canSend: Bool {
         pendingAttachmentStageCount == 0
             && transportSendButtonConnectionState == .connected
+            && sendProvisioningState(for: engineActiveSessionKey) == .ready
             && !inputContent.isEffectivelyEmpty
-    }
-
-    var sendButtonIsSending: Bool {
-        if case .sending = temporarySendButtonOverride {
-            return true
-        }
-        return isSending
-    }
-
-    var sendButtonIsPreparing: Bool {
-        if case .preparing = temporarySendButtonOverride {
-            return true
-        }
-        return pendingAttachmentStageCount > 0
     }
 
     let toastManager: ToastManager
@@ -548,14 +610,11 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
     private var observationStartupTask: Task<Void, Never>?
     private var activationTask: Task<Void, Never>?
     private var hasActivatedLifecycleOwnership = false
-    private var incomingMessagesSubscription: AsyncStream<Message>?
     private var lifecycleTransportEventsSubscription: AsyncStream<LifecycleTransportEvent>?
     private var lifecycleOutputsSubscription: AsyncStream<ConnectionLifecycleOutput>?
     private var lifecycleStartupGateDebugSubscription: AsyncStream<StartupGateDebugEvent>?
     private var sessionMessages: [String: [Message]] = [:]
     private var forceReReadGenerationBySession: [String: Int] = [:]
-    private var lastServerMessageIdBySession: [String: String] = [:]
-    private(set) var lastServerMessageId: String?
     private var pendingLocalMessages: [PendingLocalMessage] = []
     private var ackedPendingLocalMessageIDs: Set<String> = []
     private let lifecycleCoordinator: ConnectionLifecycleCoordinator
@@ -565,10 +624,12 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
     private var connectionStableTask: Task<Void, Never>?
     private let stableConnectionInterval: Duration = .seconds(5)
     private var activeClientMessageId: String?
+    private var activeCrossChatNotificationReplySourceChatId: String?
+    private var activeSendHasReachedTransport = false
+    private var crossChatNotificationReplySourceByClientMessageId: [String: String] = [:]
     private var messageFailures: [String: MessageFailure] = [:]
     private var presentationCache: [PresentationCacheKey: PresentationCacheEntry] = [:]
     private var tableParseStates: [String: StreamingTableParseState] = [:]
-    private var presentationCacheTrimCount: Int = 0
     private var uploadedAssetIds: [UUID: String] = [:]
     private var downloadedAssetData: [String: Data] = [:]
     private let streamDefaults = UserDefaults.standard
@@ -630,15 +691,33 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
     }
 
     private struct PendingProvisionedSend {
+        let clientId: String
         let content: String
         let attachments: [PendingAttachment]
+        let references: [MessageReferenceContext]
+        let replyToMessageId: String?
+        let replyToClientMessageId: String?
         let sessionKey: String
+        let crossChatNotificationReplySourceChatId: String?
     }
 
     private struct PendingHistoryResetReplay {
         let epoch: Int
         let cursorBackedSessionKeys: Set<String>
         var messagesBySessionKey: [String: [Message]] = [:]
+    }
+
+    private struct MessageSourceFlags {
+        let isServer: Bool
+        let isCache: Bool
+
+        static let local = MessageSourceFlags(isServer: false, isCache: false)
+        static let server = MessageSourceFlags(isServer: true, isCache: false)
+        static let cache = MessageSourceFlags(isServer: false, isCache: true)
+    }
+
+    private func bumpSendIndicatorRevision() {
+        sendIndicatorRevision &+= 1
     }
 
 #if DEBUG
@@ -773,7 +852,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
              let generator = UIImpactFeedbackGenerator(style: .light)
              generator.impactOccurred()
              #endif
-        }) {
+         }) {
         logger.info("ChatViewModel init id=\(self.instanceId, privacy: .public)")
         self.auth = auth
         self.chatService = chatService
@@ -874,15 +953,11 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
             coordinatorDiag("onAppear ignored non-owner")
             return
         }
-        coordinatorDiag("onAppear enter tokenPresent=\(auth.token != nil)")
+        coordinatorDiag("onAppear enter visibility-only tokenPresent=\(auth.token != nil)")
         emitPinpointLog(event: "onAppear_enter", origin: origin)
         isChatVisible = true
         isAppInForeground = true
-        logger.info("ChatViewModel onAppear id=\(self.instanceId, privacy: .public)")
-
-        guard auth.token != nil else { return }
-        await startObservingIfNeeded(origin: "onAppear[\(origin)]")
-        await lifecycleCoordinator.manualRetry()
+        logger.info("ChatViewModel onAppear id=\(self.instanceId, privacy: .public) visibility-only")
     }
 
     func onDisappear(origin: String = "ChatView.onDisappear") {
@@ -899,7 +974,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         guard !isRetired else { return }
         guard isConnectionOwner else { return }
         guard auth.token != nil else { return }
-        guard sendButtonConnectionState != .connected else { return }
+        guard sendButtonConnectionState == .disconnected else { return }
         Task {
             await startObservingIfNeeded(origin: "reconnect")
             await lifecycleCoordinator.updateCanonicalCursor(legacyReplayCursorForActiveStream())
@@ -1031,9 +1106,6 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
             await self.ensureLifecycleOutputsSubscription()
             self.coordinatorDiag("startObservingIfNeeded after ensureLifecycleOutputsSubscription")
             if Task.isCancelled { return }
-            self.ensureIncomingMessagesSubscription()
-            self.coordinatorDiag("startObservingIfNeeded after ensureIncomingMessagesSubscription")
-            if Task.isCancelled { return }
             await self.ensureLifecycleStartupGateDebugSubscription()
             self.coordinatorDiag("startObservingIfNeeded after ensureLifecycleStartupGateDebugSubscription")
             if Task.isCancelled { return }
@@ -1047,10 +1119,6 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
             self.coordinatorDiag("startObservingIfNeeded creating observationTask")
             self.observationTask = Task {
                 await withTaskGroup(of: Void.self) { group in
-                    group.addTask { [weak self] in
-                        await self?.observeIncomingMessages()
-                    }
-
                     group.addTask { [weak self] in
                         await self?.observeLifecycleTransportEvents()
                     }
@@ -1089,7 +1157,6 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         activationTask = nil
         observationTask?.cancel()
         observationTask = nil
-        incomingMessagesSubscription = nil
         lifecycleTransportEventsSubscription = nil
         lifecycleOutputsSubscription = nil
         lifecycleStartupGateDebugSubscription = nil
@@ -1108,17 +1175,11 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         hasActivatedLifecycleOwnership = false
         clearSessionStatusRefreshes()
         stopObservingLifecycle(origin: "prepareForReplacement")
-        cancelSend()
+        cancelSendForTeardown()
         guard isConnectionOwner else { return }
         Task { await lifecycleCoordinator.disconnectRequested() }
         chatService.disconnect()
         releaseConnectionOwnershipIfNeeded(reason: "prepareForReplacement")
-    }
-
-    private func ensureIncomingMessagesSubscription() {
-        guard incomingMessagesSubscription == nil else { return }
-        incomingMessagesSubscription = chatService.incomingMessages
-        coordinatorDiag("ensureIncomingMessagesSubscription created")
     }
 
     private func ensureLifecycleTransportSubscription() {
@@ -1149,14 +1210,6 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         }
         lifecycleStartupGateDebugSubscription = await lifecycleCoordinator.startupGateDebugEvents
         coordinatorDiag("ensureLifecycleStartupGateDebugSubscription created")
-    }
-
-    @MainActor
-    private func observeIncomingMessages() async {
-        guard let incomingMessagesSubscription else { return }
-        for await message in incomingMessagesSubscription {
-            handleIncoming(message)
-        }
     }
 
     @MainActor
@@ -1215,7 +1268,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
 
     private func validateTextByteLimitForSend(_ text: String) -> Bool {
         let textBytes = text.lengthOfBytes(using: .utf8)
-        guard textBytes <= Self.providerMaxTextMessageBytes else {
+        guard isTextWithinSendByteLimit(text) else {
 #if DEBUG
             recordImageSendDebugEvent(
                 .sendResult,
@@ -1228,6 +1281,14 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         return true
     }
 
+    private func isTextWithinSendByteLimit(_ text: String) -> Bool {
+        text.lengthOfBytes(using: .utf8) <= Self.providerMaxTextMessageBytes
+    }
+
+    private func nextClientMessageId() -> String {
+        "c_\(UUID().uuidString)"
+    }
+
     var canCancelCurrentPrompt: Bool {
         currentInFlightPromptSessionKey != nil
     }
@@ -1235,7 +1296,49 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
     func canCancelVisibleTypingPrompt(in sessionKey: String) -> Bool {
         let normalizedSessionKey = sessionKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !normalizedSessionKey.isEmpty else { return false }
-        return isAssistantTyping && typingSessionKey == normalizedSessionKey
+        return shouldShowTypingIndicator(in: normalizedSessionKey)
+    }
+
+    func shouldShowTypingIndicator(in sessionKey: String) -> Bool {
+        let normalizedSessionKey = sessionKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedSessionKey.isEmpty else { return false }
+        if isAssistantTyping, typingSessionKey == normalizedSessionKey {
+            return true
+        }
+        guard let status = sessionStatusBySessionKey[normalizedSessionKey] else { return false }
+        switch status.run.state {
+        case .running, .queued:
+            return true
+        case .idle, .unknown:
+            return false
+        }
+    }
+
+    func typingIndicatorMorphTargetMessageId(in sessionKey: String) -> String? {
+        let normalizedSessionKey = sessionKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedSessionKey.isEmpty else { return nil }
+        return typingIndicatorMorphTargetMessageIdBySessionKey[normalizedSessionKey]
+    }
+
+    func consumeTypingIndicatorMorphTargetMessageId(_ messageId: String?, in sessionKey: String) {
+        let normalizedSessionKey = sessionKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedSessionKey.isEmpty,
+              let messageId,
+              typingIndicatorMorphTargetMessageIdBySessionKey[normalizedSessionKey] == messageId else {
+            return
+        }
+        typingIndicatorMorphTargetMessageIdBySessionKey.removeValue(forKey: normalizedSessionKey)
+        shouldMorphTypingIndicator = !typingIndicatorMorphTargetMessageIdBySessionKey.isEmpty
+    }
+
+    private func clearTypingIndicatorMorphTarget(for sessionKey: String) {
+        typingIndicatorMorphTargetMessageIdBySessionKey.removeValue(forKey: sessionKey)
+        shouldMorphTypingIndicator = !typingIndicatorMorphTargetMessageIdBySessionKey.isEmpty
+    }
+
+    private func clearAllTypingIndicatorMorphTargets() {
+        typingIndicatorMorphTargetMessageIdBySessionKey.removeAll()
+        shouldMorphTypingIndicator = false
     }
 
     func canCancelCurrentPrompt(in sessionKey: String) -> Bool {
@@ -1298,6 +1401,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
             )
             if response.ok {
                 toastManager.show(response.message ?? "Prompt cancellation requested.")
+                clearLiveProgress(sessionKey: sessionKey, runId: nil, messageId: nil)
                 scheduleSessionStatusRefresh(for: sessionKey, reason: "cancelCurrentPrompt")
                 return
             }
@@ -1319,15 +1423,260 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         }
     }
 
-    func send() {
+    var crossChatNotificationBubbles: [CrossChatNotificationBubble] {
+        crossChatNotificationBubblesBySourceChatId.values.sorted {
+            if $0.lastAssistantActivityAt == $1.lastAssistantActivityAt {
+                return $0.sourceChatId < $1.sourceChatId
+            }
+            return $0.lastAssistantActivityAt > $1.lastAssistantActivityAt
+        }
+    }
+
+    func dismissCrossChatNotification(sourceChatId: String, markSourceRead: Bool = true) {
+        if markSourceRead {
+            markSessionRead(sourceChatId, preferServerTail: true)
+        }
+        animateCrossChatNotificationDismissal {
+            self.crossChatNotificationBubblesBySourceChatId.removeValue(forKey: sourceChatId)
+        }
+    }
+
+    func dismissAllCrossChatNotifications() {
+        for sourceChatId in crossChatNotificationBubblesBySourceChatId.keys {
+            markSessionRead(sourceChatId, preferServerTail: true)
+        }
+        animateCrossChatNotificationDismissal {
+            self.crossChatNotificationBubblesBySourceChatId.removeAll()
+        }
+    }
+
+#if DEBUG
+    func debugSeedCrossChatNotificationsForDockProof() {
+        let now = Date()
+        let mainSessionKey = SessionKey.clawlineMain(userId: auth.currentUserId ?? "debug-user")
+        let alphaSessionKey = "agent:main:clawline:ui-test:s_t1174_a"
+        let betaSessionKey = "agent:main:clawline:ui-test:s_t1174_b"
+        let streams = [
+            StreamSession(
+                sessionKey: mainSessionKey,
+                displayName: "T1174 Main",
+                kind: "main",
+                orderIndex: 0,
+                isBuiltIn: true,
+                createdAt: now,
+                updatedAt: now
+            ),
+            StreamSession(
+                sessionKey: alphaSessionKey,
+                displayName: "T1174 Alpha Chat",
+                kind: "custom",
+                orderIndex: 1,
+                isBuiltIn: false,
+                createdAt: now,
+                updatedAt: now,
+                trackingMode: .adopted
+            ),
+            StreamSession(
+                sessionKey: betaSessionKey,
+                displayName: "T1174 Beta Chat",
+                kind: "custom",
+                orderIndex: 2,
+                isBuiltIn: false,
+                createdAt: now,
+                updatedAt: now,
+                trackingMode: .adopted
+            )
+        ]
+        for stream in streams {
+            streamsBySessionKey[stream.sessionKey] = stream
+            syntheticSessionKeys.insert(stream.sessionKey)
+        }
+        let alphaMessage = Message(
+            id: "s_t1174_alpha_chat_message",
+            role: .assistant,
+            content: "T1174 Alpha Chat proof message",
+            timestamp: now,
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: alphaSessionKey,
+            sender: nil
+        )
+        let betaMessage = Message(
+            id: "s_t1174_beta_chat_message",
+            role: .assistant,
+            content: "T1174 Beta Chat proof message",
+            timestamp: now,
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: betaSessionKey,
+            sender: nil
+        )
+        sessionMessages[alphaSessionKey] = [alphaMessage]
+        sessionMessages[betaSessionKey] = [betaMessage]
+        persistMessages([alphaMessage], for: alphaSessionKey)
+        persistMessages([betaMessage], for: betaSessionKey)
+        recalculateOrderedSessionKeys()
+        SessionRegistry.shared.replace(with: orderedStreams)
+        ensureDefaultActiveSessionIfNeeded()
+        if ProcessInfo.processInfo.arguments.contains("--debug-cross-chat-notification-dock-proof-start-on-alpha") {
+            setEngineActiveSessionKey(alphaSessionKey)
+            setUISelectedSessionKey(alphaSessionKey)
+        }
+
+        crossChatNotificationBubblesBySourceChatId = [
+            alphaSessionKey: CrossChatNotificationBubble(
+                sourceChatId: alphaSessionKey,
+                sourceTitle: "T1174 Alpha",
+                entries: [
+                    CrossChatAssistantNotificationEntry(
+                        id: "s_t1174_notification_a",
+                        content: "Dock tap proof notification A",
+                        timestamp: now
+                    )
+                ],
+                lastAssistantActivityAt: now
+            ),
+            betaSessionKey: CrossChatNotificationBubble(
+                sourceChatId: betaSessionKey,
+                sourceTitle: "T1174 Beta",
+                entries: [
+                    CrossChatAssistantNotificationEntry(
+                        id: "s_t1174_notification_b",
+                        content: "Dock tap proof notification B",
+                        timestamp: now.addingTimeInterval(-1)
+                    )
+                ],
+                lastAssistantActivityAt: now.addingTimeInterval(-1)
+            )
+        ]
+    }
+#endif
+
+    private func animateCrossChatNotificationDismissal(_ updates: @escaping () -> Void) {
+        guard let crossChatNotificationDismissAnimator else {
+            updates()
+            return
+        }
+        crossChatNotificationDismissAnimator(updates)
+    }
+
+    func openCrossChatNotificationReply(sourceChatId: String) {
+        guard var bubble = crossChatNotificationBubblesBySourceChatId[sourceChatId] else { return }
+        bubble.isReplying = true
+        crossChatNotificationBubblesBySourceChatId[sourceChatId] = bubble
+        closeOverflowingCrossChatNotificationReplies()
+    }
+
+    func toggleCrossChatNotificationReply(sourceChatId: String) {
+        guard let bubble = crossChatNotificationBubblesBySourceChatId[sourceChatId] else { return }
+        if bubble.isReplying {
+            closeCrossChatNotificationReply(sourceChatId: sourceChatId)
+        } else {
+            openCrossChatNotificationReply(sourceChatId: sourceChatId)
+        }
+    }
+
+    func closeCrossChatNotificationReply(sourceChatId: String) {
+        guard var bubble = crossChatNotificationBubblesBySourceChatId[sourceChatId] else { return }
+        bubble.isReplying = false
+        bubble.replyDraft = ""
+        crossChatNotificationBubblesBySourceChatId[sourceChatId] = bubble
+    }
+
+    func setCrossChatNotificationReplyDraft(sourceChatId: String, draft: String) {
+        guard var bubble = crossChatNotificationBubblesBySourceChatId[sourceChatId] else { return }
+        bubble.replyDraft = draft
+        crossChatNotificationBubblesBySourceChatId[sourceChatId] = bubble
+    }
+
+    func isSendingCrossChatNotificationReply(sourceChatId: String) -> Bool {
+        isSending && activeCrossChatNotificationReplySourceChatId == sourceChatId
+    }
+
+    func canImmediatelySendCrossChatNotificationReply(sourceChatId: String) -> Bool {
+        guard !isSending else { return false }
+        guard let bubble = crossChatNotificationBubblesBySourceChatId[sourceChatId] else { return false }
+        let text = bubble.replyDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, isTextWithinSendByteLimit(text) else { return false }
+        guard streamsBySessionKey[sourceChatId] != nil else { return false }
+        guard transportSendButtonConnectionState == .connected else { return false }
+
+        switch sendProvisioningState(for: sourceChatId) {
+        case .ready:
+            return true
+        case .waiting, .unavailable:
+            return false
+        }
+    }
+
+    func sendCrossChatNotificationReply(sourceChatId: String) {
         guard !isSending else { return }
-        let referencedIds = Set(inputContent.pendingAttachmentIds())
+        guard let bubble = crossChatNotificationBubblesBySourceChatId[sourceChatId] else { return }
+        let text = bubble.replyDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        guard streamsBySessionKey[sourceChatId] != nil else {
+            toastManager.show("This stream is unavailable. Switch streams and try again.")
+            return
+        }
+        guard validateTextByteLimitForSend(text) else { return }
+
+        switch sendProvisioningState(for: sourceChatId) {
+        case .ready:
+            guard transportSendButtonConnectionState == .connected else {
+                toastManager.show("Could not send; not connected.")
+                return
+            }
+            beginSend(
+                content: text,
+                pendingAttachments: [],
+                references: [],
+                sessionKey: sourceChatId,
+                clearInputOnSuccess: false,
+                crossChatNotificationReplySourceChatId: sourceChatId,
+                onSuccess: { [weak self] _ in
+                    self?.dismissCrossChatNotification(sourceChatId: sourceChatId)
+                }
+            )
+        case .waiting:
+            return
+        case .unavailable:
+            toastManager.show("This stream is unavailable. Switch streams and try again.")
+        }
+    }
+
+    func send() {
+        _ = sendResolved(destinationSessionKey: nil)
+    }
+
+    @discardableResult
+    func sendCrossChatMention(to destinationSessionKey: String) -> Bool {
+        let routedContent = inputContent.contentAfterCrossChatMentionAttachment() ?? inputContent
+        let didDispatch = sendResolved(
+            destinationSessionKey: destinationSessionKey,
+            sourceContent: routedContent
+        )
+        if didDispatch {
+            clearInput()
+        }
+        return didDispatch
+    }
+
+    @discardableResult
+    private func sendResolved(
+        destinationSessionKey: String?,
+        sourceContent: NSAttributedString? = nil
+    ) -> Bool {
+        guard !isSending else { return false }
+        let sendContent = sourceContent ?? inputContent
+        let referencedIds = Set(sendContent.pendingAttachmentIds())
 #if DEBUG
         let transportSnapshot = sendTransportSnapshot()
         imageSendLastTransportSnapshot = transportSnapshot
         recordImageSendDebugEvent(
             .sendTapped,
-            detail: "textLen=\(inputContent.length) attachmentCount=\(referencedIds.count) \(transportSnapshot)"
+            detail: "textLen=\(sendContent.length) attachmentCount=\(referencedIds.count) \(transportSnapshot)"
         )
 #endif
         let stagedOnly = attachmentData.keys.filter { !referencedIds.contains($0) }
@@ -1339,37 +1688,62 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
             )
 #endif
             toastManager.show("Finishing attachment…")
-            return
+            return false
         }
         pruneAttachmentData()
-        let (text, pendingIds) = inputContent.contentForSending()
+        let (text, pendingIds) = sendContent.contentForSending()
         let pendingAttachments = pendingIds.compactMap { attachmentData[$0] }
+        let referenceIds = inputContent.pendingMessageReferenceIds()
+        let pendingReferences = referenceIds.compactMap { messageReferenceData[$0] }
+        guard pendingReferences.count == referenceIds.count else {
+#if DEBUG
+            recordImageSendDebugEvent(.sendResult, detail: "failure reason=missing_message_reference")
+#endif
+            toastManager.show("Referenced message is unavailable.")
+            return false
+        }
+        let referenceContexts = pendingReferences.compactMap(MessageReferenceContext.init(reference:))
+        guard referenceContexts.count == pendingReferences.count else {
+#if DEBUG
+            recordImageSendDebugEvent(.sendResult, detail: "failure reason=missing_llm_visible_message_id")
+#endif
+            toastManager.show(ChatViewModel.missingReplyVisibleIdMessage)
+            return false
+        }
+        let replyToMessageId = pendingReferences.first?.llmVisibleMessageId
+        let replyToClientMessageId = pendingReferences.first?.clientMessageId
 
         guard !text.isEmpty || !pendingAttachments.isEmpty else {
 #if DEBUG
             recordImageSendDebugEvent(.sendResult, detail: "failure reason=empty_input")
 #endif
-            return
+            return false
         }
 
         if !validateTextByteLimitForSend(text) {
-            return
+            return false
         }
 
-        if pendingAttachments.isEmpty && handleSlashCommand(text) {
-            return
+        let crossChatDestination = destinationSessionKey?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if crossChatDestination == nil, pendingAttachments.isEmpty && handleSlashCommand(text) {
+            return true
         }
 
         ensureDefaultActiveSessionIfNeeded()
-        let outboundSessionKey = engineActiveSessionKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let outboundSessionKey = crossChatDestination ?? engineActiveSessionKey.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !outboundSessionKey.isEmpty else {
 #if DEBUG
             recordImageSendDebugEvent(.sendResult, detail: "failure reason=no_stream_selected")
 #endif
             toastManager.show("No stream selected.")
-            return
+            return false
         }
-
+        if crossChatDestination != nil, streamsBySessionKey[outboundSessionKey] == nil {
+#if DEBUG
+            recordImageSendDebugEvent(.sendResult, detail: "failure reason=cross_chat_destination_unavailable")
+#endif
+            return false
+        }
         switch sendProvisioningState(for: outboundSessionKey) {
         case .ready:
             guard transportSendButtonConnectionState == .connected else {
@@ -1380,9 +1754,17 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
                 )
 #endif
                 toastManager.show("Could not send; not connected.")
-                return
+                return false
             }
-            beginSend(content: text, pendingAttachments: pendingAttachments, sessionKey: outboundSessionKey)
+            beginSend(
+                content: text,
+                pendingAttachments: pendingAttachments,
+                references: referenceContexts,
+                replyToMessageId: replyToMessageId,
+                replyToClientMessageId: replyToClientMessageId,
+                sessionKey: outboundSessionKey
+            )
+            return true
         case .waiting:
 #if DEBUG
             recordImageSendDebugEvent(
@@ -1390,11 +1772,27 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
                 detail: "queued reason=provisioning_waiting \(sendTransportSnapshot())"
             )
 #endif
+            let pendingAttachmentIds = pendingAttachments.map(\.id)
+            if let pendingProvisionedSend,
+               pendingProvisionedSend.content == text,
+               pendingProvisionedSend.sessionKey == outboundSessionKey,
+               pendingProvisionedSend.crossChatNotificationReplySourceChatId == nil,
+               pendingProvisionedSend.attachments.map(\.id) == pendingAttachmentIds,
+               pendingProvisionedSend.replyToMessageId == replyToMessageId,
+               pendingProvisionedSend.replyToClientMessageId == replyToClientMessageId {
+                return true
+            }
             pendingProvisionedSend = PendingProvisionedSend(
+                clientId: nextClientMessageId(),
                 content: text,
                 attachments: pendingAttachments,
-                sessionKey: outboundSessionKey
+                references: referenceContexts,
+                replyToMessageId: replyToMessageId,
+                replyToClientMessageId: replyToClientMessageId,
+                sessionKey: outboundSessionKey,
+                crossChatNotificationReplySourceChatId: nil
             )
+            return true
         case .unavailable:
 #if DEBUG
             recordImageSendDebugEvent(
@@ -1403,19 +1801,26 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
             )
 #endif
             toastManager.show("This stream is unavailable. Switch streams and try again.")
+            return false
         }
-    }
-
-    func sendCommand() {
-        send()
     }
 
     private func beginSend(content: String,
                            pendingAttachments: [PendingAttachment],
+                           references: [MessageReferenceContext],
+                           replyToMessageId: String? = nil,
+                           replyToClientMessageId: String? = nil,
                            sessionKey: String,
-                           clearInputOnSuccess: Bool = true) {
-        let clientId = "c_\(UUID().uuidString)"
+                           clientId: String? = nil,
+                           clearInputOnSuccess: Bool = true,
+                           crossChatNotificationReplySourceChatId: String? = nil,
+                           onSuccess: (@MainActor (_ clientId: String) -> Void)? = nil) {
+        let clientId = clientId ?? nextClientMessageId()
         activeClientMessageId = clientId
+        activeCrossChatNotificationReplySourceChatId = crossChatNotificationReplySourceChatId
+        if let crossChatNotificationReplySourceChatId {
+            crossChatNotificationReplySourceByClientMessageId[clientId] = crossChatNotificationReplySourceChatId
+        }
 #if DEBUG
         recordImageSendDebugEvent(
             .sendDispatched,
@@ -1424,6 +1829,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
 #endif
 
         isSending = true  // Set immediately to prevent double-tap race condition
+        activeSendHasReachedTransport = false
         let placeholder = Message(
             id: clientId,
             role: .user,
@@ -1432,18 +1838,24 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
             streaming: false,
             attachments: makeDisplayAttachments(from: pendingAttachments),
             deviceId: deviceId,
-            sessionKey: sessionKey
+            sessionKey: sessionKey,
+            replyToMessageId: replyToMessageId,
+            replyToClientMessageId: replyToClientMessageId
         )
-        appendMessage(placeholder)
+        upsert(sessionKey: sessionKey, message: placeholder, sourceFlags: .local)
         pendingLocalMessages.append(PendingLocalMessage(id: clientId, sessionKey: sessionKey))
+        scheduleSessionStatusRefresh(for: sessionKey, reason: "sendDispatched")
+        bumpSendIndicatorRevision()
 
         sendTask = Task { [weak self] in
             await self?.performSend(
                 clientId: clientId,
                 content: content,
                 pendingAttachments: pendingAttachments,
+                references: references,
                 sessionKey: sessionKey,
-                clearInputOnSuccess: clearInputOnSuccess
+                clearInputOnSuccess: clearInputOnSuccess,
+                onSuccess: onSuccess
             )
         }
     }
@@ -1468,7 +1880,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
 
     func resendFailedMessage(messageId: String) {
         guard !isSending else { return }
-        guard let (message, sessionKey, index) = findMessage(id: messageId) else { return }
+        guard let (message, sessionKey, _) = findMessage(id: messageId) else { return }
         guard validateTextByteLimitForSend(message.content) else { return }
 
         let clientId = "c_\(UUID().uuidString)"
@@ -1483,18 +1895,19 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
             sessionKey: sessionKey
         )
 
-        var messageList = sessionMessages[sessionKey] ?? []
-        messageList.remove(at: index)
-        messageList.append(resentMessage)
-        setMessages(messageList, for: sessionKey)
+        remove(sessionKey: sessionKey, messageId: messageId, reason: "retry_replace")
+        upsert(sessionKey: sessionKey, message: resentMessage, sourceFlags: .local)
 
         pendingLocalMessages.removeAll { $0.id == messageId }
         ackedPendingLocalMessageIDs.remove(messageId)
         pendingLocalMessages.append(PendingLocalMessage(id: clientId, sessionKey: sessionKey))
         messageFailures.removeValue(forKey: messageId)
+        bumpSendIndicatorRevision()
 
         isSending = true
         activeClientMessageId = clientId
+        activeCrossChatNotificationReplySourceChatId = nil
+        activeSendHasReachedTransport = false
 
         sendTask = Task { [weak self] in
             await self?.performRetrySend(
@@ -1507,13 +1920,33 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
     }
 
     func cancelSend() {
+        cancelActiveSend(shouldGhostOnlyBeforeTransport: true)
+    }
+
+    private func cancelSendForTeardown() {
+        cancelActiveSend(shouldGhostOnlyBeforeTransport: false)
+    }
+
+    private func cancelActiveSend(shouldGhostOnlyBeforeTransport: Bool) {
         guard isSending else { return }
+        if shouldGhostOnlyBeforeTransport, activeSendHasReachedTransport {
+            return
+        }
+        let canceledClientMessageId = activeClientMessageId
+        let shouldGhost = !activeSendHasReachedTransport
         sendTask?.cancel()
         sendTask = nil
-        if let activeClientMessageId {
-            removePlaceholder(withId: activeClientMessageId)
+        if let canceledClientMessageId {
+            if shouldGhost {
+                markLocalMessageCanceled(id: canceledClientMessageId)
+            } else {
+                removePendingLocalMessage(id: canceledClientMessageId, reason: "cancel_send")
+            }
+            crossChatNotificationReplySourceByClientMessageId.removeValue(forKey: canceledClientMessageId)
         }
         activeClientMessageId = nil
+        activeCrossChatNotificationReplySourceChatId = nil
+        activeSendHasReachedTransport = false
         isSending = false
     }
 
@@ -1528,6 +1961,42 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
             detail: "count=\(attachments.count) source=\(source)"
         )
 #endif
+    }
+
+    func insertMessageIntoPrompt(_ message: Message, selectionRange: NSRange) -> NSRange {
+        let insertion = NSAttributedString(
+            string: message.content,
+            attributes: [
+                .font: UIFont.clawline(.bodyText),
+                .foregroundColor: UIColor.label
+            ]
+        )
+        let mutable = NSMutableAttributedString(attributedString: inputContent)
+        let safeRange = Self.clampedRange(selectionRange, length: mutable.length)
+        mutable.replaceCharacters(in: safeRange, with: insertion)
+        inputContent = mutable
+        inputResetToken &+= 1
+        return NSRange(location: safeRange.location + insertion.length, length: 0)
+    }
+
+    func referenceMessageInPrompt(_ message: Message, selectionRange: NSRange) -> NSRange {
+        guard message.hasStableReferenceIdentity else {
+            toastManager.show(Self.missingReplyVisibleIdMessage)
+            return selectionRange
+        }
+        let reference = PendingMessageReference(message: message)
+        let attachment = MessageReferenceTextAttachment(reference: reference)
+        let token = NSMutableAttributedString(attachment: attachment)
+        token.append(NSAttributedString(string: " "))
+
+        let mutable = NSMutableAttributedString(attributedString: inputContent)
+        mutable.removeMessageReferences()
+        mutable.insert(token, at: 0)
+        messageReferenceData.removeAll()
+        messageReferenceData[reference.id] = reference
+        inputContent = mutable
+        inputResetToken &+= 1
+        return NSRange(location: token.length, length: 0)
     }
 
     func beginAttachmentStaging() {
@@ -1551,7 +2020,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
     }
 
     func logout() {
-        cancelSend()
+        cancelSendForTeardown()
         observationStartupTask?.cancel()
         observationStartupTask = nil
         activationTask?.cancel()
@@ -1573,35 +2042,22 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
             await lifecycleCoordinator.setAuthToken(nil)
         }
         chatService.disconnect()
-        chatService.clearReplayCursors()
-        var sessionKeysToClear = Set(sessionMessages.keys)
-        sessionKeysToClear.formUnion(streamsBySessionKey.keys)
-        for key in sessionKeysToClear {
-            persistLastReadMessageId(nil, for: key)
-            persistLastServerMessageId(nil, for: key)
-        }
-        lastReadMessageIdBySession.removeAll()
-        streamTailStateBySession.removeAll()
-        streamDotStateBySession.removeAll()
         auth.clearCredentials()
-        messageFailures.removeAll()
         clearInput()
         pendingAttachmentStageCount = 0
-        sessionMessages = [:]
-        clearActiveSession(clearPersistedActiveSessionKey: false)
-        streamsBySessionKey = [:]
-        orderedSessionKeys = []
-        syntheticSessionKeys = []
-        pendingLocalMessages.removeAll()
-        ackedPendingLocalMessageIDs.removeAll()
+        clearAllForLogout(reason: "logout")
         isAssistantTyping = false
         typingSessionKey = nil
+        clearAllLiveProgress()
         shouldMorphTypingIndicator = false
+        clearAllTypingIndicatorMorphTargets()
         connectionStableTask?.cancel()
         connectionStableTask = nil
         restoredSessionKeys.removeAll()
         forceReReadGenerationBySession.removeAll()
         restoredStreamMetadataForUserId = nil
+        crossChatNotificationBubblesBySourceChatId.removeAll()
+        unavailableCrossChatNotificationSourceIds.removeAll()
         resetSessionProvisioningState(clearPendingSend: true)
         clearMessageCache()
         clearStreamMetadataCache()
@@ -1776,14 +2232,11 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
     }
 
     private func reconnectActiveTransportForControlPlane() async throws {
-        guard auth.token != nil else {
+        guard let token = auth.token else {
             throw ProviderChatService.Error.notConnected
         }
-        await startObservingIfNeeded(origin: "reconnectActiveTransportForControlPlane")
-        let ready = await lifecycleCoordinator.ensureManagedTransportReady()
-        guard ready else {
-            throw ProviderChatService.Error.notConnected
-        }
+        let lastMessageId = legacyReplayCursorForActiveStream()
+        try await chatService.connect(token: token, lastMessageId: lastMessageId)
     }
 
     private static func makeIdempotencyKey() -> String {
@@ -1795,16 +2248,6 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         logger.info(
             "incoming id=\(message.id, privacy: .public) sessionKey=\(message.sessionKey, privacy: .public) stream=\(message.stream.rawValue, privacy: .public) role=\(String(describing: message.role), privacy: .public) streaming=\(message.streaming, privacy: .public) deviceId=\(message.deviceId ?? "nil", privacy: .public) snippet=\"\(snippet, privacy: .public)\""
         )
-
-        if message.id.hasPrefix("s_") {
-            chatService.setReplayCursor(message.id, for: message.sessionKey)
-            Task { await lifecycleCoordinator.updateCanonicalCursor(message.id) }
-            lastServerMessageIdBySession[message.sessionKey] = message.id
-            persistLastServerMessageId(message.id, for: message.sessionKey)
-            if message.sessionKey == engineActiveSessionKey {
-                lastServerMessageId = message.id
-            }
-        }
 
         if shouldSuppressInteractiveCallbackEcho(message) {
             logger.info(
@@ -1833,30 +2276,24 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
             )
         }
 
-        let canSynthesizeUnknownStream =
-            message.sessionKey == streamMainSessionKey()
-            || message.sessionKey == engineActiveSessionKey
-            || message.sessionKey == uiSelectedSessionKey
-            || syntheticSessionKeys.contains(message.sessionKey)
-            || !hasReceivedSessionProvisioning
-        guard streamsBySessionKey[message.sessionKey] != nil || canSynthesizeUnknownStream else {
-            logger.info(
-                "incoming ignored unknown sessionKey=\(message.sessionKey, privacy: .public) id=\(message.id, privacy: .public)"
-            )
-            return
-        }
-
         // Check if this is an assistant message arriving while typing indicator is visible.
         // If so, the UI should morph the typing indicator into this message instead of inserting new.
         ensureStreamEntry(for: message.sessionKey)
+        if message.role == .assistant, !message.streaming {
+            clearLiveProgressForAssistantFinal(message)
+        }
 
         if message.role == .assistant,
            isAssistantTyping,
            typingSessionKey == message.sessionKey {
             shouldMorphTypingIndicator = true
+            typingIndicatorMorphTargetMessageIdBySessionKey[message.sessionKey] = resolvedMessage.id
             isAssistantTyping = false
             self.typingSessionKey = nil
-        } else {
+        } else if message.role == .assistant,
+                  typingIndicatorMorphTargetMessageIdBySessionKey[message.sessionKey] == message.id {
+            clearTypingIndicatorMorphTarget(for: message.sessionKey)
+        } else if typingIndicatorMorphTargetMessageIdBySessionKey.isEmpty {
             shouldMorphTypingIndicator = false
         }
 
@@ -1868,21 +2305,12 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         if resolvedMessage.role == .assistant,
            !resolvedMessage.streaming,
            let replyToMessageId = normalizedServerEventID(resolvedMessage.replyToMessageId) {
-            messageFailures.removeValue(forKey: replyToMessageId)
+            if messageFailures.removeValue(forKey: replyToMessageId) != nil {
+                bumpSendIndicatorRevision()
+            }
         }
 
-        ensureSessionStorage(for: resolvedMessage.sessionKey)
-        var messageList = sessionMessages[resolvedMessage.sessionKey] ?? []
-        let didAppendNewMessage: Bool
-        if let existingIndex = messageList.firstIndex(where: { $0.id == resolvedMessage.id }) {
-            logger.info("incoming duplicate id=\(resolvedMessage.id, privacy: .public) index=\(existingIndex, privacy: .public) sessionKey=\(resolvedMessage.sessionKey, privacy: .public)")
-            messageList[existingIndex] = resolvedMessage
-            didAppendNewMessage = false
-        } else {
-            messageList.append(resolvedMessage)
-            didAppendNewMessage = true
-        }
-        setMessages(messageList, for: resolvedMessage.sessionKey)
+        let didAppendNewMessage = upsert(sessionKey: resolvedMessage.sessionKey, message: resolvedMessage, sourceFlags: .server)
         if resolvedMessage.role == .assistant, !resolvedMessage.streaming {
             scheduleSessionStatusRefresh(for: resolvedMessage.sessionKey, reason: "assistantResponseCommitted")
         }
@@ -1890,9 +2318,70 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
            resolvedMessage.id.hasPrefix("s_") {
             markSessionRead(resolvedMessage.sessionKey)
         }
+        applyCrossChatAssistantNotificationIfNeeded(for: resolvedMessage)
         maybeTriggerAssistantIncomingHaptic(for: resolvedMessage, didAppendNewMessage: didAppendNewMessage)
 
         resolveAssetAttachmentsIfNeeded(for: resolvedMessage)
+    }
+
+    private func applyCrossChatAssistantNotificationIfNeeded(for message: Message) {
+        guard message.role == .assistant else { return }
+        guard streamsBySessionKey[message.sessionKey] != nil else { return }
+        guard !unavailableCrossChatNotificationSourceIds.contains(message.sessionKey) else { return }
+        guard !hasReceivedSessionProvisioning || isLocallySendableSessionKey(message.sessionKey) else { return }
+        let visibleSessionKey = uiSelectedSessionKey.isEmpty ? engineActiveSessionKey : uiSelectedSessionKey
+        guard message.sessionKey != visibleSessionKey else { return }
+
+        let title = stream(for: message.sessionKey)?.displayName
+            ?? message.sender
+            ?? message.sessionKey
+        var bubble = crossChatNotificationBubblesBySourceChatId[message.sessionKey] ?? CrossChatNotificationBubble(
+            sourceChatId: message.sessionKey,
+            sourceTitle: title,
+            entries: [],
+            lastAssistantActivityAt: message.timestamp
+        )
+        bubble.sourceTitle = title
+        let existingSeparatorTimestamp = bubble.entries.first(where: { $0.id == message.id })?.appendSeparatorTimestamp
+        let appendSeparatorTimestamp = existingSeparatorTimestamp
+            ?? (bubble.entries.contains { $0.id != message.id } ? message.timestamp : nil)
+        let entry = CrossChatAssistantNotificationEntry(
+            id: message.id,
+            content: message.content,
+            timestamp: message.timestamp,
+            appendSeparatorTimestamp: appendSeparatorTimestamp
+        )
+        if let existingIndex = bubble.entries.firstIndex(where: { $0.id == message.id }) {
+            bubble.entries.remove(at: existingIndex)
+        }
+        bubble.entries.insert(entry, at: 0)
+        bubble.lastAssistantActivityAt = message.timestamp
+        crossChatNotificationBubblesBySourceChatId[message.sessionKey] = bubble
+        closeOverflowingCrossChatNotificationReplies()
+    }
+
+    func closeOverflowingCrossChatNotificationReplies(visibleCapacity: Int = 10) {
+        let capacity = max(0, visibleCapacity)
+        let overflowSourceChatIds = crossChatNotificationBubbles.dropFirst(capacity).map(\.sourceChatId)
+        closeCrossChatNotificationReplies(sourceChatIds: overflowSourceChatIds)
+    }
+
+    func closeOverflowingCrossChatNotificationReplies(visibleSourceChatIds: Set<String>) {
+        let overflowSourceChatIds = crossChatNotificationBubblesBySourceChatId.keys.filter {
+            !visibleSourceChatIds.contains($0)
+        }
+        closeCrossChatNotificationReplies(sourceChatIds: overflowSourceChatIds)
+    }
+
+    private func closeCrossChatNotificationReplies(sourceChatIds: some Sequence<String>) {
+        for sourceChatId in sourceChatIds {
+            guard var bubble = crossChatNotificationBubblesBySourceChatId[sourceChatId] else { continue }
+            guard !bubble.isReplying else { continue }
+            guard bubble.isReplying || !bubble.replyDraft.isEmpty else { continue }
+            bubble.isReplying = false
+            bubble.replyDraft = ""
+            crossChatNotificationBubblesBySourceChatId[sourceChatId] = bubble
+        }
     }
 
     private func shouldSuppressInteractiveCallbackEcho(_ message: Message) -> Bool {
@@ -1937,6 +2426,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         pendingLocalMessages.removeAll()
         ackedPendingLocalMessageIDs.removeAll()
         messageFailures.removeAll()
+        bumpSendIndicatorRevision()
         let cursorBackedSessionKeys = Set(chatService.replayCursorSnapshot().keys)
         chatService.clearReplayCursors()
         clearMessageCache()
@@ -1960,17 +2450,11 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
             .union(pending.messagesBySessionKey.keys)
         for sessionKey in allSessionKeys {
             let replayMessages = pending.messagesBySessionKey[sessionKey] ?? []
-            if pending.cursorBackedSessionKeys.contains(sessionKey) {
-                guard !replayMessages.isEmpty else { continue }
-                let merged = mergedMessagesPreservingOrder(
-                    existing: sessionMessages[sessionKey] ?? [],
-                    incoming: replayMessages
-                )
-                setMessages(merged, for: sessionKey)
-            } else {
+            if !pending.cursorBackedSessionKeys.contains(sessionKey) {
                 removeCachedMessages(for: sessionKey)
-                setMessages(replayMessages, for: sessionKey)
+                clearSessionMessages(sessionKey: sessionKey, reason: "history_reset_replay")
             }
+            replayMessages.forEach { upsert(sessionKey: sessionKey, message: $0, sourceFlags: .server) }
             applyReplayMessageSideEffects(replayMessages, sessionKey: sessionKey)
 
             if let replayCursor = lastServerMessageId(from: replayMessages) {
@@ -1990,20 +2474,6 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
            replayMessages.contains(where: { $0.id.hasPrefix("s_") }) {
             markSessionRead(sessionKey)
         }
-    }
-
-    private func mergedMessagesPreservingOrder(existing: [Message], incoming: [Message]) -> [Message] {
-        guard !existing.isEmpty else { return incoming }
-        guard !incoming.isEmpty else { return existing }
-        var merged = existing
-        for message in incoming {
-            if let index = merged.firstIndex(where: { $0.id == message.id }) {
-                merged[index] = message
-            } else {
-                merged.append(message)
-            }
-        }
-        return merged
     }
 
     private func maybeTriggerAssistantIncomingHaptic(for message: Message, didAppendNewMessage: Bool) {
@@ -2105,14 +2575,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
             )
 
             await MainActor.run {
-                self.ensureSessionStorage(for: updatedMessage.sessionKey)
-                var messageList = self.sessionMessages[updatedMessage.sessionKey] ?? []
-                if let existingIndex = messageList.firstIndex(where: { $0.id == updatedMessage.id }) {
-                    messageList[existingIndex] = updatedMessage
-                } else {
-                    messageList.append(updatedMessage)
-                }
-                self.setMessages(messageList, for: updatedMessage.sessionKey)
+                _ = self.upsert(sessionKey: updatedMessage.sessionKey, message: updatedMessage, sourceFlags: .server)
             }
         }
     }
@@ -2145,56 +2608,160 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
             return false
         }
 
-        let pending = pendingLocalMessages.remove(at: pendingIndex)
-        ackedPendingLocalMessageIDs.remove(pending.id)
-        var placeholderSessionKey = pending.sessionKey
-        ensureSessionStorage(for: placeholderSessionKey)
-        var pendingList = sessionMessages[placeholderSessionKey] ?? []
-        var placeholderIndex = pendingList.firstIndex(where: { $0.id == pending.id })
-        if placeholderIndex == nil {
-            for (sessionKey, list) in sessionMessages {
-                if let index = list.firstIndex(where: { $0.id == pending.id }) {
-                    placeholderSessionKey = sessionKey
-                    pendingList = list
-                    placeholderIndex = index
-                    break
-                }
-            }
-        }
-        guard let resolvedIndex = placeholderIndex else {
+        let pending = pendingLocalMessages[pendingIndex]
+        guard let (pendingMessage, placeholderSessionKey, _) = findMessage(id: pending.id) else {
             return false
         }
+        pendingLocalMessages.remove(at: pendingIndex)
+        ackedPendingLocalMessageIDs.remove(pending.id)
+        bumpSendIndicatorRevision()
+        let replyToMessageId = message.replyToMessageId ?? pendingMessage.replyToMessageId
+        let replyToClientMessageId = message.replyToClientMessageId ?? pendingMessage.replyToClientMessageId
+        let resolvedMessage = Message(
+            id: message.id,
+            role: message.role,
+            content: message.content,
+            timestamp: message.timestamp,
+            streaming: message.streaming,
+            attachments: message.attachments,
+            deviceId: message.deviceId,
+            sessionKey: message.sessionKey,
+            sender: message.sender,
+            clientMessageId: message.clientMessageId,
+            replyToMessageId: replyToMessageId,
+            replyToClientMessageId: replyToClientMessageId,
+            deliveryState: message.deliveryState
+        )
 
-        if placeholderSessionKey == message.sessionKey {
-            pendingList[resolvedIndex] = message
-            setMessages(pendingList, for: placeholderSessionKey)
-        } else {
-            pendingList.remove(at: resolvedIndex)
-            if pendingList.isEmpty {
-                sessionMessages.removeValue(forKey: placeholderSessionKey)
-            } else {
-                setMessages(pendingList, for: placeholderSessionKey)
-            }
-            ensureSessionStorage(for: message.sessionKey)
-            var targetList = sessionMessages[message.sessionKey] ?? []
-            targetList.append(message)
-            setMessages(targetList, for: message.sessionKey)
-        }
+        remove(sessionKey: placeholderSessionKey, messageId: pending.id, reason: "replace_pending")
+        upsert(sessionKey: message.sessionKey, message: resolvedMessage, sourceFlags: .server)
         if activeClientMessageId == pending.id {
             activeClientMessageId = nil
+            activeCrossChatNotificationReplySourceChatId = nil
+            activeSendHasReachedTransport = false
+        }
+        if let replySourceChatId = crossChatNotificationReplySourceByClientMessageId.removeValue(forKey: pending.id) {
+            dismissCrossChatNotification(sourceChatId: replySourceChatId)
         }
         messageFailures.removeValue(forKey: pending.id)
         return true
     }
 
-    private func appendMessage(_ message: Message) {
-        ensureSessionStorage(for: message.sessionKey)
-        var messageList = sessionMessages[message.sessionKey] ?? []
-        messageList.append(message)
-        setMessages(messageList, for: message.sessionKey)
+    // MARK: - Message Stream Mutation Seam
+
+    @discardableResult
+    private func upsert(sessionKey: String, message: Message, sourceFlags: MessageSourceFlags) -> Bool {
+        var messageList = sessionMessages[sessionKey] ?? []
+        let didAppendNewMessage: Bool
+        if let existingIndex = messageList.firstIndex(where: { $0.id == message.id }) {
+            if sourceFlags.isCache {
+                return false
+            }
+            let existing = messageList[existingIndex]
+            let existingIsServer = normalizedServerEventID(existing.id) != nil
+            if !sourceFlags.isServer && existingIsServer {
+                return false
+            }
+            messageList[existingIndex] = message
+            didAppendNewMessage = false
+        } else {
+            messageList.append(message)
+            didAppendNewMessage = true
+        }
+        applyMessagesWrite(messageList, for: sessionKey)
+        return didAppendNewMessage
     }
 
-    private func setMessages(_ newMessages: [Message], for sessionKey: String) {
+    private func remove(sessionKey: String, messageId: String, reason: String) {
+        _ = reason
+        guard var messageList = sessionMessages[sessionKey],
+              let index = messageList.firstIndex(where: { $0.id == messageId }) else {
+            return
+        }
+        messageList.remove(at: index)
+        applyMessagesWrite(messageList, for: sessionKey)
+    }
+
+    private func removePendingLocalMessage(id: String, reason: String) {
+        if let pendingIndex = pendingLocalMessages.firstIndex(where: { $0.id == id }) {
+            let sessionKey = pendingLocalMessages[pendingIndex].sessionKey
+            pendingLocalMessages.remove(at: pendingIndex)
+            remove(sessionKey: sessionKey, messageId: id, reason: reason)
+        }
+        ackedPendingLocalMessageIDs.remove(id)
+        messageFailures.removeValue(forKey: id)
+        bumpSendIndicatorRevision()
+    }
+
+    private func clearSessionMessages(sessionKey: String, reason: String) {
+        _ = reason
+        applyMessagesWrite([], for: sessionKey)
+    }
+
+    private func removeSession(sessionKey: String, reason: String) {
+        _ = reason
+        sessionMessages.removeValue(forKey: sessionKey)
+        persistMessages([], for: sessionKey)
+        lastReadMessageIdBySession.removeValue(forKey: sessionKey)
+        streamTailStateBySession.removeValue(forKey: sessionKey)
+        streamDotStateBySession.removeValue(forKey: sessionKey)
+        sessionStatusBySessionKey.removeValue(forKey: sessionKey)
+        sessionStatusRefreshTasks.removeValue(forKey: sessionKey)?.cancel()
+        let removedIDs = Set(pendingLocalMessages.filter { $0.sessionKey == sessionKey }.map(\.id))
+        pendingLocalMessages.removeAll { $0.sessionKey == sessionKey }
+        ackedPendingLocalMessageIDs.subtract(removedIDs)
+        for id in removedIDs {
+            crossChatNotificationReplySourceByClientMessageId.removeValue(forKey: id)
+            messageFailures.removeValue(forKey: id)
+        }
+        if !removedIDs.isEmpty {
+            bumpSendIndicatorRevision()
+        }
+        chatService.setReplayCursor(nil, for: sessionKey)
+        persistLastReadMessageId(nil, for: sessionKey)
+        if typingSessionKey == sessionKey {
+            typingSessionKey = nil
+            isAssistantTyping = false
+        }
+        clearLiveProgress(sessionKey: sessionKey, runId: nil, messageId: nil)
+        clearTypingIndicatorMorphTarget(for: sessionKey)
+        if sessionKey == engineActiveSessionKey {
+            messages = []
+        }
+    }
+
+    private func clearAllForLogout(reason: String) {
+        _ = reason
+        let sessionKeysToClear = Set(sessionMessages.keys)
+            .union(streamsBySessionKey.keys)
+            .union(lastReadMessageIdBySession.keys)
+            .union(streamTailStateBySession.keys)
+            .union(streamDotStateBySession.keys)
+        for key in sessionKeysToClear {
+            persistLastReadMessageId(nil, for: key)
+            persistMessages([], for: key)
+        }
+        sessionMessages.removeAll()
+        streamsBySessionKey.removeAll()
+        orderedSessionKeys = []
+        syntheticSessionKeys.removeAll()
+        lastReadMessageIdBySession.removeAll()
+        streamTailStateBySession.removeAll()
+        streamDotStateBySession.removeAll()
+        messageFailures.removeAll()
+        pendingLocalMessages.removeAll()
+        ackedPendingLocalMessageIDs.removeAll()
+        activeClientMessageId = nil
+        activeCrossChatNotificationReplySourceChatId = nil
+        activeSendHasReachedTransport = false
+        isSending = false
+        crossChatNotificationReplySourceByClientMessageId.removeAll()
+        chatService.clearReplayCursors()
+        clearActiveSession(clearPersistedActiveSessionKey: false)
+        bumpSendIndicatorRevision()
+    }
+
+    private func applyMessagesWrite(_ newMessages: [Message], for sessionKey: String) {
         let oldCount = sessionMessages[sessionKey]?.count ?? 0
         sessionMessages[sessionKey] = newMessages
         let newCount = newMessages.count
@@ -2212,29 +2779,6 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
                 logger.info("message list duplicate ids detected sessionKey=\(sessionKey, privacy: .public) total=\(total, privacy: .public) unique=\(uniqueCount, privacy: .public)")
             }
         }
-    }
-
-    private func ensureSessionStorage(for sessionKey: String) {
-        if sessionMessages[sessionKey] == nil {
-            sessionMessages[sessionKey] = []
-        }
-    }
-
-    private func removePlaceholder(withId id: String) {
-        let keys = Array(sessionMessages.keys)
-        for key in keys {
-            var list = sessionMessages[key] ?? []
-            if let index = list.firstIndex(where: { $0.id == id }) {
-                list.remove(at: index)
-                setMessages(list, for: key)
-                break
-            }
-        }
-        if let pendingIndex = pendingLocalMessages.firstIndex(where: { $0.id == id }) {
-            pendingLocalMessages.remove(at: pendingIndex)
-        }
-        ackedPendingLocalMessageIDs.remove(id)
-        messageFailures.removeValue(forKey: id)
     }
 
     private func handleLifecycleOutput(_ output: ConnectionLifecycleOutput) {
@@ -2314,8 +2858,14 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         }
         pendingLocalMessages.removeAll()
         ackedPendingLocalMessageIDs.removeAll()
+        for id in pendingIds {
+            crossChatNotificationReplySourceByClientMessageId.removeValue(forKey: id)
+        }
+        bumpSendIndicatorRevision()
         if let activeClientMessageId, pendingIds.contains(activeClientMessageId) {
             self.activeClientMessageId = nil
+            self.activeCrossChatNotificationReplySourceChatId = nil
+            self.activeSendHasReachedTransport = false
             self.isSending = false
         }
     }
@@ -2323,33 +2873,46 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
     private func markPendingMessagesFailedForUnscopedMessageError(code: String, message: String?) {
         guard !pendingLocalMessages.isEmpty else { return }
         let pendingIds = Set(pendingLocalMessages.map(\.id))
-        for id in pendingIds {
+        let failedIds = pendingIds.subtracting(ackedPendingLocalMessageIDs)
+        for id in failedIds {
             messageFailures[id] = MessageFailure(code: code, message: message)
         }
-        pendingLocalMessages.removeAll()
-        ackedPendingLocalMessageIDs.removeAll()
-        if let activeClientMessageId, pendingIds.contains(activeClientMessageId) {
-            self.activeClientMessageId = nil
+        pendingLocalMessages.removeAll { failedIds.contains($0.id) }
+        ackedPendingLocalMessageIDs.subtract(failedIds)
+        for id in failedIds {
+            crossChatNotificationReplySourceByClientMessageId.removeValue(forKey: id)
         }
-        self.isSending = false
+        if !failedIds.isEmpty {
+            bumpSendIndicatorRevision()
+        }
+        if let activeClientMessageId, failedIds.contains(activeClientMessageId) {
+            self.activeClientMessageId = nil
+            self.activeCrossChatNotificationReplySourceChatId = nil
+            self.activeSendHasReachedTransport = false
+            self.isSending = false
+        }
     }
 
     private func performSend(clientId: String,
                              content: String,
                              pendingAttachments: [PendingAttachment],
+                             references: [MessageReferenceContext],
                              sessionKey: String?,
-                             clearInputOnSuccess: Bool = true) async {
+                             clearInputOnSuccess: Bool = true,
+                             onSuccess: (@MainActor (_ clientId: String) -> Void)? = nil) async {
         defer { sendTask = nil }
         var didStartChatSend = false
         do {
             let wireAttachments = try await buildWireAttachments(from: pendingAttachments, content: content)
             try Task.checkCancellation()
             didStartChatSend = true
+            activeSendHasReachedTransport = true
             try await chatService.send(
                 id: clientId,
                 content: content,
                 attachments: wireAttachments,
-                sessionKey: sessionKey
+                sessionKey: sessionKey,
+                references: references
             )
             await MainActor.run {
 #if DEBUG
@@ -2358,17 +2921,27 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
                 if clearInputOnSuccess {
                     clearInput()
                 }
+                onSuccess?(clientId)
                 isSending = false
                 activeClientMessageId = nil
+                activeCrossChatNotificationReplySourceChatId = nil
+                activeSendHasReachedTransport = false
             }
         } catch is CancellationError {
             await MainActor.run {
 #if DEBUG
                 self.recordImageSendDebugEvent(.sendResult, detail: "failure localId=\(clientId) reason=cancelled")
 #endif
-                removePlaceholder(withId: clientId)
+                if activeSendHasReachedTransport {
+                    removePendingLocalMessage(id: clientId, reason: "send_cancel_after_transport")
+                } else {
+                    markLocalMessageCanceled(id: clientId)
+                }
+                crossChatNotificationReplySourceByClientMessageId.removeValue(forKey: clientId)
                 isSending = false
                 activeClientMessageId = nil
+                activeCrossChatNotificationReplySourceChatId = nil
+                activeSendHasReachedTransport = false
             }
         } catch let attachmentError as AttachmentError {
             await MainActor.run {
@@ -2384,8 +2957,11 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
                     code: "upload_failed_retryable",
                     message: nil
                 )
+                crossChatNotificationReplySourceByClientMessageId.removeValue(forKey: clientId)
                 isSending = false
                 activeClientMessageId = nil
+                activeCrossChatNotificationReplySourceChatId = nil
+                activeSendHasReachedTransport = false
             }
         } catch {
             await MainActor.run {
@@ -2402,8 +2978,11 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
                     code: "queue_failed",
                     message: nil
                 )
+                crossChatNotificationReplySourceByClientMessageId.removeValue(forKey: clientId)
                 isSending = false
                 activeClientMessageId = nil
+                activeCrossChatNotificationReplySourceChatId = nil
+                activeSendHasReachedTransport = false
             }
         }
     }
@@ -2418,11 +2997,13 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
             let wireAttachments = try await buildWireAttachments(from: attachments, content: content)
             try Task.checkCancellation()
             didStartChatSend = true
+            activeSendHasReachedTransport = true
             try await chatService.send(
                 id: clientId,
                 content: content,
                 attachments: wireAttachments,
-                sessionKey: sessionKey
+                sessionKey: sessionKey,
+                references: []
             )
             await MainActor.run {
 #if DEBUG
@@ -2430,15 +3011,23 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
 #endif
                 isSending = false
                 activeClientMessageId = nil
+                activeCrossChatNotificationReplySourceChatId = nil
+                activeSendHasReachedTransport = false
             }
         } catch is CancellationError {
             await MainActor.run {
 #if DEBUG
                 self.recordImageSendDebugEvent(.sendResult, detail: "failure localId=\(clientId) reason=cancelled retry=1")
 #endif
-                removePlaceholder(withId: clientId)
+                if activeSendHasReachedTransport {
+                    removePendingLocalMessage(id: clientId, reason: "retry_cancel_after_transport")
+                } else {
+                    markLocalMessageCanceled(id: clientId)
+                }
                 isSending = false
                 activeClientMessageId = nil
+                activeCrossChatNotificationReplySourceChatId = nil
+                activeSendHasReachedTransport = false
             }
         } catch let attachmentError as AttachmentError {
             await MainActor.run {
@@ -2456,6 +3045,8 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
                 )
                 isSending = false
                 activeClientMessageId = nil
+                activeCrossChatNotificationReplySourceChatId = nil
+                activeSendHasReachedTransport = false
             }
         } catch {
             await MainActor.run {
@@ -2474,73 +3065,10 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
                 )
                 isSending = false
                 activeClientMessageId = nil
+                activeCrossChatNotificationReplySourceChatId = nil
+                activeSendHasReachedTransport = false
             }
         }
-    }
-
-    // MARK: - Image downscale for model limits
-
-    private static let modelAwareMaxImageDimension: CGFloat = 1568
-    private static let minImageDimension: CGFloat = 512
-    private static let initialJPEGQuality: CGFloat = 0.9
-    private static let minJPEGQuality: CGFloat = 0.58
-    private static let qualityStep: CGFloat = 0.08
-    private static let resizeStep: CGFloat = 0.85
-    private static let downscalePassLimit: Int = 12
-
-    private func prepareImageDataForModel(data: Data, mimeType: String) throws -> (Data, String) {
-        guard PendingAttachment.inlineMimeTypes.contains(mimeType.lowercased()) else {
-            return (data, mimeType)
-        }
-        guard data.count > PendingAttachment.modelAwareMaxImageRawByteLimit else {
-            return (data, mimeType)
-        }
-        guard let image = UIImage(data: data) else {
-            return (data, mimeType)
-        }
-
-        var maxDim = Self.modelAwareMaxImageDimension
-        var quality = Self.initialJPEGQuality
-        var pass = 0
-
-        while pass < Self.downscalePassLimit {
-            pass += 1
-            if let compressed = downscaleImage(image, maxDimension: maxDim, quality: quality) {
-                if compressed.count <= PendingAttachment.modelAwareMaxImageRawByteLimit {
-                    logger.info("image downscaled pass=\(pass, privacy: .public) from=\(data.count, privacy: .public) to=\(compressed.count, privacy: .public)")
-                    return (compressed, "image/jpeg")
-                }
-            }
-            if quality > Self.minJPEGQuality {
-                quality -= Self.qualityStep
-            } else {
-                maxDim *= Self.resizeStep
-                quality = Self.initialJPEGQuality
-            }
-            if maxDim < Self.minImageDimension {
-                break
-            }
-        }
-
-        throw AttachmentError.imageTooLargeForModel
-    }
-
-    private func downscaleImage(_ image: UIImage, maxDimension: CGFloat, quality: CGFloat) -> Data? {
-        let size = image.size
-        let scale: CGFloat
-        if size.width > size.height {
-            scale = size.width > maxDimension ? maxDimension / size.width : 1
-        } else {
-            scale = size.height > maxDimension ? maxDimension / size.height : 1
-        }
-        let newSize = CGSize(width: (size.width * scale).rounded(), height: (size.height * scale).rounded())
-        let format = UIGraphicsImageRendererFormat()
-        format.scale = 1
-        let renderer = UIGraphicsImageRenderer(size: newSize, format: format)
-        let resized = renderer.image { _ in
-            image.draw(in: CGRect(origin: .zero, size: newSize))
-        }
-        return resized.jpegData(compressionQuality: quality)
     }
 
     private func buildWireAttachments(from attachments: [PendingAttachment],
@@ -2554,9 +3082,12 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         var inlineBytes = 0
         for attachment in attachments {
             try Task.checkCancellation()
-            let (preparedData, preparedMime) = try prepareImageDataForModel(
+            let (preparedData, preparedMime) = try ImageAttachmentPreparer.prepareForModel(
                 data: attachment.data, mimeType: attachment.mimeType
             )
+            if preparedData.count < attachment.data.count {
+                logger.info("image downscaled from=\(attachment.data.count, privacy: .public) to=\(preparedData.count, privacy: .public)")
+            }
             let canInline = PendingAttachment.inlineMimeTypes.contains(preparedMime.lowercased())
                 && preparedData.count <= PendingAttachment.inlineByteLimit
                 && inlineBytes + preparedData.count <= PendingAttachment.inlineTotalByteLimit
@@ -2611,7 +3142,10 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
                 throw AttachmentError.invalidData
             }
             let rawMime = attachment.mimeType ?? "application/octet-stream"
-            let (data, mimeType) = try prepareImageDataForModel(data: rawData, mimeType: rawMime)
+            let (data, mimeType) = try ImageAttachmentPreparer.prepareForModel(data: rawData, mimeType: rawMime)
+            if data.count < rawData.count {
+                logger.info("image downscaled retry from=\(rawData.count, privacy: .public) to=\(data.count, privacy: .public)")
+            }
             let canInline = PendingAttachment.inlineMimeTypes.contains(mimeType.lowercased())
                 && data.count <= PendingAttachment.inlineByteLimit
                 && inlineBytes + data.count <= PendingAttachment.inlineTotalByteLimit
@@ -2645,6 +3179,49 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
             }
         }
         return nil
+    }
+
+    func replyReference(for message: Message) -> PendingMessageReference? {
+        guard message.role == .user else { return nil }
+        guard let referencedMessage = resolvedReplyTarget(for: message) else { return nil }
+        return PendingMessageReference(message: referencedMessage)
+    }
+
+    func replyReferenceFingerprint(for message: Message) -> Int {
+        guard let reference = replyReference(for: message) else { return 0 }
+        var hasher = Hasher()
+        hasher.combine(reference.sessionKey)
+        hasher.combine(reference.llmVisibleMessageId)
+        hasher.combine(reference.messageRole.rawValue)
+        hasher.combine(reference.createdAt.timeIntervalSince1970)
+        hasher.combine(reference.clientMessageId)
+        hasher.combine(reference.preview)
+        return hasher.finalize()
+    }
+
+    private func resolvedReplyTarget(for message: Message) -> Message? {
+        let candidateIds = [
+            message.replyToMessageId,
+            message.replyToClientMessageId
+        ].compactMap { value -> String? in
+            let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return trimmed.isEmpty ? nil : trimmed
+        }
+        guard !candidateIds.isEmpty else { return nil }
+
+        guard let sessionMessageList = sessionMessages[message.sessionKey] else {
+            return nil
+        }
+        for candidateId in candidateIds {
+            if let resolved = sessionMessageList.first(where: { matchesReplyIdentifier(candidateId, message: $0) }) {
+                return resolved
+            }
+        }
+        return nil
+    }
+
+    private func matchesReplyIdentifier(_ identifier: String, message: Message) -> Bool {
+        message.id == identifier || message.clientMessageId == identifier
     }
 
     private func makeDisplayAttachments(from pendingAttachments: [PendingAttachment]) -> [Attachment] {
@@ -2681,6 +3258,21 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         orphanedKeys.forEach { uploadedAssetIds.removeValue(forKey: $0) }
     }
 
+    private func pruneMessageReferenceData() {
+        guard !messageReferenceData.isEmpty else { return }
+        let referencedIds = Set(inputContent.pendingMessageReferenceIds())
+        messageReferenceData = messageReferenceData.filter { referencedIds.contains($0.key) }
+    }
+
+    private static func clampedRange(_ range: NSRange, length: Int) -> NSRange {
+        guard range.location != NSNotFound else {
+            return NSRange(location: length, length: 0)
+        }
+        let location = min(max(range.location, 0), length)
+        let safeLength = max(0, min(range.length, length - location))
+        return NSRange(location: location, length: safeLength)
+    }
+
     private func handleMemoryWarning() {
         presentationCache.removeAll()
         tableParseStates.removeAll()
@@ -2695,8 +3287,13 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
     private func clearInput() {
         inputContent = NSAttributedString(string: "")
         attachmentData.removeAll()
+        messageReferenceData.removeAll()
         uploadedAssetIds.removeAll()
         stagedAttachmentProtection.removeAll()
+        inputResetToken &+= 1
+    }
+
+    func refreshInputEditorContent() {
         inputResetToken &+= 1
     }
 
@@ -2762,6 +3359,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
             inputResetToken &+= 1
         }
     }
+
     func presentation(for message: Message, metrics: ChatFlowTheme.Metrics) -> MessagePresentation {
         let key = PresentationCacheKey(messageID: message.id, isCompact: metrics.isCompact)
         let fingerprint = presentationFingerprint(for: message)
@@ -2806,6 +3404,27 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         return userFacingMessage(for: failure.code, fallback: failure.message)
     }
 
+    func liveProgress(for sessionKey: String) -> LiveAgentProgress? {
+        let normalizedSessionKey = sessionKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedSessionKey.isEmpty else { return nil }
+        return liveProgressBySessionKey[normalizedSessionKey]
+    }
+
+    func liveProgressSummary(for sessionKey: String) -> String? {
+        liveProgress(for: sessionKey)?.summary
+    }
+
+    func sendIndicatorState(for messageId: String) -> MessageSendIndicatorState? {
+        if let failure = failureMessage(for: messageId) {
+            return .failed(failure)
+        }
+        guard pendingLocalMessages.contains(where: { $0.id == messageId }),
+              !ackedPendingLocalMessageIDs.contains(messageId) else {
+            return nil
+        }
+        return .pending
+    }
+
     private func handle(serviceEvent: ChatServiceEvent) {
         switch serviceEvent {
         case .messageError(let messageId, let code, let message):
@@ -2817,30 +3436,52 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
                 messageId: messageId,
                 reason: "messageErrorTerminal"
             )
+            if let messageId, ackedPendingLocalMessageIDs.contains(messageId) {
+                return
+            }
             if shouldShowMessageErrorToast(code: code) {
                 let resolved = userFacingMessage(for: code, fallback: message)
                 toastManager.show(resolved)
             }
             guard let messageId else {
+                clearAllLiveProgress()
                 markPendingMessagesFailedForUnscopedMessageError(code: code, message: message)
                 return
             }
+            clearLiveProgress(messageId: messageId)
             messageFailures[messageId] = MessageFailure(code: code, message: message)
+            crossChatNotificationReplySourceByClientMessageId.removeValue(forKey: messageId)
             if let pendingIndex = pendingLocalMessages.firstIndex(where: { $0.id == messageId }) {
                 pendingLocalMessages.remove(at: pendingIndex)
             }
             ackedPendingLocalMessageIDs.remove(messageId)
+            bumpSendIndicatorRevision()
             if activeClientMessageId == messageId {
                 activeClientMessageId = nil
+                activeCrossChatNotificationReplySourceChatId = nil
+                activeSendHasReachedTransport = false
             }
             isSending = false
         case .messageAcked(let messageId):
+            if let sessionKey = localMessageSessionKey(for: messageId) {
+                scheduleSessionStatusRefresh(for: sessionKey, reason: "messageAcked")
+            }
             ackedPendingLocalMessageIDs.insert(messageId)
             messageFailures.removeValue(forKey: messageId)
+            if let replySourceChatId = crossChatNotificationReplySourceByClientMessageId.removeValue(forKey: messageId) {
+                dismissCrossChatNotification(sourceChatId: replySourceChatId)
+            }
+            bumpSendIndicatorRevision()
             if activeClientMessageId == messageId {
                 activeClientMessageId = nil
+                activeCrossChatNotificationReplySourceChatId = nil
+                activeSendHasReachedTransport = false
                 isSending = false
             }
+        case .agentProgress(let progress):
+            handleAgentProgress(progress)
+        case .promptTurnState(let event):
+            handlePromptTurnState(event)
         case .connectionInterrupted(let reason):
             logger.info("connection interrupted reason=\(reason ?? "unknown", privacy: .public)")
             markPendingMessagesAsFailedForConnectionLoss()
@@ -2923,17 +3564,194 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         }
     }
 
+    private func handlePromptTurnState(_ event: PromptTurnStateEvent) {
+        let state = event.payload.state.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let terminalState = event.payload.terminalState?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let messageId = event.payload.messageId
+        switch terminalState ?? state {
+        case "failed":
+            scheduleSessionStatusRefresh(for: event.payload.sessionKey, reason: "promptTurnFailed")
+            clearLiveProgress(messageId: messageId)
+            messageFailures[messageId] = MessageFailure(code: event.payload.error ?? "clawline.promptTurn.failed", message: nil)
+            if let pendingIndex = pendingLocalMessages.firstIndex(where: { $0.id == messageId }) {
+                pendingLocalMessages.remove(at: pendingIndex)
+            }
+            ackedPendingLocalMessageIDs.remove(messageId)
+            if activeClientMessageId == messageId {
+                activeClientMessageId = nil
+                activeCrossChatNotificationReplySourceChatId = nil
+                activeSendHasReachedTransport = false
+            }
+            isSending = false
+            bumpSendIndicatorRevision()
+        case "delivered", "canceled":
+            if let pendingIndex = pendingLocalMessages.firstIndex(where: { $0.id == messageId }) {
+                pendingLocalMessages.remove(at: pendingIndex)
+            }
+            ackedPendingLocalMessageIDs.remove(messageId)
+            if state == "canceled" {
+                markLocalMessageCanceled(id: messageId)
+            } else {
+                messageFailures.removeValue(forKey: messageId)
+                bumpSendIndicatorRevision()
+            }
+        default:
+            return
+        }
+    }
+
+    private func handleAgentProgress(_ event: AgentProgressEvent) {
+        let sessionKey = event.sessionKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !sessionKey.isEmpty else { return }
+        ensureStreamEntry(for: sessionKey)
+
+        let state = event.state?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if shouldIgnoreStaleAgentProgress(event, current: liveProgressBySessionKey[sessionKey]) {
+            return
+        }
+        if isTerminalAgentProgressState(state) {
+            clearLiveProgress(
+                sessionKey: sessionKey,
+                runId: normalizedAgentProgressText(event.runId),
+                messageId: normalizedAgentProgressText(event.messageId)
+            )
+            return
+        }
+
+        let isFailure = isFailureAgentProgressState(state)
+        let summary = progressSummary(from: event, isFailure: isFailure)
+        guard !summary.isEmpty else { return }
+
+        let progress = LiveAgentProgress(
+            sessionKey: sessionKey,
+            runId: normalizedAgentProgressText(event.runId),
+            messageId: normalizedAgentProgressText(event.messageId),
+            seq: event.seq,
+            summary: summary,
+            isFailure: isFailure
+        )
+        liveProgressBySessionKey[sessionKey] = progress
+        scheduleLiveProgressStaleTimeout(for: progress)
+    }
+
+    private func clearLiveProgress(sessionKey: String, runId: String?, messageId: String?) {
+        guard let current = liveProgressBySessionKey[sessionKey] else { return }
+        if let runId, let currentRunId = current.runId, currentRunId != runId { return }
+        if let messageId, let currentMessageId = current.messageId, currentMessageId != messageId { return }
+        liveProgressBySessionKey.removeValue(forKey: sessionKey)
+        liveProgressTimeoutTasksBySessionKey.removeValue(forKey: sessionKey)?.cancel()
+    }
+
+    private func clearLiveProgress(messageId: String) {
+        let sessionKeys = liveProgressBySessionKey.compactMap { entry in
+            entry.value.messageId == messageId ? entry.key : nil
+        }
+        for sessionKey in sessionKeys {
+            liveProgressBySessionKey.removeValue(forKey: sessionKey)
+            liveProgressTimeoutTasksBySessionKey.removeValue(forKey: sessionKey)?.cancel()
+        }
+    }
+
+    private func clearLiveProgressForAssistantFinal(_ message: Message) {
+        guard let current = liveProgressBySessionKey[message.sessionKey] else { return }
+        let candidateMessageIds = [
+            message.clientMessageId,
+            message.replyToClientMessageId,
+            message.replyToMessageId,
+            message.id
+        ].compactMap(normalizedAgentProgressText)
+        if let currentMessageId = current.messageId,
+           !candidateMessageIds.contains(currentMessageId) {
+            return
+        }
+        clearLiveProgress(
+            sessionKey: message.sessionKey,
+            runId: nil,
+            messageId: current.messageId
+        )
+    }
+
+    private func clearAllLiveProgress() {
+        liveProgressBySessionKey.removeAll()
+        for task in liveProgressTimeoutTasksBySessionKey.values {
+            task.cancel()
+        }
+        liveProgressTimeoutTasksBySessionKey.removeAll()
+    }
+
+    private func scheduleLiveProgressStaleTimeout(for progress: LiveAgentProgress) {
+        liveProgressTimeoutTasksBySessionKey[progress.sessionKey]?.cancel()
+        liveProgressTimeoutTasksBySessionKey[progress.sessionKey] = Task { [weak self] in
+            do {
+                try await Task.sleep(for: Self.liveProgressStaleTimeout)
+            } catch is CancellationError {
+                return
+            } catch {
+                return
+            }
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                guard self.liveProgressBySessionKey[progress.sessionKey] == progress else { return }
+                self.liveProgressBySessionKey.removeValue(forKey: progress.sessionKey)
+                self.liveProgressTimeoutTasksBySessionKey.removeValue(forKey: progress.sessionKey)
+            }
+        }
+    }
+
+    private func shouldIgnoreStaleAgentProgress(_ event: AgentProgressEvent, current: LiveAgentProgress?) -> Bool {
+        guard let current else { return false }
+        guard current.runId == normalizedAgentProgressText(event.runId) else { return false }
+        guard let currentSeq = current.seq, let incomingSeq = event.seq else { return false }
+        return incomingSeq < currentSeq
+    }
+
+    private func progressSummary(from event: AgentProgressEvent, isFailure: Bool) -> String {
+        let candidates = [
+            event.event?.progressText,
+            event.progressText,
+            event.event?.title,
+            event.title,
+            event.event?.summary,
+            event.summary,
+            event.event?.name,
+            event.name
+        ]
+        for candidate in candidates {
+            if let text = normalizedAgentProgressText(candidate) {
+                return text
+            }
+        }
+        if isFailure {
+            return "Agent progress interrupted"
+        }
+        return normalizedAgentProgressText(event.event?.kind)
+            ?? normalizedAgentProgressText(event.state)
+            ?? ""
+    }
+
+    private func normalizedAgentProgressText(_ value: String?) -> String? {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private func isTerminalAgentProgressState(_ state: String?) -> Bool {
+        guard let state else { return false }
+        return ["final", "complete", "completed", "done", "idle"].contains(state)
+    }
+
+    private func isFailureAgentProgressState(_ state: String?) -> Bool {
+        guard let state else { return false }
+        return ["error", "failed", "failure", "cancelled", "canceled"].contains(state)
+    }
+
     private func sendProvisioningState(for sessionKey: String) -> SendProvisioningState {
+        guard !sessionKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return .unavailable
+        }
         if hasReceivedSessionProvisioning {
             return isLocallySendableSessionKey(sessionKey) ? .ready : .unavailable
         }
-        if supportsSessionProvisioning {
-            return .waiting
-        }
-        if connectionState == .connected && !hasResolvedProvisioningCapability {
-            return .waiting
-        }
-        return .ready
+        return .waiting
     }
 
     private func attemptPendingProvisionedSendIfPossible() {
@@ -2943,10 +3761,17 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         switch sendProvisioningState(for: pending.sessionKey) {
         case .ready:
             pendingProvisionedSend = nil
+            let replySourceChatId = pending.crossChatNotificationReplySourceChatId
             beginSend(
                 content: pending.content,
                 pendingAttachments: pending.attachments,
-                sessionKey: pending.sessionKey
+                references: pending.references,
+                replyToMessageId: pending.replyToMessageId,
+                replyToClientMessageId: pending.replyToClientMessageId,
+                sessionKey: pending.sessionKey,
+                clientId: pending.clientId,
+                clearInputOnSuccess: replySourceChatId == nil,
+                crossChatNotificationReplySourceChatId: replySourceChatId
             )
         case .waiting:
             break
@@ -2974,11 +3799,15 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
             connectionStableTask = nil
             isAssistantTyping = false
             typingSessionKey = nil
+            clearAllLiveProgress()
+            clearAllTypingIndicatorMorphTargets()
             auth.refreshAdminStatusFromToken()
             attemptPendingProvisionedSendIfPossible()
         case .connecting, .reconnecting:
             isAssistantTyping = false
             typingSessionKey = nil
+            clearAllLiveProgress()
+            clearAllTypingIndicatorMorphTargets()
         case .disconnected, .failed:
             connectionStableTask?.cancel()
             connectionStableTask = nil
@@ -2986,6 +3815,8 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
             markPendingMessagesAsFailedForConnectionLoss()
             isAssistantTyping = false
             typingSessionKey = nil
+            clearAllLiveProgress()
+            clearAllTypingIndicatorMorphTargets()
         }
     }
 
@@ -3012,6 +3843,15 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
 
     private func replaceAccessibleSessionKeys(with sessionKeys: [String]) {
         let normalized = normalizeSessionKeyList(sessionKeys)
+        let available = Set(normalized)
+        unavailableCrossChatNotificationSourceIds.subtract(available)
+        unavailableCrossChatNotificationSourceIds.formUnion(accessibleSessionKeys.subtracting(available))
+        let unavailableNotificationSourceChatIds = crossChatNotificationBubblesBySourceChatId.keys.filter {
+            !available.contains($0)
+        }
+        for sourceChatId in unavailableNotificationSourceChatIds {
+            dismissCrossChatNotification(sourceChatId: sourceChatId, markSourceRead: false)
+        }
         accessibleSessionKeyOrder = normalized
         accessibleSessionKeys = Set(normalized)
     }
@@ -3023,8 +3863,10 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
     }
 
     private func removeAccessibleSessionKey(_ sessionKey: String) {
+        unavailableCrossChatNotificationSourceIds.insert(sessionKey)
         accessibleSessionKeys.remove(sessionKey)
         accessibleSessionKeyOrder.removeAll { $0 == sessionKey }
+        dismissCrossChatNotification(sourceChatId: sessionKey, markSourceRead: false)
     }
 
     private func replaceTrackableSessions(with sessions: [TrackableSession]) {
@@ -3156,6 +3998,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
                 fallbackModels: incoming.display.fallbackModels,
                 provider: incoming.display.provider,
                 harness: incoming.display.harness,
+                authMode: incoming.display.authMode,
                 reasoningLevel: resolvedReasoningLevel,
                 thinkingLevel: resolvedThinkingLevel,
                 fastMode: incoming.display.fastMode ?? cached.display.fastMode,
@@ -3266,30 +4109,6 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         }
     }
 
-    private func lastServerMessageIdDefaultsKey(for sessionKey: String) -> String {
-        "clawline.lastServerMessageId.\(sessionKey)"
-    }
-
-    private func persistLastServerMessageId(_ value: String?, for sessionKey: String) {
-        let key = lastServerMessageIdDefaultsKey(for: sessionKey)
-        if let value, !value.isEmpty {
-            streamDefaults.set(value, forKey: key)
-        } else {
-            streamDefaults.removeObject(forKey: key)
-        }
-    }
-
-    private func restoreLastServerMessageIdIfNeeded(for sessionKey: String) {
-        guard lastServerMessageIdBySession[sessionKey] == nil else { return }
-        if let stored = streamDefaults.string(forKey: lastServerMessageIdDefaultsKey(for: sessionKey)) {
-            lastServerMessageIdBySession[sessionKey] = stored
-        }
-    }
-
-    private func restoreLastServerMessageIdIfNeeded() {
-        restoreLastServerMessageIdIfNeeded(for: engineActiveSessionKey)
-    }
-
     private func messageCacheDirectoryURL() -> URL? {
         let fileManager = FileManager.default
         guard let baseURL = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
@@ -3356,10 +4175,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
                         guard self.writerCurrentEpoch == epoch else { return }
                         guard self.firstReplayAppliedEpoch != epoch else { return }
                     }
-                    if let currentMessages = self.sessionMessages[sessionKey], !currentMessages.isEmpty {
-                        return
-                    }
-                    self.setMessages(filtered, for: sessionKey)
+                    filtered.forEach { self.upsert(sessionKey: sessionKey, message: $0, sourceFlags: .cache) }
                     let cachedLast = self.lastServerMessageId(from: filtered)
                     self.chatService.seedReplayCursorIfMissing(cachedLast, for: sessionKey)
                     if let cachedLast,
@@ -3379,12 +4195,6 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
     }
 
     private func clearCursor(for sessionKey: String) {
-        if let currentMessages = sessionMessages[sessionKey], !currentMessages.isEmpty {
-            return
-        }
-        if let currentCursor = chatService.replayCursorSnapshot()[sessionKey], !currentCursor.isEmpty {
-            return
-        }
         self.chatService.setReplayCursor(nil, for: sessionKey)
         Task { await lifecycleCoordinator.updateCanonicalCursor(nil) }
         self.armForceReRead(for: sessionKey)
@@ -3405,13 +4215,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         persistDebounceTasks[sessionKey]?.cancel()
         persistDebounceTasks[sessionKey] = Task { [weak self] in
             guard let self else { return }
-            do {
-                try await Task.sleep(for: .milliseconds(500))
-            } catch is CancellationError {
-                return
-            } catch {
-                return
-            }
+            try? await Task.sleep(for: .milliseconds(500))
             guard let pendingPayload = self.pendingPersistPayloads[sessionKey] else { return }
             self.pendingPersistPayloads[sessionKey] = nil
             Task.detached { [pendingPayload, url, sessionKey] in
@@ -3441,28 +4245,11 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
     }
 
     private func markMissingFinalsAfterReplay() {
-        for (sessionKey, streamMessages) in sessionMessages {
-            let detectionMessages = streamMessages.filter { message in
-                !(message.role == .assistant
-                  && message.streaming
-                  && normalizedServerEventID(message.replyToMessageId) != nil)
-            }
-            if detectionMessages.count != streamMessages.count {
-                setMessages(detectionMessages, for: sessionKey)
-            }
-            let assistantFinalReplyIds = Set(detectionMessages.compactMap { message -> String? in
-                guard message.role == .assistant, !message.streaming else { return nil }
-                return normalizedServerEventID(message.replyToMessageId)
-            })
-            for message in detectionMessages {
-                guard message.role == .user,
-                      normalizedServerEventID(message.id) != nil,
-                      let clientMessageId = message.clientMessageId?.trimmingCharacters(in: .whitespacesAndNewlines),
-                      !clientMessageId.isEmpty,
-                      !assistantFinalReplyIds.contains(message.id) else {
-                    continue
-                }
-                messageFailures[message.id] = MessageFailure(code: "missing_final", message: nil)
+        for (sessionKey, streamMessages) in Array(sessionMessages) {
+            for message in streamMessages where message.role == .assistant
+                && message.streaming
+                && normalizedServerEventID(message.replyToMessageId) != nil {
+                remove(sessionKey: sessionKey, messageId: message.id, reason: "missing_final_after_replay")
             }
         }
     }
@@ -3537,6 +4324,9 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
 
     private func ensureDefaultActiveSessionIfNeeded() {
         if engineActiveSessionKey.isEmpty {
+            guard !orderedSessionKeys.isEmpty else {
+                return
+            }
             if let main = streamMainSessionKey() {
                 ensureStreamEntry(for: main)
                 setEngineActiveSessionKey(main)
@@ -3562,7 +4352,6 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         syntheticSessionKeys.insert(sessionKey)
         recalculateOrderedSessionKeys()
         SessionRegistry.shared.upsert(synthesized)
-        ensureSessionStorage(for: sessionKey)
     }
 
     private func applyStreamSnapshot(_ streams: [StreamSession]) {
@@ -3582,26 +4371,15 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         streamsBySessionKey = byKey
         let validSessionKeys = Set(byKey.keys)
         let removedSessionKeys = previousSessionKeys.subtracting(validSessionKeys)
+        unavailableCrossChatNotificationSourceIds.subtract(validSessionKeys)
+        unavailableCrossChatNotificationSourceIds.formUnion(removedSessionKeys)
         for sessionKey in removedSessionKeys {
-            sessionMessages.removeValue(forKey: sessionKey)
-            lastReadMessageIdBySession.removeValue(forKey: sessionKey)
-            streamTailStateBySession.removeValue(forKey: sessionKey)
-            streamDotStateBySession.removeValue(forKey: sessionKey)
-            sessionStatusBySessionKey.removeValue(forKey: sessionKey)
-            sessionStatusRefreshTasks.removeValue(forKey: sessionKey)?.cancel()
-            let removedIDs = Set(pendingLocalMessages.filter { $0.sessionKey == sessionKey }.map(\.id))
-            pendingLocalMessages.removeAll { $0.sessionKey == sessionKey }
-            ackedPendingLocalMessageIDs.subtract(removedIDs)
-            chatService.setReplayCursor(nil, for: sessionKey)
-            persistLastReadMessageId(nil, for: sessionKey)
-            persistLastServerMessageId(nil, for: sessionKey)
-            persistMessages([], for: sessionKey)
+            dismissCrossChatNotification(sourceChatId: sessionKey, markSourceRead: false)
+            removeSession(sessionKey: sessionKey, reason: "stream_snapshot_removed")
         }
         recalculateOrderedSessionKeys()
         for sessionKey in orderedSessionKeys {
-            ensureSessionStorage(for: sessionKey)
             restoreLastReadMessageIdIfNeeded(for: sessionKey)
-            restoreLastServerMessageIdIfNeeded(for: sessionKey)
             restoreCachedMessagesIfNeeded(for: sessionKey)
         }
         restoreActiveSessionKeyIfNeeded()
@@ -3616,12 +4394,11 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
     }
 
     private func applyStreamUpsert(_ stream: StreamSession) {
+        unavailableCrossChatNotificationSourceIds.remove(stream.sessionKey)
         streamsBySessionKey[stream.sessionKey] = stream
         syntheticSessionKeys.remove(stream.sessionKey)
         recalculateOrderedSessionKeys()
-        ensureSessionStorage(for: stream.sessionKey)
         restoreLastReadMessageIdIfNeeded(for: stream.sessionKey)
-        restoreLastServerMessageIdIfNeeded(for: stream.sessionKey)
         restoreCachedMessagesIfNeeded(for: stream.sessionKey)
         ensureDefaultActiveSessionIfNeeded()
         SessionRegistry.shared.upsert(stream)
@@ -3629,26 +4406,11 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
     }
 
     private func applyStreamDeletion(sessionKey: String) {
+        unavailableCrossChatNotificationSourceIds.insert(sessionKey)
         streamsBySessionKey.removeValue(forKey: sessionKey)
         syntheticSessionKeys.remove(sessionKey)
         recalculateOrderedSessionKeys()
-        sessionMessages.removeValue(forKey: sessionKey)
-        lastReadMessageIdBySession.removeValue(forKey: sessionKey)
-        streamTailStateBySession.removeValue(forKey: sessionKey)
-        streamDotStateBySession.removeValue(forKey: sessionKey)
-        sessionStatusBySessionKey.removeValue(forKey: sessionKey)
-        sessionStatusRefreshTasks.removeValue(forKey: sessionKey)?.cancel()
-        chatService.setReplayCursor(nil, for: sessionKey)
-        persistLastReadMessageId(nil, for: sessionKey)
-        persistLastServerMessageId(nil, for: sessionKey)
-        persistMessages([], for: sessionKey)
-        let removedIDs = Set(pendingLocalMessages.filter { $0.sessionKey == sessionKey }.map(\.id))
-        pendingLocalMessages.removeAll { $0.sessionKey == sessionKey }
-        ackedPendingLocalMessageIDs.subtract(removedIDs)
-        if typingSessionKey == sessionKey {
-            typingSessionKey = nil
-            isAssistantTyping = false
-        }
+        removeSession(sessionKey: sessionKey, reason: "stream_deleted")
 
         if engineActiveSessionKey == sessionKey {
             let fallback = streamMainSessionKey().flatMap { orderedSessionKeys.contains($0) ? $0 : nil }
@@ -3687,6 +4449,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
     }
 
     private func applyDeletedStreamMutation(sessionKey: String) {
+        dismissCrossChatNotification(sourceChatId: sessionKey, markSourceRead: false)
         if pendingUntrackRecovery?.sessionKey == sessionKey || streamsBySessionKey[sessionKey]?.adopted == true {
             unlinkTrackedSession(sessionKey: sessionKey)
             return
@@ -3695,6 +4458,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
     }
 
     private func unlinkTrackedSession(sessionKey: String) {
+        unavailableCrossChatNotificationSourceIds.insert(sessionKey)
         streamsBySessionKey.removeValue(forKey: sessionKey)
         syntheticSessionKeys.remove(sessionKey)
         sessionStatusBySessionKey.removeValue(forKey: sessionKey)
@@ -3705,6 +4469,8 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
             typingSessionKey = nil
             isAssistantTyping = false
         }
+        clearLiveProgress(sessionKey: sessionKey, runId: nil, messageId: nil)
+        clearTypingIndicatorMorphTarget(for: sessionKey)
 
         if engineActiveSessionKey == sessionKey {
             let fallback = streamMainSessionKey().flatMap { orderedSessionKeys.contains($0) ? $0 : nil }
@@ -3904,6 +4670,21 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         ackedPendingLocalMessageIDs.remove(id)
     }
 
+    private func markLocalMessageCanceled(id: String) {
+        if let (message, sessionKey, _) = findMessage(id: id) {
+            var canceledMessage = message
+            canceledMessage.deliveryState = .canceled
+            canceledMessage.streaming = false
+            upsert(sessionKey: sessionKey, message: canceledMessage, sourceFlags: .local)
+        }
+        if let pendingIndex = pendingLocalMessages.firstIndex(where: { $0.id == id }) {
+            pendingLocalMessages.remove(at: pendingIndex)
+        }
+        ackedPendingLocalMessageIDs.remove(id)
+        messageFailures.removeValue(forKey: id)
+        bumpSendIndicatorRevision()
+    }
+
     private func isNoReply(code: String, message: String?) -> Bool {
         let normalizedCode = code.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if normalizedCode == "no_reply" || normalizedCode == "no-reply" || normalizedCode.hasPrefix("no_reply") {
@@ -3936,9 +4717,16 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
             resolvedSessionKey = pendingLocalMessages[pendingIndex].sessionKey
             pendingLocalMessages.remove(at: pendingIndex)
             ackedPendingLocalMessageIDs.remove(messageId)
+            bumpSendIndicatorRevision()
         }
         if let messageId, activeClientMessageId == messageId {
             activeClientMessageId = nil
+            activeCrossChatNotificationReplySourceChatId = nil
+            activeSendHasReachedTransport = false
+        }
+        if let messageId,
+           let replySourceChatId = crossChatNotificationReplySourceByClientMessageId.removeValue(forKey: messageId) {
+            dismissCrossChatNotification(sourceChatId: replySourceChatId)
         }
         isSending = false
 
@@ -3954,7 +4742,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
             deviceId: nil,
             sessionKey: sessionKey
         )
-        appendMessage(ack)
+        upsert(sessionKey: sessionKey, message: ack, sourceFlags: .server)
         scheduleSessionStatusRefresh(for: sessionKey, reason: "noReplyTerminal")
     }
 
@@ -3980,14 +4768,20 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         }
     }
 
+    private func localMessageSessionKey(for messageId: String) -> String? {
+        if let pending = pendingLocalMessages.first(where: { $0.id == messageId }) {
+            return pending.sessionKey
+        }
+        if let (_, sessionKey, _) = findMessage(id: messageId) {
+            return sessionKey
+        }
+        return nil
+    }
+
     private func trimPresentationCache() {
         let activeIds = Set(messages.map(\.id))
         guard !activeIds.isEmpty else { return }
-        let previousCount = presentationCache.count
         presentationCache = presentationCache.filter { activeIds.contains($0.key.messageID) }
-        if presentationCache.count < previousCount {
-            presentationCacheTrimCount += 1
-        }
     }
 
     private func trimStreamingStates(maxEntries: Int = 120) {
@@ -4052,33 +4846,13 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
             clearInput()
             setTemporarySendButtonOverride(.disconnected)
             return true
-        case "/sending":
-            clearInput()
-            setTemporarySendButtonSendingOverride()
-            return true
-        case "/preparing":
-            clearInput()
-            setTemporarySendButtonPreparingOverride()
-            return true
         default:
             return false
         }
     }
 
     private func setTemporarySendButtonOverride(_ state: SendButtonConnectionState) {
-        scheduleTemporarySendButtonOverride(.connection(state))
-    }
-
-    private func setTemporarySendButtonSendingOverride() {
-        scheduleTemporarySendButtonOverride(.sending)
-    }
-
-    private func setTemporarySendButtonPreparingOverride() {
-        scheduleTemporarySendButtonOverride(.preparing)
-    }
-
-    private func scheduleTemporarySendButtonOverride(_ override: TemporarySendButtonDebugOverride) {
-        temporarySendButtonOverride = override
+        temporarySendButtonOverride = state
         refreshSendButtonConnectionState()
         temporarySendButtonOverrideTask?.cancel()
         let overrideDuration = temporarySendButtonOverrideDuration
@@ -4100,14 +4874,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
     }
 
     private func refreshSendButtonConnectionState() {
-        switch temporarySendButtonOverride {
-        case .connection(let state):
-            sendButtonConnectionState = state
-        case .preparing, .sending:
-            sendButtonConnectionState = .connected
-        case nil:
-            sendButtonConnectionState = transportSendButtonConnectionState
-        }
+        sendButtonConnectionState = temporarySendButtonOverride ?? transportSendButtonConnectionState
     }
 
     @MainActor
@@ -4249,16 +5016,32 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting, S
         connectionSnapshot()
     }
 
+    func debugUpsertMessage(_ message: Message, isServer: Bool = false, isCache: Bool = false) {
+        upsert(
+            sessionKey: message.sessionKey,
+            message: message,
+            sourceFlags: MessageSourceFlags(isServer: isServer, isCache: isCache)
+        )
+    }
+
+    func debugClearSessionMessages(_ sessionKey: String) {
+        clearSessionMessages(sessionKey: sessionKey, reason: "debug")
+    }
+
+    func debugRemoveSessionMessages(_ sessionKey: String) {
+        removeSession(sessionKey: sessionKey, reason: "debug")
+    }
+
+    func debugSessionMessageEntryExists(_ sessionKey: String) -> Bool {
+        sessionMessages[sessionKey] != nil
+    }
+
     func debugObservationStartupCount() -> Int {
         observationStartupCount
     }
 
     func debugPresentationCacheSize() -> Int {
         presentationCache.count
-    }
-
-    func debugPresentationCacheTrimCount() -> Int {
-        presentationCacheTrimCount
     }
 
     func debugTableParseStateSize() -> Int {

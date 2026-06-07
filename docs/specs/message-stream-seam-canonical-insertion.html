@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>T105 Message Stream Seam Canonical Insertion Protocol</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #f7f7f4;
+      --fg: #1d2528;
+      --muted: #5f6f73;
+      --line: #cfd8d6;
+      --panel: #ffffff;
+      --accent: #176b6b;
+      --warn: #8a5400;
+      --code: #eef3f2;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #101516;
+        --fg: #eef4f3;
+        --muted: #a8b6b8;
+        --line: #304043;
+        --panel: #182022;
+        --accent: #6ec7bc;
+        --warn: #e2b45e;
+        --code: #202b2d;
+      }
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--fg);
+      font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    main {
+      max-width: 1040px;
+      margin: 0 auto;
+      padding: 48px 22px 72px;
+    }
+
+    h1, h2, h3 {
+      line-height: 1.15;
+      letter-spacing: 0;
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: clamp(2rem, 4vw, 3rem);
+    }
+
+    h2 {
+      margin-top: 42px;
+      padding-top: 22px;
+      border-top: 1px solid var(--line);
+      font-size: 1.45rem;
+    }
+
+    h3 {
+      margin-top: 28px;
+      font-size: 1.1rem;
+    }
+
+    p {
+      margin: 10px 0;
+    }
+
+    ul, ol {
+      padding-left: 1.3rem;
+    }
+
+    li {
+      margin: 7px 0;
+    }
+
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.92em;
+      background: var(--code);
+      border-radius: 6px;
+      padding: 0.12rem 0.28rem;
+    }
+
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      margin: 16px 0;
+      background: var(--panel);
+    }
+
+    th, td {
+      border: 1px solid var(--line);
+      padding: 10px 12px;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      color: var(--accent);
+      font-weight: 700;
+    }
+
+    .meta {
+      color: var(--muted);
+      margin-bottom: 28px;
+    }
+
+    .callout {
+      border: 1px solid var(--line);
+      border-left: 5px solid var(--accent);
+      background: var(--panel);
+      padding: 14px 16px;
+      margin: 18px 0;
+      border-radius: 8px;
+    }
+
+    .warning {
+      border-left-color: var(--warn);
+    }
+
+    .decision {
+      font-weight: 700;
+    }
+
+    .id {
+      color: var(--accent);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.92em;
+      white-space: nowrap;
+    }
+  </style>
+</head>
+<body>
+<main>
+  <h1>T105 Message Stream Seam Canonical Insertion Protocol</h1>
+  <p class="meta">Clawline iOS shared spec. Prepared 2026-05-27. Canonical artifact: <code>/Users/mike/shared-workspace/clawline/specs/message-stream-seam-canonical-insertion.html</code>.</p>
+
+  <section class="callout">
+    <p class="decision">Decision: every Clawline iOS message stream mutation must go through one canonical insertion and mutation seam.</p>
+    <p>T105 stays separate from T100. T100 owns connection phases, replay admission, reconnect, and cache/replay lifecycle barriers. T105 owns the in-memory message mutation authority after a caller has a message operation to apply.</p>
+  </section>
+
+  <h2>Source Basis</h2>
+  <ul>
+    <li>Tracker T105 goal: define and implement a single canonical mutation seam for the iOS chat message stream. Network, cache, and input sources funnel through one write path with deterministic deduplication, conflict resolution, and ordering.</li>
+    <li>Shared Markdown source: <code>/Users/mike/shared-workspace/clawline/specs/message-stream-seam.md</code>.</li>
+    <li>Preserved implementation-detail source: <code>/Users/mike/shared-workspace/clawline/implementation_details/message-stream-seam.md</code>.</li>
+  </ul>
+
+  <h2>Goal</h2>
+  <p><span class="id">T105-GOAL-01</span> Make message insertion, update, cache restore, removal, session clearing, session deletion, retry, and logout clearing deterministic by routing them through one seam.</p>
+  <p><span class="id">T105-GOAL-02</span> Prevent duplicate messages, cache overwrites of live messages, wrong-stream placeholders, stale cursor references, and direct write bypasses.</p>
+
+  <h2>Non-Goals</h2>
+  <ul>
+    <li><span class="id">T105-NG-01</span> This spec does not redesign message bubble UI, markdown rendering, scrolling, stream switching, notifications, or provider connection lifecycle.</li>
+    <li><span class="id">T105-NG-02</span> This spec does not require provider wire protocol changes unless the existing data is insufficient for a listed requirement.</li>
+    <li><span class="id">T105-NG-03</span> This spec does not allow optimistic placeholder creation before send admission is satisfied.</li>
+    <li><span class="id">T105-NG-04</span> This spec does not expose arbitrary full-session replacement as a public caller operation.</li>
+  </ul>
+
+  <h2>Operation Vocabulary</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Operation</th>
+        <th>Caller Intent</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><span class="id">T105-OP-01</span></td>
+        <td><code>upsert</code></td>
+        <td>Insert a new message ID or update an existing message ID in place.</td>
+      </tr>
+      <tr>
+        <td><span class="id">T105-OP-02</span></td>
+        <td><code>remove</code></td>
+        <td>Remove one message by ID within its owning session.</td>
+      </tr>
+      <tr>
+        <td><span class="id">T105-OP-03</span></td>
+        <td><code>cacheGapFill</code></td>
+        <td>Insert cache-restored IDs that are absent from the current session set.</td>
+      </tr>
+      <tr>
+        <td><span class="id">T105-OP-04</span></td>
+        <td><code>clearSessionMessages</code></td>
+        <td>Clear messages while preserving stream/session metadata.</td>
+      </tr>
+      <tr>
+        <td><span class="id">T105-OP-05</span></td>
+        <td><code>removeSession</code></td>
+        <td>Remove the session and associated cursor state.</td>
+      </tr>
+      <tr>
+        <td><span class="id">T105-OP-06</span></td>
+        <td><code>clearAllForLogout</code></td>
+        <td>Atomically clear all message, selection, cursor, pending, and failure state for logout.</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>Requirements</h2>
+  <h3><span class="id">T105-REQ-01</span> Single Writer</h3>
+  <p>All production message collection mutations must route through the seam. Direct writes to <code>sessionMessages</code> or equivalent per-session message arrays/dictionaries are prohibited outside the seam implementation and its tests.</p>
+
+  <h3><span class="id">T105-REQ-02</span> Compiler-Error-First Migration</h3>
+  <p>Implementation must delete, mark unavailable, or otherwise make legacy direct-write APIs fail before routing callers through compatibility wrappers. The migration list must come from compile errors, not from a guessed call-site inventory.</p>
+
+  <h3><span class="id">T105-REQ-03</span> Public Operations Are Bounded</h3>
+  <p>Callers must express intent through the bounded operations in this spec. <code>replaceSession</code>, if needed, is internal seam machinery only and must not be available as a public caller operation.</p>
+
+  <h3><span class="id">T105-REQ-04</span> Deduplication By Session And ID</h3>
+  <p>The seam deduplicates by <code>(sessionKey, id)</code>. A message ID collision in one session must not affect another session.</p>
+
+  <h3><span class="id">T105-REQ-05</span> Existing IDs Update In Place</h3>
+  <p>For an existing message ID in the same session, upsert updates the existing entry in place. Repeated server events for the same streaming message ID must update one entry rather than append duplicates.</p>
+
+  <h3><span class="id">T105-REQ-06</span> New IDs Use Canonical Ordering</h3>
+  <p>For a new message ID, upsert inserts according to the seam's canonical ordering rule. Callers must not directly reorder the message collection outside the seam.</p>
+
+  <h3><span class="id">T105-REQ-07</span> Cache Is Gap-Fill Only</h3>
+  <p>Cache-restored messages may insert only IDs absent from the current session set. Cache restore must not delete, reorder, or overwrite an existing ID. If live replay has already supplied a message ID, later cache restore for that ID is a no-op for stream state.</p>
+
+  <h3><span class="id">T105-REQ-08</span> Server Wins On Conflict</h3>
+  <p>When server-sourced and cache-sourced facts conflict for an existing ID, the server-sourced entry wins. Cache is not an update source after a live/server entry exists.</p>
+
+  <h3><span class="id">T105-REQ-09</span> Retry Appends At Tail</h3>
+  <p>Retry of a failed message uses a new client ID and appends at the tail through the normal seam path. Retry must not reuse the original bubble position or original client ID.</p>
+
+  <h3><span class="id">T105-REQ-10</span> Provisioning Gate</h3>
+  <p>The composer may create/send local placeholders only when transport is connected and the active session key is present in <code>provisionedSessionKeys</code>. <code>canSend</code> must require both conditions. No optimistic placeholder may be created before this gate passes.</p>
+
+  <h3><span class="id">T105-REQ-11</span> Clear Session And Remove Session Are Distinct</h3>
+  <p><code>clearSessionMessages</code> removes messages while preserving stream/session metadata. <code>removeSession</code> removes the session and associated cursor state. Implementations must keep these effects distinct.</p>
+
+  <h3><span class="id">T105-REQ-12</span> Logout Clear Is Atomic</h3>
+  <p><code>clearAllForLogout</code> must reset all per-session message collections, active engine session key, active UI-selected session key, global and per-session reconnect cursor state, pending local message tracking, and message failure tracking as one logout clear operation.</p>
+
+  <h3><span class="id">T105-REQ-13</span> Ongoing Enforcement</h3>
+  <p>The implementation must include tests or static checks that fail when production code mutates the message collection outside the seam. Enforcement must allow seam internals and test fixtures while catching new direct production writes.</p>
+
+  <h3><span class="id">T105-REQ-14</span> Ordering Ambiguity Requires Clarification</h3>
+  <p>If implementation encounters an ordering conflict not covered by existing model fields, it must request product or architecture clarification before inventing a new heuristic.</p>
+
+  <h2>Acceptance Checks</h2>
+  <ul>
+    <li><span class="id">T105-AC-01</span> A code search or static check shows no production direct mutations to <code>sessionMessages</code> outside the seam.</li>
+    <li><span class="id">T105-AC-02</span> Upserting the same <code>(sessionKey, id)</code> twice updates one existing entry and does not append a duplicate.</li>
+    <li><span class="id">T105-AC-03</span> Streaming repeated server events for the same message ID update one message entry.</li>
+    <li><span class="id">T105-AC-04</span> The same message ID in two different sessions is treated as two independent session-scoped entries.</li>
+    <li><span class="id">T105-AC-05</span> Cache restore after live replay does not overwrite, delete, or reorder live messages.</li>
+    <li><span class="id">T105-AC-06</span> Cache can insert a missing message ID without replacing existing server-sourced IDs.</li>
+    <li><span class="id">T105-AC-07</span> Retry of a failed message creates a new client ID at the tail through the seam.</li>
+    <li><span class="id">T105-AC-08</span> Composer send admission remains blocked until both connected transport and active-session provisioning are true.</li>
+    <li><span class="id">T105-AC-09</span> <code>clearSessionMessages</code> and <code>removeSession</code> have distinct tested effects on metadata and cursor state.</li>
+    <li><span class="id">T105-AC-10</span> Logout clear removes all message/session/cursor/pending/failure state atomically.</li>
+    <li><span class="id">T105-AC-11</span> Build, tests, or static checks fail if a new production direct-write path bypasses the seam.</li>
+  </ul>
+
+  <h2>Implementation Handoff</h2>
+  <ol>
+    <li><span class="id">T105-HO-01</span> Introduce or identify the seam interface and make legacy direct-write APIs unavailable first.</li>
+    <li><span class="id">T105-HO-02</span> Use the resulting compile failures to enumerate and migrate live/replay insert, cache restore, optimistic placeholder, pending-to-server replacement, attachment hydration, no-reply append, stream deletion, and logout clear call sites.</li>
+    <li><span class="id">T105-HO-03</span> Do not preserve broad compatibility wrappers that allow new direct writes.</li>
+    <li><span class="id">T105-HO-04</span> Keep this seam coherent with T103 per-stream runtime state and T100 connection lifecycle replay/cache behavior.</li>
+  </ol>
+
+  <h2>Open Questions</h2>
+  <ul>
+    <li><span class="id">T105-OQ-01</span> If the current message model cannot express a deterministic ordering conflict, which existing source field should become authoritative: provider sequence, timestamp, receive order, or another explicit field?</li>
+    <li><span class="id">T105-OQ-02</span> Should direct-write enforcement be a unit/static test in the iOS test target, a repository script, or both?</li>
+  </ul>
+</main>
+</body>
+</html>

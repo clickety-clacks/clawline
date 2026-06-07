@@ -40,6 +40,24 @@ final class ClawlineUITests: XCTestCase {
     }
 
     @MainActor
+    func testT357LandscapeChatSurfaceCapture() throws {
+        let app = XCUIApplication()
+        app.launch()
+
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 8))
+
+        XCUIDevice.shared.orientation = .landscapeLeft
+        sleep(2)
+
+        XCTAssertGreaterThan(app.frame.width, app.frame.height, "Expected the app to be in iPhone landscape")
+
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = "T357 Landscape Chat Surface"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
+    @MainActor
     func testLaunchPerformance() throws {
         let app = XCUIApplication()
         app.launchArguments += [

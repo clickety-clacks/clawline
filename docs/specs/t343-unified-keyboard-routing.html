@@ -1,0 +1,990 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>T343 Unified Keyboard Shortcut Routing</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: transparent;
+      --fg: var(--clawline-fg, #182126);
+      --muted: #627278;
+      --line: rgba(71, 98, 104, 0.28);
+      --panel: rgba(255, 255, 255, 0.84);
+      --panel-strong: rgba(255, 255, 255, 0.94);
+      --accent: #0f766e;
+      --accent-soft: rgba(15, 118, 110, 0.12);
+      --warn: #8a5300;
+      --warn-soft: rgba(138, 83, 0, 0.11);
+      --danger: #a43f2a;
+      --danger-soft: rgba(164, 63, 42, 0.1);
+      --code: rgba(226, 235, 236, 0.72);
+      --shadow: 0 18px 50px rgba(13, 23, 28, 0.08);
+      --radius: 18px;
+      --radius-sm: 12px;
+      --max: 1080px;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --fg: var(--clawline-fg, #eef5f4);
+        --muted: #a5b6bb;
+        --line: rgba(164, 187, 191, 0.22);
+        --panel: rgba(18, 27, 31, 0.82);
+        --panel-strong: rgba(18, 27, 31, 0.92);
+        --accent: #6ed4ca;
+        --accent-soft: rgba(110, 212, 202, 0.12);
+        --warn: #f0bc61;
+        --warn-soft: rgba(240, 188, 97, 0.12);
+        --danger: #ef8d77;
+        --danger-soft: rgba(239, 141, 119, 0.12);
+        --code: rgba(36, 50, 54, 0.78);
+        --shadow: 0 20px 55px rgba(0, 0, 0, 0.22);
+      }
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background:
+        radial-gradient(circle at top right, rgba(15, 118, 110, 0.11), transparent 30%),
+        radial-gradient(circle at top left, rgba(99, 102, 241, 0.08), transparent 24%),
+        transparent;
+      color: var(--fg);
+      font: 16px/1.58 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    main {
+      max-width: var(--max);
+      margin: 0 auto;
+      padding: 40px 20px 72px;
+    }
+
+    header {
+      margin-bottom: 24px;
+    }
+
+    .eyebrow {
+      margin: 0 0 8px;
+      color: var(--accent);
+      font-size: 0.84rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    h1, h2, h3 {
+      margin: 0;
+      line-height: 1.12;
+      letter-spacing: -0.02em;
+    }
+
+    h1 {
+      font-size: clamp(2rem, 4.6vw, 3.35rem);
+      margin-bottom: 12px;
+    }
+
+    h2 {
+      font-size: 1.45rem;
+      margin-bottom: 14px;
+    }
+
+    h3 {
+      font-size: 1.03rem;
+      margin-bottom: 10px;
+    }
+
+    p {
+      margin: 10px 0;
+    }
+
+    .meta {
+      margin: 0;
+      color: var(--muted);
+      max-width: 78ch;
+    }
+
+    .callout {
+      border: 1px solid var(--line);
+      background: linear-gradient(180deg, var(--panel-strong), var(--panel));
+      border-radius: var(--radius);
+      padding: 18px 18px 16px;
+      box-shadow: var(--shadow);
+      margin: 18px 0 28px;
+    }
+
+    .decision {
+      font-weight: 700;
+    }
+
+    .summary-grid,
+    .two-col {
+      display: grid;
+      gap: 16px;
+    }
+
+    .summary-grid {
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      margin-bottom: 30px;
+    }
+
+    .two-col {
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      margin-bottom: 30px;
+    }
+
+    .card,
+    .section {
+      border: 1px solid var(--line);
+      background: var(--panel);
+      border-radius: var(--radius);
+      padding: 18px;
+      box-shadow: var(--shadow);
+    }
+
+    .card h2,
+    .section h2 {
+      margin-bottom: 12px;
+    }
+
+    .tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      border-radius: 999px;
+      padding: 6px 10px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      font-size: 0.86rem;
+      font-weight: 700;
+      margin-bottom: 10px;
+    }
+
+    .rule-list {
+      display: grid;
+      gap: 12px;
+      margin: 0;
+    }
+
+    .rule {
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      padding: 14px;
+      background: rgba(255, 255, 255, 0.02);
+    }
+
+    .rule-head {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 6px;
+    }
+
+    .rid {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 78px;
+      padding: 4px 9px;
+      border-radius: 999px;
+      background: var(--code);
+      color: var(--accent);
+      font: 700 0.82rem/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+
+    .rid.warn {
+      color: var(--warn);
+      background: var(--warn-soft);
+    }
+
+    .rid.danger {
+      color: var(--danger);
+      background: var(--danger-soft);
+    }
+
+    .rule-title {
+      font-weight: 700;
+    }
+
+    ul, ol {
+      margin: 10px 0 0;
+      padding-left: 1.2rem;
+    }
+
+    li {
+      margin: 7px 0;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 10px;
+      border: 1px solid var(--line);
+      overflow: hidden;
+      border-radius: var(--radius-sm);
+      background: var(--panel);
+    }
+
+    th, td {
+      text-align: left;
+      vertical-align: top;
+      padding: 11px 12px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    th {
+      color: var(--accent);
+      font-size: 0.9rem;
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    code, pre {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.92em;
+    }
+
+    code {
+      background: var(--code);
+      border-radius: 7px;
+      padding: 0.12rem 0.35rem;
+    }
+
+    pre {
+      margin: 12px 0 0;
+      padding: 14px 16px;
+      background: var(--code);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      overflow: auto;
+      line-height: 1.45;
+    }
+
+    .small {
+      color: var(--muted);
+      font-size: 0.92rem;
+    }
+
+    .matrix td:first-child,
+    .matrix th:first-child {
+      width: 110px;
+    }
+
+    .priority td:first-child,
+    .priority th:first-child {
+      width: 90px;
+    }
+
+    .review {
+      border-color: rgba(15, 118, 110, 0.34);
+    }
+
+    .review .rule {
+      background: rgba(15, 118, 110, 0.03);
+    }
+
+    @media (max-width: 640px) {
+      main {
+        padding: 28px 14px 56px;
+      }
+
+      .card,
+      .section,
+      .callout {
+        padding: 15px;
+      }
+
+      th, td {
+        padding: 10px;
+      }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <p class="eyebrow">T343 Architecture Spec</p>
+    <h1>Unified Keyboard Shortcut Routing</h1>
+    <p class="meta">Prepared 2026-05-18. Source-of-truth architecture spec for one keyboard ownership model that survives transient input surfaces appearing and disappearing in Clawline.</p>
+  </header>
+
+  <section class="callout">
+    <p class="decision">Decision: Clawline will route all shortcut ownership through one central Keyboard Command Router backed by one router-owned Keyboard Ownership Store. Surfaces may expose capabilities and lifecycle, but they may not decide shortcut priority on their own, and platform bridges may not become a second truth source.</p>
+  </section>
+
+  <section class="summary-grid">
+    <article class="card">
+      <div class="tag">Problem</div>
+      <p>Keyboard behavior currently regresses when transient surfaces such as notification action menus, notification reply fields, and the composer mention picker appear or disappear. The failure mode is structural, not just one broken shortcut.</p>
+    </article>
+    <article class="card">
+      <div class="tag">Invariant</div>
+      <p>Visible UI surfaces may register command intents, but only one router resolves ownership, priority, and dispatch for each keyboard event within the active chat scene.</p>
+    </article>
+    <article class="card">
+      <div class="tag">Primary Seam</div>
+      <p>Platform capture normalizes keys into command intents. Surface handlers implement behavior. The router alone chooses which handler owns the event.</p>
+    </article>
+    <article class="card">
+      <div class="tag">Hard Rule</div>
+      <p>No new raw shortcut policy may live in feature views such as notification overlays, rich text editors, or action menus after migration. Those surfaces register; they do not arbitrate.</p>
+    </article>
+  </section>
+
+  <section class="section">
+    <h2>Source Inputs</h2>
+    <ul>
+      <li>The task tracker at <code>/Users/mike/.openclaw/workspace/tracking/T343.md</code> is the direct source for goal and acceptance criteria.</li>
+      <li>The adjacent product spec at <code>/Users/mike/shared-workspace/clawline/specs/t307-cross-chat-notifications.html</code> already defines required shortcut precedence and notification behavior that this architecture must support.</li>
+      <li>The adjacent tracker at <code>/Users/mike/.openclaw/workspace/tracking/T342.md</code> defines modified Return newline behavior that this architecture must preserve for text inputs.</li>
+      <li>The workspace does not contain the repo path named in the task prompt. Current implementation seam evidence therefore comes from tracker-recorded changed paths and verified product requirements rather than direct checkout inspection.</li>
+      <li>Tracker evidence identifies current scattered shortcut logic across iOS <code>ChatView.swift</code>, iOS <code>AppCommandNotifications.swift</code>, iOS <code>RichTextEditor.swift</code>, web <code>CrossChatNotificationOverlay.tsx</code>, and tests around those paths.</li>
+    </ul>
+  </section>
+
+  <section class="two-col">
+    <article class="section">
+      <h2>Failure Topology</h2>
+      <ul>
+        <li>Shortcut policy has been patched into multiple surfaces instead of one routing layer.</li>
+        <li>Transient surfaces do not share one registration and teardown lifecycle, so stale ownership survives after UI disappears.</li>
+        <li>Focus is being used as a proxy for ownership even though explicit notification shortcuts are required to override text-field focus.</li>
+        <li>Platform-specific rescue code can capture keys before feature views see them, which creates a parallel truth risk if those bridges also choose targets.</li>
+        <li>Tests exist around individual symptoms, but the architecture has not made it hard to reintroduce the same class of bug in a new surface.</li>
+      </ul>
+    </article>
+    <article class="section">
+      <h2>Non-Goals</h2>
+      <ul>
+        <li>This spec does not redefine transcript persistence, notification content rules, or mention-routing semantics already owned by T307.</li>
+        <li>This spec does not require a single store for all UI domain data. It requires a single source of truth for keyboard ownership state.</li>
+        <li>This spec does not forbid platform bridges. It forbids platform bridges from becoming an independent policy engine.</li>
+        <li>This spec does not add new user-facing shortcuts beyond the T307 and T342 product requirements.</li>
+      </ul>
+    </article>
+  </section>
+
+  <section class="section">
+    <h2>Normative Requirements</h2>
+    <table class="matrix">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Requirement</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr id="req-r343-01">
+          <td><code>R343-01</code></td>
+          <td>Clawline must expose one explicit keyboard routing layer that is the only authority for shortcut ownership decisions inside the active chat scene.</td>
+        </tr>
+        <tr id="req-r343-02">
+          <td><code>R343-02</code></td>
+          <td>The router must support composer text editing, notification reply editing, composer mention picker navigation and acceptance, notification action menu navigation and activation, assigned notification number shortcuts, notification scroll shortcuts, and transcript/default fallback behavior.</td>
+        </tr>
+        <tr id="req-r343-03">
+          <td><code>R343-03</code></td>
+          <td>Transient surfaces must register, activate, deactivate, and unregister through the same router contract rather than adding private local key listeners with private priority rules.</td>
+        </tr>
+        <tr id="req-r343-04">
+          <td><code>R343-04</code></td>
+          <td>The router-owned Keyboard Ownership Store must be the single source of truth for routing-critical state: the surface registry including active, visible, transient, and focus-hint status, plus derived notification shortcut ownership.</td>
+        </tr>
+        <tr id="req-r343-05">
+          <td><code>R343-05</code></td>
+          <td>Feature stores remain the source of truth for their own payloads and UI state. The router may reference them, but it must not mirror or independently mutate mention text, reply drafts, notification content, or transcript data.</td>
+        </tr>
+        <tr id="req-r343-06">
+          <td><code>R343-06</code></td>
+          <td>Global notification shortcuts that T307 explicitly marks as always-winning must override ordinary text focus while their target notifications exist.</td>
+        </tr>
+        <tr id="req-r343-07">
+          <td><code>R343-07</code></td>
+          <td>Text-input semantics from T342 remain intact: normal Return submit stays scoped to the active text surface, and modified Return newline behavior remains available in composer and reply fields.</td>
+        </tr>
+        <tr id="req-r343-08">
+          <td><code>R343-08</code></td>
+          <td>Platform bridges may normalize or rescue events that declarative layers cannot reliably capture, but they must feed the central router and may not directly decide target ownership or mutate feature state.</td>
+        </tr>
+        <tr id="req-r343-09">
+          <td><code>R343-09</code></td>
+          <td>The architecture must make stale ownership hard to introduce through automatic teardown, ownership diagnostics, and review gates that reject new surface-local priority logic.</td>
+        </tr>
+        <tr id="req-r343-10">
+          <td><code>R343-10</code></td>
+          <td>Migration must consolidate the current scattered routing logic and remove redundant parallel delivery paths once equivalent router-backed handlers exist.</td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="section">
+    <h2>Core Architecture</h2>
+    <div class="rule-list">
+      <article class="rule" id="arch-ar-01">
+        <div class="rule-head">
+          <span class="rid">AR-01</span>
+          <span class="rule-title">Central Router Contract</span>
+        </div>
+        <p>The central router contract has three parts:</p>
+        <ol>
+          <li>A platform bridge turns raw keyboard events into normalized command intents.</li>
+          <li>A router-owned registry knows which surfaces exist, which are active, and which command families they can legitimately handle.</li>
+          <li>The router resolves one owner for each command intent and dispatches to that surface handler with an inspectable trace.</li>
+        </ol>
+      </article>
+
+      <article class="rule" id="arch-ar-02">
+        <div class="rule-head">
+          <span class="rid">AR-02</span>
+          <span class="rule-title">Normalized Command Intents</span>
+        </div>
+        <p>Routing is done on semantic command intents, not direct view-level key matching. Example intent families include:</p>
+        <ul>
+          <li><code>notification.assigned.open(number)</code></li>
+          <li><code>notification.assigned.reply(number)</code></li>
+          <li><code>notification.assigned.dismiss(number)</code></li>
+          <li><code>notification.scroll.forward</code> and <code>notification.scroll.backward</code></li>
+          <li><code>menu.navigate.up</code>, <code>menu.navigate.down</code>, and <code>menu.activate</code></li>
+          <li><code>picker.navigate.up</code>, <code>picker.navigate.down</code>, and <code>picker.accept</code></li>
+          <li><code>text.submit</code>, <code>text.newline.modified</code>, and <code>text.cancel</code></li>
+          <li><code>transcript.scroll</code> and default fallthrough</li>
+        </ul>
+      </article>
+
+      <article class="rule" id="arch-ar-03">
+        <div class="rule-head">
+          <span class="rid">AR-03</span>
+          <span class="rule-title">Surface Registration, Not Surface Arbitration</span>
+        </div>
+        <p>Each keyboard-capable surface registers a descriptor containing its kind, lifecycle token, scene, visibility, active state, focus hint status, and supported command families. A surface handler returns behavior for commands it owns, but it does not rank itself against sibling surfaces.</p>
+      </article>
+
+      <article class="rule" id="arch-ar-04">
+        <div class="rule-head">
+          <span class="rid">AR-04</span>
+          <span class="rule-title">One Owner Per Event</span>
+        </div>
+        <p>For any key event in the active chat scene, the router emits exactly one route decision: handled by one surface, explicitly ignored, or allowed to fall through. Two surfaces handling the same key event is an architecture bug.</p>
+      </article>
+
+      <article class="rule" id="arch-ar-05">
+        <div class="rule-head">
+          <span class="rid">AR-05</span>
+          <span class="rule-title">Inspectable Decision Trace</span>
+        </div>
+        <p>Every route decision must be inspectable in diagnostics. The trace should include the normalized intent, participating surfaces, the winning priority rule, and whether a platform bridge consumed the event before default platform handling.</p>
+      </article>
+    </div>
+  </section>
+
+  <section class="section">
+    <h2>Router-Owned State Model</h2>
+    <p class="small">The router is the only writer of routing-critical ownership state. Feature stores remain owners of domain data.</p>
+<pre><code>KeyboardOwnershipStore {
+  sceneId: SceneId
+  surfaceRegistry: Map&lt;SurfaceId, KeyboardSurfaceRecord&gt;
+  hardwareKeyboardAvailable: Bool
+  notificationShortcutMap: Map&lt;Int, SurfaceId&gt;   // derived from notification store order
+  routeEpoch: Int
+}
+
+KeyboardSurfaceRecord {
+  surfaceId: SurfaceId
+  surfaceKind: "composer" | "mention-picker" | "notification-bubble" |
+               "notification-reply" | "notification-action-menu" |
+               "transcript" | "future-overlay"
+  sceneId: SceneId
+  parentSurfaceId: SurfaceId?
+  lifecycleToken: String
+  visible: Bool
+  active: Bool
+  focusedHint: Bool
+  priorityBand: PriorityBand
+  commandFamilies: Set&lt;CommandFamily&gt;
+  domainRef: String
+}</code></pre>
+  </section>
+
+  <section class="section">
+    <h2>State Ownership Rules</h2>
+    <div class="rule-list">
+      <article class="rule" id="state-so-01">
+        <div class="rule-head">
+          <span class="rid">SO-01</span>
+          <span class="rule-title">Router Owns Ownership</span>
+        </div>
+        <p>The router owns the authoritative answers to “which surfaces exist,” “which surfaces are active,” and “who owns this command.” No surface keeps a private authoritative copy of that state.</p>
+      </article>
+
+      <article class="rule" id="state-so-02">
+        <div class="rule-head">
+          <span class="rid">SO-02</span>
+          <span class="rule-title">Feature Stores Own Domain Payload</span>
+        </div>
+        <p>The composer owns draft text and mention query state. The notification store owns bubble order, visibility, reply draft content, reply-mode state, and action-menu content. The transcript store owns transcript data. The router references those stores by stable domain references and derived snapshots, but does not mirror their payload fields.</p>
+      </article>
+
+      <article class="rule" id="state-so-03">
+        <div class="rule-head">
+          <span class="rid">SO-03</span>
+          <span class="rule-title">Focus Is a Hint, Not the Policy Engine</span>
+        </div>
+        <p>Platform focus and first-responder state are inputs into routing, not the routing authority. This is required because T307 explicitly demands notification number shortcuts and notification scroll shortcuts that can override focused text inputs.</p>
+      </article>
+
+      <article class="rule" id="state-so-04">
+        <div class="rule-head">
+          <span class="rid">SO-04</span>
+          <span class="rule-title">Derived Shortcut Maps Must Stay Derived</span>
+        </div>
+        <p>Assigned notification numbers are derived from the notification store’s visible ordering and written only into router-owned derived state. No notification bubble may store a long-lived independent hotkey assignment that can drift after reorder or overflow changes.</p>
+      </article>
+
+      <article class="rule" id="state-so-05">
+        <div class="rule-head">
+          <span class="rid">SO-05</span>
+          <span class="rule-title">Scene-Scoped Ownership</span>
+        </div>
+        <p>Ownership is scoped to the active chat scene or window. A stale hidden scene must not continue to own shortcuts for a foreground scene.</p>
+      </article>
+
+      <article class="rule" id="state-so-06">
+        <div class="rule-head">
+          <span class="rid">SO-06</span>
+          <span class="rule-title">No Duplicate Convenience Truth</span>
+        </div>
+        <p>The router store must not keep second authoritative copies of active transient owner or focused owner outside the surface registry. Those are selectors derived from the registry, not parallel mutable fields.</p>
+      </article>
+
+      <article class="rule" id="state-so-07">
+        <div class="rule-head">
+          <span class="rid">SO-07</span>
+          <span class="rule-title">Shared Lifecycle Facts Have One Writer</span>
+        </div>
+        <p>Routing-relevant lifecycle facts such as “mention picker open,” “notification action menu open,” and “reply field active” must have one writer. Either the feature store owns the fact and drives router registration atomically, or the router lifecycle API owns it and the feature renders from that state. Both layers mutating the same fact is forbidden.</p>
+      </article>
+    </div>
+  </section>
+
+  <section class="section">
+    <h2>Lifecycle Rules</h2>
+    <div class="rule-list">
+      <article class="rule" id="life-lc-01">
+        <div class="rule-head">
+          <span class="rid">LC-01</span>
+          <span class="rule-title">Register on Mount or Appearance</span>
+        </div>
+        <p>Each keyboard-capable surface registers once when it enters the active chat scene. Registration returns an opaque lifecycle token that must be used for updates and teardown.</p>
+      </article>
+
+      <article class="rule" id="life-lc-02">
+        <div class="rule-head">
+          <span class="rid">LC-02</span>
+          <span class="rule-title">Activate and Deactivate Without Reallocation</span>
+        </div>
+        <p>Transient surfaces such as mention pickers and action menus should usually toggle active and visible state on an existing registration rather than repeatedly re-creating ad hoc listeners. This keeps ownership changes explicit and inspectable.</p>
+      </article>
+
+      <article class="rule" id="life-lc-03">
+        <div class="rule-head">
+          <span class="rid">LC-03</span>
+          <span class="rule-title">Unregister on Disappear or Domain Deletion</span>
+        </div>
+        <p>When a transient surface disappears, when its parent domain object disappears, or when the scene is torn down, the router must revoke its lifecycle token and remove its ownership claims immediately.</p>
+      </article>
+
+      <article class="rule" id="life-lc-04">
+        <div class="rule-head">
+          <span class="rid">LC-04</span>
+          <span class="rule-title">Parent-Child Coupling for Transients</span>
+        </div>
+        <p>A mention picker is a child of the composer surface. A notification action menu and reply field are children of a notification bubble domain object. If the parent deactivates or disappears, child registrations are auto-revoked in the same route epoch.</p>
+      </article>
+
+      <article class="rule" id="life-lc-05">
+        <div class="rule-head">
+          <span class="rid">LC-05</span>
+          <span class="rule-title">No Orphaned Global Capture</span>
+        </div>
+        <p>Platform bridges may stay installed for the scene, but they must consult the live router registry before consuming any command. A captured command with no current owner must fall through rather than resurrecting a stale surface.</p>
+      </article>
+
+      <article class="rule" id="life-lc-06">
+        <div class="rule-head">
+          <span class="rid">LC-06</span>
+          <span class="rule-title">Navigation Resets Ownership Without Forcing Input Focus</span>
+        </div>
+        <p>Chat navigation must flush scene-local transient keyboard ownership and re-register the destination scene’s surfaces without opportunistically focusing the composer or a reply field. This preserves V307-25.</p>
+      </article>
+    </div>
+  </section>
+
+  <section class="section">
+    <h2>Priority Model</h2>
+    <table class="priority">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Priority Rule</th>
+          <th>Owner</th>
+          <th>Reason</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr id="prio-pr-01">
+          <td><code>PR-01</code></td>
+          <td>Open notification action menu owns menu arrows and Return/Enter.</td>
+          <td>Notification action menu</td>
+          <td>Menus are explicit transient interaction surfaces and must not leak navigation keys to the composer or transcript while open.</td>
+        </tr>
+        <tr id="prio-pr-02">
+          <td><code>PR-02</code></td>
+          <td>Open composer mention picker owns picker arrows and mention-accept Return/Enter.</td>
+          <td>Mention picker</td>
+          <td>The picker is the active chooser for the composer and must intercept selection keys before text submit.</td>
+        </tr>
+        <tr id="prio-pr-03">
+          <td><code>PR-03</code></td>
+          <td>Assigned notification number shortcuts always win while their target notification exists.</td>
+          <td>Target notification bubble domain</td>
+          <td>T307 makes these app-global notification commands, even over focused text fields.</td>
+        </tr>
+        <tr id="prio-pr-04">
+          <td><code>PR-04</code></td>
+          <td>Visible-notification scroll shortcuts own <code>Cmd-J</code>/<code>Cmd-K</code>/<code>Cmd-Shift-J</code>/<code>Cmd-Shift-K</code> while visible notifications exist.</td>
+          <td>Active or top notification bubble</td>
+          <td>T307 explicitly requires these to remain available even when composer or reply fields are focused.</td>
+        </tr>
+        <tr id="prio-pr-05">
+          <td><code>PR-05</code></td>
+          <td>Focused notification reply field owns plain text-entry keys, plain Return submit, modified Return newline, and Escape cancel.</td>
+          <td>Notification reply field</td>
+          <td>Reply editing is scoped text behavior after higher-priority notification-global commands are resolved.</td>
+        </tr>
+        <tr id="prio-pr-06">
+          <td><code>PR-06</code></td>
+          <td>Focused composer owns normal text editing, plain Return submit, and modified Return newline.</td>
+          <td>Composer</td>
+          <td>The composer is the default active text surface when no stronger transient or notification-global rule applies.</td>
+        </tr>
+        <tr id="prio-pr-07">
+          <td><code>PR-07</code></td>
+          <td>Transcript or default scene behavior receives only unclaimed commands.</td>
+          <td>Transcript/default</td>
+          <td>Fallback behavior must be explicit, not accidental leakage.</td>
+        </tr>
+      </tbody>
+    </table>
+    <p class="small">Important consequence: the router resolves notification-global commands before ordinary text focus, but it resolves plain text-entry keys after transient menu or picker ownership has had a chance to claim them.</p>
+  </section>
+
+  <section class="section">
+    <h2>Reference Routing Algorithm</h2>
+<pre><code>route(intent, scene):
+  candidates = registry.activeVisibleSurfaces(scene)
+
+  if intent.family in menuNavigation and exists open notification action menu:
+    return actionMenu
+
+  if intent.family in pickerNavigation and exists open composer mention picker:
+    return mentionPicker
+
+  if intent.family in assignedNotificationCommands:
+    return notificationShortcutMap[intent.number] or fallthrough
+
+  if intent.family in notificationScroll and notificationsVisible(scene):
+    return activeNotificationOrTopVisible(scene)
+
+  if exists focused notification reply field and replyField.claims(intent):
+    return replyField
+
+  if exists focused composer and composer.claims(intent):
+    return composer
+
+  return transcriptOrDefault(scene)</code></pre>
+  </section>
+
+  <section class="section">
+    <h2>Stale-Ownership Hardening</h2>
+    <div class="rule-list">
+      <article class="rule" id="hard-ho-01">
+        <div class="rule-head">
+          <span class="rid">HO-01</span>
+          <span class="rule-title">No Raw Policy in Feature Views</span>
+        </div>
+        <p>Feature views may declare command capabilities and surface lifecycle only. They may not contain private priority decisions such as “if menu open then steal arrows before notifications.”</p>
+      </article>
+
+      <article class="rule" id="hard-ho-02">
+        <div class="rule-head">
+          <span class="rid">HO-02</span>
+          <span class="rule-title">Bridge Modules Are Capture Shims</span>
+        </div>
+        <p>Bridge files such as app-command shims, responder bridges, or DOM keydown capture may normalize events and ask the router what to do. They may not directly open reply mode, scroll a notification, move a picker selection, or navigate a menu.</p>
+      </article>
+
+      <article class="rule" id="hard-ho-03">
+        <div class="rule-head">
+          <span class="rid">HO-03</span>
+          <span class="rule-title">Auto-Revoke Child Surfaces</span>
+        </div>
+        <p>Mention pickers, action menus, and inline reply surfaces must be revoked by parent teardown. This prevents the exact stale transient-surface bug class that triggered T343.</p>
+      </article>
+
+      <article class="rule" id="hard-ho-04">
+        <div class="rule-head">
+          <span class="rid">HO-04</span>
+          <span class="rule-title">Derived Route Diagnostics</span>
+        </div>
+        <p>The app should expose a lightweight debug panel or log trace showing active surfaces, derived notification assignments, and last route decision. A stale owner becomes obvious instead of invisible.</p>
+      </article>
+
+      <article class="rule" id="hard-ho-05">
+        <div class="rule-head">
+          <span class="rid">HO-05</span>
+          <span class="rule-title">Review Gate for New Surfaces</span>
+        </div>
+        <p>Any future surface that can receive keyboard interaction must ship with a router registration descriptor, lifecycle tests, and explicit priority expectations. “I added a local key handler because it was easy” is a review failure.</p>
+      </article>
+
+      <article class="rule" id="hard-ho-06">
+        <div class="rule-head">
+          <span class="rid">HO-06</span>
+          <span class="rule-title">Registry Reconciliation Guard</span>
+        </div>
+        <p>The router must reconcile its registry against the live scene and parent domain objects on scene updates and before dispatch. If a parent surface or domain reference no longer exists, orphaned child registrations are pruned even if a view forgot to unregister cleanly.</p>
+      </article>
+    </div>
+  </section>
+
+  <section class="section">
+    <h2>Platform Bridge Rules</h2>
+    <div class="rule-list">
+      <article class="rule" id="bridge-pb-01">
+        <div class="rule-head">
+          <span class="rid">PB-01</span>
+          <span class="rule-title">Allowed Bridge Responsibility</span>
+        </div>
+        <p>A platform bridge may detect hardware-keyboard availability, normalize raw platform events, and capture commands that would otherwise be swallowed before declarative UI sees them.</p>
+      </article>
+
+      <article class="rule" id="bridge-pb-02">
+        <div class="rule-head">
+          <span class="rid">PB-02</span>
+          <span class="rule-title">Forbidden Bridge Responsibility</span>
+        </div>
+        <p>A bridge may not choose between composer, reply field, mention picker, action menu, or transcript on its own. It must pass the normalized intent to the router and obey the router result.</p>
+      </article>
+
+      <article class="rule" id="bridge-pb-03">
+        <div class="rule-head">
+          <span class="rid">PB-03</span>
+          <span class="rule-title">Platform Escape Hatch Still Routes Centrally</span>
+        </div>
+        <p>If Apple or web text controls require a responder-layer workaround for arrow keys, Return, or global command shortcuts, that workaround is still a bridge, not a policy branch. The same router decides ownership on every platform.</p>
+      </article>
+
+      <article class="rule" id="bridge-pb-04">
+        <div class="rule-head">
+          <span class="rid">PB-04</span>
+          <span class="rule-title">One Intent Vocabulary Across Platforms</span>
+        </div>
+        <p>iOS/Catalyst, macOS, and web must normalize into the same command-intent vocabulary so precedence is defined once and tested once, even if capture details differ.</p>
+      </article>
+    </div>
+  </section>
+
+  <section class="section">
+    <h2>Migration Plan</h2>
+    <div class="rule-list">
+      <article class="rule" id="mig-mg-01">
+        <div class="rule-head">
+          <span class="rid">MG-01</span>
+          <span class="rule-title">Create the Router and Intent Vocabulary</span>
+        </div>
+        <p>Introduce the central router contract, normalized command-intent types, surface registry, and route diagnostics before moving behavior. This is the new stable seam.</p>
+      </article>
+
+      <article class="rule" id="mig-mg-02">
+        <div class="rule-head">
+          <span class="rid">MG-02</span>
+          <span class="rule-title">Wrap Existing Text Surfaces</span>
+        </div>
+        <p>Register the composer and notification reply fields as router-backed text surfaces first. Preserve T342 modified Return newline semantics and plain Return submit within router-dispatched handlers.</p>
+      </article>
+
+      <article class="rule" id="mig-mg-03">
+        <div class="rule-head">
+          <span class="rid">MG-03</span>
+          <span class="rule-title">Move Mention Picker Ownership</span>
+        </div>
+        <p>Move picker arrow navigation and mention acceptance into a dedicated mention-picker surface registration. Remove view-local arrow and Return priority decisions once the router-backed picker passes.</p>
+      </article>
+
+      <article class="rule" id="mig-mg-04">
+        <div class="rule-head">
+          <span class="rid">MG-04</span>
+          <span class="rule-title">Move Notification Globals and Menus</span>
+        </div>
+        <p>Route assigned notification shortcuts, notification scroll shortcuts, and notification action-menu ownership through the router. The router derives notification shortcut assignments from the notification store’s visible ordering.</p>
+      </article>
+
+      <article class="rule" id="mig-mg-05">
+        <div class="rule-head">
+          <span class="rid">MG-05</span>
+          <span class="rule-title">Demote Platform Rescue Code</span>
+        </div>
+        <p>Refactor iOS/Catalyst app-command capture, responder overrides, and web keydown capture so those modules become thin bridge shims that only emit intents to the router.</p>
+      </article>
+
+      <article class="rule" id="mig-mg-06">
+        <div class="rule-head">
+          <span class="rid">MG-06</span>
+          <span class="rule-title">Delete Redundant Local Priority Logic</span>
+        </div>
+        <p>After router-backed behavior is in place, remove duplicated shortcut arbitration from current scattered paths recorded in the tracker, including iOS chat view logic, iOS rich text/editor capture, iOS notification app-command shims, and web notification overlay logic.</p>
+      </article>
+
+      <article class="rule" id="mig-mg-07">
+        <div class="rule-head">
+          <span class="rid">MG-07</span>
+          <span class="rule-title">Lock the Seam With Tests and Review Rules</span>
+        </div>
+        <p>Add precedence tests, lifecycle tests, and a review checklist that rejects new raw shortcut policy outside router or bridge modules. This is how future surfaces stop breaking ownership again.</p>
+      </article>
+    </div>
+  </section>
+
+  <section class="section">
+    <h2>Verification Gates</h2>
+    <div class="rule-list">
+      <article class="rule" id="verify-vg-01">
+        <div class="rule-head">
+          <span class="rid">VG-01</span>
+          <span class="rule-title">Intent Normalization Tests</span>
+        </div>
+        <p>Unit-test iOS/Catalyst, macOS, and web bridge modules so the same physical shortcuts normalize into the same command intents.</p>
+      </article>
+
+      <article class="rule" id="verify-vg-02">
+        <div class="rule-head">
+          <span class="rid">VG-02</span>
+          <span class="rule-title">Precedence Matrix Tests</span>
+        </div>
+        <p>Table-driven tests must prove the router’s decisions for action menu, mention picker, notification globals, reply field, composer, and transcript fallback across conflicting states.</p>
+      </article>
+
+      <article class="rule" id="verify-vg-03">
+        <div class="rule-head">
+          <span class="rid">VG-03</span>
+          <span class="rule-title">Transient Lifecycle Tests</span>
+        </div>
+        <p>Explicitly test open, update, close, and parent-teardown transitions for mention pickers, notification action menus, and notification reply fields so stale ownership cannot survive disappearance.</p>
+      </article>
+
+      <article class="rule" id="verify-vg-04">
+        <div class="rule-head">
+          <span class="rid">VG-04</span>
+          <span class="rule-title">Regression Tests for T307 and T342</span>
+        </div>
+        <p>Carry forward focused tests for notification number shortcuts, notification scroll shortcuts, mention-picker navigation and acceptance, reply-field Return behavior, composer Return behavior, and modified Return newline behavior.</p>
+      </article>
+
+      <article class="rule" id="verify-vg-05">
+        <div class="rule-head">
+          <span class="rid">VG-05</span>
+          <span class="rule-title">Navigation and Focus Preservation Tests</span>
+        </div>
+        <p>Verify V307-25 explicitly: moving between chats or navigating from a notification must not summon the keyboard or shift ownership unless the user intentionally focused an input.</p>
+      </article>
+
+      <article class="rule" id="verify-vg-06">
+        <div class="rule-head">
+          <span class="rid">VG-06</span>
+          <span class="rule-title">Hardware Keyboard Proof</span>
+        </div>
+        <p>Run a physical or simulator-backed hardware-keyboard pass on Apple surfaces proving arrow, Return, modified Return, and global notification shortcuts on the actual UI layer, not just compile-time assumptions.</p>
+      </article>
+
+      <article class="rule" id="verify-vg-07">
+        <div class="rule-head">
+          <span class="rid">VG-07</span>
+          <span class="rule-title">Architecture Review Gate</span>
+        </div>
+        <p>Review must include a requirement matrix against this spec and reject any remaining surface-local shortcut priority logic or parallel bridge-owned ownership decisions as unsatisfied architecture requirements.</p>
+      </article>
+    </div>
+  </section>
+
+  <section class="section review">
+    <h2>Embedded Adversarial Review Verdict</h2>
+    <p><strong>Verdict:</strong> Pass after revision. The first draft risked letting focus or platform fallback remain de facto authority. The revised architecture closes that hole by making the router-owned registry and normalized command-intent pipeline the only ownership truth.</p>
+
+    <div class="rule-list">
+      <article class="rule" id="review-rv-01">
+        <div class="rule-head">
+          <span class="rid">RV-01</span>
+          <span class="rule-title">Blocker Fixed: Focus Was Not Reliable Truth</span>
+        </div>
+        <p>The spec now states that focus is only a hint, because T307 requires notification-global shortcuts to override focused text fields. Ownership now lives in router state, not responder state.</p>
+      </article>
+
+      <article class="rule" id="review-rv-02">
+        <div class="rule-head">
+          <span class="rid">RV-02</span>
+          <span class="rule-title">Blocker Fixed: Platform Bridges Could Have Become Parallel Policy</span>
+        </div>
+        <p>The bridge rules now explicitly forbid bridges from choosing targets or mutating feature state directly. Bridges capture and normalize only; the router decides.</p>
+      </article>
+
+      <article class="rule" id="review-rv-03">
+        <div class="rule-head">
+          <span class="rid">RV-03</span>
+          <span class="rule-title">Blocker Fixed: Transient Surfaces Needed Stronger Teardown</span>
+        </div>
+        <p>The lifecycle rules now require parent-child auto-revocation and scene teardown cleanup, which directly attacks the stale ownership bug class behind the mention-picker regression.</p>
+      </article>
+
+      <article class="rule" id="review-rv-04">
+        <div class="rule-head">
+          <span class="rid">RV-04</span>
+          <span class="rule-title">Blocker Fixed: Duplicate Hotkey Assignment Drift</span>
+        </div>
+        <p>The spec now makes assigned notification numbers derived router state rather than bubble-owned persistent state, which closes a future reorder or overflow drift footgun.</p>
+      </article>
+
+      <article class="rule" id="review-rv-05">
+        <div class="rule-head">
+          <span class="rid">RV-05</span>
+          <span class="rule-title">Blocker Fixed: Shared Open-State Split Brain</span>
+        </div>
+        <p>The spec now requires a single writer for routing-relevant lifecycle facts such as picker open state, action-menu open state, and reply activation. That closes a quiet duplicate-state seam that could otherwise recreate stale ownership even with a central router.</p>
+      </article>
+
+      <article class="rule" id="review-rn-01">
+        <div class="rule-head">
+          <span class="rid warn">RN-01</span>
+          <span class="rule-title">Residual Risk: Implementation Discipline</span>
+        </div>
+        <p>A future contributor can still add a raw <code>keyboardShortcut</code>, <code>onKeyDown</code>, responder override, or bridge-side mutation if review discipline slips. VG-07 and HO-05 are therefore part of the architecture, not optional cleanup.</p>
+      </article>
+
+      <article class="rule" id="review-rn-02">
+        <div class="rule-head">
+          <span class="rid warn">RN-02</span>
+          <span class="rule-title">Residual Risk: Cross-Store Atomicity</span>
+        </div>
+        <p>The router depends on up-to-date notification visibility ordering from the notification store. Implementation should wire that dependency atomically so shortcut reassignment cannot lag one frame behind visible stack changes.</p>
+      </article>
+    </div>
+  </section>
+</main>
+</body>
+</html>

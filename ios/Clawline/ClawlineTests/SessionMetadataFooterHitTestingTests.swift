@@ -41,8 +41,8 @@ struct SessionMetadataFooterHitTestingTests {
         let frames = buttons.map { $0.convert($0.bounds, to: cell) }
 
         #expect(SessionMetadataFooterCell.topPadding == 12)
-        #expect(SessionMetadataFooterCell.height(for: makeStatus()) == 60)
-        #expect(SessionMetadataFooterCell.fadeRevealRange == 56)
+        #expect(SessionMetadataFooterCell.height(for: makeStatus()) == 82)
+        #expect(SessionMetadataFooterCell.fadeRevealRange == 78)
         #expect(frames.allSatisfy {
             let centeredY = SessionMetadataFooterCell.topPadding
                 + (SessionMetadataFooterCell.actionRegionHeight - $0.height) / 2
@@ -141,7 +141,133 @@ struct SessionMetadataFooterHitTestingTests {
         let foreground = try #require(configuration.baseForegroundColor)
 
         #expect(foreground.cgColor.alpha == SessionMetadataFooterCell.textAlpha(isDark: false))
-        #expect(SessionMetadataFooterCell.fadeRevealRange == 56)
+        #expect(SessionMetadataFooterCell.fadeRevealRange == 78)
+    }
+
+    @Test("T1184 Spatial footer text stays white across theme states")
+    func spatialFooterTextStaysWhiteAcrossThemeStates() throws {
+        #expect(SessionMetadataFooterCell.textColor(isDark: false, isSpatial: true).isEqual(UIColor.white))
+        #expect(SessionMetadataFooterCell.textColor(isDark: true, isSpatial: true).isEqual(UIColor.white))
+        #expect(SessionMetadataFooterCell.textColor(isDark: false, isSpatial: false).isEqual(UIColor.white) == false)
+
+        for isDark in [false, true] {
+            let cell = makeConfiguredCell(authMode: "oauth", isDark: isDark, isSpatial: true)
+            let buttons = allSubviews(in: cell).compactMap { $0 as? UIButton }
+            let labels = allSubviews(in: cell).compactMap { $0 as? UILabel }
+
+            for button in buttons {
+                let foreground = try #require(button.configuration?.baseForegroundColor)
+                #expect(foreground.isEqual(UIColor.white))
+                #expect(button.tintColor.isEqual(UIColor.white))
+            }
+
+            for label in labels {
+                #expect(label.textColor.isEqual(UIColor.white))
+            }
+        }
+    }
+
+    @Test("Footer shows version build line and test menu")
+    func footerShowsVersionBuildLineAndTestMenu() throws {
+        let cell = makeConfiguredCell()
+        let versionLabel = try #require(
+            allSubviews(in: cell).compactMap { $0 as? UILabel }
+                .first { $0.accessibilityLabel?.hasPrefix("Version ") == true }
+        )
+        let testMenuButton = try #require(
+            allSubviews(in: cell).compactMap { $0 as? UIButton }
+                .first { $0.accessibilityLabel == "Test menu" }
+        )
+        let actions = try #require(testMenuButton.menu?.children.compactMap { $0 as? UIAction })
+
+        #expect(versionLabel.text == SessionMetadataFooterCell.versionBuildText())
+        #expect(actions.map(\.title) == ["Settings", "Logout"])
+        #expect(actions.last?.attributes.contains(.destructive) == true)
+        #expect(testMenuButton.showsMenuAsPrimaryAction)
+        #expect(testMenuButton.configuration?.image == UIImage(systemName: "gearshape"))
+        #expect(testMenuButton.configuration?.preferredSymbolConfigurationForImage == UIImage.SymbolConfiguration(
+            pointSize: SessionMetadataFooterCell.testMenuIconPointSize,
+            weight: .regular
+        ))
+        #expect(testMenuButton.bounds.width == 44)
+        let testMenuCenter = testMenuButton.convert(
+            CGPoint(x: testMenuButton.bounds.midX, y: testMenuButton.bounds.midY),
+            to: cell
+        )
+        #expect(cell.hitTest(testMenuCenter, with: nil) === testMenuButton)
+        let expandedHitPoint = testMenuButton.convert(
+            CGPoint(x: testMenuButton.bounds.midX, y: testMenuButton.bounds.minY - 8),
+            to: cell
+        )
+        #expect(cell.hitTest(expandedHitPoint, with: nil) === testMenuButton)
+    }
+
+    @Test("Footer renders sanitized auth mode as right-most text")
+    func footerRendersSanitizedAuthModeRightMost() {
+        let apiKeyStatus = makeStatus(authMode: "api_key")
+        #expect(SessionMetadataFooterCell.footerText(for: apiKeyStatus) == "gpt-5.5  ·  Thinking high  ·  Fast on  ·  API KEY")
+
+        let unknownStatus = makeStatus(authMode: "unknown")
+        #expect(SessionMetadataFooterCell.footerText(for: unknownStatus) == "gpt-5.5  ·  Thinking high  ·  Fast on")
+    }
+
+    @Test("Footer auth mode uses semantic theme colors")
+    func footerAuthModeUsesSemanticThemeColors() throws {
+        let oauthCell = makeConfiguredCell(authMode: "oauth", isDark: false)
+        let oauthLabel = try #require(
+            allSubviews(in: oauthCell).compactMap { $0 as? UILabel }
+                .first { $0.accessibilityLabel == "OAUTH" }
+        )
+        #expect(oauthLabel.textColor.isEqual(ChatFlowUIKitTheme.palette(isDark: false).sage))
+        #expect(oauthLabel.accessibilityTraits.contains(.staticText))
+        #expect(oauthLabel.isUserInteractionEnabled == false)
+        let oauthCenter = oauthLabel.convert(CGPoint(x: oauthLabel.bounds.midX, y: oauthLabel.bounds.midY), to: oauthCell)
+        #expect(oauthCell.hitTest(oauthCenter, with: nil) !== oauthLabel)
+
+        let apiKeyCell = makeConfiguredCell(authMode: "api_key", isDark: false)
+        let apiKeyLabel = try #require(
+            allSubviews(in: apiKeyCell).compactMap { $0 as? UILabel }
+                .first { $0.accessibilityLabel == "API KEY" }
+        )
+        #expect(apiKeyLabel.textColor.isEqual(ChatFlowUIKitTheme.connectionReconnecting(isDark: false)))
+        #expect(apiKeyLabel.accessibilityTraits.contains(.staticText))
+        #expect(apiKeyLabel.isUserInteractionEnabled == false)
+        let apiKeyCenter = apiKeyLabel.convert(CGPoint(x: apiKeyLabel.bounds.midX, y: apiKeyLabel.bounds.midY), to: apiKeyCell)
+        #expect(apiKeyCell.hitTest(apiKeyCenter, with: nil) !== apiKeyLabel)
+    }
+
+    @Test("Footer auth mode renders visible semantic pixels in simulator")
+    func footerAuthModeRendersVisibleSemanticPixels() throws {
+        let oauthRender = try renderedFooterImage(authMode: "oauth", accessibilityLabel: "OAUTH")
+        writeEvidenceImage(oauthRender.image, name: "t318-oauth-footer-render.png")
+        let oauthPixels = try sampledTextPixels(in: oauthRender.image, frame: oauthRender.labelFrame)
+        #expect(oauthPixels.count >= 12)
+        #expect(oauthPixels.averageGreen > oauthPixels.averageRed + 2)
+        #expect(oauthPixels.averageGreen > oauthPixels.averageBlue + 3)
+
+        let apiKeyRender = try renderedFooterImage(authMode: "api_key", accessibilityLabel: "API KEY")
+        writeEvidenceImage(apiKeyRender.image, name: "t318-api-key-footer-render.png")
+        let apiKeyPixels = try sampledTextPixels(in: apiKeyRender.image, frame: apiKeyRender.labelFrame)
+        #expect(apiKeyPixels.count >= 12)
+        #expect(apiKeyPixels.averageRed > apiKeyPixels.averageBlue + 20)
+        #expect(apiKeyPixels.averageGreen > apiKeyPixels.averageBlue + 20)
+    }
+
+    @Test("Footer model label prefers matching catalog display name")
+    func footerModelLabelPrefersMatchingCatalogDisplayName() throws {
+        let status = try decodedStatus(
+            displayModel: "qwen3.6-35b-a3b",
+            catalogName: "Qwen 3.6 35B-A3B Q4_K_M (gibson)"
+        )
+
+        #expect(SessionMetadataFooterCell.footerText(for: status) == "Qwen 3.6 35B-A3B Q4_K_M (gibson)  ·  Thinking high  ·  Fast off")
+    }
+
+    @Test("Footer appends when rendered items and footer-capable status are present")
+    func footerAppendsWhenRenderedItemsAndFooterCapableStatusArePresent() {
+        #expect(SessionMetadataFooterCell.shouldAppendFooter(after: ["message-1"], status: makeStatus()))
+        #expect(SessionMetadataFooterCell.shouldAppendFooter(after: [], status: makeStatus()) == false)
+        #expect(SessionMetadataFooterCell.shouldAppendFooter(after: ["message-1"], status: nil) == false)
     }
 
     @Test("Popup selectors mark current item with checkmark image instead of text")
@@ -171,8 +297,8 @@ struct SessionMetadataFooterHitTestingTests {
     }
 }
 
-private func makeConfiguredCell() -> SessionMetadataFooterCell {
-    let status = makeStatus()
+private func makeConfiguredCell(authMode: String? = nil, isDark: Bool = false, isSpatial: Bool = false) -> SessionMetadataFooterCell {
+    let status = makeStatus(authMode: authMode)
     let cell = SessionMetadataFooterCell(
         frame: CGRect(
             x: 0,
@@ -181,13 +307,13 @@ private func makeConfiguredCell() -> SessionMetadataFooterCell {
             height: SessionMetadataFooterCell.height(for: status)
         )
     )
-    cell.configure(status: status, isDark: false, onSelect: { _, _, _, _ in })
+    cell.configure(status: status, isDark: isDark, isSpatial: isSpatial, onSelect: { _, _, _, _ in })
     cell.setNeedsLayout()
     cell.layoutIfNeeded()
     return cell
 }
 
-private func makeStatus() -> SessionStatus {
+private func makeStatus(authMode: String? = nil) -> SessionStatus {
     SessionStatus(
         sessionKey: "agent:main:clawline:user:s_test",
         display: .init(
@@ -195,6 +321,7 @@ private func makeStatus() -> SessionStatus {
             fallbackModels: ["gpt-5.5", "claude-sonnet-4.6"],
             provider: "openai",
             harness: nil,
+            authMode: authMode,
             reasoningLevel: nil,
             thinkingLevel: "high",
             fastMode: true,
@@ -229,8 +356,131 @@ private func makeStatus() -> SessionStatus {
     )
 }
 
+@MainActor
+private func decodedStatus(displayModel: String, catalogName: String) throws -> SessionStatus {
+    let json = """
+    {
+      "sessionKey": "agent:heimdal:main",
+      "display": {
+        "model": "\(displayModel)",
+        "provider": "gibson",
+        "thinkingLevel": "high",
+        "fastMode": false
+      },
+      "run": {
+        "state": "idle"
+      },
+      "capabilities": {
+        "setModel": {
+          "supported": true
+        },
+        "setThinking": {
+          "supported": true
+        },
+        "setFastMode": {
+          "supported": true
+        }
+      },
+      "modelCatalog": {
+        "available": true,
+        "models": [
+          {
+            "id": "\(displayModel)",
+            "provider": "gibson",
+            "ref": "gibson/\(displayModel)",
+            "name": "\(catalogName)",
+            "alias": "qwen"
+          }
+        ]
+      }
+    }
+    """
+    return try JSONDecoder().decode(SessionStatus.self, from: Data(json.utf8))
+}
+
 private func allSubviews(in view: UIView) -> [UIView] {
     view.subviews + view.subviews.flatMap { allSubviews(in: $0) }
+}
+
+@MainActor
+private func renderedFooterImage(authMode: String, accessibilityLabel: String) throws -> (image: UIImage, labelFrame: CGRect) {
+    let cell = makeConfiguredCell(authMode: authMode)
+    let label = try #require(
+        allSubviews(in: cell).compactMap { $0 as? UILabel }
+            .first { $0.accessibilityLabel == accessibilityLabel }
+    )
+    let container = UIView(frame: CGRect(x: 0, y: 0, width: cell.bounds.width, height: cell.bounds.height))
+    container.backgroundColor = .white
+    cell.frame = container.bounds
+    container.addSubview(cell)
+    container.setNeedsLayout()
+    container.layoutIfNeeded()
+
+    let renderer = UIGraphicsImageRenderer(bounds: container.bounds)
+    let image = renderer.image { _ in
+        container.drawHierarchy(in: container.bounds, afterScreenUpdates: true)
+    }
+    return (image, label.convert(label.bounds, to: container))
+}
+
+private func writeEvidenceImage(_ image: UIImage, name: String) {
+    let environment = ProcessInfo.processInfo.environment
+    let directory = environment["T318_FOOTER_EVIDENCE_DIR"]
+        ?? environment["TEST_RUNNER_T318_FOOTER_EVIDENCE_DIR"]
+    guard let directory,
+          let data = image.pngData() else { return }
+    let url = URL(fileURLWithPath: directory, isDirectory: true).appendingPathComponent(name)
+    try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try? data.write(to: url)
+}
+
+private func sampledTextPixels(in image: UIImage, frame: CGRect) throws -> (count: Int, averageRed: Double, averageGreen: Double, averageBlue: Double) {
+    let cgImage = try #require(image.cgImage)
+    let width = cgImage.width
+    let height = cgImage.height
+    var pixels = [UInt8](repeating: 0, count: width * height * 4)
+    let colorSpace = CGColorSpaceCreateDeviceRGB()
+    let context = CGContext(
+        data: &pixels,
+        width: width,
+        height: height,
+        bitsPerComponent: 8,
+        bytesPerRow: width * 4,
+        space: colorSpace,
+        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+    )
+    context?.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+
+    let scale = image.scale
+    let sampleFrame = frame.insetBy(dx: 2, dy: 2)
+    let minX = max(0, Int(floor(sampleFrame.minX * scale)))
+    let maxX = min(width - 1, Int(ceil(sampleFrame.maxX * scale)))
+    let minY = max(0, Int(floor(sampleFrame.minY * scale)))
+    let maxY = min(height - 1, Int(ceil(sampleFrame.maxY * scale)))
+
+    var count = 0
+    var red = 0
+    var green = 0
+    var blue = 0
+    for y in minY ... maxY {
+        for x in minX ... maxX {
+            let offset = ((y * width) + x) * 4
+            let r = Int(pixels[offset])
+            let g = Int(pixels[offset + 1])
+            let b = Int(pixels[offset + 2])
+            guard r < 248 || g < 248 || b < 248 else { continue }
+            count += 1
+            red += r
+            green += g
+            blue += b
+        }
+    }
+    return (
+        count,
+        count == 0 ? 0 : Double(red) / Double(count),
+        count == 0 ? 0 : Double(green) / Double(count),
+        count == 0 ? 0 : Double(blue) / Double(count)
+    )
 }
 
 @MainActor
@@ -238,6 +488,7 @@ private func footerButtons(in cell: SessionMetadataFooterCell) throws -> [UIButt
     let buttons = allSubviews(in: cell)
         .compactMap { $0 as? UIButton }
         .filter { $0.isEnabled }
+        .filter { $0.accessibilityLabel != "Test menu" }
         .sorted {
             $0.convert($0.bounds, to: cell).minX < $1.convert($1.bounds, to: cell).minX
         }

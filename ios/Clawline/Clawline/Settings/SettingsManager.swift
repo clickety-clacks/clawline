@@ -25,30 +25,7 @@ final class SettingsManager {
     }
 
     let sonioxKeyStore: SonioxKeyStore
-
-    var dictationCausticsBaselineSpeed: Double {
-        didSet { saveDictationCausticsSettings() }
-    }
-
-    var dictationCausticsMaxSpeed: Double {
-        didSet { saveDictationCausticsSettings() }
-    }
-
-    var dictationCausticsBrightness: Double {
-        didSet { saveDictationCausticsSettings() }
-    }
-
-    var dictationCausticsScale: Double {
-        didSet { saveDictationCausticsSettings() }
-    }
-
-    var dictationCausticsSharpness: Double {
-        didSet { saveDictationCausticsSettings() }
-    }
-
-    var dictationCausticsColor1: CodableColor {
-        didSet { saveDictationCausticsSettings() }
-    }
+    let cartesiaKeyStore: CartesiaKeyStore
 
     var trustSelfSignedCertificates: Bool {
         didSet { saveTrustSelfSignedCertificates() }
@@ -66,6 +43,13 @@ final class SettingsManager {
         didSet { saveLifecycleDebugOverlayEnabled() }
     }
 
+    var textLinkURLTemplateRules: [TextLinkURLTemplateRule] {
+        didSet {
+            saveTextLinkURLTemplateRules()
+            TextLinkURLTemplateRules.configuredRules = textLinkURLTemplateRules
+        }
+    }
+
     private(set) var fontScaleChangeSequence: Int = 0
     private(set) var fontScaleToastSequence: Int = 0
     private var pendingFontScaleToastMessage: String?
@@ -79,27 +63,30 @@ final class SettingsManager {
         sonioxKeyStore.keyStatus
     }
 
+    var sonioxCTATitle: String {
+        sonioxKeyStore.ctaTitle
+    }
+
+    var cartesiaAPIKey: String {
+        get { cartesiaKeyStore.editableAPIKey }
+        set { cartesiaKeyStore.editableAPIKey = newValue }
+    }
+
+    var cartesiaVoiceId: String {
+        get { cartesiaKeyStore.editableVoiceId }
+        set { cartesiaKeyStore.editableVoiceId = newValue }
+    }
+
     var isSettingsPresented: Bool = false
 
     private static let effectConfigKey = "backgroundEffectConfiguration"
     private static let appearanceModeKey = "appearanceMode"
     private static let lifecycleDebugOverlayEnabledKey = "debug.lifecycleOverlayEnabled"
-    private static let dictationCausticsBaselineSpeedKey = "dictation.caustics.baselineSpeed"
-    private static let dictationCausticsMaxSpeedKey = "dictation.caustics.maxSpeed"
-    private static let dictationCausticsBrightnessKey = "dictation.caustics.brightness"
-    private static let dictationCausticsScaleKey = "dictation.caustics.scale"
-    private static let dictationCausticsSharpnessKey = "dictation.caustics.sharpness"
-    private static let dictationCausticsColor1Key = "dictation.caustics.color1"
+    private static let textLinkURLTemplateRulesKey = "textLinkURLTemplateRules"
 
-    static let defaultDictationCausticsBaselineSpeed: Double = 0.600
-    static let defaultDictationCausticsMaxSpeed: Double = 2.140
-    static let defaultDictationCausticsBrightness: Double = 0.373
-    static let defaultDictationCausticsScale: Double = 5.000
-    static let defaultDictationCausticsSharpness: Double = 1.065
-    static let defaultDictationCausticsColor1 = CodableColor(red: 1.000, green: 1.000, blue: 1.000, alpha: 1.000)
-
-    init(sonioxKeyStore: SonioxKeyStore) {
+    init(sonioxKeyStore: SonioxKeyStore, cartesiaKeyStore: CartesiaKeyStore) {
         self.sonioxKeyStore = sonioxKeyStore
+        self.cartesiaKeyStore = cartesiaKeyStore
 
         if let data = UserDefaults.standard.data(forKey: Self.effectConfigKey),
            let config = try? JSONDecoder().decode(BackgroundEffectConfiguration.self, from: data) {
@@ -115,31 +102,23 @@ final class SettingsManager {
             self.appearanceMode = .dark
         }
 
-        self.dictationCausticsBaselineSpeed = UserDefaults.standard.object(forKey: Self.dictationCausticsBaselineSpeedKey) as? Double
-            ?? Self.defaultDictationCausticsBaselineSpeed
-        self.dictationCausticsMaxSpeed = UserDefaults.standard.object(forKey: Self.dictationCausticsMaxSpeedKey) as? Double
-            ?? Self.defaultDictationCausticsMaxSpeed
-        self.dictationCausticsBrightness = UserDefaults.standard.object(forKey: Self.dictationCausticsBrightnessKey) as? Double
-            ?? Self.defaultDictationCausticsBrightness
-        self.dictationCausticsScale = UserDefaults.standard.object(forKey: Self.dictationCausticsScaleKey) as? Double
-            ?? Self.defaultDictationCausticsScale
-        self.dictationCausticsSharpness = UserDefaults.standard.object(forKey: Self.dictationCausticsSharpnessKey) as? Double
-            ?? Self.defaultDictationCausticsSharpness
-        self.dictationCausticsColor1 = Self.loadCodableColor(
-            forKey: Self.dictationCausticsColor1Key,
-            fallback: Self.defaultDictationCausticsColor1
-        )
-
         self.trustSelfSignedCertificates = ProviderTLSSettingsStore.trustSelfSignedCertificates
         self.pinnedLeafCertificateSHA256 = ProviderTLSSettingsStore.pinnedLeafCertificateSHA256 ?? ""
         let initialFontScale = AppFontScale.persistedValue()
         self.fontScale = initialFontScale
         self.isLifecycleDebugOverlayEnabled = UserDefaults.standard.bool(forKey: Self.lifecycleDebugOverlayEnabledKey)
+        if let data = UserDefaults.standard.data(forKey: Self.textLinkURLTemplateRulesKey),
+           let rules = try? JSONDecoder().decode([TextLinkURLTemplateRule].self, from: data) {
+            self.textLinkURLTemplateRules = rules
+        } else {
+            self.textLinkURLTemplateRules = []
+        }
         AppFontScale.useActiveValue(initialFontScale)
+        TextLinkURLTemplateRules.configuredRules = textLinkURLTemplateRules
     }
 
     convenience init() {
-        self.init(sonioxKeyStore: SonioxKeyStore())
+        self.init(sonioxKeyStore: SonioxKeyStore(), cartesiaKeyStore: CartesiaKeyStore(keychain: KeychainSecureStore()))
     }
 
     private func save() {
@@ -150,17 +129,6 @@ final class SettingsManager {
 
     private func saveAppearanceMode() {
         UserDefaults.standard.set(appearanceMode.rawValue, forKey: Self.appearanceModeKey)
-    }
-
-    private func saveDictationCausticsSettings() {
-        UserDefaults.standard.set(dictationCausticsBaselineSpeed, forKey: Self.dictationCausticsBaselineSpeedKey)
-        UserDefaults.standard.set(dictationCausticsMaxSpeed, forKey: Self.dictationCausticsMaxSpeedKey)
-        UserDefaults.standard.set(dictationCausticsBrightness, forKey: Self.dictationCausticsBrightnessKey)
-        UserDefaults.standard.set(dictationCausticsScale, forKey: Self.dictationCausticsScaleKey)
-        UserDefaults.standard.set(dictationCausticsSharpness, forKey: Self.dictationCausticsSharpnessKey)
-        if let data = try? JSONEncoder().encode(dictationCausticsColor1) {
-            UserDefaults.standard.set(data, forKey: Self.dictationCausticsColor1Key)
-        }
     }
 
     private func saveTrustSelfSignedCertificates() {
@@ -182,15 +150,15 @@ final class SettingsManager {
         )
     }
 
+    private func saveTextLinkURLTemplateRules() {
+        if let data = try? JSONEncoder().encode(textLinkURLTemplateRules) {
+            UserDefaults.standard.set(data, forKey: Self.textLinkURLTemplateRulesKey)
+        }
+    }
+
     func resetToDefaults() {
         effectConfig = .default
         appearanceMode = .dark
-        dictationCausticsBaselineSpeed = Self.defaultDictationCausticsBaselineSpeed
-        dictationCausticsMaxSpeed = Self.defaultDictationCausticsMaxSpeed
-        dictationCausticsBrightness = Self.defaultDictationCausticsBrightness
-        dictationCausticsScale = Self.defaultDictationCausticsScale
-        dictationCausticsSharpness = Self.defaultDictationCausticsSharpness
-        dictationCausticsColor1 = Self.defaultDictationCausticsColor1
         trustSelfSignedCertificates = true
         pinnedLeafCertificateSHA256 = ""
         resetFontScale()
@@ -207,10 +175,6 @@ final class SettingsManager {
 
     func toggleAppearanceMode() {
         appearanceMode = appearanceMode == .dark ? .light : .dark
-    }
-
-    var sonioxCTATitle: String {
-        sonioxKeyStore.ctaTitle
     }
 
     func handleSonioxPrimaryAction(openURL: (URL) -> Void) async -> Bool {
@@ -241,6 +205,21 @@ final class SettingsManager {
         applyFontScale(AppFontScale.defaultValue)
     }
 
+    func addTextLinkURLTemplateRule() {
+        textLinkURLTemplateRules.append(
+            TextLinkURLTemplateRule(
+                id: "text-link-\(UUID().uuidString)",
+                enabled: true,
+                pattern: "",
+                urlTemplate: ""
+            )
+        )
+    }
+
+    func deleteTextLinkURLTemplateRule(id: String) {
+        textLinkURLTemplateRules.removeAll { $0.id == id }
+    }
+
     func consumePendingFontScaleToastMessage() -> String? {
         defer { pendingFontScaleToastMessage = nil }
         return pendingFontScaleToastMessage
@@ -259,14 +238,6 @@ final class SettingsManager {
         }
         pendingFontScaleToastMessage = AppFontScale.toastMessage(for: next)
         fontScaleToastSequence &+= 1
-    }
-
-    private static func loadCodableColor(forKey key: String, fallback: CodableColor) -> CodableColor {
-        guard let data = UserDefaults.standard.data(forKey: key),
-              let color = try? JSONDecoder().decode(CodableColor.self, from: data) else {
-            return fallback
-        }
-        return color
     }
 }
 

@@ -11,6 +11,255 @@ import Foundation
 @testable import Clawline
 
 struct StreamSelectorLayoutTests {
+    @Test("T307 mention picker filters streams and excludes current chat")
+    func crossChatMentionPickerFiltersAndExcludesCurrent() {
+        let streams = [
+            StreamSession(
+                sessionKey: "agent:main:main",
+                displayName: "Main",
+                kind: "main",
+                orderIndex: 0,
+                isBuiltIn: true,
+                createdAt: Date(),
+                updatedAt: Date()
+            ),
+            StreamSession(
+                sessionKey: "agent:main:clawline:user:s_research",
+                displayName: "Research Notes",
+                kind: "custom",
+                orderIndex: 1,
+                isBuiltIn: false,
+                createdAt: Date(),
+                updatedAt: Date()
+            ),
+            StreamSession(
+                sessionKey: "agent:main:clawline:user:s_build",
+                displayName: "Build Log",
+                kind: "custom",
+                orderIndex: 2,
+                isBuiltIn: false,
+                createdAt: Date(),
+                updatedAt: Date()
+            ),
+        ]
+
+        let result = CrossChatMentionPickerLogic.filteredStreams(
+            streams: streams,
+            currentSessionKey: "agent:main:main",
+            query: "res"
+        )
+
+        #expect(result.map(\.displayName) == ["Research Notes"])
+    }
+
+    @Test("T307 bare at mention lists every eligible chat except current")
+    func crossChatMentionPickerBareAtListsEveryEligibleChat() {
+        let streams = [
+            StreamSession(
+                sessionKey: "agent:main:clawline:user:s_current",
+                displayName: "Current",
+                kind: "main",
+                orderIndex: 0,
+                isBuiltIn: true,
+                createdAt: Date(),
+                updatedAt: Date()
+            ),
+            StreamSession(
+                sessionKey: "agent:main:clawline:user:s_one",
+                displayName: "One",
+                kind: "custom",
+                orderIndex: 1,
+                isBuiltIn: false,
+                createdAt: Date(),
+                updatedAt: Date()
+            ),
+            StreamSession(
+                sessionKey: "agent:main:clawline:user:s_two",
+                displayName: "Two",
+                kind: "custom",
+                orderIndex: 2,
+                isBuiltIn: false,
+                createdAt: Date(),
+                updatedAt: Date()
+            ),
+            StreamSession(
+                sessionKey: "agent:main:clawline:user:s_three",
+                displayName: "Three",
+                kind: "custom",
+                orderIndex: 3,
+                isBuiltIn: false,
+                createdAt: Date(),
+                updatedAt: Date()
+            ),
+        ]
+
+        let result = CrossChatMentionPickerLogic.filteredStreams(
+            streams: streams,
+            currentSessionKey: "agent:main:clawline:user:s_current",
+            query: ""
+        )
+
+        #expect(result.map(\.displayName) == ["One", "Two", "Three"])
+    }
+
+    @Test("T307 mention picker filtering uses visible session labels")
+    func crossChatMentionPickerFilteringUsesVisibleLabels() {
+        let streams = [
+            StreamSession(
+                sessionKey: "agent:main:clawline:user:s_one",
+                displayName: "Dictation",
+                kind: "custom",
+                orderIndex: 0,
+                isBuiltIn: false,
+                createdAt: Date(),
+                updatedAt: Date()
+            ),
+            StreamSession(
+                sessionKey: "agent:main:clawline:user:s_two",
+                displayName: "Clawline",
+                kind: "custom",
+                orderIndex: 1,
+                isBuiltIn: false,
+                createdAt: Date(),
+                updatedAt: Date()
+            ),
+            StreamSession(
+                sessionKey: "agent:main:clawline:user:s_three",
+                displayName: "Notes",
+                kind: "custom",
+                orderIndex: 2,
+                isBuiltIn: false,
+                createdAt: Date(),
+                updatedAt: Date()
+            ),
+        ]
+
+        let clawline = CrossChatMentionPickerLogic.filteredStreams(
+            streams: streams,
+            currentSessionKey: "agent:main:main",
+            query: "clawline"
+        )
+        let dictation = CrossChatMentionPickerLogic.filteredStreams(
+            streams: streams,
+            currentSessionKey: "agent:main:main",
+            query: "dictation"
+        )
+
+        #expect(clawline.map(\.displayName) == ["Clawline"])
+        #expect(dictation.map(\.displayName) == ["Dictation"])
+    }
+
+    @Test("T307 mention picker activates only for leading at-sign and clamps arrow selection")
+    func crossChatMentionPickerQueryAndSelection() {
+        #expect(CrossChatMentionPickerLogic.query(inputText: "@res", resolvedMention: nil) == "res")
+        #expect(CrossChatMentionPickerLogic.query(inputText: "hello @res", resolvedMention: nil) == nil)
+        #expect(
+            CrossChatMentionPickerLogic.query(
+                inputText: "@res",
+                resolvedMention: ResolvedCrossChatMention(destinationChatId: "s_1", displayName: "One")
+            ) == nil
+        )
+
+        let streams = [
+            StreamSession(sessionKey: "s_1", displayName: "One", kind: "custom", orderIndex: 0, isBuiltIn: false, createdAt: Date(), updatedAt: Date()),
+            StreamSession(sessionKey: "s_2", displayName: "Two", kind: "custom", orderIndex: 1, isBuiltIn: false, createdAt: Date(), updatedAt: Date()),
+        ]
+
+        #expect(CrossChatMentionPickerLogic.selectionAfterMoving(currentSessionKey: nil, filteredStreams: streams, step: 1) == "s_2")
+        #expect(CrossChatMentionPickerLogic.selectionAfterMoving(currentSessionKey: nil, filteredStreams: streams, step: -1) == "s_1")
+        #expect(CrossChatMentionPickerLogic.selectionAfterMoving(currentSessionKey: "s_1", filteredStreams: streams, step: 1) == "s_2")
+        #expect(CrossChatMentionPickerLogic.selectionAfterMoving(currentSessionKey: "s_2", filteredStreams: streams, step: 1) == "s_2")
+    }
+
+    @Test("T361 Spatial mention picker selected row uses glass-visible highlight")
+    func spatialMentionPickerSelectedRowUsesGlassVisibleHighlight() {
+        let spatial = CrossChatMentionPickerLogic.highlightStyle(isHighlighted: true, isSpatial: true)
+        let nonSpatial = CrossChatMentionPickerLogic.highlightStyle(isHighlighted: true, isSpatial: false)
+        let unselected = CrossChatMentionPickerLogic.highlightStyle(isHighlighted: false, isSpatial: true)
+
+        #expect(spatial.fillOpacity > nonSpatial.fillOpacity)
+        #expect(spatial.strokeOpacity > 0)
+        #expect(spatial.strokeLineWidth > 0)
+        #expect(nonSpatial.fillOpacity == 0.12)
+        #expect(nonSpatial.strokeOpacity == 0)
+        #expect(nonSpatial.strokeLineWidth == 0)
+        #expect(unselected.fillOpacity == 0)
+        #expect(unselected.strokeOpacity == 0)
+        #expect(unselected.strokeLineWidth == 0)
+    }
+
+    @Test("T1186 Spatial popup selector selected row uses glass-visible highlight")
+    func spatialPopupSelectorSelectedRowUsesGlassVisibleHighlight() {
+        let spatial = StreamSelectorLayout.selectionHighlightStyle(
+            isSelected: true,
+            isDark: true,
+            isSpatial: true
+        )
+        let nonSpatialDark = StreamSelectorLayout.selectionHighlightStyle(
+            isSelected: true,
+            isDark: true,
+            isSpatial: false
+        )
+        let nonSpatialLight = StreamSelectorLayout.selectionHighlightStyle(
+            isSelected: true,
+            isDark: false,
+            isSpatial: false
+        )
+        let unselected = StreamSelectorLayout.selectionHighlightStyle(
+            isSelected: false,
+            isDark: true,
+            isSpatial: true
+        )
+
+        #expect(spatial.fillOpacity > nonSpatialDark.fillOpacity)
+        #expect(spatial.strokeOpacity > 0)
+        #expect(spatial.strokeLineWidth > 0)
+        #expect(nonSpatialDark.fillOpacity == 0.16)
+        #expect(nonSpatialLight.fillOpacity == 0.08)
+        #expect(nonSpatialDark.strokeOpacity == 0)
+        #expect(nonSpatialLight.strokeOpacity == 0)
+        #expect(nonSpatialDark.strokeLineWidth == 0)
+        #expect(nonSpatialLight.strokeLineWidth == 0)
+        #expect(unselected.fillOpacity == 0)
+        #expect(unselected.strokeOpacity == 0)
+        #expect(unselected.strokeLineWidth == 0)
+    }
+
+    @Test("T1188 popup selector resolves status dots for every filtered row")
+    func popupSelectorResolvesStatusDotsForEveryFilteredRow() {
+        let streams = (0..<12).map { index in
+            StreamSession(
+                sessionKey: "s_\(index)",
+                displayName: "Stream \(index)",
+                kind: "custom",
+                orderIndex: index,
+                isBuiltIn: false,
+                createdAt: Date(),
+                updatedAt: Date()
+            )
+        }
+        let lookup = StreamDotStateLookup { sessionKey in
+            switch sessionKey {
+            case "s_0":
+                return .unread
+            case "s_11":
+                return .userTail
+            default:
+                return .inactive
+            }
+        }
+
+        let dotStates = StreamSelectorLayout.dotStatesBySession(
+            streams: streams,
+            lookup: lookup
+        )
+
+        #expect(dotStates.count == streams.count)
+        #expect(dotStates["s_0"] == .unread)
+        #expect(dotStates["s_5"] == .inactive)
+        #expect(dotStates["s_11"] == .userTail)
+        #expect(Set(dotStates.keys) == Set(streams.map(\.sessionKey)))
+    }
 
     @Test("Short stream list uses content-driven height")
     func shortListUsesContentHeight() {

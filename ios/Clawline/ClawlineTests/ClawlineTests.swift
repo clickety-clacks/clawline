@@ -10,9 +10,9 @@ import Testing
 @testable import Clawline
 
 struct ClawlineTests {
-    @Test("T167: font scale applies platform delta before user multiplier")
-    func scaledPointSizeUsesPlatformDeltaAndPersistedScale() {
-        let suiteName = "ClawlineTests.T167.scaledPointSizeUsesPlatformDeltaAndPersistedScale"
+    @Test("T167: font scale applies Catalyst platform delta before user multiplier")
+    func scaledPointSizeUsesCatalystPlatformDeltaAndPersistedScale() {
+        let suiteName = "ClawlineTests.T167.scaledPointSizeUsesCatalystPlatformDeltaAndPersistedScale"
         guard let defaults = UserDefaults(suiteName: suiteName) else {
             Issue.record("Failed to create isolated defaults suite")
             return
@@ -141,6 +141,23 @@ struct ClawlineTests {
         #expect(regex.firstMatch(in: source, range: range) != nil)
     }
 
+    @Test("T320: corner indicators stay Spatial-only")
+    func cornerIndicatorsStaySpatialOnly() throws {
+        let appPath = URL(filePath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appending(path: "Clawline/ClawlineApp.swift")
+        let appSource = try String(contentsOf: appPath, encoding: .utf8)
+        #expect(!appSource.contains("ClawlineWindowCornerIndicators"))
+
+        let spatialAppPath = URL(filePath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appending(path: "Clawline Spatial/Clawline_SpatialApp.swift")
+        let spatialAppSource = try String(contentsOf: spatialAppPath, encoding: .utf8)
+        #expect(spatialAppSource.contains("ClawlineWindowCornerIndicators"))
+    }
+
     @Test("T294: Spatial typing indicator exposes a concrete tap control")
     func spatialTypingIndicatorHasConcreteTapControl() throws {
         let sourcePath = URL(filePath: #filePath)
@@ -153,6 +170,23 @@ struct ClawlineTests {
         let regex = try NSRegularExpression(pattern: pattern)
 
         #expect(regex.firstMatch(in: source, range: range) != nil)
+    }
+
+    @Test("T127: Spatial chat viewport keeps 25 percent top and bottom insets")
+    func spatialChatViewportKeepsQuarterWindowInsets() throws {
+        let sourcePath = URL(filePath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appending(path: "Clawline/Views/Chat/ChatView.swift")
+        let source = try String(contentsOf: sourcePath, encoding: .utf8)
+        let range = NSRange(source.startIndex..<source.endIndex, in: source)
+        let spatialInsetPattern = #"(?s)static func spatialViewportInset\(windowHeight: CGFloat\) -> CGFloat \{\s*#if os\(visionOS\)\s*windowHeight \* 0\.25\s*#else\s*0\s*#endif\s*\}"#
+        let topInsetPattern = #"let messageListTopInset = geometry\.safeAreaInsets\.top \+ spatialViewportInset"#
+        let bottomInsetPattern = #"let bottomViewportClearance = pageIndicatorClearance \+ spatialViewportInset"#
+
+        #expect(try NSRegularExpression(pattern: spatialInsetPattern).firstMatch(in: source, range: range) != nil)
+        #expect(try NSRegularExpression(pattern: topInsetPattern).firstMatch(in: source, range: range) != nil)
+        #expect(try NSRegularExpression(pattern: bottomInsetPattern).firstMatch(in: source, range: range) != nil)
     }
 
     @Test("T219: pairing shader is active only while pairing route is visible")
@@ -174,4 +208,5 @@ struct ClawlineTests {
             isProviderConfigured: true
         ))
     }
+
 }

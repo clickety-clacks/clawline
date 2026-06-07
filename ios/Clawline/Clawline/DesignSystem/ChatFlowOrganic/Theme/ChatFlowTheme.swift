@@ -30,6 +30,10 @@ enum ChatFlowTheme {
         scheme == .dark ? Color(red: 0.482, green: 0.639, blue: 0.463) : Color(red: 0.561, green: 0.651, blue: 0.541)
     }
 
+    static func notificationAccent(_ scheme: ColorScheme) -> Color {
+        sage(scheme)
+    }
+
     static func connectionReconnecting(_ scheme: ColorScheme) -> Color {
         scheme == .dark ? Color(red: 0.92, green: 0.76, blue: 0.30) : Color(red: 0.89, green: 0.67, blue: 0.08)
     }
@@ -122,8 +126,8 @@ enum ChatFlowTheme {
         var flowGap: CGFloat { isCompact ? 12 : 16 }
         var containerPadding: CGFloat { isCompact ? 12 : 24 }
         var inputBarPaddingHorizontal: CGFloat { isCompact ? 24 : 24 }
-        var bubblePaddingVertical: CGFloat { isCompact ? 14 : 16 }
-        var bubblePaddingHorizontal: CGFloat { isCompact ? 12 : 20 }
+        var bubblePaddingVertical: CGFloat { isCompact ? 8 : 10 }
+        var bubblePaddingHorizontal: CGFloat { isCompact ? 10 : 14 }
         var shortFontSize: CGFloat { UIFont.clawline(.shortMessage).pointSize }
         var mediumFontSize: CGFloat { UIFont.clawline(.mediumMessage).pointSize }
         var bodyFontSize: CGFloat { UIFont.clawline(.bodyText).pointSize }

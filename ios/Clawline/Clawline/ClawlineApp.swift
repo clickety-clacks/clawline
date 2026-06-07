@@ -5,6 +5,8 @@
 //  Created by Mike Manzano on 1/7/26.
 //
 
+import Foundation
+
 #if os(iOS)
 import SwiftUI
 import UIKit
@@ -16,6 +18,7 @@ struct ClawlineApp: App {
     @State private var authManager: AuthManager
     @State private var settingsManager: SettingsManager
     @State private var sonioxKeyStore: SonioxKeyStore
+    @State private var cartesiaKeyStore: CartesiaKeyStore
 
     private let deviceIdentifier: any DeviceIdentifying
     private let connectionService: any ConnectionServicing
@@ -23,9 +26,6 @@ struct ClawlineApp: App {
     private let uploadService: any UploadServicing
 
     init() {
-#if DEBUG
-        Self.resetPersistentAppStateForUnitTestsIfNeeded()
-#endif
         if #available(iOS 13.0, *) {
             UIView.appearance(whenContainedInInstancesOf: [UIHostingController<AnyView>.self]).backgroundColor = .clear
             UIScrollView.appearance(whenContainedInInstancesOf: [UIHostingController<AnyView>.self]).backgroundColor = .clear
@@ -43,9 +43,15 @@ struct ClawlineApp: App {
         _authManager = State(initialValue: authManager)
         let sonioxKeyStore = SonioxKeyStore()
         _sonioxKeyStore = State(initialValue: sonioxKeyStore)
-        let settingsManager = SettingsManager(sonioxKeyStore: sonioxKeyStore)
+        let cartesiaKeyStore = CartesiaKeyStore(keychain: KeychainSecureStore())
+        _cartesiaKeyStore = State(initialValue: cartesiaKeyStore)
+        let settingsManager = SettingsManager(sonioxKeyStore: sonioxKeyStore, cartesiaKeyStore: cartesiaKeyStore)
         _settingsManager = State(initialValue: settingsManager)
-        let coreServices = ClawlineCoreRuntimeServicesFactory.make(authManager: authManager)
+        let coreServices = ClawlineCoreRuntimeServicesFactory.make(
+            authManager: authManager,
+            sonioxKeyStore: sonioxKeyStore,
+            cartesiaKeyStore: cartesiaKeyStore
+        )
         self.deviceIdentifier = coreServices.deviceIdentifier
         self.connectionService = coreServices.connectionService
         let chatService = coreServices.chatService
@@ -55,17 +61,34 @@ struct ClawlineApp: App {
 
     var body: some Scene {
         WindowGroup {
-            @Bindable var settingsManager = settingsManager
-            RootView(uploadService: uploadService)
-                .environment(authManager)
-                .environment(\.connectionService, connectionService)
-                .environment(\.deviceIdentifier, deviceIdentifier)
-                .environment(\.chatService, chatService)
-                .environment(\.settingsManager, settingsManager)
-                .environment(\.sonioxKeyStore, sonioxKeyStore)
-                .sheet(isPresented: $settingsManager.isSettingsPresented) {
-                    SettingsView(settings: settingsManager)
-                }
+            if isRunningUnitTests {
+                Color.clear
+            } else {
+                @Bindable var settingsManager = settingsManager
+                RootView(uploadService: uploadService)
+                    .environment(authManager)
+                    .environment(\.connectionService, connectionService)
+                    .environment(\.deviceIdentifier, deviceIdentifier)
+                    .environment(\.chatService, chatService)
+                    .environment(\.settingsManager, settingsManager)
+                    .environment(\.sonioxKeyStore, sonioxKeyStore)
+                    .sheet(isPresented: $settingsManager.isSettingsPresented) {
+                        SettingsView(settings: settingsManager)
+                    }
+                    // Clear first responders before the app backgrounds.
+                    // UITextView.becomeFirstResponder triggers a synchronous pasteboard XPC call
+                    // (UIKeyboardStateManager.canInsertAdaptiveImageGlyph). If the device locks
+                    // while that XPC is in-flight, the pasteboard daemon suspends, the call never
+                    // returns, and the watchdog kills the app (0x8BADF00D).
+                    // Calling endEditing(true) on every window during willResignActive ensures no
+                    // UITextView holds focus or can gain focus during the background transition.
+                    .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
+                        UIApplication.shared.connectedScenes
+                            .compactMap { $0 as? UIWindowScene }
+                            .flatMap { $0.windows }
+                            .forEach { $0.endEditing(true) }
+                    }
+            }
         }
         .commands {
             ClawlineAppCommands(settingsManager: settingsManager)
@@ -73,14 +96,9 @@ struct ClawlineApp: App {
     }
 }
 
+
 #if DEBUG
 private extension ClawlineApp {
-    static func resetPersistentAppStateForUnitTestsIfNeeded() {
-        guard NSClassFromString("XCTestCase") != nil else { return }
-        ProviderBaseURLStore.clearBaseURL()
-        AuthManager.resetPersistentCredentialsForTesting()
-    }
-
     static func configureDebugAdminIfNeeded(authManager: AuthManager) {
         let processInfo = ProcessInfo.processInfo
         let envValue = processInfo.environment["CLAWLINE_DEBUG_FORCE_ADMIN"]
@@ -157,3 +175,7 @@ private func setHostingBackgroundsClear(in view: UIView) {
     }
 }
 #endif
+
+private var isRunningUnitTests: Bool {
+    ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+}

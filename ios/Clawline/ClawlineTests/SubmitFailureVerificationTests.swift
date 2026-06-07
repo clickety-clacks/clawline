@@ -15,7 +15,10 @@ struct SubmitFailureVerificationTests {
         let viewModel = ChatViewModel(
             auth: auth,
             chatService: chatService,
-            settings: SettingsManager(sonioxKeyStore: SonioxKeyStore()),
+            settings: SettingsManager(
+                sonioxKeyStore: SonioxKeyStore(),
+                cartesiaKeyStore: CartesiaKeyStore(keychain: KeychainSecureStore())
+            ),
             device: VerificationDevice(),
             uploadService: VerificationUploadService(),
             toastManager: ToastManager(),
@@ -150,6 +153,13 @@ private final class VerificationChatService: ChatServicing {
         }
     }()
 
+    func connect(token: String, lastMessageId: String?) async throws {
+        let _ = token
+        let _ = lastMessageId
+        isTransportReadyForSend = true
+        stateContinuation?.yield(.connected)
+    }
+
     func startConnectionAttempt(epoch: Int, lastMessageId: String?, token: String) {
         let _ = lastMessageId
         let _ = token
@@ -198,10 +208,27 @@ private final class VerificationChatService: ChatServicing {
     }
 
     func send(id: String, content: String, attachments: [WireAttachment], sessionKey: String?) async throws {
+        try await send(
+            id: id,
+            content: content,
+            attachments: attachments,
+            sessionKey: sessionKey,
+            references: []
+        )
+    }
+
+    func send(
+        id: String,
+        content: String,
+        attachments: [WireAttachment],
+        sessionKey: String?,
+        references: [MessageReferenceContext]
+    ) async throws {
         let _ = id
         let _ = content
         let _ = attachments
         let _ = sessionKey
+        let _ = references
         if !isTransportReadyForSend {
             throw ProviderChatService.Error.notConnected
         }
@@ -318,7 +345,6 @@ private final class VerificationAutoAuthClient: WebSocketClient {
 
 @MainActor
 private func resetSubmitFailureVerificationPersistence() {
-    ChatViewModel.setConnectionOwnershipDisabledForTesting(true)
     let defaults = UserDefaults.standard
     for key in defaults.dictionaryRepresentation().keys {
         if key.hasPrefix("clawline.lastServerMessageId.")

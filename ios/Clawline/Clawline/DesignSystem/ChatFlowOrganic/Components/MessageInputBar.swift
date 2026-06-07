@@ -789,6 +789,7 @@ struct MessageInputBar: View {
     let onFocusChange: (Bool) -> Void
     let onRequestFocus: () -> Void
     var onRequestDirectFocus: (() -> Void)?
+    var onTextEditActivity: (() -> Void)?
     var onPasteImages: (([UIImage]) -> Void)?
 
     @State private var editorHeight: CGFloat = 44
@@ -1395,6 +1396,7 @@ struct MessageInputBar: View {
 #endif
                     }(),
                     onFocusChange: onFocusChange,
+                    onTextEditActivity: onTextEditActivity,
                     onSubmit: handleEditorSubmitIntent,
                     onEscape: {
                         dictationEmitter.emit(.stopRequested(.escapeKey))
@@ -1519,7 +1521,7 @@ struct MessageInputBar: View {
         }
     }
 
-    private struct MessageSendControl: View {
+    struct MessageSendControl: View {
         let isSending: Bool
         let isStagingAttachments: Bool
         let canSend: Bool

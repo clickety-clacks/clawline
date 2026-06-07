@@ -129,8 +129,10 @@ final class StubChatService: ChatServicing, DirectChatConnecting {
         id: String,
         content: String,
         attachments: [WireAttachment],
-        sessionKey: String?
+        sessionKey: String?,
+        references: [MessageReferenceContext] = []
     ) async throws {
+        _ = references
         try await Task.sleep(for: .seconds(responseDelay))
         serviceEventContinuation?.yield(.messageAcked(id: id))
 
@@ -147,6 +149,21 @@ final class StubChatService: ChatServicing, DirectChatConnecting {
         )
 
         messageContinuation?.yield(response)
+    }
+
+    func send(
+        id: String,
+        content: String,
+        attachments: [WireAttachment],
+        sessionKey: String?
+    ) async throws {
+        try await send(
+            id: id,
+            content: content,
+            attachments: attachments,
+            sessionKey: sessionKey,
+            references: []
+        )
     }
 
     func sendInteractiveCallback(sourceMessageId: String, action: String, data: JSONValue?) async throws {

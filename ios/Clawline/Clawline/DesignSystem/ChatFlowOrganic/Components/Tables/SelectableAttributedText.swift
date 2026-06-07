@@ -23,6 +23,7 @@ struct SelectableAttributedText: UIViewRepresentable {
         textView.adjustsFontForContentSizeCategory = true
         textView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         textView.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        textView.addGestureRecognizer(UIHoverGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleHover(_:))))
         return textView
     }
 
@@ -111,7 +112,7 @@ struct SelectableAttributedText: UIViewRepresentable {
                 defaultAction: defaultAction,
                 openURL: { url, characterRange in
                     if TextLinkURLTemplateRules.isGeneratedLink(in: textView.attributedText, characterRange: characterRange) {
-                        _ = GeneratedTextLinkActivationRouter.activateGeneratedLink(
+                        _ = GeneratedTextLinkActivationRouter.activateGeneratedLinkTap(
                             url,
                             displayMode: TextLinkURLTemplateRules.displayMode(in: textView.attributedText, characterRange: characterRange),
                             from: textView
@@ -132,12 +133,26 @@ struct SelectableAttributedText: UIViewRepresentable {
             guard TextLinkURLTemplateRules.isGeneratedLink(in: textView.attributedText, characterRange: characterRange) else {
                 return true
             }
-            _ = GeneratedTextLinkActivationRouter.activateGeneratedLink(
+            _ = GeneratedTextLinkActivationRouter.activateGeneratedLinkTap(
                 URL,
                 displayMode: TextLinkURLTemplateRules.displayMode(in: textView.attributedText, characterRange: characterRange),
                 from: textView
             )
             return false
+        }
+
+        @objc func handleHover(_ recognizer: UIHoverGestureRecognizer) {
+            guard recognizer.state == .began || recognizer.state == .changed,
+                  let textView = recognizer.view as? UITextView,
+                  let generatedLink = MessageBubbleUIKitView.generatedTextLink(in: textView, at: recognizer.location(in: textView)),
+                  generatedLink.displayMode == .popup else {
+                return
+            }
+            _ = GeneratedTextLinkActivationRouter.presentResolvedURLPopupAtAnchor(
+                generatedLink.url,
+                from: textView,
+                anchorPoint: recognizer.location(in: textView)
+            )
         }
 
         private func emitSelectionChange(_ hasSelection: Bool) {

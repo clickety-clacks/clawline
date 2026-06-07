@@ -857,6 +857,8 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         bodyTap.delaysTouchesEnded = false
         bodyTap.delegate = self
         bodyLabel.addGestureRecognizer(bodyTap)
+        let bodyHover = UIHoverGestureRecognizer(target: self, action: #selector(handleBodyHover(_:)))
+        bodyLabel.addGestureRecognizer(bodyHover)
 #if targetEnvironment(macCatalyst)
         bodyLabel.addInteraction(UIContextMenuInteraction(delegate: self))
 #endif
@@ -1997,7 +1999,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
     @objc private func handleBodyTap(_ recognizer: UITapGestureRecognizer) {
         if recognizer.state == .ended,
            let generatedLink = Self.generatedTextLink(in: bodyLabel, at: recognizer.location(in: bodyLabel)) {
-            _ = GeneratedTextLinkActivationRouter.activateGeneratedLink(
+            _ = GeneratedTextLinkActivationRouter.activateGeneratedLinkTap(
                 generatedLink.url,
                 displayMode: generatedLink.displayMode,
                 from: bodyLabel
@@ -2005,6 +2007,19 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
             return
         }
         handleBubbleTap()
+    }
+
+    @objc private func handleBodyHover(_ recognizer: UIHoverGestureRecognizer) {
+        guard recognizer.state == .began || recognizer.state == .changed,
+              let generatedLink = Self.generatedTextLink(in: bodyLabel, at: recognizer.location(in: bodyLabel)),
+              generatedLink.displayMode == .popup else {
+            return
+        }
+        _ = GeneratedTextLinkActivationRouter.presentResolvedURLPopupAtAnchor(
+            generatedLink.url,
+            from: bodyLabel,
+            anchorPoint: recognizer.location(in: bodyLabel)
+        )
     }
 
     @objc private func handleBubbleTap() {
@@ -2146,7 +2161,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
     ) -> UIAction? {
         UnifiedMarkdownRenderer.primaryActionForTextItem(textItem, defaultAction: defaultAction) { tappedURL, characterRange in
             if TextLinkURLTemplateRules.isGeneratedLink(in: textView.attributedText, characterRange: characterRange) {
-                _ = GeneratedTextLinkActivationRouter.activateGeneratedLink(
+                _ = GeneratedTextLinkActivationRouter.activateGeneratedLinkTap(
                     tappedURL,
                     displayMode: TextLinkURLTemplateRules.displayMode(in: textView.attributedText, characterRange: characterRange),
                     from: textView
@@ -2166,7 +2181,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         guard TextLinkURLTemplateRules.isGeneratedLink(in: textView.attributedText, characterRange: characterRange) else {
             return true
         }
-        _ = GeneratedTextLinkActivationRouter.activateGeneratedLink(
+        _ = GeneratedTextLinkActivationRouter.activateGeneratedLinkTap(
             URL,
             displayMode: TextLinkURLTemplateRules.displayMode(in: textView.attributedText, characterRange: characterRange),
             from: textView

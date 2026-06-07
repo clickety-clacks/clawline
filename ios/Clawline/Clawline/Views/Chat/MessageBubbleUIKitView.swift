@@ -2015,7 +2015,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
     @objc private func handleBodyTap(_ recognizer: UITapGestureRecognizer) {
         if recognizer.state == .ended,
            let generatedLink = Self.generatedTextLink(in: bodyLabel, at: recognizer.location(in: bodyLabel)) {
-            _ = GeneratedTextLinkActivationRouter.activateGeneratedLink(
+            _ = GeneratedTextLinkActivationRouter.activateGeneratedLinkTap(
                 generatedLink.url,
                 displayMode: generatedLink.displayMode,
                 from: bodyLabel
@@ -2164,7 +2164,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
     ) -> UIAction? {
         UnifiedMarkdownRenderer.primaryActionForTextItem(textItem, defaultAction: defaultAction) { tappedURL, characterRange in
             if TextLinkURLTemplateRules.isGeneratedLink(in: textView.attributedText, characterRange: characterRange) {
-                _ = GeneratedTextLinkActivationRouter.activateGeneratedLink(
+                _ = GeneratedTextLinkActivationRouter.activateGeneratedLinkTap(
                     tappedURL,
                     displayMode: TextLinkURLTemplateRules.displayMode(in: textView.attributedText, characterRange: characterRange),
                     from: textView
@@ -2184,7 +2184,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         guard TextLinkURLTemplateRules.isGeneratedLink(in: textView.attributedText, characterRange: characterRange) else {
             return true
         }
-        _ = GeneratedTextLinkActivationRouter.activateGeneratedLink(
+        _ = GeneratedTextLinkActivationRouter.activateGeneratedLinkTap(
             URL,
             displayMode: TextLinkURLTemplateRules.displayMode(in: textView.attributedText, characterRange: characterRange),
             from: textView

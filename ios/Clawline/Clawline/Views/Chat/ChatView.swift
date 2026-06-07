@@ -930,7 +930,7 @@ struct ChatView: View {
         // Keep the bar gap continuous through the final keyboard-dismiss frames.
         let belowBarGap = ChatLayoutCoordinator.inputBarBottomGap(
             keyboardVisibleHeight: keyboardVisibleHeight,
-            surfaceState: dictationMotion.isSurfaceVisible ? .open : .closed
+            surfaceState: dictationCoordinator.isSurfaceOpen ? .open : .closed
         )
         let usesExternalKeyboardInsets: Bool = {
 #if os(visionOS)

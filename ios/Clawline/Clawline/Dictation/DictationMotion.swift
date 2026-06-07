@@ -41,6 +41,7 @@ final class DictationMotion {
         case dismissSurface
         case startSticky
         case endWalkieKeepOpen
+        case endWalkieAndCollapse
         case endWalkieAndDismiss
         case settleOpen
         case settleClosed
@@ -187,6 +188,7 @@ final class DictationMotion {
         let pullToSendArmed = isPullToSendArmed
 
         let wasSurfaceOpenAtGestureStart = originWasOpen
+        let didStartWalkieThisGesture = walkieStartedThisGesture
         teardownGesture()
 
         if wasSurfaceOpenAtGestureStart && pullToSendArmed && context.pullToSendEligible {
@@ -232,10 +234,10 @@ final class DictationMotion {
             surfaceRevealProgress = 0
             return .settleClosed
         }
-        if walkieStartedThisGesture {
-            pendingCommit = .init(target: .openPaused, reason: "walkie_release_to_open")
-            surfaceRevealProgress = 1
-            return .endWalkieKeepOpen
+        if didStartWalkieThisGesture {
+            pendingCommit = .init(target: .closed, reason: "walkie_release_collapse")
+            surfaceRevealProgress = 0
+            return .endWalkieAndCollapse
         }
         pendingCommit = .init(target: .openListening, reason: "start_sticky")
         surfaceRevealProgress = 1

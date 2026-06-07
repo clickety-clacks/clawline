@@ -280,6 +280,36 @@ struct DictationCoordinatorTests {
         #expect(intent == .startSticky)
     }
 
+    @Test("Closed-surface walkie hold survives release classification")
+    @MainActor
+    func closedSurfaceWalkieHoldSurvivesReleaseClassification() {
+        let harness = DictationTestHarness()
+        let coordinator = harness.makeCoordinator()
+
+        coordinator.updateContext(
+            sessionKey: harness.host.activeSessionKey,
+            composeIsEmpty: false,
+            textFieldFocused: true,
+            reduceMotionEnabled: false
+        )
+
+        let motion = DictationMotion(session: coordinator)
+        motion.gestureBegan(originWasOpen: false, swipeActivationEnabled: true)
+        motion.gestureChanged(translationY: -128, velocityY: -120)
+        #expect(motion.updateWalkieHoldArming(up: 128, activationThreshold: 124, holdDuration: 0) == false)
+        #expect(motion.updateWalkieHoldArming(up: 128, activationThreshold: 124, holdDuration: 0) == true)
+
+        let intent = motion.gestureEnded(
+            translationY: -128,
+            predictedY: -128,
+            velocityY: -120,
+            context: .init(pullToSendEligible: true, verticallyDominant: true)
+        )
+
+        #expect(intent == .endWalkieAndCollapse)
+        #expect(motion.pendingCommit?.target == .closed)
+    }
+
     @Test("Token inactivity timeout stops dictation")
     @MainActor
     func inactivityTimeoutStopsSession() async {
@@ -1097,6 +1127,30 @@ struct DictationCoordinatorTests {
         #expect(harness.audio.started)
         #expect(harness.client.connected)
         #expect(coordinator.errorMessage == nil)
+    }
+
+    @Test("Push-hold walkie release projects closed before finalization finishes")
+    @MainActor
+    func pushHoldWalkieReleaseProjectsClosedBeforeFinalizationFinishes() async {
+        let harness = DictationTestHarness()
+        let coordinator = harness.makeCoordinator()
+
+        coordinator.updateContext(
+            sessionKey: harness.host.activeSessionKey,
+            composeIsEmpty: true,
+            textFieldFocused: false,
+            reduceMotionEnabled: false
+        )
+
+        coordinator.startWalkieTalkieDictation()
+        await waitUntil { coordinator.isListeningReady }
+
+        coordinator.endWalkieTalkieIfNeeded()
+
+        await waitUntil(timeoutMs: 200) {
+            !coordinator.isSurfaceOpen
+        }
+        #expect(!coordinator.isSurfaceOpen)
     }
 
     @Test("Walkie dictation applies transcript into the bound compose view")

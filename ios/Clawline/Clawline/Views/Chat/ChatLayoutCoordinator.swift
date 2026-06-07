@@ -457,6 +457,9 @@ final class ChatLayoutCoordinator {
         if keyboardInsetProgress > 0, surfaceState == .closed {
             return 0
         }
+        if surfaceState == .open {
+            return 12
+        }
         return 24 - (12 * keyboardInsetProgress)
     }
 

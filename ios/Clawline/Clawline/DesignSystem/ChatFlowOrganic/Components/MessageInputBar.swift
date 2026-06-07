@@ -1863,6 +1863,10 @@ struct MessageInputBar: View {
             shouldRestoreFocusAfterGestureDictationStart = false
             logDictation("DICTATION_UI gesture_end classification=walkie_release_keep_open up=\(up) down=\(down)")
             dictationEmitter.emit(.gestureCommitRequested(.endWalkieTalkie))
+        case .endWalkieAndCollapse:
+            shouldRestoreFocusAfterGestureDictationStart = false
+            logDictation("DICTATION_UI gesture_end classification=walkie_release_collapse up=\(up) down=\(down)")
+            dictationEmitter.emit(.gestureCommitRequested(.endWalkieTalkie))
         case .endWalkieAndDismiss:
             shouldRestoreFocusAfterGestureDictationStart = false
             logDictation("DICTATION_UI gesture_end classification=walkie_release_dismiss up=\(up) down=\(down)")

@@ -369,6 +369,35 @@ struct ChatLayoutCoordinatorTests {
         )
     }
 
+    @Test("Hidden-keyboard open dictation surface does not keep closed-pill bottom padding")
+    @MainActor
+    func hiddenKeyboardOpenSurfaceUsesReducedBottomGap() {
+        let gap = ChatLayoutCoordinator.inputBarBottomGap(
+            keyboardVisibleHeight: 0,
+            surfaceState: .open
+        )
+        #expect(gap == 12)
+
+        let inputs = ChatLayoutInputs(
+            keyboardHeight: 34,
+            keyboardVisible: false,
+            isInputFocused: false,
+            keyboardAnimationDuration: 0.25,
+            keyboardAnimationCurve: .easeInOut,
+            safeAreaBottom: 34,
+            usesExternalKeyboardInsets: false
+        )
+        let metrics = ChatLayoutMetrics(
+            belowBarGap: gap,
+            flowGap: 10,
+            containerPadding: 12,
+            pageIndicatorClearance: 0
+        )
+
+        let state = ChatLayoutCoordinator.insetLayoutState(inputs: inputs, metrics: metrics, barHeight: 88)
+        #expect(abs(state.listBottomInset - 98) <= 0.5)
+    }
+
     @Test("T071: Transient zero bar height does not collapse inset after stabilization")
     @MainActor
     func transientZeroBarHeightIsIgnoredAfterStabilization() {

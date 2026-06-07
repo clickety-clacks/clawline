@@ -1013,6 +1013,7 @@ final class DictationSession {
                 await self.stopKeep(
                     reason: "walkie_release",
                     timeout: self.timing.stopKeepFinalizeTimeout,
+                    collapseSurfaceImmediately: true,
                     trigger: "walkie_release_collapse"
                 )
             case .pausedHold:

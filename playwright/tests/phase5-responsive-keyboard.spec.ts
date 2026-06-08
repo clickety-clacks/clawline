@@ -42,21 +42,23 @@ test.describe("Phase 5 responsive and keyboard flow", () => {
         const popoverBox = await popover.boundingBox();
         expect(popoverBox).not.toBeNull();
         expect(popoverBox!.width).toBeGreaterThan(820 * 0.9);
-        const streamGridMetrics = await popover.getByTestId("session-popover-list").evaluate((element) => {
+        const streamListMetrics = await popover.getByTestId("session-popover-list").evaluate((element) => {
           const computed = window.getComputedStyle(element);
           const card = element.querySelector(".session-sheet-card");
           const cardComputed = card ? window.getComputedStyle(card) : null;
           return {
-            columnCount: computed.gridTemplateColumns.split(" ").filter(Boolean).length,
+            display: computed.display,
+            flexDirection: computed.flexDirection,
             gap: computed.gap,
             cardMinHeight: cardComputed?.minHeight,
             cardRadius: cardComputed?.borderRadius
           };
         });
-        expect(streamGridMetrics.columnCount).toBeGreaterThanOrEqual(4);
-        expect(streamGridMetrics.gap).toBe("10px");
-        expect(streamGridMetrics.cardMinHeight).toBe("76px");
-        expect(streamGridMetrics.cardRadius).toBe("8px");
+        expect(streamListMetrics.display).toBe("flex");
+        expect(streamListMetrics.flexDirection).toBe("column");
+        expect(streamListMetrics.gap).toBe("4px");
+        expect(streamListMetrics.cardMinHeight).toBe("56px");
+        expect(streamListMetrics.cardRadius).toBe("8px");
         expect(
           await popover.locator(".session-sheet-card-title").first().evaluate((element) => {
             return window.getComputedStyle(element).textAlign;
@@ -108,9 +110,10 @@ test.describe("Phase 5 responsive and keyboard flow", () => {
           expect(popoverBox!.width).toBeGreaterThan(viewport.width * 0.9);
           expect(
             await popover.getByTestId("session-popover-list").evaluate((element) => {
-              return window.getComputedStyle(element).gridTemplateColumns.split(" ").filter(Boolean).length;
+              const computed = window.getComputedStyle(element);
+              return `${computed.display}:${computed.flexDirection}`;
             })
-          ).toBeGreaterThanOrEqual(4);
+          ).toBe("flex:column");
         } else {
           expect(popoverBox!.width).toBeGreaterThan(viewport.width * 0.78);
         }
@@ -155,7 +158,7 @@ test.describe("Phase 5 responsive and keyboard flow", () => {
     }
   });
 
-  test("pane-equivalent stream picker renders as a wrapping tile flow", async ({ page }) => {
+  test("pane-equivalent stream picker renders as an iOS-like scrolling list", async ({ page }) => {
     const { close, port } = await startPhase5Server();
 
     try {
@@ -176,25 +179,31 @@ test.describe("Phase 5 responsive and keyboard flow", () => {
       await expect(popover).toBeVisible();
       await expect(page.locator("body")).not.toContainText(/Unexpected Application Error|React error #185|maximum update depth/i);
 
-      const flowMetrics = await popover.getByTestId("session-popover-list").evaluate((element) => {
+      const listMetrics = await popover.getByTestId("session-popover-list").evaluate((element) => {
         const computed = window.getComputedStyle(element);
         const cards = Array.from(element.querySelectorAll(".session-sheet-card"));
         const cardRects = cards.map((card) => card.getBoundingClientRect());
-        const rows = new Set(cardRects.map((rect) => Math.round(rect.top)));
+        const firstCard = cardRects[0];
         return {
           cardCount: cards.length,
-          columnCount: computed.gridTemplateColumns.split(" ").filter(Boolean).length,
+          display: computed.display,
+          flexDirection: computed.flexDirection,
           gap: computed.gap,
           maxCardWidth: Math.max(...cardRects.map((rect) => rect.width)),
-          rowCount: rows.size
+          minCardLeft: Math.min(...cardRects.map((rect) => rect.left)),
+          rowCount: new Set(cardRects.map((rect) => Math.round(rect.top))).size,
+          firstCardWidth: firstCard?.width ?? 0,
+          listWidth: element.getBoundingClientRect().width
         };
       });
 
-      expect(flowMetrics.cardCount).toBeGreaterThanOrEqual(10);
-      expect(flowMetrics.columnCount).toBeGreaterThanOrEqual(4);
-      expect(flowMetrics.gap).toBe("10px");
-      expect(flowMetrics.maxCardWidth).toBeLessThan(260);
-      expect(flowMetrics.rowCount).toBeGreaterThan(1);
+      expect(listMetrics.cardCount).toBeGreaterThanOrEqual(10);
+      expect(listMetrics.display).toBe("flex");
+      expect(listMetrics.flexDirection).toBe("column");
+      expect(listMetrics.gap).toBe("4px");
+      expect(listMetrics.firstCardWidth).toBeGreaterThan(listMetrics.listWidth * 0.9);
+      expect(listMetrics.maxCardWidth).toBeGreaterThan(700);
+      expect(listMetrics.rowCount).toBe(listMetrics.cardCount);
       await expect(popover).toHaveScreenshot("phase5-session-popover-pane-equivalent.png", {
         animations: "disabled"
       });

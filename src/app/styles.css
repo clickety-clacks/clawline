@@ -2161,22 +2161,23 @@ html[data-appearance="light"] .session-popover {
 }
 
 .session-popover-list {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(9.5rem, 100%), 1fr));
-  gap: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
   min-height: 0;
   overflow: auto;
-  padding: 16px;
+  padding: 8px;
 }
 
 .session-sheet-card {
   display: block;
   text-align: left;
-  min-height: 76px;
+  width: 100%;
+  min-height: 56px;
   border-radius: 8px;
-  padding: 12px;
+  padding: 8px 12px;
   border-color: var(--session-popup-border);
-  background: rgb(255 255 255 / 0.035);
+  background: transparent;
   box-shadow: none;
   color: var(--session-popup-text);
   transition:
@@ -2187,7 +2188,7 @@ html[data-appearance="light"] .session-popover {
 .session-sheet-card-row {
   justify-content: flex-start;
   gap: 0.75rem;
-  min-height: 52px;
+  min-height: 40px;
   width: 100%;
 }
 

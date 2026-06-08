@@ -6014,7 +6014,7 @@ final class CrossChatNotificationRenderedEntryCache {
         }
     }
 
-    private static func colorCacheComponent(_ color: UIColor) -> String {
+    static func colorCacheComponent(_ color: UIColor) -> String {
         var red: CGFloat = 0
         var green: CGFloat = 0
         var blue: CGFloat = 0
@@ -6025,6 +6025,22 @@ final class CrossChatNotificationRenderedEntryCache {
         }
         return identity + "|" + String(format: "%.5f,%.5f,%.5f,%.5f", red, green, blue, alpha)
     }
+}
+
+private struct NotificationRenderedEntryComponent: Hashable {
+    let id: String
+    let content: String
+    let appendSeparatorTimestamp: Date?
+}
+
+private struct NotificationRenderedEntriesKey: Hashable {
+    let cacheScope: String
+    let entryComponents: [NotificationRenderedEntryComponent]
+    let fontName: String
+    let fontSize: CGFloat
+    let inkColor: String
+    let lineSpacing: CGFloat
+    let isDark: Bool
 }
 
 enum CrossChatNotificationGeometry {
@@ -7453,8 +7469,11 @@ struct CrossChatNotificationBubbleView: View {
     let isContentScrollLocked: Bool
     let onContentScrollDragChanged: (CGSize) -> Void
     let onContentScrollDragEnded: () -> Void
+    var notificationEntryRenderer: CrossChatNotificationRenderedEntryCache.RenderBlocks? = nil
     @Environment(\.colorScheme) private var colorScheme
     @State private var renderedEntriesCache = CrossChatNotificationRenderedEntryCache()
+    @State private var renderedNotificationEntries: [CrossChatRenderedNotificationEntry] = []
+    @State private var renderedNotificationEntriesKey: NotificationRenderedEntriesKey?
     @State private var isClearAllConfirmationPresented = false
     @State private var measuredEntriesHeight: CGFloat = 0
     @State private var measuredReplyFieldHeight: CGFloat = 0
@@ -7539,7 +7558,10 @@ struct CrossChatNotificationBubbleView: View {
     }
 
     private var notificationBodyInkColor: UIColor {
-        UIColor.label.withAlphaComponent(colorScheme == .dark ? 0.82 : 0.74)
+        let traits = UITraitCollection(userInterfaceStyle: colorScheme == .dark ? .dark : .light)
+        return UIColor.label
+            .resolvedColor(with: traits)
+            .withAlphaComponent(colorScheme == .dark ? 0.82 : 0.74)
     }
 
     private func notificationFont(_ role: ClawlineTextRole, weight: Font.Weight? = nil) -> Font {
@@ -7574,15 +7596,54 @@ struct CrossChatNotificationBubbleView: View {
         )
     }
 
-    private var renderedNotificationEntries: [CrossChatRenderedNotificationEntry] {
-        renderedEntriesCache.entries(
-            for: bubble.entries,
+    private var currentRenderedEntriesKey: NotificationRenderedEntriesKey {
+        let baseFont = notificationUIFont(.secondaryLabel)
+        return NotificationRenderedEntriesKey(
             cacheScope: bubble.sourceChatId,
-            baseFont: notificationUIFont(.secondaryLabel),
-            inkColor: notificationBodyInkColor,
+            entryComponents: bubble.entries.map { entry in
+                NotificationRenderedEntryComponent(
+                    id: entry.id,
+                    content: entry.content,
+                    appendSeparatorTimestamp: entry.appendSeparatorTimestamp
+                )
+            },
+            fontName: baseFont.fontDescriptor.postscriptName,
+            fontSize: baseFont.pointSize,
+            inkColor: CrossChatNotificationRenderedEntryCache.colorCacheComponent(notificationBodyInkColor),
             lineSpacing: 2,
             isDark: colorScheme == .dark
         )
+    }
+
+    private func refreshRenderedNotificationEntriesIfNeeded() {
+        let key = currentRenderedEntriesKey
+        guard renderedNotificationEntriesKey != key else { return }
+        let baseFont = notificationUIFont(.secondaryLabel)
+        let renderer: CrossChatNotificationRenderedEntryCache.RenderBlocks
+        if let notificationEntryRenderer {
+            renderer = notificationEntryRenderer
+        } else {
+            renderer = { content, messageID, baseFont, inkColor, lineSpacing, isDark in
+                CrossChatNotificationMarkdownRenderer.renderBlocks(
+                    content: content,
+                    messageID: messageID,
+                    baseFont: baseFont,
+                    inkColor: inkColor,
+                    lineSpacing: lineSpacing,
+                    isDark: isDark
+                )
+            }
+        }
+        renderedNotificationEntries = renderedEntriesCache.entries(
+            for: bubble.entries,
+            cacheScope: bubble.sourceChatId,
+            baseFont: baseFont,
+            inkColor: notificationBodyInkColor,
+            lineSpacing: key.lineSpacing,
+            isDark: key.isDark,
+            renderBlocks: renderer
+        )
+        renderedNotificationEntriesKey = key
     }
 
     private func activateReplySendControl() {
@@ -7846,6 +7907,10 @@ struct CrossChatNotificationBubbleView: View {
         ) {
             Button("Clear All Notifications", role: .destructive, action: onDismissAll)
             Button("Cancel", role: .cancel) {}
+        }
+        .onAppear(perform: refreshRenderedNotificationEntriesIfNeeded)
+        .onChange(of: currentRenderedEntriesKey) { _, _ in
+            refreshRenderedNotificationEntriesIfNeeded()
         }
     }
 

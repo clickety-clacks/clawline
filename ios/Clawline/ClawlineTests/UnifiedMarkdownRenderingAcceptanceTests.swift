@@ -581,6 +581,78 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
         #expect(renderCallCount == 2)
     }
 
+    @Test("T1205 notification bubble does not render markdown during repeated layout")
+    @MainActor
+    func t1205_notificationBubbleDoesNotRenderMarkdownDuringRepeatedLayout() {
+        var renderCallCount = 0
+        let bubble = CrossChatNotificationBubble(
+            sourceChatId: "agent:main:clawline:user:s_t1205_layout",
+            sourceTitle: "Side Thread",
+            entries: [
+                CrossChatAssistantNotificationEntry(
+                    id: "s_t1205_layout_entry",
+                    content: "Review T1205 and T1182.",
+                    timestamp: Date()
+                )
+            ],
+            lastAssistantActivityAt: Date()
+        )
+        let renderer: CrossChatNotificationRenderedEntryCache.RenderBlocks = { content, _, _, _, _, _ in
+            renderCallCount += 1
+            return [.attributedText(NSAttributedString(string: content))]
+        }
+        let host = UIHostingController(
+            rootView: CrossChatNotificationBubbleView(
+                bubble: bubble,
+                assignedNumber: 1,
+                visibleNotificationCount: 1,
+                showShortcutLabel: true,
+                maxBubbleHeight: 205,
+                maxBubbleWidth: 360,
+                bubbleCornerRadius: 18,
+                isSending: false,
+                canCancelSend: false,
+                canSendReply: false,
+                connectionState: .connected,
+                replyDraft: .constant(""),
+                onDismiss: {},
+                onReply: {},
+                onCancelReply: {},
+                onDismissAll: {},
+                onNavigate: {},
+                onSendReply: {},
+                onCancelSend: {},
+                onReconnect: {},
+                onActivate: {},
+                onReplyFocusChange: { _ in },
+                isActionMenuOpen: false,
+                actionMenuSelection: .reply,
+                onActionMenuSelectionChange: { _ in },
+                onActionMenuAction: { _ in },
+                onRegisterScrollView: { _ in },
+                isDismissSwipeActive: false,
+                isContentScrollLocked: false,
+                onContentScrollDragChanged: { _ in },
+                onContentScrollDragEnded: {},
+                notificationEntryRenderer: renderer
+            )
+        )
+
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 360, height: 240))
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        host.view.frame = window.bounds
+        host.view.setNeedsLayout()
+        host.view.layoutIfNeeded()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.15))
+        host.view.setNeedsLayout()
+        host.view.layoutIfNeeded()
+        host.view.setNeedsLayout()
+        host.view.layoutIfNeeded()
+
+        #expect(renderCallCount == 1)
+    }
+
     @Test("T307 real notification bubble renders assistant markdown content")
     @MainActor
     func t307_realNotificationBubbleRendersAssistantMarkdownContent() throws {

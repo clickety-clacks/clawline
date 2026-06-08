@@ -475,7 +475,8 @@ struct StreamManagerSheet: View {
                 let dotIdentity = StreamPopupRowStatusDotIdentity(
                     sessionKey: stream.sessionKey,
                     dotState: dotState,
-                    isActive: isActive
+                    isActive: isActive,
+                    colorScheme: colorScheme
                 )
                 HStack(spacing: 10) {
                     StreamPopupRowStatusDot(
@@ -680,6 +681,7 @@ struct StreamPopupRowStatusDotIdentity: Hashable {
     let sessionKey: String
     let dotState: StreamDotState
     let isActive: Bool
+    let colorScheme: ColorScheme
 }
 
 private struct StreamPopupRowStatusDot: View {

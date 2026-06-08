@@ -712,12 +712,14 @@ struct StreamPageDotsViewTests {
         let first = StreamPopupRowStatusDotIdentity(
             sessionKey: "agent:main:clawline:user:s_initial",
             dotState: .inactive,
-            isActive: false
+            isActive: false,
+            colorScheme: .light
         )
         let scrolledIn = StreamPopupRowStatusDotIdentity(
             sessionKey: "agent:main:clawline:user:s_scrolled",
             dotState: .inactive,
-            isActive: false
+            isActive: false,
+            colorScheme: .light
         )
 
         #expect(first != scrolledIn)
@@ -728,21 +730,31 @@ struct StreamPageDotsViewTests {
         let inactive = StreamPopupRowStatusDotIdentity(
             sessionKey: "agent:main:clawline:user:s_popup",
             dotState: .inactive,
-            isActive: false
+            isActive: false,
+            colorScheme: .light
         )
         let unread = StreamPopupRowStatusDotIdentity(
             sessionKey: "agent:main:clawline:user:s_popup",
             dotState: .unread,
-            isActive: false
+            isActive: false,
+            colorScheme: .light
         )
         let active = StreamPopupRowStatusDotIdentity(
             sessionKey: "agent:main:clawline:user:s_popup",
             dotState: .unread,
-            isActive: true
+            isActive: true,
+            colorScheme: .light
+        )
+        let dark = StreamPopupRowStatusDotIdentity(
+            sessionKey: "agent:main:clawline:user:s_popup",
+            dotState: .inactive,
+            isActive: false,
+            colorScheme: .dark
         )
 
         #expect(inactive != unread)
         #expect(unread != active)
+        #expect(inactive != dark)
     }
 
     @Test("Offscreen unread edge bloom is blurred behind the glass")

@@ -28,7 +28,7 @@ describe("SessionListSheet", () => {
   it("keeps the stream picker on the wrapping flow layout", () => {
     const styleText = readFileSync("src/app/styles.css", "utf8");
 
-    expect(styleText).toContain("width: min(66rem, calc(100vw - 1.5rem));");
+    expect(styleText).toContain("width: min(48rem, calc(100vw - 1.5rem));");
     expect(styleText).toContain(
       "grid-template-columns: repeat(auto-fill, minmax(min(9.5rem, 100%), 1fr));"
     );

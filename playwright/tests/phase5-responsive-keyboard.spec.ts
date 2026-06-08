@@ -191,7 +191,7 @@ test.describe("Phase 5 responsive and keyboard flow", () => {
       });
 
       expect(flowMetrics.cardCount).toBeGreaterThanOrEqual(10);
-      expect(flowMetrics.columnCount).toBeGreaterThanOrEqual(5);
+      expect(flowMetrics.columnCount).toBeGreaterThanOrEqual(4);
       expect(flowMetrics.gap).toBe("10px");
       expect(flowMetrics.maxCardWidth).toBeLessThan(260);
       expect(flowMetrics.rowCount).toBeGreaterThan(1);

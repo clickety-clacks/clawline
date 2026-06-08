@@ -2091,9 +2091,9 @@ html[data-appearance="light"] body::before {
   left: 50%;
   bottom: calc(8.8rem + env(safe-area-inset-bottom, 0px) + var(--chat-keyboard-inset));
   transform: translateX(-50%);
-  width: min(66rem, calc(100vw - 1.5rem));
+  width: min(48rem, calc(100vw - 1.5rem));
   min-width: min(17.5rem, calc(100vw - 1.5rem));
-  max-width: 66rem;
+  max-width: 48rem;
   max-height: min(32rem, calc(100dvh - 11rem - env(safe-area-inset-bottom, 0px) - var(--chat-keyboard-inset)));
   padding: 0;
   border-radius: 12px;
@@ -2434,7 +2434,7 @@ html[data-appearance="light"] .session-popover {
   }
   
   .session-popover {
-    width: min(100vw - 1rem, 66rem);
+    width: min(100vw - 1rem, 48rem);
     bottom: calc(8.2rem + env(safe-area-inset-bottom, 0px) + var(--chat-keyboard-inset));
     max-height: min(30rem, calc(100dvh - 9.8rem - env(safe-area-inset-bottom, 0px) - var(--chat-keyboard-inset)));
   }

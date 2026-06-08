@@ -64,6 +64,14 @@ export function ChatRoute() {
         : [],
     [chatState.messagesBySessionKey, activeSessionKey]
   );
+  const rememberSessionScrollState = useCallback(
+    (input: {
+      offsetTop: number;
+      sessionKey: string;
+      stickToBottom: boolean;
+    }) => chatStore.rememberSessionScrollState(input),
+    [chatStore]
+  );
   const streamSessionKeySignature = useMemo(
     () => chatState.streams.map((stream) => stream.sessionKey).join("\u0000"),
     [chatState.streams]
@@ -339,7 +347,7 @@ export function ChatRoute() {
         onCancelCurrentPrompt={(sessionKey) =>
           applySessionControl(sessionKey, "cancel_current_run")
         }
-        onRememberScrollState={(input) => chatStore.rememberSessionScrollState(input)}
+        onRememberScrollState={rememberSessionScrollState}
         onSessionControlSelected={applySessionControl}
         provisioningState={provisioningState}
         onUnreadAnchorConsumed={(messageId) => {

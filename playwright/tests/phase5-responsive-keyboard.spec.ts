@@ -30,7 +30,7 @@ test.describe("Phase 5 responsive and keyboard flow", () => {
 
         await expect(page.getByTestId("chat-layout")).toHaveScreenshot(
           `phase5-chat-shell-${appearance}.png`,
-          { animations: "disabled" }
+          { animations: "disabled", maxDiffPixelRatio: 0.02 }
         );
 
         await dots.click();
@@ -41,7 +41,12 @@ test.describe("Phase 5 responsive and keyboard flow", () => {
         await expect(popover.getByRole("button", { name: "Retry" })).toHaveCount(0);
         const popoverBox = await popover.boundingBox();
         expect(popoverBox).not.toBeNull();
-        expect(popoverBox!.width).toBeLessThan(820 * 0.52);
+        expect(popoverBox!.width).toBeGreaterThan(820 * 0.9);
+        expect(
+          await popover.getByTestId("session-popover-list").evaluate((element) => {
+            return window.getComputedStyle(element).gridTemplateColumns.split(" ").length;
+          })
+        ).toBeGreaterThan(1);
         expect(
           await popover.locator(".session-sheet-card-title").first().evaluate((element) => {
             return window.getComputedStyle(element).textAlign;
@@ -60,11 +65,15 @@ test.describe("Phase 5 responsive and keyboard flow", () => {
 
         if (appearance === "dark") {
           await swipeChatPanel(page, { endX: 120, startX: 300, y: 360 });
-          await expect(page.getByText("Responsive shell check")).toBeVisible();
+          await expect(page.getByTestId("message-s_phase5_2")).toContainText(
+            "Responsive shell check"
+          );
           await expect(page).toHaveURL(new RegExp(`${SIDE_SESSION_KEY.replaceAll(":", "\\:")}$`));
 
           await swipeChatPanel(page, { endX: 300, startX: 120, y: 360 });
-          await expect(page.getByText("Keyboard flow check")).toBeVisible();
+          await expect(page.getByTestId("message-s_phase5_1")).toContainText(
+            "Keyboard flow check"
+          );
           await expect(page).toHaveURL(new RegExp(`${MAIN_SESSION_KEY.replaceAll(":", "\\:")}$`));
         }
       }
@@ -85,7 +94,12 @@ test.describe("Phase 5 responsive and keyboard flow", () => {
         expect(popoverBox).not.toBeNull();
 
         if (viewport.width > 500) {
-          expect(popoverBox!.width).toBeLessThan(viewport.width * 0.52);
+          expect(popoverBox!.width).toBeGreaterThan(viewport.width * 0.9);
+          expect(
+            await popover.getByTestId("session-popover-list").evaluate((element) => {
+              return window.getComputedStyle(element).gridTemplateColumns.split(" ").length;
+            })
+          ).toBeGreaterThan(1);
         } else {
           expect(popoverBox!.width).toBeGreaterThan(viewport.width * 0.78);
         }

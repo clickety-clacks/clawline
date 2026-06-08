@@ -129,9 +129,6 @@ export function useVirtualMessageWindow(
     }
 
     const nextScrollTop = clampContainerScrollTop(container, container.scrollTop);
-    if (container.scrollTop !== nextScrollTop) {
-      container.scrollTop = nextScrollTop;
-    }
     const restingMaxScrollTop = maxRestingScrollTop(
       container,
       revealTrailingHeight

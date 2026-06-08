@@ -190,11 +190,11 @@ test.describe("Phase 5 responsive and keyboard flow", () => {
         };
       });
 
-      expect(flowMetrics.cardCount).toBeGreaterThanOrEqual(5);
+      expect(flowMetrics.cardCount).toBeGreaterThanOrEqual(10);
       expect(flowMetrics.columnCount).toBeGreaterThanOrEqual(5);
       expect(flowMetrics.gap).toBe("10px");
       expect(flowMetrics.maxCardWidth).toBeLessThan(260);
-      expect(flowMetrics.rowCount).toBe(1);
+      expect(flowMetrics.rowCount).toBeGreaterThan(1);
       await expect(popover).toHaveScreenshot("phase5-session-popover-pane-equivalent.png", {
         animations: "disabled"
       });
@@ -789,6 +789,11 @@ const SIDE_SESSION_KEY = "agent:main:clawline:flynn:side";
 const RESEARCH_SESSION_KEY = "agent:main:clawline:flynn:research";
 const DESIGN_SESSION_KEY = "agent:main:clawline:flynn:design";
 const OPS_SESSION_KEY = "agent:main:clawline:flynn:ops";
+const REVIEW_SESSION_KEY = "agent:main:clawline:flynn:review";
+const QA_SESSION_KEY = "agent:main:clawline:flynn:qa";
+const NOTES_SESSION_KEY = "agent:main:clawline:flynn:notes";
+const PLANNING_SESSION_KEY = "agent:main:clawline:flynn:planning";
+const INCIDENTS_SESSION_KEY = "agent:main:clawline:flynn:incidents";
 
 async function startPhase5Server(options?: {
   mainTranscript?: Array<{
@@ -838,7 +843,12 @@ async function startPhase5Server(options?: {
               SIDE_SESSION_KEY,
               RESEARCH_SESSION_KEY,
               DESIGN_SESSION_KEY,
-              OPS_SESSION_KEY
+              OPS_SESSION_KEY,
+              REVIEW_SESSION_KEY,
+              QA_SESSION_KEY,
+              NOTES_SESSION_KEY,
+              PLANNING_SESSION_KEY,
+              INCIDENTS_SESSION_KEY
             ]
           })
         );
@@ -852,7 +862,12 @@ async function startPhase5Server(options?: {
               SIDE_SESSION_KEY,
               RESEARCH_SESSION_KEY,
               DESIGN_SESSION_KEY,
-              OPS_SESSION_KEY
+              OPS_SESSION_KEY,
+              REVIEW_SESSION_KEY,
+              QA_SESSION_KEY,
+              NOTES_SESSION_KEY,
+              PLANNING_SESSION_KEY,
+              INCIDENTS_SESSION_KEY
             ]
           })
         );
@@ -908,6 +923,56 @@ async function startPhase5Server(options?: {
                 isBuiltIn: false,
                 createdAt: 1_764_400_000_400,
                 updatedAt: 1_764_400_000_400,
+                adopted: false
+              },
+              {
+                sessionKey: REVIEW_SESSION_KEY,
+                displayName: "Review",
+                kind: "custom",
+                orderIndex: 5,
+                isBuiltIn: false,
+                createdAt: 1_764_400_000_500,
+                updatedAt: 1_764_400_000_500,
+                adopted: false
+              },
+              {
+                sessionKey: QA_SESSION_KEY,
+                displayName: "QA",
+                kind: "custom",
+                orderIndex: 6,
+                isBuiltIn: false,
+                createdAt: 1_764_400_000_600,
+                updatedAt: 1_764_400_000_600,
+                adopted: false
+              },
+              {
+                sessionKey: NOTES_SESSION_KEY,
+                displayName: "Notes",
+                kind: "custom",
+                orderIndex: 7,
+                isBuiltIn: false,
+                createdAt: 1_764_400_000_700,
+                updatedAt: 1_764_400_000_700,
+                adopted: false
+              },
+              {
+                sessionKey: PLANNING_SESSION_KEY,
+                displayName: "Planning",
+                kind: "custom",
+                orderIndex: 8,
+                isBuiltIn: false,
+                createdAt: 1_764_400_000_800,
+                updatedAt: 1_764_400_000_800,
+                adopted: false
+              },
+              {
+                sessionKey: INCIDENTS_SESSION_KEY,
+                displayName: "Incidents",
+                kind: "custom",
+                orderIndex: 9,
+                isBuiltIn: false,
+                createdAt: 1_764_400_000_900,
+                updatedAt: 1_764_400_000_900,
                 adopted: false
               }
             ]

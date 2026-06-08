@@ -2091,12 +2091,12 @@ html[data-appearance="light"] body::before {
   left: 50%;
   bottom: calc(8.8rem + env(safe-area-inset-bottom, 0px) + var(--chat-keyboard-inset));
   transform: translateX(-50%);
-  width: min(54rem, calc(100vw - 1.5rem));
+  width: min(66rem, calc(100vw - 1.5rem));
   min-width: min(17.5rem, calc(100vw - 1.5rem));
-  max-width: 54rem;
+  max-width: 66rem;
   max-height: min(32rem, calc(100dvh - 11rem - env(safe-area-inset-bottom, 0px) - var(--chat-keyboard-inset)));
   padding: 0;
-  border-radius: 20px;
+  border-radius: 12px;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0)),
     var(--session-popup-surface-gradient);
@@ -2162,21 +2162,21 @@ html[data-appearance="light"] .session-popover {
 
 .session-popover-list {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(14rem, 100%), 1fr));
-  gap: 2px;
+  grid-template-columns: repeat(auto-fill, minmax(min(9.5rem, 100%), 1fr));
+  gap: 10px;
   min-height: 0;
   overflow: auto;
-  padding: 20px 12px;
+  padding: 16px;
 }
 
 .session-sheet-card {
   display: block;
   text-align: left;
-  min-height: 52px;
-  border-radius: 12px;
-  padding: 0 12px;
-  border-color: transparent;
-  background: transparent;
+  min-height: 76px;
+  border-radius: 8px;
+  padding: 12px;
+  border-color: var(--session-popup-border);
+  background: rgb(255 255 255 / 0.035);
   box-shadow: none;
   color: var(--session-popup-text);
   transition:
@@ -2238,7 +2238,7 @@ html[data-appearance="light"] .session-popover {
   justify-content: space-between;
   flex-wrap: nowrap;
   gap: 0.75rem;
-  padding: 12px 12px 20px;
+  padding: 12px 16px 16px;
   border-top: 1px solid var(--session-popup-divider);
 }
 
@@ -2434,7 +2434,7 @@ html[data-appearance="light"] .session-popover {
   }
   
   .session-popover {
-    width: min(100vw - 1rem, 54rem);
+    width: min(100vw - 1rem, 66rem);
     bottom: calc(8.2rem + env(safe-area-inset-bottom, 0px) + var(--chat-keyboard-inset));
     max-height: min(30rem, calc(100dvh - 9.8rem - env(safe-area-inset-bottom, 0px) - var(--chat-keyboard-inset)));
   }

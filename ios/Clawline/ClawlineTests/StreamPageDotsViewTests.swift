@@ -710,13 +710,39 @@ struct StreamPageDotsViewTests {
     @Test("T1188 popup row dot identity includes materialized session")
     func popupRowDotIdentityIncludesMaterializedSession() {
         let first = StreamPopupRowStatusDotIdentity(
-            sessionKey: "agent:main:clawline:user:s_initial"
+            sessionKey: "agent:main:clawline:user:s_initial",
+            dotState: .inactive,
+            isActive: false
         )
         let scrolledIn = StreamPopupRowStatusDotIdentity(
-            sessionKey: "agent:main:clawline:user:s_scrolled"
+            sessionKey: "agent:main:clawline:user:s_scrolled",
+            dotState: .inactive,
+            isActive: false
         )
 
         #expect(first != scrolledIn)
+    }
+
+    @Test("T1188 popup row dot identity includes rendered status")
+    func popupRowDotIdentityIncludesRenderedStatus() {
+        let inactive = StreamPopupRowStatusDotIdentity(
+            sessionKey: "agent:main:clawline:user:s_popup",
+            dotState: .inactive,
+            isActive: false
+        )
+        let unread = StreamPopupRowStatusDotIdentity(
+            sessionKey: "agent:main:clawline:user:s_popup",
+            dotState: .unread,
+            isActive: false
+        )
+        let active = StreamPopupRowStatusDotIdentity(
+            sessionKey: "agent:main:clawline:user:s_popup",
+            dotState: .unread,
+            isActive: true
+        )
+
+        #expect(inactive != unread)
+        #expect(unread != active)
     }
 
     @Test("Offscreen unread edge bloom is blurred behind the glass")

@@ -41,19 +41,23 @@ test.describe("Phase 5 responsive and keyboard flow", () => {
         await expect(popover.getByRole("button", { name: "Retry" })).toHaveCount(0);
         const popoverBox = await popover.boundingBox();
         expect(popoverBox).not.toBeNull();
-        expect(popoverBox!.width).toBeGreaterThan(820 * 0.9);
         const streamListMetrics = await popover.getByTestId("session-popover-list").evaluate((element) => {
           const computed = window.getComputedStyle(element);
-          const card = element.querySelector(".session-sheet-card");
+          const cards = Array.from(element.querySelectorAll(".session-sheet-card"));
+          const card = cards[0];
           const cardComputed = card ? window.getComputedStyle(card) : null;
+          const cardRects = cards.map((item) => item.getBoundingClientRect());
           return {
             display: computed.display,
             flexDirection: computed.flexDirection,
             gap: computed.gap,
             cardMinHeight: cardComputed?.minHeight,
-            cardRadius: cardComputed?.borderRadius
+            cardRadius: cardComputed?.borderRadius,
+            widestCardWidth: Math.max(...cardRects.map((rect) => rect.width))
           };
         });
+        expect(popoverBox!.width).toBeLessThan(820 * 0.6);
+        expect(Math.abs(popoverBox!.width - streamListMetrics.widestCardWidth)).toBeLessThan(32);
         expect(streamListMetrics.display).toBe("flex");
         expect(streamListMetrics.flexDirection).toBe("column");
         expect(streamListMetrics.gap).toBe("4px");
@@ -107,7 +111,7 @@ test.describe("Phase 5 responsive and keyboard flow", () => {
         expect(popoverBox).not.toBeNull();
 
         if (viewport.width > 500) {
-          expect(popoverBox!.width).toBeGreaterThan(viewport.width * 0.9);
+          expect(popoverBox!.width).toBeLessThan(viewport.width * 0.6);
           expect(
             await popover.getByTestId("session-popover-list").evaluate((element) => {
               const computed = window.getComputedStyle(element);
@@ -115,7 +119,8 @@ test.describe("Phase 5 responsive and keyboard flow", () => {
             })
           ).toBe("flex:column");
         } else {
-          expect(popoverBox!.width).toBeGreaterThan(viewport.width * 0.78);
+          expect(popoverBox!.width).toBeLessThan(viewport.width * 0.78);
+          expect(popoverBox!.width).toBeGreaterThan(96);
         }
 
         await expect(page.getByTestId("session-popover-list")).toBeVisible();
@@ -193,7 +198,8 @@ test.describe("Phase 5 responsive and keyboard flow", () => {
           minCardLeft: Math.min(...cardRects.map((rect) => rect.left)),
           rowCount: new Set(cardRects.map((rect) => Math.round(rect.top))).size,
           firstCardWidth: firstCard?.width ?? 0,
-          listWidth: element.getBoundingClientRect().width
+          listWidth: element.getBoundingClientRect().width,
+          popoverWidth: element.closest(".session-popover")?.getBoundingClientRect().width ?? 0
         };
       });
 
@@ -201,8 +207,10 @@ test.describe("Phase 5 responsive and keyboard flow", () => {
       expect(listMetrics.display).toBe("flex");
       expect(listMetrics.flexDirection).toBe("column");
       expect(listMetrics.gap).toBe("4px");
-      expect(listMetrics.firstCardWidth).toBeGreaterThan(listMetrics.listWidth * 0.9);
-      expect(listMetrics.maxCardWidth).toBeGreaterThan(700);
+      expect(listMetrics.firstCardWidth).toBeGreaterThan(listMetrics.listWidth * 0.85);
+      expect(listMetrics.maxCardWidth).toBeLessThan(240);
+      expect(listMetrics.popoverWidth).toBeLessThan(300);
+      expect(Math.abs(listMetrics.popoverWidth - listMetrics.maxCardWidth)).toBeLessThan(32);
       expect(listMetrics.rowCount).toBe(listMetrics.cardCount);
       await expect(popover).toHaveScreenshot("phase5-session-popover-pane-equivalent.png", {
         animations: "disabled"

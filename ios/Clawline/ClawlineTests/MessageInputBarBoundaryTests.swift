@@ -211,6 +211,22 @@ struct MessageInputBarBoundaryTests {
         #expect(layoutHostHeight == topMargin + availableHeightAboveComposer + 12)
     }
 
+    @Test("Spatial notification layout host includes motion overflow")
+    func spatialNotificationLayoutHostIncludesMotionOverflow() {
+        let topMargin = CGFloat(8)
+        let availableHeightAboveComposer = CGFloat(620)
+        let standardHostHeight = CrossChatNotificationGeometry.layoutHostHeight(
+            topMargin: topMargin,
+            maxContainerHeight: availableHeightAboveComposer
+        )
+        let spatialHostHeight = CrossChatNotificationGeometry.spatialLayoutHostHeight(
+            topMargin: topMargin,
+            maxContainerHeight: availableHeightAboveComposer
+        )
+
+        #expect(spatialHostHeight > standardHostHeight)
+    }
+
     @Test("T354 notification short content does not add blank bottom tail")
     func notificationShortContentDoesNotAddBlankBottomTail() {
         let measuredContentHeight = CGFloat(52)

@@ -1882,13 +1882,27 @@ struct ChatView: View {
                 alignment: .topTrailing
             )
             .frame(
-                height: CrossChatNotificationGeometry.layoutHostHeight(
+                height: notificationOverlayHostHeight(
                     topMargin: topMargin,
                     maxContainerHeight: maxContainerHeight
                 ),
                 alignment: .topTrailing
             )
         )
+    }
+
+    private func notificationOverlayHostHeight(topMargin: CGFloat, maxContainerHeight: CGFloat) -> CGFloat {
+#if os(visionOS)
+        CrossChatNotificationGeometry.spatialLayoutHostHeight(
+            topMargin: topMargin,
+            maxContainerHeight: maxContainerHeight
+        )
+#else
+        CrossChatNotificationGeometry.layoutHostHeight(
+            topMargin: topMargin,
+            maxContainerHeight: maxContainerHeight
+        )
+#endif
     }
 
     private func crossChatNotificationCommand(
@@ -6058,6 +6072,13 @@ enum CrossChatNotificationGeometry {
 
     static func layoutHostHeight(topMargin: CGFloat, maxContainerHeight: CGFloat) -> CGFloat {
         max(0, topMargin) + max(0, maxContainerHeight) + 12
+    }
+
+    static func spatialLayoutHostHeight(topMargin: CGFloat, maxContainerHeight: CGFloat) -> CGFloat {
+        CrossChatNotificationOverlay.overlayHostHeight(
+            topMargin: topMargin,
+            maxContainerHeight: maxContainerHeight
+        )
     }
 
     static func spatialNativeWindowWidth(keyWindowWidth: CGFloat?, firstWindowWidth: CGFloat?) -> CGFloat? {

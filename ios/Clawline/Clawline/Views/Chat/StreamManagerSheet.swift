@@ -484,6 +484,7 @@ struct StreamManagerSheet: View {
                         dotState: dotState,
                         colorScheme: colorScheme
                     )
+                    .id(dotIdentity)
                     Text(stream.displayName)
                         .font(.clawline(.subsectionHeader).weight(isActive ? .semibold : .regular))
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -493,7 +494,6 @@ struct StreamManagerSheet: View {
                             .tint(.secondary)
                     }
                 }
-                .id(dotIdentity)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
             }

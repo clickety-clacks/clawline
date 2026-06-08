@@ -418,6 +418,54 @@ test.describe("Phase 5 responsive and keyboard flow", () => {
     }
   });
 
+  test("selector filter persists across selector-driven chat navigation", async ({ page }) => {
+    const { close, port } = await startPhase5Server();
+
+    try {
+      await page.addInitScript((session) => {
+        window.localStorage.setItem("clawline-web:auth-session", JSON.stringify(session));
+        window.localStorage.setItem(
+          "clawline-web:device-id",
+          JSON.stringify(session.deviceId)
+        );
+      }, makeSession(port));
+
+      await page.setViewportSize({ height: 1180, width: 820 });
+      await page.goto(`/chat/${MAIN_SESSION_KEY}`);
+
+      await page.getByRole("button", { name: "Manage streams" }).click();
+      const popover = page.getByTestId("session-popover");
+      await expect(popover).toBeVisible();
+
+      const filterInput = page.getByRole("textbox", { name: "Filter chats" });
+      await filterInput.fill("side", { force: true });
+      await expect(filterInput).toHaveValue("side");
+      await expect(popover.getByRole("button", { name: "Side" })).toBeVisible();
+      await expect(popover.getByRole("button", { name: "Main" })).toHaveCount(0);
+
+      await popover.getByRole("button", { name: "Side" }).click();
+
+      await expect(page).toHaveURL(new RegExp(`/chat/${escapeForRegExp(SIDE_SESSION_KEY)}$`));
+      await expect(page.getByTestId("session-popover")).toHaveCount(0);
+
+      await page.getByRole("button", { name: "Manage streams" }).click();
+      const reopenedPopover = page.getByTestId("session-popover");
+      await expect(reopenedPopover).toBeVisible();
+      const reopenedFilterInput = page.getByRole("textbox", { name: "Filter chats" });
+      await expect(reopenedFilterInput).toHaveValue("side");
+      await expect(reopenedPopover.getByRole("button", { name: "Side" })).toBeVisible();
+      await expect(reopenedPopover.getByRole("button", { name: "Main" })).toHaveCount(0);
+
+      await reopenedFilterInput.fill("", { force: true });
+
+      await expect(reopenedFilterInput).toHaveValue("");
+      await expect(reopenedPopover.getByRole("button", { name: "Main" })).toBeVisible();
+      await expect(reopenedPopover.getByRole("button", { name: "Side" })).toBeVisible();
+    } finally {
+      await close();
+    }
+  });
+
   test("manage streams tap opens the popup without dismissing the keyboard", async ({ page }) => {
     const { close, port } = await startPhase5Server();
 

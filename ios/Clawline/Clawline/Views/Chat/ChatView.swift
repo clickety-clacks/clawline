@@ -1786,23 +1786,6 @@ struct ChatView: View {
     }
 #endif
 
-    private var appVersionLabel: AttributedString? {
-        let version = Bundle.main.object(
-            forInfoDictionaryKey: "CFBundleShortVersionString"
-        ) as? String
-        let build = Bundle.main.object(
-            forInfoDictionaryKey: "CFBundleVersion"
-        ) as? String
-        guard let version, !version.isEmpty else { return nil }
-        if let build, !build.isEmpty {
-            var green = AttributeContainer()
-            green.foregroundColor = .green
-            let buildText = AttributedString(build, attributes: green)
-            return AttributedString("v\(version) (build ") + buildText + AttributedString(")")
-        }
-        return AttributedString("v\(version)")
-    }
-
     private func mentionPickerOverlay(
         streams: [StreamSession],
         currentSessionKey: String,
@@ -2130,7 +2113,6 @@ struct ChatView: View {
             desiredBottomGap: belowBarGap,
             isKeyboardVisible: isKeyboardVisible,
             measuredHeight: $inputBarHeight,
-            versionText: appVersionLabel,
             layoutCoordinator: layoutCoordinator,
             layoutKey: layoutKey,
             scrollButtonView: pinnedScrollButtonView,
@@ -4787,7 +4769,6 @@ private struct KeyboardPinnedContainer<Content: View>: UIViewRepresentable {
     let desiredBottomGap: CGFloat
     let isKeyboardVisible: Bool
     @Binding var measuredHeight: CGFloat
-    let versionText: AttributedString?
     let layoutCoordinator: ChatLayoutCoordinator
     let layoutKey: ChatLayoutKey
     let scrollButtonView: AnyView?
@@ -4806,7 +4787,6 @@ private struct KeyboardPinnedContainer<Content: View>: UIViewRepresentable {
         desiredBottomGap: CGFloat,
         isKeyboardVisible: Bool,
         measuredHeight: Binding<CGFloat>,
-        versionText: AttributedString? = nil,
         layoutCoordinator: ChatLayoutCoordinator,
         layoutKey: ChatLayoutKey,
         scrollButtonView: AnyView? = nil,
@@ -4824,7 +4804,6 @@ private struct KeyboardPinnedContainer<Content: View>: UIViewRepresentable {
         self.desiredBottomGap = desiredBottomGap
         self.isKeyboardVisible = isKeyboardVisible
         self._measuredHeight = measuredHeight
-        self.versionText = versionText
         self.layoutCoordinator = layoutCoordinator
         self.layoutKey = layoutKey
         self.scrollButtonView = scrollButtonView
@@ -4841,13 +4820,12 @@ private struct KeyboardPinnedContainer<Content: View>: UIViewRepresentable {
     }
 
     func makeUIView(context: Context) -> KeyboardPinnedContainerView<Content> {
-        let container = KeyboardPinnedContainerView(rootView: content, versionText: versionText)
+        let container = KeyboardPinnedContainerView(rootView: content)
         return container
     }
 
     func updateUIView(_ uiView: KeyboardPinnedContainerView<Content>, context: Context) {
         uiView.hostingController.rootView = content
-        uiView.updateVersionText(versionText)
         uiView.updateScrollButton(
             scrollButtonView,
             isVisible: scrollButtonIsVisible,
@@ -4919,9 +4897,8 @@ enum KeyboardPinnedChromeEventRouting {
     }
 }
 
-private final class KeyboardPinnedContainerView<Content: View>: UIView, KeyboardPinnedContainerViewProtocol {
+final class KeyboardPinnedContainerView<Content: View>: UIView, KeyboardPinnedContainerViewProtocol {
     let hostingController: UIHostingController<Content>
-    let versionLabel: UILabel
     private var scrollButtonHost: UIHostingController<AnyView>?
     private var scrollButtonPanGestureRecognizer: UIPanGestureRecognizer?
     private var scrollButtonBottomToBarTop: NSLayoutConstraint?
@@ -4937,16 +4914,13 @@ private final class KeyboardPinnedContainerView<Content: View>: UIView, Keyboard
     private var minHeightConstraint: NSLayoutConstraint?
     private var hostingBottomToKeyboard: NSLayoutConstraint?
     private var hostingBottomToContainer: NSLayoutConstraint?
-    private var versionLabelBottomToKeyboard: NSLayoutConstraint?
-    private var versionLabelBottomToContainer: NSLayoutConstraint?
     private var onBarHeightChange: ((CGFloat) -> Void)?
     private var lastMeasuredHeight: CGFloat = 0
     private var lastDesiredBottomGap: CGFloat?
     private var lastPinnedKeyboardVisible: Bool?
 
-    init(rootView: Content, versionText: AttributedString?) {
+    init(rootView: Content) {
         hostingController = UIHostingController(rootView: rootView)
-        versionLabel = UILabel()
         super.init(frame: .zero)
         backgroundColor = .clear
         isOpaque = false
@@ -4956,14 +4930,6 @@ private final class KeyboardPinnedContainerView<Content: View>: UIView, Keyboard
         }
         hostingController.view.backgroundColor = .clear
         hostingController.view.isOpaque = false
-
-        versionLabel.font = .preferredFont(forTextStyle: .caption2)
-        versionLabel.textColor = .secondaryLabel
-        versionLabel.textAlignment = .right
-        if let versionText {
-            versionLabel.attributedText = NSAttributedString(versionText)
-        }
-        versionLabel.isHidden = versionText == nil
 
 #if !os(visionOS)
         // When keyboard is hidden the layout guide defaults to the safe-area
@@ -4983,18 +4949,6 @@ private final class KeyboardPinnedContainerView<Content: View>: UIView, Keyboard
 
     func setOnBarHeightChange(_ handler: @escaping (CGFloat) -> Void) {
         onBarHeightChange = handler
-    }
-
-    func updateVersionText(_ text: AttributedString?) {
-        if let text {
-            versionLabel.attributedText = NSAttributedString(text)
-        } else {
-            versionLabel.attributedText = nil
-        }
-        // Only hide for nil text; keyboard-driven hiding is handled by the coordinator
-        if text == nil {
-            versionLabel.isHidden = true
-        }
     }
 
     func updateScrollButton(
@@ -5163,10 +5117,6 @@ private final class KeyboardPinnedContainerView<Content: View>: UIView, Keyboard
         // Stay pinned to the container bottom until we know the keyboard is truly visible.
         hostingBottomToKeyboard?.isActive = isKeyboardVisible
         hostingBottomToContainer?.isActive = !isKeyboardVisible
-        let hasVersionText = versionLabel.attributedText != nil && !versionLabel.attributedText!.string.isEmpty
-        versionLabelBottomToKeyboard?.isActive = isKeyboardVisible
-        versionLabelBottomToContainer?.isActive = !isKeyboardVisible
-        versionLabel.isHidden = isKeyboardVisible || !hasVersionText
 #endif
     }
 
@@ -5244,9 +5194,6 @@ private final class KeyboardPinnedContainerView<Content: View>: UIView, Keyboard
            KeyboardPinnedHitTesting.contains(point, in: pageDotsHost.view, from: self, event: event) {
             return true
         }
-        if KeyboardPinnedHitTesting.contains(point, in: versionLabel, from: self, event: event) {
-            return true
-        }
         return false
     }
 
@@ -5267,9 +5214,6 @@ private final class KeyboardPinnedContainerView<Content: View>: UIView, Keyboard
             hostingView.setContentCompressionResistancePriority(.required, for: .vertical)
             addSubview(hostingView)
 
-            versionLabel.translatesAutoresizingMaskIntoConstraints = false
-            addSubview(versionLabel)
-
             let bottomToContainerConstraint = hostingView.bottomAnchor.constraint(
                 equalTo: bottomAnchor,
                 constant: -desiredBottomGap
@@ -5284,9 +5228,6 @@ private final class KeyboardPinnedContainerView<Content: View>: UIView, Keyboard
                 hostingView.trailingAnchor.constraint(equalTo: trailingAnchor),
                 bottomToContainerConstraint,
                 topConstraint,
-                versionLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 24),
-                versionLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -24),
-                versionLabel.bottomAnchor.constraint(equalTo: hostingView.topAnchor, constant: -4),
             ])
             hostingBottomToContainer = bottomToContainerConstraint
         }
@@ -5296,9 +5237,6 @@ private final class KeyboardPinnedContainerView<Content: View>: UIView, Keyboard
             hostingView.setContentHuggingPriority(.defaultHigh, for: .vertical)
             hostingView.setContentCompressionResistancePriority(.required, for: .vertical)
             addSubview(hostingView)
-
-            versionLabel.translatesAutoresizingMaskIntoConstraints = false
-            addSubview(versionLabel)
 
             let minHeight = hostingView.heightAnchor.constraint(greaterThanOrEqualToConstant: MessageInputBarMetrics.minInputBarHeight)
             let topConstraint = hostingView.topAnchor.constraint(greaterThanOrEqualTo: topAnchor)
@@ -5314,17 +5252,6 @@ private final class KeyboardPinnedContainerView<Content: View>: UIView, Keyboard
             )
             hostingToContainer.isActive = false
 
-            let versionToKeyboard = versionLabel.bottomAnchor.constraint(
-                equalTo: keyboardLayoutGuide.topAnchor,
-                constant: -4
-            )
-            let versionToContainer = versionLabel.bottomAnchor.constraint(
-                equalTo: bottomAnchor,
-                constant: -4
-            )
-            versionToContainer.priority = .defaultLow
-            versionToContainer.isActive = false
-
             NSLayoutConstraint.activate([
                 hostingView.leadingAnchor.constraint(equalTo: leadingAnchor),
                 hostingView.trailingAnchor.constraint(equalTo: trailingAnchor),
@@ -5332,17 +5259,11 @@ private final class KeyboardPinnedContainerView<Content: View>: UIView, Keyboard
                 topConstraint,
                 hostingToKeyboard,
                 hostingToContainer,
-                versionLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 24),
-                versionLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -24),
-                versionToKeyboard,
-                versionToContainer,
             ])
 
             minHeightConstraint = minHeight
             hostingBottomToKeyboard = hostingToKeyboard
             hostingBottomToContainer = hostingToContainer
-            versionLabelBottomToKeyboard = versionToKeyboard
-            versionLabelBottomToContainer = versionToContainer
         }
 #endif
     }

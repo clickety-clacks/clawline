@@ -1513,17 +1513,28 @@ final class ChatViewModel: ChatViewModelHosting {
             sessionKey: betaSessionKey,
             sender: nil
         )
+        let mainMessages = (0..<40).map { index in
+            Message(
+                id: "s_t1174_main_chat_message_\(index)",
+                role: .assistant,
+                content: "T1174 Main scroll proof message \(index)",
+                timestamp: now.addingTimeInterval(TimeInterval(index - 40)),
+                streaming: false,
+                attachments: [],
+                deviceId: nil,
+                sessionKey: mainSessionKey,
+                sender: nil
+            )
+        }
+        sessionMessages[mainSessionKey] = mainMessages
         sessionMessages[alphaSessionKey] = [alphaMessage]
         sessionMessages[betaSessionKey] = [betaMessage]
+        persistMessages(mainMessages, for: mainSessionKey)
         persistMessages([alphaMessage], for: alphaSessionKey)
         persistMessages([betaMessage], for: betaSessionKey)
         recalculateOrderedSessionKeys()
         SessionRegistry.shared.replace(with: orderedStreams)
         ensureDefaultActiveSessionIfNeeded()
-        if ProcessInfo.processInfo.arguments.contains("--debug-cross-chat-notification-dock-proof-start-on-alpha") {
-            setEngineActiveSessionKey(alphaSessionKey)
-            setUISelectedSessionKey(alphaSessionKey)
-        }
 
         crossChatNotificationBubblesBySourceChatId = [
             alphaSessionKey: CrossChatNotificationBubble(
@@ -1551,6 +1562,10 @@ final class ChatViewModel: ChatViewModelHosting {
                 lastAssistantActivityAt: now.addingTimeInterval(-1)
             )
         ]
+
+        if ProcessInfo.processInfo.arguments.contains("--debug-cross-chat-notification-dock-proof-start-on-alpha") {
+            requestStreamSwitch(to: alphaSessionKey, source: .programmatic)
+        }
     }
 #endif
 

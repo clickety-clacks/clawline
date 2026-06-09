@@ -7416,18 +7416,18 @@ private struct CrossChatNotificationBubbleHeightPreferenceKey: PreferenceKey {
 }
 
 enum CrossChatNotificationMaterialStyle {
-    static let backgroundOpacity = 0.85
+    static let backgroundOpacity = 0.95
 
     static func accentOpacity(isSpatial: Bool) -> Double {
         isSpatial ? 0.60 : 0.40
     }
 
     static func spatialTintOpacity(for colorScheme: ColorScheme) -> Double {
-        colorScheme == .dark ? 0.34 : 0.46
+        colorScheme == .dark ? 0.52 : 0.68
     }
 
     static func spatialBorderOpacity(for colorScheme: ColorScheme) -> Double {
-        colorScheme == .dark ? 0.20 : 0.34
+        colorScheme == .dark ? 0.28 : 0.42
     }
 }
 
@@ -7719,7 +7719,13 @@ struct CrossChatNotificationBubbleView: View {
                 .frame(height: entriesNeedScroll ? resolvedEntriesHeight : nil, alignment: .top)
                 .frame(maxHeight: contentMaxHeight, alignment: .top)
                 .contentShape(Rectangle())
-                .onTapGesture(perform: onNavigate)
+                .simultaneousGesture(
+                    TapGesture().onEnded(onNavigate)
+                )
+                .gesture(
+                    notificationSurfaceDragShield,
+                    including: entriesNeedScroll ? .none : .gesture
+                )
                 .clipped()
                 .onChange(of: entriesNeedScroll) { _, needsScroll in
                     if !needsScroll {
@@ -7858,6 +7864,12 @@ struct CrossChatNotificationBubbleView: View {
             Button("Clear All Notifications", role: .destructive, action: onDismissAll)
             Button("Cancel", role: .cancel) {}
         }
+    }
+
+    private var notificationSurfaceDragShield: some Gesture {
+        DragGesture(minimumDistance: CrossChatNotificationGestureAxisLock.minimumDistance)
+            .onChanged { _ in }
+            .onEnded { _ in }
     }
 
     private static var isSpatialPlatform: Bool {

@@ -1,6 +1,6 @@
 import Foundation
 
-enum StreamDotState: String, Codable, Equatable {
+enum StreamDotState: String, Codable, Equatable, Hashable {
     case unread
     case userTail
     case inactive

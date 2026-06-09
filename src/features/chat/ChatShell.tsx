@@ -1,4 +1,4 @@
-import type { CSSProperties, TouchEvent } from "react";
+import { useState, type CSSProperties, type TouchEvent } from "react";
 import type {
   ChatMessageRecord,
   SessionScrollState,
@@ -89,6 +89,7 @@ export function ChatShell({
   transportPhase: TransportPhase;
 }) {
   const shouldEnableSwipeNavigation = keyboardInset <= 0;
+  const [sessionFilterQuery, setSessionFilterQuery] = useState("");
 
   return (
     <KeyboardOwnershipProvider>
@@ -170,8 +171,10 @@ export function ChatShell({
       </main>
       <SessionListSheet
         activeSessionKey={selectedSessionKey}
+        filterQuery={sessionFilterQuery}
         isOpen={isSessionListOpen}
         onClose={onCloseSessionList}
+        onFilterQueryChange={setSessionFilterQuery}
         onOpenStreamManager={onOpenStreamManager}
         onSelectSession={onPopupSessionSelect}
         provisionedSessionKeys={provisionedSessionKeys}

@@ -730,6 +730,45 @@ describe("ChatRoute", () => {
     );
   });
 
+  it("keeps the selector filter after selector-driven navigation until the user clears it", async () => {
+    renderChatRoute("/chat/agent:main:clawline:user_1:main", {
+      sessionKeys: [
+        "agent:main:clawline:user_1:main",
+        "agent:main:main",
+        "agent:main:clawline:user_1:side"
+      ]
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Manage streams" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Filter chats" }), {
+      target: { value: "side" }
+    });
+
+    expect(screen.getByRole("button", { name: /Side Thread/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Personal/i })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /Side Thread/i }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("location")).toHaveTextContent(
+        "/chat/agent:main:clawline:user_1:side"
+      );
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Manage streams" }));
+
+    const filterInput = screen.getByRole("textbox", { name: "Filter chats" });
+    expect(filterInput).toHaveValue("side");
+    expect(screen.getByRole("button", { name: /Side Thread/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Personal/i })).toBeNull();
+
+    fireEvent.change(filterInput, { target: { value: "" } });
+
+    expect(filterInput).toHaveValue("");
+    expect(screen.getByRole("button", { name: /Personal/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Heimdal/i })).toBeInTheDocument();
+  });
+
   it("supports browser-safe no-text chat shortcuts", () => {
     renderChatRoute("/chat/agent:main:clawline:user_1:main");
 

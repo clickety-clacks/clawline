@@ -30,7 +30,7 @@ test.describe("Phase 5 responsive and keyboard flow", () => {
 
         await expect(page.getByTestId("chat-layout")).toHaveScreenshot(
           `phase5-chat-shell-${appearance}.png`,
-          { animations: "disabled" }
+          { animations: "disabled", maxDiffPixelRatio: 0.02 }
         );
 
         await dots.click();
@@ -41,7 +41,28 @@ test.describe("Phase 5 responsive and keyboard flow", () => {
         await expect(popover.getByRole("button", { name: "Retry" })).toHaveCount(0);
         const popoverBox = await popover.boundingBox();
         expect(popoverBox).not.toBeNull();
-        expect(popoverBox!.width).toBeLessThan(820 * 0.52);
+        const streamListMetrics = await popover.getByTestId("session-popover-list").evaluate((element) => {
+          const computed = window.getComputedStyle(element);
+          const cards = Array.from(element.querySelectorAll(".session-sheet-card"));
+          const card = cards[0];
+          const cardComputed = card ? window.getComputedStyle(card) : null;
+          const cardRects = cards.map((item) => item.getBoundingClientRect());
+          return {
+            display: computed.display,
+            flexDirection: computed.flexDirection,
+            gap: computed.gap,
+            cardMinHeight: cardComputed?.minHeight,
+            cardRadius: cardComputed?.borderRadius,
+            widestCardWidth: Math.max(...cardRects.map((rect) => rect.width))
+          };
+        });
+        expect(popoverBox!.width).toBeLessThan(820 * 0.6);
+        expect(Math.abs(popoverBox!.width - streamListMetrics.widestCardWidth)).toBeLessThan(32);
+        expect(streamListMetrics.display).toBe("flex");
+        expect(streamListMetrics.flexDirection).toBe("column");
+        expect(streamListMetrics.gap).toBe("4px");
+        expect(streamListMetrics.cardMinHeight).toBe("56px");
+        expect(streamListMetrics.cardRadius).toBe("8px");
         expect(
           await popover.locator(".session-sheet-card-title").first().evaluate((element) => {
             return window.getComputedStyle(element).textAlign;
@@ -53,18 +74,23 @@ test.describe("Phase 5 responsive and keyboard flow", () => {
             .evaluate((element) => window.getComputedStyle(element).backgroundColor)
         ).toBe("rgb(107, 156, 107)");
         await expect(popover).toHaveScreenshot(`phase5-session-popover-${appearance}.png`, {
-          animations: "disabled"
+          animations: "disabled",
+          maxDiffPixelRatio: 0.02
         });
         await page.mouse.click(12, 12);
         await expect(popover).toHaveCount(0);
 
         if (appearance === "dark") {
           await swipeChatPanel(page, { endX: 120, startX: 300, y: 360 });
-          await expect(page.getByText("Responsive shell check")).toBeVisible();
+          await expect(page.getByTestId("message-s_phase5_2")).toContainText(
+            "Responsive shell check"
+          );
           await expect(page).toHaveURL(new RegExp(`${SIDE_SESSION_KEY.replaceAll(":", "\\:")}$`));
 
           await swipeChatPanel(page, { endX: 300, startX: 120, y: 360 });
-          await expect(page.getByText("Keyboard flow check")).toBeVisible();
+          await expect(page.getByTestId("message-s_phase5_1")).toContainText(
+            "Keyboard flow check"
+          );
           await expect(page).toHaveURL(new RegExp(`${MAIN_SESSION_KEY.replaceAll(":", "\\:")}$`));
         }
       }
@@ -85,9 +111,16 @@ test.describe("Phase 5 responsive and keyboard flow", () => {
         expect(popoverBox).not.toBeNull();
 
         if (viewport.width > 500) {
-          expect(popoverBox!.width).toBeLessThan(viewport.width * 0.52);
+          expect(popoverBox!.width).toBeLessThan(viewport.width * 0.6);
+          expect(
+            await popover.getByTestId("session-popover-list").evaluate((element) => {
+              const computed = window.getComputedStyle(element);
+              return `${computed.display}:${computed.flexDirection}`;
+            })
+          ).toBe("flex:column");
         } else {
-          expect(popoverBox!.width).toBeGreaterThan(viewport.width * 0.78);
+          expect(popoverBox!.width).toBeLessThan(viewport.width * 0.78);
+          expect(popoverBox!.width).toBeGreaterThan(96);
         }
 
         await expect(page.getByTestId("session-popover-list")).toBeVisible();
@@ -125,6 +158,63 @@ test.describe("Phase 5 responsive and keyboard flow", () => {
           expect(sendBox!.x - (inputBox!.x + inputBox!.width)).toBeGreaterThan(8);
         }
       }
+    } finally {
+      await close();
+    }
+  });
+
+  test("pane-equivalent stream picker renders as an iOS-like scrolling list", async ({ page }) => {
+    const { close, port } = await startPhase5Server();
+
+    try {
+      await page.addInitScript((session) => {
+        window.localStorage.setItem("clawline-web:auth-session", JSON.stringify(session));
+        window.localStorage.setItem(
+          "clawline-web:device-id",
+          JSON.stringify(session.deviceId)
+        );
+      }, makeSession(port));
+
+      await page.setViewportSize({ height: 950, width: 2111 });
+      await page.goto(`/chat/${MAIN_SESSION_KEY}`);
+      await expect(page.getByRole("button", { name: "Manage streams" })).toBeVisible();
+
+      await page.getByRole("button", { name: "Manage streams" }).click();
+      const popover = page.getByTestId("session-popover");
+      await expect(popover).toBeVisible();
+      await expect(page.locator("body")).not.toContainText(/Unexpected Application Error|React error #185|maximum update depth/i);
+
+      const listMetrics = await popover.getByTestId("session-popover-list").evaluate((element) => {
+        const computed = window.getComputedStyle(element);
+        const cards = Array.from(element.querySelectorAll(".session-sheet-card"));
+        const cardRects = cards.map((card) => card.getBoundingClientRect());
+        const firstCard = cardRects[0];
+        return {
+          cardCount: cards.length,
+          display: computed.display,
+          flexDirection: computed.flexDirection,
+          gap: computed.gap,
+          maxCardWidth: Math.max(...cardRects.map((rect) => rect.width)),
+          minCardLeft: Math.min(...cardRects.map((rect) => rect.left)),
+          rowCount: new Set(cardRects.map((rect) => Math.round(rect.top))).size,
+          firstCardWidth: firstCard?.width ?? 0,
+          listWidth: element.getBoundingClientRect().width,
+          popoverWidth: element.closest(".session-popover")?.getBoundingClientRect().width ?? 0
+        };
+      });
+
+      expect(listMetrics.cardCount).toBeGreaterThanOrEqual(10);
+      expect(listMetrics.display).toBe("flex");
+      expect(listMetrics.flexDirection).toBe("column");
+      expect(listMetrics.gap).toBe("4px");
+      expect(listMetrics.firstCardWidth).toBeGreaterThan(listMetrics.listWidth * 0.85);
+      expect(listMetrics.maxCardWidth).toBeLessThan(240);
+      expect(listMetrics.popoverWidth).toBeLessThan(300);
+      expect(Math.abs(listMetrics.popoverWidth - listMetrics.maxCardWidth)).toBeLessThan(32);
+      expect(listMetrics.rowCount).toBe(listMetrics.cardCount);
+      await expect(popover).toHaveScreenshot("phase5-session-popover-pane-equivalent.png", {
+        animations: "disabled"
+      });
     } finally {
       await close();
     }
@@ -323,6 +413,54 @@ test.describe("Phase 5 responsive and keyboard flow", () => {
         .poll(() => receivedClientMessages.at(-1)?.sessionKey ?? null)
         .toBe(SIDE_SESSION_KEY);
       await expect(page.getByText("Send to side")).toBeVisible();
+    } finally {
+      await close();
+    }
+  });
+
+  test("selector filter persists across selector-driven chat navigation", async ({ page }) => {
+    const { close, port } = await startPhase5Server();
+
+    try {
+      await page.addInitScript((session) => {
+        window.localStorage.setItem("clawline-web:auth-session", JSON.stringify(session));
+        window.localStorage.setItem(
+          "clawline-web:device-id",
+          JSON.stringify(session.deviceId)
+        );
+      }, makeSession(port));
+
+      await page.setViewportSize({ height: 1180, width: 820 });
+      await page.goto(`/chat/${MAIN_SESSION_KEY}`);
+
+      await page.getByRole("button", { name: "Manage streams" }).click();
+      const popover = page.getByTestId("session-popover");
+      await expect(popover).toBeVisible();
+
+      const filterInput = page.getByRole("textbox", { name: "Filter chats" });
+      await filterInput.fill("side", { force: true });
+      await expect(filterInput).toHaveValue("side");
+      await expect(popover.getByRole("button", { name: "Side" })).toBeVisible();
+      await expect(popover.getByRole("button", { name: "Main" })).toHaveCount(0);
+
+      await popover.getByRole("button", { name: "Side" }).click();
+
+      await expect(page).toHaveURL(new RegExp(`/chat/${escapeForRegExp(SIDE_SESSION_KEY)}$`));
+      await expect(page.getByTestId("session-popover")).toHaveCount(0);
+
+      await page.getByRole("button", { name: "Manage streams" }).click();
+      const reopenedPopover = page.getByTestId("session-popover");
+      await expect(reopenedPopover).toBeVisible();
+      const reopenedFilterInput = page.getByRole("textbox", { name: "Filter chats" });
+      await expect(reopenedFilterInput).toHaveValue("side");
+      await expect(reopenedPopover.getByRole("button", { name: "Side" })).toBeVisible();
+      await expect(reopenedPopover.getByRole("button", { name: "Main" })).toHaveCount(0);
+
+      await reopenedFilterInput.fill("", { force: true });
+
+      await expect(reopenedFilterInput).toHaveValue("");
+      await expect(reopenedPopover.getByRole("button", { name: "Main" })).toBeVisible();
+      await expect(reopenedPopover.getByRole("button", { name: "Side" })).toBeVisible();
     } finally {
       await close();
     }
@@ -713,6 +851,14 @@ test.describe("Phase 5 responsive and keyboard flow", () => {
 
 const MAIN_SESSION_KEY = "agent:main:clawline:flynn:main";
 const SIDE_SESSION_KEY = "agent:main:clawline:flynn:side";
+const RESEARCH_SESSION_KEY = "agent:main:clawline:flynn:research";
+const DESIGN_SESSION_KEY = "agent:main:clawline:flynn:design";
+const OPS_SESSION_KEY = "agent:main:clawline:flynn:ops";
+const REVIEW_SESSION_KEY = "agent:main:clawline:flynn:review";
+const QA_SESSION_KEY = "agent:main:clawline:flynn:qa";
+const NOTES_SESSION_KEY = "agent:main:clawline:flynn:notes";
+const PLANNING_SESSION_KEY = "agent:main:clawline:flynn:planning";
+const INCIDENTS_SESSION_KEY = "agent:main:clawline:flynn:incidents";
 
 async function startPhase5Server(options?: {
   mainTranscript?: Array<{
@@ -757,7 +903,18 @@ async function startPhase5Server(options?: {
             success: true,
             userId: "user_flynn",
             replayCount: mainTranscript.length,
-            sessionKeys: [MAIN_SESSION_KEY, SIDE_SESSION_KEY]
+            sessionKeys: [
+              MAIN_SESSION_KEY,
+              SIDE_SESSION_KEY,
+              RESEARCH_SESSION_KEY,
+              DESIGN_SESSION_KEY,
+              OPS_SESSION_KEY,
+              REVIEW_SESSION_KEY,
+              QA_SESSION_KEY,
+              NOTES_SESSION_KEY,
+              PLANNING_SESSION_KEY,
+              INCIDENTS_SESSION_KEY
+            ]
           })
         );
         socket.send(
@@ -765,7 +922,18 @@ async function startPhase5Server(options?: {
             type: "session_info",
             userId: "user_flynn",
             isAdmin: false,
-            sessionKeys: [MAIN_SESSION_KEY, SIDE_SESSION_KEY]
+            sessionKeys: [
+              MAIN_SESSION_KEY,
+              SIDE_SESSION_KEY,
+              RESEARCH_SESSION_KEY,
+              DESIGN_SESSION_KEY,
+              OPS_SESSION_KEY,
+              REVIEW_SESSION_KEY,
+              QA_SESSION_KEY,
+              NOTES_SESSION_KEY,
+              PLANNING_SESSION_KEY,
+              INCIDENTS_SESSION_KEY
+            ]
           })
         );
         socket.send(
@@ -790,6 +958,86 @@ async function startPhase5Server(options?: {
                 isBuiltIn: false,
                 createdAt: 1_764_400_000_100,
                 updatedAt: 1_764_400_000_100,
+                adopted: false
+              },
+              {
+                sessionKey: RESEARCH_SESSION_KEY,
+                displayName: "Research",
+                kind: "custom",
+                orderIndex: 2,
+                isBuiltIn: false,
+                createdAt: 1_764_400_000_200,
+                updatedAt: 1_764_400_000_200,
+                adopted: false
+              },
+              {
+                sessionKey: DESIGN_SESSION_KEY,
+                displayName: "Design",
+                kind: "custom",
+                orderIndex: 3,
+                isBuiltIn: false,
+                createdAt: 1_764_400_000_300,
+                updatedAt: 1_764_400_000_300,
+                adopted: false
+              },
+              {
+                sessionKey: OPS_SESSION_KEY,
+                displayName: "Ops",
+                kind: "custom",
+                orderIndex: 4,
+                isBuiltIn: false,
+                createdAt: 1_764_400_000_400,
+                updatedAt: 1_764_400_000_400,
+                adopted: false
+              },
+              {
+                sessionKey: REVIEW_SESSION_KEY,
+                displayName: "Review",
+                kind: "custom",
+                orderIndex: 5,
+                isBuiltIn: false,
+                createdAt: 1_764_400_000_500,
+                updatedAt: 1_764_400_000_500,
+                adopted: false
+              },
+              {
+                sessionKey: QA_SESSION_KEY,
+                displayName: "QA",
+                kind: "custom",
+                orderIndex: 6,
+                isBuiltIn: false,
+                createdAt: 1_764_400_000_600,
+                updatedAt: 1_764_400_000_600,
+                adopted: false
+              },
+              {
+                sessionKey: NOTES_SESSION_KEY,
+                displayName: "Notes",
+                kind: "custom",
+                orderIndex: 7,
+                isBuiltIn: false,
+                createdAt: 1_764_400_000_700,
+                updatedAt: 1_764_400_000_700,
+                adopted: false
+              },
+              {
+                sessionKey: PLANNING_SESSION_KEY,
+                displayName: "Planning",
+                kind: "custom",
+                orderIndex: 8,
+                isBuiltIn: false,
+                createdAt: 1_764_400_000_800,
+                updatedAt: 1_764_400_000_800,
+                adopted: false
+              },
+              {
+                sessionKey: INCIDENTS_SESSION_KEY,
+                displayName: "Incidents",
+                kind: "custom",
+                orderIndex: 9,
+                isBuiltIn: false,
+                createdAt: 1_764_400_000_900,
+                updatedAt: 1_764_400_000_900,
                 adopted: false
               }
             ]

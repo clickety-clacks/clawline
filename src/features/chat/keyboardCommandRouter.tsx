@@ -327,10 +327,10 @@ export function keyboardIntentFromEvent(event: Pick<KeyboardEvent, "key" | "altK
     if (event.shiftKey && event.altKey) {
       return { intent: "notificationAssignedDismiss", index };
     }
-    if (event.shiftKey) {
+    if (!event.shiftKey && event.altKey) {
       return { intent: "notificationAssignedReply", index };
     }
-    if (!event.altKey) {
+    if (!event.shiftKey && !event.altKey) {
       return { intent: "notificationAssignedOpen", index };
     }
   }

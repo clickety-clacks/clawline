@@ -1359,7 +1359,7 @@ export function CrossChatNotificationOverlay({
                 {index > 0 ? (
                   <kbd>
                     {index === 1
-                      ? `⇧⌘${actionMenuAssignedNumber}`
+                      ? `⌥⌘${actionMenuAssignedNumber}`
                       : `⌥⇧⌘${actionMenuAssignedNumber}`}
                   </kbd>
                 ) : null}

@@ -1131,7 +1131,7 @@ describe("ChatRoute", () => {
     expect(await screen.findByLabelText("Side Thread notification"))
       .toBeInTheDocument();
 
-    fireEvent.keyDown(document.body, { key: "0", metaKey: true, shiftKey: true });
+    fireEvent.keyDown(document.body, { key: "0", metaKey: true, altKey: true });
     const replyField = await screen.findByRole("textbox", {
       name: "Reply to Side Thread"
     });
@@ -1871,7 +1871,7 @@ describe("ChatRoute", () => {
     });
     expect(within(actionMenu).getByRole("menuitem", { name: /Go to Chat/ }))
       .toHaveAttribute("aria-selected", "true");
-    expect(within(actionMenu).getByText("⇧⌘0")).toBeInTheDocument();
+    expect(within(actionMenu).getByText("⌥⌘0")).toBeInTheDocument();
     expect(within(actionMenu).getByText("⌥⇧⌘0")).toBeInTheDocument();
     expect(screen.getByTestId("location")).toHaveTextContent(
       "/chat/agent:main:clawline:user_1:main"
@@ -1915,9 +1915,9 @@ describe("ChatRoute", () => {
 
     fireEvent.keyDown(document.body, {
       code: "Digit0",
-      key: ")",
+      key: "0",
       metaKey: true,
-      shiftKey: true
+      altKey: true
     });
 
     expect(
@@ -1928,9 +1928,9 @@ describe("ChatRoute", () => {
     replyField.focus();
     fireEvent.keyDown(replyField, {
       code: "Digit0",
-      key: ")",
+      key: "0",
       metaKey: true,
-      shiftKey: true
+      altKey: true
     });
     await waitFor(() => {
       expect(
@@ -1941,9 +1941,9 @@ describe("ChatRoute", () => {
 
     fireEvent.keyDown(document.body, {
       code: "Digit0",
-      key: ")",
+      key: "0",
       metaKey: true,
-      shiftKey: true
+      altKey: true
     });
     expect(
       await screen.findByRole("textbox", { name: "Reply to Side Thread" })
@@ -2115,9 +2115,9 @@ describe("ChatRoute", () => {
       .toBeInTheDocument();
     fireEvent.keyDown(document.body, {
       code: "Digit0",
-      key: ")",
+      key: "0",
+      altKey: true,
       metaKey: true,
-      shiftKey: true
     });
     const replyField = await screen.findByRole("textbox", {
       name: "Reply to Side Thread"

@@ -6139,6 +6139,16 @@ enum CrossChatNotificationScrollCommand {
     }
 }
 
+enum CrossChatNotificationScrollTargetSelection {
+    static func sourceChatId(
+        visibleSourceChatIds: [String],
+        routedSourceChatId: String?
+    ) -> String? {
+        guard routedSourceChatId != nil else { return nil }
+        return visibleSourceChatIds.first
+    }
+}
+
 enum ChatLandscapeWidthGeometry {
     static func shouldFillWindowWidth(
         viewSize: CGSize,
@@ -6977,6 +6987,15 @@ private struct CrossChatNotificationOverlay: View {
         if case .handled(.notificationBubble(let sourceChatId)) = KeyboardCommandRouter
             .route(intent: intent, store: keyboardOwnershipStore)
             .outcome {
+            switch intent {
+            case .notificationScrollForward, .notificationScrollBackward:
+                return CrossChatNotificationScrollTargetSelection.sourceChatId(
+                    visibleSourceChatIds: visibleBubbles.map(\.sourceChatId),
+                    routedSourceChatId: sourceChatId
+                )
+            default:
+                break
+            }
             return sourceChatId
         }
         return nil

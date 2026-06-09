@@ -746,27 +746,33 @@ export function CrossChatNotificationOverlay({
     if (previewSourceChatIds.length === 0) {
       return;
     }
+    for (const timerId of Object.values(collapsedRevealTimersBySourceChatIdRef.current)) {
+      window.clearTimeout(timerId);
+    }
+    collapsedRevealTimersBySourceChatIdRef.current = {};
+    const nextPreviewSourceChatId = previewSourceChatIds[0];
     setPreviewingCollapsedSourceChatIds((current) => {
-      const next = new Set(current);
-      for (const sourceChatId of previewSourceChatIds) {
-        next.add(sourceChatId);
+      if (
+        current.size === 1 &&
+        nextPreviewSourceChatId !== undefined &&
+        current.has(nextPreviewSourceChatId)
+      ) {
+        return current;
       }
-      return next;
+      return nextPreviewSourceChatId === undefined
+        ? new Set()
+        : new Set([nextPreviewSourceChatId]);
     });
-    for (const sourceChatId of previewSourceChatIds) {
-      const currentTimer = collapsedRevealTimersBySourceChatIdRef.current[sourceChatId];
-      if (currentTimer !== undefined) {
-        window.clearTimeout(currentTimer);
-      }
-      collapsedRevealTimersBySourceChatIdRef.current[sourceChatId] =
+    if (nextPreviewSourceChatId !== undefined) {
+      collapsedRevealTimersBySourceChatIdRef.current[nextPreviewSourceChatId] =
         window.setTimeout(() => {
-          delete collapsedRevealTimersBySourceChatIdRef.current[sourceChatId];
+          delete collapsedRevealTimersBySourceChatIdRef.current[nextPreviewSourceChatId];
           setPreviewingCollapsedSourceChatIds((current) => {
-            if (!current.has(sourceChatId)) {
+            if (!current.has(nextPreviewSourceChatId)) {
               return current;
             }
             const next = new Set(current);
-            next.delete(sourceChatId);
+            next.delete(nextPreviewSourceChatId);
             return next;
           });
         }, COLLAPSED_NOTIFICATION_REVEAL_MS);

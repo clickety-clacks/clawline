@@ -453,14 +453,6 @@ struct ChatView: View {
 #endif
     }
 
-    private static func spatialFooterBottomInset(windowHeight: CGFloat) -> CGFloat {
-#if os(visionOS)
-        windowHeight * 0.125
-#else
-        0
-#endif
-    }
-
     private var isKeyboardVisible: Bool {
         keyboardHeight > 0.5
     }
@@ -1060,7 +1052,6 @@ struct ChatView: View {
         @Bindable var viewModel = viewModel
         let statusBarTopInset: CGFloat = geometry.safeAreaInsets.top
         let spatialViewportInset = Self.spatialViewportInset(windowHeight: geometry.size.height)
-        let spatialFooterBottomInset = Self.spatialFooterBottomInset(windowHeight: geometry.size.height)
         let messageListTopInset = geometry.safeAreaInsets.top + spatialViewportInset
         let isCompactLayout = horizontalSizeClass == .compact
         let metrics = ChatFlowTheme.Metrics(isCompact: isCompactLayout)
@@ -1075,7 +1066,7 @@ struct ChatView: View {
             guard showsStreamPager else { return 0 }
             return floatingPageDotsBottomGap + StreamPageDotsView.controlHeight
         }()
-        let bottomViewportClearance = pageIndicatorClearance + spatialFooterBottomInset
+        let bottomViewportClearance = pageIndicatorClearance
         let bottomFlowGap: CGFloat = isCompactLayout
             ? metrics.flowGap
             : ChatFlowTheme.Metrics(isCompact: false).flowGap

@@ -181,14 +181,13 @@ struct ClawlineTests {
         let source = try String(contentsOf: sourcePath, encoding: .utf8)
         let range = NSRange(source.startIndex..<source.endIndex, in: source)
         let spatialInsetPattern = #"(?s)static func spatialViewportInset\(windowHeight: CGFloat\) -> CGFloat \{\s*#if os\(visionOS\)\s*windowHeight \* 0\.25\s*#else\s*0\s*#endif\s*\}"#
-        let spatialFooterInsetPattern = #"(?s)static func spatialFooterBottomInset\(windowHeight: CGFloat\) -> CGFloat \{\s*#if os\(visionOS\)\s*windowHeight \* 0\.125\s*#else\s*0\s*#endif\s*\}"#
         let topInsetPattern = #"let messageListTopInset = geometry\.safeAreaInsets\.top \+ spatialViewportInset"#
-        let bottomInsetPattern = #"let bottomViewportClearance = pageIndicatorClearance \+ spatialFooterBottomInset"#
+        let bottomInsetPattern = #"let bottomViewportClearance = pageIndicatorClearance"#
 
         #expect(try NSRegularExpression(pattern: spatialInsetPattern).firstMatch(in: source, range: range) != nil)
-        #expect(try NSRegularExpression(pattern: spatialFooterInsetPattern).firstMatch(in: source, range: range) != nil)
         #expect(try NSRegularExpression(pattern: topInsetPattern).firstMatch(in: source, range: range) != nil)
         #expect(try NSRegularExpression(pattern: bottomInsetPattern).firstMatch(in: source, range: range) != nil)
+        #expect(source.contains("spatialFooterBottomInset") == false)
     }
 
     @Test("T219: pairing shader is active only while pairing route is visible")

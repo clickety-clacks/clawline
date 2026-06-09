@@ -2799,10 +2799,27 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     static func restingBottomContentHeight(
         contentSizeHeight: CGFloat,
         footerHeight: CGFloat,
-        hasFooter: Bool
+        hasFooter: Bool,
+        excludesFooterRevealRange: Bool = MessageFlowCollectionViewController.excludesFooterRevealRangeAtRestingBottom
     ) -> CGFloat {
-        guard hasFooter else { return contentSizeHeight }
+        guard hasFooter, excludesFooterRevealRange else { return contentSizeHeight }
         return max(0, contentSizeHeight - footerHeight)
+    }
+
+    static var excludesFooterRevealRangeAtRestingBottom: Bool {
+#if os(visionOS)
+        false
+#else
+        true
+#endif
+    }
+
+    static var hidesFooterAtRestingBottom: Bool {
+#if os(visionOS)
+        false
+#else
+        true
+#endif
     }
 
     static func bottomOffsetMaxY(
@@ -2818,10 +2835,14 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     static func footerRevealAlpha(
         contentOffsetY: CGFloat,
         restingBottomOffsetY: CGFloat,
-        trueBottomOffsetY: CGFloat
+        trueBottomOffsetY: CGFloat,
+        hidesFooterAtRestingBottom: Bool = MessageFlowCollectionViewController.hidesFooterAtRestingBottom
     ) -> CGFloat {
         guard restingBottomOffsetY.isFinite, trueBottomOffsetY.isFinite else { return 0 }
         let revealDistance = trueBottomOffsetY - restingBottomOffsetY
+        if !hidesFooterAtRestingBottom, revealDistance <= 0 {
+            return 1
+        }
         guard revealDistance > 0 else { return 0 }
         let revealedDistance = contentOffsetY - restingBottomOffsetY
         return min(1, max(0, revealedDistance / revealDistance))
@@ -2830,12 +2851,14 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     static func initialFooterCellAlpha(
         contentOffsetY: CGFloat,
         restingBottomOffsetY: CGFloat,
-        trueBottomOffsetY: CGFloat
+        trueBottomOffsetY: CGFloat,
+        hidesFooterAtRestingBottom: Bool = MessageFlowCollectionViewController.hidesFooterAtRestingBottom
     ) -> CGFloat {
         footerRevealAlpha(
             contentOffsetY: contentOffsetY,
             restingBottomOffsetY: restingBottomOffsetY,
-            trueBottomOffsetY: trueBottomOffsetY
+            trueBottomOffsetY: trueBottomOffsetY,
+            hidesFooterAtRestingBottom: hidesFooterAtRestingBottom
         )
     }
 
@@ -2956,7 +2979,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     }
 
     private func restingBottomContentHeight() -> CGFloat {
-        Self.restingBottomContentHeight(
+        return Self.restingBottomContentHeight(
             contentSizeHeight: collectionView.contentSize.height,
             footerHeight: SessionMetadataFooterCell.height(for: sessionStatus),
             hasFooter: dataSource.indexPath(for: SessionMetadataFooterCell.itemId) != nil

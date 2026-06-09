@@ -359,9 +359,9 @@ struct TextLinkURLTemplateRulesTests {
         #expect(openedGeneratedURL == generatedURL)
     }
 
-    @Test("T1192: chat generated link taps honor direct, modal, and popup display modes")
+    @Test("T1192: chat generated link taps honor direct and modal display modes")
     @MainActor
-    func chatGeneratedLinkTapsHonorDisplayModes() throws {
+    func chatGeneratedLinkTapsHonorDirectAndModalDisplayModes() throws {
         let cases: [(TextLinkResolvedURLDisplayMode, String)] = [
             (.direct, "D1192"),
             (.modal, "M1192"),
@@ -382,7 +382,6 @@ struct TextLinkURLTemplateRulesTests {
 
         var directURLs: [URL] = []
         var modalURLs: [URL] = []
-        var popupURLs: [URL] = []
         let originalGeneratedLinkOpener = GeneratedTextLinkActivationRouter.openGeneratedLink
         let originalModalPresenter = GeneratedTextLinkActivationRouter.presentResolvedURLModal
         let originalPopupPresenter = GeneratedTextLinkActivationRouter.presentResolvedURLPopup
@@ -395,8 +394,8 @@ struct TextLinkURLTemplateRulesTests {
             return true
         }
         GeneratedTextLinkActivationRouter.presentResolvedURLPopup = { url, _ in
-            popupURLs.append(url)
-            return true
+            Issue.record("Popup display mode should be hover-driven, not tap-driven: \(url)")
+            return false
         }
         defer {
             GeneratedTextLinkActivationRouter.openGeneratedLink = originalGeneratedLinkOpener
@@ -417,7 +416,24 @@ struct TextLinkURLTemplateRulesTests {
 
         #expect(directURLs.map(\.absoluteString) == ["https://example.com/direct/D1192"])
         #expect(modalURLs.map(\.absoluteString) == ["https://example.com/modal/M1192"])
-        #expect(popupURLs.map(\.absoluteString) == ["https://example.com/popup/P1192"])
+    }
+
+    @Test("T1192: popup display mode is presented by hover route")
+    @MainActor
+    func popupDisplayModeUsesHoverRoute() throws {
+        let popupURL = try #require(URL(string: "https://example.com/popup/P1192"))
+        var popupURLs: [URL] = []
+        let originalPopupPresenter = GeneratedTextLinkActivationRouter.presentResolvedURLPopup
+        GeneratedTextLinkActivationRouter.presentResolvedURLPopup = { url, _ in
+            popupURLs.append(url)
+            return true
+        }
+        defer {
+            GeneratedTextLinkActivationRouter.presentResolvedURLPopup = originalPopupPresenter
+        }
+
+        #expect(GeneratedTextLinkActivationRouter.presentResolvedURLPopup(popupURL, nil))
+        #expect(popupURLs == [popupURL])
     }
 
     @Test("V1135-01: generated text links suppress external text-view activation")

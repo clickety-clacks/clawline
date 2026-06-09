@@ -473,7 +473,10 @@ struct StreamManagerSheet: View {
             } label: {
                 let isActive = stream.sessionKey == viewModel.uiSelectedSessionKey
                 let dotIdentity = StreamPopupRowStatusDotIdentity(
-                    sessionKey: stream.sessionKey
+                    sessionKey: stream.sessionKey,
+                    dotState: dotState,
+                    isActive: isActive,
+                    colorScheme: colorScheme
                 )
                 HStack(spacing: 10) {
                     StreamPopupRowStatusDot(
@@ -481,6 +484,7 @@ struct StreamManagerSheet: View {
                         dotState: dotState,
                         colorScheme: colorScheme
                     )
+                    .id(dotIdentity)
                     Text(stream.displayName)
                         .font(.clawline(.subsectionHeader).weight(isActive ? .semibold : .regular))
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -490,7 +494,6 @@ struct StreamManagerSheet: View {
                             .tint(.secondary)
                     }
                 }
-                .id(dotIdentity)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
             }
@@ -676,6 +679,9 @@ struct StreamManagerSheet: View {
 
 struct StreamPopupRowStatusDotIdentity: Hashable {
     let sessionKey: String
+    let dotState: StreamDotState
+    let isActive: Bool
+    let colorScheme: ColorScheme
 }
 
 private struct StreamPopupRowStatusDot: View {

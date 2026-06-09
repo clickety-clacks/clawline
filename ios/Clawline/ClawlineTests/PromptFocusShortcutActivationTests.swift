@@ -1007,13 +1007,85 @@ struct PromptFocusShortcutActivationTests {
         #expect(NotificationScrollViewLookup.resolve(from: resolver) == nil)
     }
 
+    @Test("T1154 notification scroll resolver retries transient lifecycle misses")
+    func notificationScrollResolverRetriesTransientLifecycleMisses() {
+        #expect(NotificationScrollViewResolverRetryPolicy.shouldRetry(afterAttempt: 0))
+        #expect(NotificationScrollViewResolverRetryPolicy.shouldRetry(afterAttempt: 2))
+        #expect(NotificationScrollViewResolverRetryPolicy.shouldRetry(afterAttempt: 3) == false)
+    }
+
+    @Test("T1154 notification shortcut host identity tracks reply chat and stream popup lifecycle")
+    func notificationShortcutHostIdentityTracksReplyChatAndStreamPopupLifecycle() {
+        let beforeReply = KeyboardOwnershipSceneFactory.chatScene(
+            visibleNotificationSourceChatIds: ["notification-0"],
+            mentionPickerVisible: false,
+            composerFocused: true,
+            notificationReplyFocusedSourceChatId: nil,
+            actionMenuSourceChatId: nil
+        )
+        let inReply = KeyboardOwnershipSceneFactory.chatScene(
+            visibleNotificationSourceChatIds: ["notification-0"],
+            mentionPickerVisible: false,
+            composerFocused: false,
+            notificationReplySourceChatIds: ["notification-0"],
+            notificationReplyFocusedSourceChatId: "notification-0",
+            actionMenuSourceChatId: nil
+        )
+
+        let beforeIdentity = CrossChatNotificationShortcutLifecycle.identity(
+            sourceStates: [(sourceChatId: "notification-0", isReplying: false)],
+            keyboardOwnershipStore: beforeReply,
+            selectedSessionKey: "chat-a",
+            streamPopupRoute: .closed
+        )
+        let replyIdentity = CrossChatNotificationShortcutLifecycle.identity(
+            sourceStates: [(sourceChatId: "notification-0", isReplying: true)],
+            keyboardOwnershipStore: inReply,
+            selectedSessionKey: "chat-a",
+            streamPopupRoute: .closed
+        )
+        let switchedChatIdentity = CrossChatNotificationShortcutLifecycle.identity(
+            sourceStates: [(sourceChatId: "notification-0", isReplying: false)],
+            keyboardOwnershipStore: beforeReply,
+            selectedSessionKey: "chat-b",
+            streamPopupRoute: .closed
+        )
+        let popupOpenIdentity = CrossChatNotificationShortcutLifecycle.identity(
+            sourceStates: [(sourceChatId: "notification-0", isReplying: false)],
+            keyboardOwnershipStore: beforeReply,
+            selectedSessionKey: "chat-a",
+            streamPopupRoute: .popup(searchFocus: .request(id: 1))
+        )
+        let popupFilteringIdentity = CrossChatNotificationShortcutLifecycle.identity(
+            sourceStates: [(sourceChatId: "notification-0", isReplying: false)],
+            keyboardOwnershipStore: beforeReply,
+            selectedSessionKey: "chat-a",
+            streamPopupRoute: .popup(searchFocus: .none)
+        )
+        let recoveredIdentity = CrossChatNotificationShortcutLifecycle.identity(
+            sourceStates: [(sourceChatId: "notification-0", isReplying: false)],
+            keyboardOwnershipStore: beforeReply,
+            selectedSessionKey: "chat-a",
+            streamPopupRoute: .closed
+        )
+
+        #expect(beforeIdentity != replyIdentity)
+        #expect(beforeIdentity != switchedChatIdentity)
+        #expect(beforeIdentity != popupOpenIdentity)
+        #expect(beforeIdentity != popupFilteringIdentity)
+        #expect(beforeIdentity == recoveredIdentity)
+    }
+
     @Test("T1154 notification scroll command moves registered overflow content")
     @MainActor
     func notificationScrollCommandMovesRegisteredOverflowContent() {
-        let scrollView = UIScrollView(frame: CGRect(x: 0, y: 0, width: 120, height: 100))
-        scrollView.contentSize = CGSize(width: 120, height: 260)
+        let scrollView = UIScrollView(frame: CGRect(x: 0, y: 0, width: 120, height: 160))
+        scrollView.contentSize = CGSize(width: 120, height: 420)
         scrollView.contentOffset = .zero
+        let pageIncrement = max(80, scrollView.bounds.height * 0.82)
 
+        #expect(CrossChatNotificationScrollCommand.lineIncrement == 112)
+        #expect(CrossChatNotificationScrollCommand.lineIncrement < pageIncrement)
         #expect(CrossChatNotificationScrollCommand.scroll(scrollView, direction: .down))
         #expect(scrollView.contentOffset.y == CrossChatNotificationScrollCommand.lineIncrement)
 

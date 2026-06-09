@@ -1315,7 +1315,9 @@ struct ChatView: View {
                     viewModel: viewModel,
                     maxContainerHeight: notificationOverlayMaxHeight,
                     measuredHeightsBySourceChatId: crossChatNotificationMeasuredHeightsBySourceChatId,
-                    keyboardOwnershipStore: keyboardOwnershipStore
+                    keyboardOwnershipStore: keyboardOwnershipStore,
+                    selectedSessionKey: viewModel.uiSelectedSessionKey,
+                    streamPopupRoute: streamPopupRouteController.route
                 )
             }
             .onChange(of: notificationShortcutVisibleCount) { _, visibleCount in
@@ -1965,7 +1967,9 @@ struct ChatView: View {
         viewModel: ChatViewModel,
         maxContainerHeight: CGFloat,
         measuredHeightsBySourceChatId: [String: CGFloat],
-        keyboardOwnershipStore: KeyboardOwnershipStore
+        keyboardOwnershipStore: KeyboardOwnershipStore,
+        selectedSessionKey: String,
+        streamPopupRoute: StreamPopupRoute
     ) -> AnyView {
         AnyView(
             CrossChatNotificationKeyboardShortcuts(
@@ -1974,6 +1978,8 @@ struct ChatView: View {
                 replyPinSlotsBySourceChatId: crossChatNotificationReplyPinSlotsBySourceChatId,
                 measuredHeightsBySourceChatId: measuredHeightsBySourceChatId,
                 keyboardOwnershipStore: keyboardOwnershipStore,
+                selectedSessionKey: selectedSessionKey,
+                streamPopupRoute: streamPopupRoute,
                 onDismissAll: {
                     withAnimation(CrossChatNotificationMotion.hide) {
                         viewModel.dismissAllCrossChatNotifications()
@@ -6108,7 +6114,7 @@ enum CrossChatNotificationEntrySurfaceGeometry {
 }
 
 enum CrossChatNotificationScrollCommand {
-    static let lineIncrement: CGFloat = 56
+    static let lineIncrement: CGFloat = 112
 
     @discardableResult
     static func scroll(_ scrollView: UIScrollView?, direction: ChatScrollPageDirection) -> Bool {
@@ -7345,10 +7351,34 @@ private struct NotificationScrollViewResolver: UIViewRepresentable {
         }
 
         func resolve() {
+            resolve(attempt: 0)
+        }
+
+        private func resolve(attempt: Int) {
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
                 guard let scrollView = NotificationScrollViewLookup.resolve(from: self) else {
-                    self.onResolve?(nil)
+                    guard NotificationScrollViewResolverRetryPolicy.shouldRetry(afterAttempt: attempt) else {
+                        self.onResolve?(nil)
+                        return
+                    }
+                    DispatchQueue.main.asyncAfter(
+                        deadline: .now() + NotificationScrollViewResolverRetryPolicy.retryDelay
+                    ) { [weak self] in
+                        self?.resolve(attempt: attempt + 1)
+                    }
+                    return
+                }
+                guard scrollView.window != nil else {
+                    guard NotificationScrollViewResolverRetryPolicy.shouldRetry(afterAttempt: attempt) else {
+                        self.onResolve?(nil)
+                        return
+                    }
+                    DispatchQueue.main.asyncAfter(
+                        deadline: .now() + NotificationScrollViewResolverRetryPolicy.retryDelay
+                    ) { [weak self] in
+                        self?.resolve(attempt: attempt + 1)
+                    }
                     return
                 }
                 self.onResolve?(scrollView)
@@ -7361,6 +7391,15 @@ private struct NotificationScrollViewResolver: UIViewRepresentable {
                 }
             }
         }
+    }
+}
+
+enum NotificationScrollViewResolverRetryPolicy {
+    static let retryDelay: DispatchTimeInterval = .milliseconds(50)
+    static let maxAttempts = 3
+
+    static func shouldRetry(afterAttempt attempt: Int) -> Bool {
+        attempt < maxAttempts
     }
 }
 
@@ -7724,6 +7763,9 @@ struct CrossChatNotificationBubbleView: View {
                                     onContentScrollDragEnded()
                                 }
                         )
+                        .onDisappear {
+                            onRegisterScrollView(nil)
+                        }
                     } else {
                         measuredNotificationEntriesContent(renderedEntries)
                             .onAppear {
@@ -7738,6 +7780,11 @@ struct CrossChatNotificationBubbleView: View {
                 .clipped()
                 .onChange(of: entriesNeedScroll) { _, needsScroll in
                     if !needsScroll {
+                        onRegisterScrollView(nil)
+                    }
+                }
+                .onChange(of: bubble.isReplying) { _, isReplying in
+                    if isReplying {
                         onRegisterScrollView(nil)
                     }
                 }
@@ -8818,6 +8865,8 @@ private struct CrossChatNotificationKeyboardShortcuts: View {
     let replyPinSlotsBySourceChatId: [String: Int]
     let measuredHeightsBySourceChatId: [String: CGFloat]
     let keyboardOwnershipStore: KeyboardOwnershipStore
+    let selectedSessionKey: String
+    let streamPopupRoute: StreamPopupRoute
     let onDismissAll: () -> Void
     let onToggleDock: () -> Void
 
@@ -8884,6 +8933,16 @@ private struct CrossChatNotificationKeyboardShortcuts: View {
             .opacity(0.001)
             .frame(width: 1, height: 1)
             .accessibilityHidden(true)
+            .id(
+                CrossChatNotificationShortcutLifecycle.identity(
+                    sourceStates: visibleBubbles.map { bubble in
+                        (sourceChatId: bubble.sourceChatId, isReplying: bubble.isReplying)
+                    },
+                    keyboardOwnershipStore: keyboardOwnershipStore,
+                    selectedSessionKey: selectedSessionKey,
+                    streamPopupRoute: streamPopupRoute
+                )
+            )
         }
     }
 
@@ -8916,6 +8975,41 @@ private struct CrossChatNotificationKeyboardShortcuts: View {
             .route(intent: intent, store: keyboardOwnershipStore)
             .outcome else { return }
         action()
+    }
+}
+
+enum CrossChatNotificationShortcutLifecycle {
+    static func identity(
+        sourceStates: [(sourceChatId: String, isReplying: Bool)],
+        keyboardOwnershipStore: KeyboardOwnershipStore,
+        selectedSessionKey: String,
+        streamPopupRoute: StreamPopupRoute
+    ) -> String {
+        let notificationState = sourceStates
+            .map { "\($0.sourceChatId):\($0.isReplying)" }
+            .joined(separator: "|")
+        let routingState = keyboardOwnershipStore.activeVisibleSurfaces()
+            .sorted { $0.surfaceId.description < $1.surfaceId.description }
+            .map { record in
+                "\(record.surfaceId.description):\(record.focusedHint):\(record.lifecycleToken)"
+            }
+            .joined(separator: "|")
+        return "\(notificationState)#\(routingState)#\(selectedSessionKey)#\(streamPopupRoute.identityToken)"
+    }
+}
+
+extension StreamPopupRoute {
+    var identityToken: String {
+        switch self {
+        case .closed:
+            return "closed"
+        case .popup(.none):
+            return "popup:none"
+        case .popup(.request(let id)):
+            return "popup:request:\(id)"
+        case .trackPicker:
+            return "trackPicker"
+        }
     }
 }
 

@@ -78,6 +78,79 @@ struct KeyboardCommandRouterTests {
         assertRoute(.notificationScrollForward, in: closedStore, isHandledBy: .notificationBubble("n0"), rule: "PR-04")
     }
 
+    @Test("T1154 Cmd-J/K notification scroll survives reply and popup lifecycle transitions")
+    func notificationScrollSurvivesReplyAndPopupLifecycleTransitions() {
+        let states = [
+            KeyboardOwnershipSceneFactory.chatScene(
+                visibleNotificationSourceChatIds: ["n0"],
+                mentionPickerVisible: false,
+                composerFocused: true,
+                notificationReplyFocusedSourceChatId: nil,
+                actionMenuSourceChatId: nil
+            ),
+            KeyboardOwnershipSceneFactory.chatScene(
+                visibleNotificationSourceChatIds: ["n0"],
+                mentionPickerVisible: false,
+                composerFocused: false,
+                notificationReplySourceChatIds: ["n0"],
+                notificationReplyFocusedSourceChatId: "n0",
+                actionMenuSourceChatId: nil
+            ),
+            KeyboardOwnershipSceneFactory.chatScene(
+                visibleNotificationSourceChatIds: ["n0"],
+                mentionPickerVisible: false,
+                composerFocused: true,
+                notificationReplySourceChatIds: [],
+                notificationReplyFocusedSourceChatId: "n0",
+                actionMenuSourceChatId: nil
+            ),
+            KeyboardOwnershipSceneFactory.chatScene(
+                visibleNotificationSourceChatIds: ["n0"],
+                mentionPickerVisible: true,
+                mentionPickerHasCompletion: false,
+                composerFocused: true,
+                notificationReplyFocusedSourceChatId: nil,
+                actionMenuSourceChatId: nil
+            ),
+            KeyboardOwnershipSceneFactory.chatScene(
+                visibleNotificationSourceChatIds: ["n0"],
+                mentionPickerVisible: true,
+                mentionPickerHasCompletion: true,
+                composerFocused: true,
+                notificationReplyFocusedSourceChatId: nil,
+                actionMenuSourceChatId: nil
+            ),
+            KeyboardOwnershipSceneFactory.chatScene(
+                visibleNotificationSourceChatIds: ["n0"],
+                mentionPickerVisible: false,
+                composerFocused: false,
+                notificationReplyFocusedSourceChatId: nil,
+                actionMenuSourceChatId: nil
+            ),
+        ]
+
+        for store in states {
+            assertPhysicalShortcut(
+                input: "j",
+                modifiers: [.command],
+                in: store,
+                posts: [
+                    .clawlineScrollNotificationDownCommand,
+                    .clawlineScrollDownCommand
+                ]
+            )
+            assertPhysicalShortcut(
+                input: "k",
+                modifiers: [.command],
+                in: store,
+                posts: [
+                    .clawlineScrollNotificationUpCommand,
+                    .clawlineScrollUpCommand
+                ]
+            )
+        }
+    }
+
     @Test("T343 VG-03 mention picker without completions does not own Return")
     func mentionPickerWithoutCompletionsDoesNotOwnReturn() {
         let store = KeyboardOwnershipSceneFactory.chatScene(

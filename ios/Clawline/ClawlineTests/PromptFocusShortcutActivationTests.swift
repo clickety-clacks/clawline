@@ -1079,18 +1079,47 @@ struct PromptFocusShortcutActivationTests {
     @Test("T1154 notification scroll command moves registered overflow content")
     @MainActor
     func notificationScrollCommandMovesRegisteredOverflowContent() {
-        let scrollView = UIScrollView(frame: CGRect(x: 0, y: 0, width: 120, height: 160))
-        scrollView.contentSize = CGSize(width: 120, height: 420)
+        let scrollView = UIScrollView(frame: CGRect(x: 0, y: 0, width: 120, height: 320))
+        scrollView.contentSize = CGSize(width: 120, height: 720)
         scrollView.contentOffset = .zero
         let pageIncrement = max(80, scrollView.bounds.height * 0.82)
 
-        #expect(CrossChatNotificationScrollCommand.lineIncrement == 112)
+        #expect(CrossChatNotificationScrollCommand.lineIncrement == 224)
         #expect(CrossChatNotificationScrollCommand.lineIncrement < pageIncrement)
         #expect(CrossChatNotificationScrollCommand.scroll(scrollView, direction: .down))
         #expect(scrollView.contentOffset.y == CrossChatNotificationScrollCommand.lineIncrement)
 
         #expect(CrossChatNotificationScrollCommand.scroll(scrollView, direction: .up))
         #expect(scrollView.contentOffset.y == 0)
+    }
+
+    @Test("T1154 notification scroll command caps doubled movement below page jumps")
+    @MainActor
+    func notificationScrollCommandCapsDoubledMovementBelowPageJumps() {
+        let scrollView = UIScrollView(frame: CGRect(x: 0, y: 0, width: 120, height: 160))
+        scrollView.contentSize = CGSize(width: 120, height: 420)
+        scrollView.contentOffset = .zero
+        let pageIncrement = max(80, scrollView.bounds.height * 0.82)
+        let expectedIncrement = pageIncrement - 1
+
+        #expect(CrossChatNotificationScrollCommand.scroll(scrollView, direction: .down))
+        #expect(abs(scrollView.contentOffset.y - expectedIncrement) < 0.5)
+        #expect(scrollView.contentOffset.y < pageIncrement)
+    }
+
+    @Test("T1154 notification scroll command clamps near content edges")
+    @MainActor
+    func notificationScrollCommandClampsNearContentEdges() {
+        let scrollView = UIScrollView(frame: CGRect(x: 0, y: 0, width: 120, height: 320))
+        scrollView.contentSize = CGSize(width: 120, height: 600)
+        scrollView.contentOffset = CGPoint(x: 0, y: 240)
+        let maxY = scrollView.contentSize.height - scrollView.bounds.height
+
+        #expect(CrossChatNotificationScrollCommand.scroll(scrollView, direction: .down))
+        #expect(scrollView.contentOffset.y == maxY)
+
+        #expect(CrossChatNotificationScrollCommand.scroll(scrollView, direction: .down) == false)
+        #expect(scrollView.contentOffset.y == maxY)
     }
 
     @Test("T1154 notification scroll command no-ops without overflow")

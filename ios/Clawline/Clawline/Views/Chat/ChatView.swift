@@ -6114,7 +6114,7 @@ enum CrossChatNotificationEntrySurfaceGeometry {
 }
 
 enum CrossChatNotificationScrollCommand {
-    static let lineIncrement: CGFloat = 112
+    static let lineIncrement: CGFloat = 224
 
     @discardableResult
     static func scroll(_ scrollView: UIScrollView?, direction: ChatScrollPageDirection) -> Bool {
@@ -6129,7 +6129,9 @@ enum CrossChatNotificationScrollCommand {
         )
         guard maxY - minY > 0.5 else { return false }
 
-        let targetY = scrollView.contentOffset.y + (direction == .down ? lineIncrement : -lineIncrement)
+        let pageIncrement = max(80, scrollView.bounds.height * 0.82)
+        let increment = min(lineIncrement, max(1, pageIncrement - 1))
+        let targetY = scrollView.contentOffset.y + (direction == .down ? increment : -increment)
         let clampedY = max(minY, min(targetY, maxY))
         guard abs(scrollView.contentOffset.y - clampedY) > 0.5 else { return false }
         scrollView.setContentOffset(CGPoint(x: scrollView.contentOffset.x, y: clampedY), animated: true)

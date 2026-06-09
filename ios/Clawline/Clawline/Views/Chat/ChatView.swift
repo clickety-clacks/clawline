@@ -6070,6 +6070,30 @@ enum CrossChatNotificationEntrySurfaceGeometry {
     }
 }
 
+enum CrossChatNotificationScrollCommand {
+    static let lineIncrement: CGFloat = 56
+
+    @discardableResult
+    static func scroll(_ scrollView: UIScrollView?, direction: ChatScrollPageDirection) -> Bool {
+        guard let scrollView else {
+            return false
+        }
+
+        let minY = -scrollView.adjustedContentInset.top
+        let maxY = max(
+            minY,
+            scrollView.contentSize.height - scrollView.bounds.height + scrollView.adjustedContentInset.bottom
+        )
+        guard maxY - minY > 0.5 else { return false }
+
+        let targetY = scrollView.contentOffset.y + (direction == .down ? lineIncrement : -lineIncrement)
+        let clampedY = max(minY, min(targetY, maxY))
+        guard abs(scrollView.contentOffset.y - clampedY) > 0.5 else { return false }
+        scrollView.setContentOffset(CGPoint(x: scrollView.contentOffset.x, y: clampedY), animated: true)
+        return true
+    }
+}
+
 enum ChatLandscapeWidthGeometry {
     static func shouldFillWindowWidth(
         viewSize: CGSize,
@@ -6897,22 +6921,10 @@ private struct CrossChatNotificationOverlay: View {
     }
 
     private func scrollNotification(sourceChatId: String, direction: ChatScrollPageDirection) {
-        guard let scrollView = scrollViewsBySourceChatId[sourceChatId]?.scrollView else {
-            return
-        }
-
-        let minY = -scrollView.adjustedContentInset.top
-        let maxY = max(
-            minY,
-            scrollView.contentSize.height - scrollView.bounds.height + scrollView.adjustedContentInset.bottom
+        CrossChatNotificationScrollCommand.scroll(
+            scrollViewsBySourceChatId[sourceChatId]?.scrollView,
+            direction: direction
         )
-        guard maxY - minY > 0.5 else { return }
-
-        let lineIncrement: CGFloat = 56
-        let targetY = scrollView.contentOffset.y + (direction == .down ? lineIncrement : -lineIncrement)
-        let clampedY = max(minY, min(targetY, maxY))
-        guard abs(scrollView.contentOffset.y - clampedY) > 0.5 else { return }
-        scrollView.setContentOffset(CGPoint(x: scrollView.contentOffset.x, y: clampedY), animated: true)
     }
 
     private func routedNotificationSourceChatId(for intent: KeyboardCommandIntent) -> String? {
@@ -7602,13 +7614,13 @@ struct CrossChatNotificationBubbleView: View {
                                         configuredBreathingRoom: entriesBottomBreathingRoom
                                     )
                                 )
+                                .background(
+                                    NotificationScrollViewResolver(onResolve: onRegisterScrollView)
+                                )
                         }
                         .frame(height: resolvedEntriesHeight ?? contentMaxHeight, alignment: .top)
                         .scrollIndicators(.visible)
                         .scrollDisabled(isContentScrollLocked)
-                        .background(
-                            NotificationScrollViewResolver(onResolve: onRegisterScrollView)
-                        )
                         .simultaneousGesture(
                             DragGesture(minimumDistance: CrossChatNotificationGestureAxisLock.minimumDistance)
                                 .onChanged { value in

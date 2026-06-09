@@ -985,6 +985,31 @@ struct PromptFocusShortcutActivationTests {
         #expect(NotificationScrollViewLookup.resolve(from: resolver) == nil)
     }
 
+    @Test("T1154 notification scroll command moves registered overflow content")
+    @MainActor
+    func notificationScrollCommandMovesRegisteredOverflowContent() {
+        let scrollView = UIScrollView(frame: CGRect(x: 0, y: 0, width: 120, height: 100))
+        scrollView.contentSize = CGSize(width: 120, height: 260)
+        scrollView.contentOffset = .zero
+
+        #expect(CrossChatNotificationScrollCommand.scroll(scrollView, direction: .down))
+        #expect(scrollView.contentOffset.y == CrossChatNotificationScrollCommand.lineIncrement)
+
+        #expect(CrossChatNotificationScrollCommand.scroll(scrollView, direction: .up))
+        #expect(scrollView.contentOffset.y == 0)
+    }
+
+    @Test("T1154 notification scroll command no-ops without overflow")
+    @MainActor
+    func notificationScrollCommandNoopsWithoutOverflow() {
+        let scrollView = UIScrollView(frame: CGRect(x: 0, y: 0, width: 120, height: 100))
+        scrollView.contentSize = CGSize(width: 120, height: 100)
+
+        #expect(CrossChatNotificationScrollCommand.scroll(scrollView, direction: .down) == false)
+        #expect(scrollView.contentOffset.y == 0)
+        #expect(CrossChatNotificationScrollCommand.scroll(nil, direction: .down) == false)
+    }
+
     @Test("T351 notification overlay host reports viewport width, not motion overflow width")
     func notificationOverlayHostReportsViewportWidthNotMotionOverflowWidth() {
         #expect(CrossChatNotificationGeometry.layoutHostWidth(maxContainerWidth: 393) == 393)

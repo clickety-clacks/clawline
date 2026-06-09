@@ -91,6 +91,47 @@ struct Clawline_SpatialTests {
         #expect(collectionView?.backgroundView == nil)
     }
 
+    @Test("Spatial footer resting bottom removes footer reveal gap")
+    func spatialFooterRestingBottomRemovesFooterRevealGap() {
+        let contentHeight: CGFloat = 1_200
+        let boundsHeight: CGFloat = 700
+        let topInset: CGFloat = 40
+        let bottomInset: CGFloat = 180
+        let footerHeight = SessionMetadataFooterCell.topPadding
+            + SessionMetadataFooterCell.actionRegionHeight
+            + SessionMetadataFooterCell.versionRowHeight
+            + SessionMetadataFooterCell.bottomPadding
+
+        #expect(MessageFlowCollectionViewController.excludesFooterRevealRangeAtRestingBottom == false)
+        #expect(MessageFlowCollectionViewController.hidesFooterAtRestingBottom == false)
+
+        let restingContentHeight = MessageFlowCollectionViewController.restingBottomContentHeight(
+            contentSizeHeight: contentHeight,
+            footerHeight: footerHeight,
+            hasFooter: true
+        )
+        let restingBottom = MessageFlowCollectionViewController.bottomOffsetMaxY(
+            contentHeight: restingContentHeight,
+            boundsHeight: boundsHeight,
+            topInset: topInset,
+            bottomInset: bottomInset
+        )
+        let trueBottom = MessageFlowCollectionViewController.bottomOffsetMaxY(
+            contentHeight: contentHeight,
+            boundsHeight: boundsHeight,
+            topInset: topInset,
+            bottomInset: bottomInset
+        )
+
+        #expect(restingContentHeight == contentHeight)
+        #expect(restingBottom == trueBottom)
+        #expect(MessageFlowCollectionViewController.footerRevealAlpha(
+            contentOffsetY: restingBottom,
+            restingBottomOffsetY: restingBottom,
+            trueBottomOffsetY: trueBottom
+        ) == 1)
+    }
+
     private func makeWindow() -> UIWindow {
         let scene = UIApplication.shared.connectedScenes
             .compactMap({ $0 as? UIWindowScene })

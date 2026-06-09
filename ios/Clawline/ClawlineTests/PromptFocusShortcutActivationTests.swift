@@ -699,6 +699,11 @@ struct PromptFocusShortcutActivationTests {
             })
             #expect(notificationCommandSpecs.contains { spec in
                 spec.input == "\(index)"
+                    && spec.modifierFlags == [.command, .alternate]
+                    && spec.action.selector == #selector(UIResponder.clawlineNotificationNumberCommand(_:))
+            })
+            #expect(!notificationCommandSpecs.contains { spec in
+                spec.input == "\(index)"
                     && spec.modifierFlags == [.command, .shift]
                     && spec.action.selector == #selector(UIResponder.clawlineNotificationNumberCommand(_:))
             })
@@ -980,7 +985,7 @@ struct PromptFocusShortcutActivationTests {
         responder.clawlineNotificationNumberCommand(
             UIKeyCommand(
                 input: "3",
-                modifierFlags: [.command, .shift],
+                modifierFlags: [.command, .alternate],
                 action: #selector(UIResponder.clawlineNotificationNumberCommand(_:))
             )
         )
@@ -997,6 +1002,23 @@ struct PromptFocusShortcutActivationTests {
             .notificationAssignedReply(3),
             .notificationAssignedDismiss(3)
         ])
+
+        posted.removeAll()
+        responder.clawlineNotificationNumberCommand(
+            UIKeyCommand(
+                input: "3",
+                modifierFlags: [.command, .shift],
+                action: #selector(UIResponder.clawlineNotificationNumberCommand(_:))
+            )
+        )
+        responder.clawlineNotificationNumberCommand(
+            UIKeyCommand(
+                input: "#",
+                modifierFlags: [.command, .shift],
+                action: #selector(UIResponder.clawlineNotificationNumberCommand(_:))
+            )
+        )
+        #expect(posted.isEmpty)
     }
 
     @Test("Notification scroll responders normalize physical Cmd-J/K through root fan-out intents")
@@ -1142,6 +1164,132 @@ struct PromptFocusShortcutActivationTests {
         resolverContainer.addSubview(resolver)
 
         #expect(NotificationScrollViewLookup.resolve(from: resolver) == nil)
+    }
+
+    @Test("T1154 notification scroll resolver retries transient lifecycle misses")
+    func notificationScrollResolverRetriesTransientLifecycleMisses() {
+        #expect(NotificationScrollViewResolverRetryPolicy.shouldRetry(afterAttempt: 0))
+        #expect(NotificationScrollViewResolverRetryPolicy.shouldRetry(afterAttempt: 2))
+        #expect(NotificationScrollViewResolverRetryPolicy.shouldRetry(afterAttempt: 3) == false)
+    }
+
+    @Test("T1154 notification shortcut host identity tracks reply chat and stream popup lifecycle")
+    func notificationShortcutHostIdentityTracksReplyChatAndStreamPopupLifecycle() {
+        let beforeReply = KeyboardOwnershipSceneFactory.chatScene(
+            visibleNotificationSourceChatIds: ["notification-0"],
+            mentionPickerVisible: false,
+            composerFocused: true,
+            notificationReplyFocusedSourceChatId: nil,
+            actionMenuSourceChatId: nil
+        )
+        let inReply = KeyboardOwnershipSceneFactory.chatScene(
+            visibleNotificationSourceChatIds: ["notification-0"],
+            mentionPickerVisible: false,
+            composerFocused: false,
+            notificationReplySourceChatIds: ["notification-0"],
+            notificationReplyFocusedSourceChatId: "notification-0",
+            actionMenuSourceChatId: nil
+        )
+
+        let beforeIdentity = CrossChatNotificationShortcutLifecycle.identity(
+            sourceStates: [(sourceChatId: "notification-0", isReplying: false)],
+            keyboardOwnershipStore: beforeReply,
+            selectedSessionKey: "chat-a",
+            streamPopupRoute: .closed
+        )
+        let replyIdentity = CrossChatNotificationShortcutLifecycle.identity(
+            sourceStates: [(sourceChatId: "notification-0", isReplying: true)],
+            keyboardOwnershipStore: inReply,
+            selectedSessionKey: "chat-a",
+            streamPopupRoute: .closed
+        )
+        let switchedChatIdentity = CrossChatNotificationShortcutLifecycle.identity(
+            sourceStates: [(sourceChatId: "notification-0", isReplying: false)],
+            keyboardOwnershipStore: beforeReply,
+            selectedSessionKey: "chat-b",
+            streamPopupRoute: .closed
+        )
+        let popupOpenIdentity = CrossChatNotificationShortcutLifecycle.identity(
+            sourceStates: [(sourceChatId: "notification-0", isReplying: false)],
+            keyboardOwnershipStore: beforeReply,
+            selectedSessionKey: "chat-a",
+            streamPopupRoute: .popup(searchFocus: .request(id: 1))
+        )
+        let popupFilteringIdentity = CrossChatNotificationShortcutLifecycle.identity(
+            sourceStates: [(sourceChatId: "notification-0", isReplying: false)],
+            keyboardOwnershipStore: beforeReply,
+            selectedSessionKey: "chat-a",
+            streamPopupRoute: .popup(searchFocus: .none)
+        )
+        let recoveredIdentity = CrossChatNotificationShortcutLifecycle.identity(
+            sourceStates: [(sourceChatId: "notification-0", isReplying: false)],
+            keyboardOwnershipStore: beforeReply,
+            selectedSessionKey: "chat-a",
+            streamPopupRoute: .closed
+        )
+
+        #expect(beforeIdentity != replyIdentity)
+        #expect(beforeIdentity != switchedChatIdentity)
+        #expect(beforeIdentity != popupOpenIdentity)
+        #expect(beforeIdentity != popupFilteringIdentity)
+        #expect(beforeIdentity == recoveredIdentity)
+    }
+
+    @Test("T1154 notification scroll command moves registered overflow content")
+    @MainActor
+    func notificationScrollCommandMovesRegisteredOverflowContent() {
+        let scrollView = UIScrollView(frame: CGRect(x: 0, y: 0, width: 120, height: 320))
+        scrollView.contentSize = CGSize(width: 120, height: 720)
+        scrollView.contentOffset = .zero
+        let pageIncrement = max(80, scrollView.bounds.height * 0.82)
+
+        #expect(CrossChatNotificationScrollCommand.lineIncrement == 224)
+        #expect(CrossChatNotificationScrollCommand.lineIncrement < pageIncrement)
+        #expect(CrossChatNotificationScrollCommand.scroll(scrollView, direction: .down))
+        #expect(scrollView.contentOffset.y == CrossChatNotificationScrollCommand.lineIncrement)
+
+        #expect(CrossChatNotificationScrollCommand.scroll(scrollView, direction: .up))
+        #expect(scrollView.contentOffset.y == 0)
+    }
+
+    @Test("T1154 notification scroll command caps doubled movement below page jumps")
+    @MainActor
+    func notificationScrollCommandCapsDoubledMovementBelowPageJumps() {
+        let scrollView = UIScrollView(frame: CGRect(x: 0, y: 0, width: 120, height: 160))
+        scrollView.contentSize = CGSize(width: 120, height: 420)
+        scrollView.contentOffset = .zero
+        let pageIncrement = max(80, scrollView.bounds.height * 0.82)
+        let expectedIncrement = pageIncrement - 1
+
+        #expect(CrossChatNotificationScrollCommand.scroll(scrollView, direction: .down))
+        #expect(abs(scrollView.contentOffset.y - expectedIncrement) < 0.5)
+        #expect(scrollView.contentOffset.y < pageIncrement)
+    }
+
+    @Test("T1154 notification scroll command clamps near content edges")
+    @MainActor
+    func notificationScrollCommandClampsNearContentEdges() {
+        let scrollView = UIScrollView(frame: CGRect(x: 0, y: 0, width: 120, height: 320))
+        scrollView.contentSize = CGSize(width: 120, height: 600)
+        scrollView.contentOffset = CGPoint(x: 0, y: 240)
+        let maxY = scrollView.contentSize.height - scrollView.bounds.height
+
+        #expect(CrossChatNotificationScrollCommand.scroll(scrollView, direction: .down))
+        #expect(scrollView.contentOffset.y == maxY)
+
+        #expect(CrossChatNotificationScrollCommand.scroll(scrollView, direction: .down) == false)
+        #expect(scrollView.contentOffset.y == maxY)
+    }
+
+    @Test("T1154 notification scroll command no-ops without overflow")
+    @MainActor
+    func notificationScrollCommandNoopsWithoutOverflow() {
+        let scrollView = UIScrollView(frame: CGRect(x: 0, y: 0, width: 120, height: 100))
+        scrollView.contentSize = CGSize(width: 120, height: 100)
+
+        #expect(CrossChatNotificationScrollCommand.scroll(scrollView, direction: .down) == false)
+        #expect(scrollView.contentOffset.y == 0)
+        #expect(CrossChatNotificationScrollCommand.scroll(nil, direction: .down) == false)
     }
 
     @Test("T351 notification overlay host reports viewport width, not motion overflow width")

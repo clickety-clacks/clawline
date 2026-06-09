@@ -50,7 +50,7 @@ struct ClawlineAppCommands: Commands {
                             crossChatNotificationCommand?.reply(index)
                         }
                     }
-                    .keyboardShortcut(KeyEquivalent(Character("\(index)")), modifiers: [.command, .shift])
+                    .keyboardShortcut(KeyEquivalent(Character("\(index)")), modifiers: [.command, .option])
                     .disabled((crossChatNotificationCommand?.visibleCount ?? 0) <= index)
 
                     Button("Dismiss Notification \(index)") {

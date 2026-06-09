@@ -858,6 +858,8 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         bodyTap.delaysTouchesEnded = false
         bodyTap.delegate = self
         bodyLabel.addGestureRecognizer(bodyTap)
+        let bodyHover = UIHoverGestureRecognizer(target: self, action: #selector(handleBodyHover(_:)))
+        bodyLabel.addGestureRecognizer(bodyHover)
 #if targetEnvironment(macCatalyst)
         bodyLabel.addInteraction(UIContextMenuInteraction(delegate: self))
 #endif
@@ -2023,6 +2025,19 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
             return
         }
         handleBubbleTap()
+    }
+
+    @objc private func handleBodyHover(_ recognizer: UIHoverGestureRecognizer) {
+        guard recognizer.state == .began || recognizer.state == .changed,
+              let generatedLink = Self.generatedTextLink(in: bodyLabel, at: recognizer.location(in: bodyLabel)),
+              generatedLink.displayMode == .popup else {
+            return
+        }
+        _ = GeneratedTextLinkActivationRouter.presentResolvedURLPopupAnchored(
+            generatedLink.url,
+            bodyLabel,
+            recognizer.location(in: bodyLabel)
+        )
     }
 
     @objc private func handleBubbleTap() {

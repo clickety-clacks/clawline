@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Document Diff Viewer</title>
+  <style>
+    :root { color-scheme: light dark; --line: color-mix(in srgb, CanvasText 18%, Canvas 82%); --muted: color-mix(in srgb, CanvasText 62%, Canvas 38%); --change: #fde68a; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; background: Canvas; color: CanvasText; font: 15px/1.48 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    body { display: grid; grid-template-columns: minmax(0, 1fr) 120px; gap: 14px; padding: 16px; overflow: hidden; }
+    main { min-width: 0; overflow: auto; padding-right: 4px; }
+    aside { border-left: 1px solid var(--line); padding-left: 12px; display: grid; align-content: start; gap: 7px; }
+    .status { color: var(--muted); font-size: 13px; margin-bottom: 12px; }
+    .block { border-radius: 6px; padding: 7px 9px; overflow-wrap: anywhere; }
+    .block.changed { background: var(--change); color: #1f1600; }
+    .marker { width: 100%; min-height: 8px; border: 0; border-radius: 2px; background: color-mix(in srgb, CanvasText 18%, Canvas 82%); }
+    .marker.changed { background: #d97706; min-height: 12px; }
+  </style>
+</head>
+<body>
+  <main>
+    <div id="status" class="status">Loading document...</div>
+    <article id="document"></article>
+  </main>
+  <aside id="minimap" aria-label="Document minimap"></aside>
+  <script>
+    const params = new URLSearchParams(location.search);
+    const documentId = params.get("id");
+    const snapshotUrl = params.get("snapshotUrl") || (documentId ? "/documents/" + encodeURIComponent(documentId) + "/snapshot" : "");
+    const eventsUrl = params.get("eventsUrl") || (documentId ? "/documents/" + encodeURIComponent(documentId) + "/events" : "");
+    const statusEl = document.getElementById("status");
+    const documentEl = document.getElementById("document");
+    const minimapEl = document.getElementById("minimap");
+    let previousBlocks = [];
+
+    function blocksFor(text) {
+      return String(text || "").split(/\n{2,}/).map(block => block.trim()).filter(Boolean);
+    }
+
+    function render(snapshot) {
+      const blocks = blocksFor(snapshot.text);
+      statusEl.textContent = snapshot.label + " · revision " + snapshot.revision + " · " + snapshot.watcherMode;
+      documentEl.replaceChildren();
+      minimapEl.replaceChildren();
+      blocks.forEach((block, index) => {
+        const changed = previousBlocks.length > 0 && previousBlocks[index] !== block;
+        const section = document.createElement("section");
+        section.className = "block" + (changed ? " changed" : "");
+        section.textContent = block;
+        documentEl.appendChild(section);
+
+        const marker = document.createElement("button");
+        marker.type = "button";
+        marker.className = "marker" + (changed ? " changed" : "");
+        marker.title = changed ? "Changed block" : "Document block";
+        marker.addEventListener("click", () => section.scrollIntoView({ block: "start" }));
+        minimapEl.appendChild(marker);
+      });
+      previousBlocks = blocks;
+    }
+
+    async function loadSnapshot() {
+      if (!snapshotUrl) throw new Error("missing document id");
+      const response = await fetch(snapshotUrl, { cache: "no-store" });
+      const snapshot = await response.json();
+      if (!response.ok || snapshot.error) throw new Error(snapshot.error || response.statusText);
+      render(snapshot);
+    }
+
+    function startEvents() {
+      if (!eventsUrl || !("EventSource" in window)) return;
+      const source = new EventSource(eventsUrl);
+      source.addEventListener("document.changed", event => {
+        const payload = JSON.parse(event.data || "{}");
+        if (!documentId || payload.documentId === documentId) loadSnapshot().catch(showError);
+      });
+      source.addEventListener("error", () => {
+        statusEl.textContent = "Document event stream unavailable; keeping last snapshot visible.";
+      });
+    }
+
+    function showError(error) {
+      statusEl.textContent = error.message || String(error);
+    }
+
+    loadSnapshot().then(startEvents).catch(showError);
+  </script>
+</body>
+</html>
+

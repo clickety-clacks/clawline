@@ -50,7 +50,7 @@ struct ClawlineAppCommands: Commands {
                             crossChatNotificationCommand?.reply(index)
                         }
                     }
-                    .keyboardShortcut(KeyEquivalent(Character("\(index)")), modifiers: [.command, .shift])
+                    .keyboardShortcut(KeyEquivalent(Character("\(index)")), modifiers: [.command, .option])
                     .disabled((crossChatNotificationCommand?.visibleCount ?? 0) <= index)
 
                     Button("Dismiss Notification \(index)") {
@@ -134,10 +134,16 @@ struct ClawlineAppCommands: Commands {
         _ intent: KeyboardCommandIntent,
         perform action: () -> Void
     ) {
-        guard case .handled(.notificationBubble(_)) = KeyboardCommandRouter
-            .route(intent: intent, store: routerStore())
-            .outcome else { return }
-        action()
+        switch KeyboardCommandRouter.route(intent: intent, store: routerStore()).outcome {
+        case .handled(.notificationBubble(_)):
+            action()
+        case .handled(.chatSelectorRow(_)):
+            if case .notificationAssignedOpen = intent {
+                NotificationCenter.default.post(name: .clawlineKeyboardCommandIntent, object: intent)
+            }
+        default:
+            return
+        }
     }
 
     private func routeAppShortcut(_ intent: KeyboardCommandIntent) {

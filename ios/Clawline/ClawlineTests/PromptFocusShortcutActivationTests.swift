@@ -1292,6 +1292,32 @@ struct PromptFocusShortcutActivationTests {
         #expect(CrossChatNotificationScrollCommand.scroll(nil, direction: .down) == false)
     }
 
+    @Test("T1154 notification scroll target chooses top visible over last focused bubble")
+    func notificationScrollTargetChoosesTopVisibleOverLastFocusedBubble() {
+        #expect(
+            CrossChatNotificationScrollTargetSelection.sourceChatId(
+                visibleSourceChatIds: ["notification-0", "notification-1", "notification-2"],
+                routedSourceChatId: "notification-2"
+            ) == "notification-0"
+        )
+    }
+
+    @Test("T1154 notification scroll target requires notification routing ownership")
+    func notificationScrollTargetRequiresNotificationRoutingOwnership() {
+        #expect(
+            CrossChatNotificationScrollTargetSelection.sourceChatId(
+                visibleSourceChatIds: ["notification-0", "notification-1"],
+                routedSourceChatId: nil
+            ) == nil
+        )
+        #expect(
+            CrossChatNotificationScrollTargetSelection.sourceChatId(
+                visibleSourceChatIds: [],
+                routedSourceChatId: "notification-1"
+            ) == nil
+        )
+    }
+
     @Test("T351 notification overlay host reports viewport width, not motion overflow width")
     func notificationOverlayHostReportsViewportWidthNotMotionOverflowWidth() {
         #expect(CrossChatNotificationGeometry.layoutHostWidth(maxContainerWidth: 393) == 393)

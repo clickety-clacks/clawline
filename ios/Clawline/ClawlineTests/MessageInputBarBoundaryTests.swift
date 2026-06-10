@@ -161,6 +161,46 @@ struct MessageInputBarBoundaryTests {
         ) == 0)
     }
 
+    @Test("Rotated compact notification overlay uses physical landscape width")
+    func rotatedCompactNotificationOverlayUsesPhysicalLandscapeWidth() {
+        let resolvedFromPortraitHost = CrossChatNotificationGeometry.nativeOverlayContainerWidth(
+            containerWidth: 402,
+            leadingSafeAreaInset: 0,
+            trailingSafeAreaInset: 0,
+            isCompactLandscape: true,
+            nativeWindowWidth: 874
+        )
+        let resolvedFromSafeAreaHost = CrossChatNotificationGeometry.nativeOverlayContainerWidth(
+            containerWidth: 750,
+            leadingSafeAreaInset: 62,
+            trailingSafeAreaInset: 62,
+            isCompactLandscape: true,
+            nativeWindowWidth: 874
+        )
+
+        #expect(resolvedFromPortraitHost == 874)
+        #expect(resolvedFromSafeAreaHost == 874)
+        #expect(CrossChatNotificationGeometry.trailingAnchoredOverlayCorrection(
+            containerWidth: 402,
+            resolvedContainerWidth: resolvedFromPortraitHost
+        ) == 472)
+        #expect(CrossChatNotificationGeometry.trailingAnchoredOverlayCorrection(
+            containerWidth: 874,
+            resolvedContainerWidth: 874
+        ) == 0)
+    }
+
+    @Test("Rotated compact notification overlay does not collapse to window short side")
+    func rotatedCompactNotificationOverlayDoesNotCollapseToWindowShortSide() throws {
+        let chatViewPath = URL(filePath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appending(path: "Clawline/Views/Chat/ChatView.swift")
+        let source = try String(contentsOf: chatViewPath, encoding: .utf8)
+
+        #expect(!source.contains("min($0.width, $0.height)"))
+    }
+
     @Test("T1185 Spatial notification stack uses resolved window width before capping")
     func spatialNotificationStackUsesResolvedWindowWidthBeforeCapping() {
         let resolvedWidth = CrossChatNotificationGeometry.spatialOverlayContainerWidth(

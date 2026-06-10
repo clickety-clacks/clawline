@@ -1198,12 +1198,16 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
 
         let markdownStyle = Self.markdownStyle(for: sizeClass, metrics: metrics)
         let markdownContent = UnifiedMarkdownRenderer.makeContent(
-            presentation: presentation,
+            messageText: message.content,
+            context: MarkdownMessageRenderContext(
+                role: message.role,
+                messageID: message.id,
+                metrics: metrics
+            ),
             baseFont: markdownStyle.baseFont,
             inkColor: contentColor,
             lineSpacing: markdownStyle.lineSpacing,
             stripDetectedURLs: false,
-            role: message.role,
             isDark: effectiveIsDark
         )
 
@@ -2011,7 +2015,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
     @objc private func handleBodyTap(_ recognizer: UITapGestureRecognizer) {
         if recognizer.state == .ended,
            let generatedLink = Self.generatedTextLink(in: bodyLabel, at: recognizer.location(in: bodyLabel)) {
-            _ = GeneratedTextLinkActivationRouter.activateGeneratedLink(
+            _ = GeneratedTextLinkActivationRouter.activateGeneratedLinkTap(
                 generatedLink.url,
                 displayMode: generatedLink.displayMode,
                 from: bodyLabel
@@ -2160,7 +2164,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
     ) -> UIAction? {
         UnifiedMarkdownRenderer.primaryActionForTextItem(textItem, defaultAction: defaultAction) { tappedURL, characterRange in
             if TextLinkURLTemplateRules.isGeneratedLink(in: textView.attributedText, characterRange: characterRange) {
-                _ = GeneratedTextLinkActivationRouter.activateGeneratedLink(
+                _ = GeneratedTextLinkActivationRouter.activateGeneratedLinkTap(
                     tappedURL,
                     displayMode: TextLinkURLTemplateRules.displayMode(in: textView.attributedText, characterRange: characterRange),
                     from: textView
@@ -2180,7 +2184,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         guard TextLinkURLTemplateRules.isGeneratedLink(in: textView.attributedText, characterRange: characterRange) else {
             return true
         }
-        _ = GeneratedTextLinkActivationRouter.activateGeneratedLink(
+        _ = GeneratedTextLinkActivationRouter.activateGeneratedLinkTap(
             URL,
             displayMode: TextLinkURLTemplateRules.displayMode(in: textView.attributedText, characterRange: characterRange),
             from: textView
@@ -2280,12 +2284,20 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         if let reference = currentReplyReference {
             let label = reference.preview.isEmpty ? reference.tokenLabel : reference.preview
             let font = UIFont.clawline(.timestamp)
-            replyIndicatorTextView.attributedText = UnifiedMarkdownRenderer.renderNSAttributedString(
-                markdown: MessageReferenceMarkdownDisplay.renderableMarkdown(label),
+            let content = UnifiedMarkdownRenderer.makeContent(
+                messageText: MessageReferenceMarkdownDisplay.renderableMarkdown(label),
+                context: MarkdownMessageRenderContext(
+                    role: .user,
+                    messageID: "reply-reference-\(reference.id.uuidString)",
+                    metrics: ChatFlowTheme.Metrics(isCompact: true)
+                ),
                 baseFont: font,
                 inkColor: UIColor.label,
-                lineSpacing: 1
-            ) ?? NSAttributedString(
+                lineSpacing: 1,
+                stripDetectedURLs: false,
+                isDark: traitCollection.userInterfaceStyle == .dark
+            )
+            replyIndicatorTextView.attributedText = content.firstAttributedText ?? NSAttributedString(
                 string: label,
                 attributes: [
                     .font: font,

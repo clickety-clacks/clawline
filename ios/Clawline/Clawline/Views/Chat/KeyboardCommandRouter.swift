@@ -492,7 +492,7 @@ enum KeyboardCommandBridge {
         return (0..<min(visibleCount, 10)).flatMap { index in
             [
                 KeyCommandSpec(input: "\(index)", modifierFlags: [.command], intent: .notificationAssignedOpen(index)),
-                KeyCommandSpec(input: "\(index)", modifierFlags: [.command, .shift], intent: .notificationAssignedReply(index)),
+                KeyCommandSpec(input: "\(index)", modifierFlags: [.command, .alternate], intent: .notificationAssignedReply(index)),
                 KeyCommandSpec(input: "\(index)", modifierFlags: [.command, .shift, .alternate], intent: .notificationAssignedDismiss(index))
             ]
         }
@@ -553,7 +553,7 @@ enum KeyboardCommandBridge {
             switch filteredModifiers {
             case [.command]:
                 return .notificationAssignedOpen(index)
-            case [.command, .shift]:
+            case [.command, .alternate]:
                 return .notificationAssignedReply(index)
             case [.command, .shift, .alternate]:
                 return .notificationAssignedDismiss(index)
@@ -564,7 +564,7 @@ enum KeyboardCommandBridge {
 
         if let shiftedIndex = shiftedNumberIndex(normalizedInput) {
             switch filteredModifiers {
-            case [.command, .shift]:
+            case [.command, .alternate]:
                 return .notificationAssignedReply(shiftedIndex)
             case [.command, .shift, .alternate]:
                 return .notificationAssignedDismiss(shiftedIndex)

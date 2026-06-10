@@ -1249,7 +1249,6 @@ struct BubbleScrollTests {
         }
         return MessagePresentation(
             parts: filtered,
-            markdownRenderPlan: presentation.markdownRenderPlan,
             wordCount: presentation.wordCount,
             hasTextualContent: presentation.hasTextualContent,
             isEmojiOnly: presentation.isEmojiOnly,

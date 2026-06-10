@@ -17,7 +17,7 @@ struct UnifiedMarkdownRendererMarkTests {
     @Test("Markdown mark syntax applies rust color and skips inline code")
     func markSyntaxLightModeSkipsInlineCode() {
         let rust = SalientHighlightApplier.highlightColor(isDark: false)
-        let rendered = UnifiedMarkdownRenderer.renderNSAttributedString(
+        let rendered = attributedMarkdownForTests(
             markdown: "Alpha ==focus== and `==literal==`.",
             baseFont: UIFont.systemFont(ofSize: 15, weight: .regular),
             inkColor: .black,
@@ -45,7 +45,7 @@ struct UnifiedMarkdownRendererMarkTests {
     @Test("Markdown mark syntax applies muted gold in dark mode")
     func markSyntaxDarkModeColor() {
         let mutedGold = SalientHighlightApplier.highlightColor(isDark: true)
-        let rendered = UnifiedMarkdownRenderer.renderNSAttributedString(
+        let rendered = attributedMarkdownForTests(
             markdown: "==focus==",
             baseFont: UIFont.systemFont(ofSize: 15, weight: .regular),
             inkColor: .white,
@@ -62,27 +62,10 @@ struct UnifiedMarkdownRendererMarkTests {
         #expect(rgb(rendered, at: 0) == RGB(red: 217, green: 175, blue: 98))
     }
 
-    @Test("UnifiedMarkdownRenderer only applies markdown highlights when enabled")
-    func unifiedMarkdownRendererHighlightToggle() {
-        let presentation = MessagePresentation(
-            parts: [.markdown("==focus==")],
-            markdownRenderPlan: MarkdownRenderPlan(
-                blocks: [.richText(markdownSource: "==focus==")],
-                plainTextForMetrics: "focus",
-                containsTextualContent: true,
-                isEmojiOnly: false
-            ),
-            wordCount: 1,
-            hasTextualContent: true,
-            isEmojiOnly: false,
-            hasMediaOnly: false,
-            detectedURLs: [],
-            detectedURLCount: 0,
-            hasSingleURL: false
-        )
-
-        let disabled = UnifiedMarkdownRenderer.render(
-            plan: presentation.markdownRenderPlan,
+    @Test("UnifiedMarkdownRenderer strips mark delimiters without assistant highlight color")
+    func unifiedMarkdownRendererStripsMarkDelimitersWithoutHighlightColor() {
+        let disabled = renderMarkdownForTests(
+            markdown: "==focus==",
             options: MarkdownRenderOptions(
                 baseFont: UIFont.systemFont(ofSize: 15, weight: .regular),
                 inkColor: .black,
@@ -96,17 +79,18 @@ struct UnifiedMarkdownRendererMarkTests {
             Issue.record("Expected attributed text block")
             return
         }
-        #expect(disabledText.string == "==focus==")
+        #expect(disabledText.string == "focus")
 
-        let enabled = UnifiedMarkdownRenderer.render(
-            plan: presentation.markdownRenderPlan,
+        let enabled = renderMarkdownForTests(
+            markdown: "==focus==",
             options: MarkdownRenderOptions(
                 baseFont: UIFont.systemFont(ofSize: 15, weight: .regular),
                 inkColor: .black,
                 lineSpacing: 4,
                 stripDetectedURLs: false,
                 markHighlightColor: rustColor(isDark: false)
-            )
+            ),
+            role: .assistant
         )
         guard case .attributedText(let enabledText)? = enabled.first else {
             Issue.record("Expected attributed text block")
@@ -137,20 +121,22 @@ struct UnifiedMarkdownRendererMarkTests {
 
         #expect(presentation.parts.contains(where: { part in
             if case .markdown(let value) = part {
-                return value == "Alpha ==focus== beta"
+                return value == "Alpha focus beta"
             }
             return false
         }))
 
-        let rendered = UnifiedMarkdownRenderer.render(
-            plan: presentation.markdownRenderPlan,
+        let rendered = renderMarkdownForTests(
+            markdown: message.content,
             options: MarkdownRenderOptions(
                 baseFont: UIFont.systemFont(ofSize: 15, weight: .regular),
                 inkColor: .black,
                 lineSpacing: 4,
                 stripDetectedURLs: false,
                 markHighlightColor: rustColor(isDark: false)
-            )
+            ),
+            role: message.role,
+            messageID: message.id
         )
         guard case .attributedText(let renderedText)? = rendered.first else {
             Issue.record("Expected attributed text block")
@@ -175,20 +161,19 @@ struct UnifiedMarkdownRendererMarkTests {
             sessionKey: "agent:main:clawline:user:main",
             replyToMessageId: "llm_reply_target"
         )
-        var state = StreamingTableParseState()
-        let presentation = MessagePresentationBuilder.build(
-            from: message,
-            metrics: ChatFlowTheme.Metrics(isCompact: true),
-            streamingState: &state
-        )
+        let metrics = ChatFlowTheme.Metrics(isCompact: true)
 
         let content = UnifiedMarkdownRenderer.makeContent(
-            presentation: presentation,
+            messageText: message.content,
+            context: MarkdownMessageRenderContext(
+                role: message.role,
+                messageID: message.id,
+                metrics: metrics
+            ),
             baseFont: UIFont.systemFont(ofSize: 15, weight: .regular),
             inkColor: .black,
             lineSpacing: 4,
             stripDetectedURLs: false,
-            role: message.role,
             isDark: false
         )
 
@@ -203,10 +188,34 @@ struct UnifiedMarkdownRendererMarkTests {
         #expect(rgb(renderedText, at: rootCauseRange.location) == RGB(red: 158, green: 62, blue: 28))
     }
 
+    @Test("User bubble production renderer strips raw mark delimiters")
+    func userBubbleProductionRendererStripsRawMarkDelimiters() {
+        let rendered = renderedMessageText(role: .user, content: "Please keep ==this== clean.")
+
+        #expect(rendered == "Please keep this clean.")
+        #expect(!rendered.contains("=="))
+    }
+
+    @Test("Assistant bubble production renderer strips raw mark delimiters")
+    func assistantBubbleProductionRendererStripsRawMarkDelimiters() {
+        let rendered = renderedMessageText(role: .assistant, content: "Assistant keeps ==this== clean.")
+
+        #expect(rendered == "Assistant keeps this clean.")
+        #expect(!rendered.contains("=="))
+    }
+
+    @Test("Reply reference production renderer strips raw mark delimiters")
+    func replyReferenceProductionRendererStripsRawMarkDelimiters() {
+        let rendered = MessageReferenceTextAttachment.debugRenderedTokenLabelForTests("Reply to ==this==")
+
+        #expect(rendered.string == "Reply to this")
+        #expect(!rendered.string.contains("=="))
+    }
+
     @Test("Link spans stop before trailing backticks in assistant markdown rendering")
     func assistantMarkdownRenderingTrimsBacktickLinkSpan() {
         let rust = SalientHighlightApplier.highlightColor(isDark: false)
-        let rendered = UnifiedMarkdownRenderer.renderNSAttributedString(
+        let rendered = attributedMarkdownForTests(
             markdown: "http://tars:18800/www/tracker-dashboard.html`",
             baseFont: UIFont.systemFont(ofSize: 15, weight: .regular),
             inkColor: .black,
@@ -232,7 +241,7 @@ struct UnifiedMarkdownRendererMarkTests {
     @Test("Inline-code URLs remain tappable in assistant markdown rendering")
     func assistantMarkdownRenderingKeepsInlineCodeURLsTappable() {
         let rust = SalientHighlightApplier.highlightColor(isDark: false)
-        let rendered = UnifiedMarkdownRenderer.renderNSAttributedString(
+        let rendered = attributedMarkdownForTests(
             markdown: "Visit `https://example.com/path` now",
             baseFont: UIFont.systemFont(ofSize: 15, weight: .regular),
             inkColor: .black,
@@ -257,7 +266,7 @@ struct UnifiedMarkdownRendererMarkTests {
     @Test("Link spans stop before assistant mark delimiters")
     func assistantMarkdownRenderingStopsLinkSpanAtMarkDelimiter() {
         let rust = SalientHighlightApplier.highlightColor(isDark: false)
-        let rendered = UnifiedMarkdownRenderer.renderNSAttributedString(
+        let rendered = attributedMarkdownForTests(
             markdown: "http://example.com==nice==",
             baseFont: UIFont.systemFont(ofSize: 15, weight: .regular),
             inkColor: .black,
@@ -287,7 +296,7 @@ struct UnifiedMarkdownRendererMarkTests {
     @Test("Link spans stop before adjacent assistant mark delimiters without whitespace")
     func assistantMarkdownRenderingStopsLinkSpanAtAdjacentMarkDelimiter() {
         let rust = SalientHighlightApplier.highlightColor(isDark: false)
-        let rendered = UnifiedMarkdownRenderer.renderNSAttributedString(
+        let rendered = attributedMarkdownForTests(
             markdown: "http://example.com==text==",
             baseFont: UIFont.systemFont(ofSize: 15, weight: .regular),
             inkColor: .black,
@@ -318,7 +327,7 @@ struct UnifiedMarkdownRendererMarkTests {
     func assistantMarkdownRenderingPreservesURLsContainingDoubleEquals() {
         let rust = SalientHighlightApplier.highlightColor(isDark: false)
         let url = "https://example.com/path?token=YWJjZA=="
-        let rendered = UnifiedMarkdownRenderer.renderNSAttributedString(
+        let rendered = attributedMarkdownForTests(
             markdown: url,
             baseFont: UIFont.systemFont(ofSize: 15, weight: .regular),
             inkColor: .black,
@@ -342,6 +351,45 @@ struct UnifiedMarkdownRendererMarkTests {
 
     private func rustColor(isDark: Bool) -> UIColor {
         SalientHighlightApplier.highlightColor(isDark: isDark)
+    }
+
+    private func renderedMessageText(role: Message.Role, content: String) -> String {
+        let message = Message(
+            id: "mark-\(role)",
+            role: role,
+            content: content,
+            timestamp: Date(),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: "agent:main:clawline:user:main"
+        )
+        var state = StreamingTableParseState()
+        let metrics = ChatFlowTheme.Metrics(isCompact: true)
+        let presentation = MessagePresentationBuilder.build(
+            from: message,
+            metrics: metrics,
+            streamingState: &state
+        )
+        let content = UnifiedMarkdownRenderer.makeContent(
+            messageText: message.content,
+            context: MarkdownMessageRenderContext(
+                role: role,
+                messageID: message.id,
+                metrics: metrics
+            ),
+            baseFont: UIFont.systemFont(ofSize: 15, weight: .regular),
+            inkColor: .black,
+            lineSpacing: 4,
+            stripDetectedURLs: false,
+            isDark: false
+        )
+        return content.renderedBlocks.compactMap { block -> String? in
+            if case .attributedText(let attributed) = block {
+                return attributed.string
+            }
+            return nil
+        }.joined(separator: "\n\n")
     }
 
     private func rgb(_ attributed: NSAttributedString, at index: Int) -> RGB? {

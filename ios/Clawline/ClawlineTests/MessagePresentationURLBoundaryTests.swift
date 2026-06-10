@@ -8,6 +8,7 @@ import Foundation
 import UIKit
 @testable import Clawline
 
+@Suite(.serialized)
 struct MessagePresentationURLBoundaryTests {
     @Test("Direct image URL content renders as remote image media")
     func directImageURLContentRendersAsRemoteImageMedia() {
@@ -27,7 +28,10 @@ struct MessagePresentationURLBoundaryTests {
         #expect(presentation.detectedURLs.isEmpty)
         #expect(presentation.hasMediaOnly)
         #expect(!presentation.hasTextualContent)
-        #expect(presentation.markdownRenderPlan.blocks.isEmpty)
+        #expect(!presentation.parts.contains(where: { part in
+            if case .markdown = part { return true }
+            return false
+        }))
     }
 
     @Test("Direct image URL preserves caption text without URL markdown")
@@ -108,7 +112,10 @@ struct MessagePresentationURLBoundaryTests {
         #expect(attachment.data == Data(base64Encoded: Self.onePixelPNGBase64))
         #expect(presentation.hasMediaOnly)
         #expect(!presentation.hasTextualContent)
-        #expect(presentation.markdownRenderPlan.blocks.isEmpty)
+        #expect(!presentation.parts.contains(where: { part in
+            if case .markdown = part { return true }
+            return false
+        }))
     }
 
     @Test("Inline image data URL suppresses generated attachment summary text")
@@ -195,6 +202,64 @@ struct MessagePresentationURLBoundaryTests {
             return false
         }))
         #expect(presentation.detectedURLs.map { $0.absoluteString } == [url])
+    }
+
+    @Test("Markdown link hrefs still render as link previews")
+    func markdownLinkHrefsStillRenderAsLinkPreviews() {
+        let url = "https://example.com/ticker/latest.html"
+        let presentation = buildPresentation(content: "[Ticker update](\(url))")
+
+        #expect(presentation.parts.contains(where: { part in
+            if case .linkPreview(let detected) = part {
+                return detected.absoluteString == url
+            }
+            return false
+        }))
+        #expect(presentation.detectedURLs.map { $0.absoluteString } == [url])
+    }
+
+    @Test("Mixed image media and Markdown link href keeps non-image card URL")
+    func mixedImageMediaAndMarkdownLinkHrefKeepsNonImageCardURL() {
+        let imageURL = "https://example.com/ticker/latest.png"
+        let linkURL = "https://example.com/ticker/latest.html"
+        let presentation = buildPresentation(content: "Ticker update\n\(imageURL)\n[Details](\(linkURL))")
+
+        #expect(presentation.parts.contains(where: { part in
+            if case .remoteImage(let url) = part {
+                return url.absoluteString == imageURL
+            }
+            return false
+        }))
+        #expect(presentation.detectedURLs.map { $0.absoluteString } == [linkURL])
+        #expect(!presentation.detectedURLs.map(\.absoluteString).contains(imageURL))
+        #expect(presentation.parts.contains(where: { part in
+            if case .markdown(let text) = part {
+                return text.contains("Ticker update") && text.contains("Details")
+            }
+            return false
+        }))
+    }
+
+    @Test("Generated text link rule URLs stay out of detected card URLs")
+    @MainActor
+    func generatedTextLinkRuleURLsStayOutOfDetectedCardURLs() {
+        let originalRules = TextLinkURLTemplateRules.configuredRules
+        TextLinkURLTemplateRules.configuredRules = [.janusTrackerExample]
+        defer { TextLinkURLTemplateRules.configuredRules = originalRules }
+
+        let presentation = buildPresentation(content: "Review T1201.")
+
+        #expect(presentation.detectedURLs.isEmpty)
+        #expect(!presentation.parts.contains(where: { part in
+            if case .linkPreview = part { return true }
+            return false
+        }))
+        #expect(presentation.parts.contains(where: { part in
+            if case .markdown(let text) = part {
+                return text == "Review T1201."
+            }
+            return false
+        }))
     }
 
     @Test("Direct image URLs inside code blocks stay code")

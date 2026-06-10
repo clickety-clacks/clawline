@@ -167,9 +167,9 @@ struct DictationCoordinatorTests {
         #expect(!coordinator.isListening)
     }
 
-    @Test("Stream switch while listening deterministically stops listening")
+    @Test("Stream switch while listening rebinds transcript to current chat")
     @MainActor
-    func streamSwitchStopsListeningDeterministically() async {
+    func streamSwitchWhileListeningRebindsTranscriptToCurrentChat() async {
         let harness = DictationTestHarness()
         let coordinator = harness.makeCoordinator()
 
@@ -183,7 +183,9 @@ struct DictationCoordinatorTests {
         #expect(coordinator.isListening)
         await waitUntil { harness.client.connected }
 
+        let originalSessionKey = harness.host.activeSessionKey
         let newSessionKey = "agent:main:test:switched"
+        harness.host.setText("", for: newSessionKey)
         harness.host.activeSessionKey = newSessionKey
         coordinator.updateContext(
             sessionKey: newSessionKey,
@@ -192,7 +194,6 @@ struct DictationCoordinatorTests {
             reduceMotionEnabled: false
         )
 
-        // If streaming events arrive while session keys are mismatched, we should still stop listening.
         harness.client.emit(
             .response(
                 SonioxStreamingResponse(
@@ -204,18 +205,261 @@ struct DictationCoordinatorTests {
             )
         )
 
-        await waitUntil(timeoutMs: 1_500) {
-            !coordinator.isListening
-                && harness.client.finalized
-                && !harness.client.closeCalls.isEmpty
-                && harness.analytics.stopEvents.contains(where: { $0.reason == "stream_switch" })
+        await waitUntil {
+            harness.host.currentText(for: newSessionKey) == "hello"
         }
-        #expect(!coordinator.isListening)
+
+        #expect(coordinator.isListening)
         #expect(coordinator.isSurfaceOpen)
         #expect(coordinator.isDictationActive)
-        #expect(harness.analytics.stopEvents.contains(where: { $0.reason == "stream_switch" }))
-        #expect(harness.client.finalized)
-        #expect(harness.client.closeCalls.count >= 1)
+        #expect(harness.host.currentText(for: newSessionKey) == "hello")
+        #expect(harness.host.currentText(for: originalSessionKey).isEmpty)
+        #expect(!harness.analytics.stopEvents.contains(where: { $0.reason == "stream_switch" }))
+        #expect(!harness.client.finalized)
+        #expect(harness.client.closeCalls.isEmpty)
+    }
+
+    @Test("Stream switch into reused composer restores current chat before next token")
+    @MainActor
+    func streamSwitchIntoReusedComposerRestoresCurrentChatBeforeNextToken() async {
+        let harness = DictationTestHarness()
+        let coordinator = harness.makeCoordinator()
+        let textView = PastableTextView()
+        let editorDelegate = MockEditorBindingDelegate(host: harness.host)
+        textView.delegate = editorDelegate
+        textView.attributedText = NSAttributedString(string: "")
+        coordinator.setComposeTextView(textView)
+
+        coordinator.updateContext(
+            sessionKey: harness.host.activeSessionKey,
+            composeIsEmpty: true,
+            textFieldFocused: true,
+            reduceMotionEnabled: false
+        )
+
+        coordinator.startStickyDictation()
+        await waitUntil { coordinator.isListening }
+        #expect(coordinator.isListening)
+        await waitUntil { harness.client.connected }
+
+        harness.client.emit(
+            .response(
+                SonioxStreamingResponse(
+                    tokens: [SonioxTranscriptToken(text: "first ", isFinal: false)],
+                    finished: false,
+                    errorCode: nil,
+                    errorMessage: nil
+                )
+            )
+        )
+
+        await waitUntil {
+            textView.attributedText.string == "first"
+        }
+
+        let previousSessionKey = harness.host.activeSessionKey
+        let loadedSessionKey = "agent:main:test:loaded"
+        harness.host.setText("loaded draft ", for: loadedSessionKey)
+        harness.host.activeSessionKey = loadedSessionKey
+        textView.attributedText = NSAttributedString(string: "loaded draft ")
+        textView.selectedRange = NSRange(location: textView.attributedText.length, length: 0)
+        coordinator.setComposeTextView(textView)
+        coordinator.updateContext(
+            sessionKey: loadedSessionKey,
+            composeIsEmpty: false,
+            textFieldFocused: true,
+            reduceMotionEnabled: false
+        )
+
+        #expect(textView.attributedText.string == "loaded draft ")
+
+        harness.client.emit(
+            .response(
+                SonioxStreamingResponse(
+                    tokens: [SonioxTranscriptToken(text: "hello", isFinal: false)],
+                    finished: false,
+                    errorCode: nil,
+                    errorMessage: nil
+                )
+            )
+        )
+
+        await waitUntil {
+            textView.attributedText.string == "loaded draft hello"
+        }
+
+        #expect(coordinator.isListening)
+        #expect(coordinator.isSurfaceOpen)
+        #expect(coordinator.isDictationActive)
+        #expect(textView.attributedText.string == "loaded draft hello")
+        #expect(harness.host.currentText(for: loadedSessionKey) == "loaded draft hello")
+        #expect(harness.host.currentText(for: loadedSessionKey).components(separatedBy: "loaded draft ").count == 2)
+        #expect(harness.host.currentText(for: previousSessionKey) == "first ")
+        #expect(!harness.analytics.stopEvents.contains(where: { $0.reason == "stream_switch" }))
+        #expect(!harness.client.finalized)
+        #expect(harness.client.closeCalls.isEmpty)
+    }
+
+    @Test("Stream switch keeps same normal composer and anchors future tokens to selected chat")
+    @MainActor
+    func streamSwitchWithStableComposerAnchorsFutureTokensToSelectedChat() async {
+        let harness = DictationTestHarness()
+        let coordinator = harness.makeCoordinator()
+        let textView = PastableTextView()
+        let editorDelegate = MockEditorBindingDelegate(host: harness.host)
+        textView.delegate = editorDelegate
+        textView.attributedText = NSAttributedString(string: "")
+        coordinator.setComposeTextView(textView)
+
+        coordinator.updateContext(
+            sessionKey: harness.host.activeSessionKey,
+            composeIsEmpty: true,
+            textFieldFocused: true,
+            reduceMotionEnabled: false
+        )
+
+        coordinator.startStickyDictation()
+        await waitUntil { coordinator.isListening }
+        await waitUntil { harness.client.connected }
+
+        harness.client.emit(
+            .response(
+                SonioxStreamingResponse(
+                    tokens: [SonioxTranscriptToken(text: "old ", isFinal: false)],
+                    finished: false,
+                    errorCode: nil,
+                    errorMessage: nil
+                )
+            )
+        )
+
+        await waitUntil {
+            harness.host.currentText(for: harness.host.activeSessionKey) == "old "
+        }
+
+        let originalSessionKey = harness.host.activeSessionKey
+        let selectedSessionKey = "agent:main:test:selected-stable"
+        harness.host.setText("destination draft ", for: selectedSessionKey)
+        harness.host.currentComposeSessionKey = selectedSessionKey
+        textView.attributedText = NSAttributedString(string: "destination draft ")
+        coordinator.setComposeTextView(textView)
+
+        coordinator.updateContext(
+            sessionKey: selectedSessionKey,
+            composeIsEmpty: false,
+            textFieldFocused: true,
+            reduceMotionEnabled: false
+        )
+
+        harness.client.emit(
+            .response(
+                SonioxStreamingResponse(
+                    tokens: [SonioxTranscriptToken(text: "old future", isFinal: false)],
+                    finished: false,
+                    errorCode: nil,
+                    errorMessage: nil
+                )
+            )
+        )
+
+        await waitUntil {
+            harness.host.currentText(for: selectedSessionKey) == "destination draft future"
+        }
+
+        #expect(harness.host.activeSessionKey == originalSessionKey)
+        #expect(coordinator.isListening)
+        #expect(textView.attributedText.string == "destination draft future")
+        #expect(harness.host.currentText(for: selectedSessionKey) == "destination draft future")
+        #expect(harness.host.currentText(for: selectedSessionKey).components(separatedBy: "destination draft ").count == 2)
+        #expect(harness.host.currentText(for: originalSessionKey) == "old ")
+        #expect(!harness.host.currentText(for: selectedSessionKey).contains("old"))
+        #expect(!harness.analytics.stopEvents.contains(where: { $0.reason == "stream_switch" }))
+        #expect(!harness.client.finalized)
+        #expect(harness.client.closeCalls.isEmpty)
+    }
+
+    @Test("Stream switch through stable composer does not write previous session")
+    @MainActor
+    func streamSwitchThroughStableComposerDoesNotWritePreviousSession() async {
+        let harness = DictationTestHarness()
+        let coordinator = harness.makeCoordinator()
+        let originalTextView = PastableTextView()
+        let editorDelegate = MockEditorBindingDelegate(host: harness.host)
+        originalTextView.delegate = editorDelegate
+        originalTextView.attributedText = NSAttributedString(string: "")
+        coordinator.setComposeTextView(originalTextView)
+
+        coordinator.updateContext(
+            sessionKey: harness.host.activeSessionKey,
+            composeIsEmpty: true,
+            textFieldFocused: true,
+            reduceMotionEnabled: false
+        )
+
+        coordinator.startStickyDictation()
+        await waitUntil { coordinator.isListening }
+        await waitUntil { harness.client.connected }
+
+        harness.client.emit(
+            .response(
+                SonioxStreamingResponse(
+                    tokens: [SonioxTranscriptToken(text: "first ", isFinal: false)],
+                    finished: false,
+                    errorCode: nil,
+                    errorMessage: nil
+                )
+            )
+        )
+
+        await waitUntil {
+            originalTextView.attributedText.string == "first"
+        }
+
+        let previousSessionKey = harness.host.activeSessionKey
+        let loadedSessionKey = "agent:main:test:loaded-stale"
+        harness.host.setText("loaded draft ", for: loadedSessionKey)
+        harness.host.activeSessionKey = loadedSessionKey
+        originalTextView.attributedText = NSAttributedString(string: "loaded draft ")
+        originalTextView.selectedRange = NSRange(location: originalTextView.attributedText.length, length: 0)
+        coordinator.setComposeTextView(originalTextView)
+        coordinator.updateContext(
+            sessionKey: loadedSessionKey,
+            composeIsEmpty: false,
+            textFieldFocused: true,
+            reduceMotionEnabled: false
+        )
+
+        harness.client.emit(
+            .response(
+                SonioxStreamingResponse(
+                    tokens: [SonioxTranscriptToken(text: "first hello", isFinal: false)],
+                    finished: false,
+                    errorCode: nil,
+                    errorMessage: nil
+                )
+            )
+        )
+
+        await waitUntil {
+            harness.host.currentText(for: loadedSessionKey) == "loaded draft hello"
+        }
+
+        #expect(originalTextView.attributedText.string == "loaded draft hello")
+        #expect(harness.host.currentText(for: previousSessionKey) == "first ")
+        #expect(harness.host.currentText(for: loadedSessionKey) == "loaded draft hello")
+        #expect(!harness.host.currentText(for: loadedSessionKey).contains("first"))
+
+        let loadedTextView = PastableTextView()
+        loadedTextView.delegate = editorDelegate
+        loadedTextView.attributedText = NSAttributedString(
+            string: harness.host.currentText(for: loadedSessionKey)
+        )
+        coordinator.setComposeTextView(loadedTextView)
+
+        #expect(loadedTextView.attributedText.string == "loaded draft hello")
+        #expect(coordinator.isListening)
+        #expect(coordinator.isSurfaceOpen)
+        #expect(coordinator.isDictationActive)
     }
 
     @Test("Flick-up sticky honors activation eligibility captured at gesture begin")
@@ -308,6 +552,24 @@ struct DictationCoordinatorTests {
 
         #expect(intent == .endWalkieAndCollapse)
         #expect(motion.pendingCommit?.target == .closed)
+    }
+
+    @Test("Swipe activation remains disabled until a compose target is known")
+    @MainActor
+    func swipeActivationRequiresKnownComposeTarget() {
+        let harness = DictationTestHarness()
+        let coordinator = harness.makeCoordinator()
+
+        #expect(!coordinator.swipeActivationEnabled)
+
+        coordinator.updateContext(
+            sessionKey: harness.host.activeSessionKey,
+            composeIsEmpty: true,
+            textFieldFocused: false,
+            reduceMotionEnabled: false
+        )
+
+        #expect(coordinator.swipeActivationEnabled)
     }
 
     @Test("Token inactivity timeout stops dictation")
@@ -544,9 +806,9 @@ struct DictationCoordinatorTests {
         }
     }
 
-    @Test("Send while active preserves dictation state and still sends current draft")
+    @Test("Send while active clears submitted normal composer draft and preserves dictation state")
     @MainActor
-    func sendWhileActiveTimeoutSendsCurrentText() async {
+    func sendWhileActiveClearsSubmittedNormalComposerDraft() async {
         let harness = DictationTestHarness(
             timing: DictationTiming(
                 maxSessionDuration: .seconds(30),
@@ -556,11 +818,15 @@ struct DictationCoordinatorTests {
             )
         )
         let coordinator = harness.makeCoordinator()
+        let textView = PastableTextView()
+        textView.attributedText = NSAttributedString(string: "")
+        textView.selectedRange = NSRange(location: 0, length: 0)
+        coordinator.setComposeTextView(textView)
 
         coordinator.updateContext(
             sessionKey: harness.host.activeSessionKey,
             composeIsEmpty: true,
-            textFieldFocused: false,
+            textFieldFocused: true,
             reduceMotionEnabled: false
         )
 
@@ -579,25 +845,38 @@ struct DictationCoordinatorTests {
         await waitUntil {
             harness.host.currentText(for: harness.host.activeSessionKey) == "hello"
         }
+        #expect(textView.attributedText.string == "hello")
 
         var didSend = false
         coordinator.handleSendTapped {
             didSend = true
+            harness.host.setText("", for: harness.host.activeSessionKey)
+            return true
         }
 
         await waitUntil {
             didSend
         }
+        coordinator.updateContext(
+            sessionKey: harness.host.activeSessionKey,
+            composeIsEmpty: true,
+            textFieldFocused: true,
+            reduceMotionEnabled: false
+        )
 
-        #expect(harness.host.currentText(for: harness.host.activeSessionKey) == "hello")
+        #expect(harness.host.currentText(for: harness.host.activeSessionKey).isEmpty)
+        #expect(textView.attributedText.string.isEmpty)
         #expect(coordinator.isStickyDictationActive)
-        #expect(coordinator.isListening)
+        await waitUntil {
+            !coordinator.isListening
+        }
+        #expect(!coordinator.isListening)
         #expect(harness.analytics.sendWhileActiveEvents.contains(where: { $0.mode == .sticky && $0.sendSuccess }))
     }
 
-    @Test("Submitting while listening resets transcript baseline for repeated next prompts")
+    @Test("Submitting while listening pauses before later transcript tokens can refill composer")
     @MainActor
-    func submitWhileListeningStartsNextPromptFromCleanBaseline() async {
+    func submitWhileListeningPausesBeforeLaterTranscriptTokens() async {
         let harness = DictationTestHarness()
         let coordinator = harness.makeCoordinator()
         let textView = PastableTextView()
@@ -635,46 +914,44 @@ struct DictationCoordinatorTests {
             reduceMotionEnabled: false
         )
 
-        for nextPrompt in ["beta", "gamma", "delta"] {
-            coordinator.handleSendTapped {
-                harness.host.setText("", for: harness.host.activeSessionKey)
-            }
-            coordinator.updateContext(
-                sessionKey: harness.host.activeSessionKey,
-                composeIsEmpty: true,
-                textFieldFocused: true,
-                reduceMotionEnabled: false
-            )
+        coordinator.handleSendTapped {
+            harness.host.setText("", for: harness.host.activeSessionKey)
+            return true
+        }
+        coordinator.updateContext(
+            sessionKey: harness.host.activeSessionKey,
+            composeIsEmpty: true,
+            textFieldFocused: true,
+            reduceMotionEnabled: false
+        )
 
-            await waitUntil {
-                textView.attributedText.string.isEmpty
-            }
-            #expect(coordinator.isListening)
-            #expect(textView.attributedText.string.isEmpty)
+        await waitUntil {
+            textView.attributedText.string.isEmpty && !coordinator.isListening
+        }
+        #expect(textView.attributedText.string.isEmpty)
+        #expect(!coordinator.isListening)
 
-            cumulativeStreamText += nextPrompt
-            harness.client.emit(
-                .response(
-                    SonioxStreamingResponse(
-                        tokens: [SonioxTranscriptToken(text: cumulativeStreamText, isFinal: false)],
-                        finished: false,
-                        errorCode: nil,
-                        errorMessage: nil
-                    )
+        cumulativeStreamText += "beta"
+        harness.client.emit(
+            .response(
+                SonioxStreamingResponse(
+                    tokens: [SonioxTranscriptToken(text: cumulativeStreamText, isFinal: false)],
+                    finished: false,
+                    errorCode: nil,
+                    errorMessage: nil
                 )
             )
+        )
 
-            await waitUntil {
-                textView.attributedText.string == nextPrompt
-            }
-            #expect(textView.attributedText.string == nextPrompt)
-            coordinator.updateContext(
-                sessionKey: harness.host.activeSessionKey,
-                composeIsEmpty: false,
-                textFieldFocused: true,
-                reduceMotionEnabled: false
-            )
+        do {
+            try await Task.sleep(for: .milliseconds(100))
+        } catch is CancellationError {
+            return
+        } catch {
+            return
         }
+        #expect(textView.attributedText.string.isEmpty)
+        #expect(harness.host.currentText(for: harness.host.activeSessionKey).isEmpty)
     }
 
     @Test("Activation queues through teardown and restarts after stop settles")
@@ -1561,8 +1838,13 @@ final class DictationTestHarness {
 @MainActor
 final class MockComposeDraftHost: DictationComposeDraftHosting {
     var activeSessionKey: String = "agent:main:test:main"
+    var currentComposeSessionKey: String?
     private(set) var applySnapshotCallCount = 0
     private var drafts: [String: ComposeDraftSnapshot] = ["agent:main:test:main": .empty]
+
+    func isComposeDraftSessionCurrent(_ sessionKey: String) -> Bool {
+        sessionKey == (currentComposeSessionKey ?? activeSessionKey)
+    }
 
     func captureComposeDraftSnapshot(for sessionKey: String) -> ComposeDraftSnapshot {
         drafts[sessionKey] ?? .empty
@@ -1617,15 +1899,16 @@ final class MockEditorBindingDelegate: NSObject, UITextViewDelegate {
 
     func textViewDidChange(_ textView: UITextView) {
         let content = textView.attributedText ?? NSAttributedString(string: "")
+        let sessionKey = host.currentComposeSessionKey ?? host.activeSessionKey
         let referencedAttachmentIds = Set(content.pendingAttachmentIds())
-        let attachments = host.currentAttachments(for: host.activeSessionKey)
+        let attachments = host.currentAttachments(for: sessionKey)
             .filter { referencedAttachmentIds.contains($0.key) }
         host.setSnapshot(
             ComposeDraftSnapshot(
                 content: content,
                 attachments: attachments
             ),
-            for: host.activeSessionKey
+            for: sessionKey
         )
     }
 }

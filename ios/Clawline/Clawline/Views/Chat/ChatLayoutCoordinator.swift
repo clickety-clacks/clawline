@@ -465,9 +465,6 @@ final class ChatLayoutCoordinator {
 
     static func inputBarBottomGap(keyboardVisibleHeight: CGFloat, surfaceState: ChatInputBarSurfaceState) -> CGFloat {
         let keyboardInsetProgress = min(1, max(0, keyboardVisibleHeight / 24))
-        if keyboardInsetProgress > 0, surfaceState == .closed {
-            return 0
-        }
         if surfaceState == .open {
             return 12
         }

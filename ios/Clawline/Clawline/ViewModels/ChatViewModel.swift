@@ -1646,8 +1646,9 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
         }
     }
 
-    func send() {
-        _ = sendResolved(destinationSessionKey: nil)
+    @discardableResult
+    func send() -> Bool {
+        sendResolved(destinationSessionKey: focusedPromptSendDestinationSessionKey)
     }
 
     @discardableResult
@@ -1661,6 +1662,13 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
             clearInput()
         }
         return didDispatch
+    }
+
+    private var focusedPromptSendDestinationSessionKey: String? {
+        let selected = uiSelectedSessionKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let active = engineActiveSessionKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !selected.isEmpty, selected != active else { return nil }
+        return selected
     }
 
     @discardableResult
@@ -3306,7 +3314,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
     ) {
         _ = moveCursorToEnd
         guard !sessionKey.isEmpty else { return }
-        guard sessionKey == activeSessionKey else { return }
+        guard isComposeDraftSessionCurrent(sessionKey) else { return }
 
         let prefixLength = baseSnapshot.content.length
         let replacementRange = NSRange(location: prefixLength, length: previousTranscriptUTF16Length)
@@ -3338,7 +3346,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
 
     func captureComposeDraftSnapshot(for sessionKey: String) -> ComposeDraftSnapshot {
         guard !sessionKey.isEmpty else { return .empty }
-        guard sessionKey == activeSessionKey else {
+        guard isComposeDraftSessionCurrent(sessionKey) else {
             return ComposeDraftSnapshot(content: NSAttributedString(string: ""), attachments: [:])
         }
         return ComposeDraftSnapshot(content: inputContent, attachments: attachmentData)
@@ -3352,12 +3360,16 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
     ) {
         _ = moveCursorToEnd
         guard !sessionKey.isEmpty else { return }
-        guard sessionKey == activeSessionKey else { return }
+        guard isComposeDraftSessionCurrent(sessionKey) else { return }
         inputContent = snapshot.content
         attachmentData = snapshot.attachments
         if announceEditorReset {
             inputResetToken &+= 1
         }
+    }
+
+    func isComposeDraftSessionCurrent(_ sessionKey: String) -> Bool {
+        sessionKey == activeSessionKey || sessionKey == uiSelectedSessionKey
     }
 
     func presentation(for message: Message, metrics: ChatFlowTheme.Metrics) -> MessagePresentation {

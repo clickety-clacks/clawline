@@ -174,6 +174,28 @@ struct MessageInputBarPanIntentTests {
         )
     }
 
+    @Test("Closed-surface interactive reveal still permits walkie hold arming")
+    func closedSurfaceInteractiveRevealStillPermitsWalkieHoldArming() {
+        #expect(
+            shouldArmWalkieHoldDuringPush(
+                pushGestureStartedWithSurfaceOpen: false,
+                verticallyDominant: true
+            )
+        )
+        #expect(
+            !shouldArmWalkieHoldDuringPush(
+                pushGestureStartedWithSurfaceOpen: true,
+                verticallyDominant: true
+            )
+        )
+        #expect(
+            !shouldArmWalkieHoldDuringPush(
+                pushGestureStartedWithSurfaceOpen: false,
+                verticallyDominant: false
+            )
+        )
+    }
+
     @Test("Editable-region tap-like gesture resolves to text editing")
     func editableRegionTapResolvesToTextEditing() {
         let decision = classifyDictationPanIntent(

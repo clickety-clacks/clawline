@@ -1440,7 +1440,15 @@ struct ChatView: View {
                     actionMenuSourceChatId: $crossChatNotificationActionMenuSourceChatId,
                     focusedSourceChatId: $crossChatNotificationFocusedSourceChatId,
                     focusedReplySourceChatId: $crossChatNotificationFocusedReplySourceChatId,
-                    keyboardOwnershipStore: keyboardOwnershipStore
+                    keyboardOwnershipStore: keyboardOwnershipStore,
+                    dictationEmitter: dictationInteractionEmitter,
+                    onNotificationReplyDictationTargetChange: { sourceChatId, textView in
+                        reportNotificationReplyDictationTarget(
+                            sourceChatId: sourceChatId,
+                            textView: textView,
+                            viewModel: viewModel
+                        )
+                    }
                 )
                 .offset(x: notificationOverlayHorizontalCorrection)
             }
@@ -1567,6 +1575,7 @@ struct ChatView: View {
         .onChange(of: viewModel.engineActivationCompletedSequence) { _, _ in
             guard let completedSessionKey = viewModel.lastEngineActivationSessionKey else { return }
             restoreComposerFocusAfterCompletedStreamSwitchIfNeeded(for: completedSessionKey)
+            reportDictationObservations(viewModel: viewModel)
             guard streamToastManager.isVisible, streamToastManager.sessionKey == completedSessionKey else { return }
             scheduleStreamToastBusyClear()
         }
@@ -1585,7 +1594,6 @@ struct ChatView: View {
         }
         .onChange(of: isInputFocused) { _, _ in
             layoutRevision &+= 1
-            reportDictationObservations(viewModel: viewModel)
         }
         .onChange(of: dictationMotion.shouldFreezeLayout) { _, isFrozen in
             if !isFrozen {
@@ -2003,12 +2011,50 @@ struct ChatView: View {
     }
 
     private func reportDictationObservations(viewModel: ChatViewModel) {
+        let notificationReplySourceChatId = activeDictationNotificationReplySourceId(viewModel: viewModel)
+        let sessionKey: String
+        let composeIsEmpty: Bool
+        let textFieldFocused: Bool
+        if let notificationReplySourceChatId {
+            sessionKey = notificationReplySourceChatId
+            let replyDraft = viewModel.crossChatNotificationBubblesBySourceChatId[notificationReplySourceChatId]?
+                .replyDraft ?? ""
+            composeIsEmpty = replyDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            textFieldFocused = true
+        } else {
+            sessionKey = normalPromptDictationSessionKey(viewModel: viewModel)
+            composeIsEmpty = viewModel.inputContent.isEffectivelyEmpty
+            textFieldFocused = isInputFocused
+        }
         dictationCoordinator.updateContext(
-            sessionKey: viewModel.activeSessionKey,
-            composeIsEmpty: viewModel.inputContent.isEffectivelyEmpty,
-            textFieldFocused: isInputFocused,
+            sessionKey: sessionKey,
+            composeIsEmpty: composeIsEmpty,
+            textFieldFocused: textFieldFocused,
             reduceMotionEnabled: UIAccessibility.isReduceMotionEnabled,
             contextTerms: dictationContextTerms(viewModel: viewModel)
+        )
+    }
+
+    private func normalPromptDictationSessionKey(viewModel: ChatViewModel) -> String {
+        viewModel.uiSelectedSessionKey.isEmpty ? viewModel.activeSessionKey : viewModel.uiSelectedSessionKey
+    }
+
+    private func reportNotificationReplyDictationTarget(
+        sourceChatId: String,
+        textView: NotificationReplyUITextView?,
+        viewModel: ChatViewModel
+    ) {
+        dictationCoordinator.setComposeTextView(textView)
+        guard crossChatNotificationFocusedReplySourceChatId == sourceChatId || textView == nil else { return }
+        reportDictationObservations(viewModel: viewModel)
+    }
+
+    private func activeDictationNotificationReplySourceId(viewModel: ChatViewModel) -> String? {
+        DictationNotificationReplyTarget.activeSourceId(
+            focusedReplySourceChatId: crossChatNotificationFocusedReplySourceChatId,
+            isReplying: { sourceChatId in
+                viewModel.crossChatNotificationBubblesBySourceChatId[sourceChatId]?.isReplying == true
+            }
         )
     }
 
@@ -2022,6 +2068,31 @@ struct ChatView: View {
                     .filter { !$0.isEmpty }
             )
         )
+    }
+
+    private func submitActiveDictationTarget(viewModel: ChatViewModel) -> Bool {
+        if let notificationReplySourceChatId = activeDictationNotificationReplySourceId(viewModel: viewModel) {
+            return DictationNotificationReplyTarget.submit(
+                sourceChatId: notificationReplySourceChatId,
+                canSend: {
+                    viewModel.canImmediatelySendCrossChatNotificationReply(
+                        sourceChatId: notificationReplySourceChatId
+                    )
+                },
+                submit: {
+                    viewModel.sendCrossChatNotificationReply(sourceChatId: notificationReplySourceChatId)
+                }
+            )
+        }
+        if let resolvedCrossChatMention {
+            let didSend = viewModel.sendCrossChatMention(to: resolvedCrossChatMention.destinationChatId)
+            if didSend {
+                showCrossChatMentionSentToast(resolvedCrossChatMention)
+                removeResolvedCrossChatMention()
+            }
+            return didSend
+        }
+        return viewModel.send()
     }
 
     @MainActor
@@ -2115,7 +2186,9 @@ struct ChatView: View {
         actionMenuSourceChatId: Binding<String?>,
         focusedSourceChatId: Binding<String?>,
         focusedReplySourceChatId: Binding<String?>,
-        keyboardOwnershipStore: KeyboardOwnershipStore
+        keyboardOwnershipStore: KeyboardOwnershipStore,
+        dictationEmitter: DictationInteractionEmitter,
+        onNotificationReplyDictationTargetChange: @escaping (String, NotificationReplyUITextView?) -> Void
     ) -> AnyView {
         AnyView(
             ZStack(alignment: .topTrailing) {
@@ -2135,6 +2208,8 @@ struct ChatView: View {
                     focusedSourceChatId: focusedSourceChatId,
                     focusedReplySourceChatId: focusedReplySourceChatId,
                     keyboardOwnershipStore: keyboardOwnershipStore,
+                    dictationEmitter: dictationEmitter,
+                    onNotificationReplyDictationTargetChange: onNotificationReplyDictationTargetChange,
                     onNavigateToSource: { sourceChatId in
                         navigateToCrossChatNotificationSource(sourceChatId)
                     }
@@ -2412,6 +2487,10 @@ struct ChatView: View {
         let pinnedPageDotsView: AnyView? = pageDotsView
         let pinnedPageDotsGap: CGFloat = floatingPageDotsBottomGap
 #endif
+        let notificationReplySourceChatId = activeDictationNotificationReplySourceId(viewModel: viewModel)
+        let inputCanSend = notificationReplySourceChatId.map {
+            viewModel.canImmediatelySendCrossChatNotificationReply(sourceChatId: $0)
+        } ?? viewModel.canSend
 
         return KeyboardPinnedContainer(
             desiredBottomGap: belowBarGap,
@@ -2441,7 +2520,7 @@ struct ChatView: View {
                 placeholderText: viewModel.activeSessionPlaceholderText,
                 fontScaleChangeSequence: fontScaleChangeSequence,
                 resetToken: viewModel.inputResetToken,
-                canSend: viewModel.canSend,
+                canSend: inputCanSend,
                 isSending: viewModel.isSending,
                 isStagingAttachments: false,
                 connectionStateStore: inputBarSendButtonConnectionState,
@@ -2453,13 +2532,8 @@ struct ChatView: View {
                 isAttachmentMenuPresented: $isAttachmentMenuPresented,
                 onSend: {
                     clearTypingActivity()
-                    if let resolvedCrossChatMention {
-                        if viewModel.sendCrossChatMention(to: resolvedCrossChatMention.destinationChatId) {
-                            showCrossChatMentionSentToast(resolvedCrossChatMention)
-                            removeResolvedCrossChatMention()
-                        }
-                    } else {
-                        dictationCoordinator.handleSendTapped(sendAction: viewModel.send)
+                    dictationCoordinator.handleSendTapped {
+                        submitActiveDictationTarget(viewModel: viewModel)
                     }
                 },
                 onCancel: { viewModel.cancelSend() },
@@ -6486,6 +6560,8 @@ private struct CrossChatNotificationOverlay: View {
     @Binding var focusedSourceChatId: String?
     @Binding var focusedReplySourceChatId: String?
     var keyboardOwnershipStore = KeyboardOwnershipStore()
+    let dictationEmitter: DictationInteractionEmitter
+    let onNotificationReplyDictationTargetChange: (String, NotificationReplyUITextView?) -> Void
     let onNavigateToSource: (String) -> Void
     @State private var showShortcutLabels = CrossChatShortcutLabelAvailability.current
     @State private var actionMenuSelection: CrossChatNotificationActionMenuItem = .goToChat
@@ -6769,6 +6845,22 @@ private struct CrossChatNotificationOverlay: View {
                                 } else {
                                     clearReplyFocus(sourceChatId: bubble.sourceChatId)
                                 }
+                            },
+                            onReplyTextViewChange: { textView in
+                                onNotificationReplyDictationTargetChange(bubble.sourceChatId, textView)
+                            },
+                            onReplySelectionChange: { range in
+                                guard focusedReplySourceChatId == bubble.sourceChatId else { return }
+                                dictationEmitter.emit(.composeSelectionChanged(range))
+                            },
+                            onReplyUserEdit: { range, replacementUTF16Length in
+                                guard focusedReplySourceChatId == bubble.sourceChatId else { return }
+                                dictationEmitter.emit(
+                                    .composeUserEdited(
+                                        range: range,
+                                        replacementUTF16Length: replacementUTF16Length
+                                    )
+                                )
                             },
                             isActionMenuOpen: actionMenuSourceChatId == bubble.sourceChatId,
                             actionMenuSelection: actionMenuSelection,
@@ -7727,6 +7819,9 @@ struct CrossChatNotificationBubbleView: View {
     let onReconnect: () -> Void
     let onActivate: () -> Void
     let onReplyFocusChange: (Bool) -> Void
+    var onReplyTextViewChange: (NotificationReplyUITextView?) -> Void = { _ in }
+    var onReplySelectionChange: (NSRange) -> Void = { _ in }
+    var onReplyUserEdit: (NSRange, Int) -> Void = { _, _ in }
     let isActionMenuOpen: Bool
     let actionMenuSelection: CrossChatNotificationActionMenuItem
     var keyboardOwnershipStore = KeyboardOwnershipStore()
@@ -8069,7 +8164,10 @@ struct CrossChatNotificationBubbleView: View {
                         keyboardOwnershipStore: keyboardOwnershipStore,
                         onSubmit: activateReplySendControl,
                         onCancel: onCancelReply,
-                        onFocusChange: onReplyFocusChange
+                        onFocusChange: onReplyFocusChange,
+                        onTextViewChange: onReplyTextViewChange,
+                        onSelectionChange: onReplySelectionChange,
+                        onUserEdit: onReplyUserEdit
                     )
                         .frame(height: replyFieldHeight)
                         .padding(.horizontal, 10)
@@ -8420,6 +8518,29 @@ enum CrossChatNotificationBubbleSwipeCompletion: Equatable {
     }
 }
 
+enum DictationNotificationReplyTarget {
+    static func activeSourceId(
+        focusedReplySourceChatId: String?,
+        isReplying: (String) -> Bool
+    ) -> String? {
+        guard let sourceChatId = focusedReplySourceChatId,
+              isReplying(sourceChatId) else {
+            return nil
+        }
+        return sourceChatId
+    }
+
+    static func submit(
+        sourceChatId: String,
+        canSend: () -> Bool,
+        submit: () -> Void
+    ) -> Bool {
+        guard !sourceChatId.isEmpty, canSend() else { return false }
+        submit()
+        return true
+    }
+}
+
 enum NotificationReplyTextInputConfiguration {
     static let textContainerInset = UIEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
     static let maximumVisibleLines = 5
@@ -8478,6 +8599,9 @@ struct NotificationReplyTextInput: UIViewRepresentable {
     let onSubmit: () -> Void
     let onCancel: () -> Void
     let onFocusChange: (Bool) -> Void
+    var onTextViewChange: (NotificationReplyUITextView?) -> Void = { _ in }
+    var onSelectionChange: (NSRange) -> Void = { _ in }
+    var onUserEdit: (NSRange, Int) -> Void = { _, _ in }
 
     func makeUIView(context: Context) -> NotificationReplyUITextView {
         let textView = NotificationReplyUITextView()
@@ -8494,6 +8618,7 @@ struct NotificationReplyTextInput: UIViewRepresentable {
             visibleNotificationCount: visibleNotificationCount
         )
         textView.text = text
+        onTextViewChange(textView)
         return textView
     }
 
@@ -8514,6 +8639,11 @@ struct NotificationReplyTextInput: UIViewRepresentable {
         }
         context.coordinator.updateHeight(for: textView)
         textView.focusIfNeeded()
+        onTextViewChange(textView)
+    }
+
+    static func dismantleUIView(_ uiView: NotificationReplyUITextView, coordinator: Coordinator) {
+        coordinator.parent.onTextViewChange(nil)
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, uiView: NotificationReplyUITextView, context: Context) -> CGSize? {
@@ -8547,14 +8677,23 @@ struct NotificationReplyTextInput: UIViewRepresentable {
         func textViewDidChange(_ textView: UITextView) {
             parent.text = textView.text
             updateHeight(for: textView)
+            parent.onTextViewChange(textView as? NotificationReplyUITextView)
+            parent.onSelectionChange(textView.selectedRange)
         }
 
         func textViewDidBeginEditing(_ textView: UITextView) {
             parent.onFocusChange(true)
+            parent.onTextViewChange(textView as? NotificationReplyUITextView)
+            parent.onSelectionChange(textView.selectedRange)
         }
 
         func textViewDidEndEditing(_ textView: UITextView) {
             parent.onFocusChange(false)
+            parent.onTextViewChange(nil)
+        }
+
+        func textViewDidChangeSelection(_ textView: UITextView) {
+            parent.onSelectionChange(textView.selectedRange)
         }
 
         func textView(
@@ -8573,6 +8712,7 @@ struct NotificationReplyTextInput: UIViewRepresentable {
                 }
                 return false
             }
+            parent.onUserEdit(range, (replacement as NSString).length)
             return true
         }
 
@@ -8608,12 +8748,14 @@ struct NotificationReplyTextInput: UIViewRepresentable {
     }
 }
 
-final class NotificationReplyUITextView: UITextView {
+final class NotificationReplyUITextView: UITextView, DictationTextTargetIdentifying {
     var sourceChatId = ""
     var onCancel: (() -> Void)?
     var wantsInitialFocus = false
     var visibleNotificationCount = 0
     var keyboardOwnershipStore = KeyboardOwnershipStore()
+
+    var dictationTargetSessionKey: String { sourceChatId }
 
     func enforceSendReturnKey() {
         returnKeyType = .send

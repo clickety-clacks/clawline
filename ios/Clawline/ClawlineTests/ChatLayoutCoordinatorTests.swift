@@ -347,19 +347,19 @@ struct ChatLayoutCoordinatorTests {
         #expect(abs(openState.keyboardInset - 336) <= 0.5)
         #expect(abs(collapsedState.keyboardInset - 336) <= 0.5)
         #expect(abs(collapsedState.barHeight - 88) <= 0.5)
-        #expect(abs(collapsedState.inputBarTopFromScreenBottom - 424) <= 0.5)
-        #expect(abs(collapsedState.listBottomInset - 446) <= 0.5)
-        #expect(abs((openState.listBottomInset - collapsedState.listBottomInset) - 112) <= 0.5)
+        #expect(abs(collapsedState.inputBarTopFromScreenBottom - 436) <= 0.5)
+        #expect(abs(collapsedState.listBottomInset - 458) <= 0.5)
+        #expect(abs((openState.listBottomInset - collapsedState.listBottomInset) - 100) <= 0.5)
     }
 
-    @Test("Keyboard-visible closed input bar resolves flush to keyboard")
+    @Test("Keyboard-visible closed input bar preserves required bottom gap")
     @MainActor
-    func keyboardVisibleClosedInputBarUsesZeroBottomGap() {
+    func keyboardVisibleClosedInputBarPreservesBottomGap() {
         #expect(
             ChatLayoutCoordinator.inputBarBottomGap(
                 keyboardVisibleHeight: 336,
                 surfaceState: .closed
-            ) == 0
+            ) == 12
         )
         #expect(
             ChatLayoutCoordinator.inputBarBottomGap(

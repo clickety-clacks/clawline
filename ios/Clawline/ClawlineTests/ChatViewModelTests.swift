@@ -18,6 +18,53 @@ private final class ObservationFlag {
 }
 
 struct ChatViewModelTests {
+    @Test("T1256 dictation reply target activates only for focused open notification reply")
+    func dictationReplyTargetRequiresFocusedOpenReply() {
+        let replyingSourceId = "agent:main:test:replying"
+        let closedSourceId = "agent:main:test:closed"
+
+        let active = DictationNotificationReplyTarget.activeSourceId(
+            focusedReplySourceChatId: replyingSourceId,
+            isReplying: { $0 == replyingSourceId }
+        )
+        let closed = DictationNotificationReplyTarget.activeSourceId(
+            focusedReplySourceChatId: closedSourceId,
+            isReplying: { $0 == replyingSourceId }
+        )
+        let none = DictationNotificationReplyTarget.activeSourceId(
+            focusedReplySourceChatId: nil,
+            isReplying: { _ in true }
+        )
+
+        #expect(active == replyingSourceId)
+        #expect(closed == nil)
+        #expect(none == nil)
+    }
+
+    @Test("T1256 dictation submit uses active notification reply target when sendable")
+    func dictationSubmitUsesActiveNotificationReplyTargetWhenSendable() {
+        var submittedSourceIds: [String] = []
+
+        let didSubmit = DictationNotificationReplyTarget.submit(
+            sourceChatId: "agent:main:test:replying",
+            canSend: { true },
+            submit: {
+                submittedSourceIds.append("agent:main:test:replying")
+            }
+        )
+        let unsendableSubmit = DictationNotificationReplyTarget.submit(
+            sourceChatId: "agent:main:test:replying",
+            canSend: { false },
+            submit: {
+                submittedSourceIds.append("agent:main:test:replying")
+            }
+        )
+
+        #expect(didSubmit)
+        #expect(!unsendableSubmit)
+        #expect(submittedSourceIds == ["agent:main:test:replying"])
+    }
+
     @Test("T307 cross-chat mention sends to destination only")
     @MainActor
     func crossChatMentionSendRoutesToDestinationOnly() async throws {

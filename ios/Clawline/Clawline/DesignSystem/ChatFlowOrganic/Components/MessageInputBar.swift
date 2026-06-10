@@ -275,7 +275,7 @@ enum DictationInteractionIntent {
     case activationSelectionCaptured(NSRange)
     case composeSelectionChanged(NSRange)
     case composeUserEdited(range: NSRange, replacementUTF16Length: Int)
-    case composeTextViewChanged(PastableTextView?)
+    case composeTextViewChanged(UITextView?)
     case gesturePrewarmRequested
     case gestureCancelled(trigger: String)
     case gestureCommitRequested(DictationGestureCommitIntent)
@@ -308,6 +308,13 @@ func shouldBeginDictationPanGesture(
         return true
     }
     return false
+}
+
+func shouldArmWalkieHoldDuringPush(
+    pushGestureStartedWithSurfaceOpen: Bool,
+    verticallyDominant: Bool
+) -> Bool {
+    !pushGestureStartedWithSurfaceOpen && verticallyDominant
 }
 
 func classifyDictationPanIntent(_ context: DictationPanIntentContext) -> DictationPanIntentDecision {
@@ -1794,8 +1801,10 @@ struct MessageInputBar: View {
             velocityY: velocity.y
         )
 
-        if !motion.isSurfaceVisible,
-           verticalDominant,
+        if shouldArmWalkieHoldDuringPush(
+            pushGestureStartedWithSurfaceOpen: motion.pushGestureStartedWithSurfaceOpen,
+            verticallyDominant: verticalDominant
+        ),
            motion.updateWalkieHoldArming(
             up: up,
             activationThreshold: walkieHoldActivationThreshold,
@@ -2258,6 +2267,10 @@ struct DictationMicAffordanceAnimationPlan {
 @MainActor
 private final class PreviewDictationDraftHost: DictationComposeDraftHosting {
     var activeSessionKey: String = "preview"
+
+    func isComposeDraftSessionCurrent(_ sessionKey: String) -> Bool {
+        sessionKey == activeSessionKey
+    }
 
     func captureComposeDraftSnapshot(for sessionKey: String) -> ComposeDraftSnapshot {
         .empty

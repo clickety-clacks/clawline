@@ -29,6 +29,7 @@ enum DictationTextApplicationMode: Equatable {
 protocol DictationComposeDraftHosting: AnyObject {
     var activeSessionKey: String { get }
 
+    func isComposeDraftSessionCurrent(_ sessionKey: String) -> Bool
     func captureComposeDraftSnapshot(for sessionKey: String) -> ComposeDraftSnapshot
     func applyComposeDraftDelta(
         baseSnapshot: ComposeDraftSnapshot,
@@ -43,6 +44,11 @@ protocol DictationComposeDraftHosting: AnyObject {
         moveCursorToEnd: Bool,
         announceEditorReset: Bool
     )
+}
+
+@MainActor
+protocol DictationTextTargetIdentifying: AnyObject {
+    var dictationTargetSessionKey: String { get }
 }
 
 struct DictationTextApplicationPlan {
@@ -82,14 +88,15 @@ struct DictationTextApplicationPlan {
 @MainActor
 final class DictationTranscriptApplicator {
     private weak var host: (any DictationComposeDraftHosting)?
-    private weak var composeTextView: PastableTextView?
+    private weak var composeTextView: UITextView?
+    private var composeTextViewTargetSessionKey: String?
     private var replayPlanProvider: (@MainActor () -> DictationTextApplicationPlan?)?
 
     init(host: any DictationComposeDraftHosting) {
         self.host = host
     }
 
-    var boundComposeTextView: PastableTextView? {
+    var boundComposeTextView: UITextView? {
         composeTextView
     }
 
@@ -98,18 +105,41 @@ final class DictationTranscriptApplicator {
     }
 
     func captureSnapshot(for sessionKey: String) -> ComposeDraftSnapshot {
+        if let targetTextView = composeTextView as? DictationTextTargetIdentifying,
+           !targetTextView.dictationTargetSessionKey.isEmpty,
+           targetTextView.dictationTargetSessionKey == sessionKey {
+            let hostSnapshot = host?.captureComposeDraftSnapshot(for: sessionKey) ?? .empty
+            return ComposeDraftSnapshot(
+                content: composeTextView?.attributedText ?? NSAttributedString(string: ""),
+                attachments: hostSnapshot.attachments
+            )
+        }
+        if composeTextView != nil,
+           host?.isComposeDraftSessionCurrent(sessionKey) == true {
+            let hostSnapshot = host?.captureComposeDraftSnapshot(for: sessionKey) ?? .empty
+            return ComposeDraftSnapshot(
+                content: composeTextView?.attributedText ?? NSAttributedString(string: ""),
+                attachments: hostSnapshot.attachments
+            )
+        }
+        return host?.captureComposeDraftSnapshot(for: sessionKey) ?? .empty
+    }
+
+    func captureHostSnapshot(for sessionKey: String) -> ComposeDraftSnapshot {
         host?.captureComposeDraftSnapshot(for: sessionKey) ?? .empty
     }
 
-    func setComposeTextView(_ textView: PastableTextView?) {
+    func setComposeTextView(_ textView: UITextView?) {
         let previousTextView = composeTextView
         let previousSelection = previousTextView?.selectedRange
+        let previousTargetSessionKey = composeTextViewTargetSessionKey
         composeTextView = textView
-        guard previousTextView !== textView else { return }
-        guard let textView else { return }
-        if let replayPlan = replayPlanProvider?() {
-            apply(replayPlan)
+        composeTextViewTargetSessionKey = (textView as? DictationTextTargetIdentifying)?.dictationTargetSessionKey
+        guard previousTextView !== textView || previousTargetSessionKey != composeTextViewTargetSessionKey else {
+            return
         }
+        guard let textView else { return }
+        replayCurrentPlanIfAvailable()
         if let previousSelection,
            previousSelection.location != NSNotFound {
             textView.selectedRange = safeReplacementRange(
@@ -118,6 +148,18 @@ final class DictationTranscriptApplicator {
                 fallbackLocation: textView.attributedText.length
             )
         }
+    }
+
+    func unbindUntargetedComposeTextView() {
+        guard composeTextView != nil else { return }
+        guard !(composeTextView is DictationTextTargetIdentifying) else { return }
+        composeTextView = nil
+        composeTextViewTargetSessionKey = nil
+    }
+
+    func replayCurrentPlanIfAvailable() {
+        guard let replayPlan = replayPlanProvider?() else { return }
+        apply(replayPlan)
     }
 
     func focusComposeTextView() {
@@ -135,14 +177,16 @@ final class DictationTranscriptApplicator {
 
     func apply(_ plan: DictationTextApplicationPlan) {
         guard !plan.sessionKey.isEmpty else { return }
-        guard host?.activeSessionKey == plan.sessionKey else { return }
+        guard host?.isComposeDraftSessionCurrent(plan.sessionKey) == true || boundTextViewTargets(plan.sessionKey) else {
+            return
+        }
 
         if plan.applicationMode == .restoreBaseAndAppendReplacement {
             applyFallbackSnapshot(from: plan)
             return
         }
 
-        if let textView = composeTextView {
+        if let textView = boundTextView(for: plan.sessionKey) {
             let safeRange = safeReplacementRange(
                 selectedRange: plan.replacementRange,
                 textLength: textView.attributedText.length,
@@ -192,9 +236,29 @@ final class DictationTranscriptApplicator {
             moveCursorToEnd: false,
             announceEditorReset: true
         )
-        guard host?.activeSessionKey == sessionKey,
-              let composeTextView else { return }
+        guard host?.isComposeDraftSessionCurrent(sessionKey) == true || boundTextViewTargets(sessionKey),
+              let composeTextView = boundTextView(for: sessionKey) else { return }
         replaceSnapshot(snapshot, in: composeTextView, suppressReentrantFeedback: true)
+    }
+
+    private func boundTextViewTargets(_ sessionKey: String) -> Bool {
+        guard let targetSessionKey = (composeTextView as? DictationTextTargetIdentifying)?
+            .dictationTargetSessionKey,
+              !targetSessionKey.isEmpty else {
+            return false
+        }
+        return targetSessionKey == sessionKey
+    }
+
+    private func boundTextView(for sessionKey: String) -> UITextView? {
+        guard let composeTextView else { return nil }
+        if let targetTextView = composeTextView as? DictationTextTargetIdentifying {
+            guard !targetTextView.dictationTargetSessionKey.isEmpty else {
+                return host?.isComposeDraftSessionCurrent(sessionKey) == true ? composeTextView : nil
+            }
+            return targetTextView.dictationTargetSessionKey == sessionKey ? composeTextView : nil
+        }
+        return host?.isComposeDraftSessionCurrent(sessionKey) == true ? composeTextView : nil
     }
 
     private func safeReplacementRange(selectedRange: NSRange, textLength: Int, fallbackLocation: Int) -> NSRange {
@@ -235,7 +299,7 @@ final class DictationTranscriptApplicator {
             moveCursorToEnd: plan.selectionPolicy == .followTranscriptEndWhenSelectionAlreadyAtEnd,
             announceEditorReset: false
         )
-        if let composeTextView, host.activeSessionKey == plan.sessionKey {
+        if let composeTextView = boundTextView(for: plan.sessionKey) {
             replaceSnapshot(snapshot, in: composeTextView, suppressReentrantFeedback: plan.suppressReentrantFeedback)
         }
     }

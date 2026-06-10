@@ -406,6 +406,55 @@ struct DictationTranscriptApplicatorTests {
         #expect(host.currentText(for: host.activeSessionKey) == "seed ")
     }
 
+    @Test("Applicator routes matching notification reply target without changing normal prompt")
+    func applicatorRoutesMatchingNotificationReplyTarget() {
+        let host = MockComposeDraftHost()
+        host.setText("normal prompt", for: host.activeSessionKey)
+        let applicator = DictationTranscriptApplicator(host: host)
+        let replyTextView = NotificationReplyUITextView()
+        replyTextView.sourceChatId = "agent:main:test:reply-source"
+        replyTextView.attributedText = NSAttributedString(string: "reply ")
+        replyTextView.selectedRange = NSRange(location: 6, length: 0)
+        applicator.setComposeTextView(replyTextView)
+
+        applicator.apply(
+            DictationTextApplicationPlan(
+                sessionKey: replyTextView.sourceChatId,
+                baseSnapshot: applicator.captureSnapshot(for: replyTextView.sourceChatId),
+                replacementRange: NSRange(location: 6, length: 0),
+                fallbackLocation: 6,
+                replacementText: NSAttributedString(string: "dictated"),
+                selectionPolicy: .followTranscriptEndWhenSelectionAlreadyAtEnd,
+                suppressReentrantFeedback: true
+            )
+        )
+
+        #expect(replyTextView.attributedText.string == "reply dictated")
+        #expect(host.currentText(for: host.activeSessionKey) == "normal prompt")
+    }
+
+    @Test("Applicator normal composer snapshot uses focused visible text and preserves host attachments")
+    func applicatorNormalComposerSnapshotUsesFocusedVisibleTextAndPreservesHostAttachments() {
+        let host = MockComposeDraftHost()
+        let attachment = makePendingAttachment()
+        host.setSnapshot(
+            ComposeDraftSnapshot(
+                content: NSAttributedString(string: "draft"),
+                attachments: [attachment.id: attachment]
+            ),
+            for: host.activeSessionKey
+        )
+        let applicator = DictationTranscriptApplicator(host: host)
+        let textView = PastableTextView()
+        textView.attributedText = NSAttributedString(string: "visible draft")
+        applicator.setComposeTextView(textView)
+
+        let snapshot = applicator.captureSnapshot(for: host.activeSessionKey)
+
+        #expect(snapshot.content.string == "visible draft")
+        #expect(snapshot.attachments.keys.contains(attachment.id))
+    }
+
     @Test("Applicator replays the current machine-authored plan when a compose surface rebinds")
     func applicatorReplaysCurrentPlanOnComposeSurfaceRebind() {
         let host = MockComposeDraftHost()
@@ -463,6 +512,41 @@ struct DictationTranscriptApplicatorTests {
 
         #expect(textView.attributedText.string == "seed hello")
         #expect(textView.selectedRange == NSRange(location: 2, length: 3))
+    }
+
+    @Test("Applicator applies selected normal compose session through stable composer")
+    func applicatorAppliesSelectedNormalComposeSessionThroughStableComposer() {
+        let host = MockComposeDraftHost()
+        let originalSessionKey = host.activeSessionKey
+        let loadedSessionKey = "agent:main:test:loaded"
+        host.setText("loaded draft hello", for: loadedSessionKey)
+        let applicator = DictationTranscriptApplicator(host: host)
+
+        let textView = PastableTextView()
+        textView.attributedText = NSAttributedString(string: "first")
+        applicator.setComposeTextView(textView)
+
+        host.currentComposeSessionKey = loadedSessionKey
+        let replayPlan = DictationTextApplicationPlan(
+            sessionKey: loadedSessionKey,
+            baseSnapshot: ComposeDraftSnapshot(
+                content: NSAttributedString(string: "loaded draft "),
+                attachments: [:]
+            ),
+            replacementRange: NSRange(location: 13, length: 0),
+            fallbackLocation: 13,
+            replacementText: NSAttributedString(string: "hello"),
+            selectionPolicy: .preserveUserSelection,
+            applicationMode: .restoreBaseAndAppendReplacement,
+            suppressReentrantFeedback: true
+        )
+        applicator.setReplayPlanProvider { replayPlan }
+        textView.attributedText = NSAttributedString(string: "loaded draft ")
+        applicator.apply(replayPlan)
+
+        #expect(textView.attributedText.string == "loaded draft hello")
+        #expect(host.currentText(for: originalSessionKey).isEmpty)
+        #expect(host.currentText(for: loadedSessionKey) == "loaded draft hello")
     }
 
     @Test("Applicator carries visible user selection across compose surface rebind")

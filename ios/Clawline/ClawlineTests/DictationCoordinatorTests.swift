@@ -462,6 +462,72 @@ struct DictationCoordinatorTests {
         #expect(coordinator.isDictationActive)
     }
 
+    @Test("Stream switch live composer selection overrides stale reported anchor")
+    @MainActor
+    func streamSwitchLiveComposerSelectionOverridesStaleReportedAnchor() async {
+        let harness = DictationTestHarness()
+        let coordinator = harness.makeCoordinator()
+        let textView = PastableTextView()
+        let editorDelegate = MockEditorBindingDelegate(host: harness.host)
+        textView.delegate = editorDelegate
+        textView.attributedText = NSAttributedString(string: "")
+        coordinator.setComposeTextView(textView)
+
+        coordinator.updateContext(
+            sessionKey: harness.host.activeSessionKey,
+            composeIsEmpty: true,
+            textFieldFocused: true,
+            reduceMotionEnabled: false
+        )
+        coordinator.startStickyDictation()
+        await waitUntil { coordinator.isListening }
+        await waitUntil { harness.client.connected }
+
+        harness.client.emit(
+            .response(
+                SonioxStreamingResponse(
+                    tokens: [SonioxTranscriptToken(text: "old ", isFinal: false)],
+                    finished: false,
+                    errorCode: nil,
+                    errorMessage: nil
+                )
+            )
+        )
+        await waitUntil { harness.host.currentText(for: harness.host.activeSessionKey) == "old " }
+
+        let selectedSessionKey = "agent:main:test:selected-live-anchor"
+        harness.host.setText("destination draft ", for: selectedSessionKey)
+        harness.host.currentComposeSessionKey = selectedSessionKey
+        textView.attributedText = NSAttributedString(string: "destination draft ")
+        textView.selectedRange = NSRange(location: textView.attributedText.length, length: 0)
+        coordinator.setComposeTextView(textView)
+        coordinator.updateContext(
+            sessionKey: selectedSessionKey,
+            composeIsEmpty: false,
+            textFieldFocused: true,
+            reduceMotionEnabled: false
+        )
+
+        coordinator.noteComposeSelectionChanged(NSRange(location: 0, length: 0))
+        harness.client.emit(
+            .response(
+                SonioxStreamingResponse(
+                    tokens: [SonioxTranscriptToken(text: "old future", isFinal: false)],
+                    finished: false,
+                    errorCode: nil,
+                    errorMessage: nil
+                )
+            )
+        )
+
+        await waitUntil {
+            harness.host.currentText(for: selectedSessionKey) == "destination draft future"
+        }
+
+        #expect(textView.attributedText.string == "destination draft future")
+        #expect(!harness.host.currentText(for: selectedSessionKey).hasPrefix("futuredestination"))
+    }
+
     @Test("Flick-up sticky honors activation eligibility captured at gesture begin")
     @MainActor
     func flickUpStickyUsesGestureStartActivationSnapshot() {
@@ -552,6 +618,37 @@ struct DictationCoordinatorTests {
 
         #expect(intent == .endWalkieAndCollapse)
         #expect(motion.pendingCommit?.target == .closed)
+    }
+
+    @Test("Closed-surface walkie hold can continue upward to send")
+    @MainActor
+    func closedSurfaceWalkieHoldCanContinueUpwardToSend() {
+        let harness = DictationTestHarness()
+        let coordinator = harness.makeCoordinator()
+
+        coordinator.updateContext(
+            sessionKey: harness.host.activeSessionKey,
+            composeIsEmpty: false,
+            textFieldFocused: true,
+            reduceMotionEnabled: false
+        )
+
+        let motion = DictationMotion(session: coordinator)
+        motion.gestureBegan(originWasOpen: false, swipeActivationEnabled: true)
+        motion.gestureChanged(translationY: -128, velocityY: -120)
+        #expect(motion.updateWalkieHoldArming(up: 128, activationThreshold: 124, holdDuration: 0) == false)
+        #expect(motion.updateWalkieHoldArming(up: 128, activationThreshold: 124, holdDuration: 0) == true)
+        motion.gestureChanged(translationY: -180, velocityY: -240)
+
+        let intent = motion.gestureEnded(
+            translationY: -180,
+            predictedY: -180,
+            velocityY: -240,
+            context: .init(pullToSendEligible: true, verticallyDominant: true)
+        )
+
+        #expect(intent == .send)
+        #expect(motion.pendingCommit?.reason == "pull_to_send")
     }
 
     @Test("Swipe activation remains disabled until a compose target is known")
@@ -952,6 +1049,84 @@ struct DictationCoordinatorTests {
         }
         #expect(textView.attributedText.string.isEmpty)
         #expect(harness.host.currentText(for: harness.host.activeSessionKey).isEmpty)
+    }
+
+    @Test("Submitting while listening ignores trailing provisional fragments before pause settles")
+    @MainActor
+    func submitWhileListeningIgnoresTrailingFragmentsBeforePauseSettles() async {
+        let harness = DictationTestHarness(
+            timing: DictationTiming(
+                maxSessionDuration: .seconds(30),
+                tokenInactivityTimeout: .seconds(30),
+                stopKeepFinalizeTimeout: .milliseconds(120),
+                sendFinalizeTimeout: .milliseconds(120)
+            )
+        )
+        let coordinator = harness.makeCoordinator()
+        let textView = PastableTextView()
+        textView.attributedText = NSAttributedString(string: "")
+        textView.selectedRange = NSRange(location: 0, length: 0)
+        coordinator.setComposeTextView(textView)
+
+        coordinator.updateContext(
+            sessionKey: harness.host.activeSessionKey,
+            composeIsEmpty: true,
+            textFieldFocused: true,
+            reduceMotionEnabled: false
+        )
+        coordinator.startStickyDictation()
+
+        harness.client.emit(
+            .response(
+                SonioxStreamingResponse(
+                    tokens: [SonioxTranscriptToken(text: "alpha trailing", isFinal: false)],
+                    finished: false,
+                    errorCode: nil,
+                    errorMessage: nil
+                )
+            )
+        )
+
+        await waitUntil {
+            textView.attributedText.string == "alpha trailing"
+        }
+
+        coordinator.handleSendTapped {
+            harness.host.setText("", for: harness.host.activeSessionKey)
+            return true
+        }
+        coordinator.updateContext(
+            sessionKey: harness.host.activeSessionKey,
+            composeIsEmpty: true,
+            textFieldFocused: true,
+            reduceMotionEnabled: false
+        )
+
+        harness.client.emit(
+            .response(
+                SonioxStreamingResponse(
+                    tokens: [SonioxTranscriptToken(text: "trailing", isFinal: false)],
+                    finished: false,
+                    errorCode: nil,
+                    errorMessage: nil
+                )
+            )
+        )
+
+        do {
+            try await Task.sleep(for: .milliseconds(100))
+        } catch is CancellationError {
+            return
+        } catch {
+            return
+        }
+
+        #expect(textView.attributedText.string.isEmpty)
+        #expect(harness.host.currentText(for: harness.host.activeSessionKey).isEmpty)
+        await waitUntil {
+            !coordinator.isListening
+        }
+        #expect(!coordinator.isListening)
     }
 
     @Test("Activation queues through teardown and restarts after stop settles")

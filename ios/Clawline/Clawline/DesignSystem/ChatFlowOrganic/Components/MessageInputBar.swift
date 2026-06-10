@@ -614,6 +614,10 @@ struct DictationPanGestureInstaller: UIViewControllerRepresentable {
             activeTextViewWasSelectable = textView.isSelectable
             lockTextScrollForDictationIfNeeded()
         }
+
+        func debugShouldBeginPanForTesting(location: CGPoint, velocity: CGPoint, window: UIWindow) -> Bool {
+            shouldBeginPan(at: location, velocity: velocity, in: window)
+        }
 #endif
 
         private func promoteIntentIfNeeded(_ event: DictationPanEvent) {
@@ -689,15 +693,22 @@ struct DictationPanGestureInstaller: UIViewControllerRepresentable {
                 return false
             }
             let location = pan.location(in: window)
+            let velocity = pan.velocity(in: window)
+            let allowed = shouldBeginPan(at: location, velocity: velocity, in: window)
+            logger.info("DICTATION_UI pan_should_begin allowed=\(allowed, privacy: .public) location=\(location.debugDescription, privacy: .public) velocity=\(velocity.debugDescription, privacy: .public)")
+            return allowed
+        }
+
+        private func shouldBeginPan(at location: CGPoint, velocity: CGPoint, in window: UIWindow) -> Bool {
             if let touchedView = window.hitTest(location, with: nil),
                nearestCollectionView(from: touchedView) != nil {
                 return false
             }
+            if nearestTextView(at: location, in: window) != nil {
+                return false
+            }
             guard activeRegionInWindow.contains(location) else { return false }
-            let velocity = pan.velocity(in: window)
-            let allowed = shouldBegin(location, velocity)
-            logger.info("DICTATION_UI pan_should_begin allowed=\(allowed, privacy: .public) location=\(location.debugDescription, privacy: .public) velocity=\(velocity.debugDescription, privacy: .public)")
-            return allowed
+            return shouldBegin(location, velocity)
         }
 
         func gestureRecognizer(

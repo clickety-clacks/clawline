@@ -8913,7 +8913,6 @@ struct NotificationReplyTextInput: UIViewRepresentable {
             visibleNotificationCount: visibleNotificationCount
         )
         textView.text = text
-        onTextViewChange(textView)
         return textView
     }
 
@@ -8934,7 +8933,6 @@ struct NotificationReplyTextInput: UIViewRepresentable {
         }
         context.coordinator.updateHeight(for: textView)
         textView.focusIfNeeded()
-        onTextViewChange(textView)
     }
 
     static func dismantleUIView(_ uiView: NotificationReplyUITextView, coordinator: Coordinator) {
@@ -8972,7 +8970,6 @@ struct NotificationReplyTextInput: UIViewRepresentable {
         func textViewDidChange(_ textView: UITextView) {
             parent.text = textView.text
             updateHeight(for: textView)
-            parent.onTextViewChange(textView as? NotificationReplyUITextView)
             parent.onSelectionRangeChange(textView.selectedRange)
             parent.onSelectionActiveChange(textView.selectedRange.length > 0)
         }

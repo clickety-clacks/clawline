@@ -783,17 +783,24 @@ final class DictationSession {
     }
 
     func noteComposeSelectionChanged(_ selectionRange: NSRange) {
-        guard selectionRange.location != NSNotFound else { return }
-        latestComposeSelectionRange = selectionRange
+        let resolvedSelectionRange: NSRange
+        if let liveSelectionRange = bridge.boundComposeTextView?.selectedRange,
+           liveSelectionRange.location != NSNotFound {
+            resolvedSelectionRange = liveSelectionRange
+        } else {
+            resolvedSelectionRange = selectionRange
+        }
+        guard resolvedSelectionRange.location != NSNotFound else { return }
+        latestComposeSelectionRange = resolvedSelectionRange
         guard isDictationActive else {
             if !hasExplicitActivationSelectionCapture {
-                pendingActivationSelectionRange = selectionRange
+                pendingActivationSelectionRange = resolvedSelectionRange
             }
             return
         }
         guard let originSessionKey, !originSessionKey.isEmpty, originSessionKey == currentSessionKey else { return }
         guard (bridge.boundComposeTextView as? PastableTextView)?.dictationProgrammaticEditInFlight != true else { return }
-        reanchorActiveTranscriptSession(to: selectionRange)
+        reanchorActiveTranscriptSession(to: resolvedSelectionRange)
     }
 
     func noteComposeUserEditDuringDictation(editedRangeUTF16: NSRange, replacementUTF16Length: Int) {
@@ -1052,7 +1059,7 @@ final class DictationSession {
         analytics.trackSendWhileActive(mode: mode, sendSuccess: didSubmit)
         guard didSubmit else { return }
         composeIsEmpty = true
-        resetActiveTranscriptSessionAfterComposeCleared()
+        clearSubmittedActiveTranscriptSession()
         Task { [weak self] in
             await self?.pauseListening(reason: "send_tap_pause")
         }
@@ -2323,6 +2330,17 @@ final class DictationSession {
         latestComposeSelectionRange = anchor
         pendingActivationSelectionRange = nil
         hasExplicitActivationSelectionCapture = false
+    }
+
+    private func clearSubmittedActiveTranscriptSession() {
+        guard let session = activeTranscriptSession() else { return }
+        guard session.originSessionKey == currentSessionKey else { return }
+
+        cancelPendingTranscriptApply()
+        bridge.restore(snapshot: .empty, to: session.originSessionKey)
+        transcriptBuffer.reset()
+        latestComposeSelectionRange = NSRange(location: 0, length: 0)
+        clearOriginSessionContext()
     }
 
     private func rebindActiveTranscriptSession(to sessionKey: String) {

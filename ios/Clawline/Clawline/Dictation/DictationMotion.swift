@@ -101,6 +101,10 @@ final class DictationMotion {
 
     var isPullToSendArmed: Bool { pullToSendProgress >= 1.0 }
 
+    private var isContinuousWalkiePullToSendArmed: Bool {
+        upDistance >= Thresholds.reveal + Thresholds.pullToSendTrigger
+    }
+
     var isTextInteractionLocked: Bool { gesturePhase == .dragging }
 
     var isSurfaceVisible: Bool {
@@ -186,12 +190,15 @@ final class DictationMotion {
         let fastUp = predictedY < -120 || velocityY < -900
         let fastDown = predictedY > 120 || velocityY > 900
         let pullToSendArmed = isPullToSendArmed
+        let continuousWalkiePullToSendArmed = isContinuousWalkiePullToSendArmed
 
         let wasSurfaceOpenAtGestureStart = originWasOpen
         let didStartWalkieThisGesture = walkieStartedThisGesture
         teardownGesture()
 
-        if wasSurfaceOpenAtGestureStart && pullToSendArmed && context.pullToSendEligible {
+        if pullToSendArmed
+            && context.pullToSendEligible
+            && (wasSurfaceOpenAtGestureStart || (didStartWalkieThisGesture && continuousWalkiePullToSendArmed)) {
             pendingCommit = .init(target: originWasOpen ? .openPaused : .closed, reason: "pull_to_send")
             surfaceRevealProgress = originWasOpen ? 1 : 0
             return .send

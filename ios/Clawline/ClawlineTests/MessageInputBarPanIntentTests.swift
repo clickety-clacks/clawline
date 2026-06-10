@@ -227,6 +227,28 @@ struct MessageInputBarPanIntentTests {
     }
 
     @MainActor
+    @Test("Cursor drag inside text view does not begin dictation pan")
+    func cursorDragInsideTextViewDoesNotBeginDictationPan() {
+        let harness = PanGestureCoordinatorHarness()
+        guard let window = harness.textView.window else {
+            Issue.record("Expected text view to be attached to a window")
+            return
+        }
+        let location = harness.textView.convert(
+            CGPoint(x: harness.textView.bounds.midX, y: harness.textView.bounds.midY),
+            to: window
+        )
+
+        let shouldBegin = harness.coordinator.debugShouldBeginPanForTesting(
+            location: location,
+            velocity: CGPoint(x: 0, y: -500),
+            window: window
+        )
+
+        #expect(!shouldBegin)
+    }
+
+    @MainActor
     @Test("Text selection lock restores on installer teardown")
     func textSelectionLockRestoresOnInstallerTeardown() {
         let coordinator = DictationPanGestureInstaller.debugCoordinatorForTests()

@@ -1231,7 +1231,7 @@ describe("MessageList rich rendering", () => {
     expect(await screen.findByTestId("scroll-to-bottom-button")).toBeInTheDocument();
   });
 
-  it("keeps short transcripts at bottom during overscroll attempts", async () => {
+  it("keeps short transcripts at bottom without overriding native overscroll", async () => {
     renderMessageListWithProps({
       messages: [makeMessage(1), makeMessage(2)],
       sessionKey: "agent:main:clawline:flynn:main"
@@ -1243,7 +1243,23 @@ describe("MessageList rich rendering", () => {
 
     fireEvent.scroll(list, { target: { scrollTop: -80 } });
 
-    expect(list.scrollTop).toBe(0);
+    expect(list.scrollTop).toBe(-80);
+    expect(screen.queryByTestId("scroll-to-bottom-button")).not.toBeInTheDocument();
+  });
+
+  it("keeps bottom overscroll native without showing the jump affordance", async () => {
+    renderMessageListWithProps({
+      messages: Array.from({ length: 240 }, (_, index) => makeMessage(index + 1)),
+      sessionKey: "agent:main:clawline:flynn:main"
+    });
+
+    const list = screen.getByTestId("message-list");
+    Object.defineProperty(list, "scrollHeight", { configurable: true, value: 24_000 });
+    Object.defineProperty(list, "clientHeight", { configurable: true, value: 800 });
+
+    fireEvent.scroll(list, { target: { scrollTop: 23_640 } });
+
+    expect(list.scrollTop).toBe(23_640);
     expect(screen.queryByTestId("scroll-to-bottom-button")).not.toBeInTheDocument();
   });
 

@@ -618,6 +618,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
     private var useContinuousCorners = true
     private weak var centeredOverlayView: UIView?
     private var currentMessageId: String?
+    private var currentSessionKey: String?
     private var wasOverflowingOnLastLayout = false
     private var suppressExpandTapForLinkCards = false
     private var allowSwipeUpExpandForSingleLink = false
@@ -735,7 +736,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         layer.addSublayer(topHighlightLayer)
 
         contentStack.axis = .vertical
-        contentStack.spacing = 10
+        contentStack.spacing = 6
         contentStack.alignment = .fill
         contentStack.insetsLayoutMarginsFromSafeArea = false
         contentStack.preservesSuperviewLayoutMargins = false
@@ -1095,9 +1096,12 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
                    salientHighlightService: (any SalientHighlightServicing)? = nil) {
         assert(Thread.isMainThread)
         self.terminalConnectionPool = terminalConnectionPool
-        let isMessageReuse = (currentMessageId != nil && currentMessageId != message.id)
+        let previousIdentity = currentIdentityKey
+        let incomingIdentity = Self.identityKey(message: message)
+        let isMessageReuse = previousIdentity != nil && previousIdentity != incomingIdentity
         currentMessage = message
         currentMessageId = message.id
+        currentSessionKey = message.sessionKey
         currentCopyableReadableText = presentation.copyableReadableText
         currentReplyReference = replyReference
         // Store for trait collection updates
@@ -1194,12 +1198,16 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
 
         let markdownStyle = Self.markdownStyle(for: sizeClass, metrics: metrics)
         let markdownContent = UnifiedMarkdownRenderer.makeContent(
-            presentation: presentation,
+            messageText: message.content,
+            context: MarkdownMessageRenderContext(
+                role: message.role,
+                messageID: message.id,
+                metrics: metrics
+            ),
             baseFont: markdownStyle.baseFont,
             inkColor: contentColor,
             lineSpacing: markdownStyle.lineSpacing,
             stripDetectedURLs: false,
-            role: message.role,
             isDark: effectiveIsDark
         )
 
@@ -1670,6 +1678,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
     func prepareForReuse() {
         currentMessage = nil
         currentMessageId = nil
+        currentSessionKey = nil
         currentCopyableReadableText = nil
         currentReplyReference = nil
         onInsertIntoPrompt = nil
@@ -1750,6 +1759,15 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
 
     private func applyBubbleSizingV2(_ state: BubbleSizingV2.LayoutState) {
         dynamicContentHeightConstraint?.constant = max(44, state.measurement.outerScrollViewportHeight)
+    }
+
+    private var currentIdentityKey: String? {
+        guard let currentSessionKey, let currentMessageId else { return nil }
+        return "\(currentSessionKey)|\(currentMessageId)"
+    }
+
+    private static func identityKey(message: Message) -> String {
+        "\(message.sessionKey)|\(message.id)"
     }
 
     private func updateOuterScrollState() {
@@ -1996,8 +2014,12 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
 
     @objc private func handleBodyTap(_ recognizer: UITapGestureRecognizer) {
         if recognizer.state == .ended,
-           let generatedURL = Self.generatedTextLinkURL(in: bodyLabel, at: recognizer.location(in: bodyLabel)) {
-            _ = GeneratedTextLinkActivationRouter.openGeneratedLink(generatedURL, bodyLabel)
+           let generatedLink = Self.generatedTextLink(in: bodyLabel, at: recognizer.location(in: bodyLabel)) {
+            _ = GeneratedTextLinkActivationRouter.activateGeneratedLinkTap(
+                generatedLink.url,
+                displayMode: generatedLink.displayMode,
+                from: bodyLabel
+            )
             return
         }
         handleBubbleTap()
@@ -2014,6 +2036,10 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
     }
 
     static func generatedTextLinkURL(in textView: UITextView, at point: CGPoint) -> URL? {
+        generatedTextLink(in: textView, at: point)?.url
+    }
+
+    static func generatedTextLink(in textView: UITextView, at point: CGPoint) -> (url: URL, displayMode: TextLinkResolvedURLDisplayMode)? {
         guard let attributedText = textView.attributedText, attributedText.length > 0 else {
             return nil
         }
@@ -2052,7 +2078,10 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         guard glyphRect.contains(location) else {
             return nil
         }
-        return url
+        return (
+            url,
+            TextLinkURLTemplateRules.displayMode(in: attributedText, characterRange: effectiveRange)
+        )
     }
 
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
@@ -2135,7 +2164,11 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
     ) -> UIAction? {
         UnifiedMarkdownRenderer.primaryActionForTextItem(textItem, defaultAction: defaultAction) { tappedURL, characterRange in
             if TextLinkURLTemplateRules.isGeneratedLink(in: textView.attributedText, characterRange: characterRange) {
-                _ = GeneratedTextLinkActivationRouter.openGeneratedLink(tappedURL, textView)
+                _ = GeneratedTextLinkActivationRouter.activateGeneratedLinkTap(
+                    tappedURL,
+                    displayMode: TextLinkURLTemplateRules.displayMode(in: textView.attributedText, characterRange: characterRange),
+                    from: textView
+                )
                 return
             }
             UIApplication.shared.open(tappedURL)
@@ -2151,7 +2184,11 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         guard TextLinkURLTemplateRules.isGeneratedLink(in: textView.attributedText, characterRange: characterRange) else {
             return true
         }
-        _ = GeneratedTextLinkActivationRouter.openGeneratedLink(URL, textView)
+        _ = GeneratedTextLinkActivationRouter.activateGeneratedLinkTap(
+            URL,
+            displayMode: TextLinkURLTemplateRules.displayMode(in: textView.attributedText, characterRange: characterRange),
+            from: textView
+        )
         return false
     }
 
@@ -2247,12 +2284,20 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         if let reference = currentReplyReference {
             let label = reference.preview.isEmpty ? reference.tokenLabel : reference.preview
             let font = UIFont.clawline(.timestamp)
-            replyIndicatorTextView.attributedText = UnifiedMarkdownRenderer.renderNSAttributedString(
-                markdown: MessageReferenceMarkdownDisplay.renderableMarkdown(label),
+            let content = UnifiedMarkdownRenderer.makeContent(
+                messageText: MessageReferenceMarkdownDisplay.renderableMarkdown(label),
+                context: MarkdownMessageRenderContext(
+                    role: .user,
+                    messageID: "reply-reference-\(reference.id.uuidString)",
+                    metrics: ChatFlowTheme.Metrics(isCompact: true)
+                ),
                 baseFont: font,
                 inkColor: UIColor.label,
-                lineSpacing: 1
-            ) ?? NSAttributedString(
+                lineSpacing: 1,
+                stripDetectedURLs: false,
+                isDark: traitCollection.userInterfaceStyle == .dark
+            )
+            replyIndicatorTextView.attributedText = content.firstAttributedText ?? NSAttributedString(
                 string: label,
                 attributes: [
                     .font: font,
@@ -3222,6 +3267,7 @@ final class MessageBubbleUIKitCell: UICollectionViewCell {
 
     private let containerView = MessageBubbleUIKitContainerView()
     private var messageId: String = ""
+    private var messageSessionKey: String = ""
     private var messageSnippet: String = ""
     private var lastMismatch: (bounds: CGRect, bubble: CGRect)?
     private var flashOverlayView: UIView?
@@ -3266,9 +3312,10 @@ final class MessageBubbleUIKitCell: UICollectionViewCell {
                    replyReference: PendingMessageReference? = nil,
                    onResend: (() -> Void)?) {
         messageId = message.id
+        messageSessionKey = message.sessionKey
         messageSnippet = String(message.content.prefix(80))
         let guardedRequestLayout: (String) -> Void = { [weak self] requestedId in
-            guard let self, self.messageId == requestedId else { return }
+            guard let self, self.messageId == requestedId, self.messageSessionKey == message.sessionKey else { return }
             onRequestLayout?(requestedId)
         }
         containerView.configure(
@@ -3301,6 +3348,7 @@ final class MessageBubbleUIKitCell: UICollectionViewCell {
         flashOverlayView?.removeFromSuperview()
         flashOverlayView = nil
         messageId = ""
+        messageSessionKey = ""
         messageSnippet = ""
         lastMismatch = nil
     }

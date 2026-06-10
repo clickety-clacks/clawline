@@ -129,9 +129,6 @@ export function useVirtualMessageWindow(
     }
 
     const nextScrollTop = clampContainerScrollTop(container, container.scrollTop);
-    if (container.scrollTop !== nextScrollTop) {
-      container.scrollTop = nextScrollTop;
-    }
     const restingMaxScrollTop = maxRestingScrollTop(
       container,
       revealTrailingHeight
@@ -312,17 +309,11 @@ function buildVirtualLayout(
     const measuredSize = measuredSizes[message.id];
     const presentation = analyzeMessagePresentation(message, shouldOfferExpandedMessage);
     const estimatedWidth = estimateBubbleWidth(message, presentation, availableWidth);
-    const shouldUseEstimatedWidth =
-      availableWidth <= 500
-      && !presentation.isWide
-      && !presentation.isTruncated
-      && (presentation.sizeClass === "short" || presentation.sizeClass === "medium");
-    const width = shouldUseEstimatedWidth ? estimatedWidth : measuredSize?.width ?? estimatedWidth;
+    const width = estimatedWidth;
     const height = measuredSize?.height ?? DEFAULT_MESSAGE_HEIGHT;
     const shouldForceOwnRow =
       presentation.isWide
       || presentation.isTruncated
-      || presentation.sizeClass === "long"
       || (availableWidth <= 500 && presentation.sizeClass === "medium");
 
     if (shouldForceOwnRow && offsetLeft > 0) {

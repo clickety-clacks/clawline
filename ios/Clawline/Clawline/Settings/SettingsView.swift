@@ -289,6 +289,12 @@ private struct TextLinkURLTemplateRuleRow: View {
 #endif
                 .font(.system(.subheadline, design: .monospaced))
 
+            Picker("Display URL", selection: $rule.displayMode) {
+                ForEach(TextLinkResolvedURLDisplayMode.allCases, id: \.self) { mode in
+                    Text(mode.label).tag(mode)
+                }
+            }
+
             if let validationMessage = TextLinkURLTemplateRules.validationMessage(for: rule) {
                 Text(validationMessage)
                     .font(.caption)

@@ -20,6 +20,7 @@
   "include": [
     "playwright.config.ts",
     "src",
+    "widgets",
     "vite.config.ts",
     "vitest.setup.ts"
   ]

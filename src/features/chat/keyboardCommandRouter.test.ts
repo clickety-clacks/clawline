@@ -99,8 +99,14 @@ describe("keyboardCommandRouter", () => {
       intent: "notificationScrollForward"
     });
     expect(
-      keyboardIntentFromEvent(keyEvent({ key: "#", metaKey: true, shiftKey: true }))
+      keyboardIntentFromEvent(keyEvent({ key: "3", metaKey: true, altKey: true }))
     ).toEqual({ intent: "notificationAssignedReply", index: 3 });
+    expect(
+      keyboardIntentFromEvent(keyEvent({ key: "#", metaKey: true, shiftKey: true }))
+    ).toBeNull();
+    expect(
+      keyboardIntentFromEvent(keyEvent({ key: "3", metaKey: true, shiftKey: true }))
+    ).toBeNull();
     expect(
       keyboardIntentFromEvent(
         keyEvent({ key: "#", metaKey: true, shiftKey: true, altKey: true })

@@ -11,7 +11,7 @@ export default defineConfig({
     allowedHosts: true
   },
   test: {
-    include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
+    include: ["src/**/*.test.ts", "src/**/*.test.tsx", "widgets/**/*.test.ts"],
     exclude: ["playwright/**"],
     environment: "jsdom",
     globals: true,

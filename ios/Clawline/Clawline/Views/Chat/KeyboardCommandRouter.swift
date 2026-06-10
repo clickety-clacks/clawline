@@ -38,6 +38,7 @@ enum KeyboardCommandIntent: Equatable {
 
 enum KeyboardSurfaceKind: String, Equatable {
     case composer
+    case chatSelector
     case mentionPicker
     case notificationBubble
     case notificationReply
@@ -47,6 +48,7 @@ enum KeyboardSurfaceKind: String, Equatable {
 
 enum KeyboardSurfaceId: Hashable, ExpressibleByStringLiteral, CustomStringConvertible {
     case composer
+    case chatSelectorRow(String)
     case mentionPicker
     case notificationBubble(String)
     case notificationReply(String)
@@ -62,6 +64,8 @@ enum KeyboardSurfaceId: Hashable, ExpressibleByStringLiteral, CustomStringConver
         switch self {
         case .composer:
             return "composer"
+        case .chatSelectorRow(let sessionKey):
+            return "chat-selector-row:\(sessionKey)"
         case .mentionPicker:
             return "mention-picker"
         case .notificationBubble(let domainRef):
@@ -80,6 +84,7 @@ enum KeyboardSurfaceId: Hashable, ExpressibleByStringLiteral, CustomStringConver
 
 enum KeyboardCommandFamily: Hashable {
     case appNavigation
+    case chatSelectorAssigned
     case notificationAssigned
     case notificationStack
     case notificationScroll
@@ -109,6 +114,7 @@ struct KeyboardSurfaceRecord: Equatable {
 struct KeyboardOwnershipStore: Equatable {
     var sceneId: String
     private(set) var surfaceRegistry: [KeyboardSurfaceId: KeyboardSurfaceRecord] = [:]
+    private(set) var chatSelectorShortcutMap: [Int: KeyboardSurfaceId] = [:]
     private(set) var notificationShortcutMap: [Int: KeyboardSurfaceId] = [:]
     private(set) var routeEpoch: Int = 0
 
@@ -162,15 +168,29 @@ struct KeyboardOwnershipStore: Equatable {
         reconcile()
     }
 
+    mutating func setChatSelectorShortcutMap(_ map: [Int: KeyboardSurfaceId]) {
+        chatSelectorShortcutMap = map.filter { _, surfaceId in
+            surfaceRegistry[surfaceId]?.participatesInRouting == true
+        }
+        routeEpoch += 1
+        reconcile()
+    }
+
     mutating func synchronize(
         records: [KeyboardSurfaceRecord],
-        notificationShortcutMap nextNotificationShortcutMap: [Int: KeyboardSurfaceId]
+        notificationShortcutMap nextNotificationShortcutMap: [Int: KeyboardSurfaceId],
+        chatSelectorShortcutMap nextChatSelectorShortcutMap: [Int: KeyboardSurfaceId] = [:]
     ) {
         let nextRegistry = Dictionary(uniqueKeysWithValues: records.map { ($0.surfaceId, $0) })
-        guard nextRegistry != surfaceRegistry || nextNotificationShortcutMap != notificationShortcutMap else {
+        guard nextRegistry != surfaceRegistry
+                || nextNotificationShortcutMap != notificationShortcutMap
+                || nextChatSelectorShortcutMap != chatSelectorShortcutMap else {
             return
         }
         surfaceRegistry = nextRegistry
+        chatSelectorShortcutMap = nextChatSelectorShortcutMap.filter { _, surfaceId in
+            nextRegistry[surfaceId]?.participatesInRouting == true
+        }
         notificationShortcutMap = nextNotificationShortcutMap.filter { _, surfaceId in
             nextRegistry[surfaceId]?.participatesInRouting == true
         }
@@ -192,6 +212,9 @@ struct KeyboardOwnershipStore: Equatable {
         } while removedAny
 
         notificationShortcutMap = notificationShortcutMap.filter { _, surfaceId in
+            surfaceRegistry[surfaceId]?.participatesInRouting == true
+        }
+        chatSelectorShortcutMap = chatSelectorShortcutMap.filter { _, surfaceId in
             surfaceRegistry[surfaceId]?.participatesInRouting == true
         }
     }
@@ -317,6 +340,13 @@ enum KeyboardCommandRouter {
         case .notificationAssignedOpen(let index),
              .notificationAssignedReply(let index),
              .notificationAssignedDismiss(let index):
+            if case .notificationAssignedOpen = intent,
+               let selectorSurfaceId = reconciledStore.chatSelectorShortcutMap[index],
+               let selectorRecord = reconciledStore.surfaceRegistry[selectorSurfaceId],
+               selectorRecord.participatesInRouting,
+               selectorRecord.commandFamilies.contains(.chatSelectorAssigned) {
+                return decision(.handled(selectorSurfaceId), "PR-00")
+            }
             if let surfaceId = reconciledStore.notificationShortcutMap[index],
                let record = reconciledStore.surfaceRegistry[surfaceId],
                record.participatesInRouting,
@@ -674,6 +704,7 @@ enum KeyboardOwnershipSceneFactory {
 
     static func chatScene(
         visibleNotificationSourceChatIds: [String],
+        visibleChatSelectorSessionKeys: [String] = [],
         mentionPickerVisible: Bool,
         mentionPickerHasCompletion: Bool = false,
         composerFocused: Bool,
@@ -693,7 +724,14 @@ enum KeyboardOwnershipSceneFactory {
             actionMenuSourceChatId: actionMenuSourceChatId
         )
         var store = KeyboardOwnershipStore()
-        store.synchronize(records: scene.records, notificationShortcutMap: scene.notificationShortcutMap)
+        let chatSelectorRecords = StreamSelectorShortcutMap.records(selectableSessionKeys: visibleChatSelectorSessionKeys)
+        store.synchronize(
+            records: scene.records + chatSelectorRecords,
+            notificationShortcutMap: scene.notificationShortcutMap,
+            chatSelectorShortcutMap: StreamSelectorShortcutMap.shortcutMap(
+                selectableSessionKeys: visibleChatSelectorSessionKeys
+            )
+        )
         return store
     }
 }

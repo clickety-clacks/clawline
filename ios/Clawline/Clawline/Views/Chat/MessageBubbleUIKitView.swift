@@ -1198,12 +1198,16 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
 
         let markdownStyle = Self.markdownStyle(for: sizeClass, metrics: metrics)
         let markdownContent = UnifiedMarkdownRenderer.makeContent(
-            presentation: presentation,
+            messageText: message.content,
+            context: MarkdownMessageRenderContext(
+                role: message.role,
+                messageID: message.id,
+                metrics: metrics
+            ),
             baseFont: markdownStyle.baseFont,
             inkColor: contentColor,
             lineSpacing: markdownStyle.lineSpacing,
             stripDetectedURLs: false,
-            role: message.role,
             isDark: effectiveIsDark
         )
 
@@ -2010,8 +2014,12 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
 
     @objc private func handleBodyTap(_ recognizer: UITapGestureRecognizer) {
         if recognizer.state == .ended,
-           let generatedURL = Self.generatedTextLinkURL(in: bodyLabel, at: recognizer.location(in: bodyLabel)) {
-            _ = GeneratedTextLinkActivationRouter.openGeneratedLink(generatedURL, bodyLabel)
+           let generatedLink = Self.generatedTextLink(in: bodyLabel, at: recognizer.location(in: bodyLabel)) {
+            _ = GeneratedTextLinkActivationRouter.activateGeneratedLinkTap(
+                generatedLink.url,
+                displayMode: generatedLink.displayMode,
+                from: bodyLabel
+            )
             return
         }
         handleBubbleTap()
@@ -2028,6 +2036,10 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
     }
 
     static func generatedTextLinkURL(in textView: UITextView, at point: CGPoint) -> URL? {
+        generatedTextLink(in: textView, at: point)?.url
+    }
+
+    static func generatedTextLink(in textView: UITextView, at point: CGPoint) -> (url: URL, displayMode: TextLinkResolvedURLDisplayMode)? {
         guard let attributedText = textView.attributedText, attributedText.length > 0 else {
             return nil
         }
@@ -2066,7 +2078,10 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         guard glyphRect.contains(location) else {
             return nil
         }
-        return url
+        return (
+            url,
+            TextLinkURLTemplateRules.displayMode(in: attributedText, characterRange: effectiveRange)
+        )
     }
 
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
@@ -2149,7 +2164,11 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
     ) -> UIAction? {
         UnifiedMarkdownRenderer.primaryActionForTextItem(textItem, defaultAction: defaultAction) { tappedURL, characterRange in
             if TextLinkURLTemplateRules.isGeneratedLink(in: textView.attributedText, characterRange: characterRange) {
-                _ = GeneratedTextLinkActivationRouter.openGeneratedLink(tappedURL, textView)
+                _ = GeneratedTextLinkActivationRouter.activateGeneratedLinkTap(
+                    tappedURL,
+                    displayMode: TextLinkURLTemplateRules.displayMode(in: textView.attributedText, characterRange: characterRange),
+                    from: textView
+                )
                 return
             }
             UIApplication.shared.open(tappedURL)
@@ -2165,7 +2184,11 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         guard TextLinkURLTemplateRules.isGeneratedLink(in: textView.attributedText, characterRange: characterRange) else {
             return true
         }
-        _ = GeneratedTextLinkActivationRouter.openGeneratedLink(URL, textView)
+        _ = GeneratedTextLinkActivationRouter.activateGeneratedLinkTap(
+            URL,
+            displayMode: TextLinkURLTemplateRules.displayMode(in: textView.attributedText, characterRange: characterRange),
+            from: textView
+        )
         return false
     }
 
@@ -2261,12 +2284,20 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         if let reference = currentReplyReference {
             let label = reference.preview.isEmpty ? reference.tokenLabel : reference.preview
             let font = UIFont.clawline(.timestamp)
-            replyIndicatorTextView.attributedText = UnifiedMarkdownRenderer.renderNSAttributedString(
-                markdown: MessageReferenceMarkdownDisplay.renderableMarkdown(label),
+            let content = UnifiedMarkdownRenderer.makeContent(
+                messageText: MessageReferenceMarkdownDisplay.renderableMarkdown(label),
+                context: MarkdownMessageRenderContext(
+                    role: .user,
+                    messageID: "reply-reference-\(reference.id.uuidString)",
+                    metrics: ChatFlowTheme.Metrics(isCompact: true)
+                ),
                 baseFont: font,
                 inkColor: UIColor.label,
-                lineSpacing: 1
-            ) ?? NSAttributedString(
+                lineSpacing: 1,
+                stripDetectedURLs: false,
+                isDark: traitCollection.userInterfaceStyle == .dark
+            )
+            replyIndicatorTextView.attributedText = content.firstAttributedText ?? NSAttributedString(
                 string: label,
                 attributes: [
                     .font: font,

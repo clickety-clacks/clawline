@@ -8,6 +8,12 @@
 import SwiftUI
 import UIKit
 
+enum StreamPopupSearchPresentationFocusPolicy {
+    static func shouldRenderSearchTextFieldOnInitialPresentation(searchFocusRequestID: Int?) -> Bool {
+        searchFocusRequestID != nil
+    }
+}
+
 struct StreamManagerSheet: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.settingsManager) private var settings
@@ -31,6 +37,7 @@ struct StreamManagerSheet: View {
     @State private var pendingRemovalStream: StreamSession?
     @State private var selectedStreamSessionKey: String?
     @State private var didActivateSelection = false
+    @State private var isSearchFieldFocusEnabled = false
     @FocusState private var focusedEditor: EditorMode?
     @FocusState private var isSearchFieldFocused: Bool
 
@@ -253,12 +260,13 @@ struct StreamManagerSheet: View {
         )
         .onAppear {
             syncSelectionWithFilteredStreams()
-            handleSearchFocusRequest(searchFocusRequestID)
+            handleInitialSearchFocus(searchFocusRequestID)
         }
         .onDisappear {
             resetInlineEditing()
             searchQuery = ""
             isSearchFieldFocused = false
+            isSearchFieldFocusEnabled = false
             selectedStreamSessionKey = nil
             didActivateSelection = false
         }
@@ -296,27 +304,7 @@ struct StreamManagerSheet: View {
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass")
                     .foregroundStyle(.secondary)
-                TextField("Filter…", text: $searchQuery)
-                    .font(.clawline(.uiLabel))
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .submitLabel(.go)
-                    .focused($isSearchFieldFocused)
-                    .onSubmit {
-                        selectHighlightedStream()
-                    }
-                    .onKeyPress(.upArrow) {
-                        moveSelection(step: -1)
-                        return .handled
-                    }
-                    .onKeyPress(.downArrow) {
-                        moveSelection(step: 1)
-                        return .handled
-                    }
-                    .onKeyPress(.return) {
-                        selectHighlightedStream()
-                        return .handled
-                    }
+                searchField
                 if !searchQuery.isEmpty {
                     Button {
                         searchQuery = ""
@@ -378,6 +366,45 @@ struct StreamManagerSheet: View {
         .padding(.bottom, actionBarBottomPadding)
         .overlay(alignment: .top) {
             sectionSeparator
+        }
+    }
+
+    @ViewBuilder
+    private var searchField: some View {
+        if isSearchFieldFocusEnabled {
+            TextField("Filter…", text: $searchQuery)
+                .font(.clawline(.uiLabel))
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .submitLabel(.go)
+                .focused($isSearchFieldFocused)
+                .onSubmit {
+                    selectHighlightedStream()
+                }
+                .onKeyPress(.upArrow) {
+                    moveSelection(step: -1)
+                    return .handled
+                }
+                .onKeyPress(.downArrow) {
+                    moveSelection(step: 1)
+                    return .handled
+                }
+                .onKeyPress(.return) {
+                    selectHighlightedStream()
+                    return .handled
+                }
+        } else {
+            Button {
+                isSearchFieldFocusEnabled = true
+                focusSearchField()
+            } label: {
+                Text("Filter…")
+                    .font(.clawline(.uiLabel))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Filter streams")
         }
     }
 
@@ -446,7 +473,10 @@ struct StreamManagerSheet: View {
             } label: {
                 let isActive = stream.sessionKey == viewModel.uiSelectedSessionKey
                 let dotIdentity = StreamPopupRowStatusDotIdentity(
-                    sessionKey: stream.sessionKey
+                    sessionKey: stream.sessionKey,
+                    dotState: dotState,
+                    isActive: isActive,
+                    colorScheme: colorScheme
                 )
                 HStack(spacing: 10) {
                     StreamPopupRowStatusDot(
@@ -454,6 +484,7 @@ struct StreamManagerSheet: View {
                         dotState: dotState,
                         colorScheme: colorScheme
                     )
+                    .id(dotIdentity)
                     Text(stream.displayName)
                         .font(.clawline(.subsectionHeader).weight(isActive ? .semibold : .regular))
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -463,7 +494,6 @@ struct StreamManagerSheet: View {
                             .tint(.secondary)
                     }
                 }
-                .id(dotIdentity)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
             }
@@ -550,6 +580,7 @@ struct StreamManagerSheet: View {
     }
 
     private func focusSearchField() {
+        isSearchFieldFocusEnabled = true
         Task { @MainActor in
             await Task.yield()
             isSearchFieldFocused = true
@@ -561,6 +592,16 @@ struct StreamManagerSheet: View {
         guard requestID != nil else { return }
         focusSearchField()
         onConsumeSearchFocusRequest()
+    }
+
+    private func handleInitialSearchFocus(_ requestID: Int?) {
+        isSearchFieldFocusEnabled = StreamPopupSearchPresentationFocusPolicy
+            .shouldRenderSearchTextFieldOnInitialPresentation(searchFocusRequestID: requestID)
+        guard requestID != nil else {
+            isSearchFieldFocused = false
+            return
+        }
+        handleSearchFocusRequest(requestID)
     }
 
     private func syncSelectionWithFilteredStreams() {
@@ -638,6 +679,9 @@ struct StreamManagerSheet: View {
 
 struct StreamPopupRowStatusDotIdentity: Hashable {
     let sessionKey: String
+    let dotState: StreamDotState
+    let isActive: Bool
+    let colorScheme: ColorScheme
 }
 
 private struct StreamPopupRowStatusDot: View {

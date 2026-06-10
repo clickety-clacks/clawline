@@ -31,4 +31,38 @@ struct CrossChatNotificationOverlayLifecycleTests {
             )
         )
     }
+
+    @Test func ordinaryChatNavigationDoesNotDockUndockedNotifications() {
+        #expect(
+            !CrossChatNotificationNavigationDockPolicy.shouldDock(
+                origin: .ordinaryChatNavigation,
+                isSwitchingChats: true,
+                hasNotifications: true
+            )
+        )
+    }
+
+    @Test func notificationOriginNavigationDocksWhenSwitchingWithNotifications() {
+        #expect(
+            CrossChatNotificationNavigationDockPolicy.shouldDock(
+                origin: .notificationNavigation,
+                isSwitchingChats: true,
+                hasNotifications: true
+            )
+        )
+        #expect(
+            !CrossChatNotificationNavigationDockPolicy.shouldDock(
+                origin: .notificationNavigation,
+                isSwitchingChats: false,
+                hasNotifications: true
+            )
+        )
+        #expect(
+            !CrossChatNotificationNavigationDockPolicy.shouldDock(
+                origin: .notificationNavigation,
+                isSwitchingChats: true,
+                hasNotifications: false
+            )
+        )
+    }
 }

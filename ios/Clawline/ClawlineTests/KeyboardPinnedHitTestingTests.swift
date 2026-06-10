@@ -1,9 +1,20 @@
 import Testing
 import UIKit
+import SwiftUI
 @testable import Clawline
 
 @MainActor
 struct KeyboardPinnedHitTestingTests {
+    @Test("Keyboard-pinned composer does not own a version indicator")
+    func keyboardPinnedComposerDoesNotOwnVersionIndicator() throws {
+        let container = KeyboardPinnedContainerView(rootView: Text("Composer"))
+        container.frame = CGRect(x: 0, y: 0, width: 320, height: 120)
+        container.setDesiredBottomGap(0, isKeyboardVisible: false)
+        container.layoutIfNeeded()
+
+        #expect(allSubviews(in: container).contains { $0 is UILabel } == false)
+    }
+
     @Test("Pinned-container hit testing honors custom hit regions instead of raw frames")
     func expandedHitRegionCountsAsInteractive() {
         let container = UIView(frame: CGRect(x: 0, y: 0, width: 200, height: 200))

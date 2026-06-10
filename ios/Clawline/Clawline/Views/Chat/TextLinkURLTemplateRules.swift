@@ -2,11 +2,60 @@ import Foundation
 import OSLog
 import UIKit
 
+enum TextLinkResolvedURLDisplayMode: String, Codable, CaseIterable, Equatable {
+    case direct
+    case modal
+    case popup
+
+    var label: String {
+        switch self {
+        case .direct: "Open directly"
+        case .modal: "Show in modal"
+        case .popup: "Show in popup"
+        }
+    }
+}
+
 struct TextLinkURLTemplateRule: Codable, Equatable, Identifiable {
     var id: String
     var enabled: Bool
     var pattern: String
     var urlTemplate: String
+    var displayMode: TextLinkResolvedURLDisplayMode
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case enabled
+        case pattern
+        case urlTemplate
+        case displayMode
+    }
+
+    init(
+        id: String,
+        enabled: Bool,
+        pattern: String,
+        urlTemplate: String,
+        displayMode: TextLinkResolvedURLDisplayMode = .direct
+    ) {
+        self.id = id
+        self.enabled = enabled
+        self.pattern = pattern
+        self.urlTemplate = urlTemplate
+        self.displayMode = displayMode
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = try container.decode(String.self, forKey: .id)
+        self.enabled = try container.decode(Bool.self, forKey: .enabled)
+        self.pattern = try container.decode(String.self, forKey: .pattern)
+        self.urlTemplate = try container.decode(String.self, forKey: .urlTemplate)
+        self.displayMode = try container.decodeIfPresent(
+            TextLinkResolvedURLDisplayMode.self,
+            forKey: .displayMode
+        ) ?? .direct
+    }
 
     static let janusTrackerExample = TextLinkURLTemplateRule(
         id: "janus-ticket",
@@ -29,6 +78,7 @@ struct TextLinkURLTemplateDiagnostic: Equatable {
 
 enum TextLinkURLTemplateRules {
     static let generatedRuleIDAttribute = NSAttributedString.Key("co.clicketyclacks.Clawline.generatedTextLinkRuleID")
+    static let generatedDisplayModeAttribute = NSAttributedString.Key("co.clicketyclacks.Clawline.generatedTextLinkDisplayMode")
     static var configuredRules: [TextLinkURLTemplateRule] = [] {
         didSet { configurationVersion += 1 }
     }
@@ -68,6 +118,7 @@ enum TextLinkURLTemplateRules {
                 case .url(let url):
                     attributed.addAttribute(.link, value: url, range: match.range)
                     attributed.addAttribute(generatedRuleIDAttribute, value: rule.id, range: match.range)
+                    attributed.addAttribute(generatedDisplayModeAttribute, value: rule.displayMode.rawValue, range: match.range)
                 case .failure(let kind):
                     recordDiagnostic(kind, ruleID: rule.id, diagnostics: &diagnostics)
                 }
@@ -82,6 +133,20 @@ enum TextLinkURLTemplateRules {
             return false
         }
         return attributed.attribute(generatedRuleIDAttribute, at: characterRange.location, effectiveRange: nil) != nil
+    }
+
+    static func displayMode(in attributed: NSAttributedString, characterRange: NSRange) -> TextLinkResolvedURLDisplayMode {
+        guard characterRange.location != NSNotFound, characterRange.location < attributed.length else {
+            return .direct
+        }
+        guard let rawValue = attributed.attribute(
+            generatedDisplayModeAttribute,
+            at: characterRange.location,
+            effectiveRange: nil
+        ) as? String else {
+            return .direct
+        }
+        return TextLinkResolvedURLDisplayMode(rawValue: rawValue) ?? .direct
     }
 
     static func validationMessage(for rule: TextLinkURLTemplateRule) -> String? {

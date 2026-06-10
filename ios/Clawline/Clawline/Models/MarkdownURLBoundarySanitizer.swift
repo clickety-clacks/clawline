@@ -1,8 +1,8 @@
 import Foundation
 
 enum MarkdownURLBoundarySanitizer {
-    private static let trailingUnsafeCharacters = CharacterSet(charactersIn: "`\"“”‘’<>\\^{}|[]")
-    private static let defaultBoundaryTokens = ["`"]
+    private static let trailingUnsafeCharacters = CharacterSet(charactersIn: "`\"“”‘’<>\\^{}|[]\u{F0000}\u{F0001}")
+    private static let defaultBoundaryTokens = ["`", "%F3%B0%80%80", "%F3%B0%80%81"]
 
     static func validatedHTTPURL(from candidate: String) -> URL? {
         guard let url = URL(string: candidate),

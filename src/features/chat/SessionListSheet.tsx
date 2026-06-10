@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { Plus, Search } from "lucide-react";
 import type {
   StreamDotState,
@@ -30,8 +30,10 @@ export function resolveStreamDisplayName(stream: Pick<StreamRecord, "displayName
 
 export function SessionListSheet({
   activeSessionKey,
+  filterQuery,
   isOpen,
   onClose,
+  onFilterQueryChange,
   onOpenStreamManager,
   onSelectSession,
   provisionedSessionKeys,
@@ -41,8 +43,10 @@ export function SessionListSheet({
   transportPhase
 }: {
   activeSessionKey?: string;
+  filterQuery: string;
   isOpen: boolean;
   onClose: () => void;
+  onFilterQueryChange: (query: string) => void;
   onOpenStreamManager: () => void;
   onSelectSession: (sessionKey: string) => void;
   provisionedSessionKeys: string[];
@@ -51,7 +55,6 @@ export function SessionListSheet({
   streams: StreamRecord[];
   transportPhase: TransportPhase;
 }) {
-  const [filterQuery, setFilterQuery] = useState("");
   const filteredStreams = useMemo(() => {
     const normalizedQuery = filterQuery.trim().toLowerCase();
     if (normalizedQuery.length === 0) {
@@ -147,7 +150,7 @@ export function SessionListSheet({
             </span>
             <input
               aria-label="Filter chats"
-              onChange={(event) => setFilterQuery(event.target.value)}
+              onChange={(event) => onFilterQueryChange(event.target.value)}
               placeholder="Filter…"
               type="text"
               value={filterQuery}

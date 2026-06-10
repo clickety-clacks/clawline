@@ -901,7 +901,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         dynamicContentScrollView.isDirectionalLockEnabled = true
         dynamicContentScrollView.isScrollEnabled = false
         dynamicContentStack.axis = .vertical
-        dynamicContentStack.spacing = 10
+        dynamicContentStack.spacing = 6
         dynamicContentStack.translatesAutoresizingMaskIntoConstraints = false
         dynamicContentStack.isLayoutMarginsRelativeArrangement = true
         dynamicContentStack.layoutMargins = UIEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)

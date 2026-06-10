@@ -122,6 +122,130 @@ struct PromptFocusShortcutActivationTests {
         )
     }
 
+    @Test("T1250 text selection suppresses notification left and right swipe completion")
+    @MainActor
+    func textSelectionSuppressesNotificationLeftAndRightSwipeCompletion() {
+        let threshold: CGFloat = 44
+
+        #expect(CrossChatNotificationSelectionSwipeSuppression.allowsSwipe(isTextSelectionActive: true) == false)
+        #expect(
+            CrossChatNotificationGestureAxisLock.allowsBubbleSwipeCompletion(
+                activeLock: .horizontalSwipe,
+                finalTranslation: CGSize(width: threshold + 20, height: 4),
+                completionThreshold: threshold,
+                isTextSelectionActive: true
+            ) == false
+        )
+        #expect(
+            CrossChatNotificationGestureAxisLock.allowsBubbleSwipeCompletion(
+                activeLock: .horizontalSwipe,
+                finalTranslation: CGSize(width: -(threshold + 20), height: 4),
+                completionThreshold: threshold,
+                isTextSelectionActive: true
+            ) == false
+        )
+        #expect(
+            CrossChatNotificationBubbleSwipeCompletion.effect(
+                activeLock: .horizontalSwipe,
+                finalTranslation: CGSize(width: threshold + 20, height: 4),
+                completionThreshold: threshold,
+                isDocked: false,
+                isTextSelectionActive: true
+            ) == nil
+        )
+        #expect(
+            CrossChatNotificationBubbleSwipeCompletion.effect(
+                activeLock: .horizontalSwipe,
+                finalTranslation: CGSize(width: -(threshold + 20), height: 4),
+                completionThreshold: threshold,
+                isDocked: false,
+                isTextSelectionActive: true
+            ) == nil
+        )
+    }
+
+    @Test("T1250 inactive selection preserves normal notification swipes")
+    @MainActor
+    func inactiveSelectionPreservesNormalNotificationSwipes() {
+        let threshold: CGFloat = 44
+
+        #expect(CrossChatNotificationSelectionSwipeSuppression.allowsSwipe(isTextSelectionActive: false))
+        #expect(
+            CrossChatNotificationBubbleSwipeCompletion.effect(
+                activeLock: .horizontalSwipe,
+                finalTranslation: CGSize(width: threshold + 20, height: 4),
+                completionThreshold: threshold,
+                isDocked: false,
+                isTextSelectionActive: false
+            ) == .dock
+        )
+        #expect(
+            CrossChatNotificationBubbleSwipeCompletion.effect(
+                activeLock: .horizontalSwipe,
+                finalTranslation: CGSize(width: -(threshold + 20), height: 4),
+                completionThreshold: threshold,
+                isDocked: false,
+                isTextSelectionActive: false
+            ) == .dismiss
+        )
+    }
+
+    @Test("T1250 multiple notification content selections aggregate before re-enabling swipes")
+    @MainActor
+    func multipleNotificationContentSelectionsAggregateBeforeReenablingSwipes() {
+        var state = CrossChatNotificationTextSelectionState()
+
+        state.setContentSelectionActive(true, key: "entry-a:0")
+        state.setContentSelectionActive(true, key: "entry-b:0")
+        #expect(state.isAnySelectionActive)
+
+        state.setContentSelectionActive(false, key: "entry-a:0")
+        #expect(state.isAnySelectionActive)
+
+        state.setContentSelectionActive(false, key: "entry-b:0")
+        #expect(state.isAnySelectionActive == false)
+    }
+
+    @Test("T1250 replacing notification content clears stale content selection")
+    @MainActor
+    func replacingNotificationContentClearsStaleContentSelection() {
+        var state = CrossChatNotificationTextSelectionState()
+
+        state.setContentSelectionActive(true, key: "entry-a:0")
+        #expect(state.isAnySelectionActive)
+
+        state.clearContentSelection()
+        #expect(state.isAnySelectionActive == false)
+    }
+
+    @Test("T1250 same-length notification content replacement changes selection cleanup key")
+    @MainActor
+    func sameLengthNotificationContentReplacementChangesSelectionCleanupKey() {
+        let original = [
+            CrossChatAssistantNotificationEntry(id: "entry-a", content: "abcd", timestamp: Date(timeIntervalSince1970: 1))
+        ]
+        let replacement = [
+            CrossChatAssistantNotificationEntry(id: "entry-a", content: "wxyz", timestamp: Date(timeIntervalSince1970: 1))
+        ]
+
+        #expect(CrossChatNotificationEntriesAnimationKey.value(for: original) != CrossChatNotificationEntriesAnimationKey.value(for: replacement))
+    }
+
+    @Test("T1250 reply composer selection keeps swipes suppressed after content selection clears")
+    @MainActor
+    func replyComposerSelectionKeepsSwipesSuppressedAfterContentSelectionClears() {
+        var state = CrossChatNotificationTextSelectionState()
+
+        state.setContentSelectionActive(true, key: "entry-a:0")
+        state.setReplySelectionActive(true)
+        state.setContentSelectionActive(false, key: "entry-a:0")
+
+        #expect(state.isAnySelectionActive)
+
+        state.setReplySelectionActive(false)
+        #expect(state.isAnySelectionActive == false)
+    }
+
     @Test("T355 docked notification left swipe restores stack instead of dismissing")
     @MainActor
     func dockedNotificationLeftSwipeRestoresStackInsteadOfDismissing() {
@@ -426,7 +550,8 @@ struct PromptFocusShortcutActivationTests {
             keyboardOwnershipStore: keyboardOwnershipStore,
             onSubmit: { submitCount += 1 },
             onCancel: {},
-            onFocusChange: { _ in }
+            onFocusChange: { _ in },
+            onSelectionChange: { _ in }
         )
         let coordinator = NotificationReplyTextInput.Coordinator(parent: input)
         let textView = UITextView()
@@ -441,6 +566,40 @@ struct PromptFocusShortcutActivationTests {
         #expect(!shouldChange)
         #expect(submitCount == 1)
         #expect(textView.text == "reply")
+    }
+
+    @Test("T1250 notification reply composer reports active text selection")
+    @MainActor
+    func notificationReplyComposerReportsActiveTextSelection() {
+        var text = "selectable reply"
+        var measuredHeight: CGFloat = 20
+        var selectionStates: [Bool] = []
+        let input = NotificationReplyTextInput(
+            sourceChatId: "reply-source",
+            text: Binding(get: { text }, set: { text = $0 }),
+            measuredHeight: Binding(get: { measuredHeight }, set: { measuredHeight = $0 }),
+            font: UIFont.systemFont(ofSize: 15),
+            textColor: .label,
+            tintColor: .systemBlue,
+            visibleNotificationCount: 1,
+            onSubmit: {},
+            onCancel: {},
+            onFocusChange: { _ in },
+            onSelectionChange: { selectionStates.append($0) }
+        )
+        let coordinator = NotificationReplyTextInput.Coordinator(parent: input)
+        let textView = UITextView()
+        textView.text = text
+
+        textView.selectedRange = NSRange(location: 0, length: 6)
+        coordinator.textViewDidChangeSelection(textView)
+        textView.selectedRange = NSRange(location: 6, length: 0)
+        coordinator.textViewDidChangeSelection(textView)
+        textView.selectedRange = NSRange(location: 0, length: 4)
+        coordinator.textViewDidChangeSelection(textView)
+        coordinator.textViewDidEndEditing(textView)
+
+        #expect(selectionStates == [true, false, true, false])
     }
 
     @Test("No-text prompt focus shortcuts keep Cmd-L out of the unmodified host")

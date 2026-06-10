@@ -655,6 +655,7 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
                 isContentScrollLocked: false,
                 onContentScrollDragChanged: { _ in },
                 onContentScrollDragEnded: {},
+                onTextSelectionChange: { _ in },
                 notificationEntryRenderer: renderer
             )
         )
@@ -695,6 +696,7 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
                 assignedNumber: 1,
                 visibleNotificationCount: 1,
                 showShortcutLabel: true,
+                isShortcutLabelDisabled: false,
                 maxBubbleHeight: 205,
                 maxBubbleWidth: 360,
                 bubbleCornerRadius: 18,
@@ -721,7 +723,8 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
                 isDismissSwipeActive: false,
                 isContentScrollLocked: false,
                 onContentScrollDragChanged: { _ in },
-                onContentScrollDragEnded: {}
+                onContentScrollDragEnded: {},
+                onTextSelectionChange: { _ in }
             )
         )
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 420, height: 320))
@@ -803,6 +806,7 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
                 assignedNumber: 1,
                 visibleNotificationCount: 1,
                 showShortcutLabel: true,
+                isShortcutLabelDisabled: false,
                 maxBubbleHeight: 205,
                 maxBubbleWidth: 360,
                 bubbleCornerRadius: 18,
@@ -829,7 +833,8 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
                 isDismissSwipeActive: false,
                 isContentScrollLocked: false,
                 onContentScrollDragChanged: { _ in },
-                onContentScrollDragEnded: {}
+                onContentScrollDragEnded: {},
+                onTextSelectionChange: { _ in }
             )
         )
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 420, height: 320))
@@ -953,6 +958,7 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
             assignedNumber: 1,
             visibleNotificationCount: 1,
             showShortcutLabel: true,
+            isShortcutLabelDisabled: false,
             maxBubbleHeight: maxBubbleHeight,
             maxBubbleWidth: 360,
             bubbleCornerRadius: 18,
@@ -979,7 +985,8 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
             isDismissSwipeActive: false,
             isContentScrollLocked: false,
             onContentScrollDragChanged: { _ in },
-            onContentScrollDragEnded: {}
+            onContentScrollDragEnded: {},
+            onTextSelectionChange: { _ in }
         )
     }
 
@@ -1033,6 +1040,7 @@ final class T383NotificationPerformanceProofTests: XCTestCase {
                 assignedNumber: 1,
                 visibleNotificationCount: 1,
                 showShortcutLabel: true,
+                isShortcutLabelDisabled: false,
                 maxBubbleHeight: 205,
                 maxBubbleWidth: 360,
                 bubbleCornerRadius: 18,
@@ -1059,7 +1067,8 @@ final class T383NotificationPerformanceProofTests: XCTestCase {
                 isDismissSwipeActive: false,
                 isContentScrollLocked: false,
                 onContentScrollDragChanged: { _ in },
-                onContentScrollDragEnded: {}
+                onContentScrollDragEnded: {},
+                onTextSelectionChange: { _ in }
             )
         )
         let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 420, height: 320))

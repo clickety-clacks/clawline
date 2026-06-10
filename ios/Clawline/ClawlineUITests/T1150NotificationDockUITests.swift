@@ -8,13 +8,33 @@ final class T1150NotificationDockUITests: XCTestCase {
     @MainActor
     func testDockedNotificationTapUndocksAllNotifications() throws {
         let app = launchDockedNotificationProofApp(skipCollapsedPreview: true)
+        assertDockedPeekIsOnlyEdgeStrip(in: app)
 
         let dockedHitTarget = dockedHitTarget(in: app)
         app.coordinate(withNormalizedOffset: .zero)
-            .withOffset(CGVector(dx: dockedHitTarget.frame.midX, dy: dockedHitTarget.frame.minY + 24))
+            .withOffset(CGVector(dx: dockedHitTarget.frame.minX + 4, dy: dockedHitTarget.frame.midY))
             .tap()
 
         assertUndockedNotificationsRemainVisible(in: app)
+        assertUndockedNotificationsAlignToTrailingEdge(in: app)
+        attachLandscapeScreenshot(from: app, name: "T1150 rotated trailing notification proof")
+    }
+
+    @MainActor
+    func testRotatedLandscapeChatBubblesComposerAndNotificationsStayWithinScreen() throws {
+        let app = launchDockedNotificationProofApp(skipCollapsedPreview: true)
+        assertDockedPeekIsOnlyEdgeStrip(in: app)
+        assertLandscapeChatProofContentIsVisible(in: app)
+
+        let dockedHitTarget = dockedHitTarget(in: app)
+        app.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: dockedHitTarget.frame.minX + 4, dy: dockedHitTarget.frame.midY))
+            .tap()
+
+        assertUndockedNotificationsRemainVisible(in: app)
+        assertUndockedNotificationsAlignToTrailingEdge(in: app)
+        assertLandscapeChatProofContentIsVisible(in: app)
+        attachLandscapeScreenshot(from: app, name: "T357 rotated chat and notification proof")
     }
 
     @MainActor
@@ -23,9 +43,9 @@ final class T1150NotificationDockUITests: XCTestCase {
 
         let dockedHitTarget = dockedHitTarget(in: app)
         let start = app.coordinate(withNormalizedOffset: .zero)
-            .withOffset(CGVector(dx: dockedHitTarget.frame.midX, dy: dockedHitTarget.frame.minY + 24))
+            .withOffset(CGVector(dx: dockedHitTarget.frame.midX, dy: dockedHitTarget.frame.midY))
         let end = app.coordinate(withNormalizedOffset: .zero)
-            .withOffset(CGVector(dx: dockedHitTarget.frame.midX - 80, dy: dockedHitTarget.frame.minY + 24))
+            .withOffset(CGVector(dx: dockedHitTarget.frame.midX - 80, dy: dockedHitTarget.frame.midY))
         start.press(forDuration: 0.15, thenDragTo: end)
 
         assertUndockedNotificationsRemainVisible(in: app)
@@ -286,6 +306,54 @@ final class T1150NotificationDockUITests: XCTestCase {
             2,
             "Undocked stack should expose multiple seeded notification descendants"
         )
+    }
+
+    private func assertDockedPeekIsOnlyEdgeStrip(in app: XCUIApplication) {
+        let hitTarget = dockedHitTarget(in: app)
+        XCTAssertLessThanOrEqual(hitTarget.frame.width, 96, "Docked state should expose only the trailing edge affordance hit area")
+        XCTAssertGreaterThanOrEqual(hitTarget.frame.maxX, app.frame.maxX - 2, "Docked peek strip should sit at the physical trailing edge")
+        XCTAssertGreaterThanOrEqual(hitTarget.frame.minX, app.frame.maxX - 100, "Docked hit area should stay attached to the physical trailing edge")
+    }
+
+    private func assertUndockedNotificationsAlignToTrailingEdge(in app: XCUIApplication) {
+        let alpha = app.staticTexts["T1174 Alpha"]
+        XCTAssertTrue(alpha.waitForExistence(timeout: 4), "Expected seeded notification to be visible after undocking")
+        XCTAssertGreaterThanOrEqual(alpha.frame.minX, app.frame.minX, "Undocked notification content should not clip past the left screen edge")
+        XCTAssertLessThanOrEqual(alpha.frame.maxX, app.frame.maxX, "Undocked notification content should not clip past the right screen edge")
+        XCTAssertGreaterThan(alpha.frame.midX, app.frame.midX, "Undocked notification should align to the trailing dock zone, not float mid-screen")
+    }
+
+    private func assertLandscapeChatProofContentIsVisible(in app: XCUIApplication) {
+        XCTAssertGreaterThan(app.frame.width, app.frame.height, "Expected rotated landscape simulator geometry")
+
+        let incoming = app.descendants(matching: .any)
+            .matching(identifier: "T357 landscape incoming proof message")
+            .firstMatch
+        XCTAssertTrue(incoming.waitForExistence(timeout: 4), "Expected incoming chat proof bubble to render")
+
+        let outgoing = app.descendants(matching: .any)
+            .matching(identifier: "T357 landscape outgoing proof message")
+            .firstMatch
+        XCTAssertTrue(outgoing.waitForExistence(timeout: 4), "Expected outgoing chat proof bubble to render")
+
+        let composer = promptComposer(in: app)
+        assertElementStaysWithinScreen(incoming, in: app, label: "incoming chat proof bubble")
+        assertElementStaysWithinScreen(outgoing, in: app, label: "outgoing chat proof bubble")
+        assertElementStaysWithinScreen(composer, in: app, label: "composer")
+    }
+
+    private func assertElementStaysWithinScreen(_ element: XCUIElement, in app: XCUIApplication, label: String) {
+        XCTAssertGreaterThan(element.frame.width, 0, "\(label) should have positive width")
+        XCTAssertGreaterThan(element.frame.height, 0, "\(label) should have positive height")
+        XCTAssertGreaterThanOrEqual(element.frame.minX, app.frame.minX, "\(label) should not clip past the left screen edge")
+        XCTAssertLessThanOrEqual(element.frame.maxX, app.frame.maxX, "\(label) should not clip past the right screen edge")
+    }
+
+    private func attachLandscapeScreenshot(from app: XCUIApplication, name: String) {
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
     }
 
 }

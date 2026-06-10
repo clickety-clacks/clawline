@@ -1513,7 +1513,7 @@ final class ChatViewModel: ChatViewModelHosting {
             sessionKey: betaSessionKey,
             sender: nil
         )
-        let mainMessages = (0..<40).map { index in
+        var mainMessages = (0..<40).map { index in
             Message(
                 id: "s_t1174_main_chat_message_\(index)",
                 role: .assistant,
@@ -1526,6 +1526,30 @@ final class ChatViewModel: ChatViewModelHosting {
                 sender: nil
             )
         }
+        mainMessages.append(contentsOf: [
+            Message(
+                id: "s_t357_landscape_incoming_message",
+                role: .assistant,
+                content: "T357 landscape incoming proof message",
+                timestamp: now.addingTimeInterval(1),
+                streaming: false,
+                attachments: [],
+                deviceId: nil,
+                sessionKey: mainSessionKey,
+                sender: nil
+            ),
+            Message(
+                id: "s_t357_landscape_outgoing_message",
+                role: .user,
+                content: "T357 landscape outgoing proof message",
+                timestamp: now.addingTimeInterval(2),
+                streaming: false,
+                attachments: [],
+                deviceId: nil,
+                sessionKey: mainSessionKey,
+                sender: nil
+            ),
+        ])
         sessionMessages[mainSessionKey] = mainMessages
         sessionMessages[alphaSessionKey] = [alphaMessage]
         sessionMessages[betaSessionKey] = [betaMessage]

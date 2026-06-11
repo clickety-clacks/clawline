@@ -212,6 +212,52 @@ struct MessageInputBarPanIntentTests {
         )
     }
 
+    @MainActor
+    @Test("Walkie hold scheduler activates without another drag update")
+    func walkieHoldSchedulerActivatesWithoutAnotherDragUpdate() async {
+        let harness = DictationTestHarness()
+        let coordinator = harness.makeCoordinator()
+        coordinator.updateContext(
+            sessionKey: harness.host.activeSessionKey,
+            composeIsEmpty: true,
+            textFieldFocused: false,
+            reduceMotionEnabled: false
+        )
+        let motion = DictationMotion(session: coordinator)
+        let scheduler = DictationWalkieHoldActivationScheduler()
+        var activation: (up: CGFloat, rawDragY: CGFloat)?
+
+        motion.gestureBegan(originWasOpen: false, swipeActivationEnabled: true)
+        motion.gestureChanged(translationY: -128, velocityY: -120)
+        #expect(motion.updateWalkieHoldArming(up: 128, activationThreshold: 124, holdDuration: 0.02) == false)
+
+        scheduler.schedule(
+            delay: 0.03,
+            motion: motion,
+            activationThreshold: 124,
+            holdDuration: 0.02,
+            shouldArm: {
+                shouldArmWalkieHoldDuringPush(
+                    pushGestureStartedWithSurfaceOpen: motion.pushGestureStartedWithSurfaceOpen,
+                    verticallyDominant: true
+                )
+            },
+            activate: { up, rawDragY in
+                activation = (up: up, rawDragY: rawDragY)
+            }
+        )
+
+        await waitUntil(timeoutMs: 500) {
+            activation != nil
+        }
+
+        #expect(activation?.up == 128)
+        #expect(activation?.rawDragY == -128)
+        #expect(motion.walkieStartedThisGesture)
+        #expect(motion.gesturePhase == .dragging)
+        #expect(!scheduler.isScheduled)
+    }
+
     @Test("Editable-region tap-like gesture resolves to text editing")
     func editableRegionTapResolvesToTextEditing() {
         let decision = classifyDictationPanIntent(

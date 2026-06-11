@@ -326,6 +326,15 @@ final class DictationMotion {
         return false
     }
 
+    @discardableResult
+    func updateWalkieHoldArming(activationThreshold: CGFloat, holdDuration: TimeInterval) -> Bool {
+        updateWalkieHoldArming(
+            up: upDistance,
+            activationThreshold: activationThreshold,
+            holdDuration: holdDuration
+        )
+    }
+
     private func teardownGesture() {
         gesturePhase = .settling
         rawDragY = 0

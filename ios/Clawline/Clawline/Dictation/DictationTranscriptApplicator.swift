@@ -117,6 +117,9 @@ final class DictationTranscriptApplicator {
         if composeTextView != nil,
            host?.isComposeDraftSessionCurrent(sessionKey) == true {
             let hostSnapshot = host?.captureComposeDraftSnapshot(for: sessionKey) ?? .empty
+            guard boundComposeTextViewContentMatchesHostSnapshot(for: sessionKey) else {
+                return hostSnapshot
+            }
             return ComposeDraftSnapshot(
                 content: composeTextView?.attributedText ?? NSAttributedString(string: ""),
                 attachments: hostSnapshot.attachments
@@ -127,6 +130,27 @@ final class DictationTranscriptApplicator {
 
     func captureHostSnapshot(for sessionKey: String) -> ComposeDraftSnapshot {
         host?.captureComposeDraftSnapshot(for: sessionKey) ?? .empty
+    }
+
+    func captureSelectionRange(for sessionKey: String) -> NSRange? {
+        guard let textView = boundTextView(for: sessionKey) else { return nil }
+        if !(textView is DictationTextTargetIdentifying) {
+            guard boundComposeTextViewContentMatchesHostSnapshot(for: sessionKey) else { return nil }
+        }
+        let selectionRange = textView.selectedRange
+        guard selectionRange.location != NSNotFound else { return nil }
+        return safeReplacementRange(
+            selectedRange: selectionRange,
+            textLength: textView.attributedText.length,
+            fallbackLocation: textView.attributedText.length
+        )
+    }
+
+    func boundComposeTextViewContentMatchesHostSnapshot(for sessionKey: String) -> Bool {
+        guard let textView = boundTextView(for: sessionKey) else { return false }
+        guard !(textView is DictationTextTargetIdentifying) else { return true }
+        let hostSnapshot = host?.captureComposeDraftSnapshot(for: sessionKey) ?? .empty
+        return textView.attributedText.isEqual(to: hostSnapshot.content)
     }
 
     func setComposeTextView(_ textView: UITextView?) {

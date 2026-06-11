@@ -526,6 +526,217 @@ struct DictationCoordinatorTests {
 
         #expect(textView.attributedText.string == "destination draft future")
         #expect(!harness.host.currentText(for: selectedSessionKey).hasPrefix("futuredestination"))
+        #expect(textView.selectedRange == NSRange(location: textView.attributedText.length, length: 0))
+    }
+
+    @Test("Stream switch rebind keeps insertion anchored to visible composer cursor")
+    @MainActor
+    func streamSwitchRebindUsesVisibleComposerCursor() async {
+        let harness = DictationTestHarness()
+        let coordinator = harness.makeCoordinator()
+        let textView = PastableTextView()
+        let editorDelegate = MockEditorBindingDelegate(host: harness.host)
+        textView.delegate = editorDelegate
+        textView.attributedText = NSAttributedString(string: "")
+        coordinator.setComposeTextView(textView)
+
+        coordinator.updateContext(
+            sessionKey: harness.host.activeSessionKey,
+            composeIsEmpty: true,
+            textFieldFocused: true,
+            reduceMotionEnabled: false
+        )
+        coordinator.startStickyDictation()
+        await waitUntil { coordinator.isListening }
+        await waitUntil { harness.client.connected }
+
+        harness.client.emit(
+            .response(
+                SonioxStreamingResponse(
+                    tokens: [SonioxTranscriptToken(text: "old ", isFinal: false)],
+                    finished: false,
+                    errorCode: nil,
+                    errorMessage: nil
+                )
+            )
+        )
+        await waitUntil { harness.host.currentText(for: harness.host.activeSessionKey) == "old " }
+
+        let selectedSessionKey = "agent:main:test:selected-visible-cursor"
+        let destinationText = "destination draft "
+        let visibleCursor = ("destination " as NSString).length
+        harness.host.setText(destinationText, for: selectedSessionKey)
+        harness.host.currentComposeSessionKey = selectedSessionKey
+        textView.attributedText = NSAttributedString(string: destinationText)
+        textView.selectedRange = NSRange(location: visibleCursor, length: 0)
+        coordinator.setComposeTextView(textView)
+        coordinator.updateContext(
+            sessionKey: selectedSessionKey,
+            composeIsEmpty: false,
+            textFieldFocused: true,
+            reduceMotionEnabled: false
+        )
+
+        harness.client.emit(
+            .response(
+                SonioxStreamingResponse(
+                    tokens: [SonioxTranscriptToken(text: "old future", isFinal: false)],
+                    finished: false,
+                    errorCode: nil,
+                    errorMessage: nil
+                )
+            )
+        )
+
+        let expectedText = "destination futuredraft "
+        let expectedCursor = visibleCursor + ("future" as NSString).length
+        await waitUntil {
+            harness.host.currentText(for: selectedSessionKey) == expectedText
+        }
+
+        #expect(textView.attributedText.string == expectedText)
+        #expect(textView.selectedRange == NSRange(location: expectedCursor, length: 0))
+        #expect(harness.host.currentText(for: harness.host.activeSessionKey) == "old ")
+    }
+
+    @Test("Stream switch late text view bind reanchors to visible composer cursor")
+    @MainActor
+    func streamSwitchLateTextViewBindReanchorsToVisibleComposerCursor() async {
+        let harness = DictationTestHarness()
+        let coordinator = harness.makeCoordinator()
+        let textView = PastableTextView()
+        let editorDelegate = MockEditorBindingDelegate(host: harness.host)
+        textView.delegate = editorDelegate
+        textView.attributedText = NSAttributedString(string: "")
+        coordinator.setComposeTextView(textView)
+
+        coordinator.updateContext(
+            sessionKey: harness.host.activeSessionKey,
+            composeIsEmpty: true,
+            textFieldFocused: true,
+            reduceMotionEnabled: false
+        )
+        coordinator.startStickyDictation()
+        await waitUntil { coordinator.isListening }
+        await waitUntil { harness.client.connected }
+
+        harness.client.emit(
+            .response(
+                SonioxStreamingResponse(
+                    tokens: [SonioxTranscriptToken(text: "old ", isFinal: false)],
+                    finished: false,
+                    errorCode: nil,
+                    errorMessage: nil
+                )
+            )
+        )
+        await waitUntil { harness.host.currentText(for: harness.host.activeSessionKey) == "old " }
+
+        let selectedSessionKey = "agent:main:test:late-bind-visible-cursor"
+        let destinationText = "destination draft "
+        let visibleCursor = ("destination " as NSString).length
+        harness.host.setText(destinationText, for: selectedSessionKey)
+        harness.host.currentComposeSessionKey = selectedSessionKey
+        coordinator.updateContext(
+            sessionKey: selectedSessionKey,
+            composeIsEmpty: false,
+            textFieldFocused: true,
+            reduceMotionEnabled: false
+        )
+        coordinator.setComposeTextView(textView)
+        textView.attributedText = NSAttributedString(string: destinationText)
+        textView.selectedRange = NSRange(location: visibleCursor, length: 0)
+        coordinator.setComposeTextView(textView)
+
+        harness.client.emit(
+            .response(
+                SonioxStreamingResponse(
+                    tokens: [SonioxTranscriptToken(text: "old future", isFinal: false)],
+                    finished: false,
+                    errorCode: nil,
+                    errorMessage: nil
+                )
+            )
+        )
+
+        let expectedText = "destination futuredraft "
+        let expectedCursor = visibleCursor + ("future" as NSString).length
+        await waitUntil {
+            harness.host.currentText(for: selectedSessionKey) == expectedText
+        }
+
+        #expect(textView.attributedText.string == expectedText)
+        #expect(textView.selectedRange == NSRange(location: expectedCursor, length: 0))
+        #expect(harness.host.currentText(for: harness.host.activeSessionKey) == "old ")
+    }
+
+    @Test("Stream switch rebind replaces visible composer selection")
+    @MainActor
+    func streamSwitchRebindReplacesVisibleComposerSelection() async {
+        let harness = DictationTestHarness()
+        let coordinator = harness.makeCoordinator()
+        let textView = PastableTextView()
+        let editorDelegate = MockEditorBindingDelegate(host: harness.host)
+        textView.delegate = editorDelegate
+        textView.attributedText = NSAttributedString(string: "")
+        coordinator.setComposeTextView(textView)
+
+        coordinator.updateContext(
+            sessionKey: harness.host.activeSessionKey,
+            composeIsEmpty: true,
+            textFieldFocused: true,
+            reduceMotionEnabled: false
+        )
+        coordinator.startStickyDictation()
+        await waitUntil { coordinator.isListening }
+        await waitUntil { harness.client.connected }
+
+        harness.client.emit(
+            .response(
+                SonioxStreamingResponse(
+                    tokens: [SonioxTranscriptToken(text: "old ", isFinal: false)],
+                    finished: false,
+                    errorCode: nil,
+                    errorMessage: nil
+                )
+            )
+        )
+        await waitUntil { harness.host.currentText(for: harness.host.activeSessionKey) == "old " }
+
+        let selectedSessionKey = "agent:main:test:selected-visible-replacement"
+        let destinationText = "replace this draft"
+        let selectedRange = NSRange(location: 0, length: ("replace this" as NSString).length)
+        harness.host.setText(destinationText, for: selectedSessionKey)
+        harness.host.currentComposeSessionKey = selectedSessionKey
+        textView.attributedText = NSAttributedString(string: destinationText)
+        textView.selectedRange = selectedRange
+        coordinator.setComposeTextView(textView)
+        coordinator.updateContext(
+            sessionKey: selectedSessionKey,
+            composeIsEmpty: false,
+            textFieldFocused: true,
+            reduceMotionEnabled: false
+        )
+
+        harness.client.emit(
+            .response(
+                SonioxStreamingResponse(
+                    tokens: [SonioxTranscriptToken(text: "old future", isFinal: false)],
+                    finished: false,
+                    errorCode: nil,
+                    errorMessage: nil
+                )
+            )
+        )
+
+        let expectedText = "future draft"
+        await waitUntil {
+            harness.host.currentText(for: selectedSessionKey) == expectedText
+        }
+
+        #expect(textView.attributedText.string == expectedText)
+        #expect(textView.selectedRange == NSRange(location: ("future" as NSString).length, length: 0))
+        #expect(harness.host.currentText(for: harness.host.activeSessionKey) == "old ")
     }
 
     @Test("Flick-up sticky honors activation eligibility captured at gesture begin")
@@ -643,6 +854,72 @@ struct DictationCoordinatorTests {
         let intent = motion.gestureEnded(
             translationY: -180,
             predictedY: -180,
+            velocityY: -240,
+            context: .init(pullToSendEligible: true, verticallyDominant: true)
+        )
+
+        #expect(intent == .send)
+        #expect(motion.pendingCommit?.reason == "pull_to_send")
+    }
+
+    @Test("Held walkie inserts into prompt before release and can continue upward to send")
+    @MainActor
+    func heldWalkieInsertsBeforeReleaseAndCanContinueToSend() async {
+        let harness = DictationTestHarness()
+        let coordinator = harness.makeCoordinator()
+        let textView = PastableTextView()
+        let bindingDelegate = MockEditorBindingDelegate(host: harness.host)
+        textView.delegate = bindingDelegate
+        textView.attributedText = NSAttributedString(string: "")
+        textView.selectedRange = NSRange(location: 0, length: 0)
+        coordinator.setComposeTextView(textView)
+
+        coordinator.updateContext(
+            sessionKey: harness.host.activeSessionKey,
+            composeIsEmpty: true,
+            textFieldFocused: false,
+            reduceMotionEnabled: false
+        )
+
+        let motion = DictationMotion(session: coordinator)
+        motion.gestureBegan(originWasOpen: false, swipeActivationEnabled: true)
+        motion.gestureChanged(translationY: -128, velocityY: -120)
+        #expect(motion.updateWalkieHoldArming(up: 128, activationThreshold: 124, holdDuration: 0.02) == false)
+        do {
+            try await Task.sleep(for: .milliseconds(30))
+        } catch is CancellationError {
+            return
+        } catch {
+            return
+        }
+        #expect(motion.updateWalkieHoldArming(activationThreshold: 124, holdDuration: 0.02) == true)
+
+        coordinator.startWalkieTalkieDictation()
+        await waitUntil { coordinator.isListeningReady }
+
+        harness.client.emit(
+            .response(
+                SonioxStreamingResponse(
+                    tokens: [SonioxTranscriptToken(text: "walkie hold", isFinal: false)],
+                    finished: false,
+                    errorCode: nil,
+                    errorMessage: nil
+                )
+            )
+        )
+
+        await waitUntil {
+            textView.attributedText.string == "walkie hold"
+        }
+
+        #expect(textView.attributedText.string == "walkie hold")
+        #expect(harness.host.currentText(for: harness.host.activeSessionKey) == "walkie hold")
+        #expect(motion.gesturePhase == .dragging)
+
+        motion.gestureChanged(translationY: -190, velocityY: -240)
+        let intent = motion.gestureEnded(
+            translationY: -190,
+            predictedY: -190,
             velocityY: -240,
             context: .init(pullToSendEligible: true, verticallyDominant: true)
         )

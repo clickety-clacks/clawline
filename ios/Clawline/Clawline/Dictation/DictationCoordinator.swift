@@ -524,6 +524,7 @@ final class DictationSession {
     private let timing: DictationTiming
 
     private var currentSessionKey: String = ""
+    private var composeTextViewBindingSessionKey: String?
     private var composeIsEmpty = true
     private var isTextFieldFocused = false
     private var latestComposeSelectionRange = NSRange(location: 0, length: 0)
@@ -735,7 +736,24 @@ final class DictationSession {
     }
 
     func setComposeTextView(_ textView: UITextView?) {
+        let previousTextView = bridge.boundComposeTextView
+        let previousBindingSessionKey = composeTextViewBindingSessionKey
         bridge.setComposeTextView(textView)
+        guard let textView else {
+            composeTextViewBindingSessionKey = nil
+            return
+        }
+        let targetSessionKey = (textView as? DictationTextTargetIdentifying)?.dictationTargetSessionKey
+        let hasExplicitTargetSession = targetSessionKey?.isEmpty == false
+        let effectiveSessionKey = hasExplicitTargetSession ? (targetSessionKey ?? "") : currentSessionKey
+        if !hasExplicitTargetSession,
+           !bridge.boundComposeTextViewContentMatchesHostSnapshot(for: effectiveSessionKey) {
+            return
+        }
+        composeTextViewBindingSessionKey = effectiveSessionKey
+        guard previousTextView !== textView || previousBindingSessionKey != effectiveSessionKey else { return }
+        guard bridge.captureSelectionRange(for: currentSessionKey) != nil else { return }
+        reanchorActiveTranscriptSessionToLiveSelection()
     }
 
     func focusComposeTextViewForTesting() {
@@ -2374,15 +2392,17 @@ final class DictationSession {
         logDictation("DICTATION_PERF ts=\(Date().timeIntervalSince1970) event=rebind_snapshot_begin session=\(sessionKey)")
         let snapshot = bridge.captureSnapshot(for: sessionKey)
         logDictation("DICTATION_PERF ts=\(Date().timeIntervalSince1970) event=rebind_snapshot_end session=\(sessionKey)")
-        let anchor = NSRange(location: snapshot.content.length, length: 0)
+        let anchor = bridge.captureSelectionRange(for: sessionKey)
+            ?? NSRange(location: snapshot.content.length, length: 0)
+        let selectedText = TranscriptEngine.substring(text: snapshot.content.string, utf16Range: anchor) ?? ""
         transcriptOwnership = .active(
             TranscriptSession(
                 originSessionKey: sessionKey,
                 baseSnapshot: snapshot,
                 dictationStartUTF16: anchor.location,
-                baseReplacementLenUTF16: 0,
+                baseReplacementLenUTF16: anchor.length,
                 committedLenUTF16: 0,
-                provisionalText: "",
+                provisionalText: selectedText,
                 suppressedUntilNextEndpoint: false,
                 committedText: "",
                 pendingUpdate: nil,

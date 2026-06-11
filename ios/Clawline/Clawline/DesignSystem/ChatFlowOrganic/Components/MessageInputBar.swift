@@ -815,6 +815,7 @@ struct MessageInputBar: View {
     @State private var micFadeTask: Task<Void, Never>?
     @State private var micTapActivationTask: Task<Void, Never>?
     @State private var gestureSettleTask: Task<Void, Never>?
+    @State private var walkieHoldActivationScheduler = DictationWalkieHoldActivationScheduler()
     @State private var textEditorGlobalFrame: CGRect = .zero
     @State private var inputBarGlobalFrame: CGRect = .zero
     @State private var cachedMaxBarWidth: CGFloat?
@@ -1291,6 +1292,7 @@ struct MessageInputBar: View {
         .onDisappear {
             micFadeTask?.cancel()
             gestureSettleTask?.cancel()
+            cancelWalkieHoldActivationTask()
             motion.clearGestureState()
         }
         .onAppear {
@@ -1769,6 +1771,7 @@ struct MessageInputBar: View {
 
         if motion.gesturePhase == .settling {
             gestureSettleTask?.cancel()
+            cancelWalkieHoldActivationTask()
             motion.clearGestureState()
         }
 
@@ -1788,6 +1791,7 @@ struct MessageInputBar: View {
             withAnimation(settleSpring) {
                 motion.gestureCancelled()
             }
+            cancelWalkieHoldActivationTask()
             scheduleInsetUnfreezeAfterSettle()
             return
         }
@@ -1799,6 +1803,7 @@ struct MessageInputBar: View {
             withAnimation(settleSpring) {
                 motion.gestureCancelled()
             }
+            cancelWalkieHoldActivationTask()
             scheduleInsetUnfreezeAfterSettle()
             return
         }
@@ -1817,10 +1822,44 @@ struct MessageInputBar: View {
             activationThreshold: walkieHoldActivationThreshold,
             holdDuration: walkieHoldDurationSeconds
            ) {
-            logDictation("DICTATION_UI gesture_classification=walkie_hold_activated up=\(up) dx=\(dx) dy=\(dy)")
-            dictationEmitter.emit(.gestureCommitRequested(.startWalkieTalkie))
-            beginMicFadeOut(fromSwipe: false)
+            cancelWalkieHoldActivationTask()
+            activateWalkieHold(up: up, dx: dx, dy: dy)
+        } else if shouldArmWalkieHoldDuringPush(
+            pushGestureStartedWithSurfaceOpen: motion.pushGestureStartedWithSurfaceOpen,
+            verticallyDominant: verticalDominant
+        ), up >= walkieHoldActivationThreshold {
+            scheduleWalkieHoldActivationTask()
+        } else {
+            cancelWalkieHoldActivationTask()
         }
+    }
+
+    private func scheduleWalkieHoldActivationTask() {
+        walkieHoldActivationScheduler.schedule(
+            delay: walkieHoldDurationSeconds,
+            motion: motion,
+            activationThreshold: walkieHoldActivationThreshold,
+            holdDuration: walkieHoldDurationSeconds,
+            shouldArm: {
+                shouldArmWalkieHoldDuringPush(
+                    pushGestureStartedWithSurfaceOpen: motion.pushGestureStartedWithSurfaceOpen,
+                    verticallyDominant: true
+                )
+            },
+            activate: { up, rawDragY in
+                activateWalkieHold(up: up, dx: 0, dy: rawDragY)
+            }
+        )
+    }
+
+    private func cancelWalkieHoldActivationTask() {
+        walkieHoldActivationScheduler.cancel()
+    }
+
+    private func activateWalkieHold(up: CGFloat, dx: CGFloat, dy: CGFloat) {
+        logDictation("DICTATION_UI gesture_classification=walkie_hold_activated up=\(up) dx=\(dx) dy=\(dy)")
+        dictationEmitter.emit(.gestureCommitRequested(.startWalkieTalkie))
+        beginMicFadeOut(fromSwipe: false)
     }
 
     private func handlePushEnded(
@@ -1834,6 +1873,7 @@ struct MessageInputBar: View {
         guard motion.gesturePhase == .dragging else {
             return
         }
+        cancelWalkieHoldActivationTask()
         if wasCancelled {
             shouldRestoreFocusAfterGestureDictationStart = false
             withAnimation(settleSpring) {
@@ -2134,6 +2174,7 @@ struct MessageInputBar: View {
     private func resetMotionToCurrentProjection() {
         guard motion.gesturePhase != .dragging else { return }
         gestureSettleTask?.cancel()
+        cancelWalkieHoldActivationTask()
         shouldRestoreFocusAfterGestureDictationStart = false
         motion.clearGestureState()
         motion.settle(to: dictation.surfaceTarget)

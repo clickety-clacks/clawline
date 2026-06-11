@@ -127,7 +127,6 @@ struct RichTextEditor: UIViewRepresentable {
         textView.onLayout = { _ in
             coordinator.updateHeight(for: textView, allowAutoScroll: false)
         }
-        onTextViewReady?(textView)
         textView.onResponderFocusChange = { isFocused in
             coordinator.parent.onFocusChange(isFocused)
         }
@@ -219,6 +218,8 @@ struct RichTextEditor: UIViewRepresentable {
                 context.coordinator.isInsertingAttachments = false
             }
         }
+
+        onTextViewReady?(textView)
     }
 
     func makeCoordinator() -> Coordinator {

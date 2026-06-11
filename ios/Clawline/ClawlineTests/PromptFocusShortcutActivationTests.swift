@@ -255,6 +255,12 @@ struct PromptFocusShortcutActivationTests {
         #expect(
             CrossChatNotificationSelectionTapPolicy.effect(isTextSelectionActive: false) == .navigate
         )
+        #expect(
+            CrossChatNotificationSelectionTapPolicy.effect(
+                isTextSelectionActive: false,
+                didClearSelectionDuringCurrentTap: true
+            ) == .ignoreDuplicateSelectionClear
+        )
 
         var state = CrossChatNotificationTextSelectionState()
         state.setContentSelectionActive(true, key: "entry-a:0")

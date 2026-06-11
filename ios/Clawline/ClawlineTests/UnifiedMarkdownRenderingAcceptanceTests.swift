@@ -492,6 +492,30 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
         #expect(linkTarget("details", in: attributed)?.absoluteString == "https://example.com")
     }
 
+    @Test("T1278 notification content renders Clawline highlight markup")
+    func t1278_notificationContentRendersHighlightMarkup() {
+        let rendered = CrossChatNotificationMarkdownRenderer.renderBlocks(
+            content: "Investigate ==Nonmaterial Soup Exclusion Rows== before deploy.",
+            messageID: "t1278_notification_highlight",
+            baseFont: UIFont.systemFont(ofSize: 15, weight: .regular),
+            inkColor: .label,
+            lineSpacing: 2,
+            isDark: false
+        )
+
+        guard case .attributedText(let attributed)? = rendered.first else {
+            Issue.record("Expected attributed notification text")
+            return
+        }
+
+        #expect(attributed.string == "Investigate Nonmaterial Soup Exclusion Rows before deploy.")
+        #expect(!attributed.string.contains("=="))
+
+        let highlightedRange = (attributed.string as NSString).range(of: "Nonmaterial Soup Exclusion Rows")
+        #expect(highlightedRange.location != NSNotFound)
+        #expect(foregroundRGB(in: attributed, at: highlightedRange.location) == RGB(red: 158, green: 62, blue: 28))
+    }
+
     @Test("T1133 notification render cache reuses rendered markdown across body passes")
     @MainActor
     func t1133_notificationRenderCacheReusesRenderedMarkdownAcrossBodyPasses() {
@@ -860,6 +884,12 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
         case table
     }
 
+    private struct RGB: Equatable {
+        let red: Int
+        let green: Int
+        let blue: Int
+    }
+
     private func sequence(for blocks: [RenderedMarkdownBlock]) -> [RenderedType] {
         blocks.map { block in
             switch block {
@@ -940,6 +970,24 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
         let range = (attributed.string as NSString).range(of: token)
         guard range.location != NSNotFound else { return nil }
         return attributed.attribute(.link, at: range.location, effectiveRange: nil) as? URL
+    }
+
+    private func foregroundRGB(in attributed: NSAttributedString, at location: Int) -> RGB? {
+        guard let color = attributed.attribute(.foregroundColor, at: location, effectiveRange: nil) as? UIColor else {
+            return nil
+        }
+        var red: CGFloat = 0
+        var green: CGFloat = 0
+        var blue: CGFloat = 0
+        var alpha: CGFloat = 0
+        guard color.getRed(&red, green: &green, blue: &blue, alpha: &alpha) else {
+            return nil
+        }
+        return RGB(
+            red: Int(round(red * 255)),
+            green: Int(round(green * 255)),
+            blue: Int(round(blue * 255))
+        )
     }
 
     private func notificationBubbleView(content: String, maxBubbleHeight: CGFloat) -> some View {

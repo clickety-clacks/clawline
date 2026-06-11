@@ -1591,6 +1591,21 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
             requestStreamSwitch(to: alphaSessionKey, source: .programmatic)
         }
     }
+
+    func debugAppendBetaCrossChatNotificationForSinglePeekProof() {
+        let betaSessionKey = "agent:main:clawline:ui-test:s_t1174_b"
+        guard var bubble = crossChatNotificationBubblesBySourceChatId[betaSessionKey] else { return }
+        let now = Date()
+        bubble.entries.append(
+            CrossChatAssistantNotificationEntry(
+                id: "s_t1265_notification_handoff",
+                content: "T1265 handoff proof notification",
+                timestamp: now
+            )
+        )
+        bubble.lastAssistantActivityAt = now
+        crossChatNotificationBubblesBySourceChatId[betaSessionKey] = bubble
+    }
 #endif
 
     private func animateCrossChatNotificationDismissal(_ updates: @escaping () -> Void) {

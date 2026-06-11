@@ -616,6 +616,18 @@ struct ChatView: View {
         isCrossChatNotificationStackDocked = ProcessInfo.processInfo.arguments.contains(
             "--debug-cross-chat-notification-dock-proof-start-docked"
         )
+        if ProcessInfo.processInfo.arguments.contains("--debug-cross-chat-notification-dock-proof-single-peek-handoff") {
+            Task { @MainActor in
+                do {
+                    try await Task.sleep(nanoseconds: 1_000_000_000)
+                } catch is CancellationError {
+                    return
+                } catch {
+                    return
+                }
+                viewModel.debugAppendBetaCrossChatNotificationForSinglePeekProof()
+            }
+        }
     }
 #endif
 
@@ -7738,30 +7750,44 @@ private struct CrossChatNotificationOverlay: View {
     private func startCollapsedPreview(sourceChatIds: [String]) {
         guard isCollapsed else { return }
         let visibleSourceChatIds = Set(visibleBubbles.map(\.sourceChatId))
-        for sourceChatId in sourceChatIds where visibleSourceChatIds.contains(sourceChatId)
-            && !dockedCollapsedPreviewSourceChatIds.contains(sourceChatId) {
-            collapsedPreviewTasksBySourceChatId[sourceChatId]?.cancel()
-            withAnimation(Self.revealAnimation) {
-                _ = previewingCollapsedSourceChatIds.insert(sourceChatId)
+        let eligibleSourceChatIds = sourceChatIds.filter {
+            visibleSourceChatIds.contains($0)
+                && !dockedCollapsedPreviewSourceChatIds.contains($0)
+        }
+        guard let sourceChatId = eligibleSourceChatIds.first else { return }
+
+        let previousPreviewingSourceChatIds = previewingCollapsedSourceChatIds.subtracting([sourceChatId])
+        for previousSourceChatId in previousPreviewingSourceChatIds {
+            dockedCollapsedPreviewSourceChatIds.insert(previousSourceChatId)
+            clearCollapsedPreview(sourceChatId: previousSourceChatId)
+        }
+        for extraSourceChatId in eligibleSourceChatIds.dropFirst() {
+            dockedCollapsedPreviewSourceChatIds.insert(extraSourceChatId)
+            clearCollapsedPreview(sourceChatId: extraSourceChatId)
+        }
+
+        collapsedPreviewTasksBySourceChatId[sourceChatId]?.cancel()
+        dockedCollapsedPreviewSourceChatIds.remove(sourceChatId)
+        withAnimation(Self.revealAnimation) {
+            previewingCollapsedSourceChatIds = [sourceChatId]
+        }
+        let previewDurationNanoseconds = collapsedPreviewDurationNanoseconds
+        collapsedPreviewTasksBySourceChatId[sourceChatId] = Task { @MainActor in
+            do {
+                try await Task.sleep(nanoseconds: previewDurationNanoseconds)
+            } catch is CancellationError {
+                return
+            } catch {
+                return
             }
-            let previewDurationNanoseconds = collapsedPreviewDurationNanoseconds
-            collapsedPreviewTasksBySourceChatId[sourceChatId] = Task { @MainActor in
-                do {
-                    try await Task.sleep(nanoseconds: previewDurationNanoseconds)
-                } catch is CancellationError {
-                    return
-                } catch {
-                    return
-                }
-                guard isCollapsed else {
-                    clearCollapsedPreview(sourceChatId: sourceChatId)
-                    return
-                }
-                withAnimation(Self.hideAnimation) {
-                    _ = previewingCollapsedSourceChatIds.remove(sourceChatId)
-                }
-                collapsedPreviewTasksBySourceChatId[sourceChatId] = nil
+            guard isCollapsed else {
+                clearCollapsedPreview(sourceChatId: sourceChatId)
+                return
             }
+            withAnimation(Self.hideAnimation) {
+                _ = previewingCollapsedSourceChatIds.remove(sourceChatId)
+            }
+            collapsedPreviewTasksBySourceChatId[sourceChatId] = nil
         }
     }
 

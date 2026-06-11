@@ -298,7 +298,7 @@ func shouldBeginDictationPanGesture(
     hasSelection: Bool,
     startedInSelectionGestureRegion: Bool
 ) -> Bool {
-    if startedInEditableRegion || startedInSelectionGestureRegion {
+    if startedInSelectionGestureRegion {
         return false
     }
     if hasSelection {
@@ -321,8 +321,6 @@ func classifyDictationPanIntent(_ context: DictationPanIntentContext) -> Dictati
     let up = max(0, -context.translation.y)
     let down = max(0, context.translation.y)
     let verticalDominant = max(up, down) >= 1.25 * abs(context.translation.x)
-    let velocityDominantUp = abs(context.velocity.y) >= 1.15 * abs(context.velocity.x)
-    let fastUpVelocity = context.velocity.y <= -220 && velocityDominantUp
     let velocityDominantDown = abs(context.velocity.y) >= 1.15 * abs(context.velocity.x)
     let clearDownDismissDrag = context.isSurfaceOpen &&
         verticalDominant &&
@@ -333,7 +331,7 @@ func classifyDictationPanIntent(_ context: DictationPanIntentContext) -> Dictati
         if clearDownDismissDrag {
             return .dictation
         }
-        if fastUpVelocity || (up >= 22 && context.elapsed < 0.18 && verticalDominant) {
+        if context.elapsed < 0.22, up >= 22, verticalDominant {
             return .dictation
         }
         // Prefer text editing quickly when a touch starts in the editor and does not
@@ -391,10 +389,11 @@ struct DictationPanGestureInstaller: UIViewControllerRepresentable {
 
 #if DEBUG
     static func debugCoordinatorForTests(
+        shouldBegin: @escaping (CGPoint, CGPoint) -> Bool = { _, _ in false },
         onEnded: @escaping (DictationPanEvent, Bool) -> Void = { _, _ in }
     ) -> Coordinator {
         Coordinator(
-            shouldBegin: { _, _ in false },
+            shouldBegin: shouldBegin,
             startsInEditableRegion: { _ in false },
             activeRegion: { .zero },
             isSurfaceOpen: { false },
@@ -702,9 +701,6 @@ struct DictationPanGestureInstaller: UIViewControllerRepresentable {
         private func shouldBeginPan(at location: CGPoint, velocity: CGPoint, in window: UIWindow) -> Bool {
             if let touchedView = window.hitTest(location, with: nil),
                nearestCollectionView(from: touchedView) != nil {
-                return false
-            }
-            if nearestTextView(at: location, in: window) != nil {
                 return false
             }
             guard activeRegionInWindow.contains(location) else { return false }

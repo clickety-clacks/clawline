@@ -74,7 +74,10 @@ private final class PanGestureCoordinatorHarness {
             fatalError("Expected active UIWindow for pan coordinator tests")
         }
 
-        coordinator = DictationPanGestureInstaller.debugCoordinatorForTests(onEnded: onEnded)
+        coordinator = DictationPanGestureInstaller.debugCoordinatorForTests(
+            shouldBegin: { _, _ in true },
+            onEnded: onEnded
+        )
         textView = TestTextView(frame: CGRect(x: 24, y: 30, width: 220, height: 56))
         textView.isSelectable = true
         textView.isScrollEnabled = true
@@ -135,12 +138,25 @@ private final class PanGestureCoordinatorHarness {
 
 @Suite(.serialized)
 struct MessageInputBarPanIntentTests {
-    @Test("Editor-origin gestures never arm dictation")
-    func editorOriginGesturesNeverArmDictation() {
+    @Test("Editor-origin gestures can enter arbitration without selection")
+    func editorOriginGesturesCanEnterArbitrationWithoutSelection() {
         #expect(
-            !shouldBeginDictationPanGesture(
+            shouldBeginDictationPanGesture(
                 startedInEditableRegion: true,
                 isSurfaceVisible: true,
+                swipeActivationEnabled: true,
+                hasSelection: false,
+                startedInSelectionGestureRegion: false
+            )
+        )
+    }
+
+    @Test("Clear upward editor-origin swipe arms dictation")
+    func clearUpwardEditorOriginSwipeArmsDictation() {
+        #expect(
+            shouldBeginDictationPanGesture(
+                startedInEditableRegion: true,
+                isSurfaceVisible: false,
                 swipeActivationEnabled: true,
                 hasSelection: false,
                 startedInSelectionGestureRegion: false
@@ -226,9 +242,91 @@ struct MessageInputBarPanIntentTests {
         #expect(decision == .textEditing)
     }
 
+    @Test("Fast editor-origin velocity waits for upward displacement")
+    func fastEditorOriginVelocityWaitsForUpwardDisplacement() {
+        let decision = classifyDictationPanIntent(
+            .init(
+                startedInEditableRegion: true,
+                isSurfaceOpen: false,
+                elapsed: 0.01,
+                translation: .zero,
+                velocity: CGPoint(x: 0, y: -500)
+            )
+        )
+
+        #expect(decision == .undecided)
+    }
+
+    @Test("Long editor-origin cursor movement stays text editing")
+    func longEditorOriginCursorMovementStaysTextEditing() {
+        let decision = classifyDictationPanIntent(
+            .init(
+                startedInEditableRegion: true,
+                isSurfaceOpen: false,
+                elapsed: 0.35,
+                translation: CGPoint(x: 0, y: -32),
+                velocity: CGPoint(x: 0, y: -420)
+            )
+        )
+
+        #expect(decision == .textEditing)
+    }
+
     @MainActor
-    @Test("Cursor drag inside text view does not begin dictation pan")
-    func cursorDragInsideTextViewDoesNotBeginDictationPan() {
+    @Test("Cursor drag inside text view can begin arbitration")
+    func cursorDragInsideTextViewCanBeginArbitration() {
+        let harness = PanGestureCoordinatorHarness()
+        guard let window = harness.textView.window else {
+            Issue.record("Expected text view to be attached to a window")
+            return
+        }
+        let location = harness.textView.convert(
+            CGPoint(x: harness.textView.bounds.midX, y: harness.textView.bounds.midY),
+            to: window
+        )
+
+        let shouldBegin = harness.coordinator.debugShouldBeginPanForTesting(
+            location: location,
+            velocity: CGPoint(x: 260, y: -80),
+            window: window
+        )
+
+        #expect(shouldBegin)
+    }
+
+    @MainActor
+    @Test("Cursor drag inside text view does not lock text gestures")
+    func cursorDragInsideTextViewDoesNotLockTextGestures() {
+        let harness = PanGestureCoordinatorHarness()
+
+        harness.sendPan(state: .began, velocity: CGPoint(x: 260, y: -80))
+        harness.sendPan(
+            state: .changed,
+            translation: CGPoint(x: 30, y: -8),
+            velocity: CGPoint(x: 260, y: -80)
+        )
+
+        #expect(harness.textGestureRecognizer.isEnabled == true)
+        #expect(harness.textView.isSelectable == true)
+        #expect(harness.textView.isScrollEnabled == true)
+    }
+
+    @MainActor
+    @Test("Fast editor-origin velocity does not lock before displacement")
+    func fastEditorOriginVelocityDoesNotLockBeforeDisplacement() {
+        let harness = PanGestureCoordinatorHarness()
+        _ = harness.textView.becomeFirstResponder()
+
+        harness.sendPan(state: .began, velocity: CGPoint(x: 0, y: -500))
+
+        #expect(harness.textGestureRecognizer.isEnabled == true)
+        #expect(harness.textView.isSelectable == true)
+        #expect(harness.textView.isScrollEnabled == true)
+    }
+
+    @MainActor
+    @Test("Clear upward swipe from editor can begin dictation pan")
+    func clearUpwardSwipeFromEditorCanBeginDictationPan() {
         let harness = PanGestureCoordinatorHarness()
         guard let window = harness.textView.window else {
             Issue.record("Expected text view to be attached to a window")
@@ -245,7 +343,7 @@ struct MessageInputBarPanIntentTests {
             window: window
         )
 
-        #expect(!shouldBegin)
+        #expect(shouldBegin)
     }
 
     @MainActor

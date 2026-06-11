@@ -147,6 +147,7 @@ actor ConnectionLifecycleCoordinator {
 
     private var continuation: AsyncStream<ConnectionLifecycleOutput>.Continuation?
     private var startupGateContinuation: AsyncStream<StartupGateDebugEvent>.Continuation?
+    private var managedReadyWaiters: [CheckedContinuation<Bool, Never>] = []
 
     private(set) var phase: ConnectionLifecyclePhase = .idle
     private var currentEpoch: Int = 0
@@ -349,6 +350,32 @@ actor ConnectionLifecycleCoordinator {
         stopAttempt()
         resetRecoveringState()
         moveToIdleIfNeeded(reason: .explicitTeardown)
+    }
+
+    func ensureManagedTransportReady() async -> Bool {
+        guard authToken != nil else { return false }
+        switch phase {
+        case .live:
+            return true
+        case .idle:
+            startConnecting(reason: .manualRetry)
+        case .recovering:
+            reconnectTask?.cancel()
+            reconnectTask = nil
+            reconnectBackoff = .seconds(1)
+            startConnecting(reason: .manualRetry)
+        case .failed:
+            resetRecoveringState()
+            startConnecting(reason: .manualRetry)
+        case .connecting, .authenticating, .replaying:
+            break
+        }
+        if phase == .live {
+            return true
+        }
+        return await withCheckedContinuation { continuation in
+            managedReadyWaiters.append(continuation)
+        }
     }
 
     func acknowledgeHistoryReset(epoch: Int) {
@@ -673,6 +700,7 @@ actor ConnectionLifecycleCoordinator {
         }()
         emit(.replayCompleted(epoch: epoch))
         transition(to: .live, reason: .replayCompleted)
+        finishManagedReadyWaiters(ready: true)
         if replayTruncated {
             emit(.historyTruncated(epoch: epoch))
         }
@@ -689,6 +717,7 @@ actor ConnectionLifecycleCoordinator {
         transition(to: .failed, reason: .failure(reason))
         cancelAllTimers()
         stopAttempt()
+        finishManagedReadyWaiters(ready: false)
         if reason == .sessionReplaced || reason == .authRejected || reason == .tokenRevoked {
             reconnectTask?.cancel()
             reconnectTask = nil
@@ -811,6 +840,7 @@ actor ConnectionLifecycleCoordinator {
         switch phase {
         case .connecting, .authenticating, .replaying, .live, .recovering:
             transition(to: .idle, reason: reason)
+            finishManagedReadyWaiters(ready: false)
         case .idle, .failed:
             break
         }
@@ -887,5 +917,14 @@ actor ConnectionLifecycleCoordinator {
         reconnectBackoff = .seconds(1)
         retriedInvalidLastMessageId = false
         replayCountDrained = false
+    }
+
+    private func finishManagedReadyWaiters(ready: Bool) {
+        guard !managedReadyWaiters.isEmpty else { return }
+        let waiters = managedReadyWaiters
+        managedReadyWaiters.removeAll()
+        for waiter in waiters {
+            waiter.resume(returning: ready)
+        }
     }
 }

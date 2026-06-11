@@ -57,7 +57,7 @@ final class T1150NotificationDockUITests: XCTestCase {
         let alpha = app.staticTexts["T1174 Alpha"]
         XCTAssertTrue(alpha.waitForExistence(timeout: 4), "Expected seeded notification to be peeking")
         let beta = app.staticTexts["T1174 Beta"]
-        XCTAssertTrue(beta.waitForExistence(timeout: 4), "Expected second seeded notification to be peeking")
+        XCTAssertFalse(beta.isHittable, "P8 permits only the single active docked notification to peek")
         let interactionPoint = alpha.frame.center
 
         let start = app.coordinate(withNormalizedOffset: .zero)
@@ -67,7 +67,11 @@ final class T1150NotificationDockUITests: XCTestCase {
         start.press(forDuration: 0.15, thenDragTo: end)
 
         XCTAssertFalse(app.staticTexts["T1174 Alpha"].waitForExistence(timeout: 1), "Peeking left swipe should dismiss only the swiped notification")
-        XCTAssertTrue(app.staticTexts["T1174 Beta"].exists, "Peeking left swipe should preserve other notifications")
+        let dockedHitTarget = dockedHitTarget(in: app)
+        app.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: dockedHitTarget.frame.midX, dy: dockedHitTarget.frame.minY + 24))
+            .tap()
+        XCTAssertTrue(app.staticTexts["T1174 Beta"].waitForExistence(timeout: 4), "Peeking left swipe should preserve other notifications")
     }
 
     @MainActor
@@ -85,7 +89,7 @@ final class T1150NotificationDockUITests: XCTestCase {
 
         let beta = app.staticTexts["T1174 Beta"]
         XCTAssertFalse(app.staticTexts["T1174 Alpha"].isHittable, "Peeking right swipe should move the swiped notification out of the peeking surface")
-        XCTAssertTrue(beta.waitForExistence(timeout: 4), "Peeking right swipe should preserve other peeking notifications")
+        XCTAssertFalse(beta.isHittable, "P8 keeps unrelated notifications docked instead of peeking concurrently")
 
         let dockedHitTarget = dockedHitTarget(in: app)
         app.coordinate(withNormalizedOffset: .zero)
@@ -101,7 +105,7 @@ final class T1150NotificationDockUITests: XCTestCase {
         let app = launchDockedNotificationProofApp(extendCollapsedPreview: true)
         let alpha = app.staticTexts["T1174 Alpha"]
         XCTAssertTrue(alpha.waitForExistence(timeout: 4), "Expected seeded chat-backed notification to be peeking")
-        XCTAssertTrue(app.staticTexts["T1174 Beta"].waitForExistence(timeout: 4), "Expected second seeded notification to be peeking")
+        XCTAssertFalse(app.staticTexts["T1174 Beta"].isHittable, "P8 permits only the active docked notification to peek")
         let interactionPoint = alpha.frame.center
 
         app.coordinate(withNormalizedOffset: .zero)
@@ -116,7 +120,26 @@ final class T1150NotificationDockUITests: XCTestCase {
                 .waitForExistence(timeout: 2),
             "Peeking tap should navigate to the notification source chat"
         )
-        XCTAssertTrue(app.staticTexts["T1174 Beta"].exists, "Peeking tap should not dismiss another chat's notification")
+        XCTAssertFalse(app.staticTexts["T1174 Beta"].isHittable, "Peeking tap should not undock another chat's notification")
+    }
+
+    @MainActor
+    func testT1265DockedSinglePeekHandsOffToNewestEligibleNotification() throws {
+        let app = launchDockedNotificationProofApp(
+            extendCollapsedPreview: true,
+            singlePeekHandoff: true
+        )
+        let alpha = app.staticTexts["T1174 Alpha"]
+        XCTAssertTrue(alpha.waitForExistence(timeout: 4), "Expected the first seeded notification to start as the single peek")
+        XCTAssertFalse(app.staticTexts["T1174 Beta"].isHittable, "Expected the second seeded notification to remain docked before new output")
+        attachLandscapeScreenshot(from: app, name: "T1265 before single-peek handoff")
+
+        let beta = app.staticTexts["T1174 Beta"]
+        XCTAssertTrue(beta.waitForExistence(timeout: 5), "New eligible assistant output should make Beta the single peeking notification")
+        XCTAssertTrue(app.staticTexts["T1174 Alpha"].exists, "The previously peeking Alpha notification should remain in the docked stack")
+        XCTAssertFalse(app.staticTexts["T1174 Alpha"].isHittable, "The previously peeking Alpha notification should return to the docked stack")
+        assertElementStaysWithinScreen(beta, in: app, label: "T1265 handoff notification")
+        attachLandscapeScreenshot(from: app, name: "T1265 after single-peek handoff")
     }
 
     @MainActor
@@ -234,7 +257,8 @@ final class T1150NotificationDockUITests: XCTestCase {
     private func launchDockedNotificationProofApp(
         skipCollapsedPreview: Bool = false,
         extendCollapsedPreview: Bool = false,
-        startOnAlpha: Bool = false
+        startOnAlpha: Bool = false,
+        singlePeekHandoff: Bool = false
     ) -> XCUIApplication {
         XCUIDevice.shared.orientation = .landscapeLeft
 
@@ -255,6 +279,9 @@ final class T1150NotificationDockUITests: XCTestCase {
         }
         if startOnAlpha {
             app.launchArguments.append("--debug-cross-chat-notification-dock-proof-start-on-alpha")
+        }
+        if singlePeekHandoff {
+            app.launchArguments.append("--debug-cross-chat-notification-dock-proof-single-peek-handoff")
         }
         app.launch()
 
@@ -279,6 +306,11 @@ final class T1150NotificationDockUITests: XCTestCase {
             let promptInput = app.textViews["prompt_input"]
             if promptInput.exists && promptInput.isHittable {
                 return promptInput
+            }
+
+            let composeTextView = app.textViews["compose-text-view"]
+            if composeTextView.exists && composeTextView.isHittable {
+                return composeTextView
             }
 
             let candidates = app.textViews.allElementsBoundByIndex
@@ -336,10 +368,8 @@ final class T1150NotificationDockUITests: XCTestCase {
             .firstMatch
         XCTAssertTrue(outgoing.waitForExistence(timeout: 4), "Expected outgoing chat proof bubble to render")
 
-        let composer = promptComposer(in: app)
         assertElementStaysWithinScreen(incoming, in: app, label: "incoming chat proof bubble")
         assertElementStaysWithinScreen(outgoing, in: app, label: "outgoing chat proof bubble")
-        assertElementStaysWithinScreen(composer, in: app, label: "composer")
     }
 
     private func assertElementStaysWithinScreen(_ element: XCUIElement, in app: XCUIApplication, label: String) {

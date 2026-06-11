@@ -4,6 +4,9 @@
 	bare = true
 	ignorecase = true
 	precomposeunicode = true
+	symlinks = true
+	fsmonitor = false
+	longpaths = true
 [remote "origin"]
 	url = https://github.com/appstefan/HighlightSwift.git
 	tagOpt = --no-tags

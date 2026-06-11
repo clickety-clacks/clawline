@@ -42,6 +42,11 @@ struct ChatInsetLayoutState: Equatable {
     let listBottomInset: CGFloat
 }
 
+enum ChatInputBarSurfaceState: Equatable {
+    case closed
+    case open
+}
+
 struct ChatLayoutTransition: Equatable {
     let animationDuration: TimeInterval
     let animationOptions: UIView.AnimationOptions
@@ -143,6 +148,10 @@ final class ChatLayoutCoordinator {
 
     func registerListView(_ view: MessageFlowCollectionViewController, sessionKey: String) {
         dispatchPrecondition(condition: .onQueue(.main))
+        if let existing = listViews[sessionKey]?.value, existing === view {
+            applyLatestInset(to: view, isActive: sessionKey == activeSessionKey)
+            return
+        }
         listViews[sessionKey] = WeakBox(view)
         applyLatestInset(to: view, isActive: sessionKey == activeSessionKey)
     }
@@ -271,16 +280,19 @@ final class ChatLayoutCoordinator {
                 barView.setDesiredBottomGap(metrics.belowBarGap, isKeyboardVisible: inputs.keyboardVisible)
                 barView.containerView.layoutIfNeeded()
             }
-            if insetChanged {
-                for list in self.listViews.values.compactMap({ $0.value }) {
-                    if abs(list.currentBottomInset - targetInset) > 0.5 {
-                        list.setBottomInset(targetInset)
-                    }
+        }
+
+        let applyInsetsImmediately = { [weak self] in
+            guard let self, insetChanged else { return }
+            for list in self.listViews.values.compactMap({ $0.value }) {
+                if abs(list.currentBottomInset - targetInset) > 0.5 {
+                    list.setBottomInset(targetInset)
                 }
             }
         }
 
         if transition.animateInsets || transition.animateBarPosition {
+            applyInsetsImmediately()
             UIView.animate(
                 withDuration: transition.animationDuration,
                 delay: 0,
@@ -298,6 +310,7 @@ final class ChatLayoutCoordinator {
                 }
             }
         } else {
+            applyInsetsImmediately()
             applyChanges()
             performScrollAction(transition.scrollAction)
             isApplyingTransition = false
@@ -448,6 +461,14 @@ final class ChatLayoutCoordinator {
             inputBarTopFromScreenBottom: inputBarTopFromScreenBottom,
             listBottomInset: listBottomInset
         )
+    }
+
+    static func inputBarBottomGap(keyboardVisibleHeight: CGFloat, surfaceState: ChatInputBarSurfaceState) -> CGFloat {
+        let keyboardInsetProgress = min(1, max(0, keyboardVisibleHeight / 24))
+        if surfaceState == .open {
+            return 12
+        }
+        return 24 - (12 * keyboardInsetProgress)
     }
 
     func runtimeInsetLayoutState(inputs: ChatLayoutInputs,

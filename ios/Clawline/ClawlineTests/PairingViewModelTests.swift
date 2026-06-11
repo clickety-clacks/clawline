@@ -14,6 +14,8 @@ struct PairingViewModelTests {
     func defaultsBareHostToPlainWebSocket() async throws {
         let (defaults, suiteName) = makeIsolatedDefaults()
         defer { defaults.removePersistentDomain(forName: suiteName) }
+        let restoreProviderBaseURL = snapshotProviderBaseURL()
+        defer { restoreProviderBaseURL() }
 
         let connection = RecordingConnectionService(result: .failure(MockPairingError.unexpected))
         let viewModel = PairingViewModel(
@@ -37,6 +39,8 @@ struct PairingViewModelTests {
     func nonNetworkErrorStaysError() async throws {
         let (defaults, suiteName) = makeIsolatedDefaults()
         defer { defaults.removePersistentDomain(forName: suiteName) }
+        let restoreProviderBaseURL = snapshotProviderBaseURL()
+        defer { restoreProviderBaseURL() }
 
         let connection = RecordingConnectionService(result: .failure(MockPairingError.unexpected))
         let viewModel = PairingViewModel(
@@ -69,6 +73,8 @@ struct PairingViewModelTests {
     func networkTimeoutBecomesStalledWaiting() async throws {
         let (defaults, suiteName) = makeIsolatedDefaults()
         defer { defaults.removePersistentDomain(forName: suiteName) }
+        let restoreProviderBaseURL = snapshotProviderBaseURL()
+        defer { restoreProviderBaseURL() }
 
         let connection = RecordingConnectionService(result: .failure(URLError(.timedOut)))
         let viewModel = PairingViewModel(
@@ -104,6 +110,19 @@ private func makeIsolatedDefaults() -> (UserDefaults, String) {
     let defaults = UserDefaults(suiteName: suiteName)!
     defaults.removePersistentDomain(forName: suiteName)
     return (defaults, suiteName)
+}
+
+private func snapshotProviderBaseURL() -> () -> Void {
+    let defaults = UserDefaults.standard
+    let domainName = Bundle.main.bundleIdentifier ?? ""
+    let existing = defaults.persistentDomain(forName: domainName)?["provider.baseURL"] as? String
+    return {
+        if let existing {
+            defaults.set(existing, forKey: "provider.baseURL")
+        } else {
+            defaults.removeObject(forKey: "provider.baseURL")
+        }
+    }
 }
 
 private func waitFor(

@@ -71,6 +71,7 @@ struct ClawlineApp: App {
                     .environment(\.deviceIdentifier, deviceIdentifier)
                     .environment(\.chatService, chatService)
                     .environment(\.settingsManager, settingsManager)
+                    .environment(\.sonioxKeyStore, sonioxKeyStore)
                     .sheet(isPresented: $settingsManager.isSettingsPresented) {
                         SettingsView(settings: settingsManager)
                     }

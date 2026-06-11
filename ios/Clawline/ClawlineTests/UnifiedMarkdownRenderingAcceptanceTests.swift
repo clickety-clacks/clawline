@@ -628,6 +628,7 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
                 assignedNumber: 1,
                 visibleNotificationCount: 1,
                 showShortcutLabel: true,
+                isShortcutLabelDisabled: false,
                 maxBubbleHeight: 205,
                 maxBubbleWidth: 360,
                 bubbleCornerRadius: 18,

@@ -9,6 +9,7 @@ import Foundation
 import Testing
 @testable import Clawline
 
+@Suite(.serialized)
 struct ProviderServiceTests {
     @Test("Pairing request sends payload and resolves success")
     func pairingSuccess() async throws {
@@ -132,7 +133,7 @@ struct ProviderServiceTests {
         let mockSocket = MockWebSocketClient()
         let connector = MockWebSocketConnector(client: mockSocket)
         let baseURL = URL(string: "https://example.com")!
-        let service = ProviderChatService(
+        let service = ProviderDirectChatClient(
             connector: connector,
             deviceId: "device_123",
             baseURLProvider: { baseURL }
@@ -148,7 +149,7 @@ struct ProviderServiceTests {
             mockSocket.enqueue(text: #"{ "type": "message", "id": "s_1", "role": "assistant", "content": "Hi", "timestamp": 1700000000000, "streaming": false, "sessionKey": "agent:main:main", "attachments": [] }"#)
         }
 
-        async let connectResult = service.connect(token: "jwt", lastMessageId: "s_0")
+        async let connectResult: Void = service.connect(token: "jwt", lastMessageId: "s_0")
         try await connectResult
 
         let message = await iterator.next()
@@ -371,7 +372,11 @@ struct ProviderServiceTests {
             mockSocket.enqueue(text: #"{ "type": "auth_result", "success": true }"#)
         }
 
-        try await service.connect(token: "jwt", lastMessageId: nil)
+        service.startConnectionAttempt(epoch: 1, lastMessageId: nil, token: "jwt")
+        for _ in 0..<50 {
+            if mockSocket.sentTexts.contains(where: { $0.contains("\"type\":\"auth\"") }) { break }
+            try await Task.sleep(for: .milliseconds(20))
+        }
 
         #expect(
             mockSocket.sentTexts.contains {
@@ -386,7 +391,7 @@ struct ProviderServiceTests {
         let mockSocket = MockWebSocketClient()
         let connector = FallbackMockWebSocketConnector(client: mockSocket)
         let baseURL = URL(string: "http://example.com")!
-        let service = ProviderChatService(
+        let service = ProviderDirectChatClient(
             connector: connector,
             deviceId: "device_123",
             baseURLProvider: { baseURL }
@@ -404,12 +409,58 @@ struct ProviderServiceTests {
         #expect(connector.connectedURLs.last?.absoluteString == "ws://example.com/ws")
     }
 
+    @Test("Managed lifecycle connect falls back to ws when secure transport closes before auth completes")
+    @MainActor
+    func managedLifecycleConnectFallsBackAfterPreAuthSocketClose() async throws {
+        let secureSocket = MockWebSocketClient()
+        let fallbackSocket = MockWebSocketClient()
+        let connector = AsyncFallbackMockWebSocketConnector(
+            secureClient: secureSocket,
+            fallbackClient: fallbackSocket
+        )
+        let baseURL = URL(string: "http://example.com")!
+        let service = ProviderChatService(
+            connector: connector,
+            deviceId: "device_123",
+            baseURLProvider: { baseURL }
+        )
+
+        let stateMonitor = Task {
+            var iterator = service.connectionState.makeAsyncIterator()
+            while let state = await iterator.next() {
+                if state == .connected {
+                    return true
+                }
+            }
+            return false
+        }
+        defer { stateMonitor.cancel() }
+
+        service.startConnectionAttempt(epoch: 1, lastMessageId: nil, token: "jwt")
+
+        Task {
+            try await Task.sleep(forDuration: .milliseconds(20))
+            secureSocket.close(with: .normalClosure)
+            try await Task.sleep(forDuration: .milliseconds(20))
+            fallbackSocket.enqueue(text: #"{ "type": "auth_result", "success": true }"#)
+        }
+
+        try await waitUntil(timeout: .seconds(1)) {
+            connector.connectedURLs.count == 2
+        }
+        let sawConnected = try await waitForTaskValue(timeout: .seconds(1), task: stateMonitor)
+
+        #expect(connector.connectedURLs.first?.absoluteString == "wss://example.com/ws")
+        #expect(connector.connectedURLs.last?.absoluteString == "ws://example.com/ws")
+        #expect(sawConnected)
+    }
+
     @Test("Chat send serializes message payload")
     func chatSendSerializesPayload() async throws {
         let mockSocket = MockWebSocketClient()
         let connector = MockWebSocketConnector(client: mockSocket)
         let baseURL = URL(string: "https://example.com")!
-        let service = ProviderChatService(
+        let service = ProviderDirectChatClient(
             connector: connector,
             deviceId: "device_123",
             baseURLProvider: { baseURL }
@@ -516,7 +567,7 @@ struct ProviderServiceTests {
         let mockSocket = MockWebSocketClient()
         let connector = MockWebSocketConnector(client: mockSocket)
         let baseURL = URL(string: "https://example.com")!
-        let service = ProviderChatService(
+        let service = ProviderDirectChatClient(
             connector: connector,
             deviceId: "device_123",
             baseURLProvider: { baseURL }
@@ -548,7 +599,7 @@ struct ProviderServiceTests {
         let mockSocket = MockWebSocketClient()
         let connector = MockWebSocketConnector(client: mockSocket)
         let baseURL = URL(string: "https://example.com")!
-        let service = ProviderChatService(
+        let service = ProviderDirectChatClient(
             connector: connector,
             deviceId: "device_123",
             baseURLProvider: { baseURL }
@@ -584,7 +635,7 @@ struct ProviderServiceTests {
         let mockSocket = MockWebSocketClient()
         let connector = MockWebSocketConnector(client: mockSocket)
         let baseURL = URL(string: "https://example.com")!
-        let service = ProviderChatService(
+        let service = ProviderDirectChatClient(
             connector: connector,
             deviceId: "device_123",
             baseURLProvider: { baseURL }
@@ -622,7 +673,7 @@ struct ProviderServiceTests {
         let mockSocket = MockWebSocketClient()
         let connector = MockWebSocketConnector(client: mockSocket)
         let baseURL = URL(string: "https://example.com")!
-        let service = ProviderChatService(
+        let service = ProviderDirectChatClient(
             connector: connector,
             deviceId: "device_123",
             baseURLProvider: { baseURL }
@@ -651,7 +702,7 @@ struct ProviderServiceTests {
         let mockSocket = MockWebSocketClient()
         let connector = MockWebSocketConnector(client: mockSocket)
         let baseURL = URL(string: "https://example.com")!
-        let service = ProviderChatService(
+        let service = ProviderDirectChatClient(
             connector: connector,
             deviceId: "device_123",
             baseURLProvider: { baseURL }
@@ -760,7 +811,7 @@ struct ProviderServiceTests {
         let mockSocket = MockWebSocketClient()
         let connector = MockWebSocketConnector(client: mockSocket)
         let baseURL = URL(string: "https://example.com")!
-        let service = ProviderChatService(
+        let service = ProviderDirectChatClient(
             connector: connector,
             deviceId: "device_123",
             baseURLProvider: { baseURL }
@@ -827,6 +878,7 @@ struct ProviderServiceTests {
             connector: connector,
             deviceId: "device_123",
             baseURLProvider: { baseURL },
+            authTokenProvider: { "jwt" },
             streamAPIClient: streamAPIClient
         )
 
@@ -847,7 +899,7 @@ struct ProviderServiceTests {
             mockSocket.enqueue(text: #"{ "type": "stream_snapshot", "streams": [{ "sessionKey": "agent:main:clawline:user:main", "displayName": "Personal", "kind": "main", "orderIndex": 0, "isBuiltIn": true, "createdAt": 1700000000000, "updatedAt": 1700000000000 }] }"#)
         }
 
-        try await service.connect(token: "jwt", lastMessageId: nil)
+        service.startConnectionAttempt(epoch: 1, lastMessageId: nil, token: "jwt")
         let sessions = try await fetchTask.value
 
         #expect(sessions.map(\.sessionKey) == ["agent:main:clawline:user:s_trackable"])
@@ -1180,7 +1232,19 @@ struct ProviderServiceTests {
             #expect(request.url?.path == "/api/streams/adopt")
             #expect(request.httpMethod == "POST")
             #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer jwt")
-            let body = try JSONSerialization.jsonObject(with: request.httpBody ?? Data()) as? [String: Any]
+            let bodyData = request.httpBody ?? request.httpBodyStream.flatMap { stream -> Data? in
+                stream.open(); defer { stream.close() }
+                var data = Data()
+                let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: 4096)
+                defer { buffer.deallocate() }
+                while stream.hasBytesAvailable {
+                    let count = stream.read(buffer, maxLength: 4096)
+                    guard count > 0 else { break }
+                    data.append(buffer, count: count)
+                }
+                return data
+            } ?? Data()
+            let body = try JSONSerialization.jsonObject(with: bodyData) as? [String: Any]
             #expect(body?["sessionKey"] as? String == "agent:main:openclaw:user:s_trackable")
             let data = #"""
             {
@@ -1291,7 +1355,7 @@ struct ProviderServiceTests {
         HTTPStubURLProtocol.requestHandler = { request in
             let data = #"""
             {
-              "sessionKey": "agent:main:openclaw:user:s_trackable"
+              "deletedSessionKey": "agent:main:openclaw:user:s_trackable"
             }
             """#.data(using: .utf8) ?? Data()
             return (
@@ -1408,7 +1472,7 @@ struct ProviderServiceTests {
         let mockSocket = MockWebSocketClient()
         let connector = MockWebSocketConnector(client: mockSocket)
         let baseURL = URL(string: "https://example.com")!
-        let service = ProviderChatService(
+        let service = ProviderDirectChatClient(
             connector: connector,
             deviceId: "device_123",
             baseURLProvider: { baseURL }
@@ -1510,6 +1574,25 @@ private final class FallbackMockWebSocketConnector: WebSocketConnecting {
     }
 }
 
+private final class AsyncFallbackMockWebSocketConnector: WebSocketConnecting {
+    let secureClient: MockWebSocketClient
+    let fallbackClient: MockWebSocketClient
+    private(set) var connectedURLs: [URL] = []
+
+    init(secureClient: MockWebSocketClient, fallbackClient: MockWebSocketClient) {
+        self.secureClient = secureClient
+        self.fallbackClient = fallbackClient
+    }
+
+    func connect(to url: URL) async throws -> any WebSocketClient {
+        connectedURLs.append(url)
+        if url.scheme == "wss" {
+            return secureClient
+        }
+        return fallbackClient
+    }
+}
+
 private final class MockWebSocketClient: WebSocketClient {
     private let stream: AsyncStream<String>
     private let continuation: AsyncStream<String>.Continuation
@@ -1577,6 +1660,41 @@ private final class HangingWebSocketClient: WebSocketClient {
     }
 
     func close(with code: URLSessionWebSocketTask.CloseCode?) {}
+}
+
+private func waitUntil(
+    timeout: Duration,
+    poll: Duration = .milliseconds(10),
+    condition: @escaping @Sendable () -> Bool
+) async throws {
+    let clock = ContinuousClock()
+    let deadline = clock.now + timeout
+
+    while !condition() {
+        if clock.now >= deadline {
+            throw CancellationError()
+        }
+        try await Task.sleep(forDuration: poll)
+    }
+}
+
+private func waitForTaskValue<T: Sendable>(
+    timeout: Duration,
+    task: Task<T, Never>
+) async throws -> T {
+    try await withThrowingTaskGroup(of: T.self) { group in
+        group.addTask {
+            await task.value
+        }
+        group.addTask {
+            try await Task.sleep(forDuration: timeout)
+            throw CancellationError()
+        }
+
+        let value = try await group.next()!
+        group.cancelAll()
+        return value
+    }
 }
 
 private func jsonObject(_ text: String) throws -> [String: Any] {

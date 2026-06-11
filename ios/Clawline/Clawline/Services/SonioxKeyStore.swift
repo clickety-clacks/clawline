@@ -257,6 +257,10 @@ final class SonioxKeyStore {
         hasKey ? "Verify" : "Get Key"
     }
 
+    var statusText: String? {
+        keyStatus.inlineStatusText
+    }
+
     func setKey(_ value: String) {
         editableKey = value
     }

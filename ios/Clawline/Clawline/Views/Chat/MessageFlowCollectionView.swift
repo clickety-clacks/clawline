@@ -126,6 +126,7 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
     var isActiveSession: Bool
     var isRenderPolicyFrozen: Bool
     var isInputActive: Bool
+    var isDictationActive: Bool = false
     var isTypingActive: Bool
     var truncationBottomInset: CGFloat
     var trailingContentInset: CGFloat = 0
@@ -147,8 +148,19 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
     var onFooterTestMenuSelected: (@MainActor (FooterTestMenuAction) -> Void)?
     var onInsertMessageIntoPrompt: (@MainActor (Message) -> Void)?
     var onReferenceMessageInPrompt: (@MainActor (Message) -> Void)?
+    var onKeyboardDismissModeChanged: (@MainActor (String) -> Void)? = nil
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.allowsTransparentWindowBackground) private var allowsTransparentWindowBackground
+
+#if !os(visionOS)
+    static func keyboardDismissModeForInputFocus(
+        _ isInputActive: Bool,
+        isDictationActive: Bool
+    ) -> UIScrollView.KeyboardDismissMode {
+        let _ = isInputActive
+        return isDictationActive ? .none : .interactive
+    }
+#endif
 
     func makeUIViewController(context _: Context) -> MessageFlowCollectionViewController {
         let controller = MessageFlowCollectionViewController()
@@ -164,6 +176,7 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
             isActiveSession: isActiveSession,
             isRenderPolicyFrozen: isRenderPolicyFrozen,
             isInputActive: isInputActive,
+            isDictationActive: isDictationActive,
             isTypingActive: isTypingActive,
             topInset: topInset,
             truncationBottomInset: truncationBottomInset,
@@ -183,6 +196,7 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
             onFooterTestMenuSelected: onFooterTestMenuSelected,
             onInsertMessageIntoPrompt: onInsertMessageIntoPrompt,
             onReferenceMessageInPrompt: onReferenceMessageInPrompt,
+            onKeyboardDismissModeChanged: onKeyboardDismissModeChanged,
             isDark: isDark,
             allowsTransparentWindowBackground: allowsTransparentWindowBackground
         )
@@ -200,6 +214,7 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
             isActiveSession: isActiveSession,
             isRenderPolicyFrozen: isRenderPolicyFrozen,
             isInputActive: isInputActive,
+            isDictationActive: isDictationActive,
             isTypingActive: isTypingActive,
             topInset: topInset,
             truncationBottomInset: truncationBottomInset,
@@ -219,6 +234,7 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
             onFooterTestMenuSelected: onFooterTestMenuSelected,
             onInsertMessageIntoPrompt: onInsertMessageIntoPrompt,
             onReferenceMessageInPrompt: onReferenceMessageInPrompt,
+            onKeyboardDismissModeChanged: onKeyboardDismissModeChanged,
             isDark: isDark,
             allowsTransparentWindowBackground: allowsTransparentWindowBackground
         )
@@ -240,6 +256,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         let isActiveSession: Bool
         let isRenderPolicyFrozen: Bool
         let isInputActive: Bool
+        let isDictationActive: Bool
         let isTypingActive: Bool
         let topInset: CGFloat
         let truncationBottomInset: CGFloat
@@ -259,6 +276,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         let onFooterTestMenuSelected: (@MainActor (FooterTestMenuAction) -> Void)?
         let onInsertMessageIntoPrompt: (@MainActor (Message) -> Void)?
         let onReferenceMessageInPrompt: (@MainActor (Message) -> Void)?
+        let onKeyboardDismissModeChanged: (@MainActor (String) -> Void)?
         let isDark: Bool?
         let allowsTransparentWindowBackground: Bool
     }
@@ -371,6 +389,24 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         }
     }
 
+    private func reportKeyboardDismissModeIfNeeded() {
+#if !os(visionOS)
+        guard let onKeyboardDismissModeChanged else { return }
+        let mode: String
+        switch collectionView.keyboardDismissMode {
+        case .none:
+            mode = "none"
+        case .interactive:
+            mode = "interactive"
+        case .onDrag:
+            mode = "onDrag"
+        @unknown default:
+            mode = "unknown"
+        }
+        onKeyboardDismissModeChanged("keyboardDismissMode=\(mode);dictating=\(isDictationActive ? 1 : 0)")
+#endif
+    }
+
     private var messagesById: [String: Message] = [:]
     private var dateSeparatorTextByItemId: [String: String] = [:]
     private struct PerStreamRuntimeState {
@@ -443,6 +479,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     private var isActiveSession: Bool = true
     private var isRenderPolicyFrozen: Bool = false
     private var isInputActive: Bool = false
+    private var isDictationActive: Bool = false
     private var isTypingActive: Bool = false
     private var sessionStatus: SessionStatus?
     private var topInset: CGFloat = 0
@@ -463,6 +500,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     private var onFooterTestMenuSelected: (@MainActor (FooterTestMenuAction) -> Void)?
     private var onInsertMessageIntoPrompt: (@MainActor (Message) -> Void)?
     private var onReferenceMessageInPrompt: (@MainActor (Message) -> Void)?
+    private var onKeyboardDismissModeChanged: (@MainActor (String) -> Void)?
     private let webBubbleCoordinator = WebBubbleCoordinator()
     private var lastMessages: [Message] = []
     private var lastEffectiveStream: ChatStream?
@@ -1236,6 +1274,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 isActiveSession: isActiveSession,
                 isRenderPolicyFrozen: isRenderPolicyFrozen,
                 isInputActive: isInputActive,
+                isDictationActive: isDictationActive,
                 isTypingActive: isTypingActive,
                 topInset: topInset,
                 truncationBottomInset: truncationBottomInset,
@@ -2097,6 +2136,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             isActiveSession: isActiveSession,
             isRenderPolicyFrozen: isRenderPolicyFrozen,
             isInputActive: isInputActive,
+            isDictationActive: isDictationActive,
             isTypingActive: isTypingActive,
             topInset: topInset,
             truncationBottomInset: truncationBottomInset,
@@ -2112,6 +2152,10 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             onTypingIndicatorTap: onTypingIndicatorTap,
             onTypingIndicatorAnchorFrameChanged: onTypingIndicatorAnchorFrameChanged,
             onSessionControlSelected: onSessionControlSelected,
+            onFooterTestMenuSelected: onFooterTestMenuSelected,
+            onInsertMessageIntoPrompt: onInsertMessageIntoPrompt,
+            onReferenceMessageInPrompt: onReferenceMessageInPrompt,
+            onKeyboardDismissModeChanged: onKeyboardDismissModeChanged,
             isDark: currentIsDark,
             allowsTransparentWindowBackground: allowsTransparentWindowBackground
         )
@@ -2142,6 +2186,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 isActiveSession: request.isActiveSession,
                 isRenderPolicyFrozen: request.isRenderPolicyFrozen,
                 isInputActive: request.isInputActive,
+                isDictationActive: request.isDictationActive,
                 isTypingActive: request.isTypingActive,
                 topInset: request.topInset,
                 truncationBottomInset: request.truncationBottomInset,
@@ -2157,6 +2202,10 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 onTypingIndicatorTap: request.onTypingIndicatorTap,
                 onTypingIndicatorAnchorFrameChanged: request.onTypingIndicatorAnchorFrameChanged,
                 onSessionControlSelected: request.onSessionControlSelected,
+                onFooterTestMenuSelected: request.onFooterTestMenuSelected,
+                onInsertMessageIntoPrompt: request.onInsertMessageIntoPrompt,
+                onReferenceMessageInPrompt: request.onReferenceMessageInPrompt,
+                onKeyboardDismissModeChanged: request.onKeyboardDismissModeChanged,
                 isDark: request.isDark,
                 allowsTransparentWindowBackground: request.allowsTransparentWindowBackground
             )
@@ -2216,6 +2265,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
               self.isActiveSession == request.isActiveSession,
               self.isRenderPolicyFrozen == request.isRenderPolicyFrozen,
               self.isInputActive == request.isInputActive,
+              self.isDictationActive == request.isDictationActive,
               self.currentSendIndicatorRevision == request.sendIndicatorRevision,
               abs(self.topInset - request.topInset) <= 0.5,
               abs(self.trailingContentInset - max(0, request.trailingContentInset)) <= 0.5,
@@ -2241,6 +2291,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         isActiveSession: Bool,
         isRenderPolicyFrozen: Bool,
         isInputActive: Bool,
+        isDictationActive: Bool,
         isTypingActive: Bool,
         topInset: CGFloat,
         truncationBottomInset: CGFloat,
@@ -2260,6 +2311,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         onFooterTestMenuSelected: (@MainActor (FooterTestMenuAction) -> Void)? = nil,
         onInsertMessageIntoPrompt: (@MainActor (Message) -> Void)? = nil,
         onReferenceMessageInPrompt: (@MainActor (Message) -> Void)? = nil,
+        onKeyboardDismissModeChanged: (@MainActor (String) -> Void)? = nil,
         isDark: Bool? = nil,
         allowsTransparentWindowBackground: Bool = false
     ) {
@@ -2269,6 +2321,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             isActiveSession: isActiveSession,
             isRenderPolicyFrozen: isRenderPolicyFrozen,
             isInputActive: isInputActive,
+            isDictationActive: isDictationActive,
             isTypingActive: isTypingActive,
             topInset: topInset,
             truncationBottomInset: truncationBottomInset,
@@ -2288,6 +2341,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             onFooterTestMenuSelected: onFooterTestMenuSelected,
             onInsertMessageIntoPrompt: onInsertMessageIntoPrompt,
             onReferenceMessageInPrompt: onReferenceMessageInPrompt,
+            onKeyboardDismissModeChanged: onKeyboardDismissModeChanged,
             isDark: isDark,
             allowsTransparentWindowBackground: allowsTransparentWindowBackground
         )
@@ -2319,6 +2373,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         self.isActiveSession = isActiveSession
         self.isRenderPolicyFrozen = isRenderPolicyFrozen
         self.isInputActive = isInputActive
+        self.isDictationActive = isDictationActive
         self.isTypingActive = isTypingActive
         self.sessionStatus = sessionStatus
         self.currentSendIndicatorRevision = request.sendIndicatorRevision
@@ -2331,7 +2386,18 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         self.onFooterTestMenuSelected = onFooterTestMenuSelected
         self.onInsertMessageIntoPrompt = onInsertMessageIntoPrompt
         self.onReferenceMessageInPrompt = onReferenceMessageInPrompt
+        self.onKeyboardDismissModeChanged = onKeyboardDismissModeChanged
         self.allowsTransparentWindowBackground = allowsTransparentWindowBackground
+#if !os(visionOS)
+        let desiredDismissMode = MessageFlowCollectionView.keyboardDismissModeForInputFocus(
+            isInputActive,
+            isDictationActive: isDictationActive
+        )
+        if collectionView.keyboardDismissMode != desiredDismissMode {
+            collectionView.keyboardDismissMode = desiredDismissMode
+        }
+        reportKeyboardDismissModeIfNeeded()
+#endif
         let nextTrailingContentInset = max(0, request.trailingContentInset)
 
         // Handle appearance change from SwiftUI colorScheme
@@ -3627,7 +3693,10 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         collectionView.contentInsetAdjustmentBehavior = .never
         collectionView.alwaysBounceVertical = true
         #if !os(visionOS)
-            collectionView.keyboardDismissMode = .interactive
+            collectionView.keyboardDismissMode = MessageFlowCollectionView.keyboardDismissModeForInputFocus(
+                isInputActive,
+                isDictationActive: isDictationActive
+            )
         #endif
         collectionView.allowsSelection = false
         collectionView.allowsMultipleSelection = false

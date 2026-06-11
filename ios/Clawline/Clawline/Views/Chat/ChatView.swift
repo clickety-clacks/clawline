@@ -6306,8 +6306,9 @@ enum CrossChatNotificationScrollTargetSelection {
         visibleSourceChatIds: [String],
         routedSourceChatId: String?
     ) -> String? {
-        guard routedSourceChatId != nil else { return nil }
-        return visibleSourceChatIds.first
+        guard let routedSourceChatId,
+              visibleSourceChatIds.contains(routedSourceChatId) else { return nil }
+        return routedSourceChatId
     }
 }
 

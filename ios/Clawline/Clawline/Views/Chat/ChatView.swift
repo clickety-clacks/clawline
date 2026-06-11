@@ -7767,6 +7767,8 @@ struct CrossChatNotificationBubbleView: View {
     @State private var measuredEntriesHeight: CGFloat = 0
     @State private var measuredReplyFieldHeight: CGFloat = 0
     @State private var textSelectionState = CrossChatNotificationTextSelectionState()
+    @State private var contentSelectionResetToken = 0
+    @State private var didClearSelectionDuringCurrentTap = false
 
     private let controlSize: CGFloat = 44
     private let normalContentSpacing: CGFloat = 6
@@ -7978,7 +7980,7 @@ struct CrossChatNotificationBubbleView: View {
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .contentShape(Rectangle())
-                    .onTapGesture(perform: onNavigate)
+                    .onTapGesture(perform: handleNotificationBodyTap)
 
                 Spacer(minLength: 8)
 
@@ -8334,6 +8336,26 @@ struct CrossChatNotificationBubbleView: View {
         onTextSelectionChange(textSelectionState.isAnySelectionActive)
     }
 
+    private func handleNotificationBodyTap() {
+        switch CrossChatNotificationSelectionTapPolicy.effect(
+            isTextSelectionActive: textSelectionState.isAnySelectionActive,
+            didClearSelectionDuringCurrentTap: didClearSelectionDuringCurrentTap
+        ) {
+        case .clearSelection:
+            textSelectionState.clearAllSelection()
+            contentSelectionResetToken += 1
+            didClearSelectionDuringCurrentTap = true
+            publishTextSelectionState()
+            DispatchQueue.main.async {
+                didClearSelectionDuringCurrentTap = false
+            }
+        case .ignoreDuplicateSelectionClear:
+            break
+        case .navigate:
+            onNavigate()
+        }
+    }
+
     private func notificationDateSeparator(timestamp: Date) -> some View {
         HStack(spacing: 8) {
             Rectangle()
@@ -8438,6 +8460,27 @@ struct CrossChatNotificationTextSelectionState: Equatable {
 
     mutating func clearContentSelection() {
         selectedContentKeys = []
+    }
+
+    mutating func clearAllSelection() {
+        selectedContentKeys = []
+        isReplySelectionActive = false
+    }
+}
+
+enum CrossChatNotificationSelectionTapPolicy: Equatable {
+    case navigate
+    case clearSelection
+    case ignoreDuplicateSelectionClear
+
+    static func effect(
+        isTextSelectionActive: Bool,
+        didClearSelectionDuringCurrentTap: Bool = false
+    ) -> CrossChatNotificationSelectionTapPolicy {
+        if isTextSelectionActive {
+            return .clearSelection
+        }
+        return didClearSelectionDuringCurrentTap ? .ignoreDuplicateSelectionClear : .navigate
     }
 }
 

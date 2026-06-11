@@ -290,8 +290,8 @@ struct BubbleScrollTests {
 
         #expect(compact.bubblePaddingVertical == 8)
         #expect(compact.bubblePaddingHorizontal == 10)
-        #expect(regular.bubblePaddingVertical == 10)
-        #expect(regular.bubblePaddingHorizontal == 14)
+        #expect(regular.bubblePaddingVertical == 8)
+        #expect(regular.bubblePaddingHorizontal == 10)
     }
 
     @Test("T1193: Production markdown body block spacing stays compact")

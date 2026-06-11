@@ -8056,6 +8056,7 @@ struct CrossChatNotificationBubbleView: View {
     @State private var measuredEntriesHeight: CGFloat = 0
     @State private var measuredReplyFieldHeight: CGFloat = 0
     @State private var textSelectionState = CrossChatNotificationTextSelectionState()
+    @State private var contentSelectionResetToken = 0
 
     private let controlSize: CGFloat = 44
     private let normalContentSpacing: CGFloat = 6
@@ -8364,7 +8365,7 @@ struct CrossChatNotificationBubbleView: View {
                 .frame(maxHeight: contentMaxHeight, alignment: .top)
                 .contentShape(Rectangle())
                 .simultaneousGesture(
-                    TapGesture().onEnded(onNavigate)
+                    TapGesture().onEnded(handleNotificationBodyTap)
                 )
                 .gesture(
                     notificationSurfaceDragShield,
@@ -8482,7 +8483,7 @@ struct CrossChatNotificationBubbleView: View {
             publishTextSelectionState()
         }
         .contentShape(RoundedRectangle(cornerRadius: bubbleCornerRadius, style: .continuous))
-        .onTapGesture(perform: onNavigate)
+        .onTapGesture(perform: handleNotificationBodyTap)
         .background(alignment: .leading) {
             Rectangle()
                 .fill(notificationAccentColor.opacity(notificationAccentOpacity))
@@ -8591,6 +8592,7 @@ struct CrossChatNotificationBubbleView: View {
                 attributedString: attributed,
                 alignment: .left,
                 colorScheme: colorScheme,
+                selectionResetToken: contentSelectionResetToken,
                 onSelectionChange: { isSelectionActive in
                     setContentSelectionActive(isSelectionActive, selectionKey: selectionKey)
                 },
@@ -8624,6 +8626,17 @@ struct CrossChatNotificationBubbleView: View {
 
     private func publishTextSelectionState() {
         onTextSelectionChange(textSelectionState.isAnySelectionActive)
+    }
+
+    private func handleNotificationBodyTap() {
+        switch CrossChatNotificationSelectionTapPolicy.effect(isTextSelectionActive: textSelectionState.isAnySelectionActive) {
+        case .clearSelection:
+            textSelectionState.clearAllSelection()
+            contentSelectionResetToken += 1
+            publishTextSelectionState()
+        case .navigate:
+            onNavigate()
+        }
     }
 
     private func notificationDateSeparator(timestamp: Date) -> some View {
@@ -8730,6 +8743,20 @@ struct CrossChatNotificationTextSelectionState: Equatable {
 
     mutating func clearContentSelection() {
         selectedContentKeys = []
+    }
+
+    mutating func clearAllSelection() {
+        selectedContentKeys = []
+        isReplySelectionActive = false
+    }
+}
+
+enum CrossChatNotificationSelectionTapPolicy: Equatable {
+    case navigate
+    case clearSelection
+
+    static func effect(isTextSelectionActive: Bool) -> CrossChatNotificationSelectionTapPolicy {
+        isTextSelectionActive ? .clearSelection : .navigate
     }
 }
 

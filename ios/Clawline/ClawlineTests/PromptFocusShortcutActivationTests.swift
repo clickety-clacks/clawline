@@ -246,6 +246,47 @@ struct PromptFocusShortcutActivationTests {
         #expect(state.isAnySelectionActive == false)
     }
 
+    @Test("T1250 active notification selection tap clears selection instead of navigating")
+    @MainActor
+    func activeNotificationSelectionTapClearsSelectionInsteadOfNavigating() {
+        #expect(
+            CrossChatNotificationSelectionTapPolicy.effect(isTextSelectionActive: true) == .clearSelection
+        )
+        #expect(
+            CrossChatNotificationSelectionTapPolicy.effect(isTextSelectionActive: false) == .navigate
+        )
+
+        var state = CrossChatNotificationTextSelectionState()
+        state.setContentSelectionActive(true, key: "entry-a:0")
+        state.setReplySelectionActive(true)
+        #expect(state.isAnySelectionActive)
+
+        state.clearAllSelection()
+        #expect(state.isAnySelectionActive == false)
+    }
+
+    @Test("T1250 selection lifecycle remains per notification after tap clear")
+    @MainActor
+    func selectionLifecycleRemainsPerNotificationAfterTapClear() {
+        var first = CrossChatNotificationTextSelectionState()
+        var second = CrossChatNotificationTextSelectionState()
+
+        first.setContentSelectionActive(true, key: "first-entry:0")
+        #expect(CrossChatNotificationSelectionSwipeSuppression.allowsSwipe(isTextSelectionActive: first.isAnySelectionActive) == false)
+        #expect(CrossChatNotificationSelectionSwipeSuppression.allowsSwipe(isTextSelectionActive: second.isAnySelectionActive))
+
+        first.clearAllSelection()
+        #expect(first.isAnySelectionActive == false)
+        #expect(CrossChatNotificationSelectionSwipeSuppression.allowsSwipe(isTextSelectionActive: first.isAnySelectionActive))
+
+        first.setContentSelectionActive(true, key: "first-entry:1")
+        second.setContentSelectionActive(true, key: "second-entry:0")
+        #expect(first.isAnySelectionActive)
+        #expect(second.isAnySelectionActive)
+        #expect(CrossChatNotificationSelectionSwipeSuppression.allowsSwipe(isTextSelectionActive: first.isAnySelectionActive) == false)
+        #expect(CrossChatNotificationSelectionSwipeSuppression.allowsSwipe(isTextSelectionActive: second.isAnySelectionActive) == false)
+    }
+
     @Test("T355 docked notification left swipe restores stack instead of dismissing")
     @MainActor
     func dockedNotificationLeftSwipeRestoresStackInsteadOfDismissing() {

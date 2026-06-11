@@ -114,6 +114,34 @@ struct KeyboardCommandRouterTests {
         #expect(KeyboardCommandRouter.route(intent: .notificationAssignedOpen(4), store: StreamSelectorShortcutMap.store(selectableSessionKeys: [])).outcome == .fallthroughToDefault)
     }
 
+    @Test("T1210 popup key press activation posts router-owned selector intent")
+    func popupKeyPressActivationPostsRouterOwnedSelectorIntent() {
+        #expect(
+            StreamSelectorShortcutActivation.intent(
+                characters: "1",
+                modifiers: .command
+            ) == .notificationAssignedOpen(1)
+        )
+        #expect(
+            StreamSelectorShortcutActivation.intent(
+                characters: "0",
+                modifiers: .command
+            ) == .notificationAssignedOpen(0)
+        )
+        #expect(
+            StreamSelectorShortcutActivation.intent(
+                characters: "1",
+                modifiers: [.command, .option]
+            ) == nil
+        )
+        #expect(
+            StreamSelectorShortcutActivation.intent(
+                characters: "11",
+                modifiers: .command
+            ) == nil
+        )
+    }
+
     @Test("T343 VG-03 mention picker open close cannot poison notification scroll ownership")
     func mentionPickerOpenCloseCannotPoisonNotificationScrollOwnership() {
         let openStore = KeyboardOwnershipSceneFactory.chatScene(

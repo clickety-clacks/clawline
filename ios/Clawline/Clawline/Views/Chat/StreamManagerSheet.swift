@@ -162,61 +162,67 @@ struct StreamManagerSheet: View {
         )
     }
 
-    private func listViewportHeight(containerHeight: CGFloat) -> CGFloat {
-        StreamSelectorLayout.listViewportHeight(
-            containerHeight: containerHeight,
-            actionBarReservedHeight: actionBarReservedHeight
-        )
-    }
-
-    private var cappedContainerHeight: CGFloat {
-        StreamSelectorLayout.containerHeight(
+    var body: some View {
+        let _ = settings.fontScaleChangeSequence
+        let verticalLayout = StreamSelectorLayout.popupVerticalLayout(
             itemCount: listItemCount,
             showsCreateInlineRow: false,
             rowHeight: listRowHeight,
             rowSpacing: listRowSpacing,
-            functionBarHeight: actionBarReservedHeight,
+            actionBarHeight: actionBarReservedHeight,
             outerVerticalPadding: listOuterVerticalPadding,
             maxAvailableHeight: maxAvailableHeight,
             minimumPopoverHeight: minimumPopoverHeight
         )
-    }
+        let containerHeight = verticalLayout.containerHeight
+        let rowDotStates = StreamSelectorLayout.dotStatesBySession(
+            streams: filteredStreams,
+            lookup: dotStateLookup
+        )
+        VStack(spacing: 0) {
+            List {
+                ForEach(filteredStreams) { stream in
+                    streamRow(
+                        for: stream,
+                        dotState: rowDotStates[stream.sessionKey] ?? .inactive
+                    )
+                }
 
-    var body: some View {
-        let _ = settings.fontScaleChangeSequence
-        GeometryReader { geometry in
-            // Trust the allocated size. If the popover system gives us less than our ideal,
-            // the List viewport shrinks to match instead of overflowing into the popup chrome.
-            let containerHeight = geometry.size.height
-            let rowDotStates = StreamSelectorLayout.dotStatesBySession(
-                streams: filteredStreams,
-                lookup: dotStateLookup
-            )
-            VStack(spacing: 0) {
-                List {
-                    ForEach(filteredStreams) { stream in
-                        streamRow(
-                            for: stream,
-                            dotState: rowDotStates[stream.sessionKey] ?? .inactive
-                        )
+                ForEach(filteredPendingCreateRows) { pendingRow in
+                    HStack(spacing: 10) {
+                        Circle()
+                            .fill(Color.primary.opacity(0.18))
+                            .frame(width: 8, height: 8)
+                        Text(pendingRow.displayName)
+                            .font(.clawline(.subsectionHeader).weight(.regular))
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        ProgressView()
+                            .controlSize(.small)
+                            .tint(.secondary)
                     }
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+                    .frame(height: listRowHeight, alignment: .center)
+                    .listRowInsets(
+                        EdgeInsets(
+                            top: 0,
+                            leading: listRowHorizontalInset,
+                            bottom: 0,
+                            trailing: listRowHorizontalInset
+                        )
+                    )
+                    .contentShape(Rectangle())
+                }
 
-                    ForEach(filteredPendingCreateRows) { pendingRow in
-                        HStack(spacing: 10) {
-                            Circle()
-                                .fill(Color.primary.opacity(0.18))
-                                .frame(width: 8, height: 8)
-                            Text(pendingRow.displayName)
-                                .font(.clawline(.subsectionHeader).weight(.regular))
-                                .foregroundStyle(.secondary)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                            ProgressView()
-                                .controlSize(.small)
-                                .tint(.secondary)
-                        }
+                if filteredStreams.isEmpty && filteredPendingCreateRows.isEmpty {
+                    Text("No streams found")
+                        .font(.clawline(.secondaryLabel))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .frame(height: listRowHeight, alignment: .center)
                         .listRowSeparator(.hidden)
                         .listRowBackground(Color.clear)
-                        .frame(height: listRowHeight, alignment: .center)
                         .listRowInsets(
                             EdgeInsets(
                                 top: 0,
@@ -225,43 +231,23 @@ struct StreamManagerSheet: View {
                                 trailing: listRowHorizontalInset
                             )
                         )
-                        .contentShape(Rectangle())
-                    }
-
-                    if filteredStreams.isEmpty && filteredPendingCreateRows.isEmpty {
-                        Text("No streams found")
-                            .font(.clawline(.secondaryLabel))
-                            .foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity, alignment: .center)
-                            .frame(height: listRowHeight, alignment: .center)
-                            .listRowSeparator(.hidden)
-                            .listRowBackground(Color.clear)
-                            .listRowInsets(
-                                EdgeInsets(
-                                    top: 0,
-                                    leading: listRowHorizontalInset,
-                                    bottom: 0,
-                                    trailing: listRowHorizontalInset
-                                )
-                            )
-                    }
                 }
-                .listStyle(.plain)
-                .environment(\.defaultMinListRowHeight, listRowHeight)
-                .listRowSpacing(listRowSpacing)
-                .scrollBounceBehavior(.always)
-                .contentMargins(.top, listOuterVerticalPadding, for: .scrollContent)
-                .contentMargins(.bottom, listOuterVerticalPadding, for: .scrollContent)
-                .scrollContentBackground(.hidden)
-                .background(Color.clear)
-                .frame(height: listViewportHeight(containerHeight: containerHeight))
-                .clipShape(Rectangle())
-                .disabled(isWorking)
-
-                bottomActionBar
             }
-            .frame(width: geometry.size.width, height: geometry.size.height, alignment: .top)
+            .listStyle(.plain)
+            .environment(\.defaultMinListRowHeight, listRowHeight)
+            .listRowSpacing(listRowSpacing)
+            .scrollBounceBehavior(.always)
+            .contentMargins(.top, listOuterVerticalPadding, for: .scrollContent)
+            .contentMargins(.bottom, listOuterVerticalPadding, for: .scrollContent)
+            .scrollContentBackground(.hidden)
+            .background(Color.clear)
+            .frame(height: verticalLayout.listViewportHeight)
+            .clipShape(Rectangle())
+            .disabled(isWorking)
+
+            bottomActionBar
         }
+        .frame(height: containerHeight, alignment: .top)
         .frame(
             minWidth: minimumPopoverWidth,
             idealWidth: idealPopoverWidth,
@@ -270,9 +256,9 @@ struct StreamManagerSheet: View {
         .frame(
             // Clamp the floor to the capped height so we never produce an inconsistent
             // (minHeight > maxHeight) frame when the window is shorter than our preferred minimum.
-            minHeight: min(minimumPopoverHeight, cappedContainerHeight),
-            idealHeight: cappedContainerHeight,
-            maxHeight: cappedContainerHeight,
+            minHeight: min(minimumPopoverHeight, containerHeight),
+            idealHeight: containerHeight,
+            maxHeight: containerHeight,
             alignment: .top
         )
         .background(Color.clear)
@@ -315,6 +301,9 @@ struct StreamManagerSheet: View {
         }
         .onChange(of: selectableShortcutSessionKeys) { _, _ in
             publishShortcutOwnership()
+        }
+        .onKeyPress(characters: .decimalDigits) { keyPress in
+            handleSelectorShortcutKeyPress(keyPress)
         }
 #if os(iOS) && !targetEnvironment(macCatalyst) && canImport(GameController)
         .onReceive(NotificationCenter.default.publisher(for: .GCKeyboardDidConnect)) { _ in
@@ -434,8 +423,8 @@ struct StreamManagerSheet: View {
                 }
             }
         }
-        .frame(width: 0, height: 0)
-        .opacity(0)
+        .frame(width: 1, height: 1)
+        .opacity(0.001)
         .allowsHitTesting(false)
     }
 
@@ -462,6 +451,9 @@ struct StreamManagerSheet: View {
                 .onKeyPress(.return) {
                     selectHighlightedStream()
                     return .handled
+                }
+                .onKeyPress(characters: .decimalDigits) { keyPress in
+                    handleSelectorShortcutKeyPress(keyPress)
                 }
         } else {
             Button {
@@ -718,6 +710,17 @@ struct StreamManagerSheet: View {
         onSelectStream(selectedStreamSessionKey)
     }
 
+    private func handleSelectorShortcutKeyPress(_ keyPress: KeyPress) -> KeyPress.Result {
+        guard let intent = StreamSelectorShortcutActivation.intent(
+            characters: keyPress.characters,
+            modifiers: keyPress.modifiers
+        ) else {
+            return .ignored
+        }
+        NotificationCenter.default.post(name: .clawlineKeyboardCommandIntent, object: intent)
+        return .handled
+    }
+
     private func publishShortcutOwnership() {
         onShortcutOwnershipChange(selectableShortcutSessionKeys)
     }
@@ -837,6 +840,21 @@ enum StreamSelectorShortcutMap {
             return nil
         }
         return selectableSessionKeys[index]
+    }
+}
+
+enum StreamSelectorShortcutActivation {
+    static func intent(
+        characters: String,
+        modifiers: EventModifiers
+    ) -> KeyboardCommandIntent? {
+        guard modifiers == .command,
+              let character = characters.first,
+              characters.dropFirst().isEmpty,
+              let slot = Int(String(character)) else {
+            return nil
+        }
+        return .notificationAssignedOpen(slot)
     }
 }
 
@@ -1345,6 +1363,12 @@ enum StreamSelectorLayout {
         let strokeLineWidth: CGFloat
     }
 
+    struct PopupVerticalLayout: Equatable {
+        let containerHeight: CGFloat
+        let listViewportHeight: CGFloat
+        let actionBarHeight: CGFloat
+    }
+
     static func dotStatesBySession(
         streams: [StreamSession],
         lookup: StreamDotStateLookup
@@ -1489,6 +1513,36 @@ enum StreamSelectorLayout {
         let preferredFloor = min(minimumPopoverHeight, cap)
         let desiredWithinBudget = min(desired, cap)
         return max(preferredFloor, desiredWithinBudget)
+    }
+
+    static func popupVerticalLayout(
+        itemCount: Int,
+        showsCreateInlineRow: Bool,
+        rowHeight: CGFloat,
+        rowSpacing: CGFloat,
+        actionBarHeight: CGFloat,
+        outerVerticalPadding: CGFloat,
+        maxAvailableHeight: CGFloat,
+        minimumPopoverHeight: CGFloat
+    ) -> PopupVerticalLayout {
+        let containerHeight = containerHeight(
+            itemCount: itemCount,
+            showsCreateInlineRow: showsCreateInlineRow,
+            rowHeight: rowHeight,
+            rowSpacing: rowSpacing,
+            functionBarHeight: actionBarHeight,
+            outerVerticalPadding: outerVerticalPadding,
+            maxAvailableHeight: maxAvailableHeight,
+            minimumPopoverHeight: minimumPopoverHeight
+        )
+        return PopupVerticalLayout(
+            containerHeight: containerHeight,
+            listViewportHeight: listViewportHeight(
+                containerHeight: containerHeight,
+                actionBarReservedHeight: actionBarHeight
+            ),
+            actionBarHeight: actionBarHeight
+        )
     }
 
     /// Adaptive height for the stream list viewport given an actual allocated container height.

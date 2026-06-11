@@ -1292,14 +1292,52 @@ struct PromptFocusShortcutActivationTests {
         #expect(CrossChatNotificationScrollCommand.scroll(nil, direction: .down) == false)
     }
 
-    @Test("T1154 notification scroll target chooses top visible over last focused bubble")
-    func notificationScrollTargetChoosesTopVisibleOverLastFocusedBubble() {
+    @Test("T1154 notification scroll target keeps the routed visible bubble")
+    func notificationScrollTargetKeepsRoutedVisibleBubble() {
         #expect(
             CrossChatNotificationScrollTargetSelection.sourceChatId(
                 visibleSourceChatIds: ["notification-0", "notification-1", "notification-2"],
                 routedSourceChatId: "notification-2"
-            ) == "notification-0"
+            ) == "notification-2"
         )
+    }
+
+    @Test("T1154 multi-notification Cmd-J scrolls the focused visible bubble")
+    @MainActor
+    func multiNotificationCommandJScrollsFocusedVisibleBubble() {
+        let visibleSourceChatIds = ["notification-0", "notification-1"]
+        let store = KeyboardOwnershipSceneFactory.chatScene(
+            visibleNotificationSourceChatIds: visibleSourceChatIds,
+            mentionPickerVisible: false,
+            composerFocused: true,
+            notificationFocusedSourceChatId: "notification-1",
+            notificationReplyFocusedSourceChatId: nil,
+            actionMenuSourceChatId: nil
+        )
+        guard case .handled(.notificationBubble(let routedSourceChatId)) = KeyboardCommandRouter
+            .route(intent: .notificationScrollForward, store: store)
+            .outcome else {
+            Issue.record("Expected notification scroll to route to a notification bubble")
+            return
+        }
+        let targetSourceChatId = CrossChatNotificationScrollTargetSelection.sourceChatId(
+            visibleSourceChatIds: visibleSourceChatIds,
+            routedSourceChatId: routedSourceChatId
+        )
+
+        let topScrollView = UIScrollView(frame: CGRect(x: 0, y: 0, width: 120, height: 320))
+        topScrollView.contentSize = CGSize(width: 120, height: 720)
+        let focusedScrollView = UIScrollView(frame: CGRect(x: 0, y: 0, width: 120, height: 320))
+        focusedScrollView.contentSize = CGSize(width: 120, height: 720)
+        let scrollViewsBySourceChatId = [
+            "notification-0": topScrollView,
+            "notification-1": focusedScrollView
+        ]
+
+        #expect(targetSourceChatId == "notification-1")
+        #expect(CrossChatNotificationScrollCommand.scroll(scrollViewsBySourceChatId[targetSourceChatId ?? ""], direction: .down))
+        #expect(topScrollView.contentOffset.y == 0)
+        #expect(focusedScrollView.contentOffset.y == CrossChatNotificationScrollCommand.lineIncrement)
     }
 
     @Test("T1154 notification scroll target requires notification routing ownership")
@@ -1314,6 +1352,12 @@ struct PromptFocusShortcutActivationTests {
             CrossChatNotificationScrollTargetSelection.sourceChatId(
                 visibleSourceChatIds: [],
                 routedSourceChatId: "notification-1"
+            ) == nil
+        )
+        #expect(
+            CrossChatNotificationScrollTargetSelection.sourceChatId(
+                visibleSourceChatIds: ["notification-0", "notification-1"],
+                routedSourceChatId: "notification-2"
             ) == nil
         )
     }

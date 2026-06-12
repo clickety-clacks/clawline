@@ -5,7 +5,7 @@ _Last updated: 2026-03-10_
 This architecture summary is based on current code in:
 
 - Provider/runtime: `/Users/mike/src/openclaw/src/clawline/`
-- iOS client: `/Users/mike/src/clawline-dictation/ios/Clawline/Clawline/`
+- iOS client: `/Users/mike/src/clawline/ios/Clawline/Clawline/`
 
 ## System shape
 

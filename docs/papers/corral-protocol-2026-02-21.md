@@ -14,7 +14,7 @@ Date: February 21, 2026 · Duration: ~40 minutes · CLU sessions involved: 7 · 
 - **Clawline** — A custom messaging protocol and iOS app — the primary channel Flynn uses to communicate with CLU. Built as an OpenClaw provider extension.
 - **TARS** — The server machine where CLU and the Clawline provider run.
 - **eezo** — The development machine where coding agents run in tmux sessions. All implementation work happens here, isolated from the live server.
-- **Markdown / Engram / Parallelism / Personal / Rebase / Ideas / Dictation** — Named Clawline streams — each is a separate CLU instance with its own conversation context. They can communicate with each other via the alert endpoint.
+- **Markdown / Engram / Parallelism / Personal / Rebase / Ideas** — Named Clawline streams — each is a separate CLU instance with its own conversation context. They can communicate with each other via the alert endpoint.
 - **clawline-scroll-issues** — A coding agent on eezo that spent the previous day auditing scroll/SBB bugs in the Clawline iOS app. Shut down during this session after contributing findings.
 - **clawline-stream-restore** — A second coding agent on eezo, handling a related active-stream restore bug (T094). Also decommissioned.
 - **T095 / T103 / T104** — Three related Clawline iOS bug tickets: scroll position not preserved on stream switch, stream switch landing mid-thread, and scroll-to-bottom button not appearing after switch. All share the same root cause: stream-local state leaking across reused controller contexts.

@@ -51,17 +51,6 @@ extension EnvironmentValues {
     }
 }
 
-private struct SonioxKeyStoreKey: EnvironmentKey {
-    static let defaultValue: SonioxKeyStore = SonioxKeyStore()
-}
-
-extension EnvironmentValues {
-    var sonioxKeyStore: SonioxKeyStore {
-        get { self[SonioxKeyStoreKey.self] }
-        set { self[SonioxKeyStoreKey.self] = newValue }
-    }
-}
-
 private struct AllowsTransparentWindowBackgroundKey: EnvironmentKey {
     static let defaultValue = false
 }

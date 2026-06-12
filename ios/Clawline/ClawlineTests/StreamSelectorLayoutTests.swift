@@ -107,7 +107,7 @@ struct StreamSelectorLayoutTests {
         let streams = [
             StreamSession(
                 sessionKey: "agent:main:clawline:user:s_one",
-                displayName: "Dictation",
+                displayName: "Design",
                 kind: "custom",
                 orderIndex: 0,
                 isBuiltIn: false,
@@ -139,14 +139,14 @@ struct StreamSelectorLayoutTests {
             currentSessionKey: "agent:main:main",
             query: "clawline"
         )
-        let dictation = CrossChatMentionPickerLogic.filteredStreams(
+        let design = CrossChatMentionPickerLogic.filteredStreams(
             streams: streams,
             currentSessionKey: "agent:main:main",
-            query: "dictation"
+            query: "design"
         )
 
         #expect(clawline.map(\.displayName) == ["Clawline"])
-        #expect(dictation.map(\.displayName) == ["Dictation"])
+        #expect(design.map(\.displayName) == ["Design"])
     }
 
     @Test("T307 mention picker activates only for leading at-sign and clamps arrow selection")

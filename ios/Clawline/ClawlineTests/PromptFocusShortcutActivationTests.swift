@@ -553,7 +553,6 @@ struct PromptFocusShortcutActivationTests {
             onSubmit: { submitCount += 1 },
             onCancel: {},
             onFocusChange: { _ in },
-            onSelectionRangeChange: { _ in },
             onSelectionActiveChange: { _ in }
         )
         let coordinator = NotificationReplyTextInput.Coordinator(parent: input)
@@ -588,7 +587,6 @@ struct PromptFocusShortcutActivationTests {
             onSubmit: {},
             onCancel: {},
             onFocusChange: { _ in },
-            onSelectionRangeChange: { _ in },
             onSelectionActiveChange: { selectionStates.append($0) }
         )
         let coordinator = NotificationReplyTextInput.Coordinator(parent: input)
@@ -604,43 +602,6 @@ struct PromptFocusShortcutActivationTests {
         coordinator.textViewDidEndEditing(textView)
 
         #expect(selectionStates == [true, false, true, false])
-    }
-
-    @Test("T1256 notification reply dictation target is published only while focused")
-    @MainActor
-    func notificationReplyDictationTargetIsPublishedOnlyWhileFocused() {
-        var text = "reply"
-        var measuredHeight: CGFloat = 20
-        var targetEvents: [String?] = []
-        let input = NotificationReplyTextInput(
-            sourceChatId: "reply-source",
-            text: Binding(get: { text }, set: { text = $0 }),
-            measuredHeight: Binding(get: { measuredHeight }, set: { measuredHeight = $0 }),
-            font: UIFont.systemFont(ofSize: 15),
-            textColor: .label,
-            tintColor: .systemBlue,
-            visibleNotificationCount: 1,
-            onSubmit: {},
-            onCancel: {},
-            onFocusChange: { _ in },
-            onTextViewChange: { targetEvents.append($0?.sourceChatId) },
-            onSelectionRangeChange: { _ in },
-            onSelectionActiveChange: { _ in }
-        )
-        let coordinator = NotificationReplyTextInput.Coordinator(parent: input)
-        let textView = NotificationReplyUITextView()
-        textView.sourceChatId = "reply-source"
-        textView.text = text
-
-        coordinator.textViewDidChange(textView)
-        coordinator.textViewDidChangeSelection(textView)
-        #expect(targetEvents.isEmpty)
-
-        coordinator.textViewDidBeginEditing(textView)
-        coordinator.textViewDidChange(textView)
-        coordinator.textViewDidEndEditing(textView)
-
-        #expect(targetEvents == ["reply-source", nil])
     }
 
     @Test("No-text prompt focus shortcuts keep Cmd-L out of the unmodified host")

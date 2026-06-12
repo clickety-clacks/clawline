@@ -128,7 +128,7 @@ struct MessageInputBarBoundaryTests {
         #expect(CrossChatNotificationGeometry.spatialOverlayHorizontalCorrection(
             containerWidth: hostWidth,
             resolvedContainerWidth: resolvedWidth
-        ) == nativeWindowWidth - hostWidth)
+        ) == 0)
     }
 
     @Test("T1185 Spatial notification window width tolerates key-window handoff")
@@ -158,6 +158,17 @@ struct MessageInputBarBoundaryTests {
         #expect(CrossChatNotificationGeometry.spatialOverlayHorizontalCorrection(
             containerWidth: hostWidth,
             resolvedContainerWidth: hostWidth
+        ) == 0)
+    }
+
+    @Test("T1185 Spatial notification correction does not push wider overlay past trailing edge")
+    func spatialNotificationCorrectionDoesNotPushWiderOverlayPastTrailingEdge() {
+        let hostWidth = CGFloat(720)
+        let resolvedWidth = CGFloat(960)
+
+        #expect(CrossChatNotificationGeometry.spatialOverlayHorizontalCorrection(
+            containerWidth: hostWidth,
+            resolvedContainerWidth: resolvedWidth
         ) == 0)
     }
 
@@ -195,6 +206,51 @@ struct MessageInputBarBoundaryTests {
             visibleNotificationCount: 1,
             isSpatial: false
         ) == nil)
+    }
+
+    @Test("T1185 Spatial single notification max height is bounded by available dock height")
+    func spatialSingleNotificationMaxHeightIsBoundedByAvailableDockHeight() {
+        #expect(CrossChatNotificationGeometry.bubbleMaxHeight(
+            isCompactLayout: false,
+            maxContainerHeight: 240
+        ) == CGFloat(240))
+        #expect(CrossChatNotificationGeometry.bubbleMaxHeight(
+            isCompactLayout: false,
+            maxContainerHeight: 620
+        ) == CrossChatNotificationGeometry.compactBubbleMaxHeight * 2)
+    }
+
+    @Test("T1185 notification capacity uses measured bubble heights")
+    func notificationCapacityUsesMeasuredBubbleHeights() {
+        let bubbles = [
+            CrossChatNotificationBubble(
+                sourceChatId: "alpha",
+                sourceTitle: "Alpha",
+                entries: [],
+                lastAssistantActivityAt: Date(timeIntervalSinceReferenceDate: 3)
+            ),
+            CrossChatNotificationBubble(
+                sourceChatId: "beta",
+                sourceTitle: "Beta",
+                entries: [],
+                lastAssistantActivityAt: Date(timeIntervalSinceReferenceDate: 2)
+            ),
+            CrossChatNotificationBubble(
+                sourceChatId: "gamma",
+                sourceTitle: "Gamma",
+                entries: [],
+                lastAssistantActivityAt: Date(timeIntervalSinceReferenceDate: 1)
+            )
+        ]
+
+        let heights = bubbles.map { _ in CGFloat(104) }
+
+        #expect(CrossChatNotificationGeometry.visibleCapacity(
+            maxContainerHeight: 240,
+            bubbleHeights: heights,
+            bubbleSpacing: 10,
+            maxVisibleBubbleCount: 10
+        ) == 2)
     }
 
     @Test("T354 notification layout host height excludes motion overflow")

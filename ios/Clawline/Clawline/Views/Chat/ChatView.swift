@@ -947,7 +947,8 @@ struct ChatView: View {
     private func floatingScrollButtonOverlay(
         viewModel: ChatViewModel,
         inputBarTopFromScreenBottom: CGFloat,
-        containerWidth: CGFloat
+        containerWidth: CGFloat,
+        activeSelectionPopupVisible: Bool
     ) -> some View {
 #if os(visionOS)
         if !activeSelectionPopupVisible {
@@ -1690,7 +1691,8 @@ struct ChatView: View {
             floatingScrollButtonOverlay(
                 viewModel: viewModel,
                 inputBarTopFromScreenBottom: inputBarTopFromScreenBottom,
-                containerWidth: geometry.size.width
+                containerWidth: geometry.size.width,
+                activeSelectionPopupVisible: activeSelectionPopupVisible
             )
         }
         .overlay(alignment: .topLeading) {

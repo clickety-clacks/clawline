@@ -6253,10 +6253,29 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
     {
         let current = normalized(display.model)
         if catalog?.available == true {
-            return catalog?.models.map { model in
+            var optionsByRef: [String: FooterOption] = [:]
+            var orderedRefs: [String] = []
+            for model in catalog?.models ?? [] {
                 let option = modelCatalogOption(model, current: current)
-                return FooterOption(title: option.title, value: model.ref, enabled: nil, isCurrent: option.isCurrent)
-            } ?? []
+                let footerOption = FooterOption(title: option.title, value: model.ref, enabled: nil, isCurrent: option.isCurrent)
+                let ref = normalized(model.ref) ?? option.title
+                if optionsByRef[ref] == nil {
+                    orderedRefs.append(ref)
+                    optionsByRef[ref] = footerOption
+                } else if option.isCurrent {
+                    optionsByRef[ref] = footerOption
+                }
+            }
+            let options = orderedRefs.compactMap { optionsByRef[$0] }
+            guard let currentIndex = options.firstIndex(where: \.isCurrent) else { return options }
+            return options.enumerated().map { index, option in
+                FooterOption(
+                    title: option.title,
+                    value: option.value,
+                    enabled: option.enabled,
+                    isCurrent: index == currentIndex
+                )
+            }
         }
         let fallbackModels = ([current] + (display.fallbackModels ?? []).map { normalized($0) }).compactMap { $0 }
         let uniqueModels = Array(NSOrderedSet(array: fallbackModels)) as? [String] ?? fallbackModels

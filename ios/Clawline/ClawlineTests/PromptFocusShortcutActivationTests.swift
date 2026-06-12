@@ -799,6 +799,13 @@ struct PromptFocusShortcutActivationTests {
     func promptTextInputExposesFanOutScrollCommandsBeforeBaseTextViewCommands() {
         let textView = PastableTextView(frame: .zero, textContainer: nil)
         textView.notificationVisibleCount = 2
+        textView.keyboardOwnershipStore = KeyboardOwnershipSceneFactory.chatScene(
+            visibleNotificationSourceChatIds: ["notification-0", "notification-1"],
+            mentionPickerVisible: false,
+            composerFocused: true,
+            notificationReplyFocusedSourceChatId: nil,
+            actionMenuSourceChatId: nil
+        )
 
         let firstCommandJ = textView.keyCommands?.first { command in
             command.input == "j" && command.modifierFlags == [.command]
@@ -816,6 +823,13 @@ struct PromptFocusShortcutActivationTests {
     func promptTextInputExposesCommandSemicolonStreamPopupBeforeBaseTextViewCommands() {
         let textView = PastableTextView(frame: .zero, textContainer: nil)
         textView.notificationVisibleCount = 0
+        textView.keyboardOwnershipStore = KeyboardOwnershipSceneFactory.chatScene(
+            visibleNotificationSourceChatIds: [],
+            mentionPickerVisible: false,
+            composerFocused: true,
+            notificationReplyFocusedSourceChatId: nil,
+            actionMenuSourceChatId: nil
+        )
 
         let firstCommandSemicolon = textView.keyCommands?.first { command in
             command.input == ";" && command.modifierFlags == [.command]

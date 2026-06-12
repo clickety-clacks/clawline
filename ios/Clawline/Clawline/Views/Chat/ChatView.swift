@@ -7999,7 +7999,7 @@ enum CrossChatNotificationMaterialStyle {
     static let backgroundOpacity = 0.95
 
     static func accentOpacity(isSpatial: Bool) -> Double {
-        isSpatial ? 0.60 : 0.40
+        isSpatial ? 0.98 : 0.40
     }
 
     static func spatialTintOpacity(for colorScheme: ColorScheme) -> Double {

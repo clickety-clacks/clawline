@@ -39,24 +39,6 @@ struct SettingsView: View {
                 }
 
                 Section {
-                    SonioxKeyConfigurationRow(
-                        keyText: $settings.sonioxAPIKey,
-                        status: settings.sonioxKeyStatus,
-                        actionTitle: settings.sonioxCTATitle,
-                        onAction: {
-                            Task {
-                                _ = await settings.handleSonioxPrimaryAction { url in
-                                    openURL(url)
-                                }
-                            }
-                        },
-                        placeholder: "soniox.apiKey"
-                    )
-                } header: {
-                    Text("Voice Dictation")
-                }
-
-                Section {
                     TextField("cartesia.apiKey", text: $settings.cartesiaAPIKey)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled(true)

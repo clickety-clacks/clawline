@@ -24,7 +24,6 @@ final class SettingsManager {
         didSet { saveAppearanceMode() }
     }
 
-    let sonioxKeyStore: SonioxKeyStore
     let cartesiaKeyStore: CartesiaKeyStore
 
     var trustSelfSignedCertificates: Bool {
@@ -54,19 +53,6 @@ final class SettingsManager {
     private(set) var fontScaleToastSequence: Int = 0
     private var pendingFontScaleToastMessage: String?
 
-    var sonioxAPIKey: String {
-        get { sonioxKeyStore.editableKey }
-        set { sonioxKeyStore.setKey(newValue) }
-    }
-
-    var sonioxKeyStatus: SonioxKeyVerificationStatus {
-        sonioxKeyStore.keyStatus
-    }
-
-    var sonioxCTATitle: String {
-        sonioxKeyStore.ctaTitle
-    }
-
     var cartesiaAPIKey: String {
         get { cartesiaKeyStore.editableAPIKey }
         set { cartesiaKeyStore.editableAPIKey = newValue }
@@ -84,8 +70,7 @@ final class SettingsManager {
     private static let lifecycleDebugOverlayEnabledKey = "debug.lifecycleOverlayEnabled"
     private static let textLinkURLTemplateRulesKey = "textLinkURLTemplateRules"
 
-    init(sonioxKeyStore: SonioxKeyStore, cartesiaKeyStore: CartesiaKeyStore) {
-        self.sonioxKeyStore = sonioxKeyStore
+    init(cartesiaKeyStore: CartesiaKeyStore) {
         self.cartesiaKeyStore = cartesiaKeyStore
 
         if let data = UserDefaults.standard.data(forKey: Self.effectConfigKey),
@@ -118,7 +103,7 @@ final class SettingsManager {
     }
 
     convenience init() {
-        self.init(sonioxKeyStore: SonioxKeyStore(), cartesiaKeyStore: CartesiaKeyStore(keychain: KeychainSecureStore()))
+        self.init(cartesiaKeyStore: CartesiaKeyStore(keychain: KeychainSecureStore()))
     }
 
     private func save() {
@@ -175,22 +160,6 @@ final class SettingsManager {
 
     func toggleAppearanceMode() {
         appearanceMode = appearanceMode == .dark ? .light : .dark
-    }
-
-    func handleSonioxPrimaryAction(openURL: (URL) -> Void) async -> Bool {
-        if !sonioxKeyStore.hasKey {
-            openURL(SonioxConfigurationStore.keyManagementURL)
-            return false
-        }
-        return await verifySonioxKey()
-    }
-
-    @discardableResult
-    func verifySonioxKey() async -> Bool {
-        guard sonioxKeyStore.hasKey else {
-            return false
-        }
-        return await sonioxKeyStore.verify()
     }
 
     func increaseFontScale() {

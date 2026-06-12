@@ -6,6 +6,7 @@
 //
 
 import AVFoundation
+import CoreAudio
 import Foundation
 import OSLog
 

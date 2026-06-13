@@ -196,6 +196,53 @@ struct KeyboardCommandRouterTests {
         )
     }
 
+    @Test("T1210 app key command bridge exposes selector-only plain number slots")
+    func appKeyCommandBridgeExposesSelectorOnlyPlainNumberSlots() {
+        let specs = KeyboardCommandBridge.appSpecs(
+            notificationVisibleCount: 0,
+            selectorShortcutSlots: [1, 2, 0]
+        )
+
+        #expect(specs.contains {
+            $0.input == "1"
+                && $0.modifierFlags == [.command]
+                && $0.intent == .notificationAssignedOpen(1)
+        })
+        #expect(specs.contains {
+            $0.input == "2"
+                && $0.modifierFlags == [.command]
+                && $0.intent == .notificationAssignedOpen(2)
+        })
+        #expect(specs.contains {
+            $0.input == "0"
+                && $0.modifierFlags == [.command]
+                && $0.intent == .notificationAssignedOpen(0)
+        })
+        #expect(specs.contains {
+            $0.input == "1"
+                && $0.modifierFlags == [.command, .alternate]
+                && $0.intent == .notificationAssignedReply(1)
+        } == false)
+        #expect(
+            ChatAppCommandShortcut.keyCommandSpecs(
+                notificationVisibleCount: 0,
+                selectorShortcutSlots: [1, 2, 0]
+            )
+            .filter { $0.action == .notificationNumber }
+            .map(\.input) == ["1", "2", "0"]
+        )
+        #expect(
+            ChatAppCommandShortcut.keyCommandSignature(
+                notificationVisibleCount: 0,
+                selectorShortcutSlots: []
+            )
+            != ChatAppCommandShortcut.keyCommandSignature(
+                notificationVisibleCount: 0,
+                selectorShortcutSlots: [1, 2, 0]
+            )
+        )
+    }
+
     @Test("T1210 focused command source installs for selector-only ownership")
     func focusedCommandSourceInstallsForSelectorOnlyOwnership() {
         #expect(

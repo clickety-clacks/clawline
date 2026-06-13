@@ -6182,7 +6182,7 @@ enum CrossChatNotificationGeometry {
         containerWidth: CGFloat,
         resolvedContainerWidth: CGFloat
     ) -> CGFloat {
-        max(0, resolvedContainerWidth - max(0, containerWidth))
+        0
     }
 
     static func trailingAnchoredOverlayCorrection(
@@ -6194,6 +6194,32 @@ enum CrossChatNotificationGeometry {
 
     static func bubbleMaxHeight(isCompactLayout: Bool) -> CGFloat {
         isCompactLayout ? compactBubbleMaxHeight : compactBubbleMaxHeight * 2
+    }
+
+    static func bubbleMaxHeight(isCompactLayout: Bool, maxContainerHeight: CGFloat) -> CGFloat {
+        min(bubbleMaxHeight(isCompactLayout: isCompactLayout), max(0, maxContainerHeight))
+    }
+
+    static func visibleCapacity(
+        maxContainerHeight: CGFloat,
+        bubbleHeights: [CGFloat],
+        bubbleSpacing: CGFloat,
+        maxVisibleBubbleCount: Int
+    ) -> Int {
+        guard !bubbleHeights.isEmpty else { return 1 }
+        var usedHeight: CGFloat = 0
+        var capacity = 0
+        for bubbleHeight in bubbleHeights.prefix(maxVisibleBubbleCount) {
+            let nextUsedHeight = usedHeight
+                + max(0, bubbleHeight)
+                + (capacity == 0 ? 0 : bubbleSpacing)
+            guard capacity == 0 || nextUsedHeight <= maxContainerHeight else {
+                break
+            }
+            usedHeight = nextUsedHeight
+            capacity += 1
+        }
+        return max(1, capacity)
     }
 
     static func transcriptTrailingClearance(
@@ -6438,22 +6464,16 @@ private struct CrossChatNotificationOverlay: View {
         bubbles: [CrossChatNotificationBubble],
         measuredHeightsBySourceChatId: [String: CGFloat] = [:]
     ) -> Int {
-        guard !bubbles.isEmpty else { return 1 }
-        var usedHeight: CGFloat = 0
-        var capacity = 0
-        for bubble in bubbles.prefix(maxVisibleBubbleCount) {
-            let nextHeight = measuredHeightsBySourceChatId[bubble.sourceChatId]
+        let bubbleHeights = bubbles.map { bubble in
+            measuredHeightsBySourceChatId[bubble.sourceChatId]
                 ?? estimatedUnmeasuredHeight(for: bubble)
-            let nextUsedHeight = usedHeight
-                + nextHeight
-                + (capacity == 0 ? 0 : bubbleSpacing)
-            guard capacity == 0 || nextUsedHeight <= maxContainerHeight else {
-                break
-            }
-            usedHeight = nextUsedHeight
-            capacity += 1
         }
-        return max(1, capacity)
+        return CrossChatNotificationGeometry.visibleCapacity(
+            maxContainerHeight: maxContainerHeight,
+            bubbleHeights: bubbleHeights,
+            bubbleSpacing: bubbleSpacing,
+            maxVisibleBubbleCount: maxVisibleBubbleCount
+        )
     }
 
     private static func estimatedUnmeasuredHeight(for bubble: CrossChatNotificationBubble) -> CGFloat {
@@ -6507,7 +6527,10 @@ private struct CrossChatNotificationOverlay: View {
     }
 
     private var maxBubbleHeight: CGFloat {
-        CrossChatNotificationGeometry.bubbleMaxHeight(isCompactLayout: isCompactLayout)
+        CrossChatNotificationGeometry.bubbleMaxHeight(
+            isCompactLayout: isCompactLayout,
+            maxContainerHeight: maxContainerHeight
+        )
     }
 
     private var stackWidth: CGFloat {

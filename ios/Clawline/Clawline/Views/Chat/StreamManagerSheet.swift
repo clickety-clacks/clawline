@@ -128,10 +128,7 @@ struct StreamManagerSheet: View {
     }
 
     private var selectableShortcutSessionKeys: [String] {
-        guard selectorShortcutsAvailable, !isWorking else { return [] }
-        return filteredStreamSessionKeys.filter { sessionKey in
-            !removingSessionKeys.contains(sessionKey) && activeEditor != .renaming(sessionKey)
-        }
+        selectableShortcutSessionKeys(shortcutsAvailable: selectorShortcutsAvailable)
     }
 
     private var selectorShortcutSlots: [Int] {
@@ -274,8 +271,7 @@ struct StreamManagerSheet: View {
             selectorShortcutButtons
         }
         .onAppear {
-            resolvedHardwareKeyboardShortcutsAvailable = CrossChatShortcutLabelAvailability.current
-            publishShortcutOwnership()
+            refreshShortcutAvailabilityAndPublish()
             syncSelectionWithFilteredStreams()
             handleInitialSearchFocus(searchFocusRequestID)
         }
@@ -307,12 +303,10 @@ struct StreamManagerSheet: View {
         }
 #if os(iOS) && !targetEnvironment(macCatalyst) && canImport(GameController)
         .onReceive(NotificationCenter.default.publisher(for: .GCKeyboardDidConnect)) { _ in
-            resolvedHardwareKeyboardShortcutsAvailable = CrossChatShortcutLabelAvailability.current
-            publishShortcutOwnership()
+            refreshShortcutAvailabilityAndPublish()
         }
         .onReceive(NotificationCenter.default.publisher(for: .GCKeyboardDidDisconnect)) { _ in
-            resolvedHardwareKeyboardShortcutsAvailable = CrossChatShortcutLabelAvailability.current
-            publishShortcutOwnership()
+            refreshShortcutAvailabilityAndPublish()
         }
 #endif
         .alert(
@@ -714,7 +708,12 @@ struct StreamManagerSheet: View {
         guard let intent = StreamSelectorShortcutActivation.intent(
             characters: keyPress.characters,
             modifiers: keyPress.modifiers
-        ) else {
+        ),
+              case .notificationAssignedOpen(let slot) = intent,
+              StreamSelectorShortcutMap.sessionKey(
+                forSlot: slot,
+                selectableSessionKeys: selectableShortcutSessionKeys
+              ) != nil else {
             return .ignored
         }
         NotificationCenter.default.post(name: .clawlineKeyboardCommandIntent, object: intent)
@@ -723,6 +722,26 @@ struct StreamManagerSheet: View {
 
     private func publishShortcutOwnership() {
         onShortcutOwnershipChange(selectableShortcutSessionKeys)
+    }
+
+    private func refreshShortcutAvailabilityAndPublish() {
+        let shortcutsAvailable = CrossChatShortcutLabelAvailability.current
+        resolvedHardwareKeyboardShortcutsAvailable = shortcutsAvailable
+        onShortcutOwnershipChange(selectableShortcutSessionKeys(shortcutsAvailable: shortcutsAvailable))
+    }
+
+    private func selectableShortcutSessionKeys(shortcutsAvailable: Bool) -> [String] {
+        let renamingSessionKey: String? = {
+            guard case .renaming(let sessionKey) = activeEditor else { return nil }
+            return sessionKey
+        }()
+        return StreamSelectorShortcutMap.selectableSessionKeys(
+            filteredSessionKeys: filteredStreamSessionKeys,
+            shortcutsAvailable: shortcutsAvailable,
+            isWorking: isWorking,
+            removingSessionKeys: removingSessionKeys,
+            renamingSessionKey: renamingSessionKey
+        )
     }
 
     private func shortcutLabelText(for stream: StreamSession) -> String? {
@@ -791,6 +810,19 @@ struct StreamPopupRowStatusDotIdentity: Hashable {
 
 enum StreamSelectorShortcutMap {
     static let orderedSlots = [1, 2, 3, 4, 5, 6, 7, 8, 9, 0]
+
+    static func selectableSessionKeys(
+        filteredSessionKeys: [String],
+        shortcutsAvailable: Bool,
+        isWorking: Bool,
+        removingSessionKeys: Set<String>,
+        renamingSessionKey: String?
+    ) -> [String] {
+        guard shortcutsAvailable, !isWorking else { return [] }
+        return filteredSessionKeys.filter { sessionKey in
+            !removingSessionKeys.contains(sessionKey) && renamingSessionKey != sessionKey
+        }
+    }
 
     static func shortcutMap(selectableSessionKeys: [String]) -> [Int: KeyboardSurfaceId] {
         Dictionary(

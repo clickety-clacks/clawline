@@ -342,13 +342,13 @@ struct MessageInputBarBoundaryTests {
         #expect(stackWidth == CGFloat(562.5))
     }
 
-    @Test("T1185 Spatial single notification occupies resolved stack width")
-    func spatialSingleNotificationOccupiesResolvedStackWidth() {
+    @Test("T1185 Spatial single notification uses flexible bubble width")
+    func spatialSingleNotificationUsesFlexibleBubbleWidth() {
         #expect(CrossChatNotificationGeometry.bubbleFrameWidth(
             maxBubbleWidth: 562.5,
             visibleNotificationCount: 1,
             isSpatial: true
-        ) == CGFloat(562.5))
+        ) == nil)
         #expect(CrossChatNotificationGeometry.bubbleFrameWidth(
             maxBubbleWidth: 562.5,
             visibleNotificationCount: 2,
@@ -359,6 +359,40 @@ struct MessageInputBarBoundaryTests {
             visibleNotificationCount: 1,
             isSpatial: false
         ) == nil)
+    }
+
+    @Test("T1185 Spatial notifications stay inside resolved trailing edge")
+    func spatialNotificationsStayInsideResolvedTrailingEdge() {
+        let resolvedWidth = CrossChatNotificationGeometry.spatialOverlayContainerWidth(
+            containerWidth: 360,
+            nativeWindowWidth: 720
+        )
+        let cases: [(count: Int, isCollapsed: Bool)] = [
+            (1, false),
+            (2, false),
+            (1, true),
+            (2, true)
+        ]
+
+        for testCase in cases {
+            let stackWidth = CrossChatNotificationGeometry.stackWidth(
+                maxContainerWidth: resolvedWidth,
+                normalTrailingMargin: 12,
+                compactLeadingFitMargin: 0,
+                maxStackWidth: 562.5,
+                isCollapsed: testCase.isCollapsed
+            )
+            let bubbleWidth = CrossChatNotificationGeometry.bubbleFrameWidth(
+                maxBubbleWidth: 562.5,
+                visibleNotificationCount: testCase.count,
+                isSpatial: true
+            )
+            let visibleTrailingEdge = testCase.isCollapsed ? resolvedWidth : resolvedWidth - 12
+
+            #expect(stackWidth <= resolvedWidth)
+            #expect(bubbleWidth == nil)
+            #expect(visibleTrailingEdge <= resolvedWidth)
+        }
     }
 
     @Test("T1185 Spatial single notification max height is bounded by available dock height")

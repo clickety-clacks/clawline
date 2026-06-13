@@ -6263,8 +6263,7 @@ enum CrossChatNotificationGeometry {
         visibleNotificationCount: Int,
         isSpatial: Bool
     ) -> CGFloat? {
-        guard isSpatial, visibleNotificationCount == 1 else { return nil }
-        return max(0, maxBubbleWidth)
+        nil
     }
 
     static func collapsedOffset(

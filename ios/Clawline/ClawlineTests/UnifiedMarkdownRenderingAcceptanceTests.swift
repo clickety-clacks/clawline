@@ -676,6 +676,28 @@ struct UnifiedMarkdownRenderingAcceptanceTests {
         #expect(renderCallCount == 1)
     }
 
+    @Test("T1205 selectable attributed text skips identical UIKit text assignment")
+    func t1205_selectableAttributedTextSkipsIdenticalTextAssignment() {
+        let first = NSAttributedString(
+            string: "Review T1205.",
+            attributes: [.font: UIFont.preferredFont(forTextStyle: .body)]
+        )
+        let equalCopy = NSAttributedString(attributedString: first)
+        let changedAttributes = NSAttributedString(
+            string: "Review T1205.",
+            attributes: [.font: UIFont.preferredFont(forTextStyle: .headline)]
+        )
+        let changedText = NSAttributedString(
+            string: "Review T1205 again.",
+            attributes: [.font: UIFont.preferredFont(forTextStyle: .body)]
+        )
+
+        #expect(SelectableAttributedText.needsAttributedTextUpdate(current: nil, next: first))
+        #expect(SelectableAttributedText.needsAttributedTextUpdate(current: first, next: equalCopy) == false)
+        #expect(SelectableAttributedText.needsAttributedTextUpdate(current: first, next: changedAttributes))
+        #expect(SelectableAttributedText.needsAttributedTextUpdate(current: first, next: changedText))
+    }
+
     @Test("T307 real notification bubble renders assistant markdown content")
     @MainActor
     func t307_realNotificationBubbleRendersAssistantMarkdownContent() throws {

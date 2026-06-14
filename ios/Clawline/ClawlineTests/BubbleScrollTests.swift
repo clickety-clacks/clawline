@@ -289,8 +289,12 @@ struct BubbleScrollTests {
         let regular = ChatFlowTheme.Metrics(isCompact: false)
 
         #expect(compact.bubblePaddingVertical == 8)
+        #expect(compact.bubblePaddingTop == 8)
+        #expect(compact.bubblePaddingBottom == 6)
         #expect(compact.bubblePaddingHorizontal == 10)
         #expect(regular.bubblePaddingVertical == 10)
+        #expect(regular.bubblePaddingTop == 10)
+        #expect(regular.bubblePaddingBottom == 6)
         #expect(regular.bubblePaddingHorizontal == 14)
     }
 
@@ -344,6 +348,72 @@ struct BubbleScrollTests {
         }
 
         #expect(bodyStack.spacing == 6)
+    }
+
+    @Test("T1193: Rendered text bubble bottom chrome is tighter than top chrome")
+    @MainActor
+    func renderedTextBubbleBottomChromeIsTighterThanTopChrome() {
+        let metrics = ChatFlowTheme.Metrics(isCompact: false)
+        let message = Message(
+            id: "t1193-rendered-bottom-chrome",
+            role: .assistant,
+            content: "A compact production bubble should not carry a heavy blank pad below the final line.",
+            timestamp: Date(),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: "agent:main:clawline:flynn:s_111df227"
+        )
+        let presentation = buildPresentation(message, metrics: metrics, enableLinkPreviews: false)
+        let bubble = MessageBubbleUIKitView(frame: CGRect(x: 0, y: 0, width: 360, height: 1))
+
+        bubble.configure(
+            message: message,
+            presentation: presentation,
+            sizeClass: MessageFlowRules.sizeClass(for: presentation),
+            metrics: metrics,
+            maxWidth: 360,
+            truncationHeightOverride: 1000,
+            bubbleSizingV2: nil,
+            showsHeader: false,
+            paddingScale: 1,
+            minWidthOverride: nil,
+            maxWidthOverride: nil,
+            useContinuousCorners: true,
+            isDark: false,
+            onRequestExpand: nil,
+            onRequestLayout: nil,
+            onInteractiveCallback: nil
+        )
+        let measured = bubble.systemLayoutSizeFitting(
+            CGSize(width: 360, height: UIView.layoutFittingCompressedSize.height),
+            withHorizontalFittingPriority: .required,
+            verticalFittingPriority: .fittingSizeLevel
+        )
+        bubble.frame = CGRect(origin: .zero, size: measured)
+        bubble.layoutIfNeeded()
+
+        guard let textView = textViews(in: bubble).first(where: {
+            !$0.attributedText.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }) else {
+            Issue.record("Expected rendered text view inside production bubble")
+            return
+        }
+        textView.layoutManager.ensureLayout(for: textView.textContainer)
+        let usedRect = textView.layoutManager.usedRect(for: textView.textContainer)
+        let glyphFrame = CGRect(
+            x: usedRect.minX + textView.textContainerInset.left,
+            y: usedRect.minY + textView.textContainerInset.top,
+            width: usedRect.width,
+            height: usedRect.height
+        )
+        let textFrame = textView.convert(glyphFrame, to: bubble)
+        let topChrome = textFrame.minY
+        let bottomChrome = bubble.bounds.maxY - textFrame.maxY
+
+        #expect(topChrome >= metrics.bubblePaddingTop)
+        #expect(bottomChrome >= metrics.bubblePaddingBottom)
+        #expect(bottomChrome < topChrome)
     }
 
     @Test("BubbleSizingV2 live short-bubble remeasure keeps plan min width below legacy floor")
@@ -580,6 +650,7 @@ struct BubbleScrollTests {
         controller.view.frame = CGRect(x: 0, y: 0, width: 636, height: 536)
         controller.view.setNeedsLayout()
         controller.view.layoutIfNeeded()
+        controller.viewDidLayoutSubviews()
         let viewportSize = controller.debugScrollView.bounds.size
         let expectedScale = ImagePopupViewerLayout.initialZoomScale(
             imageSize: image.size,
@@ -747,11 +818,37 @@ struct BubbleScrollTests {
             Issue.record("Expected LinkPreviewView in bubble content")
             return
         }
-        let expectedPreviewMaxHeight = 900 - (metrics.bubblePaddingVertical * 2)
+        let expectedPreviewMaxHeight = 900 - (metrics.bubblePaddingTop + metrics.bubblePaddingBottom)
         let previewMeasured = preview.sizeThatFits(
             CGSize(width: referenceWidthCap, height: .greatestFiniteMagnitude)
         )
         #expect(abs(previewMeasured.height - expectedPreviewMaxHeight) <= 1)
+    }
+
+    @Test("T1193: BubbleSizingV2 link preview viewport uses asymmetric bubble padding")
+    func bubbleSizingV2LinkPreviewViewportUsesAsymmetricPadding() {
+        let metrics = ChatFlowTheme.Metrics(isCompact: false)
+        let env = BubbleSizingV2.Environment(
+            containerWidth: 1200,
+            containerHeight: 900,
+            singleLinkContainerHeight: 900,
+            topInset: 0,
+            bottomInset: 0,
+            truncationBottomInset: 0,
+            isVisionOS: false,
+            metricsFingerprint: BubbleSizingV2.metricsFingerprint(metrics: metrics, traitCollection: UITraitCollection())
+        )
+
+        let policy = BubbleSizingV2.BubbleHeightPolicy.resolve(
+            metrics: metrics,
+            env: env,
+            isSingleLinkPreview: true,
+            prefersScreenAwareHeightCap: true,
+            allowsOuterScroll: false
+        )
+
+        let expectedPreviewMaxHeight = policy.heightCap - (metrics.bubblePaddingTop + metrics.bubblePaddingBottom)
+        #expect(abs(policy.linkPreviewViewportMaxHeight - expectedPreviewMaxHeight) <= 1)
     }
 
     @Test("T060: Single-link cap uses live bottom inset (not truncation reserve)")

@@ -2,6 +2,7 @@ import Foundation
 import SwiftUI
 import Testing
 import UIKit
+import WebKit
 @testable import Clawline
 
 @Suite(.serialized)
@@ -436,6 +437,69 @@ struct TextLinkURLTemplateRulesTests {
         #expect(popupURLs == [popupURL])
     }
 
+    @Test("T1192: popup hover route carries anchor point")
+    @MainActor
+    func popupHoverRouteCarriesAnchorPoint() throws {
+        let popupURL = try #require(URL(string: "https://example.com/popup/P1192"))
+        let anchor = CGPoint(x: 44, y: 18)
+        var received: (URL, UIView?, CGPoint?)?
+        let originalPopupPresenter = GeneratedTextLinkActivationRouter.presentResolvedURLPopupAnchored
+        GeneratedTextLinkActivationRouter.presentResolvedURLPopupAnchored = { url, view, point in
+            received = (url, view, point)
+            return true
+        }
+        defer {
+            GeneratedTextLinkActivationRouter.presentResolvedURLPopupAnchored = originalPopupPresenter
+        }
+
+        let textView = UITextView(frame: CGRect(x: 0, y: 0, width: 280, height: 80))
+        #expect(GeneratedTextLinkActivationRouter.presentResolvedURLPopupAnchored(popupURL, textView, anchor))
+        #expect(received?.0 == popupURL)
+        #expect(received?.1 === textView)
+        #expect(received?.2 == anchor)
+    }
+
+    @Test("D11/R1135-11: popup resolved URL presentation uses clear outer background and web content")
+    @MainActor
+    func popupResolvedURLPresentationUsesClearOuterBackgroundAndWebContent() throws {
+        let popupURL = try #require(URL(string: "https://example.com/popup/P1192"))
+        let controller = TextLinkResolvedURLContentViewController(
+            url: popupURL,
+            presentation: .popup,
+            anchorPoint: CGPoint(x: 80, y: 90)
+        )
+        controller.loadViewIfNeeded()
+        controller.view.frame = CGRect(x: 0, y: 0, width: 800, height: 600)
+        controller.view.setNeedsLayout()
+        controller.view.layoutIfNeeded()
+
+        #expect(controller.view.backgroundColor == .clear)
+        let webView = try #require(webViews(in: controller.view).first)
+        #expect(webView.frame.width >= 320)
+        #expect(webView.frame.height >= 280)
+        #expect(!buttons(in: controller.view).contains { !$0.isHidden })
+    }
+
+    @Test("T1192: popup layout keeps edge hover point inside content")
+    @MainActor
+    func popupLayoutKeepsEdgeHoverPointInsideContent() throws {
+        let popupURL = try #require(URL(string: "https://example.com/popup/P1192"))
+        let anchor = CGPoint(x: 790, y: 590)
+        let controller = TextLinkResolvedURLContentViewController(
+            url: popupURL,
+            presentation: .popup,
+            anchorPoint: anchor
+        )
+        controller.loadViewIfNeeded()
+        controller.view.frame = CGRect(x: 0, y: 0, width: 800, height: 600)
+        controller.view.setNeedsLayout()
+        controller.view.layoutIfNeeded()
+
+        let webView = try #require(webViews(in: controller.view).first)
+        let contentFrame = webView.convert(webView.bounds, to: controller.view)
+        #expect(contentFrame.contains(CGPoint(x: 782, y: 582)))
+    }
+
     @Test("V1135-01: generated text links suppress external text-view activation")
     @MainActor
     func generatedTextLinksSuppressExternalActivation() throws {
@@ -559,6 +623,28 @@ struct TextLinkURLTemplateRulesTests {
         }
         for subview in view.subviews {
             matches.append(contentsOf: textViews(in: subview))
+        }
+        return matches
+    }
+
+    private func webViews(in view: UIView) -> [WKWebView] {
+        var matches: [WKWebView] = []
+        if let webView = view as? WKWebView {
+            matches.append(webView)
+        }
+        for subview in view.subviews {
+            matches.append(contentsOf: webViews(in: subview))
+        }
+        return matches
+    }
+
+    private func buttons(in view: UIView) -> [UIButton] {
+        var matches: [UIButton] = []
+        if let button = view as? UIButton {
+            matches.append(button)
+        }
+        for subview in view.subviews {
+            matches.append(contentsOf: buttons(in: subview))
         }
         return matches
     }

@@ -616,6 +616,29 @@ struct MessageInputBarBoundaryTests {
         #expect(source.contains(".offset(x: chatSurfaceOffset)"))
     }
 
+    @Test("T1282 compact landscape recovers physical width from rotated portrait window size")
+    func compactLandscapeRecoversPhysicalWidthFromRotatedPortraitWindowSize() {
+        let physicalWidth = ChatLandscapeWidthGeometry.physicalWindowWidth(
+            from: CGSize(width: 402, height: 874)
+        )
+
+        #expect(physicalWidth == 874)
+        #expect(ChatLandscapeWidthGeometry.physicalWidth(
+            containerWidth: 750,
+            leadingSafeAreaInset: 0,
+            trailingSafeAreaInset: 0,
+            isCompactLandscape: true,
+            nativeWindowWidth: physicalWidth
+        ) == 874)
+        #expect(ChatLandscapeWidthGeometry.horizontalOffset(
+            containerWidth: 750,
+            leadingSafeAreaInset: 0,
+            trailingSafeAreaInset: 0,
+            isCompactLandscape: true,
+            nativeWindowWidth: physicalWidth
+        ) == 62)
+    }
+
     @Test("T357 asymmetric compact landscape chrome recenters to physical window")
     func asymmetricCompactLandscapeChromeRecentersToPhysicalWindow() {
         #expect(ChatLandscapeWidthGeometry.physicalWidth(

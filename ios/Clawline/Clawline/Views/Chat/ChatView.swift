@@ -1183,15 +1183,11 @@ struct ChatView: View {
         let cachedKeyboardHeight = max(layoutInputs.effectiveKeyboardInset, lastNonZeroKeyboardHeight)
         let isLandscape = geometry.size.width > geometry.size.height
 #if os(iOS) && !targetEnvironment(macCatalyst)
-        let nativeWindowSize = UIApplication.shared.connectedScenes
-            .compactMap { $0 as? UIWindowScene }
-            .first(where: { $0.activationState == .foregroundActive })?
-            .windows
-            .first(where: \.isKeyWindow)?
-            .bounds
-            .size
+        let nativeWindowSize = Self.nativeWindowSizeForLandscapeWidth()
+        let nativeWindowWidth = ChatLandscapeWidthGeometry.physicalWindowWidth(from: nativeWindowSize)
 #else
         let nativeWindowSize: CGSize? = nil
+        let nativeWindowWidth: CGFloat? = nil
 #endif
         let isNativeWindowLandscape = nativeWindowSize.map { $0.width > $0.height } ?? false
         let isCompactLandscape = isCompactLayout && (isLandscape || isNativeWindowLandscape)
@@ -1200,14 +1196,14 @@ struct ChatView: View {
             leadingSafeAreaInset: geometry.safeAreaInsets.leading,
             trailingSafeAreaInset: geometry.safeAreaInsets.trailing,
             isCompactLandscape: isCompactLandscape,
-            nativeWindowWidth: nativeWindowSize?.width
+            nativeWindowWidth: nativeWindowWidth
         )
         let chatSurfaceOffset = ChatLandscapeWidthGeometry.horizontalOffset(
             containerWidth: geometry.size.width,
             leadingSafeAreaInset: geometry.safeAreaInsets.leading,
             trailingSafeAreaInset: geometry.safeAreaInsets.trailing,
             isCompactLandscape: isCompactLandscape,
-            nativeWindowWidth: nativeWindowSize?.width
+            nativeWindowWidth: nativeWindowWidth
         )
         let estimatedKeyboardHeight: CGFloat = {
             if horizontalSizeClass == .regular {
@@ -1646,6 +1642,18 @@ struct ChatView: View {
         decoratedRootLayer
 #endif
     }
+
+#if os(iOS) && !targetEnvironment(macCatalyst)
+    private static func nativeWindowSizeForLandscapeWidth() -> CGSize? {
+        UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first(where: { $0.activationState == .foregroundActive })?
+            .windows
+            .first(where: \.isKeyWindow)?
+            .bounds
+            .size
+    }
+#endif
 
     private func confirmCancelCurrentPromptDialog(viewModel: ChatViewModel) {
         if cancelCurrentPromptRequiresVisibleTyping,
@@ -2148,15 +2156,11 @@ struct ChatView: View {
         let isCompactLayout = horizontalSizeClass == .compact
         let isLandscape = geometry.size.width > geometry.size.height
 #if os(iOS) && !targetEnvironment(macCatalyst)
-        let nativeWindowSize = UIApplication.shared.connectedScenes
-            .compactMap { $0 as? UIWindowScene }
-            .first(where: { $0.activationState == .foregroundActive })?
-            .windows
-            .first(where: \.isKeyWindow)?
-            .bounds
-            .size
+        let nativeWindowSize = Self.nativeWindowSizeForLandscapeWidth()
+        let nativeWindowWidth = ChatLandscapeWidthGeometry.physicalWindowWidth(from: nativeWindowSize)
 #else
         let nativeWindowSize: CGSize? = nil
+        let nativeWindowWidth: CGFloat? = nil
 #endif
         let isNativeWindowLandscape = nativeWindowSize.map { $0.width > $0.height } ?? false
         let isCompactLandscape = isCompactLayout && (isLandscape || isNativeWindowLandscape)
@@ -2187,14 +2191,14 @@ struct ChatView: View {
             leadingSafeAreaInset: geometry.safeAreaInsets.leading,
             trailingSafeAreaInset: geometry.safeAreaInsets.trailing,
             isCompactLandscape: isCompactLandscape,
-            nativeWindowWidth: nativeWindowSize?.width
+            nativeWindowWidth: nativeWindowWidth
         )
         let pinnedSurfaceOffset = ChatLandscapeWidthGeometry.horizontalOffset(
             containerWidth: geometry.size.width,
             leadingSafeAreaInset: geometry.safeAreaInsets.leading,
             trailingSafeAreaInset: geometry.safeAreaInsets.trailing,
             isCompactLandscape: isCompactLandscape,
-            nativeWindowWidth: nativeWindowSize?.width
+            nativeWindowWidth: nativeWindowWidth
         )
 
 #if os(visionOS)
@@ -6338,6 +6342,11 @@ enum CrossChatNotificationScrollTargetSelection {
 }
 
 enum ChatLandscapeWidthGeometry {
+    static func physicalWindowWidth(from windowSize: CGSize?) -> CGFloat? {
+        guard let windowSize else { return nil }
+        return max(windowSize.width, windowSize.height)
+    }
+
     static func shouldFillWindowWidth(
         viewSize: CGSize,
         windowSize: CGSize?,

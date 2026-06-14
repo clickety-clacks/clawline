@@ -26,18 +26,25 @@ struct RichTextEditor: UIViewRepresentable {
     var fontScaleChangeSequence: Int
     var resetToken: Int
     var focusTrigger: Int
+    var dismissTrigger: Int
     var isEditable: Bool
+    var isKeyboardVisible: Bool
+    var isExternalEditingActive: Bool = false
     var tintColor: UIColor
     var textColor: UIColor = .label
     var onFocusChange: (Bool) -> Void
     var onTextEditActivity: (() -> Void)?
     var onSubmit: (() -> Void)?
+    var onEscape: (() -> Void)?
+    var onEscapeLongPress: (() -> Void)?
     var handlesMentionPickerKeyCommands: Bool = false
     var mentionPickerHasCompletion: Bool = false
     var onMentionPickerTab: (() -> Void)?
     var onMentionPickerMoveUp: (() -> Void)?
     var onMentionPickerMoveDown: (() -> Void)?
     var onPasteImages: (([UIImage]) -> Void)?
+    var onUserEdit: ((NSRange, Int) -> Void)?
+    var onTextViewReady: ((PastableTextView) -> Void)?
     var notificationVisibleCount: Int = 0
     var keyboardOwnershipStore = KeyboardOwnershipStore()
     var trailingPadding: CGFloat = 20
@@ -49,11 +56,20 @@ struct RichTextEditor: UIViewRepresentable {
         textView.onPasteImages = { images in
             coordinator.parent.onPasteImages?(images)
         }
+        textView.onEscape = {
+            coordinator.parent.onEscape?()
+        }
+        textView.onEscapeLongPress = {
+            coordinator.parent.onEscapeLongPress?()
+        }
         textView.onLayout = { _ in
             coordinator.updateHeight(for: textView, allowAutoScroll: false)
         }
         textView.onResponderFocusChange = { isFocused in
             coordinator.parent.onFocusChange(isFocused)
+        }
+        textView.onDirectUserTextReplacement = { range, replacementText in
+            coordinator.parent.onUserEdit?(range, replacementText.utf16.count)
         }
         textView.handlesMentionPickerKeyCommands = handlesMentionPickerKeyCommands
         textView.notificationVisibleCount = notificationVisibleCount
@@ -69,9 +85,11 @@ struct RichTextEditor: UIViewRepresentable {
         textView.font = UIFont.clawline(.bodyText)
         textView.allowsEditingTextAttributes = true
 #if !os(visionOS)
-        textView.keyboardDismissMode = .interactive
+        textView.keyboardDismissMode = .none
 #endif
         textView.returnKeyType = .send
+        textView.accessibilityIdentifier = "compose-text-view"
+        textView.accessibilityLabel = "Compose message"
         textView.tintColor = tintColor
         textView.textColor = textColor
         textView.autocorrectionType = .yes
@@ -80,9 +98,13 @@ struct RichTextEditor: UIViewRepresentable {
         textView.smartInsertDeleteType = .yes
         textView.attributedText = attributedText
         textView.isInputEnabled = isEditable
-        textView.accessibilityIdentifier = "prompt_input"
+        let focusTap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleEditorTap(_:)))
+        focusTap.cancelsTouchesInView = false
+        focusTap.delegate = context.coordinator
+        textView.addGestureRecognizer(focusTap)
         textView.setContentHuggingPriority(.defaultLow, for: .horizontal)
         textView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        onTextViewReady?(textView)
         return textView
     }
 
@@ -96,11 +118,21 @@ struct RichTextEditor: UIViewRepresentable {
         textView.onPasteImages = { images in
             coordinator.parent.onPasteImages?(images)
         }
+        textView.onEscape = {
+            coordinator.parent.onEscape?()
+        }
+        textView.onEscapeLongPress = {
+            coordinator.parent.onEscapeLongPress?()
+        }
         textView.onLayout = { _ in
             coordinator.updateHeight(for: textView, allowAutoScroll: false)
         }
+        onTextViewReady?(textView)
         textView.onResponderFocusChange = { isFocused in
             coordinator.parent.onFocusChange(isFocused)
+        }
+        textView.onDirectUserTextReplacement = { range, replacementText in
+            coordinator.parent.onUserEdit?(range, replacementText.utf16.count)
         }
         textView.handlesMentionPickerKeyCommands = handlesMentionPickerKeyCommands
         textView.notificationVisibleCount = notificationVisibleCount
@@ -125,9 +157,23 @@ struct RichTextEditor: UIViewRepresentable {
         }
         context.coordinator.isApplyingLocalEdit = false
 
+        if !isComposing,
+           !context.coordinator.isApplyingLocalEdit,
+           !((textView.attributedText?.isEqual(attributedText)) ?? false) {
+            textView.attributedText = attributedText
+            context.coordinator.enforceBaseAttributes(on: textView)
+            context.coordinator.ensureTypingAttributes(on: textView)
+        }
+
         if textView.isInputEnabled != isEditable {
             textView.isInputEnabled = isEditable
         }
+
+#if !os(visionOS)
+        if textView.keyboardDismissMode != .none {
+            textView.keyboardDismissMode = .none
+        }
+#endif
 
         if textView.tintColor != tintColor {
             textView.tintColor = tintColor
@@ -148,7 +194,15 @@ struct RichTextEditor: UIViewRepresentable {
                                                        right: trailingPadding)
         }
 
-        context.coordinator.applyFocusIfNeeded(on: textView, trigger: focusTrigger)
+        context.coordinator.applyFocusIfNeeded(
+            on: textView,
+            trigger: focusTrigger,
+            isKeyboardVisible: isKeyboardVisible
+        )
+        context.coordinator.applyDismissIfNeeded(
+            on: textView,
+            trigger: dismissTrigger
+        )
         context.coordinator.updateHeight(for: textView, allowAutoScroll: false)
         context.coordinator.enforceBaseAttributesIfNeeded(
             on: textView,
@@ -171,9 +225,10 @@ struct RichTextEditor: UIViewRepresentable {
         Coordinator(parent: self)
     }
 
-    final class Coordinator: NSObject, UITextViewDelegate {
+    final class Coordinator: NSObject, UITextViewDelegate, UIGestureRecognizerDelegate {
         var parent: RichTextEditor
         private var lastFocusTrigger: Int = 0
+        private var lastDismissTrigger: Int = 0
         var isApplyingLocalEdit = false
         var isInsertingAttachments = false
         var isUpdatingFromSwiftUI = false
@@ -187,18 +242,82 @@ struct RichTextEditor: UIViewRepresentable {
             self.parent = parent
         }
 
+        @objc func handleEditorTap(_ gesture: UITapGestureRecognizer) {
+            guard let textView = gesture.view as? UITextView else { return }
+            requestEditorFocus(on: textView, isKeyboardVisible: parent.isKeyboardVisible)
+        }
+
+        private func requestEditorFocus(on textView: UITextView, isKeyboardVisible: Bool) {
+            guard parent.isEditable else { return }
+            if let textView = textView as? PastableTextView {
+                textView.isInputEnabled = true
+            }
+            textView.isEditable = true
+            textView.isSelectable = true
+            if Self.shouldCycleFirstResponder(
+                isFirstResponder: textView.isFirstResponder,
+                isKeyboardVisible: isKeyboardVisible
+            ) {
+                textView.resignFirstResponder()
+                DispatchQueue.main.async { [weak self, weak textView] in
+                    guard let self, let textView else { return }
+                    let becameFirstResponder = textView.becomeFirstResponder()
+                    if becameFirstResponder || textView.isFirstResponder {
+                        self.parent.onFocusChange(true)
+                    }
+                }
+            } else if !textView.isFirstResponder {
+                let becameFirstResponder = textView.becomeFirstResponder()
+                if becameFirstResponder || textView.isFirstResponder {
+                    parent.onFocusChange(true)
+                }
+            } else {
+                parent.onFocusChange(true)
+            }
+        }
+
+        func gestureRecognizer(
+            _ gestureRecognizer: UIGestureRecognizer,
+            shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer
+        ) -> Bool {
+            true
+        }
+
+        func textViewDidBeginEditing(_ textView: UITextView) {
+            parent.onFocusChange(true)
+        }
+
+        func textViewDidEndEditing(_ textView: UITextView) {
+            parent.onFocusChange(false)
+        }
+
         func textViewDidChange(_ textView: UITextView) {
             guard !isUpdatingFromSwiftUI else { return }
+            let isProgrammaticEdit = (textView as? PastableTextView)?.programmaticEditInFlight == true
             isApplyingLocalEdit = true
+            if !isProgrammaticEdit {
+                parent.onTextEditActivity?()
+            }
             parent.attributedText = textView.attributedText
-            parent.onTextEditActivity?()
-            setSelectionRange(textView.selectedRange)
+            if !isProgrammaticEdit {
+                setSelectionRange(textView.selectedRange)
+            }
             updateHeight(for: textView, allowAutoScroll: true)
-            ensureCaretVisible(in: textView)
+            if !isProgrammaticEdit {
+                ensureCaretVisible(in: textView)
+            }
             ensureTypingAttributes(on: textView)
         }
 
         func textViewDidChangeSelection(_ textView: UITextView) {
+            if let textView = textView as? PastableTextView {
+                if textView.consumeExpectedProgrammaticSelectionFeedback(textView.selectedRange) {
+                    return
+                }
+                if textView.programmaticEditInFlight {
+                    return
+                }
+            }
             let selectedRange = textView.selectedRange
             guard selectedRange.location != NSNotFound else { return }
             guard !isApplyingParentSelection else { return }
@@ -212,18 +331,15 @@ struct RichTextEditor: UIViewRepresentable {
         func textView(_ textView: UITextView,
                       shouldChangeTextIn range: NSRange,
                       replacementText text: String) -> Bool {
+            if let textView = textView as? PastableTextView {
+                guard !textView.programmaticEditInFlight else { return true }
+                textView.clearExpectedProgrammaticSelectionFeedback()
+                parent.onUserEdit?(range, text.utf16.count)
+            } else {
+                parent.onUserEdit?(range, text.utf16.count)
+            }
             if text == "\n" {
-                // UIKit's software-keyboard text delegate reports only the replacement text,
-                // so Return and software Shift-Return are not distinguishable here. Hardware
-                // modified Return is handled by keyCommands before this submit path.
-                switch KeyboardCommandRouter.route(intent: .textSubmit, store: parent.keyboardOwnershipStore).outcome {
-                case .handled(.mentionPicker):
-                    parent.onMentionPickerTab?()
-                case .handled(.composer):
-                    parent.onSubmit?()
-                default:
-                    return true
-                }
+                parent.onSubmit?()
                 return false
             }
             return true
@@ -271,12 +387,29 @@ struct RichTextEditor: UIViewRepresentable {
             }
         }
 
-        func applyFocusIfNeeded(on textView: UITextView, trigger: Int) {
+        static func shouldCycleFirstResponder(
+            isFirstResponder: Bool,
+            isKeyboardVisible: Bool
+        ) -> Bool {
+            isFirstResponder && !isKeyboardVisible
+        }
+
+        func applyFocusIfNeeded(on textView: UITextView, trigger: Int, isKeyboardVisible: Bool) {
             guard trigger != lastFocusTrigger else { return }
             lastFocusTrigger = trigger
             guard trigger > 0 else { return }
             guard parent.isEditable else { return }
-            textView.becomeFirstResponder()
+            requestEditorFocus(on: textView, isKeyboardVisible: isKeyboardVisible)
+        }
+
+        func applyDismissIfNeeded(on textView: UITextView, trigger: Int) {
+            guard trigger != lastDismissTrigger else { return }
+            lastDismissTrigger = trigger
+            guard trigger > 0 else { return }
+            guard textView.isFirstResponder || parent.isKeyboardVisible else { return }
+            textView.resignFirstResponder()
+            textView.window?.endEditing(true)
+            parent.onFocusChange(false)
         }
 
         private func ensureCaretVisible(in textView: UITextView) {
@@ -379,14 +512,19 @@ struct RichTextEditor: UIViewRepresentable {
 ///      image items before they can be converted to text
 final class PastableTextView: UITextView, UITextPasteDelegate {
     var onPasteImages: (([UIImage]) -> Void)?
+    var onEscape: (() -> Void)?
+    var onEscapeLongPress: (() -> Void)?
     var onLayout: ((CGFloat) -> Void)?
-    var onResponderFocusChange: ((Bool) -> Void)?
+    var onDirectUserTextReplacement: ((NSRange, String) -> Void)?
     var handlesMentionPickerKeyCommands = false
     var notificationVisibleCount = 0
     var keyboardOwnershipStore = KeyboardOwnershipStore()
     var onMentionPickerTab: (() -> Void)?
     var onMentionPickerMoveUp: (() -> Void)?
     var onMentionPickerMoveDown: (() -> Void)?
+    var programmaticEditInFlight: Bool = false
+    private var expectedProgrammaticSelectionFeedback: NSRange?
+    var onResponderFocusChange: ((Bool) -> Void)?
     var isInputEnabled: Bool = true {
         didSet {
             guard oldValue != isInputEnabled else { return }
@@ -405,6 +543,10 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
     /// Text providers collected during the delegate's `transforming` calls,
     /// flushed after the run-loop tick so all items from a single drop are batched.
     private var _delegateTextProviders: [NSItemProvider] = []
+    private var escapeLongPressTask: Task<Void, Never>?
+    private var isEscapePressed = false
+    private var didFireEscapeLongPress = false
+    private let escapeLongPressDuration: Duration = .milliseconds(700)
 
     override init(frame: CGRect, textContainer: NSTextContainer?) {
         super.init(frame: frame, textContainer: textContainer)
@@ -416,14 +558,31 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
         pasteDelegate = self
     }
 
+    func expectProgrammaticSelectionFeedback(_ selection: NSRange) {
+        expectedProgrammaticSelectionFeedback = selection
+    }
+
+    func consumeExpectedProgrammaticSelectionFeedback(_ selection: NSRange) -> Bool {
+        guard let expectedProgrammaticSelectionFeedback,
+              expectedProgrammaticSelectionFeedback == selection else {
+            return false
+        }
+        self.expectedProgrammaticSelectionFeedback = nil
+        return true
+    }
+
+    func clearExpectedProgrammaticSelectionFeedback() {
+        expectedProgrammaticSelectionFeedback = nil
+    }
+
     override func layoutSubviews() {
         super.layoutSubviews()
         onLayout?(bounds.width)
     }
 
-    override func becomeFirstResponder() -> Bool {
-        let didBecomeFirstResponder = super.becomeFirstResponder()
-        if didBecomeFirstResponder {
+        override func becomeFirstResponder() -> Bool {
+            let didBecomeFirstResponder = super.becomeFirstResponder()
+            if didBecomeFirstResponder {
             onResponderFocusChange?(true)
         }
         return didBecomeFirstResponder
@@ -435,7 +594,7 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
             onResponderFocusChange?(false)
         }
         return didResignFirstResponder
-    }
+        }
 
     override var keyCommands: [UIKeyCommand]? {
         let base = super.keyCommands ?? []
@@ -449,13 +608,20 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
         ]
         let appCommandShortcuts = ChatAppCommandShortcut
             .prioritizedTextInputKeyCommandSpecs(notificationVisibleCount: notificationVisibleCount)
+            .filter { spec in
+                guard let intent = KeyboardCommandBridge.intent(input: spec.input, modifierFlags: spec.modifierFlags) else {
+                    return false
+                }
+                let outcome = KeyboardCommandRouter.route(intent: intent, store: keyboardOwnershipStore).outcome
+                return outcome.containsNotificationBubble || outcome.containsHandledSurface(.transcript)
+            }
             .map { spec in
-            UIKeyCommand(
-                input: spec.input,
-                modifierFlags: spec.modifierFlags,
-                action: spec.action.selector
-            )
-        }
+                UIKeyCommand(
+                    input: spec.input,
+                    modifierFlags: spec.modifierFlags,
+                    action: spec.action.selector
+                )
+            }
         let inputReleaseCommands = [
             UIKeyCommand(input: "\r", modifierFlags: [.shift], action: #selector(didPressModifiedReturn)),
             UIKeyCommand(input: "\r", modifierFlags: [.control], action: #selector(didPressModifiedReturn)),
@@ -502,10 +668,6 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
         }
     }
 
-    private var canHandleInputShortcut: Bool {
-        isInputEnabled && isFirstResponder
-    }
-
     @objc private func didPressMentionPickerTab(_ sender: UIKeyCommand) {
         guard canHandleInputShortcut, routes(.pickerAccept) else { return }
         onMentionPickerTab?()
@@ -529,29 +691,9 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
         insertPlainText("\n")
     }
 
-    override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
-        guard canHandleInputShortcut else {
-            super.pressesBegan(presses, with: event)
-            return
-        }
-
-        for press in presses {
-            guard let key = press.key, key.hasNoCommandModifiers else { continue }
-            switch key.keyCode {
-            case .keyboardUpArrow:
-                guard routes(.pickerNavigateUp) else { break }
-                onMentionPickerMoveUp?()
-                return
-            case .keyboardDownArrow:
-                guard routes(.pickerNavigateDown) else { break }
-                onMentionPickerMoveDown?()
-                return
-            default:
-                continue
-            }
-        }
-
-        super.pressesBegan(presses, with: event)
+    @objc private func didPressEscape(_ sender: UIKeyCommand) {
+        guard canHandleInputShortcut else { return }
+        onEscape?()
     }
 
     private func routes(_ intent: KeyboardCommandIntent) -> Bool {
@@ -560,6 +702,10 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
                 .route(intent: intent, store: keyboardOwnershipStore)
                 .outcome else { return false }
         return true
+    }
+
+    private var canHandleInputShortcut: Bool {
+        isInputEnabled && isFirstResponder
     }
 
     @objc private func didPressCtrlA(_ sender: UIKeyCommand) {
@@ -576,7 +722,7 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
         guard canHandleInputShortcut else { return }
 
         if let selectedRange = selectedTextRange, !selectedRange.isEmpty {
-            replace(selectedRange, withText: "")
+            replaceUserText(selectedRange, with: "")
             return
         }
 
@@ -603,7 +749,7 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
               let deleteStart = position(from: cursor, offset: -charsToDelete),
               let deleteRange = textRange(from: deleteStart, to: cursor) else { return }
 
-        replace(deleteRange, withText: "")
+        replaceUserText(deleteRange, with: "")
     }
 
     @objc private func didPressCtrlU(_ sender: UIKeyCommand) {
@@ -611,7 +757,7 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
         guard let cursor = selectedTextRange?.start,
               let range = textRange(from: beginningOfDocument, to: cursor),
               !range.isEmpty else { return }
-        replace(range, withText: "")
+        replaceUserText(range, with: "")
     }
 
     @objc private func didPressCtrlK(_ sender: UIKeyCommand) {
@@ -619,18 +765,89 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
         guard let cursor = selectedTextRange?.start,
               let range = textRange(from: cursor, to: endOfDocument),
               !range.isEmpty else { return }
-        replace(range, withText: "")
+        replaceUserText(range, with: "")
     }
 
     @objc private func didPressCtrlC(_ sender: UIKeyCommand) {
         guard canHandleInputShortcut else { return }
         guard let fullRange = textRange(from: beginningOfDocument, to: endOfDocument) else { return }
-        replace(fullRange, withText: "")
+        replaceUserText(fullRange, with: "")
     }
 
-    @objc private func didPressEscape(_ sender: UIKeyCommand) {
+    override func pressesBegan(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        guard presses.contains(where: isEscapePress(_:)) else {
+            guard canHandleInputShortcut else {
+                super.pressesBegan(presses, with: event)
+                return
+            }
+            for press in presses {
+                guard let key = press.key, key.hasNoCommandModifiers else { continue }
+                switch key.keyCode {
+                case .keyboardUpArrow:
+                    guard routes(.pickerNavigateUp) else { break }
+                    onMentionPickerMoveUp?()
+                    return
+                case .keyboardDownArrow:
+                    guard routes(.pickerNavigateDown) else { break }
+                    onMentionPickerMoveDown?()
+                    return
+                default:
+                    continue
+                }
+            }
+            super.pressesBegan(presses, with: event)
+            return
+        }
         guard canHandleInputShortcut else { return }
-        _ = resignFirstResponder()
+        guard !isEscapePressed else { return }
+        isEscapePressed = true
+        didFireEscapeLongPress = false
+        escapeLongPressTask?.cancel()
+        escapeLongPressTask = Task { [weak self] in
+            guard let self else { return }
+            do {
+                try await Task.sleep(for: escapeLongPressDuration)
+            } catch is CancellationError {
+                return
+            } catch {
+                return
+            }
+            await MainActor.run {
+                guard self.isEscapePressed else { return }
+                self.didFireEscapeLongPress = true
+                self.onEscapeLongPress?()
+            }
+        }
+    }
+
+    override func pressesEnded(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        guard presses.contains(where: isEscapePress(_:)) else {
+            super.pressesEnded(presses, with: event)
+            return
+        }
+        escapeLongPressTask?.cancel()
+        escapeLongPressTask = nil
+        if !didFireEscapeLongPress {
+            onEscape?()
+        }
+        isEscapePressed = false
+        didFireEscapeLongPress = false
+    }
+
+    override func pressesCancelled(_ presses: Set<UIPress>, with event: UIPressesEvent?) {
+        guard presses.contains(where: isEscapePress(_:)) else {
+            super.pressesCancelled(presses, with: event)
+            return
+        }
+        escapeLongPressTask?.cancel()
+        escapeLongPressTask = nil
+        isEscapePressed = false
+        didFireEscapeLongPress = false
+    }
+
+    private func isEscapePress(_ press: UIPress) -> Bool {
+        guard press.key != nil else { return false }
+        return press.key?.charactersIgnoringModifiers == UIKeyCommand.inputEscape
     }
 
     // MARK: - Paste action gating
@@ -735,9 +952,27 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
     private func insertPlainText(_ text: String) {
         let attributed = NSAttributedString(string: text, attributes: typingAttributes)
         let range = selectedRange
+        notifyDirectUserTextReplacement(range: range, replacementText: text)
         textStorage.replaceCharacters(in: range, with: attributed)
         selectedRange = NSRange(location: range.location + attributed.length, length: 0)
         delegate?.textViewDidChange?(self)
+    }
+
+    private func replaceUserText(_ textRange: UITextRange, with replacementText: String) {
+        notifyDirectUserTextReplacement(range: nsRange(from: textRange), replacementText: replacementText)
+        replace(textRange, withText: replacementText)
+    }
+
+    private func notifyDirectUserTextReplacement(range: NSRange, replacementText: String) {
+        guard !programmaticEditInFlight else { return }
+        clearExpectedProgrammaticSelectionFeedback()
+        onDirectUserTextReplacement?(range, replacementText)
+    }
+
+    private func nsRange(from textRange: UITextRange) -> NSRange {
+        let location = offset(from: beginningOfDocument, to: textRange.start)
+        let length = offset(from: textRange.start, to: textRange.end)
+        return NSRange(location: location, length: length)
     }
 
     nonisolated private static func loadSanitizedText(from provider: NSItemProvider) async -> String? {

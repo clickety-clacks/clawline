@@ -905,6 +905,7 @@ private struct StreamPopupRowStatusDot: View {
                 )
             )
             .frame(width: 8, height: 8)
+            .fixedSize()
             .shadow(
                 color: isActive ? StreamDotColor.activeGlow(colorScheme: colorScheme) : .clear,
                 radius: isActive ? StreamDotColor.activeOuterGlowRadius(colorScheme: colorScheme) : 0

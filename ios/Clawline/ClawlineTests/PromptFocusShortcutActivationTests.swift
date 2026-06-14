@@ -496,7 +496,9 @@ struct PromptFocusShortcutActivationTests {
             fontScaleChangeSequence: 0,
             resetToken: 0,
             focusTrigger: 0,
+            dismissTrigger: 0,
             isEditable: true,
+            isKeyboardVisible: false,
             tintColor: .systemBlue,
             onFocusChange: { _ in },
             onSubmit: { submitCount += 1 },
@@ -551,7 +553,7 @@ struct PromptFocusShortcutActivationTests {
             onSubmit: { submitCount += 1 },
             onCancel: {},
             onFocusChange: { _ in },
-            onSelectionChange: { _ in }
+            onSelectionActiveChange: { _ in }
         )
         let coordinator = NotificationReplyTextInput.Coordinator(parent: input)
         let textView = UITextView()
@@ -585,7 +587,7 @@ struct PromptFocusShortcutActivationTests {
             onSubmit: {},
             onCancel: {},
             onFocusChange: { _ in },
-            onSelectionChange: { selectionStates.append($0) }
+            onSelectionActiveChange: { selectionStates.append($0) }
         )
         let coordinator = NotificationReplyTextInput.Coordinator(parent: input)
         let textView = UITextView()

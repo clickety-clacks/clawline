@@ -9,6 +9,10 @@ import SwiftUI
 import UIKit
 import Foundation
 import Observation
+import OSLog
+import Combine
+
+private let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "MessageInputBar")
 
 // The input bar is hosted in a pinned UIKit container, so parent value changes do not always
 // rebuild its content closure. Keep the send button state in a stable observable store.
@@ -49,42 +53,46 @@ final class SendButtonConnectionStateStore {
 // ═══════════════════════════════════════════════════════════════════════════════════════════
 
 struct MessageInputBar: View {
+    enum SendButtonBubbleVisualState: Equatable {
+        case ghost
+        case active
+        case reconnecting
+        case error
+    }
+
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.settingsManager) private var settings
+    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
+    @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.openURL) private var openURL
     @Binding var content: NSAttributedString
     @Binding var selectionRange: NSRange
     @Binding var pendingInsertions: [PendingAttachment]
     var placeholderText: String = "Message"
-    let fontScaleChangeSequence: Int
+    var fontScaleChangeSequence: Int = 0
     var resetToken: Int
     let canSend: Bool
     let isSending: Bool
-    let canCancelSend: Bool
     let isStagingAttachments: Bool
     let connectionStateStore: SendButtonConnectionStateStore
     let focusTrigger: Int
+    let dismissTrigger: Int
+    let isTextFieldFocused: Bool
     /// Pass geometry.safeAreaInsets.bottom directly - DO NOT pass a computed Bool.
     let bottomSafeAreaInset: CGFloat
     /// Keyboard visibility state owned by parent view to survive geometry changes.
     let isKeyboardVisible: Bool
     @Binding var isAttachmentMenuPresented: Bool
-    var resolvedMentionTitle: String? = nil
     let onSend: () -> Void
     let onCancel: () -> Void
     let onReconnect: () -> Void
     let onAdd: () -> Void
-    var onRemoveResolvedMention: (() -> Void)? = nil
     let attachmentMenuContent: () -> AnyView
     let onFocusChange: (Bool) -> Void
-    let onTextEditActivity: () -> Void
-    var handlesMentionPickerKeyCommands: Bool = false
-    var mentionPickerHasCompletion: Bool = false
-    var onMentionPickerTab: (() -> Void)?
-    var onMentionPickerMoveUp: (() -> Void)?
-    var onMentionPickerMoveDown: (() -> Void)?
+    let onRequestFocus: () -> Void
+    var onRequestDirectFocus: (() -> Void)?
+    var onTextEditActivity: (() -> Void)?
     var onPasteImages: (([UIImage]) -> Void)?
-    var notificationVisibleCount: Int = 0
-    var keyboardOwnershipStore = KeyboardOwnershipStore()
 
     @State private var editorHeight: CGFloat = 44
     @State private var cachedMaxBarWidth: CGFloat?
@@ -124,6 +132,121 @@ struct MessageInputBar: View {
             return AnyShape(Capsule())
         } else {
             return AnyShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+        }
+    }
+
+    private var inputCornerRadius: CGFloat {
+        isSingleLine ? inputHeight / 2 : 22
+    }
+
+    private var trailingTextPadding: CGFloat { 20 }
+
+    private var connectionAlertHint: String? {
+        switch connectionState {
+        case .reconnecting:
+            return "Waiting for connection to return."
+        case .disconnected:
+            return "Connection lost. Try again soon."
+        case .connected:
+            return nil
+        }
+    }
+
+    private var isReconnecting: Bool {
+        connectionState == .reconnecting
+    }
+
+    private var isDisconnected: Bool {
+        connectionState == .disconnected
+    }
+
+    private var hasSubmittableDraft: Bool {
+        !content.isEffectivelyEmpty
+    }
+
+    private var sendButtonWidth: CGFloat {
+        metrics.inputBarHeight
+    }
+
+    private var canSendNow: Bool {
+        !isSending && canSend && connectionState == .connected
+    }
+
+    static func shouldDispatchEditorSubmitIntent(
+        isSending: Bool,
+        hasSubmittableDraft: Bool
+    ) -> Bool {
+        !isSending && hasSubmittableDraft
+    }
+
+    static func shouldRequestFocusOnEditorTap(isKeyboardVisible: Bool) -> Bool {
+        !isKeyboardVisible
+    }
+
+    static func reconnectBubbleScale(phase: CGFloat) -> CGFloat {
+        let clampedPhase = min(1, max(0, phase))
+        return 0.75 + (0.25 * clampedPhase)
+    }
+
+    static func sendButtonBubbleVisualState(
+        isSending: Bool,
+        canSend: Bool,
+        isStagingAttachments: Bool,
+        connectionState: SendButtonConnectionState
+    ) -> SendButtonBubbleVisualState {
+        switch connectionState {
+        case .connected:
+            return (isSending || canSend || sendButtonShowsPreparingSpinner(
+                isSending: isSending,
+                canSend: canSend,
+                isStagingAttachments: isStagingAttachments,
+                connectionState: connectionState
+            )) ? .active : .ghost
+        case .reconnecting:
+            return .reconnecting
+        case .disconnected:
+            return .error
+        }
+    }
+
+    static func sendButtonShowsPreparingSpinner(
+        isSending: Bool,
+        canSend: Bool,
+        isStagingAttachments: Bool,
+        connectionState: SendButtonConnectionState
+    ) -> Bool {
+        connectionState == .connected && isStagingAttachments && !isSending && !canSend
+    }
+
+    static func sendButtonShowsPrimaryIcon(
+        isSending: Bool,
+        canSend: Bool,
+        isStagingAttachments: Bool,
+        connectionState: SendButtonConnectionState
+    ) -> Bool {
+        !isSending && !sendButtonShowsPreparingSpinner(
+            isSending: isSending,
+            canSend: canSend,
+            isStagingAttachments: isStagingAttachments,
+            connectionState: connectionState
+        )
+    }
+
+    static func sendButtonPrimarySymbolName(connectionState: SendButtonConnectionState) -> String {
+        connectionState == .disconnected ? "arrow.clockwise" : "paperplane.fill"
+    }
+
+    static func sendButtonBubbleScale(
+        state: SendButtonBubbleVisualState,
+        reconnectPhase: Double = 0
+    ) -> Double {
+        switch state {
+        case .ghost:
+            return 0
+        case .active, .error:
+            return 1
+        case .reconnecting:
+            return Double(reconnectBubbleScale(phase: CGFloat(reconnectPhase)))
         }
     }
 
@@ -238,24 +361,38 @@ struct MessageInputBar: View {
             : Color.white.opacity(0.5)
     }
 
-    private var hasSubmittableDraft: Bool {
-        !content.isEffectivelyEmpty
+    private var inputBorderColor: Color {
+#if os(visionOS)
+        return visionOSBorderColor
+#else
+        return ChatFlowTheme.ink(colorScheme).opacity(0.16)
+#endif
     }
 
-    private var editorOpacity: Double {
-        isSending ? 0.5 : 1
+    private var placeholderColor: Color {
+#if os(visionOS)
+        return isLightModeForInputBar
+            ? ChatFlowTheme.ink(.light).opacity(0.6)
+            : ChatFlowTheme.ink(.dark).opacity(0.6)
+#else
+        return .secondary
+#endif
     }
 
-    static func shouldDispatchEditorSubmitIntent(
-        isSending: Bool,
-        hasSubmittableDraft: Bool
-    ) -> Bool {
-        !isSending && hasSubmittableDraft
+    private var inputTintColor: Color {
+#if os(visionOS)
+        return isLightModeForInputBar ? ChatFlowTheme.ink(.light) : ChatFlowTheme.ink(.dark)
+#else
+        return .primary
+#endif
     }
 
-    static func reconnectBubbleScale(phase: CGFloat) -> CGFloat {
-        let clampedPhase = min(1, max(0, phase))
-        return 0.75 + (0.25 * clampedPhase)
+    private var editorTintUIColor: UIColor {
+#if os(visionOS)
+        return UIColor(inputTintColor)
+#else
+        return UIColor(ChatFlowTheme.sage(colorScheme))
+#endif
     }
 
     static func disabledSendButtonBackingColor(
@@ -279,7 +416,33 @@ struct MessageInputBar: View {
     }
 
     var body: some View {
-        let _ = fontScaleChangeSequence
+        VStack(alignment: .leading, spacing: 0) {
+            inputRow
+        }
+        .padding(.horizontal, containerPadding)
+        .padding(.bottom, metrics.bottomPadding)
+        .frame(maxWidth: cachedMaxBarWidth)
+        .frame(maxWidth: .infinity, alignment: .center)
+        .contentShape(Rectangle())
+        .simultaneousGesture(TapGesture().onEnded {
+            logger.info("Input bar tap gesture")
+        })
+        .onChange(of: content.length) { _, newValue in
+            guard newValue == 0 else { return }
+            editorHeight = metrics.inputBarHeight
+        }
+        .onAppear {
+            refreshMaxBarWidth()
+        }
+        .onChange(of: isCompact) { _, _ in
+            refreshMaxBarWidth()
+        }
+        .onChange(of: settings.fontScale) { _, _ in
+            refreshMaxBarWidth()
+        }
+    }
+
+    private var inputRow: some View {
         HStack(alignment: .bottom, spacing: MessageInputBarMetrics.elementSpacing) {
 #if os(visionOS)
             // Appearance toggle button
@@ -345,148 +508,7 @@ struct MessageInputBar: View {
                     .presentationBackground(.clear)
             }
 
-            MessageEditorChrome(
-                content: $content,
-                selectionRange: $selectionRange,
-                pendingInsertions: $pendingInsertions,
-                editorHeight: $editorHeight,
-                fontScaleChangeSequence: fontScaleChangeSequence,
-                resetToken: resetToken,
-                focusTrigger: focusTrigger,
-                inputHeight: inputHeight,
-                inputShape: inputShape,
-                editorOpacity: editorOpacity,
-                onSubmitRequested: handleEditorSubmitIntent,
-                onFocusChange: onFocusChange,
-                onTextEditActivity: onTextEditActivity,
-                resolvedMentionTitle: resolvedMentionTitle,
-                onRemoveResolvedMention: onRemoveResolvedMention,
-                handlesMentionPickerKeyCommands: handlesMentionPickerKeyCommands,
-                mentionPickerHasCompletion: mentionPickerHasCompletion,
-                onMentionPickerTab: onMentionPickerTab,
-                onMentionPickerMoveUp: onMentionPickerMoveUp,
-                onMentionPickerMoveDown: onMentionPickerMoveDown,
-                onPasteImages: onPasteImages,
-                notificationVisibleCount: notificationVisibleCount,
-                keyboardOwnershipStore: keyboardOwnershipStore,
-                placeholderText: placeholderText,
-                isLightModeForInputBar: isLightModeForInputBar,
-                visionOSBorderColor: visionOSBorderColor
-            )
-
-            MessageSendControl(
-                isSending: isSending,
-                canCancelSend: canCancelSend,
-                canSend: canSend,
-                isStagingAttachments: isStagingAttachments,
-                connectionState: connectionState,
-                sendButtonSize: metrics.inputBarHeight,
-                inputBarColorScheme: inputBarColorScheme,
-                uiColorScheme: colorScheme,
-                visionOSBorderColor: visionOSBorderColor,
-                onSend: onSend,
-                onCancel: onCancel,
-                onReconnect: onReconnect
-            )
-        }
-        .padding(.horizontal, containerPadding)
-        .padding(.bottom, metrics.bottomPadding)
-        .frame(maxWidth: cachedMaxBarWidth)
-        .frame(maxWidth: .infinity, alignment: .center)
-        .onChange(of: content.length) { _, newValue in
-            guard newValue == 0 else { return }
-            editorHeight = metrics.inputBarHeight
-        }
-        .onAppear {
-            refreshMaxBarWidth()
-        }
-        .onChange(of: isCompact) { _, _ in
-            refreshMaxBarWidth()
-        }
-        .onChange(of: settings.fontScale) { _, _ in
-            refreshMaxBarWidth()
-        }
-    }
-}
-
-private struct MessageEditorChrome: View {
-    @Binding var content: NSAttributedString
-    @Binding var selectionRange: NSRange
-    @Binding var pendingInsertions: [PendingAttachment]
-    @Binding var editorHeight: CGFloat
-    let fontScaleChangeSequence: Int
-    let resetToken: Int
-    let focusTrigger: Int
-    let inputHeight: CGFloat
-    let inputShape: AnyShape
-    let editorOpacity: Double
-    let onSubmitRequested: () -> Void
-    let onFocusChange: (Bool) -> Void
-    let onTextEditActivity: () -> Void
-    var resolvedMentionTitle: String?
-    var onRemoveResolvedMention: (() -> Void)?
-    var handlesMentionPickerKeyCommands: Bool = false
-    var mentionPickerHasCompletion: Bool = false
-    var onMentionPickerTab: (() -> Void)?
-    var onMentionPickerMoveUp: (() -> Void)?
-    var onMentionPickerMoveDown: (() -> Void)?
-    var onPasteImages: (([UIImage]) -> Void)?
-    var notificationVisibleCount: Int = 0
-    var keyboardOwnershipStore = KeyboardOwnershipStore()
-    let placeholderText: String
-    let isLightModeForInputBar: Bool
-    let visionOSBorderColor: Color
-
-    // Local single source of truth for editor chrome without introducing a new formal type yet.
-    private var chrome: (tintColor: UIColor, textColor: UIColor) {
-#if os(visionOS)
-        let tint = isLightModeForInputBar ? ChatFlowTheme.ink(.light) : ChatFlowTheme.ink(.dark)
-        return (UIColor(tint), .white)
-#else
-        let tint = isLightModeForInputBar ? ChatFlowTheme.sage(.light) : ChatFlowTheme.sage(.dark)
-        return (UIColor(tint), .label)
-#endif
-    }
-
-    private var placeholderColor: Color {
-#if os(visionOS)
-        isLightModeForInputBar
-            ? ChatFlowTheme.ink(.light).opacity(0.6)
-            : ChatFlowTheme.ink(.dark).opacity(0.6)
-#else
-        .secondary
-#endif
-    }
-
-    var body: some View {
-        HStack(spacing: 6) {
-            if let resolvedMentionTitle {
-                HStack(spacing: 6) {
-                    Text(resolvedMentionTitle)
-                        .font(.clawline(.secondaryLabel).weight(.semibold))
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                    Button(action: {
-                        onRemoveResolvedMention?()
-                    }) {
-                        Image(systemName: "xmark")
-                            .font(.clawline(.secondaryLabel).weight(.bold))
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Remove mention")
-                }
-                .foregroundStyle(isLightModeForInputBar ? ChatFlowTheme.ink(.light) : .white)
-                .padding(.leading, 12)
-                .padding(.trailing, 8)
-                .padding(.vertical, 7)
-                .background(
-                    Capsule()
-                        .fill(Color.primary.opacity(isLightModeForInputBar ? 0.10 : 0.18))
-                )
-                .padding(.leading, 8)
-                .frame(maxWidth: 170)
-            }
-
+            // Text field - glass capsule/rounded rect
             ZStack(alignment: .leading) {
                 RichTextEditor(
                     attributedText: $content,
@@ -496,29 +518,29 @@ private struct MessageEditorChrome: View {
                     fontScaleChangeSequence: fontScaleChangeSequence,
                     resetToken: resetToken,
                     focusTrigger: focusTrigger,
+                    dismissTrigger: dismissTrigger,
                     isEditable: true,
-                    tintColor: chrome.tintColor,
-                    textColor: chrome.textColor,
+                    isKeyboardVisible: isKeyboardVisible,
+                    isExternalEditingActive: false,
+                    tintColor: editorTintUIColor,
+                    textColor: {
+#if os(visionOS)
+                        // #61: Input bar is forced dark on visionOS; ensure typed text is visible.
+                        return .white
+#else
+                        return .label
+#endif
+                    }(),
                     onFocusChange: onFocusChange,
                     onTextEditActivity: onTextEditActivity,
-                    onSubmit: {
-                        onSubmitRequested()
-                    },
-                    handlesMentionPickerKeyCommands: handlesMentionPickerKeyCommands,
-                    mentionPickerHasCompletion: mentionPickerHasCompletion,
-                    onMentionPickerTab: onMentionPickerTab,
-                    onMentionPickerMoveUp: onMentionPickerMoveUp,
-                    onMentionPickerMoveDown: onMentionPickerMoveDown,
+                    onSubmit: handleEditorSubmitIntent,
                     onPasteImages: onPasteImages,
-                    notificationVisibleCount: notificationVisibleCount,
-                    keyboardOwnershipStore: keyboardOwnershipStore,
-                    trailingPadding: 20
+                    trailingPadding: trailingTextPadding
                 )
-                .opacity(editorOpacity)
+                .opacity(isSending ? 0.5 : 1)
 
                 if content.length == 0 {
                     Text(placeholderText)
-                        .font(.clawline(.bodyText))
                         .lineLimit(1)
                         .truncationMode(.middle)
                         .minimumScaleFactor(0.7)
@@ -526,186 +548,219 @@ private struct MessageEditorChrome: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
                         .frame(maxHeight: .infinity, alignment: .center)
                         .padding(.leading, 20)
-                        .padding(.trailing, 20)
-                        .allowsHitTesting(false)
+                        .padding(.trailing, trailingTextPadding)
                 }
             }
-        }
-        .frame(height: inputHeight)
-        .frame(maxWidth: .infinity, alignment: .bottom)
+            .tint(inputTintColor)
+            .frame(height: inputHeight)
+            .frame(maxWidth: .infinity, alignment: .bottom)
+            .contentShape(Rectangle())
 #if os(visionOS)
-        .background(.regularMaterial, in: inputShape)
+            .background(.regularMaterial, in: inputShape)
 #else
-        .glassEffect(.regular, in: inputShape)
+            .glassEffect(.regular, in: inputShape)
 #endif
-        .overlay {
-#if os(visionOS)
-            inputShape
-                .stroke(visionOSBorderColor, lineWidth: 1)
-#endif
-        }
-    }
-}
-
-struct MessageSendControl: View {
-    private enum BubbleVisualState: Equatable {
-        case ghost
-        case active
-        case reconnecting
-        case error
-    }
-
-    let isSending: Bool
-    let canCancelSend: Bool
-    let canSend: Bool
-    let isStagingAttachments: Bool
-    let connectionState: SendButtonConnectionState
-    let sendButtonSize: CGFloat
-    let inputBarColorScheme: ColorScheme
-    let uiColorScheme: ColorScheme
-    let visionOSBorderColor: Color
-    let onSend: () -> Void
-    let onCancel: () -> Void
-    let onReconnect: () -> Void
-
-    private var isReconnecting: Bool { connectionState == .reconnecting }
-    private var isDisconnected: Bool { connectionState == .disconnected }
-    private var isStagingSendGate: Bool {
-        connectionState == .connected && isStagingAttachments && !isSending && !canSend
-    }
-    private var sendActionEnabled: Bool { (isSending && canCancelSend) || canSend || isDisconnected }
-    private var sendIconColor: Color { .white }
-    private let reconnectPulseDuration: TimeInterval = 0.8
-    private var drawsDisabledSendButtonBacking: Bool {
-#if os(visionOS)
-        false
-#else
-        true
-#endif
-    }
-
-    private var bubbleVisualState: BubbleVisualState {
-        switch connectionState {
-        case .connected:
-            return (sendActionEnabled || isStagingSendGate) ? .active : .ghost
-        case .reconnecting:
-            return .reconnecting
-        case .disconnected:
-            return .error
-        }
-    }
-
-    private var bubbleColor: Color {
-        let activeColor: Color = {
-#if os(visionOS)
-            ChatFlowTheme.sage(inputBarColorScheme)
-#else
-            ChatFlowTheme.sage(uiColorScheme)
-#endif
-        }()
-        switch bubbleVisualState {
-        case .ghost:
-            return activeColor
-        case .active:
-            return activeColor
-        case .reconnecting:
-            return ChatFlowTheme.connectionReconnecting(inputBarColorScheme)
-        case .error:
-            return ChatFlowTheme.connectionDisconnected(inputBarColorScheme)
-        }
-    }
-
-    private func reconnectPulsePhase(at date: Date) -> CGFloat {
-        let phase = date.timeIntervalSinceReferenceDate
-            .truncatingRemainder(dividingBy: reconnectPulseDuration) / reconnectPulseDuration
-        return CGFloat(0.5 - 0.5 * cos(phase * 2 * .pi))
-    }
-
-    private func bubbleScale(at date: Date) -> CGFloat {
-        switch bubbleVisualState {
-        case .ghost:
-            return 0
-        case .active, .error:
-            return 1
-        case .reconnecting:
-            return MessageInputBar.reconnectBubbleScale(phase: reconnectPulsePhase(at: date))
-        }
-    }
-
-    var body: some View {
-        Button(action: {
-            if isSending {
-                if canCancelSend {
-                    onCancel()
-                }
-                return
+            .overlay {
+                inputShape
+                    .stroke(inputBorderColor, lineWidth: 1)
             }
-            switch connectionState {
-            case .connected:
-                onSend()
-            case .disconnected:
-                onReconnect()
+
+            MessageSendControl(
+                isSending: isSending,
+                isStagingAttachments: isStagingAttachments,
+                canSend: canSendNow,
+                connectionState: connectionState,
+                sendButtonSize: sendButtonWidth,
+                inputBarColorScheme: inputBarColorScheme,
+                uiColorScheme: colorScheme,
+                visionOSBorderColor: visionOSBorderColor,
+                connectionAlertHint: connectionAlertHint,
+                onSend: onSend,
+                onCancel: onCancel,
+                onReconnect: onReconnect
+            )
+        }
+    }
+
+    struct MessageSendControl: View {
+        let isSending: Bool
+        let isStagingAttachments: Bool
+        let canSend: Bool
+        let connectionState: SendButtonConnectionState
+        let sendButtonSize: CGFloat
+        let inputBarColorScheme: ColorScheme
+        let uiColorScheme: ColorScheme
+        let visionOSBorderColor: Color
+        let connectionAlertHint: String?
+        let onSend: () -> Void
+        let onCancel: () -> Void
+        let onReconnect: () -> Void
+
+        private var isReconnecting: Bool { connectionState == .reconnecting }
+        private var isDisconnected: Bool { connectionState == .disconnected }
+        private var sendActionEnabled: Bool { isSending || canSend || isDisconnected }
+        private var sendIconColor: Color { .white }
+        private let reconnectPulseDuration: TimeInterval = 0.8
+        private var drawsDisabledSendButtonBacking: Bool {
+#if os(visionOS)
+            false
+#else
+            true
+#endif
+        }
+        private var isPreparingSpinnerVisible: Bool {
+            MessageInputBar.sendButtonShowsPreparingSpinner(
+                isSending: isSending,
+                canSend: canSend,
+                isStagingAttachments: isStagingAttachments,
+                connectionState: connectionState
+            )
+        }
+        private var showsPrimaryIcon: Bool {
+            MessageInputBar.sendButtonShowsPrimaryIcon(
+                isSending: isSending,
+                canSend: canSend,
+                isStagingAttachments: isStagingAttachments,
+                connectionState: connectionState
+            )
+        }
+
+        private var bubbleVisualState: MessageInputBar.SendButtonBubbleVisualState {
+            MessageInputBar.sendButtonBubbleVisualState(
+                isSending: isSending,
+                canSend: canSend,
+                isStagingAttachments: isStagingAttachments,
+                connectionState: connectionState
+            )
+        }
+
+        private var bubbleColor: Color {
+            let activeColor: Color = {
+#if os(visionOS)
+                ChatFlowTheme.sage(inputBarColorScheme)
+#else
+                ChatFlowTheme.sage(uiColorScheme)
+#endif
+            }()
+            switch bubbleVisualState {
+            case .ghost:
+                return activeColor
+            case .active:
+                return activeColor
             case .reconnecting:
-                break
+                return ChatFlowTheme.connectionReconnecting(inputBarColorScheme)
+            case .error:
+                return ChatFlowTheme.connectionDisconnected(inputBarColorScheme)
             }
-        }) {
-            Group {
-                if isStagingSendGate {
+        }
+
+        private func reconnectPulsePhase(at date: Date) -> Double {
+            let phase = date.timeIntervalSinceReferenceDate
+                .truncatingRemainder(dividingBy: reconnectPulseDuration) / reconnectPulseDuration
+            return 0.5 - 0.5 * cos(phase * 2 * .pi)
+        }
+
+        private func bubbleScale(at date: Date) -> Double {
+            MessageInputBar.sendButtonBubbleScale(
+                state: bubbleVisualState,
+                reconnectPhase: reconnectPulsePhase(at: date)
+            )
+        }
+
+        var body: some View {
+            Button(action: {
+                if isSending {
+                    onCancel()
+                    return
+                }
+                switch connectionState {
+                case .connected:
+                    onSend()
+                case .disconnected:
+                    onReconnect()
+                case .reconnecting:
+                    break
+                }
+            }) {
+                ZStack {
                     ProgressView()
                         .progressViewStyle(.circular)
                         .tint(sendIconColor)
                         .scaleEffect(0.9)
-                } else {
-                    Image(systemName: isDisconnected ? "arrow.clockwise" : "paperplane.fill")
+                        .opacity(isPreparingSpinnerVisible ? 1 : 0)
+                        .scaleEffect(isPreparingSpinnerVisible ? 1 : 0.7)
+
+                    Image(systemName: "stop.fill")
                         .font(.clawline(.uiLabel).weight(.semibold))
                         .foregroundStyle(sendIconColor)
+                        .opacity(isSending && !isReconnecting && !isPreparingSpinnerVisible ? 1 : 0)
+                        .scaleEffect(isSending && !isReconnecting && !isPreparingSpinnerVisible ? 1 : 0.7)
+
+                    Image(systemName: MessageInputBar.sendButtonPrimarySymbolName(connectionState: connectionState))
+                        .font(.clawline(.uiLabel).weight(.semibold))
+                        .foregroundStyle(sendIconColor)
+                        .opacity(showsPrimaryIcon ? 1 : 0)
+                        .scaleEffect(showsPrimaryIcon ? 1 : 0.7)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .contentShape(Rectangle())
+            }
+            .frame(width: sendButtonSize, height: sendButtonSize)
+            .background {
+                if bubbleVisualState == .ghost,
+                   let backingColor = MessageInputBar.disabledSendButtonBackingColor(
+                    colorScheme: uiColorScheme,
+                    drawsDisabledBacking: drawsDisabledSendButtonBacking
+                   ) {
+                    Circle()
+                        .fill(backingColor)
+                        .frame(width: sendButtonSize, height: sendButtonSize)
+                        .blur(radius: MessageInputBar.sendButtonColoredBackingBlurRadius)
+                }
+                TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !isReconnecting)) { context in
+                    Circle()
+                        .fill(bubbleColor)
+                        .frame(width: sendButtonSize, height: sendButtonSize)
+                        .scaleEffect(bubbleScale(at: context.date))
+                        .blur(radius: MessageInputBar.sendButtonColoredBackingBlurRadius)
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .contentShape(Rectangle())
-        }
-        .frame(width: sendButtonSize, height: sendButtonSize)
-        .background {
-            if bubbleVisualState == .ghost,
-               let backingColor = MessageInputBar.disabledSendButtonBackingColor(
-                   colorScheme: uiColorScheme,
-                   drawsDisabledBacking: drawsDisabledSendButtonBacking
-                ) {
-                Circle()
-                    .fill(backingColor)
-                    .frame(width: sendButtonSize, height: sendButtonSize)
-                    .blur(radius: MessageInputBar.sendButtonColoredBackingBlurRadius)
-            }
-            TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: !isReconnecting)) { context in
-                Circle()
-                    .fill(bubbleColor)
-                    .frame(width: sendButtonSize, height: sendButtonSize)
-                    .scaleEffect(bubbleScale(at: context.date))
-                    .blur(radius: MessageInputBar.sendButtonColoredBackingBlurRadius)
-            }
-        }
 #if os(visionOS)
-        .background(.regularMaterial, in: Circle())
-        .overlay(Circle().stroke(visionOSBorderColor, lineWidth: 1))
+            .background(.regularMaterial, in: Circle())
+            .overlay(Circle().stroke(visionOSBorderColor, lineWidth: 1))
 #else
-        .glassEffect(.regular.interactive(), in: Circle())
+            .glassEffect(.regular.interactive(), in: Circle())
 #endif
-        .buttonStyle(.plain)
-        .allowsHitTesting(sendActionEnabled && !isReconnecting)
-        .accessibilityLabel(
-            isReconnecting ? "Reconnecting" :
-                (isStagingSendGate ? "Staging attachments" :
-                    (isDisconnected ? "Disconnected. Tap to reconnect." :
-                        (isSending && canCancelSend ? "Cancel send" :
-                            (isSending ? "Sending message" : "Send message"))))
-        )
-        .accessibilityIdentifier("send_button")
-        .id("send-button")
-        .animation(.spring(response: 0.30, dampingFraction: 0.82), value: isSending)
-        .animation(.spring(response: 0.30, dampingFraction: 0.82), value: canSend)
-        .animation(.spring(response: 0.30, dampingFraction: 0.82), value: connectionState)
-        .animation(.spring(response: 0.30, dampingFraction: 0.82), value: bubbleVisualState)
+            .buttonStyle(.plain)
+#if os(visionOS)
+            .tint(sendIconColor)
+            .foregroundStyle(sendIconColor)
+#endif
+            .allowsHitTesting(sendActionEnabled && !isReconnecting)
+            .accessibilityLabel(
+                isReconnecting ? "Reconnecting" :
+                    (isPreparingSpinnerVisible ? "Staging attachments" :
+                        (isDisconnected ? "Disconnected. Tap to reconnect." : "Send message"))
+            )
+            .accessibilityHint(connectionAlertHint ?? "")
+            .accessibilityIdentifier("send_button")
+            .id("send-button")
+            .animation(.spring(response: 0.30, dampingFraction: 0.82), value: isSending)
+            .animation(.spring(response: 0.30, dampingFraction: 0.82), value: canSend)
+            .animation(.spring(response: 0.30, dampingFraction: 0.82), value: connectionState)
+            .animation(.spring(response: 0.30, dampingFraction: 0.82), value: bubbleVisualState)
+        }
     }
+
+    private func requestComposeFocus() {
+        if let onRequestDirectFocus {
+            onRequestDirectFocus()
+        } else {
+            onFocusChange(true)
+            onRequestFocus()
+        }
+    }
+
 }
 
 #Preview("Message Input") {
@@ -718,14 +773,15 @@ struct MessageSendControl: View {
                 content: $content,
                 selectionRange: $selection,
                 pendingInsertions: .constant([]),
-                fontScaleChangeSequence: 0,
+                placeholderText: "Message",
                 resetToken: 0,
                 canSend: true,
                 isSending: false,
-                canCancelSend: false,
                 isStagingAttachments: false,
                 connectionStateStore: connectionStateStore,
                 focusTrigger: 0,
+                dismissTrigger: 0,
+                isTextFieldFocused: false,
                 bottomSafeAreaInset: 34,
                 isKeyboardVisible: false,
                 isAttachmentMenuPresented: .constant(false),
@@ -735,7 +791,7 @@ struct MessageSendControl: View {
                 onAdd: {},
                 attachmentMenuContent: { AnyView(EmptyView()) },
                 onFocusChange: { _ in },
-                onTextEditActivity: {},
+                onRequestFocus: {},
                 onPasteImages: nil,
                 isCompact: true
             )

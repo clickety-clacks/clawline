@@ -43,6 +43,17 @@ private final class T099OnDisappearProbeStore {
 }
 #endif
 
+func runtimeInsetFallbackBarHeight(
+    measuredInputBarHeight: CGFloat,
+    settledInputBarHeight: CGFloat,
+    layoutFrozen: Bool
+) -> CGFloat {
+    if layoutFrozen, settledInputBarHeight > 0.5 {
+        return settledInputBarHeight
+    }
+    return max(measuredInputBarHeight, MessageInputBarMetrics.minInputBarHeight)
+}
+
 // MARK: - ⚠️⚠️⚠️ CRITICAL: DO NOT MODIFY WITHOUT READING ⚠️⚠️⚠️
 //
 // This file contains a non-obvious keyboard positioning fix that took 7+ iterations to solve.
@@ -338,11 +349,13 @@ struct ChatView: View {
     @State private var keyboardAnimationDuration: TimeInterval = 0.3
     @State private var keyboardAnimationCurve: UIView.AnimationCurve = .easeInOut
     @State private var keyboardRefreshToken: Int = 0
+    @State private var messageListDismissModeSummary = "keyboardDismissMode=interactive;keyboardPinned=0"
     @State private var layoutCoordinator = ChatLayoutCoordinator()
     @State private var layoutRevision: Int = 0
     @State private var selectionRange = NSRange(location: 0, length: 0)
     @State private var pendingInputInsertions: [PendingAttachment] = []
     @State private var inputBarSendButtonConnectionState = SendButtonConnectionStateStore()
+    @State private var dismissRequestID = 0
     @State private var resolvedCrossChatMention: ResolvedCrossChatMention?
     @State private var highlightedCrossChatMentionSessionKey: String?
     @State private var activeSheet: ChatSheet?
@@ -380,6 +393,7 @@ struct ChatView: View {
     @State private var didSeedCrossChatNotificationDockProof = false
 #endif
 
+    @MainActor
     init(viewModel: ChatViewModel, toastManager: ToastManager) {
         self._viewModel = Bindable(wrappedValue: viewModel)
         self.toastManager = toastManager
@@ -390,6 +404,7 @@ struct ChatView: View {
     @Environment(\.settingsManager) private var settings
 
     @State private var inputBarHeight: CGFloat = 0
+    @State private var settledInputBarHeight: CGFloat = 0
     @State private var isTypingActive = false
     @State private var typingActivityResetTask: Task<Void, Never>?
     @State private var streamToastManager = StreamToastManager()
@@ -532,6 +547,18 @@ struct ChatView: View {
         isCrossChatNotificationStackDocked = ProcessInfo.processInfo.arguments.contains(
             "--debug-cross-chat-notification-dock-proof-start-docked"
         )
+        if ProcessInfo.processInfo.arguments.contains("--debug-cross-chat-notification-dock-proof-single-peek-handoff") {
+            Task { @MainActor in
+                do {
+                    try await Task.sleep(nanoseconds: 1_000_000_000)
+                } catch is CancellationError {
+                    return
+                } catch {
+                    return
+                }
+                viewModel.debugAppendBetaCrossChatNotificationForSinglePeekProof()
+            }
+        }
     }
 #endif
 
@@ -690,7 +717,11 @@ struct ChatView: View {
         scrollButtonSuppressNextTap = true
         scrollButtonTapSuppressionTask?.cancel()
         scrollButtonTapSuppressionTask = Task { @MainActor in
-            try? await Task.sleep(for: scrollButtonTapSuppressionDuration)
+            do {
+                try await Task.sleep(for: scrollButtonTapSuppressionDuration)
+            } catch {
+                return
+            }
             scrollButtonSuppressNextTap = false
         }
     }
@@ -764,7 +795,11 @@ struct ChatView: View {
             scrollButtonIsDetentSettling = true
             scrollButtonSettleTask?.cancel()
             scrollButtonSettleTask = Task { @MainActor in
-                try? await Task.sleep(for: scrollButtonSettleDuration)
+                do {
+                    try await Task.sleep(for: scrollButtonSettleDuration)
+                } catch {
+                    return
+                }
                 scrollButtonIsDetentSettling = false
                 scrollButtonSettleStartOffset = nil
             }
@@ -837,6 +872,40 @@ struct ChatView: View {
             onTap: onTap
         )
         .contentShape(Rectangle())
+    }
+
+    @ViewBuilder
+    private func floatingScrollButtonOverlay(
+        viewModel: ChatViewModel,
+        inputBarTopFromScreenBottom: CGFloat,
+        containerWidth: CGFloat,
+        activeSelectionPopupVisible: Bool
+    ) -> some View {
+#if os(visionOS)
+        if !activeSelectionPopupVisible {
+            let sessionKey = viewModel.uiSelectedSessionKey
+            let state = scrollButtonState(for: sessionKey)
+            scrollButtonControl(
+                state: state,
+                containerWidth: containerWidth,
+                onTap: { handleScrollButtonTap(sessionKey: sessionKey, viewModel: viewModel) }
+            )
+            .highPriorityGesture(
+                DragGesture(minimumDistance: 2, coordinateSpace: .global)
+                    .onChanged { value in
+                        handleScrollButtonDragChanged(value, containerWidth: containerWidth)
+                    }
+                    .onEnded { value in
+                        handleScrollButtonDragEnded(value, containerWidth: containerWidth)
+                    }
+            )
+            .offset(x: activeScrollButtonHorizontalOffset(containerWidth: containerWidth))
+            .padding(.bottom, inputBarTopFromScreenBottom + floatingScrollButtonBottomGap)
+            .frame(maxWidth: .infinity, alignment: .center)
+        }
+#else
+        EmptyView()
+#endif
     }
 
     @ViewBuilder
@@ -1056,7 +1125,11 @@ struct ChatView: View {
         let messageListTopInset = geometry.safeAreaInsets.top + spatialViewportInset
         let isCompactLayout = horizontalSizeClass == .compact
         let metrics = ChatFlowTheme.Metrics(isCompact: isCompactLayout)
-        let resolvedInputHeight = max(inputBarHeight, MessageInputBarMetrics.minInputBarHeight)
+        let resolvedInputHeight = runtimeInsetFallbackBarHeight(
+            measuredInputBarHeight: inputBarHeight,
+            settledInputBarHeight: settledInputBarHeight,
+            layoutFrozen: false
+        )
         let keyboardVisibleHeight = max(0, keyboardHeight - geometry.safeAreaInsets.bottom)
         let isKeyboardVisible = keyboardVisibleHeight > 0.5
         let effectiveStreams = viewModel.orderedStreams
@@ -1073,8 +1146,10 @@ struct ChatView: View {
             : ChatFlowTheme.Metrics(isCompact: false).flowGap
         let bottomInsetFlowGap = bottomFlowGap
         // Keep the bar gap continuous through the final keyboard-dismiss frames.
-        let keyboardInsetProgress = min(1, max(0, keyboardVisibleHeight / 24))
-        let belowBarGap: CGFloat = 24 - (12 * keyboardInsetProgress)
+        let belowBarGap = ChatLayoutCoordinator.inputBarBottomGap(
+            keyboardVisibleHeight: keyboardVisibleHeight,
+            surfaceState: .closed
+        )
         let usesExternalKeyboardInsets: Bool = {
 #if os(visionOS)
             // visionOS keyboard geometry can over-report and cause content overlap drift after
@@ -1108,15 +1183,11 @@ struct ChatView: View {
         let cachedKeyboardHeight = max(layoutInputs.effectiveKeyboardInset, lastNonZeroKeyboardHeight)
         let isLandscape = geometry.size.width > geometry.size.height
 #if os(iOS) && !targetEnvironment(macCatalyst)
-        let nativeWindowSize = UIApplication.shared.connectedScenes
-            .compactMap { $0 as? UIWindowScene }
-            .first(where: { $0.activationState == .foregroundActive })?
-            .windows
-            .first(where: \.isKeyWindow)?
-            .bounds
-            .size
+        let nativeWindowSize = Self.nativeWindowSizeForLandscapeWidth()
+        let nativeWindowWidth = ChatLandscapeWidthGeometry.physicalWindowWidth(from: nativeWindowSize)
 #else
         let nativeWindowSize: CGSize? = nil
+        let nativeWindowWidth: CGFloat? = nil
 #endif
         let isNativeWindowLandscape = nativeWindowSize.map { $0.width > $0.height } ?? false
         let isCompactLandscape = isCompactLayout && (isLandscape || isNativeWindowLandscape)
@@ -1125,14 +1196,14 @@ struct ChatView: View {
             leadingSafeAreaInset: geometry.safeAreaInsets.leading,
             trailingSafeAreaInset: geometry.safeAreaInsets.trailing,
             isCompactLandscape: isCompactLandscape,
-            nativeWindowWidth: nativeWindowSize?.width
+            nativeWindowWidth: nativeWindowWidth
         )
         let chatSurfaceOffset = ChatLandscapeWidthGeometry.horizontalOffset(
             containerWidth: geometry.size.width,
             leadingSafeAreaInset: geometry.safeAreaInsets.leading,
             trailingSafeAreaInset: geometry.safeAreaInsets.trailing,
             isCompactLandscape: isCompactLandscape,
-            nativeWindowWidth: nativeWindowSize?.width
+            nativeWindowWidth: nativeWindowWidth
         )
         let estimatedKeyboardHeight: CGFloat = {
             if horizontalSizeClass == .regular {
@@ -1478,15 +1549,22 @@ struct ChatView: View {
         .onChange(of: keyboardAnimationDuration) { _, _ in layoutRevision &+= 1 }
         .onChange(of: keyboardAnimationCurve) { _, _ in layoutRevision &+= 1 }
         .onChange(of: inputBarHeight) { _, _ in
+            settledInputBarHeight = inputBarHeight
             guard shouldInvalidateLayoutRevisionOnInputBarHeightChange else { return }
             layoutRevision &+= 1
         }
-        .onChange(of: isInputFocused) { _, _ in layoutRevision &+= 1 }
+        .onChange(of: isInputFocused) { _, _ in
+            layoutRevision &+= 1
+        }
+
         .onChange(of: keyboardGeometryRefreshKey) { _, _ in
             layoutRevision &+= 1
             keyboardRefreshToken &+= 1
         }
         .onChange(of: horizontalSizeClass) { _, _ in layoutRevision &+= 1 }
+        )
+
+        let overlaidRootLayer: AnyView = AnyView(lifecycleRootLayer
         .overlay(alignment: .bottom) {
 #if os(visionOS)
             floatingPageDotsView(
@@ -1516,38 +1594,16 @@ struct ChatView: View {
             )
         }
         .overlay(alignment: .bottom) {
-#if os(visionOS)
-            // visionOS: keep the scroll-to-bottom button in the main SwiftUI overlay.
-            // iOS/iPadOS: we pin it to the UIKit keyboardLayoutGuide via KeyboardPinnedContainerView.
-            if !activeSelectionPopupVisible {
-                let sessionKey = viewModel.uiSelectedSessionKey
-                let state = scrollButtonState(for: sessionKey)
-                scrollButtonControl(
-                    state: state,
-                    containerWidth: geometry.size.width,
-                    onTap: { handleScrollButtonTap(sessionKey: sessionKey, viewModel: viewModel) }
-                )
-                .highPriorityGesture(
-                    // Keep translation stable while the hosted button itself is repositioned.
-                    DragGesture(minimumDistance: 2, coordinateSpace: .global)
-                        .onChanged { value in
-                            handleScrollButtonDragChanged(value, containerWidth: geometry.size.width)
-                        }
-                        .onEnded { value in
-                            handleScrollButtonDragEnded(value, containerWidth: geometry.size.width)
-                        }
-                )
-                .offset(x: activeScrollButtonHorizontalOffset(containerWidth: geometry.size.width))
-                .padding(.bottom, inputBarTopFromScreenBottom + floatingScrollButtonBottomGap)
-                .frame(maxWidth: .infinity, alignment: .center)
-            }
-#else
-            EmptyView()
-#endif
+            floatingScrollButtonOverlay(
+                viewModel: viewModel,
+                inputBarTopFromScreenBottom: inputBarTopFromScreenBottom,
+                containerWidth: geometry.size.width,
+                activeSelectionPopupVisible: activeSelectionPopupVisible
+            )
         }
         )
 
-        let promptRootLayer: AnyView = AnyView(lifecycleRootLayer.modifier(
+        let promptRootLayer: AnyView = AnyView(overlaidRootLayer.modifier(
             PromptFocusShortcutModifier(
                 isEnabled: promptFocusShortcutEnabled,
                 hasStreams: !effectiveSessionKeys.isEmpty,
@@ -1586,6 +1642,18 @@ struct ChatView: View {
         decoratedRootLayer
 #endif
     }
+
+#if os(iOS) && !targetEnvironment(macCatalyst)
+    private static func nativeWindowSizeForLandscapeWidth() -> CGSize? {
+        UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first(where: { $0.activationState == .foregroundActive })?
+            .windows
+            .first(where: \.isKeyWindow)?
+            .bounds
+            .size
+    }
+#endif
 
     private func confirmCancelCurrentPromptDialog(viewModel: ChatViewModel) {
         if cancelCurrentPromptRequiresVisibleTyping,
@@ -2091,15 +2159,11 @@ struct ChatView: View {
         let isCompactLayout = horizontalSizeClass == .compact
         let isLandscape = geometry.size.width > geometry.size.height
 #if os(iOS) && !targetEnvironment(macCatalyst)
-        let nativeWindowSize = UIApplication.shared.connectedScenes
-            .compactMap { $0 as? UIWindowScene }
-            .first(where: { $0.activationState == .foregroundActive })?
-            .windows
-            .first(where: \.isKeyWindow)?
-            .bounds
-            .size
+        let nativeWindowSize = Self.nativeWindowSizeForLandscapeWidth()
+        let nativeWindowWidth = ChatLandscapeWidthGeometry.physicalWindowWidth(from: nativeWindowSize)
 #else
         let nativeWindowSize: CGSize? = nil
+        let nativeWindowWidth: CGFloat? = nil
 #endif
         let isNativeWindowLandscape = nativeWindowSize.map { $0.width > $0.height } ?? false
         let isCompactLandscape = isCompactLayout && (isLandscape || isNativeWindowLandscape)
@@ -2130,14 +2194,14 @@ struct ChatView: View {
             leadingSafeAreaInset: geometry.safeAreaInsets.leading,
             trailingSafeAreaInset: geometry.safeAreaInsets.trailing,
             isCompactLandscape: isCompactLandscape,
-            nativeWindowWidth: nativeWindowSize?.width
+            nativeWindowWidth: nativeWindowWidth
         )
         let pinnedSurfaceOffset = ChatLandscapeWidthGeometry.horizontalOffset(
             containerWidth: geometry.size.width,
             leadingSafeAreaInset: geometry.safeAreaInsets.leading,
             trailingSafeAreaInset: geometry.safeAreaInsets.trailing,
             isCompactLandscape: isCompactLandscape,
-            nativeWindowWidth: nativeWindowSize?.width
+            nativeWindowWidth: nativeWindowWidth
         )
 
 #if os(visionOS)
@@ -2176,11 +2240,14 @@ struct ChatView: View {
         let pinnedPageDotsView: AnyView? = pageDotsView
         let pinnedPageDotsGap: CGFloat = floatingPageDotsBottomGap
 #endif
+        let inputCanSend = viewModel.canSend
 
         return KeyboardPinnedContainer(
             desiredBottomGap: belowBarGap,
             isKeyboardVisible: isKeyboardVisible,
+            composerMotionOffsetY: 0,
             measuredHeight: $inputBarHeight,
+            freezeBarHeightUpdates: false,
             layoutCoordinator: layoutCoordinator,
             layoutKey: layoutKey,
             scrollButtonView: pinnedScrollButtonView,
@@ -2201,34 +2268,24 @@ struct ChatView: View {
                 placeholderText: viewModel.activeSessionPlaceholderText,
                 fontScaleChangeSequence: fontScaleChangeSequence,
                 resetToken: viewModel.inputResetToken,
-                canSend: viewModel.canSend,
+                canSend: inputCanSend,
                 isSending: viewModel.isSending,
-                canCancelSend: viewModel.canCancelSend,
-                isStagingAttachments: viewModel.pendingAttachmentStageCount > 0,
+                isStagingAttachments: false,
                 connectionStateStore: inputBarSendButtonConnectionState,
                 focusTrigger: focusRequestID,
+                dismissTrigger: dismissRequestID,
+                isTextFieldFocused: isInputFocused,
                 bottomSafeAreaInset: geometry.safeAreaInsets.bottom,
                 isKeyboardVisible: isKeyboardVisible,
                 isAttachmentMenuPresented: $isAttachmentMenuPresented,
-                resolvedMentionTitle: nil,
                 onSend: {
                     clearTypingActivity()
-                    if let resolvedCrossChatMention {
-                        if viewModel.sendCrossChatMention(to: resolvedCrossChatMention.destinationChatId) {
-                            showCrossChatMentionSentToast(resolvedCrossChatMention)
-                            removeResolvedCrossChatMention()
-                        }
-                    } else {
-                        viewModel.send()
-                    }
+                    _ = submitActiveComposerTarget(viewModel: viewModel)
                 },
                 onCancel: { viewModel.cancelSend() },
                 onReconnect: { viewModel.reconnect() },
                 onAdd: {
                     isAttachmentMenuPresented = true
-                },
-                onRemoveResolvedMention: {
-                    removeResolvedCrossChatMention()
                 },
                 attachmentMenuContent: {
                     AnyView(
@@ -2253,24 +2310,14 @@ struct ChatView: View {
                 onFocusChange: { focused in
                     scheduleInputFocusChange(focused)
                 },
+                onRequestFocus: {
+                    focusRequestID &+= 1
+                },
                 onTextEditActivity: {
                     reconcileResolvedMentionAttachment()
                     recordTypingActivity()
                 },
-                handlesMentionPickerKeyCommands: isMentionPickerVisible,
-                mentionPickerHasCompletion: !mentionPickerStreams.isEmpty,
-                onMentionPickerTab: {
-                    handleCrossChatMentionTab(filteredStreams: mentionPickerStreams)
-                },
-                onMentionPickerMoveUp: {
-                    handleCrossChatMentionMove(filteredStreams: mentionPickerStreams, step: -1)
-                },
-                onMentionPickerMoveDown: {
-                    handleCrossChatMentionMove(filteredStreams: mentionPickerStreams, step: 1)
-                },
                 onPasteImages: handlePastedImages,
-                notificationVisibleCount: notificationVisibleCount,
-                keyboardOwnershipStore: keyboardOwnershipStore,
                 isCompact: horizontalSizeClass == .compact
             )
         }
@@ -2279,6 +2326,18 @@ struct ChatView: View {
         .visionOSInputBarDepthOffset()
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         .ignoresSafeArea(.container, edges: .bottom)
+    }
+
+    private func submitActiveComposerTarget(viewModel: ChatViewModel) -> Bool {
+        if let resolvedCrossChatMention {
+            let didSend = viewModel.sendCrossChatMention(to: resolvedCrossChatMention.destinationChatId)
+            if didSend {
+                showCrossChatMentionSentToast(resolvedCrossChatMention)
+                removeResolvedCrossChatMention()
+            }
+            return didSend
+        }
+        return viewModel.send()
     }
 
     private func showCrossChatMentionSentToast(_ mention: ResolvedCrossChatMention) {
@@ -2448,6 +2507,7 @@ struct ChatView: View {
             isActiveSession: sessionKey == renderPolicySessionKey,
             isRenderPolicyFrozen: viewModel.isRenderPolicyFrozen,
             isInputActive: isInputFocused,
+            keepsKeyboardPinned: false,
             isTypingActive: isTypingActive,
             truncationBottomInset: truncationBottomInset,
             trailingContentInset: trailingContentInset,
@@ -2494,6 +2554,9 @@ struct ChatView: View {
             },
             onReferenceMessageInPrompt: { message in
                 referenceMessageInPrompt(message)
+            },
+            onKeyboardDismissModeChanged: { summary in
+                messageListDismissModeSummary = summary
             }
         )
         // We manage keyboard avoidance manually inside the collection view.
@@ -2624,6 +2687,7 @@ struct ChatView: View {
                 isActiveSession: false,
                 isRenderPolicyFrozen: false,
                 isInputActive: isInputFocused,
+                keepsKeyboardPinned: false,
                 isTypingActive: isTypingActive,
                 truncationBottomInset: truncationBottomInset,
                 trailingContentInset: trailingContentInset,
@@ -4881,7 +4945,9 @@ private struct KeyboardPinnedContainer<Content: View>: UIViewRepresentable {
 
     let desiredBottomGap: CGFloat
     let isKeyboardVisible: Bool
+    let composerMotionOffsetY: CGFloat
     @Binding var measuredHeight: CGFloat
+    let freezeBarHeightUpdates: Bool
     let layoutCoordinator: ChatLayoutCoordinator
     let layoutKey: ChatLayoutKey
     let scrollButtonView: AnyView?
@@ -4899,7 +4965,9 @@ private struct KeyboardPinnedContainer<Content: View>: UIViewRepresentable {
     init(
         desiredBottomGap: CGFloat,
         isKeyboardVisible: Bool,
+        composerMotionOffsetY: CGFloat = 0,
         measuredHeight: Binding<CGFloat>,
+        freezeBarHeightUpdates: Bool = false,
         layoutCoordinator: ChatLayoutCoordinator,
         layoutKey: ChatLayoutKey,
         scrollButtonView: AnyView? = nil,
@@ -4916,7 +4984,9 @@ private struct KeyboardPinnedContainer<Content: View>: UIViewRepresentable {
     ) {
         self.desiredBottomGap = desiredBottomGap
         self.isKeyboardVisible = isKeyboardVisible
+        self.composerMotionOffsetY = composerMotionOffsetY
         self._measuredHeight = measuredHeight
+        self.freezeBarHeightUpdates = freezeBarHeightUpdates
         self.layoutCoordinator = layoutCoordinator
         self.layoutKey = layoutKey
         self.scrollButtonView = scrollButtonView
@@ -4963,13 +5033,16 @@ private struct KeyboardPinnedContainer<Content: View>: UIViewRepresentable {
                 DispatchQueue.main.async {
                     _measuredHeight.wrappedValue = snapped
                 }
+                guard !freezeBarHeightUpdates else { return }
                 layoutCoordinator?.updateBarHeight(snapped)
             } else if measuredHeight <= 0.5, snapped > 0.5 {
                 // First non-zero measurement after mount: always inform coordinator.
+                guard !freezeBarHeightUpdates else { return }
                 layoutCoordinator?.updateBarHeight(snapped)
             }
         }
         layoutCoordinator.registerBarView(uiView)
+        uiView.setComposerMotionOffsetY(composerMotionOffsetY)
         layoutCoordinator.applyTransitionIfPossible(reason: "KeyboardPinnedContainer.updateUIView")
         _ = layoutKey
     }
@@ -5031,6 +5104,7 @@ final class KeyboardPinnedContainerView<Content: View>: UIView, KeyboardPinnedCo
     private var lastMeasuredHeight: CGFloat = 0
     private var lastDesiredBottomGap: CGFloat?
     private var lastPinnedKeyboardVisible: Bool?
+    private var composerMotionOffsetY: CGFloat = 0
 
     init(rootView: Content) {
         hostingController = UIHostingController(rootView: rootView)
@@ -5244,6 +5318,12 @@ final class KeyboardPinnedContainerView<Content: View>: UIView, KeyboardPinnedCo
         return true
     }
 
+    func setComposerMotionOffsetY(_ offset: CGFloat) {
+        guard composerMotionOffsetY != offset else { return }
+        composerMotionOffsetY = offset
+        applyComposerMotionTransform()
+    }
+
 #if !os(visionOS)
     @objc
     private func handleScrollButtonPan(_ recognizer: UIPanGestureRecognizer) {
@@ -5312,10 +5392,22 @@ final class KeyboardPinnedContainerView<Content: View>: UIView, KeyboardPinnedCo
 
     override func layoutSubviews() {
         super.layoutSubviews()
+        applyComposerMotionTransform()
         let height = barHeight
         guard abs(height - lastMeasuredHeight) > 0.5 else { return }
         lastMeasuredHeight = height
         onBarHeightChange?(height)
+    }
+
+    private func applyComposerMotionTransform() {
+        guard let hostingView = hostingController.view else { return }
+        let transform = CGAffineTransform(translationX: 0, y: composerMotionOffsetY)
+        if hostingView.transform != transform {
+            hostingView.transform = transform
+        }
+        if let pageDotsHost, pageDotsHost.view.transform != transform {
+            pageDotsHost.view.transform = transform
+        }
     }
 
     private func ensureConstraints(desiredBottomGap: CGFloat) {
@@ -6137,7 +6229,7 @@ enum CrossChatNotificationGeometry {
         containerWidth: CGFloat,
         resolvedContainerWidth: CGFloat
     ) -> CGFloat {
-        max(0, resolvedContainerWidth - max(0, containerWidth))
+        0
     }
 
     static func trailingAnchoredOverlayCorrection(
@@ -6149,6 +6241,32 @@ enum CrossChatNotificationGeometry {
 
     static func bubbleMaxHeight(isCompactLayout: Bool) -> CGFloat {
         isCompactLayout ? compactBubbleMaxHeight : compactBubbleMaxHeight * 2
+    }
+
+    static func bubbleMaxHeight(isCompactLayout: Bool, maxContainerHeight: CGFloat) -> CGFloat {
+        min(bubbleMaxHeight(isCompactLayout: isCompactLayout), max(0, maxContainerHeight))
+    }
+
+    static func visibleCapacity(
+        maxContainerHeight: CGFloat,
+        bubbleHeights: [CGFloat],
+        bubbleSpacing: CGFloat,
+        maxVisibleBubbleCount: Int
+    ) -> Int {
+        guard !bubbleHeights.isEmpty else { return 1 }
+        var usedHeight: CGFloat = 0
+        var capacity = 0
+        for bubbleHeight in bubbleHeights.prefix(maxVisibleBubbleCount) {
+            let nextUsedHeight = usedHeight
+                + max(0, bubbleHeight)
+                + (capacity == 0 ? 0 : bubbleSpacing)
+            guard capacity == 0 || nextUsedHeight <= maxContainerHeight else {
+                break
+            }
+            usedHeight = nextUsedHeight
+            capacity += 1
+        }
+        return max(1, capacity)
     }
 
     static func transcriptTrailingClearance(
@@ -6267,6 +6385,11 @@ enum CrossChatNotificationScrollTargetSelection {
 }
 
 enum ChatLandscapeWidthGeometry {
+    static func physicalWindowWidth(from windowSize: CGSize?) -> CGFloat? {
+        guard let windowSize else { return nil }
+        return max(windowSize.width, windowSize.height)
+    }
+
     static func shouldFillWindowWidth(
         viewSize: CGSize,
         windowSize: CGSize?,
@@ -6393,22 +6516,16 @@ private struct CrossChatNotificationOverlay: View {
         bubbles: [CrossChatNotificationBubble],
         measuredHeightsBySourceChatId: [String: CGFloat] = [:]
     ) -> Int {
-        guard !bubbles.isEmpty else { return 1 }
-        var usedHeight: CGFloat = 0
-        var capacity = 0
-        for bubble in bubbles.prefix(maxVisibleBubbleCount) {
-            let nextHeight = measuredHeightsBySourceChatId[bubble.sourceChatId]
+        let bubbleHeights = bubbles.map { bubble in
+            measuredHeightsBySourceChatId[bubble.sourceChatId]
                 ?? estimatedUnmeasuredHeight(for: bubble)
-            let nextUsedHeight = usedHeight
-                + nextHeight
-                + (capacity == 0 ? 0 : bubbleSpacing)
-            guard capacity == 0 || nextUsedHeight <= maxContainerHeight else {
-                break
-            }
-            usedHeight = nextUsedHeight
-            capacity += 1
         }
-        return max(1, capacity)
+        return CrossChatNotificationGeometry.visibleCapacity(
+            maxContainerHeight: maxContainerHeight,
+            bubbleHeights: bubbleHeights,
+            bubbleSpacing: bubbleSpacing,
+            maxVisibleBubbleCount: maxVisibleBubbleCount
+        )
     }
 
     private static func estimatedUnmeasuredHeight(for bubble: CrossChatNotificationBubble) -> CGFloat {
@@ -6462,7 +6579,10 @@ private struct CrossChatNotificationOverlay: View {
     }
 
     private var maxBubbleHeight: CGFloat {
-        CrossChatNotificationGeometry.bubbleMaxHeight(isCompactLayout: isCompactLayout)
+        CrossChatNotificationGeometry.bubbleMaxHeight(
+            isCompactLayout: isCompactLayout,
+            maxContainerHeight: maxContainerHeight
+        )
     }
 
     private var stackWidth: CGFloat {
@@ -7374,30 +7494,44 @@ private struct CrossChatNotificationOverlay: View {
     private func startCollapsedPreview(sourceChatIds: [String]) {
         guard isCollapsed else { return }
         let visibleSourceChatIds = Set(visibleBubbles.map(\.sourceChatId))
-        for sourceChatId in sourceChatIds where visibleSourceChatIds.contains(sourceChatId)
-            && !dockedCollapsedPreviewSourceChatIds.contains(sourceChatId) {
-            collapsedPreviewTasksBySourceChatId[sourceChatId]?.cancel()
-            withAnimation(Self.revealAnimation) {
-                _ = previewingCollapsedSourceChatIds.insert(sourceChatId)
+        let eligibleSourceChatIds = sourceChatIds.filter {
+            visibleSourceChatIds.contains($0)
+                && !dockedCollapsedPreviewSourceChatIds.contains($0)
+        }
+        guard let sourceChatId = eligibleSourceChatIds.first else { return }
+
+        let previousPreviewingSourceChatIds = previewingCollapsedSourceChatIds.subtracting([sourceChatId])
+        for previousSourceChatId in previousPreviewingSourceChatIds {
+            dockedCollapsedPreviewSourceChatIds.insert(previousSourceChatId)
+            clearCollapsedPreview(sourceChatId: previousSourceChatId)
+        }
+        for extraSourceChatId in eligibleSourceChatIds.dropFirst() {
+            dockedCollapsedPreviewSourceChatIds.insert(extraSourceChatId)
+            clearCollapsedPreview(sourceChatId: extraSourceChatId)
+        }
+
+        collapsedPreviewTasksBySourceChatId[sourceChatId]?.cancel()
+        dockedCollapsedPreviewSourceChatIds.remove(sourceChatId)
+        withAnimation(Self.revealAnimation) {
+            previewingCollapsedSourceChatIds = [sourceChatId]
+        }
+        let previewDurationNanoseconds = collapsedPreviewDurationNanoseconds
+        collapsedPreviewTasksBySourceChatId[sourceChatId] = Task { @MainActor in
+            do {
+                try await Task.sleep(nanoseconds: previewDurationNanoseconds)
+            } catch is CancellationError {
+                return
+            } catch {
+                return
             }
-            let previewDurationNanoseconds = collapsedPreviewDurationNanoseconds
-            collapsedPreviewTasksBySourceChatId[sourceChatId] = Task { @MainActor in
-                do {
-                    try await Task.sleep(nanoseconds: previewDurationNanoseconds)
-                } catch is CancellationError {
-                    return
-                } catch {
-                    return
-                }
-                guard isCollapsed else {
-                    clearCollapsedPreview(sourceChatId: sourceChatId)
-                    return
-                }
-                withAnimation(Self.hideAnimation) {
-                    _ = previewingCollapsedSourceChatIds.remove(sourceChatId)
-                }
-                collapsedPreviewTasksBySourceChatId[sourceChatId] = nil
+            guard isCollapsed else {
+                clearCollapsedPreview(sourceChatId: sourceChatId)
+                return
             }
+            withAnimation(Self.hideAnimation) {
+                _ = previewingCollapsedSourceChatIds.remove(sourceChatId)
+            }
+            collapsedPreviewTasksBySourceChatId[sourceChatId] = nil
         }
     }
 
@@ -8014,7 +8148,7 @@ struct CrossChatNotificationBubbleView: View {
                         onSubmit: activateReplySendControl,
                         onCancel: onCancelReply,
                         onFocusChange: onReplyFocusChange,
-                        onSelectionChange: { isSelectionActive in
+                        onSelectionActiveChange: { isSelectionActive in
                             textSelectionState.setReplySelectionActive(isSelectionActive)
                             publishTextSelectionState()
                         }
@@ -8028,16 +8162,16 @@ struct CrossChatNotificationBubbleView: View {
                         )
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .layoutPriority(1)
-                    MessageSendControl(
+                    MessageInputBar.MessageSendControl(
                         isSending: isSending,
-                        canCancelSend: canCancelSend,
-                        canSend: canSendReply,
                         isStagingAttachments: false,
+                        canSend: canSendReply,
                         connectionState: connectionState,
                         sendButtonSize: controlSize,
                         inputBarColorScheme: inputBarColorScheme,
                         uiColorScheme: colorScheme,
                         visionOSBorderColor: visionOSBorderColor,
+                        connectionAlertHint: nil,
                         onSend: onSendReply,
                         onCancel: onCancelSend,
                         onReconnect: onReconnect
@@ -8500,7 +8634,7 @@ struct NotificationReplyTextInput: UIViewRepresentable {
     let onSubmit: () -> Void
     let onCancel: () -> Void
     let onFocusChange: (Bool) -> Void
-    let onSelectionChange: (Bool) -> Void
+    let onSelectionActiveChange: (Bool) -> Void
 
     func makeUIView(context: Context) -> NotificationReplyUITextView {
         let textView = NotificationReplyUITextView()
@@ -8539,6 +8673,9 @@ struct NotificationReplyTextInput: UIViewRepresentable {
         textView.focusIfNeeded()
     }
 
+    static func dismantleUIView(_ uiView: NotificationReplyUITextView, coordinator: Coordinator) {
+    }
+
     func sizeThatFits(_ proposal: ProposedViewSize, uiView: NotificationReplyUITextView, context: Context) -> CGSize? {
         guard let width = proposal.width, width > 0 else { return nil }
         let maxHeight = NotificationReplyTextInputConfiguration.height(
@@ -8570,19 +8707,21 @@ struct NotificationReplyTextInput: UIViewRepresentable {
         func textViewDidChange(_ textView: UITextView) {
             parent.text = textView.text
             updateHeight(for: textView)
+            parent.onSelectionActiveChange(textView.selectedRange.length > 0)
         }
 
         func textViewDidBeginEditing(_ textView: UITextView) {
             parent.onFocusChange(true)
+            parent.onSelectionActiveChange(textView.selectedRange.length > 0)
         }
 
         func textViewDidEndEditing(_ textView: UITextView) {
-            parent.onSelectionChange(false)
+            parent.onSelectionActiveChange(false)
             parent.onFocusChange(false)
         }
 
         func textViewDidChangeSelection(_ textView: UITextView) {
-            parent.onSelectionChange(textView.selectedRange.length > 0)
+            parent.onSelectionActiveChange(textView.selectedRange.length > 0)
         }
 
         func textView(

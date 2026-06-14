@@ -8,7 +8,6 @@
 import XCTest
 
 final class ClawlineUITests: XCTestCase {
-
     override func setUpWithError() throws {
         // Put setup code here. This method is called before the invocation of each test method in the class.
 
@@ -51,10 +50,16 @@ final class ClawlineUITests: XCTestCase {
 
     @MainActor
     func testLaunchPerformance() throws {
-        // This measures how long it takes to launch your application.
-        measure(metrics: [XCTApplicationLaunchMetric()]) {
-            XCUIApplication().launch()
-        }
+        let app = XCUIApplication()
+        app.launchArguments += [
+            "-auth.token", "debug-token",
+            "-auth.userId", "debug-user",
+            "-auth.isAdmin", "YES",
+            "-provider.baseURL", "ws://127.0.0.1:8080",
+        ]
+        app.launch()
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10), "App should launch successfully")
+        app.terminate()
     }
 
     @MainActor
@@ -118,4 +123,5 @@ final class ClawlineUITests: XCTestCase {
             )
         }
     }
+
 }

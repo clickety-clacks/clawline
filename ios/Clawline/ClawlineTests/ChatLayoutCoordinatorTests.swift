@@ -298,6 +298,106 @@ struct ChatLayoutCoordinatorTests {
         #expect(abs(state.listBottomInset - 458) <= 0.5)
     }
 
+    @Test("Keyboard-visible expanded surface releases open surface height from runtime inset")
+    @MainActor
+    func keyboardVisibleExpandedSurfaceUsesCollapsedBarHeight() {
+        let coordinator = ChatLayoutCoordinator()
+        let inputs = ChatLayoutInputs(
+            keyboardHeight: 336,
+            keyboardVisible: true,
+            isInputFocused: true,
+            keyboardAnimationDuration: 0.25,
+            keyboardAnimationCurve: .easeInOut,
+            safeAreaBottom: 34,
+            usesExternalKeyboardInsets: false
+        )
+        let openMetrics = ChatLayoutMetrics(
+            belowBarGap: ChatLayoutCoordinator.inputBarBottomGap(
+                keyboardVisibleHeight: 336,
+                surfaceState: .open
+            ),
+            flowGap: 10,
+            containerPadding: 12,
+            pageIndicatorClearance: 24
+        )
+        let collapsedMetrics = ChatLayoutMetrics(
+            belowBarGap: ChatLayoutCoordinator.inputBarBottomGap(
+                keyboardVisibleHeight: 336,
+                surfaceState: .closed
+            ),
+            flowGap: 10,
+            containerPadding: 12,
+            pageIndicatorClearance: 24
+        )
+
+        coordinator.updateBarHeight(188)
+        let openState = coordinator.runtimeInsetLayoutState(
+            inputs: inputs,
+            metrics: openMetrics,
+            fallbackBarHeight: MessageInputBarMetrics.minInputBarHeight
+        )
+
+        coordinator.updateBarHeight(88)
+        let collapsedState = coordinator.runtimeInsetLayoutState(
+            inputs: inputs,
+            metrics: collapsedMetrics,
+            fallbackBarHeight: 188
+        )
+
+        #expect(abs(openState.keyboardInset - 336) <= 0.5)
+        #expect(abs(collapsedState.keyboardInset - 336) <= 0.5)
+        #expect(abs(collapsedState.barHeight - 88) <= 0.5)
+        #expect(abs(collapsedState.inputBarTopFromScreenBottom - 436) <= 0.5)
+        #expect(abs(collapsedState.listBottomInset - 458) <= 0.5)
+        #expect(abs((openState.listBottomInset - collapsedState.listBottomInset) - 100) <= 0.5)
+    }
+
+    @Test("Keyboard-visible closed input bar preserves required bottom gap")
+    @MainActor
+    func keyboardVisibleClosedInputBarPreservesBottomGap() {
+        #expect(
+            ChatLayoutCoordinator.inputBarBottomGap(
+                keyboardVisibleHeight: 336,
+                surfaceState: .closed
+            ) == 12
+        )
+        #expect(
+            ChatLayoutCoordinator.inputBarBottomGap(
+                keyboardVisibleHeight: 336,
+                surfaceState: .open
+            ) == 12
+        )
+    }
+
+    @Test("Hidden-keyboard open input surface does not keep closed-pill bottom padding")
+    @MainActor
+    func hiddenKeyboardOpenSurfaceUsesReducedBottomGap() {
+        let gap = ChatLayoutCoordinator.inputBarBottomGap(
+            keyboardVisibleHeight: 0,
+            surfaceState: .open
+        )
+        #expect(gap == 12)
+
+        let inputs = ChatLayoutInputs(
+            keyboardHeight: 34,
+            keyboardVisible: false,
+            isInputFocused: false,
+            keyboardAnimationDuration: 0.25,
+            keyboardAnimationCurve: .easeInOut,
+            safeAreaBottom: 34,
+            usesExternalKeyboardInsets: false
+        )
+        let metrics = ChatLayoutMetrics(
+            belowBarGap: gap,
+            flowGap: 10,
+            containerPadding: 12,
+            pageIndicatorClearance: 0
+        )
+
+        let state = ChatLayoutCoordinator.insetLayoutState(inputs: inputs, metrics: metrics, barHeight: 88)
+        #expect(abs(state.listBottomInset - 98) <= 0.5)
+    }
+
     @Test("T071: Transient zero bar height does not collapse inset after stabilization")
     @MainActor
     func transientZeroBarHeightIsIgnoredAfterStabilization() {

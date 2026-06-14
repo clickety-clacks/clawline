@@ -26,6 +26,7 @@ enum ProviderBaseURLStore {
         UserDefaults.standard.removeObject(forKey: key)
         NotificationCenter.default.post(name: .providerBaseURLDidChange, object: nil)
     }
+
 }
 
 struct ProviderTLSPolicy: Equatable {

@@ -2,7 +2,7 @@
 
 _Last updated: 2026-03-10_
 
-Source of truth: `/Users/mike/src/clawline-dictation/ios/Clawline/Clawline/`
+Source of truth: `/Users/mike/src/clawline/ios/Clawline/Clawline/`
 
 ## App composition
 

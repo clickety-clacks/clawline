@@ -29,10 +29,123 @@ struct MessageInputBarBoundaryTests {
         ))
     }
 
+    @Test("Send button bubble grows from ghost to active instead of fading")
+    @MainActor
+    func sendButtonBubbleUsesScaleStateForConnectedTransitions() {
+        let ghostState = MessageInputBar.sendButtonBubbleVisualState(
+            isSending: false,
+            canSend: false,
+            isStagingAttachments: false,
+            connectionState: .connected
+        )
+        let activeState = MessageInputBar.sendButtonBubbleVisualState(
+            isSending: false,
+            canSend: true,
+            isStagingAttachments: false,
+            connectionState: .connected
+        )
+
+        #expect(ghostState == .ghost)
+        #expect(activeState == .active)
+        #expect(MessageInputBar.sendButtonBubbleScale(state: ghostState) == 0)
+        #expect(MessageInputBar.sendButtonBubbleScale(state: activeState) == 1)
+    }
+
     @Test("Reconnect bubble keeps the 0.75 small-end scale")
+    @MainActor
     func reconnectBubbleRetainsRequestedSmallEndScale() {
         #expect(MessageInputBar.reconnectBubbleScale(phase: CGFloat(0)) == CGFloat(0.75))
         #expect(MessageInputBar.reconnectBubbleScale(phase: CGFloat(1)) == CGFloat(1.0))
+        #expect(
+            abs(
+                MessageInputBar.sendButtonBubbleScale(
+                    state: .reconnecting,
+                    reconnectPhase: 0
+                ) - 0.75
+            ) < 0.0001
+        )
+        #expect(
+            abs(
+                MessageInputBar.sendButtonBubbleScale(
+                    state: .reconnecting,
+                    reconnectPhase: 1
+                ) - 1.0
+            ) < 0.0001
+        )
+    }
+
+    @Test("Preparing spinner keeps the send bubble active without enabling send")
+    @MainActor
+    func preparingSpinnerUsesConnectedActiveBubbleGate() {
+        #expect(
+            MessageInputBar.sendButtonShowsPreparingSpinner(
+                isSending: false,
+                canSend: false,
+                isStagingAttachments: true,
+                connectionState: .connected
+            )
+        )
+        #expect(
+            MessageInputBar.sendButtonBubbleVisualState(
+                isSending: false,
+                canSend: false,
+                isStagingAttachments: true,
+                connectionState: .connected
+            ) == .active
+        )
+        #expect(
+            !MessageInputBar.sendButtonShowsPreparingSpinner(
+                isSending: false,
+                canSend: false,
+                isStagingAttachments: true,
+                connectionState: .reconnecting
+            )
+        )
+    }
+
+    @Test("Reconnect state keeps the primary send icon visible while pulsing")
+    @MainActor
+    func reconnectStateRetainsPaperPlaneIcon() {
+        #expect(
+            MessageInputBar.sendButtonShowsPrimaryIcon(
+                isSending: false,
+                canSend: false,
+                isStagingAttachments: false,
+                connectionState: .reconnecting
+            )
+        )
+        #expect(
+            MessageInputBar.sendButtonPrimarySymbolName(connectionState: .reconnecting)
+                == "paperplane.fill"
+        )
+    }
+
+    @Test("Editor tap requests focus when keyboard is hidden")
+    func editorTapRequestsFocusWhenKeyboardHidden() {
+        #expect(MessageInputBar.shouldRequestFocusOnEditorTap(isKeyboardVisible: false))
+        #expect(!MessageInputBar.shouldRequestFocusOnEditorTap(isKeyboardVisible: true))
+    }
+
+    @Test("Focus trigger cycles first responder only when keyboard collapsed under focus")
+    func focusTriggerCyclesFirstResponderOnlyForHiddenKeyboard() {
+        #expect(
+            RichTextEditor.Coordinator.shouldCycleFirstResponder(
+                isFirstResponder: true,
+                isKeyboardVisible: false
+            )
+        )
+        #expect(
+            !RichTextEditor.Coordinator.shouldCycleFirstResponder(
+                isFirstResponder: false,
+                isKeyboardVisible: false
+            )
+        )
+        #expect(
+            !RichTextEditor.Coordinator.shouldCycleFirstResponder(
+                isFirstResponder: true,
+                isKeyboardVisible: true
+            )
+        )
     }
 
     @Test("Light disabled send button keeps an off-white backing circle")
@@ -128,7 +241,7 @@ struct MessageInputBarBoundaryTests {
         #expect(CrossChatNotificationGeometry.spatialOverlayHorizontalCorrection(
             containerWidth: hostWidth,
             resolvedContainerWidth: resolvedWidth
-        ) == nativeWindowWidth - hostWidth)
+        ) == 0)
     }
 
     @Test("T1185 Spatial notification window width tolerates key-window handoff")
@@ -158,6 +271,17 @@ struct MessageInputBarBoundaryTests {
         #expect(CrossChatNotificationGeometry.spatialOverlayHorizontalCorrection(
             containerWidth: hostWidth,
             resolvedContainerWidth: hostWidth
+        ) == 0)
+    }
+
+    @Test("T1185 Spatial notification correction does not push wider overlay past trailing edge")
+    func spatialNotificationCorrectionDoesNotPushWiderOverlayPastTrailingEdge() {
+        let hostWidth = CGFloat(720)
+        let resolvedWidth = CGFloat(960)
+
+        #expect(CrossChatNotificationGeometry.spatialOverlayHorizontalCorrection(
+            containerWidth: hostWidth,
+            resolvedContainerWidth: resolvedWidth
         ) == 0)
     }
 
@@ -235,6 +359,28 @@ struct MessageInputBarBoundaryTests {
             visibleNotificationCount: 1,
             isSpatial: false
         ) == nil)
+    }
+
+    @Test("T1185 Spatial single notification max height is bounded by available dock height")
+    func spatialSingleNotificationMaxHeightIsBoundedByAvailableDockHeight() {
+        #expect(CrossChatNotificationGeometry.bubbleMaxHeight(
+            isCompactLayout: false,
+            maxContainerHeight: 240
+        ) == CGFloat(240))
+        #expect(CrossChatNotificationGeometry.bubbleMaxHeight(
+            isCompactLayout: false,
+            maxContainerHeight: 620
+        ) == CrossChatNotificationGeometry.compactBubbleMaxHeight * 2)
+    }
+
+    @Test("T1185 notification capacity uses measured bubble heights")
+    func notificationCapacityUsesMeasuredBubbleHeights() {
+        #expect(CrossChatNotificationGeometry.visibleCapacity(
+            maxContainerHeight: 240,
+            bubbleHeights: [104, 104, 104],
+            bubbleSpacing: 10,
+            maxVisibleBubbleCount: 10
+        ) == 2)
     }
 
     @Test("T354 notification layout host height excludes motion overflow")
@@ -468,6 +614,29 @@ struct MessageInputBarBoundaryTests {
         ))
         #expect(source.contains(".frame(width: chatSurfaceWidth)"))
         #expect(source.contains(".offset(x: chatSurfaceOffset)"))
+    }
+
+    @Test("T1282 compact landscape recovers physical width from rotated portrait window size")
+    func compactLandscapeRecoversPhysicalWidthFromRotatedPortraitWindowSize() {
+        let physicalWidth = ChatLandscapeWidthGeometry.physicalWindowWidth(
+            from: CGSize(width: 402, height: 874)
+        )
+
+        #expect(physicalWidth == 874)
+        #expect(ChatLandscapeWidthGeometry.physicalWidth(
+            containerWidth: 750,
+            leadingSafeAreaInset: 0,
+            trailingSafeAreaInset: 0,
+            isCompactLandscape: true,
+            nativeWindowWidth: physicalWidth
+        ) == 874)
+        #expect(ChatLandscapeWidthGeometry.horizontalOffset(
+            containerWidth: 750,
+            leadingSafeAreaInset: 0,
+            trailingSafeAreaInset: 0,
+            isCompactLandscape: true,
+            nativeWindowWidth: physicalWidth
+        ) == 62)
     }
 
     @Test("T357 asymmetric compact landscape chrome recenters to physical window")

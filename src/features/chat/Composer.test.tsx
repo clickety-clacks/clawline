@@ -334,11 +334,11 @@ describe("Composer", () => {
       {
         adopted: false,
         createdAt: 12,
-        displayName: "Dictation",
+        displayName: "Design",
         isBuiltIn: false,
         kind: "custom",
         orderIndex: 2,
-        sessionKey: "agent:main:clawline:user_1:dictation",
+        sessionKey: "agent:main:clawline:user_1:design",
         updatedAt: 12
       }
     ];
@@ -347,21 +347,21 @@ describe("Composer", () => {
 
     fireEvent.change(textarea, { target: { value: "@" } });
     const sideOption = screen.getByRole("option", { name: /Side Thread/i });
-    const dictationOption = screen.getByRole("option", { name: /Dictation/i });
+    const designOption = screen.getByRole("option", { name: /Design/i });
     expect(sideOption).toHaveAttribute("aria-selected", "true");
-    expect(dictationOption).toHaveAttribute("aria-selected", "false");
+    expect(designOption).toHaveAttribute("aria-selected", "false");
 
     fireEvent.keyDown(textarea, { key: "ArrowDown" });
     expect(sideOption).toHaveAttribute("aria-selected", "false");
-    expect(dictationOption).toHaveAttribute("aria-selected", "true");
+    expect(designOption).toHaveAttribute("aria-selected", "true");
     expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest" });
 
     fireEvent.keyDown(textarea, { key: "Tab" });
     expect(screen.getByTestId("composer-mention-chip")).toHaveTextContent(
-      "Dictation"
+      "Design"
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Remove Dictation mention" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove Design mention" }));
     fireEvent.change(textarea, { target: { value: "@" } });
     fireEvent.keyDown(textarea, { key: "ArrowDown" });
     fireEvent.keyDown(textarea, { key: "ArrowUp" });
@@ -369,7 +369,7 @@ describe("Composer", () => {
       "aria-selected",
       "true"
     );
-    expect(screen.getByRole("option", { name: /Dictation/i })).toHaveAttribute(
+    expect(screen.getByRole("option", { name: /Design/i })).toHaveAttribute(
       "aria-selected",
       "false"
     );
@@ -401,11 +401,11 @@ describe("Composer", () => {
       {
         adopted: false,
         createdAt: 12,
-        displayName: "Dictation",
+        displayName: "Design",
         isBuiltIn: false,
         kind: "custom",
         orderIndex: 2,
-        sessionKey: "agent:main:clawline:user_1:dictation",
+        sessionKey: "agent:main:clawline:user_1:design",
         updatedAt: 12
       }
     ];
@@ -421,7 +421,7 @@ describe("Composer", () => {
 
     expect(sendMessage).not.toHaveBeenCalled();
     expect(screen.getByTestId("composer-mention-chip")).toHaveTextContent(
-      "Dictation"
+      "Design"
     );
     expect(screen.queryByRole("listbox", { name: "Mention destination" }))
       .not.toBeInTheDocument();
@@ -434,7 +434,7 @@ describe("Composer", () => {
         attachments: [],
         content: "Please check this",
         id: expect.stringMatching(/^c_/),
-        sessionKey: "agent:main:clawline:user_1:dictation"
+        sessionKey: "agent:main:clawline:user_1:design"
       });
     });
   });

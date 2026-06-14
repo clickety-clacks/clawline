@@ -28,7 +28,7 @@
       1173  var transcript: String = ""         // accumulated transcript text (partial + final tokens)
       1174  var errorMessage: String?           // current error, nil if none
       1175  var mode: VoiceMode?                // .tap | .hold | nil (nil when idle)
-      1176 -var canUseVoice: Bool               // derived: Soniox key present AND direct internet available
+      1176 -var canUseVoice: Bool               // derived from direct internet availability
       1176 +var canUseVoice: Bool               // DEPRECATED — use WatchConnectionPresentationState.voiceInputAvailable instead. Kept for migration only.
       1177
       1178  enum VoiceState {
@@ -169,4 +169,3 @@
 ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
   Opus 4.6 in specs ➜
   ⏵⏵ bypass permissions on (shift+tab to cycle)
-

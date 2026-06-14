@@ -17,7 +17,6 @@ import Observation
 struct ClawlineApp: App {
     @State private var authManager: AuthManager
     @State private var settingsManager: SettingsManager
-    @State private var sonioxKeyStore: SonioxKeyStore
     @State private var cartesiaKeyStore: CartesiaKeyStore
 
     private let deviceIdentifier: any DeviceIdentifying
@@ -41,15 +40,12 @@ struct ClawlineApp: App {
         Self.configureDebugAdminIfNeeded(authManager: authManager)
 #endif
         _authManager = State(initialValue: authManager)
-        let sonioxKeyStore = SonioxKeyStore()
-        _sonioxKeyStore = State(initialValue: sonioxKeyStore)
         let cartesiaKeyStore = CartesiaKeyStore(keychain: KeychainSecureStore())
         _cartesiaKeyStore = State(initialValue: cartesiaKeyStore)
-        let settingsManager = SettingsManager(sonioxKeyStore: sonioxKeyStore, cartesiaKeyStore: cartesiaKeyStore)
+        let settingsManager = SettingsManager(cartesiaKeyStore: cartesiaKeyStore)
         _settingsManager = State(initialValue: settingsManager)
         let coreServices = ClawlineCoreRuntimeServicesFactory.make(
             authManager: authManager,
-            sonioxKeyStore: sonioxKeyStore,
             cartesiaKeyStore: cartesiaKeyStore
         )
         self.deviceIdentifier = coreServices.deviceIdentifier

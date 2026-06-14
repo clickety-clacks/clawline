@@ -21,6 +21,8 @@ struct SelectableAttributedText: UIViewRepresentable {
         )
         textView.textContainer.widthTracksTextView = true
         textView.adjustsFontForContentSizeCategory = true
+        let hover = UIHoverGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleTextHover(_:)))
+        textView.addGestureRecognizer(hover)
         textView.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         textView.setContentHuggingPriority(.defaultLow, for: .horizontal)
         return textView
@@ -34,7 +36,9 @@ struct SelectableAttributedText: UIViewRepresentable {
         if uiView.overrideUserInterfaceStyle != style {
             uiView.overrideUserInterfaceStyle = style
         }
-        uiView.attributedText = attributedString
+        if Self.needsAttributedTextUpdate(current: uiView.attributedText, next: attributedString) {
+            uiView.attributedText = attributedString
+        }
         uiView.textAlignment = alignment
     }
 
@@ -76,6 +80,11 @@ struct SelectableAttributedText: UIViewRepresentable {
             }
             setNeedsDisplay()
         }
+    }
+
+    static func needsAttributedTextUpdate(current: NSAttributedString?, next: NSAttributedString) -> Bool {
+        guard let current else { return true }
+        return !current.isEqual(to: next)
     }
 
     final class Coordinator: NSObject, UITextViewDelegate {
@@ -138,6 +147,20 @@ struct SelectableAttributedText: UIViewRepresentable {
                 from: textView
             )
             return false
+        }
+
+        @objc func handleTextHover(_ recognizer: UIHoverGestureRecognizer) {
+            guard recognizer.state == .began || recognizer.state == .changed,
+                  let textView = recognizer.view as? UITextView,
+                  let generatedLink = MessageBubbleUIKitView.generatedTextLink(in: textView, at: recognizer.location(in: textView)),
+                  generatedLink.displayMode == .popup else {
+                return
+            }
+            _ = GeneratedTextLinkActivationRouter.presentResolvedURLPopupAnchored(
+                generatedLink.url,
+                textView,
+                recognizer.location(in: textView)
+            )
         }
 
         private func emitSelectionChange(_ hasSelection: Bool) {

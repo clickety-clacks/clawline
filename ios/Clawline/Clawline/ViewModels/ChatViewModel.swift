@@ -1591,6 +1591,21 @@ final class ChatViewModel: ChatViewModelHosting {
             requestStreamSwitch(to: alphaSessionKey, source: .programmatic)
         }
     }
+
+    func debugAppendBetaCrossChatNotificationForSinglePeekProof() {
+        let betaSessionKey = "agent:main:clawline:ui-test:s_t1174_b"
+        guard var bubble = crossChatNotificationBubblesBySourceChatId[betaSessionKey] else { return }
+        let now = Date()
+        bubble.entries.append(
+            CrossChatAssistantNotificationEntry(
+                id: "s_t1265_notification_handoff",
+                content: "T1265 handoff proof notification",
+                timestamp: now
+            )
+        )
+        bubble.lastAssistantActivityAt = now
+        crossChatNotificationBubblesBySourceChatId[betaSessionKey] = bubble
+    }
 #endif
 
     private func animateCrossChatNotificationDismissal(_ updates: @escaping () -> Void) {
@@ -1685,8 +1700,9 @@ final class ChatViewModel: ChatViewModelHosting {
         }
     }
 
-    func send() {
-        _ = sendResolved(destinationSessionKey: nil)
+    @discardableResult
+    func send() -> Bool {
+        sendResolved(destinationSessionKey: focusedPromptSendDestinationSessionKey)
     }
 
     @discardableResult
@@ -1700,6 +1716,13 @@ final class ChatViewModel: ChatViewModelHosting {
             clearInput()
         }
         return didDispatch
+    }
+
+    private var focusedPromptSendDestinationSessionKey: String? {
+        let selected = uiSelectedSessionKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let active = engineActiveSessionKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !selected.isEmpty, selected != active else { return nil }
+        return selected
     }
 
     @discardableResult

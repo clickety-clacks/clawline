@@ -34,7 +34,9 @@ struct SelectableAttributedText: UIViewRepresentable {
         if uiView.overrideUserInterfaceStyle != style {
             uiView.overrideUserInterfaceStyle = style
         }
-        uiView.attributedText = attributedString
+        if Self.needsAttributedTextUpdate(current: uiView.attributedText, next: attributedString) {
+            uiView.attributedText = attributedString
+        }
         uiView.textAlignment = alignment
     }
 
@@ -76,6 +78,11 @@ struct SelectableAttributedText: UIViewRepresentable {
             }
             setNeedsDisplay()
         }
+    }
+
+    static func needsAttributedTextUpdate(current: NSAttributedString?, next: NSAttributedString) -> Bool {
+        guard let current else { return true }
+        return !current.isEqual(to: next)
     }
 
     final class Coordinator: NSObject, UITextViewDelegate {

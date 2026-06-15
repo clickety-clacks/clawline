@@ -339,7 +339,14 @@ struct RichTextEditor: UIViewRepresentable {
                 parent.onUserEdit?(range, text.utf16.count)
             }
             if text == "\n" {
-                parent.onSubmit?()
+                switch KeyboardCommandRouter.route(intent: .textSubmit, store: parent.keyboardOwnershipStore).outcome {
+                case .handled(.mentionPicker):
+                    parent.onMentionPickerTab?()
+                case .handled(.composer):
+                    parent.onSubmit?()
+                default:
+                    return true
+                }
                 return false
             }
             return true

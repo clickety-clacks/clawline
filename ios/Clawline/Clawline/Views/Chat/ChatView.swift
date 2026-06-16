@@ -6589,7 +6589,7 @@ enum CrossChatNotificationEntrySurfaceGeometry {
 }
 
 enum CrossChatNotificationScrollCommand {
-    static let lineIncrement: CGFloat = 224
+    static let lineIncrement: CGFloat = ChatVisibleBubbleContentScroll.commandIncrement
 
     @discardableResult
     static func scroll(_ scrollView: UIScrollView?, direction: ChatScrollPageDirection) -> Bool {

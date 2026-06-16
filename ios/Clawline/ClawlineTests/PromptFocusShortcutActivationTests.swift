@@ -910,20 +910,26 @@ struct PromptFocusShortcutActivationTests {
         )
 
         #expect(scrolled == 2)
-        #expect(first.contentOffset.y == ChatVisibleBubbleContentScroll.lineIncrement)
-        #expect(second.contentOffset.y == ChatVisibleBubbleContentScroll.lineIncrement)
+        #expect(
+            first.contentOffset.y
+                == min(ChatVisibleBubbleContentScroll.commandIncrement, max(80, first.bounds.height * 0.82) - 1)
+        )
+        #expect(
+            second.contentOffset.y
+                == min(ChatVisibleBubbleContentScroll.commandIncrement, max(80, second.bounds.height * 0.82) - 1)
+        )
         #expect(nested.contentOffset.y == 0)
         #expect(offscreen.contentOffset.y == 0)
     }
 
-    @Test("Cmd-J/K bubble content scroller uses a line increment instead of a page increment")
+    @Test("Cmd-J/K bubble content scroller uses notification-sized useful subpage step")
     @MainActor
-    func bubbleContentScrollerUsesLineIncrementInsteadOfPageIncrement() {
+    func bubbleContentScrollerUsesNotificationSizedUsefulSubpageStep() {
         let viewport = UIView(frame: CGRect(x: 0, y: 0, width: 320, height: 240))
         let root = UIView(frame: viewport.bounds)
         viewport.addSubview(root)
 
-        let scrollView = makeVerticalScrollView(frame: CGRect(x: 0, y: 0, width: 220, height: 200), contentHeight: 1_000)
+        let scrollView = makeVerticalScrollView(frame: CGRect(x: 0, y: 0, width: 220, height: 320), contentHeight: 1_000)
         root.addSubview(scrollView)
 
         let scrolledDown = ChatVisibleBubbleContentScroll.scrollVisibleScrollableContent(
@@ -935,7 +941,8 @@ struct PromptFocusShortcutActivationTests {
         let pageIncrement = max(80, scrollView.bounds.height * 0.82)
 
         #expect(scrolledDown == 1)
-        #expect(scrollView.contentOffset.y == ChatVisibleBubbleContentScroll.lineIncrement)
+        #expect(ChatVisibleBubbleContentScroll.commandIncrement == CrossChatNotificationScrollCommand.lineIncrement)
+        #expect(scrollView.contentOffset.y == ChatVisibleBubbleContentScroll.commandIncrement)
         #expect(scrollView.contentOffset.y < pageIncrement)
 
         let scrolledUp = ChatVisibleBubbleContentScroll.scrollVisibleScrollableContent(

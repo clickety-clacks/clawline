@@ -148,6 +148,108 @@ struct MessageInputBarBoundaryTests {
         )
     }
 
+    @Test("T1315 Return delegates to active mention picker instead of composer submit")
+    @MainActor
+    func returnDelegatesToMentionPickerInsteadOfSubmit() {
+        var attributedText = NSAttributedString(string: "@des")
+        var calculatedHeight: CGFloat = 44
+        var selectionRange = NSRange(location: 4, length: 0)
+        var pendingInsertions: [PendingAttachment] = []
+        var submitCount = 0
+        var mentionAcceptCount = 0
+        let editor = RichTextEditor(
+            attributedText: Binding(get: { attributedText }, set: { attributedText = $0 }),
+            calculatedHeight: Binding(get: { calculatedHeight }, set: { calculatedHeight = $0 }),
+            selectionRange: Binding(get: { selectionRange }, set: { selectionRange = $0 }),
+            pendingInsertions: Binding(get: { pendingInsertions }, set: { pendingInsertions = $0 }),
+            fontScaleChangeSequence: 0,
+            resetToken: 0,
+            focusTrigger: 0,
+            dismissTrigger: 0,
+            isEditable: true,
+            isKeyboardVisible: true,
+            tintColor: .systemBlue,
+            onFocusChange: { _ in },
+            onSubmit: { submitCount += 1 },
+            handlesMentionPickerKeyCommands: true,
+            mentionPickerHasCompletion: true,
+            onMentionPickerTab: { mentionAcceptCount += 1 },
+            keyboardOwnershipStore: KeyboardOwnershipSceneFactory.chatScene(
+                visibleNotificationSourceChatIds: [],
+                mentionPickerVisible: true,
+                mentionPickerHasCompletion: true,
+                composerFocused: true,
+                notificationReplyFocusedSourceChatId: nil,
+                actionMenuSourceChatId: nil
+            )
+        )
+        let coordinator = RichTextEditor.Coordinator(parent: editor)
+        let textView = UITextView()
+        textView.text = "@des"
+
+        let shouldChange = coordinator.textView(
+            textView,
+            shouldChangeTextIn: NSRange(location: 4, length: 0),
+            replacementText: "\n"
+        )
+
+        #expect(!shouldChange)
+        #expect(mentionAcceptCount == 1)
+        #expect(submitCount == 0)
+        #expect(textView.text == "@des")
+    }
+
+    @Test("T1315 Return submits composer when mention picker has no completion")
+    @MainActor
+    func returnSubmitsComposerWhenMentionPickerHasNoCompletion() {
+        var attributedText = NSAttributedString(string: "@")
+        var calculatedHeight: CGFloat = 44
+        var selectionRange = NSRange(location: 1, length: 0)
+        var pendingInsertions: [PendingAttachment] = []
+        var submitCount = 0
+        var mentionAcceptCount = 0
+        let editor = RichTextEditor(
+            attributedText: Binding(get: { attributedText }, set: { attributedText = $0 }),
+            calculatedHeight: Binding(get: { calculatedHeight }, set: { calculatedHeight = $0 }),
+            selectionRange: Binding(get: { selectionRange }, set: { selectionRange = $0 }),
+            pendingInsertions: Binding(get: { pendingInsertions }, set: { pendingInsertions = $0 }),
+            fontScaleChangeSequence: 0,
+            resetToken: 0,
+            focusTrigger: 0,
+            dismissTrigger: 0,
+            isEditable: true,
+            isKeyboardVisible: true,
+            tintColor: .systemBlue,
+            onFocusChange: { _ in },
+            onSubmit: { submitCount += 1 },
+            handlesMentionPickerKeyCommands: true,
+            mentionPickerHasCompletion: false,
+            onMentionPickerTab: { mentionAcceptCount += 1 },
+            keyboardOwnershipStore: KeyboardOwnershipSceneFactory.chatScene(
+                visibleNotificationSourceChatIds: [],
+                mentionPickerVisible: true,
+                mentionPickerHasCompletion: false,
+                composerFocused: true,
+                notificationReplyFocusedSourceChatId: nil,
+                actionMenuSourceChatId: nil
+            )
+        )
+        let coordinator = RichTextEditor.Coordinator(parent: editor)
+        let textView = UITextView()
+        textView.text = "@"
+
+        let shouldChange = coordinator.textView(
+            textView,
+            shouldChangeTextIn: NSRange(location: 1, length: 0),
+            replacementText: "\n"
+        )
+
+        #expect(!shouldChange)
+        #expect(submitCount == 1)
+        #expect(mentionAcceptCount == 0)
+        #expect(textView.text == "@")
+    }
+
     @Test("Light disabled send button keeps an off-white backing circle")
     func lightDisabledSendButtonKeepsBackingCircle() {
         let lightColor = MessageInputBar.disabledSendButtonBackingColor(colorScheme: .light)

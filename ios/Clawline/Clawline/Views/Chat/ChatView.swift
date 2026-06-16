@@ -2317,7 +2317,20 @@ struct ChatView: View {
                     reconcileResolvedMentionAttachment()
                     recordTypingActivity()
                 },
+                handlesMentionPickerKeyCommands: isMentionPickerVisible,
+                mentionPickerHasCompletion: !mentionPickerStreams.isEmpty,
+                onMentionPickerTab: {
+                    handleCrossChatMentionTab(filteredStreams: mentionPickerStreams)
+                },
+                onMentionPickerMoveUp: {
+                    handleCrossChatMentionMove(filteredStreams: mentionPickerStreams, step: -1)
+                },
+                onMentionPickerMoveDown: {
+                    handleCrossChatMentionMove(filteredStreams: mentionPickerStreams, step: 1)
+                },
                 onPasteImages: handlePastedImages,
+                notificationVisibleCount: notificationVisibleCount,
+                keyboardOwnershipStore: keyboardOwnershipStore,
                 isCompact: horizontalSizeClass == .compact
             )
         }

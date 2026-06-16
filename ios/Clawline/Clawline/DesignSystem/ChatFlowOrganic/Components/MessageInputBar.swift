@@ -92,7 +92,14 @@ struct MessageInputBar: View {
     let onRequestFocus: () -> Void
     var onRequestDirectFocus: (() -> Void)?
     var onTextEditActivity: (() -> Void)?
+    var handlesMentionPickerKeyCommands: Bool = false
+    var mentionPickerHasCompletion: Bool = false
+    var onMentionPickerTab: (() -> Void)?
+    var onMentionPickerMoveUp: (() -> Void)?
+    var onMentionPickerMoveDown: (() -> Void)?
     var onPasteImages: (([UIImage]) -> Void)?
+    var notificationVisibleCount: Int = 0
+    var keyboardOwnershipStore = KeyboardOwnershipStore()
 
     @State private var editorHeight: CGFloat = 44
     @State private var cachedMaxBarWidth: CGFloat?
@@ -534,7 +541,14 @@ struct MessageInputBar: View {
                     onFocusChange: onFocusChange,
                     onTextEditActivity: onTextEditActivity,
                     onSubmit: handleEditorSubmitIntent,
+                    handlesMentionPickerKeyCommands: handlesMentionPickerKeyCommands,
+                    mentionPickerHasCompletion: mentionPickerHasCompletion,
+                    onMentionPickerTab: onMentionPickerTab,
+                    onMentionPickerMoveUp: onMentionPickerMoveUp,
+                    onMentionPickerMoveDown: onMentionPickerMoveDown,
                     onPasteImages: onPasteImages,
+                    notificationVisibleCount: notificationVisibleCount,
+                    keyboardOwnershipStore: keyboardOwnershipStore,
                     trailingPadding: trailingTextPadding
                 )
                 .opacity(isSending ? 0.5 : 1)

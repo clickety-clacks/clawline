@@ -268,7 +268,7 @@ struct StreamManagerSheet: View {
                 .allowsHitTesting(false)
         )
         .background {
-            selectorShortcutButtons
+            selectorShortcutKeyCommandBridge
         }
         .onAppear {
             refreshShortcutAvailabilityAndPublish()
@@ -399,27 +399,14 @@ struct StreamManagerSheet: View {
         }
     }
 
-    private var selectorShortcutButtons: some View {
-        Group {
-            if selectorShortcutsAvailable {
-                ForEach(selectorShortcutSlots, id: \.self) { slot in
-                    Button("") {
-                        NotificationCenter.default.post(
-                            name: .clawlineKeyboardCommandIntent,
-                            object: KeyboardCommandIntent.notificationAssignedOpen(slot)
-                        )
-                    }
-                    .keyboardShortcut(
-                        KeyEquivalent(Character("\(slot)")),
-                        modifiers: .command
-                    )
-                    .accessibilityHidden(true)
-                }
-            }
-        }
+    private var selectorShortcutKeyCommandBridge: some View {
+        StreamSelectorShortcutKeyCommandBridge(
+            selectableSessionKeys: selectorShortcutsAvailable ? selectableShortcutSessionKeys : []
+        )
         .frame(width: 1, height: 1)
         .opacity(0.001)
         .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 
     @ViewBuilder
@@ -569,7 +556,7 @@ struct StreamManagerSheet: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .frame(width: shortcutLabelReservedWidth, alignment: .trailing)
-                .accessibilityLabel(label.replacingOccurrences(of: "Cmd-", with: "Command "))
+                .accessibilityLabel(StreamSelectorShortcutMap.accessibilityLabel(forShortcutLabel: label))
         }
     }
 
@@ -750,11 +737,11 @@ struct StreamManagerSheet: View {
                 forSessionKey: stream.sessionKey,
                 selectableSessionKeys: selectableShortcutSessionKeys
               ) else { return nil }
-        return "Cmd-\(slot)"
+        return StreamSelectorShortcutMap.shortcutLabel(forSlot: slot)
     }
 
     private func accessibilityShortcutLabel(for stream: StreamSession) -> String? {
-        shortcutLabelText(for: stream)?.replacingOccurrences(of: "Cmd-", with: "Command ")
+        shortcutLabelText(for: stream).map(StreamSelectorShortcutMap.accessibilityLabel(forShortcutLabel:))
     }
 
     private func renameStream(_ stream: StreamSession) async {
@@ -873,6 +860,14 @@ enum StreamSelectorShortcutMap {
         }
         return selectableSessionKeys[index]
     }
+
+    static func shortcutLabel(forSlot slot: Int) -> String {
+        "⌘-\(slot)"
+    }
+
+    static func accessibilityLabel(forShortcutLabel label: String) -> String {
+        label.replacingOccurrences(of: "⌘-", with: "Command ")
+    }
 }
 
 enum StreamSelectorShortcutActivation {
@@ -887,6 +882,96 @@ enum StreamSelectorShortcutActivation {
             return nil
         }
         return .notificationAssignedOpen(slot)
+    }
+}
+
+enum StreamSelectorShortcutKeyCommands {
+    struct KeyCommandSpec: Equatable {
+        let input: String
+        let modifierFlags: UIKeyModifierFlags
+        let intent: KeyboardCommandIntent
+    }
+
+    static func keyCommandSpecs(selectableSessionKeys: [String]) -> [KeyCommandSpec] {
+        StreamSelectorShortcutMap.orderedSlots.compactMap { slot in
+            guard StreamSelectorShortcutMap.sessionKey(
+                forSlot: slot,
+                selectableSessionKeys: selectableSessionKeys
+            ) != nil else {
+                return nil
+            }
+            return KeyCommandSpec(
+                input: "\(slot)",
+                modifierFlags: .command,
+                intent: .notificationAssignedOpen(slot)
+            )
+        }
+    }
+}
+
+private struct StreamSelectorShortcutKeyCommandBridge: UIViewRepresentable {
+    let selectableSessionKeys: [String]
+
+    func makeUIView(context: Context) -> KeyCommandView {
+        let view = KeyCommandView()
+        view.selectableSessionKeys = selectableSessionKeys
+        return view
+    }
+
+    func updateUIView(_ uiView: KeyCommandView, context: Context) {
+        uiView.selectableSessionKeys = selectableSessionKeys
+        uiView.refreshKeyCommandsIfNeeded()
+        DispatchQueue.main.async { [weak uiView] in
+            uiView?.becomeFirstResponder()
+        }
+    }
+
+    final class KeyCommandView: UIView {
+        var selectableSessionKeys: [String] = []
+        private var keyCommandSignature: [String] = []
+
+        override var canBecomeFirstResponder: Bool { true }
+
+        override var keyCommands: [UIKeyCommand]? {
+            StreamSelectorShortcutKeyCommands
+                .keyCommandSpecs(selectableSessionKeys: selectableSessionKeys)
+                .map { spec in
+                    UIKeyCommand(
+                        input: spec.input,
+                        modifierFlags: spec.modifierFlags,
+                        action: #selector(handleShortcut)
+                    )
+                }
+        }
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            DispatchQueue.main.async { [weak self] in
+                self?.becomeFirstResponder()
+            }
+        }
+
+        func refreshKeyCommandsIfNeeded() {
+            let nextSignature = StreamSelectorShortcutKeyCommands
+                .keyCommandSpecs(selectableSessionKeys: selectableSessionKeys)
+                .map { "\($0.input)|\($0.modifierFlags.rawValue)|\($0.intent)" }
+            guard nextSignature != keyCommandSignature else { return }
+            keyCommandSignature = nextSignature
+            reloadInputViews()
+        }
+
+        @objc private func handleShortcut(_ sender: UIKeyCommand) {
+            guard let input = sender.input,
+                  let intent = KeyboardCommandBridge.intent(input: input, modifierFlags: sender.modifierFlags),
+                  case .notificationAssignedOpen(let slot) = intent,
+                  StreamSelectorShortcutMap.sessionKey(
+                    forSlot: slot,
+                    selectableSessionKeys: selectableSessionKeys
+                  ) != nil else {
+                return
+            }
+            NotificationCenter.default.post(name: .clawlineKeyboardCommandIntent, object: intent)
+        }
     }
 }
 

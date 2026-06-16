@@ -311,6 +311,36 @@ struct KeyboardCommandRouterTests {
         )
     }
 
+    @Test("T1210 visible popup key command bridge exposes selector Cmd-number slots")
+    func visiblePopupKeyCommandBridgeExposesSelectorCommandNumberSlots() {
+        let specs = StreamSelectorShortcutKeyCommands.keyCommandSpecs(
+            selectableSessionKeys: ["s_first", "s_second", "s_third"]
+        )
+
+        #expect(specs.map(\.input) == ["1", "2", "3"])
+        #expect(specs.allSatisfy { $0.modifierFlags == .command })
+        #expect(specs.map(\.intent) == [
+            .notificationAssignedOpen(1),
+            .notificationAssignedOpen(2),
+            .notificationAssignedOpen(3),
+        ])
+        #expect(
+            KeyboardCommandBridge.intent(input: specs[0].input, modifierFlags: specs[0].modifierFlags)
+            == .notificationAssignedOpen(1)
+        )
+    }
+
+    @Test("T1210 visible popup shortcut hints render command symbol")
+    func visiblePopupShortcutHintsRenderCommandSymbol() {
+        #expect(StreamSelectorShortcutMap.shortcutLabel(forSlot: 1) == "⌘-1")
+        #expect(StreamSelectorShortcutMap.shortcutLabel(forSlot: 0) == "⌘-0")
+        #expect(
+            StreamSelectorShortcutMap.accessibilityLabel(
+                forShortcutLabel: StreamSelectorShortcutMap.shortcutLabel(forSlot: 2)
+            ) == "Command 2"
+        )
+    }
+
     @Test("T343 VG-03 mention picker open close cannot poison notification scroll ownership")
     func mentionPickerOpenCloseCannotPoisonNotificationScrollOwnership() {
         let openStore = KeyboardOwnershipSceneFactory.chatScene(

@@ -1,7 +1,7 @@
 # Watch iOS Support — Non-Obvious Details
 
-## Cartesia key storage doesn't exist yet in iOS — must be added as Phase 0 prerequisite
-The iOS app currently has NO storage for Cartesia API keys or Cartesia voice ID. The Watch credential sync assumes iOS holds these. `CartesiaKeyStore` (Keychain-backed with `@Observable`) must exist before credential sync can work. This is not obvious from the Watch spec alone.
+## Soniox and Cartesia key storage doesn't exist yet in iOS — must be added as Phase 0 prerequisite
+The iOS app currently has NO storage for Soniox API keys, Cartesia API keys, or Cartesia voice ID. The Watch credential sync assumes iOS holds these. `SonioxKeyStore` and `CartesiaKeyStore` (Keychain-backed with `@Observable`) must be created before credential sync can work. This is not obvious from the Watch spec alone.
 
 ## Phone relay is a transparent proxy — Watch sends the full WebSocket message, iOS forwards it
 The phone relay proxy is NOT an application-level message bridge. iOS acts as a transparent proxy: Watch sends a WebSocket message via WCSession, iOS forwards it as-is to its existing `ProviderChatService` WebSocket, and reverses responses. The protocol on the relay path is identical to the direct path. iOS does not parse or transform the content.

@@ -8121,7 +8121,7 @@ struct CrossChatNotificationBubbleView: View {
                 .frame(maxHeight: contentMaxHeight, alignment: .top)
                 .contentShape(Rectangle())
                 .simultaneousGesture(
-                    TapGesture().onEnded(onNavigate)
+                    TapGesture().onEnded(handleNotificationBodyTap)
                 )
                 .gesture(
                     notificationSurfaceDragShield,
@@ -8236,7 +8236,7 @@ struct CrossChatNotificationBubbleView: View {
             publishTextSelectionState()
         }
         .contentShape(RoundedRectangle(cornerRadius: bubbleCornerRadius, style: .continuous))
-        .onTapGesture(perform: onNavigate)
+        .onTapGesture(perform: handleNotificationBodyTap)
         .background(alignment: .leading) {
             Rectangle()
                 .fill(notificationAccentColor.opacity(notificationAccentOpacity))
@@ -8345,6 +8345,7 @@ struct CrossChatNotificationBubbleView: View {
                 attributedString: attributed,
                 alignment: .left,
                 colorScheme: colorScheme,
+                selectionResetToken: contentSelectionResetToken,
                 onSelectionChange: { isSelectionActive in
                     setContentSelectionActive(isSelectionActive, selectionKey: selectionKey)
                 },

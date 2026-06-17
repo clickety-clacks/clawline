@@ -3610,6 +3610,10 @@ final class ChatViewModel: ChatViewModelHosting {
             }
         case "accepted", "queued":
             markMessageAcceptedForDelivery(messageId: messageId, reason: "promptTurnState")
+            guard shouldRecordPromptTurnWaiting(
+                sessionKey: event.payload.sessionKey,
+                messageId: messageId
+            ) else { return }
             recordLiveProgress(
                 sessionKey: event.payload.sessionKey,
                 runId: nil,
@@ -3621,18 +3625,19 @@ final class ChatViewModel: ChatViewModelHosting {
             )
         case "running":
             markMessageAcceptedForDelivery(messageId: messageId, reason: "promptTurnState")
-            let normalizedSessionKey = event.payload.sessionKey.trimmingCharacters(in: .whitespacesAndNewlines)
-            if liveProgressBySessionKey[normalizedSessionKey]?.messageId != messageId {
-                recordLiveProgress(
-                    sessionKey: event.payload.sessionKey,
-                    runId: nil,
-                    messageId: messageId,
-                    seq: nil,
-                    stage: .acceptedWaiting,
-                    summary: "Waiting to start",
-                    isFailure: false
-                )
-            }
+            guard shouldRecordPromptTurnWaiting(
+                sessionKey: event.payload.sessionKey,
+                messageId: messageId
+            ) else { return }
+            recordLiveProgress(
+                sessionKey: event.payload.sessionKey,
+                runId: nil,
+                messageId: messageId,
+                seq: nil,
+                stage: .acceptedWaiting,
+                summary: "Waiting to start",
+                isFailure: false
+            )
         default:
             return
         }
@@ -3677,7 +3682,7 @@ final class ChatViewModel: ChatViewModelHosting {
         let isFailure = isFailureAgentProgressState(state)
         let summary = progressSummary(from: event, isFailure: isFailure)
         guard !summary.isEmpty else { return }
-        let stage = progressStage(from: event, isFailure: isFailure)
+        guard let stage = progressStage(from: event, isFailure: isFailure) else { return }
 
         recordLiveProgress(
             sessionKey: sessionKey,
@@ -3786,6 +3791,16 @@ final class ChatViewModel: ChatViewModelHosting {
         return incomingSeq < currentSeq
     }
 
+    private func shouldRecordPromptTurnWaiting(sessionKey: String, messageId: String) -> Bool {
+        let normalizedSessionKey = sessionKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedSessionKey.isEmpty else { return false }
+        guard let current = liveProgressBySessionKey[normalizedSessionKey] else { return true }
+        if let currentMessageId = current.messageId, currentMessageId != messageId {
+            return false
+        }
+        return current.runId == nil && current.seq == nil
+    }
+
     private func progressSummary(from event: AgentProgressEvent, isFailure: Bool) -> String {
         let candidates = [
             event.event?.progressText,
@@ -3810,7 +3825,7 @@ final class ChatViewModel: ChatViewModelHosting {
             ?? ""
     }
 
-    private func progressStage(from event: AgentProgressEvent, isFailure: Bool) -> PromptProcessingStage {
+    private func progressStage(from event: AgentProgressEvent, isFailure: Bool) -> PromptProcessingStage? {
         if isFailure {
             return .failed
         }
@@ -3838,7 +3853,7 @@ final class ChatViewModel: ChatViewModelHosting {
         if ["tool", "item", "plan", "command-output", "patch", "compaction"].contains(kind) {
             return .toolActivity
         }
-        return .toolActivity
+        return nil
     }
 
     private func normalizedAgentProgressText(_ value: String?) -> String? {

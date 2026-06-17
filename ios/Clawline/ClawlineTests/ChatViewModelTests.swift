@@ -846,12 +846,9 @@ struct ChatViewModelTests {
                 )
             )
         )
-        for _ in 0..<50 {
-            if viewModel.liveProgress(for: personalSessionKey)?.stage == .acceptedWaiting { break }
-            try await Task.sleep(forDuration: .milliseconds(20))
-        }
-        #expect(viewModel.liveProgress(for: personalSessionKey)?.stage == .acceptedWaiting)
-        #expect(viewModel.liveProgressSummary(for: personalSessionKey) == "Accepted by provider")
+        try await Task.sleep(forDuration: .milliseconds(20))
+        #expect(viewModel.liveProgress(for: personalSessionKey)?.stage == .toolActivity)
+        #expect(viewModel.liveProgressSummary(for: personalSessionKey) == "Reading files")
 
         chatService.emitServiceEvent(
             .agentProgress(
@@ -918,7 +915,15 @@ struct ChatViewModelTests {
                     messageId: "c_1",
                     seq: 5,
                     state: "running",
-                    summary: "Running command"
+                    event: AgentProgressItem(
+                        kind: "command-output",
+                        phase: "start",
+                        status: "running",
+                        title: "Running command",
+                        name: "exec",
+                        summary: nil,
+                        progressText: nil
+                    )
                 )
             )
         )
@@ -937,6 +942,23 @@ struct ChatViewModelTests {
                     runId: "run_1",
                     messageId: "c_1",
                     seq: 6,
+                    state: "running",
+                    summary: "Unsupported generic progress"
+                )
+            )
+        )
+        try await Task.sleep(forDuration: .milliseconds(20))
+        #expect(viewModel.liveProgress(for: personalSessionKey)?.stage == .toolActivity)
+        #expect(viewModel.liveProgressSummary(for: personalSessionKey) == "Running command")
+
+        chatService.emitServiceEvent(
+            .agentProgress(
+                AgentProgressEvent(
+                    version: 1,
+                    sessionKey: personalSessionKey,
+                    runId: "run_1",
+                    messageId: "c_1",
+                    seq: 7,
                     state: "running",
                     event: AgentProgressItem(
                         kind: "stage",
@@ -964,13 +986,16 @@ struct ChatViewModelTests {
                     sessionKey: personalSessionKey,
                     runId: "run_1",
                     messageId: "c_1",
-                    seq: 7,
+                    seq: 8,
                     state: "done"
                 )
             )
         )
-        try await Task.sleep(forDuration: .milliseconds(20))
-        #expect(viewModel.liveProgressSummary(for: personalSessionKey) == "Running command")
+        for _ in 0..<50 {
+            if viewModel.liveProgress(for: personalSessionKey) == nil { break }
+            try await Task.sleep(forDuration: .milliseconds(20))
+        }
+        #expect(viewModel.liveProgress(for: personalSessionKey) == nil)
 
         chatService.emit(
             Message(
@@ -989,6 +1014,57 @@ struct ChatViewModelTests {
             if viewModel.liveProgress(for: personalSessionKey) == nil { break }
             try await Task.sleep(forDuration: .milliseconds(20))
         }
+        #expect(viewModel.liveProgress(for: personalSessionKey) == nil)
+    }
+
+    @Test("Prompt stage indicator is scoped to the selected stream")
+    @MainActor
+    func promptStageIndicatorIsScopedToSelectedStream() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let chatService = TestChatService()
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.onDisappear() }
+
+        await viewModel.onAppear()
+        let otherSessionKey = "agent:main:clawline:user:s_other_progress"
+        chatService.emitServiceEvent(
+            .agentProgress(
+                AgentProgressEvent(
+                    version: 1,
+                    sessionKey: otherSessionKey,
+                    runId: "run_other",
+                    messageId: "c_other",
+                    seq: 1,
+                    state: "running",
+                    event: AgentProgressItem(
+                        kind: "stage",
+                        phase: "pre_model",
+                        status: "running",
+                        title: "Preparing prompt",
+                        name: nil,
+                        summary: nil,
+                        progressText: nil
+                    )
+                )
+            )
+        )
+        for _ in 0..<50 {
+            if viewModel.shouldShowPromptStageIndicator(in: otherSessionKey) { break }
+            try await Task.sleep(forDuration: .milliseconds(20))
+        }
+
+        #expect(viewModel.shouldShowPromptStageIndicator(in: otherSessionKey))
+        #expect(!viewModel.shouldShowPromptStageIndicator(in: personalSessionKey))
         #expect(viewModel.liveProgress(for: personalSessionKey) == nil)
     }
 
@@ -1677,6 +1753,7 @@ struct ChatViewModelTests {
         #expect(viewModel.sendIndicatorState(for: messageId) == nil)
         #expect(viewModel.liveProgress(for: personalSessionKey)?.stage == .acceptedWaiting)
         #expect(viewModel.liveProgressSummary(for: personalSessionKey) == "Accepted by provider")
+        #expect(viewModel.shouldShowPromptStageIndicator(in: personalSessionKey))
     }
 
     @Test("Canceled prompt remains visible as terminal ghost and does not send")

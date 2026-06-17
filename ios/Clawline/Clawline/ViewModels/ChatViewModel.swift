@@ -40,6 +40,16 @@ enum MessageSendIndicatorState: Equatable, Hashable {
     case failed(String)
 }
 
+enum PromptProcessingStage: String, Equatable {
+    case acceptedWaiting = "accepted_waiting"
+    case preModel = "pre_model"
+    case modelActive = "model_active"
+    case toolActivity = "tool_activity"
+    case completionHandoff = "completion_handoff"
+    case blocked
+    case failed
+}
+
 protocol ChatViewModelHosting: AnyObject {
     func handleSceneDidBecomeActive()
 }
@@ -49,6 +59,7 @@ struct LiveAgentProgress: Equatable {
     let runId: String?
     let messageId: String?
     let seq: Int?
+    let stage: PromptProcessingStage
     let summary: String
     let isFailure: Bool
 }
@@ -3422,6 +3433,13 @@ final class ChatViewModel: ChatViewModelHosting {
         liveProgress(for: sessionKey)?.summary
     }
 
+    func shouldShowPromptStageIndicator(in sessionKey: String) -> Bool {
+        let normalizedSessionKey = sessionKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedSessionKey.isEmpty else { return false }
+        return liveProgressBySessionKey[normalizedSessionKey] != nil ||
+            shouldShowTypingIndicator(in: normalizedSessionKey)
+    }
+
     func sendIndicatorState(for messageId: String) -> MessageSendIndicatorState? {
         if let failure = failureMessage(for: messageId) {
             return .failed(failure)
@@ -3471,21 +3489,7 @@ final class ChatViewModel: ChatViewModelHosting {
             }
             isSending = false
         case .messageAcked(let messageId):
-            if let sessionKey = localMessageSessionKey(for: messageId) {
-                scheduleSessionStatusRefresh(for: sessionKey, reason: "messageAcked")
-            }
-            ackedPendingLocalMessageIDs.insert(messageId)
-            messageFailures.removeValue(forKey: messageId)
-            if let replySourceChatId = crossChatNotificationReplySourceByClientMessageId.removeValue(forKey: messageId) {
-                dismissCrossChatNotification(sourceChatId: replySourceChatId)
-            }
-            bumpSendIndicatorRevision()
-            if activeClientMessageId == messageId {
-                activeClientMessageId = nil
-                activeCrossChatNotificationReplySourceChatId = nil
-                activeSendHasReachedTransport = false
-                isSending = false
-            }
+            markMessageAcceptedForDelivery(messageId: messageId, reason: "messageAcked")
         case .agentProgress(let progress):
             handleAgentProgress(progress)
         case .promptTurnState(let event):
@@ -3597,14 +3601,58 @@ final class ChatViewModel: ChatViewModelHosting {
                 pendingLocalMessages.remove(at: pendingIndex)
             }
             ackedPendingLocalMessageIDs.remove(messageId)
+            clearLiveProgress(messageId: messageId)
             if state == "canceled" {
                 markLocalMessageCanceled(id: messageId)
             } else {
                 messageFailures.removeValue(forKey: messageId)
                 bumpSendIndicatorRevision()
             }
+        case "accepted", "queued":
+            markMessageAcceptedForDelivery(messageId: messageId, reason: "promptTurnState")
+            recordLiveProgress(
+                sessionKey: event.payload.sessionKey,
+                runId: nil,
+                messageId: messageId,
+                seq: nil,
+                stage: .acceptedWaiting,
+                summary: state == "queued" ? "Waiting to start" : "Accepted by provider",
+                isFailure: false
+            )
+        case "running":
+            markMessageAcceptedForDelivery(messageId: messageId, reason: "promptTurnState")
+            let normalizedSessionKey = event.payload.sessionKey.trimmingCharacters(in: .whitespacesAndNewlines)
+            if liveProgressBySessionKey[normalizedSessionKey]?.messageId != messageId {
+                recordLiveProgress(
+                    sessionKey: event.payload.sessionKey,
+                    runId: nil,
+                    messageId: messageId,
+                    seq: nil,
+                    stage: .acceptedWaiting,
+                    summary: "Waiting to start",
+                    isFailure: false
+                )
+            }
         default:
             return
+        }
+    }
+
+    private func markMessageAcceptedForDelivery(messageId: String, reason: String) {
+        if let sessionKey = localMessageSessionKey(for: messageId) {
+            scheduleSessionStatusRefresh(for: sessionKey, reason: reason)
+        }
+        ackedPendingLocalMessageIDs.insert(messageId)
+        messageFailures.removeValue(forKey: messageId)
+        if let replySourceChatId = crossChatNotificationReplySourceByClientMessageId.removeValue(forKey: messageId) {
+            dismissCrossChatNotification(sourceChatId: replySourceChatId)
+        }
+        bumpSendIndicatorRevision()
+        if activeClientMessageId == messageId {
+            activeClientMessageId = nil
+            activeCrossChatNotificationReplySourceChatId = nil
+            activeSendHasReachedTransport = false
+            isSending = false
         }
     }
 
@@ -3629,16 +3677,41 @@ final class ChatViewModel: ChatViewModelHosting {
         let isFailure = isFailureAgentProgressState(state)
         let summary = progressSummary(from: event, isFailure: isFailure)
         guard !summary.isEmpty else { return }
+        let stage = progressStage(from: event, isFailure: isFailure)
 
-        let progress = LiveAgentProgress(
+        recordLiveProgress(
             sessionKey: sessionKey,
             runId: normalizedAgentProgressText(event.runId),
             messageId: normalizedAgentProgressText(event.messageId),
             seq: event.seq,
+            stage: stage,
             summary: summary,
             isFailure: isFailure
         )
-        liveProgressBySessionKey[sessionKey] = progress
+    }
+
+    private func recordLiveProgress(sessionKey: String,
+                                    runId: String?,
+                                    messageId: String?,
+                                    seq: Int?,
+                                    stage: PromptProcessingStage,
+                                    summary: String,
+                                    isFailure: Bool) {
+        let normalizedSessionKey = sessionKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedSessionKey.isEmpty else { return }
+        let normalizedSummary = summary.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedSummary.isEmpty else { return }
+        let progress = LiveAgentProgress(
+            sessionKey: normalizedSessionKey,
+            runId: normalizedAgentProgressText(runId),
+            messageId: normalizedAgentProgressText(messageId),
+            seq: seq,
+            stage: stage,
+            summary: normalizedSummary,
+            isFailure: isFailure
+        )
+        ensureStreamEntry(for: normalizedSessionKey)
+        liveProgressBySessionKey[normalizedSessionKey] = progress
         scheduleLiveProgressStaleTimeout(for: progress)
     }
 
@@ -3735,6 +3808,37 @@ final class ChatViewModel: ChatViewModelHosting {
         return normalizedAgentProgressText(event.event?.kind)
             ?? normalizedAgentProgressText(event.state)
             ?? ""
+    }
+
+    private func progressStage(from event: AgentProgressEvent, isFailure: Bool) -> PromptProcessingStage {
+        if isFailure {
+            return .failed
+        }
+        let kind = normalizedAgentProgressText(event.event?.kind)?.lowercased()
+        let phase = normalizedAgentProgressText(event.event?.phase)?.lowercased()
+        let status = normalizedAgentProgressText(event.event?.status)?.lowercased()
+        if status == "blocked" || kind == "blocked" || kind == "approval" {
+            return .blocked
+        }
+        if kind == "stage" {
+            switch phase {
+            case "accepted_waiting":
+                return .acceptedWaiting
+            case "pre_model":
+                return .preModel
+            case "completion_handoff":
+                return .completionHandoff
+            default:
+                break
+            }
+        }
+        if kind == "model" {
+            return .modelActive
+        }
+        if ["tool", "item", "plan", "command-output", "patch", "compaction"].contains(kind) {
+            return .toolActivity
+        }
+        return .toolActivity
     }
 
     private func normalizedAgentProgressText(_ value: String?) -> String? {

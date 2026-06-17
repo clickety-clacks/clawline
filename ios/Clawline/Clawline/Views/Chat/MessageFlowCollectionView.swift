@@ -441,6 +441,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         var pendingScrollToBottomWorkItem: DispatchWorkItem?
 
         var wasShowingTypingIndicator: Bool = false
+        var liveProgress: LiveAgentProgress?
         var morphTargetMessageId: String?
         var deferScrollToBottomUntilMorphCompletes = false
 
@@ -482,6 +483,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     private var keepsKeyboardPinned: Bool = false
     private var isTypingActive: Bool = false
     private var sessionStatus: SessionStatus?
+    private var liveProgress: LiveAgentProgress?
     private var topInset: CGFloat = 0
     private var truncationBottomInset: CGFloat = 0
     private var trailingContentInset: CGFloat = 0
@@ -2365,9 +2367,11 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         loadViewIfNeeded()
         let previousLastMessageId = lastMessageId
         let previousSessionStatus = self.sessionStatus
+        let previousLiveProgress = self.liveProgress
         let wasUserInteracting = isUserInteracting
         let wasPinnedToBottomIntent = sbbState.isPinnedToBottomIntent
         let previousSessionKey = channelOverride
+        let nextLiveProgress = viewModel.liveProgress(for: effectiveSessionKey)
         self.viewModel = viewModel
         channelOverride = sessionKey
         self.isActiveSession = isActiveSession
@@ -2376,6 +2380,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         self.keepsKeyboardPinned = keepsKeyboardPinned
         self.isTypingActive = isTypingActive
         self.sessionStatus = sessionStatus
+        self.liveProgress = nextLiveProgress
         self.currentSendIndicatorRevision = request.sendIndicatorRevision
         self.onExpand = onExpand
         self.truncationBottomInset = truncationBottomInset
@@ -2528,7 +2533,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         // Add typing indicator when assistant is typing (server-controlled)
         // Only show on the matching channel page (for paged TabView)
         let wasShowingTypingIndicatorBeforeUpdate = wasShowingTypingIndicator
-        let showTypingIndicator = viewModel.shouldShowTypingIndicator(in: effectiveSessionKey)
+        let showTypingIndicator = viewModel.shouldShowPromptStageIndicator(in: effectiveSessionKey)
         let typingIndicatorJustAppeared = showTypingIndicator && !wasShowingTypingIndicatorBeforeUpdate
         if showTypingIndicator != wasShowingTypingIndicator {
             let wasShowingTypingIndicator = wasShowingTypingIndicator
@@ -2588,6 +2593,12 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
            oldItemIds.contains(SessionMetadataFooterCell.itemId)
         {
             snapshot.reconfigureItems([SessionMetadataFooterCell.itemId])
+        }
+        if previousLiveProgress != nextLiveProgress,
+           snapshot.indexOfItem(TypingIndicatorCell.itemId) != nil,
+           oldItemIds.contains(TypingIndicatorCell.itemId)
+        {
+            snapshot.reconfigureItems([TypingIndicatorCell.itemId])
         }
         forceReconfigureAll = false
 
@@ -3857,7 +3868,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                     for: indexPath
                 ) as? TypingIndicatorCell
                 let metrics = ChatFlowTheme.Metrics(isCompact: self.isCompact)
-                let storageKey = viewModel.typingSessionKey ?? viewModel.engineActiveSessionKey
+                let storageKey = self.liveProgress?.sessionKey ?? viewModel.typingSessionKey ?? self.channelOverride ?? viewModel.engineActiveSessionKey
                 let message = TypingIndicatorCell.makeMessage(sessionKey: storageKey)
                 let presentation = TypingIndicatorCell.makePresentation(metrics: metrics)
                 let sizeClass = MessageFlowRules.sizeClass(for: presentation)
@@ -3875,6 +3886,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                     isCompact: self.isCompact,
                     maxWidth: maxWidth,
                     isDark: self.currentIsDark,
+                    progressSummary: self.liveProgress?.summary,
                     onTap: { [weak self, weak cell] in
                         guard let self else { return }
                         let anchorFrame = cell?.renderedBubbleFrame(in: nil) ?? .null
@@ -4393,7 +4405,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
 
         // Handle typing indicator size
         if id == TypingIndicatorCell.itemId {
-            let storageKey = viewModel.typingSessionKey ?? viewModel.engineActiveSessionKey
+            let storageKey = liveProgress?.sessionKey ?? viewModel.typingSessionKey ?? channelOverride ?? viewModel.engineActiveSessionKey
             let message = TypingIndicatorCell.makeMessage(sessionKey: storageKey)
             let presentation = TypingIndicatorCell.makePresentation(metrics: metrics)
             let sizeClass = MessageFlowRules.sizeClass(for: presentation)
@@ -5756,7 +5768,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         snapshot.deleteAllItems()
         snapshot.appendSections([0])
         snapshot.appendItems(desiredItemIds)
-        if viewModel.shouldShowTypingIndicator(in: effectiveSessionKey) {
+        if viewModel.shouldShowPromptStageIndicator(in: effectiveSessionKey) {
             snapshot.appendItems([TypingIndicatorCell.itemId])
         }
         if SessionMetadataFooterCell.shouldAppendFooter(after: desiredItemIds, status: sessionStatus) {

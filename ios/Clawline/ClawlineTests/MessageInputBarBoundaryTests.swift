@@ -444,13 +444,13 @@ struct MessageInputBarBoundaryTests {
         #expect(stackWidth == CGFloat(562.5))
     }
 
-    @Test("T1185 Spatial single notification occupies resolved stack width")
-    func spatialSingleNotificationOccupiesResolvedStackWidth() {
+    @Test("T1185 Spatial single notification shares stacked width behavior")
+    func spatialSingleNotificationSharesStackedWidthBehavior() {
         #expect(CrossChatNotificationGeometry.bubbleFrameWidth(
             maxBubbleWidth: 562.5,
             visibleNotificationCount: 1,
             isSpatial: true
-        ) == CGFloat(562.5))
+        ) == nil)
         #expect(CrossChatNotificationGeometry.bubbleFrameWidth(
             maxBubbleWidth: 562.5,
             visibleNotificationCount: 2,
@@ -483,6 +483,120 @@ struct MessageInputBarBoundaryTests {
             bubbleSpacing: 10,
             maxVisibleBubbleCount: 10
         ) == 2)
+    }
+
+    @Test("T1185 reply ordering uses measured notification capacity")
+    func replyOrderingUsesMeasuredNotificationCapacity() throws {
+        let chatViewPath = URL(filePath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appending(path: "Clawline/Views/Chat/ChatView.swift")
+        let source = try String(contentsOf: chatViewPath, encoding: .utf8)
+
+        #expect(source.contains("visibleCapacity: Self.visibleCapacity(\n                maxContainerHeight: maxContainerHeight,\n                bubbles: viewModel.crossChatNotificationBubbles,\n                measuredHeightsBySourceChatId: measuredBubbleHeightsBySourceChatId"))
+        #expect(!source.contains("visibleCapacity: Self.visibleCapacity(maxContainerHeight: maxContainerHeight)"))
+    }
+
+    @Test("T1185 simulator render proof artifacts")
+    @MainActor
+    func simulatorRenderProofArtifacts() throws {
+        let proofDirectory = try t1185ProofDirectory()
+        let maxBubbleWidth = CGFloat(562.5)
+        let singleWidth = CrossChatNotificationGeometry.bubbleFrameWidth(
+            maxBubbleWidth: maxBubbleWidth,
+            visibleNotificationCount: 1,
+            isSpatial: true
+        )
+        #expect(singleWidth == nil)
+
+        let measuredCapacity = CrossChatNotificationGeometry.visibleCapacity(
+            maxContainerHeight: 330,
+            bubbleHeights: [160, 160, 160],
+            bubbleSpacing: 10,
+            maxVisibleBubbleCount: 10
+        )
+        #expect(measuredCapacity == 2)
+
+        let singleImage = renderT1185ProofImage(
+            T1185ProofBackdrop {
+                t1185NotificationBubble(
+                    id: "t1185-single",
+                    title: "Flynn Spatial",
+                    content: "Single Spatial notification containment proof: this card should sit inside the host with rounded standard visionOS glass.",
+                    assignedNumber: 1,
+                    visibleNotificationCount: 1,
+                    maxBubbleWidth: maxBubbleWidth,
+                    maxBubbleHeight: 220
+                )
+            },
+            size: CGSize(width: 720, height: 300)
+        )
+        try writeT1185ProofImage(singleImage, name: "t1185-single-containment-glass.png", directory: proofDirectory)
+
+        let stackedImage = renderT1185ProofImage(
+            T1185ProofBackdrop {
+                VStack(alignment: .trailing, spacing: 10) {
+                    t1185NotificationBubble(
+                        id: "t1185-stack-1",
+                        title: "Spatial Stack A",
+                        content: "First stacked notification remains on the shared card geometry.",
+                        assignedNumber: 1,
+                        visibleNotificationCount: 2,
+                        maxBubbleWidth: maxBubbleWidth,
+                        maxBubbleHeight: 180
+                    )
+                    t1185NotificationBubble(
+                        id: "t1185-stack-2",
+                        title: "Spatial Stack B",
+                        content: "Second stacked notification preserves spacing, width, and glass treatment.",
+                        assignedNumber: 2,
+                        visibleNotificationCount: 2,
+                        maxBubbleWidth: maxBubbleWidth,
+                        maxBubbleHeight: 180
+                    )
+                }
+            },
+            size: CGSize(width: 720, height: 430)
+        )
+        try writeT1185ProofImage(stackedImage, name: "t1185-stacked-preservation-glass.png", directory: proofDirectory)
+
+        let capacityImage = renderT1185ProofImage(
+            T1185ProofBackdrop {
+                VStack(alignment: .trailing, spacing: 10) {
+                    ForEach(0..<measuredCapacity, id: \.self) { index in
+                        t1185NotificationBubble(
+                            id: "t1185-capacity-\(index)",
+                            title: "Measured Capacity \(index + 1)",
+                            content: "Measured height capacity proof renders only the two cards that fit inside the 330 point capacity budget.",
+                            assignedNumber: index + 1,
+                            visibleNotificationCount: measuredCapacity,
+                            maxBubbleWidth: maxBubbleWidth,
+                            maxBubbleHeight: 160
+                        )
+                    }
+                }
+            },
+            size: CGSize(width: 720, height: 430)
+        )
+        try writeT1185ProofImage(capacityImage, name: "t1185-measured-capacity-two-visible-glass.png", directory: proofDirectory)
+
+        let metadata = """
+        {
+          "ticket": "T1185",
+          "singleSpatialBubbleFrameWidth": "\(String(describing: singleWidth))",
+          "measuredCapacityForThree160PointBubblesIn330PointContainer": \(measuredCapacity),
+          "artifacts": [
+            "t1185-single-containment-glass.png",
+            "t1185-stacked-preservation-glass.png",
+            "t1185-measured-capacity-two-visible-glass.png"
+          ]
+        }
+        """
+        try metadata.write(
+            to: proofDirectory.appendingPathComponent("t1185-render-proof-metadata.json"),
+            atomically: true,
+            encoding: .utf8
+        )
     }
 
     @Test("T354 notification layout host height excludes motion overflow")
@@ -848,4 +962,124 @@ struct MessageInputBarBoundaryTests {
             trailingSafeAreaInset: 0
         ) == stackWidth - peekWidth)
     }
+}
+
+private struct T1185ProofBackdrop<Content: View>: View {
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            checkerboard
+            content
+                .padding(.top, 28)
+                .padding(.trailing, 48)
+        }
+    }
+
+    private var checkerboard: some View {
+        Canvas { context, size in
+            let cell = CGFloat(36)
+            for row in 0..<Int(ceil(size.height / cell)) {
+                for column in 0..<Int(ceil(size.width / cell)) {
+                    let isAlternate = (row + column).isMultiple(of: 2)
+                    let color = isAlternate
+                        ? Color(red: 0.12, green: 0.20, blue: 0.34)
+                        : Color(red: 0.82, green: 0.88, blue: 0.95)
+                    context.fill(
+                        Path(CGRect(x: CGFloat(column) * cell, y: CGFloat(row) * cell, width: cell, height: cell)),
+                        with: .color(color)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@MainActor
+private func t1185NotificationBubble(
+    id: String,
+    title: String,
+    content: String,
+    assignedNumber: Int,
+    visibleNotificationCount: Int,
+    maxBubbleWidth: CGFloat,
+    maxBubbleHeight: CGFloat
+) -> some View {
+    CrossChatNotificationBubbleView(
+        bubble: CrossChatNotificationBubble(
+            sourceChatId: id,
+            sourceTitle: title,
+            entries: [
+                CrossChatAssistantNotificationEntry(
+                    id: "\(id)-entry",
+                    content: content,
+                    timestamp: Date()
+                )
+            ],
+            lastAssistantActivityAt: Date()
+        ),
+        assignedNumber: assignedNumber,
+        visibleNotificationCount: visibleNotificationCount,
+        showShortcutLabel: true,
+        isShortcutLabelDisabled: false,
+        maxBubbleHeight: maxBubbleHeight,
+        maxBubbleWidth: maxBubbleWidth,
+        bubbleCornerRadius: 18,
+        isSending: false,
+        canCancelSend: false,
+        canSendReply: false,
+        connectionState: .connected,
+        replyDraft: .constant(""),
+        onDismiss: {},
+        onReply: {},
+        onCancelReply: {},
+        onDismissAll: {},
+        onNavigate: {},
+        onSendReply: {},
+        onCancelSend: {},
+        onReconnect: {},
+        onActivate: {},
+        onReplyFocusChange: { _ in },
+        isActionMenuOpen: false,
+        actionMenuSelection: .goToChat,
+        onActionMenuSelectionChange: { _ in },
+        onActionMenuAction: { _ in },
+        onRegisterScrollView: { _ in },
+        isDismissSwipeActive: false,
+        isContentScrollLocked: false,
+        onContentScrollDragChanged: { _ in },
+        onContentScrollDragEnded: {},
+        onTextSelectionChange: { _ in }
+    )
+}
+
+@MainActor
+private func renderT1185ProofImage<Content: View>(_ view: Content, size: CGSize) -> UIImage {
+    let host = UIHostingController(rootView: view.frame(width: size.width, height: size.height))
+    host.view.frame = CGRect(origin: .zero, size: size)
+    host.view.backgroundColor = .clear
+    host.view.setNeedsLayout()
+    host.view.layoutIfNeeded()
+
+    let renderer = UIGraphicsImageRenderer(size: size)
+    return renderer.image { _ in
+        host.view.drawHierarchy(in: host.view.bounds, afterScreenUpdates: true)
+    }
+}
+
+private func t1185ProofDirectory() throws -> URL {
+    let environment = ProcessInfo.processInfo.environment
+    let directoryPath = environment["T1185_RENDER_PROOF_DIR"]
+        ?? environment["TEST_RUNNER_T1185_RENDER_PROOF_DIR"]
+        ?? "scratch/t1185-render-proof"
+    let directory = URL(fileURLWithPath: directoryPath, isDirectory: true)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    return directory
+}
+
+private func writeT1185ProofImage(_ image: UIImage, name: String, directory: URL) throws {
+    let url = directory.appendingPathComponent(name)
+    let data = try #require(image.pngData())
+    try data.write(to: url, options: .atomic)
+    #expect(data.count > 1_000)
 }

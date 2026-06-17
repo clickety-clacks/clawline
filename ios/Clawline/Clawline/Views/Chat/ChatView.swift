@@ -6280,8 +6280,7 @@ enum CrossChatNotificationGeometry {
         visibleNotificationCount: Int,
         isSpatial: Bool
     ) -> CGFloat? {
-        guard isSpatial, visibleNotificationCount == 1 else { return nil }
-        return max(0, maxBubbleWidth)
+        nil
     }
 
     static func collapsedOffset(
@@ -6540,7 +6539,11 @@ private struct CrossChatNotificationOverlay: View {
         Self.applyReplyPins(
             to: viewModel.crossChatNotificationBubbles,
             replyPinSlotsBySourceChatId: replyPinSlotsBySourceChatId,
-            visibleCapacity: Self.visibleCapacity(maxContainerHeight: maxContainerHeight)
+            visibleCapacity: Self.visibleCapacity(
+                maxContainerHeight: maxContainerHeight,
+                bubbles: viewModel.crossChatNotificationBubbles,
+                measuredHeightsBySourceChatId: measuredBubbleHeightsBySourceChatId
+            )
         )
     }
 
@@ -7708,14 +7711,8 @@ private struct CrossChatNotificationBubbleHeightPreferenceKey: PreferenceKey {
 }
 
 enum CrossChatNotificationMaterialStyle {
-    static let backgroundOpacity = 0.95
-
     static func accentOpacity(isSpatial: Bool) -> Double {
         isSpatial ? 0.60 : 0.40
-    }
-
-    static func spatialTintOpacity(for colorScheme: ColorScheme) -> Double {
-        colorScheme == .dark ? 0.52 : 0.68
     }
 
     static func spatialBorderOpacity(for colorScheme: ColorScheme) -> Double {
@@ -7832,11 +7829,6 @@ struct CrossChatNotificationBubbleView: View {
 #else
         Color.primary.opacity(0.08)
 #endif
-    }
-
-    private var spatialNotificationTintColor: Color {
-        (colorScheme == .dark ? Color.black : Color.white)
-            .opacity(CrossChatNotificationMaterialStyle.spatialTintOpacity(for: colorScheme))
     }
 
     private var notificationDismissActiveColor: Color {
@@ -8200,13 +8192,9 @@ struct CrossChatNotificationBubbleView: View {
                 .allowsHitTesting(false)
         }
 #if os(visionOS)
-        .background {
-            let shape = RoundedRectangle(cornerRadius: bubbleCornerRadius, style: .continuous)
-            shape
-                .fill(spatialNotificationTintColor)
-                .background(.regularMaterial, in: shape)
-                .opacity(CrossChatNotificationMaterialStyle.backgroundOpacity)
-        }
+        .glassBackgroundEffect(
+            in: RoundedRectangle(cornerRadius: bubbleCornerRadius, style: .continuous)
+        )
 #else
         .glassEffect(.regular, in: RoundedRectangle(cornerRadius: bubbleCornerRadius, style: .continuous))
 #endif

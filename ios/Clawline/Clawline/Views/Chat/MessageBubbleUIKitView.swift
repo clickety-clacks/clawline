@@ -603,7 +603,8 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
     private var currentSizeClass: MessageSizeClass = .short
     private var explicitIsDarkOverride: Bool?
     private var currentContentPaddingHorizontal: CGFloat = 16
-    private var currentContentPaddingVertical: CGFloat = 14
+    private var currentContentPaddingTop: CGFloat = 14
+    private var currentContentPaddingBottom: CGFloat = 14
     private var currentEffectiveMaxWidth: CGFloat = 320
     private var contentLeadingConstraint: NSLayoutConstraint!
     private var contentTrailingConstraint: NSLayoutConstraint!
@@ -636,7 +637,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
     }
 
     override init(frame: CGRect) {
-        self.enableDataDetectors = false
+        self.enableDataDetectors = true
         super.init(frame: frame)
         configureViewHierarchy()
     }
@@ -858,6 +859,8 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         bodyTap.delaysTouchesEnded = false
         bodyTap.delegate = self
         bodyLabel.addGestureRecognizer(bodyTap)
+        let bodyHover = UIHoverGestureRecognizer(target: self, action: #selector(handleBodyHover(_:)))
+        bodyLabel.addGestureRecognizer(bodyHover)
 #if targetEnvironment(macCatalyst)
         bodyLabel.addInteraction(UIContextMenuInteraction(delegate: self))
 #endif
@@ -969,7 +972,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
     }
 
     private static func linkPreviewViewportMaxHeight(heightCap: CGFloat, metrics: ChatFlowTheme.Metrics) -> CGFloat {
-        let standardVerticalPadding = max(0, metrics.bubblePaddingVertical * 2)
+        let standardVerticalPadding = max(0, metrics.bubblePaddingTop + metrics.bubblePaddingBottom)
         return max(44, heightCap - standardVerticalPadding)
     }
 
@@ -1510,13 +1513,15 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
 
         // Flynn: terminal bubbles render without bubble chrome and without standard padding.
         let basePaddingHorizontal = (hasTerminalSessions || presentation.hasMediaOnly) ? 0 : metrics.bubblePaddingHorizontal
-        let basePaddingVertical = (hasTerminalSessions || presentation.hasMediaOnly) ? 0 : metrics.bubblePaddingVertical
+        let basePaddingTop = (hasTerminalSessions || presentation.hasMediaOnly) ? 0 : metrics.bubblePaddingTop
+        let basePaddingBottom = (hasTerminalSessions || presentation.hasMediaOnly) ? 0 : metrics.bubblePaddingBottom
         currentContentPaddingHorizontal = round(basePaddingHorizontal * contentPaddingScale)
-        currentContentPaddingVertical = round(basePaddingVertical * contentPaddingScale)
+        currentContentPaddingTop = round(basePaddingTop * contentPaddingScale)
+        currentContentPaddingBottom = round(basePaddingBottom * contentPaddingScale)
         contentLeadingConstraint.constant = currentContentPaddingHorizontal
         contentTrailingConstraint.constant = -currentContentPaddingHorizontal
-        contentTopConstraint.constant = currentContentPaddingVertical
-        contentBottomConstraint.constant = -currentContentPaddingVertical
+        contentTopConstraint.constant = currentContentPaddingTop
+        contentBottomConstraint.constant = -currentContentPaddingBottom
 
         let isSingleImageOnly: Bool = {
             guard presentation.hasMediaOnly, presentation.parts.count == 1 else { return false }
@@ -1537,7 +1542,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
             } else {
                 let headerHeight: CGFloat = showsHeader ? 32 : 0
                 let headerSpacing: CGFloat = showsHeader ? contentStack.spacing : 0
-                let padding = currentContentPaddingVertical * 2
+                let padding = currentContentPaddingTop + currentContentPaddingBottom
                 return max(120, effectiveTruncationHeight - (headerHeight + headerSpacing + padding))
             }
         }()
@@ -2023,6 +2028,19 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
             return
         }
         handleBubbleTap()
+    }
+
+    @objc private func handleBodyHover(_ recognizer: UIHoverGestureRecognizer) {
+        guard recognizer.state == .began || recognizer.state == .changed,
+              let generatedLink = Self.generatedTextLink(in: bodyLabel, at: recognizer.location(in: bodyLabel)),
+              generatedLink.displayMode == .popup else {
+            return
+        }
+        _ = GeneratedTextLinkActivationRouter.presentResolvedURLPopupAnchored(
+            generatedLink.url,
+            bodyLabel,
+            recognizer.location(in: bodyLabel)
+        )
     }
 
     @objc private func handleBubbleTap() {

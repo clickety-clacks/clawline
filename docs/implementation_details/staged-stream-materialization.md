@@ -1,7 +1,7 @@
 # Staged Stream Materialization — Non-Obvious Details
 
 ## Why staged apply — what the original design assumed
-Full-history apply kept chat semantics simple but produced 1.4–2.7s main-thread stalls on iPhone for 500-message streams. The original design assumed the cost was acceptable; measurements proved it blocks gesture recognition and dictation. Staged apply trades complexity for correctness under real device conditions.
+Full-history apply kept chat semantics simple but produced 1.4–2.7s main-thread stalls on iPhone for 500-message streams. The original design assumed the cost was acceptable; measurements proved it blocks gesture recognition. Staged apply trades complexity for correctness under real device conditions.
 
 ## Tail window size rationale: N=50, not 100
 Linear approximation: 500 items → 1.4–2.7s. 50 items → ~140–270ms. 100 items → ~280–540ms (still too visible for first paint). The choice of 50 is derived from measurement, not arbitrary. Changing this threshold should re-run the measurement.

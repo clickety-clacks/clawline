@@ -31,37 +31,6 @@ enum CrossChatShortcutLabelAvailability {
 }
 
 #if DEBUG
-private let keyboardDictationUITestLaunchArg = "--ui-test-keyboard-dictation"
-
-private final class UITestDictationAudioCapture: DictationAudioCapturing {
-    let frameStream: AsyncStream<Data> = AsyncStream { _ in }
-    let levelStream: AsyncStream<Float> = AsyncStream { _ in }
-    let eventStream: AsyncStream<DictationAudioCaptureEvent> = AsyncStream { _ in }
-
-    func start() throws {}
-    func stop() {}
-}
-
-private final class UITestSonioxStreamingClient: SonioxStreamingClienting {
-    let events: AsyncStream<SonioxStreamingEvent> = AsyncStream { _ in }
-
-    func connect(config: SonioxStreamingConfig) async throws {
-        let _ = config
-    }
-
-    func sendAudioFrame(_ frame: Data) async throws {
-        let _ = frame
-    }
-
-    func sendFinalize() async throws {}
-
-    func close(code: URLSessionWebSocketTask.CloseCode, reason: String?, caller: String) {
-        let _ = code
-        let _ = reason
-        let _ = caller
-    }
-}
-
 @MainActor
 private final class T099OnDisappearProbeStore {
     struct PendingActiveDisappear {
@@ -366,10 +335,6 @@ struct ChatView: View {
         return "T217-typing-cancel-\(build)"
     }
 
-    static func shouldCloseDictationForScenePhase(_ phase: ScenePhase) -> Bool {
-        phase == .background
-    }
-
     @Bindable var viewModel: ChatViewModel
     let toastManager: ToastManager
     @Environment(\.scenePhase) private var scenePhase
@@ -384,7 +349,7 @@ struct ChatView: View {
     @State private var keyboardAnimationDuration: TimeInterval = 0.3
     @State private var keyboardAnimationCurve: UIView.AnimationCurve = .easeInOut
     @State private var keyboardRefreshToken: Int = 0
-    @State private var messageListDismissModeSummary = "keyboardDismissMode=interactive;dictating=0"
+    @State private var messageListDismissModeSummary = "keyboardDismissMode=interactive;keyboardPinned=0"
     @State private var layoutCoordinator = ChatLayoutCoordinator()
     @State private var layoutRevision: Int = 0
     @State private var selectionRange = NSRange(location: 0, length: 0)
@@ -432,26 +397,6 @@ struct ChatView: View {
     init(viewModel: ChatViewModel, toastManager: ToastManager) {
         self._viewModel = Bindable(wrappedValue: viewModel)
         self.toastManager = toastManager
-#if DEBUG
-        let isKeyboardDictationUITestMode = ProcessInfo.processInfo.arguments.contains(keyboardDictationUITestLaunchArg)
-        let audioCaptureFactory: () -> any DictationAudioCapturing = isKeyboardDictationUITestMode
-            ? { UITestDictationAudioCapture() }
-            : { DictationAudioCapture() }
-        let streamingClientFactory: () -> any SonioxStreamingClienting = isKeyboardDictationUITestMode
-            ? { UITestSonioxStreamingClient() }
-            : { SonioxStreamingClient() }
-#else
-        let audioCaptureFactory: () -> any DictationAudioCapturing = { DictationAudioCapture() }
-        let streamingClientFactory: () -> any SonioxStreamingClienting = { SonioxStreamingClient() }
-#endif
-        let session = DictationCoordinator(
-            bridge: DictationTranscriptApplicator(host: viewModel),
-            keyStore: SonioxKeyStore(),
-            audioCaptureFactory: audioCaptureFactory,
-            streamingClientFactory: streamingClientFactory
-        )
-        _dictationCoordinator = State(initialValue: session)
-        _dictationMotion = State(initialValue: DictationMotion(session: session))
     }
 
     @Environment(\.colorScheme) private var colorScheme
@@ -460,8 +405,6 @@ struct ChatView: View {
 
     @State private var inputBarHeight: CGFloat = 0
     @State private var settledInputBarHeight: CGFloat = 0
-    @State private var dictationCoordinator: DictationCoordinator
-    @State private var dictationMotion: DictationMotion
     @State private var isTypingActive = false
     @State private var typingActivityResetTask: Task<Void, Never>?
     @State private var streamToastManager = StreamToastManager()
@@ -528,18 +471,6 @@ struct ChatView: View {
 
     private var isKeyboardVisible: Bool {
         keyboardHeight > 0.5
-    }
-
-    private var isKeyboardDictationUITestMode: Bool {
-#if DEBUG
-        ProcessInfo.processInfo.arguments.contains(keyboardDictationUITestLaunchArg)
-#else
-        false
-#endif
-    }
-
-    private var keyboardDictationStateSummary: String {
-        "focused=\(isInputFocused ? 1 : 0);keyboard=\(isKeyboardVisible ? 1 : 0);dictating=\(dictationCoordinator.isDictationActive ? 1 : 0)"
     }
 
     private var fontScaleChangeSequence: Int {
@@ -947,7 +878,8 @@ struct ChatView: View {
     private func floatingScrollButtonOverlay(
         viewModel: ChatViewModel,
         inputBarTopFromScreenBottom: CGFloat,
-        containerWidth: CGFloat
+        containerWidth: CGFloat,
+        activeSelectionPopupVisible: Bool
     ) -> some View {
 #if os(visionOS)
         if !activeSelectionPopupVisible {
@@ -1076,9 +1008,6 @@ struct ChatView: View {
         }
         .onChange(of: scenePhase) { _, phase in
             viewModel.handleSceneActiveStateChanged(isActive: phase == .active)
-            if Self.shouldCloseDictationForScenePhase(phase) {
-                dictationCoordinator.handleAppBackgrounded()
-            }
             guard phase == .active else { return }
             keyboardRefreshToken &+= 1
         }
@@ -1199,7 +1128,7 @@ struct ChatView: View {
         let resolvedInputHeight = runtimeInsetFallbackBarHeight(
             measuredInputBarHeight: inputBarHeight,
             settledInputBarHeight: settledInputBarHeight,
-            layoutFrozen: dictationMotion.shouldFreezeLayout
+            layoutFrozen: false
         )
         let keyboardVisibleHeight = max(0, keyboardHeight - geometry.safeAreaInsets.bottom)
         let isKeyboardVisible = keyboardVisibleHeight > 0.5
@@ -1219,7 +1148,7 @@ struct ChatView: View {
         // Keep the bar gap continuous through the final keyboard-dismiss frames.
         let belowBarGap = ChatLayoutCoordinator.inputBarBottomGap(
             keyboardVisibleHeight: keyboardVisibleHeight,
-            surfaceState: dictationCoordinator.isSurfaceOpen ? .open : .closed
+            surfaceState: .closed
         )
         let usesExternalKeyboardInsets: Bool = {
 #if os(visionOS)
@@ -1254,15 +1183,11 @@ struct ChatView: View {
         let cachedKeyboardHeight = max(layoutInputs.effectiveKeyboardInset, lastNonZeroKeyboardHeight)
         let isLandscape = geometry.size.width > geometry.size.height
 #if os(iOS) && !targetEnvironment(macCatalyst)
-        let nativeWindowSize = UIApplication.shared.connectedScenes
-            .compactMap { $0 as? UIWindowScene }
-            .first(where: { $0.activationState == .foregroundActive })?
-            .windows
-            .first(where: \.isKeyWindow)?
-            .bounds
-            .size
+        let nativeWindowSize = Self.nativeWindowSizeForLandscapeWidth()
+        let nativeWindowWidth = ChatLandscapeWidthGeometry.physicalWindowWidth(from: nativeWindowSize)
 #else
         let nativeWindowSize: CGSize? = nil
+        let nativeWindowWidth: CGFloat? = nil
 #endif
         let isNativeWindowLandscape = nativeWindowSize.map { $0.width > $0.height } ?? false
         let isCompactLandscape = isCompactLayout && (isLandscape || isNativeWindowLandscape)
@@ -1271,14 +1196,14 @@ struct ChatView: View {
             leadingSafeAreaInset: geometry.safeAreaInsets.leading,
             trailingSafeAreaInset: geometry.safeAreaInsets.trailing,
             isCompactLandscape: isCompactLandscape,
-            nativeWindowWidth: nativeWindowSize?.width
+            nativeWindowWidth: nativeWindowWidth
         )
         let chatSurfaceOffset = ChatLandscapeWidthGeometry.horizontalOffset(
             containerWidth: geometry.size.width,
             leadingSafeAreaInset: geometry.safeAreaInsets.leading,
             trailingSafeAreaInset: geometry.safeAreaInsets.trailing,
             isCompactLandscape: isCompactLandscape,
-            nativeWindowWidth: nativeWindowSize?.width
+            nativeWindowWidth: nativeWindowWidth
         )
         let estimatedKeyboardHeight: CGFloat = {
             if horizontalSizeClass == .regular {
@@ -1467,14 +1392,6 @@ struct ChatView: View {
                     focusedSourceChatId: $crossChatNotificationFocusedSourceChatId,
                     focusedReplySourceChatId: $crossChatNotificationFocusedReplySourceChatId,
                     keyboardOwnershipStore: keyboardOwnershipStore,
-                    dictationEmitter: dictationInteractionEmitter,
-                    onNotificationReplyDictationTargetChange: { sourceChatId, textView in
-                        reportNotificationReplyDictationTarget(
-                            sourceChatId: sourceChatId,
-                            textView: textView,
-                            viewModel: viewModel
-                        )
-                    },
                     disabledPlainNumberShortcutSlots: selectorOverriddenPlainNumberSlots
                 )
                 .offset(x: notificationOverlayHorizontalCorrection)
@@ -1589,14 +1506,12 @@ struct ChatView: View {
             layoutCoordinator.updateInputs(layoutInputs, metrics: layoutMetrics)
             layoutCoordinator.markInputsChanged()
             inputBarSendButtonConnectionState.value = sendButtonConnectionState
-            reportDictationObservations(viewModel: viewModel)
         }
         .onChange(of: sendButtonConnectionState) { _, newValue in
             inputBarSendButtonConnectionState.value = newValue
         }
         .onChange(of: viewModel.uiSelectionSequence) { _, _ in
             removeResolvedCrossChatMention(restoreFocus: false)
-            reportDictationObservations(viewModel: viewModel)
             guard let selectedSessionKey = viewModel.lastUISelectedSessionKey else { return }
             let streamDisplayName = viewModel.stream(for: selectedSessionKey)?.displayName ?? viewModel.activeSessionDisplayName
             let shouldShowBusy = selectedSessionKey != viewModel.engineActiveSessionKey
@@ -1624,7 +1539,6 @@ struct ChatView: View {
         .onChange(of: viewModel.engineActivationCompletedSequence) { _, _ in
             guard let completedSessionKey = viewModel.lastEngineActivationSessionKey else { return }
             restoreComposerFocusAfterCompletedStreamSwitchIfNeeded(for: completedSessionKey)
-            reportDictationObservations(viewModel: viewModel)
             guard streamToastManager.isVisible, streamToastManager.sessionKey == completedSessionKey else { return }
             scheduleStreamToastBusyClear()
         }
@@ -1635,21 +1549,14 @@ struct ChatView: View {
         .onChange(of: keyboardAnimationDuration) { _, _ in layoutRevision &+= 1 }
         .onChange(of: keyboardAnimationCurve) { _, _ in layoutRevision &+= 1 }
         .onChange(of: inputBarHeight) { _, _ in
-            if !dictationMotion.shouldFreezeLayout {
-                settledInputBarHeight = inputBarHeight
-            }
+            settledInputBarHeight = inputBarHeight
             guard shouldInvalidateLayoutRevisionOnInputBarHeightChange else { return }
             layoutRevision &+= 1
         }
         .onChange(of: isInputFocused) { _, _ in
             layoutRevision &+= 1
         }
-        .onChange(of: dictationMotion.shouldFreezeLayout) { _, isFrozen in
-            if !isFrozen {
-                settledInputBarHeight = inputBarHeight
-                layoutCoordinator.updateBarHeight(inputBarHeight)
-            }
-        }
+
         .onChange(of: keyboardGeometryRefreshKey) { _, _ in
             layoutRevision &+= 1
             keyboardRefreshToken &+= 1
@@ -1690,11 +1597,9 @@ struct ChatView: View {
             floatingScrollButtonOverlay(
                 viewModel: viewModel,
                 inputBarTopFromScreenBottom: inputBarTopFromScreenBottom,
-                containerWidth: geometry.size.width
+                containerWidth: geometry.size.width,
+                activeSelectionPopupVisible: activeSelectionPopupVisible
             )
-        }
-        .overlay(alignment: .topLeading) {
-            keyboardDictationUITestProbeOverlay()
         }
         )
 
@@ -1738,77 +1643,17 @@ struct ChatView: View {
 #endif
     }
 
-    @ViewBuilder
-    private func keyboardDictationUITestProbeOverlay() -> some View {
-        if isKeyboardDictationUITestMode {
-            VStack(alignment: .leading, spacing: 1) {
-                Text(keyboardDictationStateSummary)
-                    .font(.caption2)
-                    .foregroundStyle(.clear)
-                    .accessibilityIdentifier("keyboard-dictation-state")
-                    .accessibilityLabel(keyboardDictationStateSummary)
-
-                Text(messageListDismissModeSummary)
-                    .font(.caption2)
-                    .foregroundStyle(.clear)
-                    .accessibilityIdentifier("message-list-dismiss-mode-state")
-                    .accessibilityLabel(messageListDismissModeSummary)
-
-                Button("focus") {
-                    focusRequestID &+= 1
-                    dictationCoordinator.focusComposeTextViewForTesting()
-                    keyboardRefreshToken &+= 1
-                }
-                .buttonStyle(.plain)
-                .font(.caption2)
-                .foregroundStyle(.primary)
-                .frame(width: 44, height: 22)
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-                .accessibilityIdentifier("ui-test-start-dictation")
-
-                Button("stop") {
-                    if dictationCoordinator.isDictationActive {
-                        dictationCoordinator.stopDictationForKeyboardDismissUITest()
-                    } else {
-                        dictationCoordinator.focusComposeTextViewForTesting()
-                    }
-                    keyboardRefreshToken &+= 1
-                }
-                .buttonStyle(.plain)
-                .font(.caption2)
-                .foregroundStyle(.primary)
-                .frame(width: 44, height: 22)
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-                .accessibilityIdentifier("ui-test-stop-dictation")
-
-                Button("hide") {
-                    isInputFocused = false
-                    dictationCoordinator.dismissComposeTextViewKeyboard()
-                    keyboardRefreshToken &+= 1
-                }
-                .buttonStyle(.plain)
-                .font(.caption2)
-                .foregroundStyle(.primary)
-                .frame(width: 44, height: 22)
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-                .accessibilityIdentifier("ui-test-force-keyboard-dismiss")
-
-                Button("list") {
-                    isInputFocused = false
-                    dictationCoordinator.dismissComposeTextViewKeyboard()
-                    keyboardRefreshToken &+= 1
-                }
-                .buttonStyle(.plain)
-                .font(.caption2)
-                .foregroundStyle(.primary)
-                .frame(width: 44, height: 22)
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
-                .accessibilityIdentifier("ui-test-message-list-dismiss")
-            }
-            .padding(1)
-            .allowsHitTesting(true)
-        }
+#if os(iOS) && !targetEnvironment(macCatalyst)
+    private static func nativeWindowSizeForLandscapeWidth() -> CGSize? {
+        UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first(where: { $0.activationState == .foregroundActive })?
+            .windows
+            .first(where: \.isKeyWindow)?
+            .bounds
+            .size
     }
+#endif
 
     private func confirmCancelCurrentPromptDialog(viewModel: ChatViewModel) {
         if cancelCurrentPromptRequiresVisibleTyping,
@@ -2046,156 +1891,6 @@ struct ChatView: View {
     }
 #endif
 
-    private var dictationInteractionProjection: DictationInteractionProjection {
-        DictationInteractionProjection(session: dictationCoordinator)
-    }
-
-    private var dictationInteractionEmitter: DictationInteractionEmitter {
-        DictationInteractionEmitter(
-            emit: handleDictationIntent(_:),
-            performComposeKeyPrimaryAction: { openURL in
-                await dictationCoordinator.handleComposeKeyPrimaryAction(openKeyURL: openURL)
-            }
-        )
-    }
-
-    private func reportDictationObservations(viewModel: ChatViewModel) {
-        let notificationReplySourceChatId = activeDictationNotificationReplySourceId(viewModel: viewModel)
-        let sessionKey: String
-        let composeIsEmpty: Bool
-        let textFieldFocused: Bool
-        if let notificationReplySourceChatId {
-            sessionKey = notificationReplySourceChatId
-            let replyDraft = viewModel.crossChatNotificationBubblesBySourceChatId[notificationReplySourceChatId]?
-                .replyDraft ?? ""
-            composeIsEmpty = replyDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            textFieldFocused = true
-        } else {
-            sessionKey = normalPromptDictationSessionKey(viewModel: viewModel)
-            composeIsEmpty = viewModel.inputContent.isEffectivelyEmpty
-            textFieldFocused = isInputFocused
-        }
-        dictationCoordinator.updateContext(
-            sessionKey: sessionKey,
-            composeIsEmpty: composeIsEmpty,
-            textFieldFocused: textFieldFocused,
-            reduceMotionEnabled: UIAccessibility.isReduceMotionEnabled,
-            contextTerms: dictationContextTerms(viewModel: viewModel)
-        )
-    }
-
-    private func normalPromptDictationSessionKey(viewModel: ChatViewModel) -> String {
-        viewModel.uiSelectedSessionKey.isEmpty ? viewModel.activeSessionKey : viewModel.uiSelectedSessionKey
-    }
-
-    private func reportNotificationReplyDictationTarget(
-        sourceChatId: String,
-        textView: NotificationReplyUITextView?,
-        viewModel: ChatViewModel
-    ) {
-        dictationCoordinator.setComposeTextView(textView)
-        guard crossChatNotificationFocusedReplySourceChatId == sourceChatId || textView == nil else { return }
-        reportDictationObservations(viewModel: viewModel)
-    }
-
-    private func activeDictationNotificationReplySourceId(viewModel: ChatViewModel) -> String? {
-        DictationNotificationReplyTarget.activeSourceId(
-            focusedReplySourceChatId: crossChatNotificationFocusedReplySourceChatId,
-            isReplying: { sourceChatId in
-                viewModel.crossChatNotificationBubblesBySourceChatId[sourceChatId]?.isReplying == true
-            }
-        )
-    }
-
-    private func dictationContextTerms(viewModel: ChatViewModel) -> [String] {
-        let names = [viewModel.activeSessionDisplayName]
-            + [viewModel.stream(for: viewModel.activeSessionKey)?.displayName].compactMap { $0 }
-        return Array(
-            Set(
-                names
-                    .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-                    .filter { !$0.isEmpty }
-            )
-        )
-    }
-
-    private func submitActiveDictationTarget(viewModel: ChatViewModel) -> Bool {
-        if let notificationReplySourceChatId = activeDictationNotificationReplySourceId(viewModel: viewModel) {
-            return DictationNotificationReplyTarget.submit(
-                sourceChatId: notificationReplySourceChatId,
-                canSend: {
-                    viewModel.canImmediatelySendCrossChatNotificationReply(
-                        sourceChatId: notificationReplySourceChatId
-                    )
-                },
-                submit: {
-                    viewModel.sendCrossChatNotificationReply(sourceChatId: notificationReplySourceChatId)
-                }
-            )
-        }
-        if let resolvedCrossChatMention {
-            let didSend = viewModel.sendCrossChatMention(to: resolvedCrossChatMention.destinationChatId)
-            if didSend {
-                showCrossChatMentionSentToast(resolvedCrossChatMention)
-                removeResolvedCrossChatMention()
-            }
-            return didSend
-        }
-        return viewModel.send()
-    }
-
-    @MainActor
-    private func handleDictationIntent(_ intent: DictationInteractionIntent) {
-        switch intent {
-        case .activationSelectionCaptured(let selectionRange):
-            dictationCoordinator.captureComposeSelectionRangeForActivation(selectionRange)
-        case .composeSelectionChanged(let selectionRange):
-            dictationCoordinator.noteComposeSelectionChanged(selectionRange)
-        case .composeUserEdited(let range, let replacementUTF16Length):
-            dictationCoordinator.noteComposeUserEditDuringDictation(
-                editedRangeUTF16: range,
-                replacementUTF16Length: replacementUTF16Length
-            )
-        case .composeTextViewChanged(let textView):
-            dictationCoordinator.setComposeTextView(textView)
-        case .gesturePrewarmRequested:
-            dictationCoordinator.beginGesturePrewarm()
-        case .gestureCancelled(let trigger):
-            dictationCoordinator.cancelGesturePrewarmIfNeeded(trigger: trigger)
-        case .gestureCommitRequested(let commitIntent):
-            switch commitIntent {
-            case .startSticky:
-                dictationCoordinator.startStickyDictation()
-            case .startWalkieTalkie:
-                dictationCoordinator.startWalkieTalkieDictation()
-            case .dismissSurface:
-                dictationCoordinator.dismissSurfaceFromUserGesture()
-            case .endWalkieTalkie:
-                dictationCoordinator.endWalkieTalkieIfNeeded()
-            case .resumeWalkieTalkieFromPaused:
-                dictationCoordinator.startWalkieTalkieFromPausedSurface()
-            }
-        case .stopRequested(let source):
-            switch source {
-            case .escapeKey:
-                dictationCoordinator.stopFromEscapeKey()
-            case .voiceOverAction:
-                dictationCoordinator.stopFromVoiceOverAction()
-            }
-        case .discardRequested(let source):
-            switch source {
-            case .escapeLongPress:
-                dictationCoordinator.discardFromEscapeLongPress()
-            case .voiceOverAction:
-                dictationCoordinator.discardFromVoiceOverAction()
-            }
-        case .waveformToggleRequested:
-            dictationCoordinator.toggleWaveformTapAction()
-        case .inlineKeyTextChanged(let value):
-            dictationCoordinator.updateInlineKeyText(value)
-        }
-    }
-
     private func mentionPickerOverlay(
         streams: [StreamSession],
         currentSessionKey: String,
@@ -2236,8 +1931,6 @@ struct ChatView: View {
         focusedSourceChatId: Binding<String?>,
         focusedReplySourceChatId: Binding<String?>,
         keyboardOwnershipStore: KeyboardOwnershipStore,
-        dictationEmitter: DictationInteractionEmitter,
-        onNotificationReplyDictationTargetChange: @escaping (String, NotificationReplyUITextView?) -> Void,
         disabledPlainNumberShortcutSlots: Set<Int>
     ) -> AnyView {
         AnyView(
@@ -2258,8 +1951,6 @@ struct ChatView: View {
                     focusedSourceChatId: focusedSourceChatId,
                     focusedReplySourceChatId: focusedReplySourceChatId,
                     keyboardOwnershipStore: keyboardOwnershipStore,
-                    dictationEmitter: dictationEmitter,
-                    onNotificationReplyDictationTargetChange: onNotificationReplyDictationTargetChange,
                     disabledPlainNumberShortcutSlots: disabledPlainNumberShortcutSlots,
                     showsDockedHitTarget: false,
                     onNavigateToSource: { sourceChatId in
@@ -2465,15 +2156,11 @@ struct ChatView: View {
         let isCompactLayout = horizontalSizeClass == .compact
         let isLandscape = geometry.size.width > geometry.size.height
 #if os(iOS) && !targetEnvironment(macCatalyst)
-        let nativeWindowSize = UIApplication.shared.connectedScenes
-            .compactMap { $0 as? UIWindowScene }
-            .first(where: { $0.activationState == .foregroundActive })?
-            .windows
-            .first(where: \.isKeyWindow)?
-            .bounds
-            .size
+        let nativeWindowSize = Self.nativeWindowSizeForLandscapeWidth()
+        let nativeWindowWidth = ChatLandscapeWidthGeometry.physicalWindowWidth(from: nativeWindowSize)
 #else
         let nativeWindowSize: CGSize? = nil
+        let nativeWindowWidth: CGFloat? = nil
 #endif
         let isNativeWindowLandscape = nativeWindowSize.map { $0.width > $0.height } ?? false
         let isCompactLandscape = isCompactLayout && (isLandscape || isNativeWindowLandscape)
@@ -2504,14 +2191,14 @@ struct ChatView: View {
             leadingSafeAreaInset: geometry.safeAreaInsets.leading,
             trailingSafeAreaInset: geometry.safeAreaInsets.trailing,
             isCompactLandscape: isCompactLandscape,
-            nativeWindowWidth: nativeWindowSize?.width
+            nativeWindowWidth: nativeWindowWidth
         )
         let pinnedSurfaceOffset = ChatLandscapeWidthGeometry.horizontalOffset(
             containerWidth: geometry.size.width,
             leadingSafeAreaInset: geometry.safeAreaInsets.leading,
             trailingSafeAreaInset: geometry.safeAreaInsets.trailing,
             isCompactLandscape: isCompactLandscape,
-            nativeWindowWidth: nativeWindowSize?.width
+            nativeWindowWidth: nativeWindowWidth
         )
 
 #if os(visionOS)
@@ -2550,17 +2237,14 @@ struct ChatView: View {
         let pinnedPageDotsView: AnyView? = pageDotsView
         let pinnedPageDotsGap: CGFloat = floatingPageDotsBottomGap
 #endif
-        let notificationReplySourceChatId = activeDictationNotificationReplySourceId(viewModel: viewModel)
-        let inputCanSend = notificationReplySourceChatId.map {
-            viewModel.canImmediatelySendCrossChatNotificationReply(sourceChatId: $0)
-        } ?? viewModel.canSend
+        let inputCanSend = viewModel.canSend
 
         return KeyboardPinnedContainer(
             desiredBottomGap: belowBarGap,
             isKeyboardVisible: isKeyboardVisible,
-            composerMotionOffsetY: -dictationMotion.composerLiftY,
+            composerMotionOffsetY: 0,
             measuredHeight: $inputBarHeight,
-            freezeBarHeightUpdates: dictationMotion.shouldFreezeLayout,
+            freezeBarHeightUpdates: false,
             layoutCoordinator: layoutCoordinator,
             layoutKey: layoutKey,
             scrollButtonView: pinnedScrollButtonView,
@@ -2578,8 +2262,6 @@ struct ChatView: View {
                 content: $viewModel.inputContent,
                 selectionRange: $selectionRange,
                 pendingInsertions: $pendingInputInsertions,
-                dictation: dictationInteractionProjection,
-                dictationEmitter: dictationInteractionEmitter,
                 placeholderText: viewModel.activeSessionPlaceholderText,
                 fontScaleChangeSequence: fontScaleChangeSequence,
                 resetToken: viewModel.inputResetToken,
@@ -2595,9 +2277,7 @@ struct ChatView: View {
                 isAttachmentMenuPresented: $isAttachmentMenuPresented,
                 onSend: {
                     clearTypingActivity()
-                    dictationCoordinator.handleSendTapped {
-                        submitActiveDictationTarget(viewModel: viewModel)
-                    }
+                    _ = submitActiveComposerTarget(viewModel: viewModel)
                 },
                 onCancel: { viewModel.cancelSend() },
                 onReconnect: { viewModel.reconnect() },
@@ -2634,8 +2314,20 @@ struct ChatView: View {
                     reconcileResolvedMentionAttachment()
                     recordTypingActivity()
                 },
+                handlesMentionPickerKeyCommands: isMentionPickerVisible,
+                mentionPickerHasCompletion: !mentionPickerStreams.isEmpty,
+                onMentionPickerTab: {
+                    handleCrossChatMentionTab(filteredStreams: mentionPickerStreams)
+                },
+                onMentionPickerMoveUp: {
+                    handleCrossChatMentionMove(filteredStreams: mentionPickerStreams, step: -1)
+                },
+                onMentionPickerMoveDown: {
+                    handleCrossChatMentionMove(filteredStreams: mentionPickerStreams, step: 1)
+                },
                 onPasteImages: handlePastedImages,
-                motion: dictationMotion,
+                notificationVisibleCount: notificationVisibleCount,
+                keyboardOwnershipStore: keyboardOwnershipStore,
                 isCompact: horizontalSizeClass == .compact
             )
         }
@@ -2644,6 +2336,18 @@ struct ChatView: View {
         .visionOSInputBarDepthOffset()
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
         .ignoresSafeArea(.container, edges: .bottom)
+    }
+
+    private func submitActiveComposerTarget(viewModel: ChatViewModel) -> Bool {
+        if let resolvedCrossChatMention {
+            let didSend = viewModel.sendCrossChatMention(to: resolvedCrossChatMention.destinationChatId)
+            if didSend {
+                showCrossChatMentionSentToast(resolvedCrossChatMention)
+                removeResolvedCrossChatMention()
+            }
+            return didSend
+        }
+        return viewModel.send()
     }
 
     private func showCrossChatMentionSentToast(_ mention: ResolvedCrossChatMention) {
@@ -2813,7 +2517,7 @@ struct ChatView: View {
             isActiveSession: sessionKey == renderPolicySessionKey,
             isRenderPolicyFrozen: viewModel.isRenderPolicyFrozen,
             isInputActive: isInputFocused,
-            isDictationActive: dictationCoordinator.isDictationActive,
+            keepsKeyboardPinned: false,
             isTypingActive: isTypingActive,
             truncationBottomInset: truncationBottomInset,
             trailingContentInset: trailingContentInset,
@@ -2993,7 +2697,7 @@ struct ChatView: View {
                 isActiveSession: false,
                 isRenderPolicyFrozen: false,
                 isInputActive: isInputFocused,
-                isDictationActive: dictationCoordinator.isDictationActive,
+                keepsKeyboardPinned: false,
                 isTypingActive: isTypingActive,
                 truncationBottomInset: truncationBottomInset,
                 trailingContentInset: trailingContentInset,
@@ -6495,7 +6199,7 @@ enum CrossChatNotificationGeometry {
         containerWidth: CGFloat,
         resolvedContainerWidth: CGFloat
     ) -> CGFloat {
-        max(0, resolvedContainerWidth - max(0, containerWidth))
+        0
     }
 
     static func trailingAnchoredOverlayCorrection(
@@ -6507,6 +6211,32 @@ enum CrossChatNotificationGeometry {
 
     static func bubbleMaxHeight(isCompactLayout: Bool) -> CGFloat {
         isCompactLayout ? compactBubbleMaxHeight : compactBubbleMaxHeight * 2
+    }
+
+    static func bubbleMaxHeight(isCompactLayout: Bool, maxContainerHeight: CGFloat) -> CGFloat {
+        min(bubbleMaxHeight(isCompactLayout: isCompactLayout), max(0, maxContainerHeight))
+    }
+
+    static func visibleCapacity(
+        maxContainerHeight: CGFloat,
+        bubbleHeights: [CGFloat],
+        bubbleSpacing: CGFloat,
+        maxVisibleBubbleCount: Int
+    ) -> Int {
+        guard !bubbleHeights.isEmpty else { return 1 }
+        var usedHeight: CGFloat = 0
+        var capacity = 0
+        for bubbleHeight in bubbleHeights.prefix(maxVisibleBubbleCount) {
+            let nextUsedHeight = usedHeight
+                + max(0, bubbleHeight)
+                + (capacity == 0 ? 0 : bubbleSpacing)
+            guard capacity == 0 || nextUsedHeight <= maxContainerHeight else {
+                break
+            }
+            usedHeight = nextUsedHeight
+            capacity += 1
+        }
+        return max(1, capacity)
     }
 
     static func transcriptTrailingClearance(
@@ -6625,6 +6355,11 @@ enum CrossChatNotificationScrollTargetSelection {
 }
 
 enum ChatLandscapeWidthGeometry {
+    static func physicalWindowWidth(from windowSize: CGSize?) -> CGFloat? {
+        guard let windowSize else { return nil }
+        return max(windowSize.width, windowSize.height)
+    }
+
     static func shouldFillWindowWidth(
         viewSize: CGSize,
         windowSize: CGSize?,
@@ -6688,8 +6423,6 @@ private struct CrossChatNotificationOverlay: View {
     @Binding var focusedSourceChatId: String?
     @Binding var focusedReplySourceChatId: String?
     var keyboardOwnershipStore = KeyboardOwnershipStore()
-    let dictationEmitter: DictationInteractionEmitter
-    let onNotificationReplyDictationTargetChange: (String, NotificationReplyUITextView?) -> Void
     let disabledPlainNumberShortcutSlots: Set<Int>
     let showsDockedHitTarget: Bool
     let onNavigateToSource: (String) -> Void
@@ -6753,22 +6486,16 @@ private struct CrossChatNotificationOverlay: View {
         bubbles: [CrossChatNotificationBubble],
         measuredHeightsBySourceChatId: [String: CGFloat] = [:]
     ) -> Int {
-        guard !bubbles.isEmpty else { return 1 }
-        var usedHeight: CGFloat = 0
-        var capacity = 0
-        for bubble in bubbles.prefix(maxVisibleBubbleCount) {
-            let nextHeight = measuredHeightsBySourceChatId[bubble.sourceChatId]
+        let bubbleHeights = bubbles.map { bubble in
+            measuredHeightsBySourceChatId[bubble.sourceChatId]
                 ?? estimatedUnmeasuredHeight(for: bubble)
-            let nextUsedHeight = usedHeight
-                + nextHeight
-                + (capacity == 0 ? 0 : bubbleSpacing)
-            guard capacity == 0 || nextUsedHeight <= maxContainerHeight else {
-                break
-            }
-            usedHeight = nextUsedHeight
-            capacity += 1
         }
-        return max(1, capacity)
+        return CrossChatNotificationGeometry.visibleCapacity(
+            maxContainerHeight: maxContainerHeight,
+            bubbleHeights: bubbleHeights,
+            bubbleSpacing: bubbleSpacing,
+            maxVisibleBubbleCount: maxVisibleBubbleCount
+        )
     }
 
     private static func estimatedUnmeasuredHeight(for bubble: CrossChatNotificationBubble) -> CGFloat {
@@ -6822,7 +6549,10 @@ private struct CrossChatNotificationOverlay: View {
     }
 
     private var maxBubbleHeight: CGFloat {
-        CrossChatNotificationGeometry.bubbleMaxHeight(isCompactLayout: isCompactLayout)
+        CrossChatNotificationGeometry.bubbleMaxHeight(
+            isCompactLayout: isCompactLayout,
+            maxContainerHeight: maxContainerHeight
+        )
     }
 
     private var stackWidth: CGFloat {
@@ -6977,22 +6707,6 @@ private struct CrossChatNotificationOverlay: View {
                                 } else {
                                     clearReplyFocus(sourceChatId: bubble.sourceChatId)
                                 }
-                            },
-                            onReplyTextViewChange: { textView in
-                                onNotificationReplyDictationTargetChange(bubble.sourceChatId, textView)
-                            },
-                            onReplySelectionChange: { range in
-                                guard focusedReplySourceChatId == bubble.sourceChatId else { return }
-                                dictationEmitter.emit(.composeSelectionChanged(range))
-                            },
-                            onReplyUserEdit: { range, replacementUTF16Length in
-                                guard focusedReplySourceChatId == bubble.sourceChatId else { return }
-                                dictationEmitter.emit(
-                                    .composeUserEdited(
-                                        range: range,
-                                        replacementUTF16Length: replacementUTF16Length
-                                    )
-                                )
                             },
                             isActionMenuOpen: actionMenuSourceChatId == bubble.sourceChatId,
                             actionMenuSelection: actionMenuSelection,
@@ -8033,9 +7747,6 @@ struct CrossChatNotificationBubbleView: View {
     let onReconnect: () -> Void
     let onActivate: () -> Void
     let onReplyFocusChange: (Bool) -> Void
-    var onReplyTextViewChange: (NotificationReplyUITextView?) -> Void = { _ in }
-    var onReplySelectionChange: (NSRange) -> Void = { _ in }
-    var onReplyUserEdit: (NSRange, Int) -> Void = { _, _ in }
     let isActionMenuOpen: Bool
     let actionMenuSelection: CrossChatNotificationActionMenuItem
     var keyboardOwnershipStore = KeyboardOwnershipStore()
@@ -8056,6 +7767,8 @@ struct CrossChatNotificationBubbleView: View {
     @State private var measuredEntriesHeight: CGFloat = 0
     @State private var measuredReplyFieldHeight: CGFloat = 0
     @State private var textSelectionState = CrossChatNotificationTextSelectionState()
+    @State private var contentSelectionResetToken = 0
+    @State private var didClearSelectionDuringCurrentTap = false
 
     private let controlSize: CGFloat = 44
     private let normalContentSpacing: CGFloat = 6
@@ -8267,7 +7980,7 @@ struct CrossChatNotificationBubbleView: View {
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .contentShape(Rectangle())
-                    .onTapGesture(perform: onNavigate)
+                    .onTapGesture(perform: handleNotificationBodyTap)
 
                 Spacer(minLength: 8)
 
@@ -8407,9 +8120,6 @@ struct CrossChatNotificationBubbleView: View {
                         onSubmit: activateReplySendControl,
                         onCancel: onCancelReply,
                         onFocusChange: onReplyFocusChange,
-                        onTextViewChange: onReplyTextViewChange,
-                        onSelectionRangeChange: onReplySelectionChange,
-                        onUserEdit: onReplyUserEdit,
                         onSelectionActiveChange: { isSelectionActive in
                             textSelectionState.setReplySelectionActive(isSelectionActive)
                             publishTextSelectionState()
@@ -8626,6 +8336,26 @@ struct CrossChatNotificationBubbleView: View {
         onTextSelectionChange(textSelectionState.isAnySelectionActive)
     }
 
+    private func handleNotificationBodyTap() {
+        switch CrossChatNotificationSelectionTapPolicy.effect(
+            isTextSelectionActive: textSelectionState.isAnySelectionActive,
+            didClearSelectionDuringCurrentTap: didClearSelectionDuringCurrentTap
+        ) {
+        case .clearSelection:
+            textSelectionState.clearAllSelection()
+            contentSelectionResetToken += 1
+            didClearSelectionDuringCurrentTap = true
+            publishTextSelectionState()
+            DispatchQueue.main.async {
+                didClearSelectionDuringCurrentTap = false
+            }
+        case .ignoreDuplicateSelectionClear:
+            break
+        case .navigate:
+            onNavigate()
+        }
+    }
+
     private func notificationDateSeparator(timestamp: Date) -> some View {
         HStack(spacing: 8) {
             Rectangle()
@@ -8730,6 +8460,27 @@ struct CrossChatNotificationTextSelectionState: Equatable {
 
     mutating func clearContentSelection() {
         selectedContentKeys = []
+    }
+
+    mutating func clearAllSelection() {
+        selectedContentKeys = []
+        isReplySelectionActive = false
+    }
+}
+
+enum CrossChatNotificationSelectionTapPolicy: Equatable {
+    case navigate
+    case clearSelection
+    case ignoreDuplicateSelectionClear
+
+    static func effect(
+        isTextSelectionActive: Bool,
+        didClearSelectionDuringCurrentTap: Bool = false
+    ) -> CrossChatNotificationSelectionTapPolicy {
+        if isTextSelectionActive {
+            return .clearSelection
+        }
+        return didClearSelectionDuringCurrentTap ? .ignoreDuplicateSelectionClear : .navigate
     }
 }
 
@@ -8838,29 +8589,6 @@ enum CrossChatNotificationBubbleSwipeCompletion: Equatable {
     }
 }
 
-enum DictationNotificationReplyTarget {
-    static func activeSourceId(
-        focusedReplySourceChatId: String?,
-        isReplying: (String) -> Bool
-    ) -> String? {
-        guard let sourceChatId = focusedReplySourceChatId,
-              isReplying(sourceChatId) else {
-            return nil
-        }
-        return sourceChatId
-    }
-
-    static func submit(
-        sourceChatId: String,
-        canSend: () -> Bool,
-        submit: () -> Void
-    ) -> Bool {
-        guard !sourceChatId.isEmpty, canSend() else { return false }
-        submit()
-        return true
-    }
-}
-
 enum NotificationReplyTextInputConfiguration {
     static let textContainerInset = UIEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
     static let maximumVisibleLines = 5
@@ -8919,9 +8647,6 @@ struct NotificationReplyTextInput: UIViewRepresentable {
     let onSubmit: () -> Void
     let onCancel: () -> Void
     let onFocusChange: (Bool) -> Void
-    var onTextViewChange: (NotificationReplyUITextView?) -> Void = { _ in }
-    var onSelectionRangeChange: (NSRange) -> Void = { _ in }
-    var onUserEdit: (NSRange, Int) -> Void = { _, _ in }
     let onSelectionActiveChange: (Bool) -> Void
 
     func makeUIView(context: Context) -> NotificationReplyUITextView {
@@ -8962,7 +8687,6 @@ struct NotificationReplyTextInput: UIViewRepresentable {
     }
 
     static func dismantleUIView(_ uiView: NotificationReplyUITextView, coordinator: Coordinator) {
-        coordinator.parent.onTextViewChange(nil)
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, uiView: NotificationReplyUITextView, context: Context) -> CGSize? {
@@ -8996,25 +8720,20 @@ struct NotificationReplyTextInput: UIViewRepresentable {
         func textViewDidChange(_ textView: UITextView) {
             parent.text = textView.text
             updateHeight(for: textView)
-            parent.onSelectionRangeChange(textView.selectedRange)
             parent.onSelectionActiveChange(textView.selectedRange.length > 0)
         }
 
         func textViewDidBeginEditing(_ textView: UITextView) {
             parent.onFocusChange(true)
-            parent.onTextViewChange(textView as? NotificationReplyUITextView)
-            parent.onSelectionRangeChange(textView.selectedRange)
             parent.onSelectionActiveChange(textView.selectedRange.length > 0)
         }
 
         func textViewDidEndEditing(_ textView: UITextView) {
             parent.onSelectionActiveChange(false)
             parent.onFocusChange(false)
-            parent.onTextViewChange(nil)
         }
 
         func textViewDidChangeSelection(_ textView: UITextView) {
-            parent.onSelectionRangeChange(textView.selectedRange)
             parent.onSelectionActiveChange(textView.selectedRange.length > 0)
         }
 
@@ -9034,7 +8753,6 @@ struct NotificationReplyTextInput: UIViewRepresentable {
                 }
                 return false
             }
-            parent.onUserEdit(range, (replacement as NSString).length)
             return true
         }
 
@@ -9070,14 +8788,12 @@ struct NotificationReplyTextInput: UIViewRepresentable {
     }
 }
 
-final class NotificationReplyUITextView: UITextView, DictationTextTargetIdentifying {
+final class NotificationReplyUITextView: UITextView {
     var sourceChatId = ""
     var onCancel: (() -> Void)?
     var wantsInitialFocus = false
     var visibleNotificationCount = 0
     var keyboardOwnershipStore = KeyboardOwnershipStore()
-
-    var dictationTargetSessionKey: String { sourceChatId }
 
     func enforceSendReturnKey() {
         returnKeyType = .send

@@ -39,8 +39,6 @@
 	</dict>
 	<key>NSCameraUsageDescription</key>
 	<string>Clawline needs camera access to take photos for chat.</string>
-	<key>NSMicrophoneUsageDescription</key>
-	<string>Clawline needs microphone access for voice dictation.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Clawline needs permission to save images to your photo library.</string>
 	<key>NSPhotoLibraryUsageDescription</key>

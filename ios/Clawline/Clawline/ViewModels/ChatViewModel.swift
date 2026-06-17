@@ -129,7 +129,7 @@ enum ImageAttachmentPreparer {
 
 @Observable
 @MainActor
-final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
+final class ChatViewModel: ChatViewModelHosting {
     private let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "MessagePipeline")
     private let instanceId = UUID().uuidString
     @MainActor
@@ -3366,73 +3366,6 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
 
     func refreshInputEditorContent() {
         inputResetToken &+= 1
-    }
-
-    func applyComposeDraftDelta(
-        baseSnapshot: ComposeDraftSnapshot,
-        previousTranscriptUTF16Length: Int,
-        replacementText: NSAttributedString,
-        to sessionKey: String,
-        moveCursorToEnd: Bool
-    ) {
-        _ = moveCursorToEnd
-        guard !sessionKey.isEmpty else { return }
-        guard isComposeDraftSessionCurrent(sessionKey) else { return }
-
-        let prefixLength = baseSnapshot.content.length
-        let replacementRange = NSRange(location: prefixLength, length: previousTranscriptUTF16Length)
-        let current = NSMutableAttributedString(attributedString: inputContent)
-
-        let hasExpectedPrefix: Bool = {
-            guard current.length >= prefixLength else { return false }
-            let prefix = current.attributedSubstring(from: NSRange(location: 0, length: prefixLength))
-            return prefix.isEqual(to: baseSnapshot.content)
-        }()
-
-        guard hasExpectedPrefix,
-              replacementRange.location >= 0,
-              replacementRange.length >= 0,
-              replacementRange.location + replacementRange.length <= current.length else {
-            let fallback = NSMutableAttributedString(attributedString: baseSnapshot.content)
-            if replacementText.length > 0 {
-                fallback.append(replacementText)
-            }
-            inputContent = fallback
-            attachmentData = baseSnapshot.attachments
-            return
-        }
-
-        current.replaceCharacters(in: replacementRange, with: replacementText)
-        inputContent = current
-        attachmentData = baseSnapshot.attachments
-    }
-
-    func captureComposeDraftSnapshot(for sessionKey: String) -> ComposeDraftSnapshot {
-        guard !sessionKey.isEmpty else { return .empty }
-        guard isComposeDraftSessionCurrent(sessionKey) else {
-            return ComposeDraftSnapshot(content: NSAttributedString(string: ""), attachments: [:])
-        }
-        return ComposeDraftSnapshot(content: inputContent, attachments: attachmentData)
-    }
-
-    func applyComposeDraftSnapshot(
-        _ snapshot: ComposeDraftSnapshot,
-        to sessionKey: String,
-        moveCursorToEnd: Bool,
-        announceEditorReset: Bool
-    ) {
-        _ = moveCursorToEnd
-        guard !sessionKey.isEmpty else { return }
-        guard isComposeDraftSessionCurrent(sessionKey) else { return }
-        inputContent = snapshot.content
-        attachmentData = snapshot.attachments
-        if announceEditorReset {
-            inputResetToken &+= 1
-        }
-    }
-
-    func isComposeDraftSessionCurrent(_ sessionKey: String) -> Bool {
-        sessionKey == activeSessionKey || sessionKey == uiSelectedSessionKey
     }
 
     func presentation(for message: Message, metrics: ChatFlowTheme.Metrics) -> MessagePresentation {

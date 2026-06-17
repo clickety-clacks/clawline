@@ -114,7 +114,12 @@ enum GeneratedTextLinkActivationRouter {
 
     @MainActor
     static var presentResolvedURLPopup: (URL, UIView?) -> Bool = { url, view in
-        presentResolvedURLPopupAtAnchor(url, from: view, anchorPoint: nil)
+        presentResolvedURLPopupAnchored(url, view, nil)
+    }
+
+    @MainActor
+    static var presentResolvedURLPopupAnchored: (URL, UIView?, CGPoint?) -> Bool = { url, view, anchorPoint in
+        presentResolvedURLPopupAtAnchor(url, from: view, anchorPoint: anchorPoint)
     }
 
     @MainActor
@@ -181,7 +186,7 @@ final class TextLinkResolvedURLContentViewController: UIViewController {
     private let url: URL
     private let presentation: Presentation
     private let anchorPoint: CGPoint?
-    private let panelView = UIView()
+    private let contentView = UIView()
     private let webView: WKWebView = {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = WebSessionSharedResources.shared.websiteDataStore
@@ -208,26 +213,26 @@ final class TextLinkResolvedURLContentViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
 
-        view.backgroundColor = UIColor.black.withAlphaComponent(presentation == .modal ? 0.36 : 0.08)
+        view.backgroundColor = presentation == .modal ? UIColor.black.withAlphaComponent(0.36) : .clear
 
-        panelView.translatesAutoresizingMaskIntoConstraints = false
-        panelView.backgroundColor = .systemBackground
-        panelView.layer.cornerRadius = 12
-        panelView.layer.cornerCurve = .continuous
-        panelView.layer.shadowColor = UIColor.black.cgColor
-        panelView.layer.shadowOpacity = 0.18
-        panelView.layer.shadowRadius = 22
-        panelView.layer.shadowOffset = CGSize(width: 0, height: 12)
-        view.addSubview(panelView)
+        contentView.backgroundColor = presentation == .modal ? .systemBackground : .clear
+        contentView.layer.cornerRadius = presentation == .modal ? 12 : 10
+        contentView.layer.cornerCurve = .continuous
+        contentView.layer.shadowColor = UIColor.black.cgColor
+        contentView.layer.shadowOpacity = presentation == .modal ? 0.18 : 0.24
+        contentView.layer.shadowRadius = presentation == .modal ? 22 : 16
+        contentView.layer.shadowOffset = CGSize(width: 0, height: presentation == .modal ? 12 : 8)
+        view.addSubview(contentView)
 
-        webView.translatesAutoresizingMaskIntoConstraints = false
         webView.allowsLinkPreview = false
         webView.isOpaque = false
         webView.backgroundColor = .clear
         webView.scrollView.backgroundColor = .clear
+        webView.layer.cornerRadius = presentation == .modal ? 12 : 10
+        webView.layer.cornerCurve = .continuous
+        webView.clipsToBounds = true
         webView.load(URLRequest(url: url))
 
-        closeButton.translatesAutoresizingMaskIntoConstraints = false
         closeButton.setImage(UIImage(systemName: "xmark"), for: .normal)
         closeButton.tintColor = .label
         closeButton.backgroundColor = UIColor.systemBackground.withAlphaComponent(0.92)
@@ -237,62 +242,80 @@ final class TextLinkResolvedURLContentViewController: UIViewController {
         closeButton.addTarget(self, action: #selector(close), for: .touchUpInside)
         closeButton.isHidden = presentation == .popup
 
-        panelView.addSubview(webView)
-        panelView.addSubview(closeButton)
+        contentView.addSubview(webView)
+        contentView.addSubview(closeButton)
 
         if presentation == .modal {
             let outsideTap = UITapGestureRecognizer(target: self, action: #selector(handleOutsideTap(_:)))
             outsideTap.cancelsTouchesInView = false
             view.addGestureRecognizer(outsideTap)
         } else {
-            let hover = UIHoverGestureRecognizer(target: self, action: #selector(handlePopupHover(_:)))
-            panelView.addGestureRecognizer(hover)
+            let rootHover = UIHoverGestureRecognizer(target: self, action: #selector(handlePopupHover(_:)))
+            view.addGestureRecognizer(rootHover)
+            let contentHover = UIHoverGestureRecognizer(target: self, action: #selector(handlePopupHover(_:)))
+            contentView.addGestureRecognizer(contentHover)
+        }
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+
+        let safeFrame = view.safeAreaLayoutGuide.layoutFrame
+        let size: CGSize
+        let origin: CGPoint
+        switch presentation {
+        case .modal:
+            size = CGSize(width: safeFrame.width * 0.88, height: safeFrame.height * 0.82)
+            origin = CGPoint(
+                x: safeFrame.midX - size.width / 2,
+                y: safeFrame.midY - size.height / 2
+            )
+        case .popup:
+            let width = min(560, max(320, safeFrame.width * 0.62))
+            let height = min(480, max(280, safeFrame.height * 0.55))
+            size = CGSize(width: min(width, safeFrame.width - 36), height: min(height, safeFrame.height - 36))
+            let rawAnchor = anchorPoint ?? CGPoint(x: safeFrame.midX, y: safeFrame.midY)
+            let anchor = CGPoint(
+                x: clamp(rawAnchor.x, min: safeFrame.minX + 18, max: safeFrame.maxX - 18),
+                y: clamp(rawAnchor.y, min: safeFrame.minY + 18, max: safeFrame.maxY - 18)
+            )
+            origin = CGPoint(
+                x: clamp(anchor.x - 24, min: safeFrame.minX + 18, max: safeFrame.maxX - size.width - 18),
+                y: clamp(anchor.y - 24, min: safeFrame.minY + 18, max: safeFrame.maxY - size.height - 18)
+            )
         }
 
-        var constraints: [NSLayoutConstraint] = [
-            panelView.centerXAnchor.constraint(equalTo: view.safeAreaLayoutGuide.centerXAnchor),
-            panelView.leadingAnchor.constraint(greaterThanOrEqualTo: view.safeAreaLayoutGuide.leadingAnchor, constant: 18),
-            panelView.trailingAnchor.constraint(lessThanOrEqualTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -18),
-            panelView.topAnchor.constraint(greaterThanOrEqualTo: view.safeAreaLayoutGuide.topAnchor, constant: 18),
-            panelView.bottomAnchor.constraint(lessThanOrEqualTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -18),
-            panelView.widthAnchor.constraint(equalTo: view.safeAreaLayoutGuide.widthAnchor, multiplier: presentation == .modal ? 0.88 : 0.58),
-            panelView.heightAnchor.constraint(equalTo: view.safeAreaLayoutGuide.heightAnchor, multiplier: presentation == .modal ? 0.82 : 0.52),
-
-            webView.leadingAnchor.constraint(equalTo: panelView.leadingAnchor),
-            webView.trailingAnchor.constraint(equalTo: panelView.trailingAnchor),
-            webView.topAnchor.constraint(equalTo: panelView.topAnchor),
-            webView.bottomAnchor.constraint(equalTo: panelView.bottomAnchor),
-
-            closeButton.topAnchor.constraint(equalTo: panelView.topAnchor, constant: 12),
-            closeButton.trailingAnchor.constraint(equalTo: panelView.trailingAnchor, constant: -12),
-            closeButton.widthAnchor.constraint(equalToConstant: 36),
-            closeButton.heightAnchor.constraint(equalToConstant: 36),
-        ]
-        if presentation == .popup, let anchorPoint {
-            let anchoredTop = panelView.topAnchor.constraint(equalTo: view.topAnchor, constant: max(18, anchorPoint.y - 24))
-            anchoredTop.priority = .defaultHigh
-            constraints.append(anchoredTop)
-        } else {
-            constraints.append(panelView.centerYAnchor.constraint(equalTo: view.safeAreaLayoutGuide.centerYAnchor))
-        }
-        NSLayoutConstraint.activate(constraints)
+        contentView.frame = CGRect(origin: origin, size: size)
+        webView.frame = contentView.bounds
+        closeButton.frame = CGRect(x: contentView.bounds.maxX - 48, y: 12, width: 36, height: 36)
     }
 
     @objc private func handleOutsideTap(_ recognizer: UITapGestureRecognizer) {
         guard recognizer.state == .ended,
-              !panelView.frame.contains(recognizer.location(in: view)) else {
+              !contentView.frame.contains(recognizer.location(in: view)) else {
             return
         }
         close()
     }
 
     @objc private func handlePopupHover(_ recognizer: UIHoverGestureRecognizer) {
-        if recognizer.state == .ended || recognizer.state == .cancelled {
+        let location = recognizer.location(in: view)
+        if recognizer.state == .changed,
+           !contentView.frame.contains(location) {
+            dismiss(animated: false)
+            return
+        }
+        if (recognizer.state == .ended || recognizer.state == .cancelled),
+           !contentView.frame.contains(location) {
             dismiss(animated: false)
         }
     }
 
     @objc private func close() {
         dismiss(animated: true)
+    }
+
+    private func clamp(_ value: CGFloat, min: CGFloat, max: CGFloat) -> CGFloat {
+        Swift.max(min, Swift.min(max, value))
     }
 }

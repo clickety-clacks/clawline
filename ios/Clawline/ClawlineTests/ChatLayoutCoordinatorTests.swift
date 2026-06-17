@@ -298,9 +298,9 @@ struct ChatLayoutCoordinatorTests {
         #expect(abs(state.listBottomInset - 458) <= 0.5)
     }
 
-    @Test("Keyboard-visible dictation collapse releases open surface height from runtime inset")
+    @Test("Keyboard-visible expanded surface releases open surface height from runtime inset")
     @MainActor
-    func keyboardVisibleDictationCollapseUsesCollapsedBarHeight() {
+    func keyboardVisibleExpandedSurfaceUsesCollapsedBarHeight() {
         let coordinator = ChatLayoutCoordinator()
         let inputs = ChatLayoutInputs(
             keyboardHeight: 336,
@@ -369,7 +369,7 @@ struct ChatLayoutCoordinatorTests {
         )
     }
 
-    @Test("Hidden-keyboard open dictation surface does not keep closed-pill bottom padding")
+    @Test("Hidden-keyboard open input surface does not keep closed-pill bottom padding")
     @MainActor
     func hiddenKeyboardOpenSurfaceUsesReducedBottomGap() {
         let gap = ChatLayoutCoordinator.inputBarBottomGap(

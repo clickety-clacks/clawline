@@ -29,7 +29,7 @@ struct RichTextEditor: UIViewRepresentable {
     var dismissTrigger: Int
     var isEditable: Bool
     var isKeyboardVisible: Bool
-    var isDictationActive: Bool = false
+    var isExternalEditingActive: Bool = false
     var tintColor: UIColor
     var textColor: UIColor = .label
     var onFocusChange: (Bool) -> Void
@@ -293,17 +293,17 @@ struct RichTextEditor: UIViewRepresentable {
 
         func textViewDidChange(_ textView: UITextView) {
             guard !isUpdatingFromSwiftUI else { return }
-            let isDictationProgrammaticEdit = (textView as? PastableTextView)?.dictationProgrammaticEditInFlight == true
+            let isProgrammaticEdit = (textView as? PastableTextView)?.programmaticEditInFlight == true
             isApplyingLocalEdit = true
-            if !isDictationProgrammaticEdit {
+            if !isProgrammaticEdit {
                 parent.onTextEditActivity?()
             }
             parent.attributedText = textView.attributedText
-            if !isDictationProgrammaticEdit {
+            if !isProgrammaticEdit {
                 setSelectionRange(textView.selectedRange)
             }
             updateHeight(for: textView, allowAutoScroll: true)
-            if !isDictationProgrammaticEdit {
+            if !isProgrammaticEdit {
                 ensureCaretVisible(in: textView)
             }
             ensureTypingAttributes(on: textView)
@@ -311,10 +311,10 @@ struct RichTextEditor: UIViewRepresentable {
 
         func textViewDidChangeSelection(_ textView: UITextView) {
             if let textView = textView as? PastableTextView {
-                if textView.consumeExpectedDictationProgrammaticSelectionFeedback(textView.selectedRange) {
+                if textView.consumeExpectedProgrammaticSelectionFeedback(textView.selectedRange) {
                     return
                 }
-                if textView.dictationProgrammaticEditInFlight {
+                if textView.programmaticEditInFlight {
                     return
                 }
             }
@@ -332,14 +332,21 @@ struct RichTextEditor: UIViewRepresentable {
                       shouldChangeTextIn range: NSRange,
                       replacementText text: String) -> Bool {
             if let textView = textView as? PastableTextView {
-                guard !textView.dictationProgrammaticEditInFlight else { return true }
-                textView.clearExpectedDictationProgrammaticSelectionFeedback()
+                guard !textView.programmaticEditInFlight else { return true }
+                textView.clearExpectedProgrammaticSelectionFeedback()
                 parent.onUserEdit?(range, text.utf16.count)
             } else {
                 parent.onUserEdit?(range, text.utf16.count)
             }
             if text == "\n" {
-                parent.onSubmit?()
+                switch KeyboardCommandRouter.route(intent: .textSubmit, store: parent.keyboardOwnershipStore).outcome {
+                case .handled(.mentionPicker):
+                    parent.onMentionPickerTab?()
+                case .handled(.composer):
+                    parent.onSubmit?()
+                default:
+                    return true
+                }
                 return false
             }
             return true
@@ -522,8 +529,8 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
     var onMentionPickerTab: (() -> Void)?
     var onMentionPickerMoveUp: (() -> Void)?
     var onMentionPickerMoveDown: (() -> Void)?
-    var dictationProgrammaticEditInFlight: Bool = false
-    private var expectedDictationProgrammaticSelectionFeedback: NSRange?
+    var programmaticEditInFlight: Bool = false
+    private var expectedProgrammaticSelectionFeedback: NSRange?
     var onResponderFocusChange: ((Bool) -> Void)?
     var isInputEnabled: Bool = true {
         didSet {
@@ -558,21 +565,21 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
         pasteDelegate = self
     }
 
-    func expectDictationProgrammaticSelectionFeedback(_ selection: NSRange) {
-        expectedDictationProgrammaticSelectionFeedback = selection
+    func expectProgrammaticSelectionFeedback(_ selection: NSRange) {
+        expectedProgrammaticSelectionFeedback = selection
     }
 
-    func consumeExpectedDictationProgrammaticSelectionFeedback(_ selection: NSRange) -> Bool {
-        guard let expectedDictationProgrammaticSelectionFeedback,
-              expectedDictationProgrammaticSelectionFeedback == selection else {
+    func consumeExpectedProgrammaticSelectionFeedback(_ selection: NSRange) -> Bool {
+        guard let expectedProgrammaticSelectionFeedback,
+              expectedProgrammaticSelectionFeedback == selection else {
             return false
         }
-        self.expectedDictationProgrammaticSelectionFeedback = nil
+        self.expectedProgrammaticSelectionFeedback = nil
         return true
     }
 
-    func clearExpectedDictationProgrammaticSelectionFeedback() {
-        expectedDictationProgrammaticSelectionFeedback = nil
+    func clearExpectedProgrammaticSelectionFeedback() {
+        expectedProgrammaticSelectionFeedback = nil
     }
 
     override func layoutSubviews() {
@@ -964,8 +971,8 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
     }
 
     private func notifyDirectUserTextReplacement(range: NSRange, replacementText: String) {
-        guard !dictationProgrammaticEditInFlight else { return }
-        clearExpectedDictationProgrammaticSelectionFeedback()
+        guard !programmaticEditInFlight else { return }
+        clearExpectedProgrammaticSelectionFeedback()
         onDirectUserTextReplacement?(range, replacementText)
     }
 

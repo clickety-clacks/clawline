@@ -1904,8 +1904,10 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
             replyToMessageId: replyToMessageId,
             replyToClientMessageId: replyToClientMessageId
         )
+        print("[ClawlineSendDiag] vm_begin_send_placeholder id=\(clientId) sessionKey=\(sessionKey) contentChars=\(content.count) attachments=\(pendingAttachments.count) references=\(references.count)")
         upsert(sessionKey: sessionKey, message: placeholder, sourceFlags: .local)
         pendingLocalMessages.append(PendingLocalMessage(id: clientId, sessionKey: sessionKey))
+        print("[ClawlineSendDiag] vm_begin_send_task_scheduled id=\(clientId) sessionKey=\(sessionKey) pendingLocalCount=\(pendingLocalMessages.count)")
         scheduleSessionStatusRefresh(for: sessionKey, reason: "sendDispatched")
         bumpSendIndicatorRevision()
 
@@ -2965,10 +2967,13 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
         defer { sendTask = nil }
         var didStartChatSend = false
         do {
+            print("[ClawlineSendDiag] vm_perform_send_start id=\(clientId) sessionKey=\(sessionKey ?? "nil") contentChars=\(content.count) attachments=\(pendingAttachments.count) references=\(references.count)")
             let wireAttachments = try await buildWireAttachments(from: pendingAttachments, content: content)
+            print("[ClawlineSendDiag] vm_wire_attachments_ready id=\(clientId) sessionKey=\(sessionKey ?? "nil") wireAttachments=\(wireAttachments.count)")
             try Task.checkCancellation()
             didStartChatSend = true
             activeSendHasReachedTransport = true
+            print("[ClawlineSendDiag] vm_call_chat_service_send id=\(clientId) sessionKey=\(sessionKey ?? "nil")")
             try await chatService.send(
                 id: clientId,
                 content: content,
@@ -2976,6 +2981,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
                 sessionKey: sessionKey,
                 references: references
             )
+            print("[ClawlineSendDiag] vm_chat_service_send_success id=\(clientId) sessionKey=\(sessionKey ?? "nil")")
             await MainActor.run {
 #if DEBUG
                 self.recordImageSendDebugEvent(.sendResult, detail: "success localId=\(clientId)")
@@ -2990,6 +2996,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
                 activeSendHasReachedTransport = false
             }
         } catch is CancellationError {
+            print("[ClawlineSendDiag] vm_perform_send_cancelled id=\(clientId) sessionKey=\(sessionKey ?? "nil") reachedTransport=\(didStartChatSend)")
             await MainActor.run {
 #if DEBUG
                 self.recordImageSendDebugEvent(.sendResult, detail: "failure localId=\(clientId) reason=cancelled")
@@ -3006,6 +3013,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
                 activeSendHasReachedTransport = false
             }
         } catch let attachmentError as AttachmentError {
+            print("[ClawlineSendDiag] vm_perform_send_attachment_failure id=\(clientId) sessionKey=\(sessionKey ?? "nil") error=\(attachmentError.localizedDescription)")
             await MainActor.run {
 #if DEBUG
                 self.recordImageSendDebugEvent(
@@ -3026,6 +3034,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
                 activeSendHasReachedTransport = false
             }
         } catch {
+            print("[ClawlineSendDiag] vm_perform_send_failure id=\(clientId) sessionKey=\(sessionKey ?? "nil") reachedTransport=\(didStartChatSend) error=\(error.localizedDescription)")
             await MainActor.run {
 #if DEBUG
                 self.recordImageSendDebugEvent(

@@ -535,16 +535,20 @@ final class ProviderChatService: ChatServicing {
         references: [MessageReferenceContext] = []
     ) async throws {
         guard let socket else {
+            print("[ClawlineSendDiag] provider_send_no_socket id=\(id) sessionKey=\(sessionKey ?? "nil")")
             throw Error.notConnected
         }
         guard id.hasPrefix("c_") else {
+            print("[ClawlineSendDiag] provider_send_invalid_id id=\(id) sessionKey=\(sessionKey ?? "nil")")
             throw Error.invalidMessageId
         }
         if sentMessageIDs.contains(id) {
             logger.warning("duplicate outbound message suppressed id=\(id, privacy: .public)")
+            print("[ClawlineSendDiag] provider_send_duplicate_suppressed id=\(id) sessionKey=\(sessionKey ?? "nil")")
             return
         }
 
+        print("[ClawlineSendDiag] provider_send_encode_start id=\(id) sessionKey=\(sessionKey ?? "nil") contentChars=\(content.count) attachments=\(attachments.count) references=\(references.count)")
         let payload = ClientMessagePayload(
             id: id,
             content: content,
@@ -555,6 +559,7 @@ final class ProviderChatService: ChatServicing {
         let data = try encoder.encode(payload)
         guard let text = String(data: data, encoding: .utf8) else {
             logger.error("Failed to encode outbound message payload as UTF-8 id=\(id, privacy: .public)")
+            print("[ClawlineSendDiag] provider_send_encode_failed id=\(id) sessionKey=\(sessionKey ?? "nil")")
             throw Error.serverError(
                 code: "client_encode_failed",
                 message: "Failed to encode outbound message payload."
@@ -563,10 +568,13 @@ final class ProviderChatService: ChatServicing {
 
         sentMessageIDs.insert(id)
         pendingMessages.insert(id)
+        print("[ClawlineSendDiag] provider_socket_send_start id=\(id) sessionKey=\(sessionKey ?? "nil") payloadBytes=\(data.count) pendingCount=\(pendingMessages.count)")
         do {
             try await socket.send(text: text)
+            print("[ClawlineSendDiag] provider_socket_send_success id=\(id) sessionKey=\(sessionKey ?? "nil") pendingCount=\(pendingMessages.count)")
         } catch {
             pendingMessages.remove(id)
+            print("[ClawlineSendDiag] provider_socket_send_failure id=\(id) sessionKey=\(sessionKey ?? "nil") error=\(error.localizedDescription)")
             throw error
         }
     }

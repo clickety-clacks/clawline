@@ -328,12 +328,19 @@ struct KeyboardCommandRouterTests {
             KeyboardCommandBridge.intent(input: specs[0].input, modifierFlags: specs[0].modifierFlags)
             == .notificationAssignedOpen(1)
         )
+        assertRoute(
+            specs[0].intent,
+            in: StreamSelectorShortcutMap.store(selectableSessionKeys: ["s_first", "s_second", "s_third"]),
+            isHandledBy: .chatSelectorRow("s_first"),
+            rule: "PR-00"
+        )
     }
 
     @Test("T1210 visible popup shortcut hints render command symbol")
     func visiblePopupShortcutHintsRenderCommandSymbol() {
-        #expect(StreamSelectorShortcutMap.shortcutLabel(forSlot: 1) == "⌘-1")
-        #expect(StreamSelectorShortcutMap.shortcutLabel(forSlot: 0) == "⌘-0")
+        #expect(StreamSelectorShortcutMap.shortcutLabel(forSlot: 1) == "⌘ 1")
+        #expect(StreamSelectorShortcutMap.shortcutLabel(forSlot: 0) == "⌘ 0")
+        #expect(StreamSelectorShortcutMap.shortcutLabel(forSlot: 1).contains("-") == false)
         #expect(
             StreamSelectorShortcutMap.accessibilityLabel(
                 forShortcutLabel: StreamSelectorShortcutMap.shortcutLabel(forSlot: 2)

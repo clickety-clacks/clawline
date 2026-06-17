@@ -862,11 +862,11 @@ enum StreamSelectorShortcutMap {
     }
 
     static func shortcutLabel(forSlot slot: Int) -> String {
-        "⌘-\(slot)"
+        "⌘ \(slot)"
     }
 
     static func accessibilityLabel(forShortcutLabel label: String) -> String {
-        label.replacingOccurrences(of: "⌘-", with: "Command ")
+        label.replacingOccurrences(of: "⌘ ", with: "Command ")
     }
 }
 

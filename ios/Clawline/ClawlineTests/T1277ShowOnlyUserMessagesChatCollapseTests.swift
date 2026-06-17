@@ -85,6 +85,25 @@ final class T1277ShowOnlyUserMessagesChatCollapseTests: XCTestCase {
 
         XCTAssertEqual(revealedMessageId, "u_reveal_identity")
     }
+
+    func testCollapsedUserMessageWithLinkCardStillRevealsOnNonLinkBubbleTap() {
+        let message = t1277Message(
+            id: "u_reveal_link_card",
+            role: .user,
+            content: "Review https://example.com/t1277 for details."
+        )
+        var revealedMessageId: String?
+        let bubble = t1277ConfiguredBubble(
+            message: message,
+            menuLabel: ShowOnlyUserMessagesChatCollapse.menuLabel(isCollapsed: true),
+            onToggle: {},
+            onReveal: { revealedMessageId = $0.id }
+        )
+
+        _ = bubble.perform(NSSelectorFromString("handleBubbleTap"))
+
+        XCTAssertEqual(revealedMessageId, "u_reveal_link_card")
+    }
 }
 
 private let t1277SessionKey = SessionKey.clawlineMain(userId: "t1277")

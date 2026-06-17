@@ -2062,13 +2062,13 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
     }
 
     @objc private func handleBubbleTap() {
-        if suppressExpandTapForLinkCards {
-            return
-        }
         if let currentMessage,
            currentMessage.role == .user,
            let onShowOnlyUserMessagesReveal {
             onShowOnlyUserMessagesReveal(currentMessage)
+            return
+        }
+        if suppressExpandTapForLinkCards {
             return
         }
         // If the bubble overflows the max height cap, allow tap-to-expand (signals "truncated").

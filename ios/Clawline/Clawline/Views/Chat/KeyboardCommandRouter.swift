@@ -481,10 +481,16 @@ enum KeyboardCommandBridge {
         KeyCommandSpec(input: UIKeyCommand.inputEscape, modifierFlags: [], intent: .textCancel)
     ]
 
-    static func appSpecs(notificationVisibleCount: Int) -> [KeyCommandSpec] {
+    static func appSpecs(
+        notificationVisibleCount: Int,
+        selectorShortcutSlots: Set<Int> = []
+    ) -> [KeyCommandSpec] {
         navigationSpecs
             + transcriptScrollSpecs
-            + notificationNumberSpecs(visibleCount: notificationVisibleCount)
+            + numberSpecs(
+                notificationVisibleCount: notificationVisibleCount,
+                selectorShortcutSlots: selectorShortcutSlots
+            )
     }
 
     static func notificationNumberSpecs(visibleCount: Int) -> [KeyCommandSpec] {
@@ -496,6 +502,21 @@ enum KeyboardCommandBridge {
                 KeyCommandSpec(input: "\(index)", modifierFlags: [.command, .shift, .alternate], intent: .notificationAssignedDismiss(index))
             ]
         }
+    }
+
+    static func numberSpecs(
+        notificationVisibleCount: Int,
+        selectorShortcutSlots: Set<Int>
+    ) -> [KeyCommandSpec] {
+        var specs = notificationNumberSpecs(visibleCount: notificationVisibleCount)
+        let existingPlainSlots = Set(0..<min(notificationVisibleCount, 10))
+        let selectorOnlySlots = [1, 2, 3, 4, 5, 6, 7, 8, 9, 0].filter { slot in
+            selectorShortcutSlots.contains(slot) && !existingPlainSlots.contains(slot)
+        }
+        specs.append(contentsOf: selectorOnlySlots.map { slot in
+            KeyCommandSpec(input: "\(slot)", modifierFlags: [.command], intent: .notificationAssignedOpen(slot))
+        })
+        return specs
     }
 
     static func prioritizedTextInputSpecs(notificationVisibleCount: Int) -> [KeyCommandSpec] {

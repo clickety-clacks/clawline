@@ -2001,9 +2001,12 @@ struct ChatView: View {
             replyPinSlotsBySourceChatId: replyPinSlotsBySourceChatId,
             measuredHeightsBySourceChatId: measuredHeightsBySourceChatId
         )
-        guard !bubbles.isEmpty else { return nil }
+        guard CrossChatNotificationCommandAvailability.shouldInstallCommand(
+            visibleNotificationCount: bubbles.count,
+            selectorShortcutSlots: Set(keyboardOwnershipStore.chatSelectorShortcutMap.keys)
+        ) else { return nil }
         return CrossChatNotificationCommand(
-            hasVisibleNotifications: true,
+            hasVisibleNotifications: !bubbles.isEmpty,
             visibleCount: bubbles.count,
             keyboardOwnershipStore: keyboardOwnershipStore,
             openActionMenu: { index in
@@ -4242,6 +4245,7 @@ private struct PromptFocusShortcutHost: UIViewRepresentable {
         view.hasStreams = hasStreams
         view.notificationVisibleCount = notificationVisibleCount
         view.keyboardOwnershipStore = keyboardOwnershipStore
+        view.refreshKeyCommandsIfNeeded()
         if isEnabled {
             view.activateWhenReady()
         } else if view.isFirstResponder {
@@ -4258,6 +4262,10 @@ private final class PromptFocusShortcutView: UIView {
     var hasStreams = false
     var notificationVisibleCount = 0
     var keyboardOwnershipStore = KeyboardOwnershipStore()
+    private var keyCommandSignature = ChatAppCommandShortcut.keyCommandSignature(
+        notificationVisibleCount: 0,
+        selectorShortcutSlots: []
+    )
     private var hasPendingActivationRetry = false
     private static let keyboardSuppressingInputView = PromptFocusShortcutSuppressedInputView()
 
@@ -4283,7 +4291,10 @@ private final class PromptFocusShortcutView: UIView {
             )
         }
         let appCommandShortcuts = ChatAppCommandShortcut
-            .keyCommandSpecs(notificationVisibleCount: notificationVisibleCount)
+            .keyCommandSpecs(
+                notificationVisibleCount: notificationVisibleCount,
+                selectorShortcutSlots: Set(keyboardOwnershipStore.chatSelectorShortcutMap.keys)
+            )
             .map { spec in
             UIKeyCommand(
                 input: spec.input,
@@ -4292,6 +4303,19 @@ private final class PromptFocusShortcutView: UIView {
             )
         }
         return noTextCommands + appCommandShortcuts
+    }
+
+    func refreshKeyCommandsIfNeeded() {
+        let nextSignature = ChatAppCommandShortcut.keyCommandSignature(
+            notificationVisibleCount: notificationVisibleCount,
+            selectorShortcutSlots: Set(keyboardOwnershipStore.chatSelectorShortcutMap.keys)
+        )
+        guard nextSignature != keyCommandSignature else { return }
+        keyCommandSignature = nextSignature
+        reloadInputViews()
+        guard isFirstResponder else { return }
+        resignFirstResponder()
+        becomeFirstResponder()
     }
 
     private func selector(for action: PromptFocusShortcutConfiguration.Action) -> Selector {
@@ -4454,8 +4478,27 @@ enum ChatAppCommandShortcut {
 
     static let keyCommandSpecs = keyCommandSpecs(notificationVisibleCount: 0)
 
-    static func keyCommandSpecs(notificationVisibleCount: Int) -> [KeyCommandSpec] {
-        convert(KeyboardCommandBridge.appSpecs(notificationVisibleCount: notificationVisibleCount))
+    static func keyCommandSpecs(
+        notificationVisibleCount: Int,
+        selectorShortcutSlots: Set<Int> = []
+    ) -> [KeyCommandSpec] {
+        convert(KeyboardCommandBridge.appSpecs(
+            notificationVisibleCount: notificationVisibleCount,
+            selectorShortcutSlots: selectorShortcutSlots
+        ))
+    }
+
+    static func keyCommandSignature(
+        notificationVisibleCount: Int,
+        selectorShortcutSlots: Set<Int>
+    ) -> [String] {
+        keyCommandSpecs(
+            notificationVisibleCount: notificationVisibleCount,
+            selectorShortcutSlots: selectorShortcutSlots
+        )
+        .map { spec in
+            "\(spec.input)|\(spec.modifierFlags.rawValue)|\(spec.action)"
+        }
     }
 
     static func scrollKeyCommandSpecs(notificationVisibleCount: Int) -> [KeyCommandSpec] {

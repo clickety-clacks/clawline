@@ -489,6 +489,53 @@ struct StreamSelectorLayoutTests {
         #expect(viewport == CGFloat(0))
     }
 
+    @Test("T1210 filtering resizes popup height while preserving action bar height")
+    func filteringResizesPopupHeightWhilePreservingActionBarHeight() {
+        let unfiltered = StreamSelectorLayout.popupVerticalLayout(
+            itemCount: 8,
+            showsCreateInlineRow: false,
+            rowHeight: CGFloat(52),
+            rowSpacing: CGFloat(2),
+            actionBarHeight: CGFloat(72),
+            outerVerticalPadding: CGFloat(20),
+            maxAvailableHeight: CGFloat(640),
+            minimumPopoverHeight: CGFloat(140)
+        )
+        let filtered = StreamSelectorLayout.popupVerticalLayout(
+            itemCount: 2,
+            showsCreateInlineRow: false,
+            rowHeight: CGFloat(52),
+            rowSpacing: CGFloat(2),
+            actionBarHeight: CGFloat(72),
+            outerVerticalPadding: CGFloat(20),
+            maxAvailableHeight: CGFloat(640),
+            minimumPopoverHeight: CGFloat(140)
+        )
+
+        #expect(unfiltered.containerHeight == CGFloat(542))
+        #expect(filtered.containerHeight == CGFloat(218))
+        #expect(unfiltered.actionBarHeight == filtered.actionBarHeight)
+        #expect(filtered.listViewportHeight == CGFloat(146))
+    }
+
+    @Test("T1210 filtered popup height caps list viewport instead of resizing the action bar")
+    func filteredPopupHeightCapsListViewportInsteadOfActionBar() {
+        let layout = StreamSelectorLayout.popupVerticalLayout(
+            itemCount: 12,
+            showsCreateInlineRow: false,
+            rowHeight: CGFloat(52),
+            rowSpacing: CGFloat(2),
+            actionBarHeight: CGFloat(72),
+            outerVerticalPadding: CGFloat(20),
+            maxAvailableHeight: CGFloat(320),
+            minimumPopoverHeight: CGFloat(140)
+        )
+
+        #expect(layout.containerHeight == CGFloat(320))
+        #expect(layout.actionBarHeight == CGFloat(72))
+        #expect(layout.listViewportHeight == CGFloat(248))
+    }
+
     @Test("Blank stream filter returns all streams")
     func blankStreamFilterReturnsAll() {
         let streams = [

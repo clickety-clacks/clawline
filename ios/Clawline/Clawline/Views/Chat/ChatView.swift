@@ -1481,6 +1481,9 @@ struct ChatView: View {
             guard let intent = notification.object as? KeyboardCommandIntent else { return }
             handleRootKeyboardCommandIntent(intent, keyboardOwnershipStore: keyboardOwnershipStore)
         }
+        .onReceive(NotificationCenter.default.publisher(for: .clawlineToggleShowOnlyUserMessagesCommand)) { _ in
+            toggleShowOnlyUserMessagesMode()
+        }
         .onChange(of: layoutInputs) { _, _ in
             layoutCoordinator.updateInputs(layoutInputs, metrics: layoutMetrics)
             layoutCoordinator.markInputsChanged()
@@ -2565,6 +2568,9 @@ struct ChatView: View {
             onReferenceMessageInPrompt: { message in
                 referenceMessageInPrompt(message)
             },
+            onShowOnlyUserMessagesModeChanged: { sessionKey, isCollapsed in
+                viewModel.setShowOnlyUserMessagesMode(isCollapsed, for: sessionKey)
+            },
             onKeyboardDismissModeChanged: { summary in
                 messageListDismissModeSummary = summary
             }
@@ -2916,6 +2922,11 @@ struct ChatView: View {
     private func scrollChatSurface(_ direction: ChatScrollPageDirection) {
         guard let sessionKey = keyboardNavigationSessionKey else { return }
         layoutCoordinator.scrollByPage(sessionKey: sessionKey, direction: direction, animated: true)
+    }
+
+    private func toggleShowOnlyUserMessagesMode() {
+        guard let sessionKey = keyboardNavigationSessionKey else { return }
+        layoutCoordinator.toggleShowOnlyUserMessages(sessionKey: sessionKey)
     }
 
     private func navigateStreamByShortcut(step: Int, sessionKeys: [String]) {
@@ -4408,6 +4419,7 @@ enum ChatAppCommandShortcut {
         case openStreamPopup
         case navigatePreviousStream
         case navigateNextStream
+        case toggleShowOnlyUserMessages
         case scrollDown
         case scrollUp
         case scrollChatDown
@@ -4426,6 +4438,8 @@ enum ChatAppCommandShortcut {
                 return #selector(UIResponder.clawlineNavigateToPreviousStreamCommand(_:))
             case .navigateNextStream:
                 return #selector(UIResponder.clawlineNavigateToNextStreamCommand(_:))
+            case .toggleShowOnlyUserMessages:
+                return #selector(UIResponder.clawlineToggleShowOnlyUserMessagesCommand(_:))
             case .scrollDown:
                 return #selector(UIResponder.clawlineScrollDownCommand(_:))
             case .scrollUp:
@@ -4495,6 +4509,8 @@ enum ChatAppCommandShortcut {
             return .navigatePreviousStream
         case .navigateNextStream:
             return .navigateNextStream
+        case .toggleShowOnlyUserMessages:
+            return .toggleShowOnlyUserMessages
         case .transcriptBubbleScrollForward:
             return .scrollDown
         case .transcriptBubbleScrollBackward:
@@ -4564,6 +4580,8 @@ enum ChatRootKeyboardCommandDispatch {
             return .clawlineNavigateToPreviousStreamCommand
         case .navigateNextStream:
             return .clawlineNavigateToNextStreamCommand
+        case .toggleShowOnlyUserMessages:
+            return .clawlineToggleShowOnlyUserMessagesCommand
         case .transcriptBubbleScrollForward:
             return .clawlineScrollDownCommand
         case .transcriptBubbleScrollBackward:
@@ -4603,6 +4621,10 @@ extension UIResponder {
     }
 
     @objc func clawlineNavigateToNextStreamCommand(_ sender: UIKeyCommand) {
+        NotificationCenter.default.post(name: .clawlineKeyboardCommandIntent, object: KeyboardCommandBridge.intent(input: sender.input, modifierFlags: sender.modifierFlags))
+    }
+
+    @objc func clawlineToggleShowOnlyUserMessagesCommand(_ sender: UIKeyCommand) {
         NotificationCenter.default.post(name: .clawlineKeyboardCommandIntent, object: KeyboardCommandBridge.intent(input: sender.input, modifierFlags: sender.modifierFlags))
     }
 

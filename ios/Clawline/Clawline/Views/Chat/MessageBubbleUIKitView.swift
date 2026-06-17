@@ -455,6 +455,9 @@ final class MessageBubbleUIKitContainerView: UIView {
                    onInteractiveCallback: ((String, String, JSONValue?) -> Void)?,
                    onInsertIntoPrompt: ((Message) -> Void)?,
                    onReferenceMessage: ((Message) -> Void)?,
+                   showOnlyUserMessagesMenuLabel: String? = nil,
+                   onToggleShowOnlyUserMessages: (() -> Void)? = nil,
+                   onShowOnlyUserMessagesReveal: ((Message) -> Void)? = nil,
                    replyReference: PendingMessageReference? = nil,
                    onResend: (() -> Void)?) {
         let metrics = ChatFlowTheme.Metrics(isCompact: isCompact)
@@ -481,6 +484,9 @@ final class MessageBubbleUIKitContainerView: UIView {
             onInteractiveCallback: onInteractiveCallback,
             onInsertIntoPrompt: onInsertIntoPrompt,
             onReferenceMessage: onReferenceMessage,
+            showOnlyUserMessagesMenuLabel: showOnlyUserMessagesMenuLabel,
+            onToggleShowOnlyUserMessages: onToggleShowOnlyUserMessages,
+            onShowOnlyUserMessagesReveal: onShowOnlyUserMessagesReveal,
             replyReference: replyReference,
             salientHighlightService: salientHighlightService
         )
@@ -586,6 +592,9 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
     private var onInteractiveCallback: ((String, String, JSONValue?) -> Void)?
     private var onInsertIntoPrompt: ((Message) -> Void)?
     private var onReferenceMessage: ((Message) -> Void)?
+    private var showOnlyUserMessagesMenuLabel: String?
+    private var onToggleShowOnlyUserMessages: (() -> Void)?
+    private var onShowOnlyUserMessagesReveal: ((Message) -> Void)?
     private var currentMessage: Message?
     private var currentCopyableReadableText: String?
     private var currentReplyReference: PendingMessageReference?
@@ -1095,6 +1104,9 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
                    onInteractiveCallback: ((String, String, JSONValue?) -> Void)?,
                    onInsertIntoPrompt: ((Message) -> Void)? = nil,
                    onReferenceMessage: ((Message) -> Void)? = nil,
+                   showOnlyUserMessagesMenuLabel: String? = nil,
+                   onToggleShowOnlyUserMessages: (() -> Void)? = nil,
+                   onShowOnlyUserMessagesReveal: ((Message) -> Void)? = nil,
                    replyReference: PendingMessageReference? = nil,
                    salientHighlightService: (any SalientHighlightServicing)? = nil) {
         assert(Thread.isMainThread)
@@ -1150,6 +1162,9 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         self.onInteractiveCallback = onInteractiveCallback
         self.onInsertIntoPrompt = onInsertIntoPrompt
         self.onReferenceMessage = onReferenceMessage
+        self.showOnlyUserMessagesMenuLabel = showOnlyUserMessagesMenuLabel
+        self.onToggleShowOnlyUserMessages = onToggleShowOnlyUserMessages
+        self.onShowOnlyUserMessagesReveal = onShowOnlyUserMessagesReveal
         updateReplyIndicator()
         headerMenuButton.menu = messageContextMenu()
 
@@ -1688,6 +1703,9 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         currentReplyReference = nil
         onInsertIntoPrompt = nil
         onReferenceMessage = nil
+        showOnlyUserMessagesMenuLabel = nil
+        onToggleShowOnlyUserMessages = nil
+        onShowOnlyUserMessagesReveal = nil
         updateReplyIndicator()
         headerMenuButton.menu = nil
         suppressExpandTapForLinkCards = false
@@ -2047,6 +2065,12 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         if suppressExpandTapForLinkCards {
             return
         }
+        if let currentMessage,
+           currentMessage.role == .user,
+           let onShowOnlyUserMessagesReveal {
+            onShowOnlyUserMessagesReveal(currentMessage)
+            return
+        }
         // If the bubble overflows the max height cap, allow tap-to-expand (signals "truncated").
         if dynamicContentScrollView.contentSize.height > dynamicContentScrollView.bounds.height + 1 {
             onRequestExpand?()
@@ -2171,6 +2195,12 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
             guard let self, let message = self.currentMessage else { return }
             self.onReferenceMessage?(message)
         })
+        if let showOnlyUserMessagesMenuLabel,
+           let onToggleShowOnlyUserMessages {
+            actions.append(UIAction(title: showOnlyUserMessagesMenuLabel, image: UIImage(systemName: "line.3.horizontal.decrease.circle")) { _ in
+                onToggleShowOnlyUserMessages()
+            })
+        }
         return actions.isEmpty ? nil : UIMenu(children: actions)
     }
 
@@ -3327,6 +3357,9 @@ final class MessageBubbleUIKitCell: UICollectionViewCell {
                    onInteractiveCallback: ((String, String, JSONValue?) -> Void)?,
                    onInsertIntoPrompt: ((Message) -> Void)?,
                    onReferenceMessage: ((Message) -> Void)?,
+                   showOnlyUserMessagesMenuLabel: String? = nil,
+                   onToggleShowOnlyUserMessages: (() -> Void)? = nil,
+                   onShowOnlyUserMessagesReveal: ((Message) -> Void)? = nil,
                    replyReference: PendingMessageReference? = nil,
                    onResend: (() -> Void)?) {
         messageId = message.id
@@ -3355,6 +3388,9 @@ final class MessageBubbleUIKitCell: UICollectionViewCell {
             onInteractiveCallback: onInteractiveCallback,
             onInsertIntoPrompt: onInsertIntoPrompt,
             onReferenceMessage: onReferenceMessage,
+            showOnlyUserMessagesMenuLabel: showOnlyUserMessagesMenuLabel,
+            onToggleShowOnlyUserMessages: onToggleShowOnlyUserMessages,
+            onShowOnlyUserMessagesReveal: onShowOnlyUserMessagesReveal,
             replyReference: replyReference,
             onResend: onResend
         )

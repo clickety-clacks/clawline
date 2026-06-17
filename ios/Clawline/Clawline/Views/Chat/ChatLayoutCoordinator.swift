@@ -206,6 +206,11 @@ final class ChatLayoutCoordinator {
         listViews[sessionKey]?.value?.requestFlashMessage(messageId: messageId, isUnreadTap: isUnreadTap)
     }
 
+    func toggleShowOnlyUserMessages(sessionKey: String) {
+        dispatchPrecondition(condition: .onQueue(.main))
+        listViews[sessionKey]?.value?.toggleShowOnlyUserMessagesMode()
+    }
+
     func updateInputs(_ inputs: ChatLayoutInputs, metrics: ChatLayoutMetrics) {
         dispatchPrecondition(condition: .onQueue(.main))
         latestInputs = inputs

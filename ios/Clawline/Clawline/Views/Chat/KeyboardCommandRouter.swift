@@ -13,6 +13,7 @@ enum KeyboardCommandIntent: Equatable {
     case openStreamPopup
     case navigatePreviousStream
     case navigateNextStream
+    case toggleShowOnlyUserMessages
     case notificationAssignedOpen(Int)
     case notificationAssignedReply(Int)
     case notificationAssignedDismiss(Int)
@@ -403,7 +404,7 @@ enum KeyboardCommandRouter {
             }
             return decision(.fallthroughToDefault, "PR-07")
 
-        case .focusPromptInput, .openStreamPopup, .navigatePreviousStream, .navigateNextStream:
+        case .focusPromptInput, .openStreamPopup, .navigatePreviousStream, .navigateNextStream, .toggleShowOnlyUserMessages:
             if let transcript = reconciledStore.firstActiveSurface(kind: .transcript, supporting: .appNavigation) {
                 return decision(.handled(transcript.surfaceId), "PR-07")
             }
@@ -437,7 +438,8 @@ enum KeyboardCommandBridge {
         KeyCommandSpec(input: ";", modifierFlags: [.command], intent: .openStreamPopup),
         KeyCommandSpec(input: ";", modifierFlags: [.control], intent: .openStreamPopup),
         KeyCommandSpec(input: "h", modifierFlags: [.command, .shift], intent: .navigatePreviousStream),
-        KeyCommandSpec(input: "l", modifierFlags: [.command, .shift], intent: .navigateNextStream)
+        KeyCommandSpec(input: "l", modifierFlags: [.command, .shift], intent: .navigateNextStream),
+        KeyCommandSpec(input: "`", modifierFlags: [.command], intent: .toggleShowOnlyUserMessages)
     ]
 
     static let transcriptScrollSpecs: [KeyCommandSpec] = [
@@ -500,7 +502,8 @@ enum KeyboardCommandBridge {
 
     static func prioritizedTextInputSpecs(notificationVisibleCount: Int) -> [KeyCommandSpec] {
         let textInputGlobalNavigationSpecs = navigationSpecs.filter {
-            $0.intent == .openStreamPopup && $0.input == ";"
+            ($0.intent == .openStreamPopup && $0.input == ";")
+                || $0.intent == .toggleShowOnlyUserMessages
         }
         guard notificationVisibleCount > 0 else {
             return textInputGlobalNavigationSpecs + transcriptScrollSpecs

@@ -148,6 +148,108 @@ struct MessageInputBarBoundaryTests {
         )
     }
 
+    @Test("T1315 Return delegates to active mention picker instead of composer submit")
+    @MainActor
+    func returnDelegatesToMentionPickerInsteadOfSubmit() {
+        var attributedText = NSAttributedString(string: "@des")
+        var calculatedHeight: CGFloat = 44
+        var selectionRange = NSRange(location: 4, length: 0)
+        var pendingInsertions: [PendingAttachment] = []
+        var submitCount = 0
+        var mentionAcceptCount = 0
+        let editor = RichTextEditor(
+            attributedText: Binding(get: { attributedText }, set: { attributedText = $0 }),
+            calculatedHeight: Binding(get: { calculatedHeight }, set: { calculatedHeight = $0 }),
+            selectionRange: Binding(get: { selectionRange }, set: { selectionRange = $0 }),
+            pendingInsertions: Binding(get: { pendingInsertions }, set: { pendingInsertions = $0 }),
+            fontScaleChangeSequence: 0,
+            resetToken: 0,
+            focusTrigger: 0,
+            dismissTrigger: 0,
+            isEditable: true,
+            isKeyboardVisible: true,
+            tintColor: .systemBlue,
+            onFocusChange: { _ in },
+            onSubmit: { submitCount += 1 },
+            handlesMentionPickerKeyCommands: true,
+            mentionPickerHasCompletion: true,
+            onMentionPickerTab: { mentionAcceptCount += 1 },
+            keyboardOwnershipStore: KeyboardOwnershipSceneFactory.chatScene(
+                visibleNotificationSourceChatIds: [],
+                mentionPickerVisible: true,
+                mentionPickerHasCompletion: true,
+                composerFocused: true,
+                notificationReplyFocusedSourceChatId: nil,
+                actionMenuSourceChatId: nil
+            )
+        )
+        let coordinator = RichTextEditor.Coordinator(parent: editor)
+        let textView = UITextView()
+        textView.text = "@des"
+
+        let shouldChange = coordinator.textView(
+            textView,
+            shouldChangeTextIn: NSRange(location: 4, length: 0),
+            replacementText: "\n"
+        )
+
+        #expect(!shouldChange)
+        #expect(mentionAcceptCount == 1)
+        #expect(submitCount == 0)
+        #expect(textView.text == "@des")
+    }
+
+    @Test("T1315 Return submits composer when mention picker has no completion")
+    @MainActor
+    func returnSubmitsComposerWhenMentionPickerHasNoCompletion() {
+        var attributedText = NSAttributedString(string: "@")
+        var calculatedHeight: CGFloat = 44
+        var selectionRange = NSRange(location: 1, length: 0)
+        var pendingInsertions: [PendingAttachment] = []
+        var submitCount = 0
+        var mentionAcceptCount = 0
+        let editor = RichTextEditor(
+            attributedText: Binding(get: { attributedText }, set: { attributedText = $0 }),
+            calculatedHeight: Binding(get: { calculatedHeight }, set: { calculatedHeight = $0 }),
+            selectionRange: Binding(get: { selectionRange }, set: { selectionRange = $0 }),
+            pendingInsertions: Binding(get: { pendingInsertions }, set: { pendingInsertions = $0 }),
+            fontScaleChangeSequence: 0,
+            resetToken: 0,
+            focusTrigger: 0,
+            dismissTrigger: 0,
+            isEditable: true,
+            isKeyboardVisible: true,
+            tintColor: .systemBlue,
+            onFocusChange: { _ in },
+            onSubmit: { submitCount += 1 },
+            handlesMentionPickerKeyCommands: true,
+            mentionPickerHasCompletion: false,
+            onMentionPickerTab: { mentionAcceptCount += 1 },
+            keyboardOwnershipStore: KeyboardOwnershipSceneFactory.chatScene(
+                visibleNotificationSourceChatIds: [],
+                mentionPickerVisible: true,
+                mentionPickerHasCompletion: false,
+                composerFocused: true,
+                notificationReplyFocusedSourceChatId: nil,
+                actionMenuSourceChatId: nil
+            )
+        )
+        let coordinator = RichTextEditor.Coordinator(parent: editor)
+        let textView = UITextView()
+        textView.text = "@"
+
+        let shouldChange = coordinator.textView(
+            textView,
+            shouldChangeTextIn: NSRange(location: 1, length: 0),
+            replacementText: "\n"
+        )
+
+        #expect(!shouldChange)
+        #expect(submitCount == 1)
+        #expect(mentionAcceptCount == 0)
+        #expect(textView.text == "@")
+    }
+
     @Test("Light disabled send button keeps an off-white backing circle")
     func lightDisabledSendButtonKeepsBackingCircle() {
         let lightColor = MessageInputBar.disabledSendButtonBackingColor(colorScheme: .light)
@@ -241,7 +343,7 @@ struct MessageInputBarBoundaryTests {
         #expect(CrossChatNotificationGeometry.spatialOverlayHorizontalCorrection(
             containerWidth: hostWidth,
             resolvedContainerWidth: resolvedWidth
-        ) == nativeWindowWidth - hostWidth)
+        ) == 0)
     }
 
     @Test("T1185 Spatial notification window width tolerates key-window handoff")
@@ -271,6 +373,17 @@ struct MessageInputBarBoundaryTests {
         #expect(CrossChatNotificationGeometry.spatialOverlayHorizontalCorrection(
             containerWidth: hostWidth,
             resolvedContainerWidth: hostWidth
+        ) == 0)
+    }
+
+    @Test("T1185 Spatial notification correction does not push wider overlay past trailing edge")
+    func spatialNotificationCorrectionDoesNotPushWiderOverlayPastTrailingEdge() {
+        let hostWidth = CGFloat(720)
+        let resolvedWidth = CGFloat(960)
+
+        #expect(CrossChatNotificationGeometry.spatialOverlayHorizontalCorrection(
+            containerWidth: hostWidth,
+            resolvedContainerWidth: resolvedWidth
         ) == 0)
     }
 
@@ -348,6 +461,28 @@ struct MessageInputBarBoundaryTests {
             visibleNotificationCount: 1,
             isSpatial: false
         ) == nil)
+    }
+
+    @Test("T1185 Spatial single notification max height is bounded by available dock height")
+    func spatialSingleNotificationMaxHeightIsBoundedByAvailableDockHeight() {
+        #expect(CrossChatNotificationGeometry.bubbleMaxHeight(
+            isCompactLayout: false,
+            maxContainerHeight: 240
+        ) == CGFloat(240))
+        #expect(CrossChatNotificationGeometry.bubbleMaxHeight(
+            isCompactLayout: false,
+            maxContainerHeight: 620
+        ) == CrossChatNotificationGeometry.compactBubbleMaxHeight * 2)
+    }
+
+    @Test("T1185 notification capacity uses measured bubble heights")
+    func notificationCapacityUsesMeasuredBubbleHeights() {
+        #expect(CrossChatNotificationGeometry.visibleCapacity(
+            maxContainerHeight: 240,
+            bubbleHeights: [104, 104, 104],
+            bubbleSpacing: 10,
+            maxVisibleBubbleCount: 10
+        ) == 2)
     }
 
     @Test("T354 notification layout host height excludes motion overflow")
@@ -581,6 +716,29 @@ struct MessageInputBarBoundaryTests {
         ))
         #expect(source.contains(".frame(width: chatSurfaceWidth)"))
         #expect(source.contains(".offset(x: chatSurfaceOffset)"))
+    }
+
+    @Test("T1282 compact landscape recovers physical width from rotated portrait window size")
+    func compactLandscapeRecoversPhysicalWidthFromRotatedPortraitWindowSize() {
+        let physicalWidth = ChatLandscapeWidthGeometry.physicalWindowWidth(
+            from: CGSize(width: 402, height: 874)
+        )
+
+        #expect(physicalWidth == 874)
+        #expect(ChatLandscapeWidthGeometry.physicalWidth(
+            containerWidth: 750,
+            leadingSafeAreaInset: 0,
+            trailingSafeAreaInset: 0,
+            isCompactLandscape: true,
+            nativeWindowWidth: physicalWidth
+        ) == 874)
+        #expect(ChatLandscapeWidthGeometry.horizontalOffset(
+            containerWidth: 750,
+            leadingSafeAreaInset: 0,
+            trailingSafeAreaInset: 0,
+            isCompactLandscape: true,
+            nativeWindowWidth: physicalWidth
+        ) == 62)
     }
 
     @Test("T357 asymmetric compact landscape chrome recenters to physical window")

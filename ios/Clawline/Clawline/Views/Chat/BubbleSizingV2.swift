@@ -120,7 +120,7 @@ enum BubbleSizingV2 {
                 if prefersScreenAwareHeightCap { return screenAwareCap }
                 return nil
             }()
-            let linkPreviewViewportMaxHeight = max(44, heightCap - max(0, metrics.bubblePaddingVertical * 2))
+            let linkPreviewViewportMaxHeight = max(44, heightCap - max(0, metrics.bubblePaddingTop + metrics.bubblePaddingBottom))
             var hasher = Hasher()
             hasher.combine(isSingleLinkPreview)
             hasher.combine(heightCapMode)

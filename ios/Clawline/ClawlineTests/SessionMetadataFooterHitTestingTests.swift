@@ -263,6 +263,49 @@ struct SessionMetadataFooterHitTestingTests {
         #expect(SessionMetadataFooterCell.footerText(for: status) == "Qwen 3.6 35B-A3B Q4_K_M (gibson)  ·  Thinking high  ·  Fast off")
     }
 
+    @Test("Footer model menu deduplicates catalog refs with one selected item")
+    func footerModelMenuDeduplicatesCatalogRefsWithOneSelectedItem() throws {
+        let status = try decodedStatus(
+            displayModel: "gpt-5.5",
+            catalogModelsJSON: """
+              {
+                "id": "gpt-5.5",
+                "provider": "openai",
+                "ref": "openai/gpt-5.5",
+                "name": "GPT-5.5",
+                "alias": "gpt-5.5"
+              },
+              {
+                "id": "gpt-5.4",
+                "provider": "openai",
+                "ref": "openai/gpt-5.4",
+                "name": "GPT-5.4",
+                "alias": "gpt-5.4"
+              },
+              {
+                "id": "gpt-5.5-duplicate",
+                "provider": "openai",
+                "ref": "openai/gpt-5.5",
+                "name": "GPT-5.5 Experimental",
+                "alias": "gpt-5.5"
+              }
+            """
+        )
+        let cell = SessionMetadataFooterCell(
+            frame: CGRect(x: 0, y: 0, width: 320, height: SessionMetadataFooterCell.height(for: status))
+        )
+        cell.configure(status: status, isDark: false, isSpatial: false, onSelect: { _, _, _, _ in })
+        cell.layoutIfNeeded()
+        let modelButton = try #require(
+            allSubviews(in: cell).compactMap { $0 as? UIButton }
+                .first { $0.accessibilityLabel == "GPT-5.5" }
+        )
+        let actions = try #require(modelButton.menu?.children.compactMap { $0 as? UIAction })
+
+        #expect(actions.map(\.title) == ["GPT-5.5", "GPT-5.4"])
+        #expect(actions.filter { $0.image != nil }.map(\.title) == ["GPT-5.5"])
+    }
+
     @Test("Footer appends when rendered items and footer-capable status are present")
     func footerAppendsWhenRenderedItemsAndFooterCapableStatusArePresent() {
         #expect(SessionMetadataFooterCell.shouldAppendFooter(after: ["message-1"], status: makeStatus()))
@@ -358,6 +401,22 @@ private func makeStatus(authMode: String? = nil) -> SessionStatus {
 
 @MainActor
 private func decodedStatus(displayModel: String, catalogName: String) throws -> SessionStatus {
+    try decodedStatus(
+        displayModel: displayModel,
+        catalogModelsJSON: """
+          {
+            "id": "\(displayModel)",
+            "provider": "gibson",
+            "ref": "gibson/\(displayModel)",
+            "name": "\(catalogName)",
+            "alias": "qwen"
+          }
+        """
+    )
+}
+
+@MainActor
+private func decodedStatus(displayModel: String, catalogModelsJSON: String) throws -> SessionStatus {
     let json = """
     {
       "sessionKey": "agent:heimdal:main",
@@ -384,13 +443,7 @@ private func decodedStatus(displayModel: String, catalogName: String) throws -> 
       "modelCatalog": {
         "available": true,
         "models": [
-          {
-            "id": "\(displayModel)",
-            "provider": "gibson",
-            "ref": "gibson/\(displayModel)",
-            "name": "\(catalogName)",
-            "alias": "qwen"
-          }
+          \(catalogModelsJSON)
         ]
       }
     }

@@ -16,7 +16,6 @@ struct SubmitFailureVerificationTests {
             auth: auth,
             chatService: chatService,
             settings: SettingsManager(
-                sonioxKeyStore: SonioxKeyStore(),
                 cartesiaKeyStore: CartesiaKeyStore(keychain: KeychainSecureStore())
             ),
             device: VerificationDevice(),

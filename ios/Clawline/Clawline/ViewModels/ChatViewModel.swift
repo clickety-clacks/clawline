@@ -129,7 +129,7 @@ enum ImageAttachmentPreparer {
 
 @Observable
 @MainActor
-final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
+final class ChatViewModel: ChatViewModelHosting {
     private let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "MessagePipeline")
     private let instanceId = UUID().uuidString
     @MainActor
@@ -1904,8 +1904,10 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
             replyToMessageId: replyToMessageId,
             replyToClientMessageId: replyToClientMessageId
         )
+        print("[ClawlineSendDiag] vm_begin_send_placeholder id=\(clientId) sessionKey=\(sessionKey) contentChars=\(content.count) attachments=\(pendingAttachments.count) references=\(references.count)")
         upsert(sessionKey: sessionKey, message: placeholder, sourceFlags: .local)
         pendingLocalMessages.append(PendingLocalMessage(id: clientId, sessionKey: sessionKey))
+        print("[ClawlineSendDiag] vm_begin_send_task_scheduled id=\(clientId) sessionKey=\(sessionKey) pendingLocalCount=\(pendingLocalMessages.count)")
         scheduleSessionStatusRefresh(for: sessionKey, reason: "sendDispatched")
         bumpSendIndicatorRevision()
 
@@ -2965,10 +2967,13 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
         defer { sendTask = nil }
         var didStartChatSend = false
         do {
+            print("[ClawlineSendDiag] vm_perform_send_start id=\(clientId) sessionKey=\(sessionKey ?? "nil") contentChars=\(content.count) attachments=\(pendingAttachments.count) references=\(references.count)")
             let wireAttachments = try await buildWireAttachments(from: pendingAttachments, content: content)
+            print("[ClawlineSendDiag] vm_wire_attachments_ready id=\(clientId) sessionKey=\(sessionKey ?? "nil") wireAttachments=\(wireAttachments.count)")
             try Task.checkCancellation()
             didStartChatSend = true
             activeSendHasReachedTransport = true
+            print("[ClawlineSendDiag] vm_call_chat_service_send id=\(clientId) sessionKey=\(sessionKey ?? "nil")")
             try await chatService.send(
                 id: clientId,
                 content: content,
@@ -2976,6 +2981,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
                 sessionKey: sessionKey,
                 references: references
             )
+            print("[ClawlineSendDiag] vm_chat_service_send_success id=\(clientId) sessionKey=\(sessionKey ?? "nil")")
             await MainActor.run {
 #if DEBUG
                 self.recordImageSendDebugEvent(.sendResult, detail: "success localId=\(clientId)")
@@ -2990,6 +2996,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
                 activeSendHasReachedTransport = false
             }
         } catch is CancellationError {
+            print("[ClawlineSendDiag] vm_perform_send_cancelled id=\(clientId) sessionKey=\(sessionKey ?? "nil") reachedTransport=\(didStartChatSend)")
             await MainActor.run {
 #if DEBUG
                 self.recordImageSendDebugEvent(.sendResult, detail: "failure localId=\(clientId) reason=cancelled")
@@ -3006,6 +3013,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
                 activeSendHasReachedTransport = false
             }
         } catch let attachmentError as AttachmentError {
+            print("[ClawlineSendDiag] vm_perform_send_attachment_failure id=\(clientId) sessionKey=\(sessionKey ?? "nil") error=\(attachmentError.localizedDescription)")
             await MainActor.run {
 #if DEBUG
                 self.recordImageSendDebugEvent(
@@ -3026,6 +3034,7 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
                 activeSendHasReachedTransport = false
             }
         } catch {
+            print("[ClawlineSendDiag] vm_perform_send_failure id=\(clientId) sessionKey=\(sessionKey ?? "nil") reachedTransport=\(didStartChatSend) error=\(error.localizedDescription)")
             await MainActor.run {
 #if DEBUG
                 self.recordImageSendDebugEvent(
@@ -3357,73 +3366,6 @@ final class ChatViewModel: ChatViewModelHosting, DictationComposeDraftHosting {
 
     func refreshInputEditorContent() {
         inputResetToken &+= 1
-    }
-
-    func applyComposeDraftDelta(
-        baseSnapshot: ComposeDraftSnapshot,
-        previousTranscriptUTF16Length: Int,
-        replacementText: NSAttributedString,
-        to sessionKey: String,
-        moveCursorToEnd: Bool
-    ) {
-        _ = moveCursorToEnd
-        guard !sessionKey.isEmpty else { return }
-        guard isComposeDraftSessionCurrent(sessionKey) else { return }
-
-        let prefixLength = baseSnapshot.content.length
-        let replacementRange = NSRange(location: prefixLength, length: previousTranscriptUTF16Length)
-        let current = NSMutableAttributedString(attributedString: inputContent)
-
-        let hasExpectedPrefix: Bool = {
-            guard current.length >= prefixLength else { return false }
-            let prefix = current.attributedSubstring(from: NSRange(location: 0, length: prefixLength))
-            return prefix.isEqual(to: baseSnapshot.content)
-        }()
-
-        guard hasExpectedPrefix,
-              replacementRange.location >= 0,
-              replacementRange.length >= 0,
-              replacementRange.location + replacementRange.length <= current.length else {
-            let fallback = NSMutableAttributedString(attributedString: baseSnapshot.content)
-            if replacementText.length > 0 {
-                fallback.append(replacementText)
-            }
-            inputContent = fallback
-            attachmentData = baseSnapshot.attachments
-            return
-        }
-
-        current.replaceCharacters(in: replacementRange, with: replacementText)
-        inputContent = current
-        attachmentData = baseSnapshot.attachments
-    }
-
-    func captureComposeDraftSnapshot(for sessionKey: String) -> ComposeDraftSnapshot {
-        guard !sessionKey.isEmpty else { return .empty }
-        guard isComposeDraftSessionCurrent(sessionKey) else {
-            return ComposeDraftSnapshot(content: NSAttributedString(string: ""), attachments: [:])
-        }
-        return ComposeDraftSnapshot(content: inputContent, attachments: attachmentData)
-    }
-
-    func applyComposeDraftSnapshot(
-        _ snapshot: ComposeDraftSnapshot,
-        to sessionKey: String,
-        moveCursorToEnd: Bool,
-        announceEditorReset: Bool
-    ) {
-        _ = moveCursorToEnd
-        guard !sessionKey.isEmpty else { return }
-        guard isComposeDraftSessionCurrent(sessionKey) else { return }
-        inputContent = snapshot.content
-        attachmentData = snapshot.attachments
-        if announceEditorReset {
-            inputResetToken &+= 1
-        }
-    }
-
-    func isComposeDraftSessionCurrent(_ sessionKey: String) -> Bool {
-        sessionKey == activeSessionKey || sessionKey == uiSelectedSessionKey
     }
 
     func presentation(for message: Message, metrics: ChatFlowTheme.Metrics) -> MessagePresentation {

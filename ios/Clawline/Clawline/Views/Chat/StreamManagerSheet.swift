@@ -128,10 +128,7 @@ struct StreamManagerSheet: View {
     }
 
     private var selectableShortcutSessionKeys: [String] {
-        guard selectorShortcutsAvailable, !isWorking else { return [] }
-        return filteredStreamSessionKeys.filter { sessionKey in
-            !removingSessionKeys.contains(sessionKey) && activeEditor != .renaming(sessionKey)
-        }
+        selectableShortcutSessionKeys(shortcutsAvailable: selectorShortcutsAvailable)
     }
 
     private var selectorShortcutSlots: [Int] {
@@ -162,61 +159,67 @@ struct StreamManagerSheet: View {
         )
     }
 
-    private func listViewportHeight(containerHeight: CGFloat) -> CGFloat {
-        StreamSelectorLayout.listViewportHeight(
-            containerHeight: containerHeight,
-            actionBarReservedHeight: actionBarReservedHeight
-        )
-    }
-
-    private var cappedContainerHeight: CGFloat {
-        StreamSelectorLayout.containerHeight(
+    var body: some View {
+        let _ = settings.fontScaleChangeSequence
+        let verticalLayout = StreamSelectorLayout.popupVerticalLayout(
             itemCount: listItemCount,
             showsCreateInlineRow: false,
             rowHeight: listRowHeight,
             rowSpacing: listRowSpacing,
-            functionBarHeight: actionBarReservedHeight,
+            actionBarHeight: actionBarReservedHeight,
             outerVerticalPadding: listOuterVerticalPadding,
             maxAvailableHeight: maxAvailableHeight,
             minimumPopoverHeight: minimumPopoverHeight
         )
-    }
+        let containerHeight = verticalLayout.containerHeight
+        let rowDotStates = StreamSelectorLayout.dotStatesBySession(
+            streams: filteredStreams,
+            lookup: dotStateLookup
+        )
+        VStack(spacing: 0) {
+            List {
+                ForEach(filteredStreams) { stream in
+                    streamRow(
+                        for: stream,
+                        dotState: rowDotStates[stream.sessionKey] ?? .inactive
+                    )
+                }
 
-    var body: some View {
-        let _ = settings.fontScaleChangeSequence
-        GeometryReader { geometry in
-            // Trust the allocated size. If the popover system gives us less than our ideal,
-            // the List viewport shrinks to match instead of overflowing into the popup chrome.
-            let containerHeight = geometry.size.height
-            let rowDotStates = StreamSelectorLayout.dotStatesBySession(
-                streams: filteredStreams,
-                lookup: dotStateLookup
-            )
-            VStack(spacing: 0) {
-                List {
-                    ForEach(filteredStreams) { stream in
-                        streamRow(
-                            for: stream,
-                            dotState: rowDotStates[stream.sessionKey] ?? .inactive
-                        )
+                ForEach(filteredPendingCreateRows) { pendingRow in
+                    HStack(spacing: 10) {
+                        Circle()
+                            .fill(Color.primary.opacity(0.18))
+                            .frame(width: 8, height: 8)
+                        Text(pendingRow.displayName)
+                            .font(.clawline(.subsectionHeader).weight(.regular))
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        ProgressView()
+                            .controlSize(.small)
+                            .tint(.secondary)
                     }
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+                    .frame(height: listRowHeight, alignment: .center)
+                    .listRowInsets(
+                        EdgeInsets(
+                            top: 0,
+                            leading: listRowHorizontalInset,
+                            bottom: 0,
+                            trailing: listRowHorizontalInset
+                        )
+                    )
+                    .contentShape(Rectangle())
+                }
 
-                    ForEach(filteredPendingCreateRows) { pendingRow in
-                        HStack(spacing: 10) {
-                            Circle()
-                                .fill(Color.primary.opacity(0.18))
-                                .frame(width: 8, height: 8)
-                            Text(pendingRow.displayName)
-                                .font(.clawline(.subsectionHeader).weight(.regular))
-                                .foregroundStyle(.secondary)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                            ProgressView()
-                                .controlSize(.small)
-                                .tint(.secondary)
-                        }
+                if filteredStreams.isEmpty && filteredPendingCreateRows.isEmpty {
+                    Text("No streams found")
+                        .font(.clawline(.secondaryLabel))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .frame(height: listRowHeight, alignment: .center)
                         .listRowSeparator(.hidden)
                         .listRowBackground(Color.clear)
-                        .frame(height: listRowHeight, alignment: .center)
                         .listRowInsets(
                             EdgeInsets(
                                 top: 0,
@@ -225,43 +228,23 @@ struct StreamManagerSheet: View {
                                 trailing: listRowHorizontalInset
                             )
                         )
-                        .contentShape(Rectangle())
-                    }
-
-                    if filteredStreams.isEmpty && filteredPendingCreateRows.isEmpty {
-                        Text("No streams found")
-                            .font(.clawline(.secondaryLabel))
-                            .foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity, alignment: .center)
-                            .frame(height: listRowHeight, alignment: .center)
-                            .listRowSeparator(.hidden)
-                            .listRowBackground(Color.clear)
-                            .listRowInsets(
-                                EdgeInsets(
-                                    top: 0,
-                                    leading: listRowHorizontalInset,
-                                    bottom: 0,
-                                    trailing: listRowHorizontalInset
-                                )
-                            )
-                    }
                 }
-                .listStyle(.plain)
-                .environment(\.defaultMinListRowHeight, listRowHeight)
-                .listRowSpacing(listRowSpacing)
-                .scrollBounceBehavior(.always)
-                .contentMargins(.top, listOuterVerticalPadding, for: .scrollContent)
-                .contentMargins(.bottom, listOuterVerticalPadding, for: .scrollContent)
-                .scrollContentBackground(.hidden)
-                .background(Color.clear)
-                .frame(height: listViewportHeight(containerHeight: containerHeight))
-                .clipShape(Rectangle())
-                .disabled(isWorking)
-
-                bottomActionBar
             }
-            .frame(width: geometry.size.width, height: geometry.size.height, alignment: .top)
+            .listStyle(.plain)
+            .environment(\.defaultMinListRowHeight, listRowHeight)
+            .listRowSpacing(listRowSpacing)
+            .scrollBounceBehavior(.always)
+            .contentMargins(.top, listOuterVerticalPadding, for: .scrollContent)
+            .contentMargins(.bottom, listOuterVerticalPadding, for: .scrollContent)
+            .scrollContentBackground(.hidden)
+            .background(Color.clear)
+            .frame(height: verticalLayout.listViewportHeight)
+            .clipShape(Rectangle())
+            .disabled(isWorking)
+
+            bottomActionBar
         }
+        .frame(height: containerHeight, alignment: .top)
         .frame(
             minWidth: minimumPopoverWidth,
             idealWidth: idealPopoverWidth,
@@ -270,9 +253,9 @@ struct StreamManagerSheet: View {
         .frame(
             // Clamp the floor to the capped height so we never produce an inconsistent
             // (minHeight > maxHeight) frame when the window is shorter than our preferred minimum.
-            minHeight: min(minimumPopoverHeight, cappedContainerHeight),
-            idealHeight: cappedContainerHeight,
-            maxHeight: cappedContainerHeight,
+            minHeight: min(minimumPopoverHeight, containerHeight),
+            idealHeight: containerHeight,
+            maxHeight: containerHeight,
             alignment: .top
         )
         .background(Color.clear)
@@ -285,11 +268,10 @@ struct StreamManagerSheet: View {
                 .allowsHitTesting(false)
         )
         .background {
-            selectorShortcutButtons
+            selectorShortcutKeyCommandBridge
         }
         .onAppear {
-            resolvedHardwareKeyboardShortcutsAvailable = CrossChatShortcutLabelAvailability.current
-            publishShortcutOwnership()
+            refreshShortcutAvailabilityAndPublish()
             syncSelectionWithFilteredStreams()
             handleInitialSearchFocus(searchFocusRequestID)
         }
@@ -316,14 +298,15 @@ struct StreamManagerSheet: View {
         .onChange(of: selectableShortcutSessionKeys) { _, _ in
             publishShortcutOwnership()
         }
+        .onKeyPress(characters: .decimalDigits) { keyPress in
+            handleSelectorShortcutKeyPress(keyPress)
+        }
 #if os(iOS) && !targetEnvironment(macCatalyst) && canImport(GameController)
         .onReceive(NotificationCenter.default.publisher(for: .GCKeyboardDidConnect)) { _ in
-            resolvedHardwareKeyboardShortcutsAvailable = CrossChatShortcutLabelAvailability.current
-            publishShortcutOwnership()
+            refreshShortcutAvailabilityAndPublish()
         }
         .onReceive(NotificationCenter.default.publisher(for: .GCKeyboardDidDisconnect)) { _ in
-            resolvedHardwareKeyboardShortcutsAvailable = CrossChatShortcutLabelAvailability.current
-            publishShortcutOwnership()
+            refreshShortcutAvailabilityAndPublish()
         }
 #endif
         .alert(
@@ -416,27 +399,14 @@ struct StreamManagerSheet: View {
         }
     }
 
-    private var selectorShortcutButtons: some View {
-        Group {
-            if selectorShortcutsAvailable {
-                ForEach(selectorShortcutSlots, id: \.self) { slot in
-                    Button("") {
-                        NotificationCenter.default.post(
-                            name: .clawlineKeyboardCommandIntent,
-                            object: KeyboardCommandIntent.notificationAssignedOpen(slot)
-                        )
-                    }
-                    .keyboardShortcut(
-                        KeyEquivalent(Character("\(slot)")),
-                        modifiers: .command
-                    )
-                    .accessibilityHidden(true)
-                }
-            }
-        }
-        .frame(width: 0, height: 0)
-        .opacity(0)
+    private var selectorShortcutKeyCommandBridge: some View {
+        StreamSelectorShortcutKeyCommandBridge(
+            selectableSessionKeys: selectorShortcutsAvailable ? selectableShortcutSessionKeys : []
+        )
+        .frame(width: 1, height: 1)
+        .opacity(0.001)
         .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 
     @ViewBuilder
@@ -462,6 +432,9 @@ struct StreamManagerSheet: View {
                 .onKeyPress(.return) {
                     selectHighlightedStream()
                     return .handled
+                }
+                .onKeyPress(characters: .decimalDigits) { keyPress in
+                    handleSelectorShortcutKeyPress(keyPress)
                 }
         } else {
             Button {
@@ -583,7 +556,7 @@ struct StreamManagerSheet: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
                 .frame(width: shortcutLabelReservedWidth, alignment: .trailing)
-                .accessibilityLabel(label.replacingOccurrences(of: "Cmd-", with: "Command "))
+                .accessibilityLabel(StreamSelectorShortcutMap.accessibilityLabel(forShortcutLabel: label))
         }
     }
 
@@ -718,8 +691,44 @@ struct StreamManagerSheet: View {
         onSelectStream(selectedStreamSessionKey)
     }
 
+    private func handleSelectorShortcutKeyPress(_ keyPress: KeyPress) -> KeyPress.Result {
+        guard let intent = StreamSelectorShortcutActivation.intent(
+            characters: keyPress.characters,
+            modifiers: keyPress.modifiers
+        ),
+              case .notificationAssignedOpen(let slot) = intent,
+              StreamSelectorShortcutMap.sessionKey(
+                forSlot: slot,
+                selectableSessionKeys: selectableShortcutSessionKeys
+              ) != nil else {
+            return .ignored
+        }
+        NotificationCenter.default.post(name: .clawlineKeyboardCommandIntent, object: intent)
+        return .handled
+    }
+
     private func publishShortcutOwnership() {
         onShortcutOwnershipChange(selectableShortcutSessionKeys)
+    }
+
+    private func refreshShortcutAvailabilityAndPublish() {
+        let shortcutsAvailable = CrossChatShortcutLabelAvailability.current
+        resolvedHardwareKeyboardShortcutsAvailable = shortcutsAvailable
+        onShortcutOwnershipChange(selectableShortcutSessionKeys(shortcutsAvailable: shortcutsAvailable))
+    }
+
+    private func selectableShortcutSessionKeys(shortcutsAvailable: Bool) -> [String] {
+        let renamingSessionKey: String? = {
+            guard case .renaming(let sessionKey) = activeEditor else { return nil }
+            return sessionKey
+        }()
+        return StreamSelectorShortcutMap.selectableSessionKeys(
+            filteredSessionKeys: filteredStreamSessionKeys,
+            shortcutsAvailable: shortcutsAvailable,
+            isWorking: isWorking,
+            removingSessionKeys: removingSessionKeys,
+            renamingSessionKey: renamingSessionKey
+        )
     }
 
     private func shortcutLabelText(for stream: StreamSession) -> String? {
@@ -728,11 +737,11 @@ struct StreamManagerSheet: View {
                 forSessionKey: stream.sessionKey,
                 selectableSessionKeys: selectableShortcutSessionKeys
               ) else { return nil }
-        return "Cmd-\(slot)"
+        return StreamSelectorShortcutMap.shortcutLabel(forSlot: slot)
     }
 
     private func accessibilityShortcutLabel(for stream: StreamSession) -> String? {
-        shortcutLabelText(for: stream)?.replacingOccurrences(of: "Cmd-", with: "Command ")
+        shortcutLabelText(for: stream).map(StreamSelectorShortcutMap.accessibilityLabel(forShortcutLabel:))
     }
 
     private func renameStream(_ stream: StreamSession) async {
@@ -789,6 +798,19 @@ struct StreamPopupRowStatusDotIdentity: Hashable {
 enum StreamSelectorShortcutMap {
     static let orderedSlots = [1, 2, 3, 4, 5, 6, 7, 8, 9, 0]
 
+    static func selectableSessionKeys(
+        filteredSessionKeys: [String],
+        shortcutsAvailable: Bool,
+        isWorking: Bool,
+        removingSessionKeys: Set<String>,
+        renamingSessionKey: String?
+    ) -> [String] {
+        guard shortcutsAvailable, !isWorking else { return [] }
+        return filteredSessionKeys.filter { sessionKey in
+            !removingSessionKeys.contains(sessionKey) && renamingSessionKey != sessionKey
+        }
+    }
+
     static func shortcutMap(selectableSessionKeys: [String]) -> [Int: KeyboardSurfaceId] {
         Dictionary(
             uniqueKeysWithValues: zip(orderedSlots, selectableSessionKeys.prefix(orderedSlots.count))
@@ -838,6 +860,119 @@ enum StreamSelectorShortcutMap {
         }
         return selectableSessionKeys[index]
     }
+
+    static func shortcutLabel(forSlot slot: Int) -> String {
+        "⌘ \(slot)"
+    }
+
+    static func accessibilityLabel(forShortcutLabel label: String) -> String {
+        label.replacingOccurrences(of: "⌘ ", with: "Command ")
+    }
+}
+
+enum StreamSelectorShortcutActivation {
+    static func intent(
+        characters: String,
+        modifiers: EventModifiers
+    ) -> KeyboardCommandIntent? {
+        guard modifiers == .command,
+              let character = characters.first,
+              characters.dropFirst().isEmpty,
+              let slot = Int(String(character)) else {
+            return nil
+        }
+        return .notificationAssignedOpen(slot)
+    }
+}
+
+enum StreamSelectorShortcutKeyCommands {
+    struct KeyCommandSpec: Equatable {
+        let input: String
+        let modifierFlags: UIKeyModifierFlags
+        let intent: KeyboardCommandIntent
+    }
+
+    static func keyCommandSpecs(selectableSessionKeys: [String]) -> [KeyCommandSpec] {
+        StreamSelectorShortcutMap.orderedSlots.compactMap { slot in
+            guard StreamSelectorShortcutMap.sessionKey(
+                forSlot: slot,
+                selectableSessionKeys: selectableSessionKeys
+            ) != nil else {
+                return nil
+            }
+            return KeyCommandSpec(
+                input: "\(slot)",
+                modifierFlags: .command,
+                intent: .notificationAssignedOpen(slot)
+            )
+        }
+    }
+}
+
+private struct StreamSelectorShortcutKeyCommandBridge: UIViewRepresentable {
+    let selectableSessionKeys: [String]
+
+    func makeUIView(context: Context) -> KeyCommandView {
+        let view = KeyCommandView()
+        view.selectableSessionKeys = selectableSessionKeys
+        return view
+    }
+
+    func updateUIView(_ uiView: KeyCommandView, context: Context) {
+        uiView.selectableSessionKeys = selectableSessionKeys
+        uiView.refreshKeyCommandsIfNeeded()
+        DispatchQueue.main.async { [weak uiView] in
+            uiView?.becomeFirstResponder()
+        }
+    }
+
+    final class KeyCommandView: UIView {
+        var selectableSessionKeys: [String] = []
+        private var keyCommandSignature: [String] = []
+
+        override var canBecomeFirstResponder: Bool { true }
+
+        override var keyCommands: [UIKeyCommand]? {
+            StreamSelectorShortcutKeyCommands
+                .keyCommandSpecs(selectableSessionKeys: selectableSessionKeys)
+                .map { spec in
+                    UIKeyCommand(
+                        input: spec.input,
+                        modifierFlags: spec.modifierFlags,
+                        action: #selector(handleShortcut)
+                    )
+                }
+        }
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            DispatchQueue.main.async { [weak self] in
+                self?.becomeFirstResponder()
+            }
+        }
+
+        func refreshKeyCommandsIfNeeded() {
+            let nextSignature = StreamSelectorShortcutKeyCommands
+                .keyCommandSpecs(selectableSessionKeys: selectableSessionKeys)
+                .map { "\($0.input)|\($0.modifierFlags.rawValue)|\($0.intent)" }
+            guard nextSignature != keyCommandSignature else { return }
+            keyCommandSignature = nextSignature
+            reloadInputViews()
+        }
+
+        @objc private func handleShortcut(_ sender: UIKeyCommand) {
+            guard let input = sender.input,
+                  let intent = KeyboardCommandBridge.intent(input: input, modifierFlags: sender.modifierFlags),
+                  case .notificationAssignedOpen(let slot) = intent,
+                  StreamSelectorShortcutMap.sessionKey(
+                    forSlot: slot,
+                    selectableSessionKeys: selectableSessionKeys
+                  ) != nil else {
+                return
+            }
+            NotificationCenter.default.post(name: .clawlineKeyboardCommandIntent, object: intent)
+        }
+    }
 }
 
 private struct StreamPopupRowStatusDot: View {
@@ -855,6 +990,7 @@ private struct StreamPopupRowStatusDot: View {
                 )
             )
             .frame(width: 8, height: 8)
+            .fixedSize()
             .shadow(
                 color: isActive ? StreamDotColor.activeGlow(colorScheme: colorScheme) : .clear,
                 radius: isActive ? StreamDotColor.activeOuterGlowRadius(colorScheme: colorScheme) : 0
@@ -1345,6 +1481,12 @@ enum StreamSelectorLayout {
         let strokeLineWidth: CGFloat
     }
 
+    struct PopupVerticalLayout: Equatable {
+        let containerHeight: CGFloat
+        let listViewportHeight: CGFloat
+        let actionBarHeight: CGFloat
+    }
+
     static func dotStatesBySession(
         streams: [StreamSession],
         lookup: StreamDotStateLookup
@@ -1489,6 +1631,36 @@ enum StreamSelectorLayout {
         let preferredFloor = min(minimumPopoverHeight, cap)
         let desiredWithinBudget = min(desired, cap)
         return max(preferredFloor, desiredWithinBudget)
+    }
+
+    static func popupVerticalLayout(
+        itemCount: Int,
+        showsCreateInlineRow: Bool,
+        rowHeight: CGFloat,
+        rowSpacing: CGFloat,
+        actionBarHeight: CGFloat,
+        outerVerticalPadding: CGFloat,
+        maxAvailableHeight: CGFloat,
+        minimumPopoverHeight: CGFloat
+    ) -> PopupVerticalLayout {
+        let containerHeight = containerHeight(
+            itemCount: itemCount,
+            showsCreateInlineRow: showsCreateInlineRow,
+            rowHeight: rowHeight,
+            rowSpacing: rowSpacing,
+            functionBarHeight: actionBarHeight,
+            outerVerticalPadding: outerVerticalPadding,
+            maxAvailableHeight: maxAvailableHeight,
+            minimumPopoverHeight: minimumPopoverHeight
+        )
+        return PopupVerticalLayout(
+            containerHeight: containerHeight,
+            listViewportHeight: listViewportHeight(
+                containerHeight: containerHeight,
+                actionBarReservedHeight: actionBarHeight
+            ),
+            actionBarHeight: actionBarHeight
+        )
     }
 
     /// Adaptive height for the stream list viewport given an actual allocated container height.

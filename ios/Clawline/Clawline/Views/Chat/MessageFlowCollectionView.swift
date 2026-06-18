@@ -125,7 +125,7 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
     var isActiveSession: Bool
     var isRenderPolicyFrozen: Bool
     var isInputActive: Bool
-    var isDictationActive: Bool = false
+    var keepsKeyboardPinned: Bool = false
     var isTypingActive: Bool
     var truncationBottomInset: CGFloat
     var trailingContentInset: CGFloat = 0
@@ -154,10 +154,10 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
 #if !os(visionOS)
     static func keyboardDismissModeForInputFocus(
         _ isInputActive: Bool,
-        isDictationActive: Bool
+        keepsKeyboardPinned: Bool
     ) -> UIScrollView.KeyboardDismissMode {
         let _ = isInputActive
-        return isDictationActive ? .none : .interactive
+        return keepsKeyboardPinned ? .none : .interactive
     }
 #endif
 
@@ -175,7 +175,7 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
             isActiveSession: isActiveSession,
             isRenderPolicyFrozen: isRenderPolicyFrozen,
             isInputActive: isInputActive,
-            isDictationActive: isDictationActive,
+            keepsKeyboardPinned: keepsKeyboardPinned,
             isTypingActive: isTypingActive,
             topInset: topInset,
             truncationBottomInset: truncationBottomInset,
@@ -213,7 +213,7 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
             isActiveSession: isActiveSession,
             isRenderPolicyFrozen: isRenderPolicyFrozen,
             isInputActive: isInputActive,
-            isDictationActive: isDictationActive,
+            keepsKeyboardPinned: keepsKeyboardPinned,
             isTypingActive: isTypingActive,
             topInset: topInset,
             truncationBottomInset: truncationBottomInset,
@@ -255,7 +255,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         let isActiveSession: Bool
         let isRenderPolicyFrozen: Bool
         let isInputActive: Bool
-        let isDictationActive: Bool
+        let keepsKeyboardPinned: Bool
         let isTypingActive: Bool
         let topInset: CGFloat
         let truncationBottomInset: CGFloat
@@ -402,7 +402,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         @unknown default:
             mode = "unknown"
         }
-        onKeyboardDismissModeChanged("keyboardDismissMode=\(mode);dictating=\(isDictationActive ? 1 : 0)")
+        onKeyboardDismissModeChanged("keyboardDismissMode=\(mode);keyboardPinned=\(keepsKeyboardPinned ? 1 : 0)")
 #endif
     }
 
@@ -478,7 +478,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     private var isActiveSession: Bool = true
     private var isRenderPolicyFrozen: Bool = false
     private var isInputActive: Bool = false
-    private var isDictationActive: Bool = false
+    private var keepsKeyboardPinned: Bool = false
     private var isTypingActive: Bool = false
     private var sessionStatus: SessionStatus?
     private var topInset: CGFloat = 0
@@ -1273,7 +1273,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 isActiveSession: isActiveSession,
                 isRenderPolicyFrozen: isRenderPolicyFrozen,
                 isInputActive: isInputActive,
-                isDictationActive: isDictationActive,
+                keepsKeyboardPinned: keepsKeyboardPinned,
                 isTypingActive: isTypingActive,
                 topInset: topInset,
                 truncationBottomInset: truncationBottomInset,
@@ -2135,7 +2135,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             isActiveSession: isActiveSession,
             isRenderPolicyFrozen: isRenderPolicyFrozen,
             isInputActive: isInputActive,
-            isDictationActive: isDictationActive,
+            keepsKeyboardPinned: keepsKeyboardPinned,
             isTypingActive: isTypingActive,
             topInset: topInset,
             truncationBottomInset: truncationBottomInset,
@@ -2185,7 +2185,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 isActiveSession: request.isActiveSession,
                 isRenderPolicyFrozen: request.isRenderPolicyFrozen,
                 isInputActive: request.isInputActive,
-                isDictationActive: request.isDictationActive,
+                keepsKeyboardPinned: request.keepsKeyboardPinned,
                 isTypingActive: request.isTypingActive,
                 topInset: request.topInset,
                 truncationBottomInset: request.truncationBottomInset,
@@ -2264,7 +2264,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
               self.isActiveSession == request.isActiveSession,
               self.isRenderPolicyFrozen == request.isRenderPolicyFrozen,
               self.isInputActive == request.isInputActive,
-              self.isDictationActive == request.isDictationActive,
+              self.keepsKeyboardPinned == request.keepsKeyboardPinned,
               self.currentSendIndicatorRevision == request.sendIndicatorRevision,
               abs(self.topInset - request.topInset) <= 0.5,
               abs(self.trailingContentInset - max(0, request.trailingContentInset)) <= 0.5,
@@ -2290,7 +2290,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         isActiveSession: Bool,
         isRenderPolicyFrozen: Bool,
         isInputActive: Bool,
-        isDictationActive: Bool,
+        keepsKeyboardPinned: Bool,
         isTypingActive: Bool,
         topInset: CGFloat,
         truncationBottomInset: CGFloat,
@@ -2320,7 +2320,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             isActiveSession: isActiveSession,
             isRenderPolicyFrozen: isRenderPolicyFrozen,
             isInputActive: isInputActive,
-            isDictationActive: isDictationActive,
+            keepsKeyboardPinned: keepsKeyboardPinned,
             isTypingActive: isTypingActive,
             topInset: topInset,
             truncationBottomInset: truncationBottomInset,
@@ -2372,7 +2372,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         self.isActiveSession = isActiveSession
         self.isRenderPolicyFrozen = isRenderPolicyFrozen
         self.isInputActive = isInputActive
-        self.isDictationActive = isDictationActive
+        self.keepsKeyboardPinned = keepsKeyboardPinned
         self.isTypingActive = isTypingActive
         self.sessionStatus = sessionStatus
         self.currentSendIndicatorRevision = request.sendIndicatorRevision
@@ -2390,7 +2390,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
 #if !os(visionOS)
         let desiredDismissMode = MessageFlowCollectionView.keyboardDismissModeForInputFocus(
             isInputActive,
-            isDictationActive: isDictationActive
+            keepsKeyboardPinned: keepsKeyboardPinned
         )
         if collectionView.keyboardDismissMode != desiredDismissMode {
             collectionView.keyboardDismissMode = desiredDismissMode
@@ -3694,7 +3694,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         #if !os(visionOS)
             collectionView.keyboardDismissMode = MessageFlowCollectionView.keyboardDismissModeForInputFocus(
                 isInputActive,
-                isDictationActive: isDictationActive
+                keepsKeyboardPinned: keepsKeyboardPinned
             )
         #endif
         collectionView.allowsSelection = false
@@ -6252,10 +6252,29 @@ final class SessionMetadataFooterCell: UICollectionViewCell {
     {
         let current = normalized(display.model)
         if catalog?.available == true {
-            return catalog?.models.map { model in
+            var optionsByRef: [String: FooterOption] = [:]
+            var orderedRefs: [String] = []
+            for model in catalog?.models ?? [] {
                 let option = modelCatalogOption(model, current: current)
-                return FooterOption(title: option.title, value: model.ref, enabled: nil, isCurrent: option.isCurrent)
-            } ?? []
+                let footerOption = FooterOption(title: option.title, value: model.ref, enabled: nil, isCurrent: option.isCurrent)
+                let ref = normalized(model.ref) ?? option.title
+                if optionsByRef[ref] == nil {
+                    orderedRefs.append(ref)
+                    optionsByRef[ref] = footerOption
+                } else if option.isCurrent {
+                    optionsByRef[ref] = footerOption
+                }
+            }
+            let options = orderedRefs.compactMap { optionsByRef[$0] }
+            guard let currentIndex = options.firstIndex(where: \.isCurrent) else { return options }
+            return options.enumerated().map { index, option in
+                FooterOption(
+                    title: option.title,
+                    value: option.value,
+                    enabled: option.enabled,
+                    isCurrent: index == currentIndex
+                )
+            }
         }
         let fallbackModels = ([current] + (display.fallbackModels ?? []).map { normalized($0) }).compactMap { $0 }
         let uniqueModels = Array(NSOrderedSet(array: fallbackModels)) as? [String] ?? fallbackModels
@@ -6711,8 +6730,7 @@ private final class MessageFlowLayout: UICollectionViewFlowLayout {
         let size = (collectionView.delegate as? UICollectionViewDelegateFlowLayout)?
             .collectionView?(collectionView, layout: self, sizeForItemAt: newIndexPath) ?? itemSize
         if isFullRowItem(size.width, contentWidth: signature.contentWidth) ||
-            isFullRowItem(previousAttributes.frame.width, contentWidth: signature.contentWidth)
-        {
+            isFullRowItem(previousAttributes.frame.width, contentWidth: signature.contentWidth) {
             return false
         }
         let maxX = signature.contentWidth - sectionInset.right

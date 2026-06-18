@@ -246,6 +246,53 @@ struct PromptFocusShortcutActivationTests {
         #expect(state.isAnySelectionActive == false)
     }
 
+    @Test("T1250 active notification selection tap clears selection instead of navigating")
+    @MainActor
+    func activeNotificationSelectionTapClearsSelectionInsteadOfNavigating() {
+        #expect(
+            CrossChatNotificationSelectionTapPolicy.effect(isTextSelectionActive: true) == .clearSelection
+        )
+        #expect(
+            CrossChatNotificationSelectionTapPolicy.effect(isTextSelectionActive: false) == .navigate
+        )
+        #expect(
+            CrossChatNotificationSelectionTapPolicy.effect(
+                isTextSelectionActive: false,
+                didClearSelectionDuringCurrentTap: true
+            ) == .ignoreDuplicateSelectionClear
+        )
+
+        var state = CrossChatNotificationTextSelectionState()
+        state.setContentSelectionActive(true, key: "entry-a:0")
+        state.setReplySelectionActive(true)
+        #expect(state.isAnySelectionActive)
+
+        state.clearAllSelection()
+        #expect(state.isAnySelectionActive == false)
+    }
+
+    @Test("T1250 selection lifecycle remains per notification after tap clear")
+    @MainActor
+    func selectionLifecycleRemainsPerNotificationAfterTapClear() {
+        var first = CrossChatNotificationTextSelectionState()
+        var second = CrossChatNotificationTextSelectionState()
+
+        first.setContentSelectionActive(true, key: "first-entry:0")
+        #expect(CrossChatNotificationSelectionSwipeSuppression.allowsSwipe(isTextSelectionActive: first.isAnySelectionActive) == false)
+        #expect(CrossChatNotificationSelectionSwipeSuppression.allowsSwipe(isTextSelectionActive: second.isAnySelectionActive))
+
+        first.clearAllSelection()
+        #expect(first.isAnySelectionActive == false)
+        #expect(CrossChatNotificationSelectionSwipeSuppression.allowsSwipe(isTextSelectionActive: first.isAnySelectionActive))
+
+        first.setContentSelectionActive(true, key: "first-entry:1")
+        second.setContentSelectionActive(true, key: "second-entry:0")
+        #expect(first.isAnySelectionActive)
+        #expect(second.isAnySelectionActive)
+        #expect(CrossChatNotificationSelectionSwipeSuppression.allowsSwipe(isTextSelectionActive: first.isAnySelectionActive) == false)
+        #expect(CrossChatNotificationSelectionSwipeSuppression.allowsSwipe(isTextSelectionActive: second.isAnySelectionActive) == false)
+    }
+
     @Test("T355 docked notification left swipe restores stack instead of dismissing")
     @MainActor
     func dockedNotificationLeftSwipeRestoresStackInsteadOfDismissing() {
@@ -553,7 +600,6 @@ struct PromptFocusShortcutActivationTests {
             onSubmit: { submitCount += 1 },
             onCancel: {},
             onFocusChange: { _ in },
-            onSelectionRangeChange: { _ in },
             onSelectionActiveChange: { _ in }
         )
         let coordinator = NotificationReplyTextInput.Coordinator(parent: input)
@@ -588,7 +634,6 @@ struct PromptFocusShortcutActivationTests {
             onSubmit: {},
             onCancel: {},
             onFocusChange: { _ in },
-            onSelectionRangeChange: { _ in },
             onSelectionActiveChange: { selectionStates.append($0) }
         )
         let coordinator = NotificationReplyTextInput.Coordinator(parent: input)
@@ -604,43 +649,6 @@ struct PromptFocusShortcutActivationTests {
         coordinator.textViewDidEndEditing(textView)
 
         #expect(selectionStates == [true, false, true, false])
-    }
-
-    @Test("T1256 notification reply dictation target is published only while focused")
-    @MainActor
-    func notificationReplyDictationTargetIsPublishedOnlyWhileFocused() {
-        var text = "reply"
-        var measuredHeight: CGFloat = 20
-        var targetEvents: [String?] = []
-        let input = NotificationReplyTextInput(
-            sourceChatId: "reply-source",
-            text: Binding(get: { text }, set: { text = $0 }),
-            measuredHeight: Binding(get: { measuredHeight }, set: { measuredHeight = $0 }),
-            font: UIFont.systemFont(ofSize: 15),
-            textColor: .label,
-            tintColor: .systemBlue,
-            visibleNotificationCount: 1,
-            onSubmit: {},
-            onCancel: {},
-            onFocusChange: { _ in },
-            onTextViewChange: { targetEvents.append($0?.sourceChatId) },
-            onSelectionRangeChange: { _ in },
-            onSelectionActiveChange: { _ in }
-        )
-        let coordinator = NotificationReplyTextInput.Coordinator(parent: input)
-        let textView = NotificationReplyUITextView()
-        textView.sourceChatId = "reply-source"
-        textView.text = text
-
-        coordinator.textViewDidChange(textView)
-        coordinator.textViewDidChangeSelection(textView)
-        #expect(targetEvents.isEmpty)
-
-        coordinator.textViewDidBeginEditing(textView)
-        coordinator.textViewDidChange(textView)
-        coordinator.textViewDidEndEditing(textView)
-
-        #expect(targetEvents == ["reply-source", nil])
     }
 
     @Test("No-text prompt focus shortcuts keep Cmd-L out of the unmodified host")
@@ -799,6 +807,13 @@ struct PromptFocusShortcutActivationTests {
     func promptTextInputExposesFanOutScrollCommandsBeforeBaseTextViewCommands() {
         let textView = PastableTextView(frame: .zero, textContainer: nil)
         textView.notificationVisibleCount = 2
+        textView.keyboardOwnershipStore = KeyboardOwnershipSceneFactory.chatScene(
+            visibleNotificationSourceChatIds: ["notification-0", "notification-1"],
+            mentionPickerVisible: false,
+            composerFocused: true,
+            notificationReplyFocusedSourceChatId: nil,
+            actionMenuSourceChatId: nil
+        )
 
         let firstCommandJ = textView.keyCommands?.first { command in
             command.input == "j" && command.modifierFlags == [.command]
@@ -816,6 +831,13 @@ struct PromptFocusShortcutActivationTests {
     func promptTextInputExposesCommandSemicolonStreamPopupBeforeBaseTextViewCommands() {
         let textView = PastableTextView(frame: .zero, textContainer: nil)
         textView.notificationVisibleCount = 0
+        textView.keyboardOwnershipStore = KeyboardOwnershipSceneFactory.chatScene(
+            visibleNotificationSourceChatIds: [],
+            mentionPickerVisible: false,
+            composerFocused: true,
+            notificationReplyFocusedSourceChatId: nil,
+            actionMenuSourceChatId: nil
+        )
 
         let firstCommandSemicolon = textView.keyCommands?.first { command in
             command.input == ";" && command.modifierFlags == [.command]
@@ -1340,14 +1362,52 @@ struct PromptFocusShortcutActivationTests {
         #expect(CrossChatNotificationScrollCommand.scroll(nil, direction: .down) == false)
     }
 
-    @Test("T1154 notification scroll target chooses top visible over last focused bubble")
-    func notificationScrollTargetChoosesTopVisibleOverLastFocusedBubble() {
+    @Test("T1154 notification scroll target keeps the routed visible bubble")
+    func notificationScrollTargetKeepsRoutedVisibleBubble() {
         #expect(
             CrossChatNotificationScrollTargetSelection.sourceChatId(
                 visibleSourceChatIds: ["notification-0", "notification-1", "notification-2"],
                 routedSourceChatId: "notification-2"
-            ) == "notification-0"
+            ) == "notification-2"
         )
+    }
+
+    @Test("T1154 multi-notification Cmd-J scrolls the focused visible bubble")
+    @MainActor
+    func multiNotificationCommandJScrollsFocusedVisibleBubble() {
+        let visibleSourceChatIds = ["notification-0", "notification-1"]
+        let store = KeyboardOwnershipSceneFactory.chatScene(
+            visibleNotificationSourceChatIds: visibleSourceChatIds,
+            mentionPickerVisible: false,
+            composerFocused: true,
+            notificationFocusedSourceChatId: "notification-1",
+            notificationReplyFocusedSourceChatId: nil,
+            actionMenuSourceChatId: nil
+        )
+        guard case .handled(.notificationBubble(let routedSourceChatId)) = KeyboardCommandRouter
+            .route(intent: .notificationScrollForward, store: store)
+            .outcome else {
+            Issue.record("Expected notification scroll to route to a notification bubble")
+            return
+        }
+        let targetSourceChatId = CrossChatNotificationScrollTargetSelection.sourceChatId(
+            visibleSourceChatIds: visibleSourceChatIds,
+            routedSourceChatId: routedSourceChatId
+        )
+
+        let topScrollView = UIScrollView(frame: CGRect(x: 0, y: 0, width: 120, height: 320))
+        topScrollView.contentSize = CGSize(width: 120, height: 720)
+        let focusedScrollView = UIScrollView(frame: CGRect(x: 0, y: 0, width: 120, height: 320))
+        focusedScrollView.contentSize = CGSize(width: 120, height: 720)
+        let scrollViewsBySourceChatId = [
+            "notification-0": topScrollView,
+            "notification-1": focusedScrollView
+        ]
+
+        #expect(targetSourceChatId == "notification-1")
+        #expect(CrossChatNotificationScrollCommand.scroll(scrollViewsBySourceChatId[targetSourceChatId ?? ""], direction: .down))
+        #expect(topScrollView.contentOffset.y == 0)
+        #expect(focusedScrollView.contentOffset.y == CrossChatNotificationScrollCommand.lineIncrement)
     }
 
     @Test("T1154 notification scroll target requires notification routing ownership")
@@ -1362,6 +1422,12 @@ struct PromptFocusShortcutActivationTests {
             CrossChatNotificationScrollTargetSelection.sourceChatId(
                 visibleSourceChatIds: [],
                 routedSourceChatId: "notification-1"
+            ) == nil
+        )
+        #expect(
+            CrossChatNotificationScrollTargetSelection.sourceChatId(
+                visibleSourceChatIds: ["notification-0", "notification-1"],
+                routedSourceChatId: "notification-2"
             ) == nil
         )
     }

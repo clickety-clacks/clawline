@@ -2,6 +2,7 @@ import Foundation
 import SwiftUI
 import Testing
 import UIKit
+import WebKit
 @testable import Clawline
 
 @Suite(.serialized)
@@ -359,6 +360,80 @@ struct TextLinkURLTemplateRulesTests {
         #expect(openedGeneratedURL == generatedURL)
     }
 
+    @Test("T1250: selectable notification text reset clears selection and allows fresh selections")
+    @MainActor
+    func selectableNotificationTextResetClearsSelectionAndAllowsFreshSelections() throws {
+        let rendered = NSAttributedString(string: "Selectable notification text")
+        var firstSelectionStates: [Bool] = []
+        var secondSelectionStates: [Bool] = []
+        let firstHost = UIHostingController(
+            rootView: SelectableAttributedText(
+                attributedString: rendered,
+                alignment: .left,
+                colorScheme: .light,
+                selectionResetToken: 0,
+                onSelectionChange: { firstSelectionStates.append($0) },
+                onLinkTap: { _ in }
+            )
+            .frame(width: 280)
+        )
+        let secondHost = UIHostingController(
+            rootView: SelectableAttributedText(
+                attributedString: rendered,
+                alignment: .left,
+                colorScheme: .light,
+                selectionResetToken: 0,
+                onSelectionChange: { secondSelectionStates.append($0) },
+                onLinkTap: { _ in }
+            )
+            .frame(width: 280)
+        )
+        let stack = UIStackView(arrangedSubviews: [firstHost.view, secondHost.view])
+        stack.axis = .vertical
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 220))
+        let container = UIViewController()
+        container.view.addSubview(stack)
+        window.rootViewController = container
+        window.makeKeyAndVisible()
+        stack.frame = window.bounds
+        firstHost.view.frame = CGRect(x: 0, y: 0, width: 320, height: 100)
+        secondHost.view.frame = CGRect(x: 0, y: 110, width: 320, height: 100)
+        firstHost.view.setNeedsLayout()
+        secondHost.view.setNeedsLayout()
+        firstHost.view.layoutIfNeeded()
+        secondHost.view.layoutIfNeeded()
+
+        let firstTextView = try #require(textViews(in: firstHost.view).first)
+        let secondTextView = try #require(textViews(in: secondHost.view).first)
+
+        firstTextView.selectedRange = NSRange(location: 0, length: 10)
+        firstTextView.delegate?.textViewDidChangeSelection?(firstTextView)
+        #expect(firstSelectionStates.last == true)
+
+        firstHost.rootView = SelectableAttributedText(
+            attributedString: rendered,
+            alignment: .left,
+            colorScheme: .light,
+            selectionResetToken: 1,
+            onSelectionChange: { firstSelectionStates.append($0) },
+            onLinkTap: { _ in }
+        )
+        .frame(width: 280)
+        firstHost.view.setNeedsLayout()
+        firstHost.view.layoutIfNeeded()
+
+        #expect(firstTextView.selectedRange.length == 0)
+        #expect(firstSelectionStates.last == false)
+
+        firstTextView.selectedRange = NSRange(location: 11, length: 12)
+        firstTextView.delegate?.textViewDidChangeSelection?(firstTextView)
+        secondTextView.selectedRange = NSRange(location: 0, length: 10)
+        secondTextView.delegate?.textViewDidChangeSelection?(secondTextView)
+
+        #expect(firstSelectionStates.last == true)
+        #expect(secondSelectionStates.last == true)
+    }
+
     @Test("T1192: chat generated link taps honor direct and modal display modes")
     @MainActor
     func chatGeneratedLinkTapsHonorDirectAndModalDisplayModes() throws {
@@ -434,6 +509,69 @@ struct TextLinkURLTemplateRulesTests {
 
         #expect(GeneratedTextLinkActivationRouter.presentResolvedURLPopup(popupURL, nil))
         #expect(popupURLs == [popupURL])
+    }
+
+    @Test("T1192: popup hover route carries anchor point")
+    @MainActor
+    func popupHoverRouteCarriesAnchorPoint() throws {
+        let popupURL = try #require(URL(string: "https://example.com/popup/P1192"))
+        let anchor = CGPoint(x: 44, y: 18)
+        var received: (URL, UIView?, CGPoint?)?
+        let originalPopupPresenter = GeneratedTextLinkActivationRouter.presentResolvedURLPopupAnchored
+        GeneratedTextLinkActivationRouter.presentResolvedURLPopupAnchored = { url, view, point in
+            received = (url, view, point)
+            return true
+        }
+        defer {
+            GeneratedTextLinkActivationRouter.presentResolvedURLPopupAnchored = originalPopupPresenter
+        }
+
+        let textView = UITextView(frame: CGRect(x: 0, y: 0, width: 280, height: 80))
+        #expect(GeneratedTextLinkActivationRouter.presentResolvedURLPopupAnchored(popupURL, textView, anchor))
+        #expect(received?.0 == popupURL)
+        #expect(received?.1 === textView)
+        #expect(received?.2 == anchor)
+    }
+
+    @Test("D11/R1135-11: popup resolved URL presentation uses clear outer background and web content")
+    @MainActor
+    func popupResolvedURLPresentationUsesClearOuterBackgroundAndWebContent() throws {
+        let popupURL = try #require(URL(string: "https://example.com/popup/P1192"))
+        let controller = TextLinkResolvedURLContentViewController(
+            url: popupURL,
+            presentation: .popup,
+            anchorPoint: CGPoint(x: 80, y: 90)
+        )
+        controller.loadViewIfNeeded()
+        controller.view.frame = CGRect(x: 0, y: 0, width: 800, height: 600)
+        controller.view.setNeedsLayout()
+        controller.view.layoutIfNeeded()
+
+        #expect(controller.view.backgroundColor == .clear)
+        let webView = try #require(webViews(in: controller.view).first)
+        #expect(webView.frame.width >= 320)
+        #expect(webView.frame.height >= 280)
+        #expect(!buttons(in: controller.view).contains { !$0.isHidden })
+    }
+
+    @Test("T1192: popup layout keeps edge hover point inside content")
+    @MainActor
+    func popupLayoutKeepsEdgeHoverPointInsideContent() throws {
+        let popupURL = try #require(URL(string: "https://example.com/popup/P1192"))
+        let anchor = CGPoint(x: 790, y: 590)
+        let controller = TextLinkResolvedURLContentViewController(
+            url: popupURL,
+            presentation: .popup,
+            anchorPoint: anchor
+        )
+        controller.loadViewIfNeeded()
+        controller.view.frame = CGRect(x: 0, y: 0, width: 800, height: 600)
+        controller.view.setNeedsLayout()
+        controller.view.layoutIfNeeded()
+
+        let webView = try #require(webViews(in: controller.view).first)
+        let contentFrame = webView.convert(webView.bounds, to: controller.view)
+        #expect(contentFrame.contains(CGPoint(x: 782, y: 582)))
     }
 
     @Test("V1135-01: generated text links suppress external text-view activation")
@@ -559,6 +697,28 @@ struct TextLinkURLTemplateRulesTests {
         }
         for subview in view.subviews {
             matches.append(contentsOf: textViews(in: subview))
+        }
+        return matches
+    }
+
+    private func webViews(in view: UIView) -> [WKWebView] {
+        var matches: [WKWebView] = []
+        if let webView = view as? WKWebView {
+            matches.append(webView)
+        }
+        for subview in view.subviews {
+            matches.append(contentsOf: webViews(in: subview))
+        }
+        return matches
+    }
+
+    private func buttons(in view: UIView) -> [UIButton] {
+        var matches: [UIButton] = []
+        if let button = view as? UIButton {
+            matches.append(button)
+        }
+        for subview in view.subviews {
+            matches.append(contentsOf: buttons(in: subview))
         }
         return matches
     }

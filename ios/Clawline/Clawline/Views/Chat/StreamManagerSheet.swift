@@ -134,15 +134,6 @@ struct StreamManagerSheet: View {
         }
     }
 
-    private var selectorShortcutSlots: [Int] {
-        StreamSelectorShortcutMap.orderedSlots.filter { slot in
-            StreamSelectorShortcutMap.sessionKey(
-                forSlot: slot,
-                selectableSessionKeys: selectableShortcutSessionKeys
-            ) != nil
-        }
-    }
-
     private var filteredPendingCreateRows: [PendingCreateRow] {
         guard !searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return pendingCreateRows
@@ -284,9 +275,6 @@ struct StreamManagerSheet: View {
                 .stroke(Color.white.opacity(0.10), lineWidth: 0.5)
                 .allowsHitTesting(false)
         )
-        .background {
-            selectorShortcutButtons
-        }
         .onAppear {
             resolvedHardwareKeyboardShortcutsAvailable = CrossChatShortcutLabelAvailability.current
             publishShortcutOwnership()
@@ -414,29 +402,6 @@ struct StreamManagerSheet: View {
         .overlay(alignment: .top) {
             sectionSeparator
         }
-    }
-
-    private var selectorShortcutButtons: some View {
-        Group {
-            if selectorShortcutsAvailable {
-                ForEach(selectorShortcutSlots, id: \.self) { slot in
-                    Button("") {
-                        NotificationCenter.default.post(
-                            name: .clawlineKeyboardCommandIntent,
-                            object: KeyboardCommandIntent.notificationAssignedOpen(slot)
-                        )
-                    }
-                    .keyboardShortcut(
-                        KeyEquivalent(Character("\(slot)")),
-                        modifiers: .command
-                    )
-                    .accessibilityHidden(true)
-                }
-            }
-        }
-        .frame(width: 0, height: 0)
-        .opacity(0)
-        .allowsHitTesting(false)
     }
 
     @ViewBuilder

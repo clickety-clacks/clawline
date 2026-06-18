@@ -2001,10 +2001,12 @@ struct ChatView: View {
             replyPinSlotsBySourceChatId: replyPinSlotsBySourceChatId,
             measuredHeightsBySourceChatId: measuredHeightsBySourceChatId
         )
-        guard !bubbles.isEmpty else { return nil }
+        let hasActiveChatSelectorShortcuts = !keyboardOwnershipStore.chatSelectorShortcutMap.isEmpty
+        guard !bubbles.isEmpty || hasActiveChatSelectorShortcuts else { return nil }
         return CrossChatNotificationCommand(
-            hasVisibleNotifications: true,
+            hasVisibleNotifications: !bubbles.isEmpty,
             visibleCount: bubbles.count,
+            hasActiveChatSelectorShortcuts: hasActiveChatSelectorShortcuts,
             keyboardOwnershipStore: keyboardOwnershipStore,
             openActionMenu: { index in
                 guard bubbles.indices.contains(index),

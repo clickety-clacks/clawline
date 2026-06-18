@@ -31,6 +31,9 @@ struct KeyboardCommandRouterTests {
         #expect(KeyboardCommandBridge.intent(input: "\r", modifierFlags: [.control]) == .textModifiedNewline)
         #expect(KeyboardCommandBridge.intent(input: UIKeyCommand.inputUpArrow, modifierFlags: []) == .menuNavigateUp)
         #expect(KeyboardCommandBridge.intent(input: "\t", modifierFlags: []) == .pickerAccept)
+        #expect(KeyboardCommandBridge.intent(input: "a", modifierFlags: []) == nil)
+        #expect(KeyboardCommandBridge.intent(input: "4", modifierFlags: []) == nil)
+        #expect(KeyboardCommandBridge.intent(input: " ", modifierFlags: [.shift]) == nil)
     }
 
     @Test("T343 VG-02 router priority matrix chooses one owner for conflicting states")
@@ -98,6 +101,65 @@ struct KeyboardCommandRouterTests {
 
         assertRoute(.notificationAssignedOpen(1), in: store, isHandledBy: .chatSelectorRow("s_first"), rule: "PR-00")
         assertRoute(.notificationAssignedReply(1), in: store, isHandledBy: .notificationBubble("n1"), rule: "PR-03")
+    }
+
+    @Test("T1344 selector Cmd-number remains centrally routed without converting filter typing into commands")
+    func selectorNumberShortcutStaysCentralWhileFilterTypingFallsThrough() {
+        let store = KeyboardOwnershipSceneFactory.chatScene(
+            visibleNotificationSourceChatIds: [],
+            visibleChatSelectorSessionKeys: ["s_first", "s_second"],
+            mentionPickerVisible: false,
+            composerFocused: false,
+            notificationReplyFocusedSourceChatId: nil,
+            actionMenuSourceChatId: nil
+        )
+
+        #expect(KeyboardCommandBridge.intent(input: "f", modifierFlags: []) == nil)
+        #expect(KeyboardCommandBridge.intent(input: "i", modifierFlags: []) == nil)
+        #expect(KeyboardCommandBridge.intent(input: "l", modifierFlags: []) == nil)
+        #expect(KeyboardCommandBridge.intent(input: "1", modifierFlags: []) == nil)
+        #expect(KeyboardCommandBridge.intent(input: "1", modifierFlags: [.command]) == .notificationAssignedOpen(1))
+        assertRoute(.notificationAssignedOpen(1), in: store, isHandledBy: .chatSelectorRow("s_first"), rule: "PR-00")
+        #expect(
+            ChatAppShortcutCommandDispatch.action(
+                for: .notificationAssignedOpen(1),
+                keyboardOwnershipStore: store
+            ) == .postKeyboardIntent
+        )
+        #expect(
+            ChatAppShortcutCommandDispatch.plainNumberOpenCommandIsOwned(
+                index: 1,
+                keyboardOwnershipStore: store
+            )
+        )
+        #expect(
+            ChatAppShortcutCommandDispatch.plainNumberOpenCommandOwner(
+                index: 1,
+                keyboardOwnershipStore: store
+            ) == .chatSelector
+        )
+        #expect(ChatAppShortcutCommandDispatch.PlainNumberOpenOwner.chatSelector.menuTitle(forIndex: 1) == "Select Chat 1")
+        #expect(
+            !ChatAppShortcutCommandDispatch.plainNumberOpenCommandIsOwned(
+                index: 0,
+                keyboardOwnershipStore: store
+            )
+        )
+
+        let tenRowStore = KeyboardOwnershipSceneFactory.chatScene(
+            visibleNotificationSourceChatIds: [],
+            visibleChatSelectorSessionKeys: (0..<10).map { "s_\($0)" },
+            mentionPickerVisible: false,
+            composerFocused: false,
+            notificationReplyFocusedSourceChatId: nil,
+            actionMenuSourceChatId: nil
+        )
+        #expect(
+            ChatAppShortcutCommandDispatch.plainNumberOpenCommandIsOwned(
+                index: 0,
+                keyboardOwnershipStore: tenRowStore
+            )
+        )
     }
 
     @Test("T1210 selector map follows filtered visible ordering and maps tenth row to slot zero")

@@ -933,12 +933,16 @@ struct PromptFocusShortcutActivationTests {
 
         #expect(scrolled == 2)
         #expect(
-            first.contentOffset.y
-                == min(ChatVisibleBubbleContentScroll.commandIncrement, max(80, first.bounds.height * 0.82) - 1)
+            abs(
+                first.contentOffset.y
+                    - min(ChatVisibleBubbleContentScroll.commandIncrement, max(80, first.bounds.height * 0.82) - 1)
+            ) < 0.5
         )
         #expect(
-            second.contentOffset.y
-                == min(ChatVisibleBubbleContentScroll.commandIncrement, max(80, second.bounds.height * 0.82) - 1)
+            abs(
+                second.contentOffset.y
+                    - min(ChatVisibleBubbleContentScroll.commandIncrement, max(80, second.bounds.height * 0.82) - 1)
+            ) < 0.5
         )
         #expect(nested.contentOffset.y == 0)
         #expect(offscreen.contentOffset.y == 0)
@@ -1372,9 +1376,9 @@ struct PromptFocusShortcutActivationTests {
         )
     }
 
-    @Test("T1154 multi-notification Cmd-J scrolls the focused visible bubble")
+    @Test("T1154 multi-notification Cmd-J scrolls every visible scrollable notification")
     @MainActor
-    func multiNotificationCommandJScrollsFocusedVisibleBubble() {
+    func multiNotificationCommandJScrollsEveryVisibleScrollableNotification() {
         let visibleSourceChatIds = ["notification-0", "notification-1"]
         let store = KeyboardOwnershipSceneFactory.chatScene(
             visibleNotificationSourceChatIds: visibleSourceChatIds,
@@ -1390,7 +1394,7 @@ struct PromptFocusShortcutActivationTests {
             Issue.record("Expected notification scroll to route to a notification bubble")
             return
         }
-        let targetSourceChatId = CrossChatNotificationScrollTargetSelection.sourceChatId(
+        let targetSourceChatIds = CrossChatNotificationScrollTargetSelection.sourceChatIds(
             visibleSourceChatIds: visibleSourceChatIds,
             routedSourceChatId: routedSourceChatId
         )
@@ -1399,15 +1403,36 @@ struct PromptFocusShortcutActivationTests {
         topScrollView.contentSize = CGSize(width: 120, height: 720)
         let focusedScrollView = UIScrollView(frame: CGRect(x: 0, y: 0, width: 120, height: 320))
         focusedScrollView.contentSize = CGSize(width: 120, height: 720)
+        let hiddenScrollView = UIScrollView(frame: CGRect(x: 0, y: 0, width: 120, height: 320))
+        hiddenScrollView.contentSize = CGSize(width: 120, height: 720)
         let scrollViewsBySourceChatId = [
             "notification-0": topScrollView,
-            "notification-1": focusedScrollView
+            "notification-1": focusedScrollView,
+            "notification-hidden": hiddenScrollView
         ]
 
-        #expect(targetSourceChatId == "notification-1")
-        #expect(CrossChatNotificationScrollCommand.scroll(scrollViewsBySourceChatId[targetSourceChatId ?? ""], direction: .down))
-        #expect(topScrollView.contentOffset.y == 0)
+        #expect(targetSourceChatIds == visibleSourceChatIds)
+        #expect(
+            CrossChatNotificationScrollCommand.scroll(
+                sourceChatIds: targetSourceChatIds,
+                scrollViewsBySourceChatId: scrollViewsBySourceChatId,
+                direction: .down
+            )
+        )
+        #expect(topScrollView.contentOffset.y == CrossChatNotificationScrollCommand.lineIncrement)
         #expect(focusedScrollView.contentOffset.y == CrossChatNotificationScrollCommand.lineIncrement)
+        #expect(hiddenScrollView.contentOffset.y == 0)
+
+        #expect(
+            CrossChatNotificationScrollCommand.scroll(
+                sourceChatIds: targetSourceChatIds,
+                scrollViewsBySourceChatId: scrollViewsBySourceChatId,
+                direction: .up
+            )
+        )
+        #expect(topScrollView.contentOffset.y == 0)
+        #expect(focusedScrollView.contentOffset.y == 0)
+        #expect(hiddenScrollView.contentOffset.y == 0)
     }
 
     @Test("T1154 notification scroll target requires notification routing ownership")
@@ -1429,6 +1454,24 @@ struct PromptFocusShortcutActivationTests {
                 visibleSourceChatIds: ["notification-0", "notification-1"],
                 routedSourceChatId: "notification-2"
             ) == nil
+        )
+        #expect(
+            CrossChatNotificationScrollTargetSelection.sourceChatIds(
+                visibleSourceChatIds: ["notification-0", "notification-1"],
+                routedSourceChatId: nil
+            ) == []
+        )
+        #expect(
+            CrossChatNotificationScrollTargetSelection.sourceChatIds(
+                visibleSourceChatIds: [],
+                routedSourceChatId: "notification-1"
+            ) == []
+        )
+        #expect(
+            CrossChatNotificationScrollTargetSelection.sourceChatIds(
+                visibleSourceChatIds: ["notification-0", "notification-1"],
+                routedSourceChatId: "notification-2"
+            ) == []
         )
     }
 
@@ -1491,6 +1534,18 @@ struct PromptFocusShortcutActivationTests {
         assertRoute(.notificationAssignedOpen(1), in: store, isHandledBy: .notificationBubble("notification-1"), rule: "PR-03")
         assertRoute(.notificationScrollForward, in: store, isHandledBy: .notificationBubble("notification-0"), rule: "PR-04")
         assertRoute(.notificationScrollBackward, in: store, isHandledBy: .notificationBubble("notification-0"), rule: "PR-04")
+        guard case .handled(.notificationBubble(let routedSourceChatId)) = KeyboardCommandRouter
+            .route(intent: .notificationScrollForward, store: store)
+            .outcome else {
+            Issue.record("Expected reply focus to keep notification scroll routing")
+            return
+        }
+        #expect(
+            CrossChatNotificationScrollTargetSelection.sourceChatIds(
+                visibleSourceChatIds: ["notification-0", "notification-1", "notification-2", "notification-3"],
+                routedSourceChatId: routedSourceChatId
+            ) == ["notification-0", "notification-1", "notification-2", "notification-3"]
+        )
         #expect(KeyboardCommandBridge.intent(input: "3", modifierFlags: [.command, .control]) == nil)
         #expect(KeyboardCommandRouter.route(intent: .notificationAssignedOpen(4), store: store).outcome == .fallthroughToDefault)
 

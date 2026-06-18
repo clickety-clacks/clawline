@@ -6385,6 +6385,19 @@ enum CrossChatNotificationScrollCommand {
         scrollView.setContentOffset(CGPoint(x: scrollView.contentOffset.x, y: clampedY), animated: true)
         return true
     }
+
+    @discardableResult
+    static func scroll(
+        sourceChatIds: [String],
+        scrollViewsBySourceChatId: [String: UIScrollView],
+        direction: ChatScrollPageDirection
+    ) -> Bool {
+        var didScroll = false
+        for sourceChatId in sourceChatIds {
+            didScroll = scroll(scrollViewsBySourceChatId[sourceChatId], direction: direction) || didScroll
+        }
+        return didScroll
+    }
 }
 
 enum CrossChatNotificationScrollTargetSelection {
@@ -6395,6 +6408,17 @@ enum CrossChatNotificationScrollTargetSelection {
         guard let routedSourceChatId,
               visibleSourceChatIds.contains(routedSourceChatId) else { return nil }
         return routedSourceChatId
+    }
+
+    static func sourceChatIds(
+        visibleSourceChatIds: [String],
+        routedSourceChatId: String?
+    ) -> [String] {
+        guard sourceChatId(
+            visibleSourceChatIds: visibleSourceChatIds,
+            routedSourceChatId: routedSourceChatId
+        ) != nil else { return [] }
+        return visibleSourceChatIds
     }
 }
 
@@ -6874,12 +6898,10 @@ private struct CrossChatNotificationOverlay: View {
             }
 #endif
             .onReceive(NotificationCenter.default.publisher(for: .clawlineScrollNotificationDownCommand)) { _ in
-                guard let sourceChatId = routedNotificationSourceChatId(for: .notificationScrollForward) else { return }
-                scrollNotification(sourceChatId: sourceChatId, direction: .down)
+                scrollVisibleNotifications(direction: .down, intent: .notificationScrollForward)
             }
             .onReceive(NotificationCenter.default.publisher(for: .clawlineScrollNotificationUpCommand)) { _ in
-                guard let sourceChatId = routedNotificationSourceChatId(for: .notificationScrollBackward) else { return }
-                scrollNotification(sourceChatId: sourceChatId, direction: .up)
+                scrollVisibleNotifications(direction: .up, intent: .notificationScrollBackward)
             }
             .onReceive(NotificationCenter.default.publisher(for: .clawlineToggleNotificationDockCommand)) { _ in
                 guard routedNotificationSourceChatId(for: .notificationToggleDock) != nil else { return }
@@ -7249,6 +7271,22 @@ private struct CrossChatNotificationOverlay: View {
         )
     }
 
+    private func scrollVisibleNotifications(direction: ChatScrollPageDirection, intent: KeyboardCommandIntent) {
+        guard case .handled(.notificationBubble(let routedSourceChatId)) = KeyboardCommandRouter
+            .route(intent: intent, store: keyboardOwnershipStore)
+            .outcome else { return }
+        let sourceChatIds = CrossChatNotificationScrollTargetSelection.sourceChatIds(
+            visibleSourceChatIds: visibleBubbles.map(\.sourceChatId),
+            routedSourceChatId: routedSourceChatId
+        )
+        for sourceChatId in sourceChatIds {
+            CrossChatNotificationScrollCommand.scroll(
+                scrollViewsBySourceChatId[sourceChatId]?.scrollView,
+                direction: direction
+            )
+        }
+    }
+
     private func routedNotificationSourceChatId(for intent: KeyboardCommandIntent) -> String? {
         if case .handled(.notificationBubble(let sourceChatId)) = KeyboardCommandRouter
             .route(intent: intent, store: keyboardOwnershipStore)
@@ -7309,11 +7347,9 @@ private struct CrossChatNotificationOverlay: View {
             guard case .handled(.notificationBubble(_)) = route.outcome else { return }
             toggleDock()
         case .notificationScrollForward:
-            guard case .handled(.notificationBubble(let sourceChatId)) = route.outcome else { return }
-            scrollNotification(sourceChatId: sourceChatId, direction: .down)
+            scrollVisibleNotifications(direction: .down, intent: intent)
         case .notificationScrollBackward:
-            guard case .handled(.notificationBubble(let sourceChatId)) = route.outcome else { return }
-            scrollNotification(sourceChatId: sourceChatId, direction: .up)
+            scrollVisibleNotifications(direction: .up, intent: intent)
         default:
             break
         }

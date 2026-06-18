@@ -31,6 +31,7 @@ struct CancelCurrentPromptCommand {
 struct CrossChatNotificationCommand {
     let hasVisibleNotifications: Bool
     let visibleCount: Int
+    let hasActiveChatSelectorShortcuts: Bool
     let keyboardOwnershipStore: KeyboardOwnershipStore
     let openActionMenu: @MainActor (Int) -> Void
     let dismiss: @MainActor (Int) -> Void

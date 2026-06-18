@@ -131,15 +131,6 @@ struct StreamManagerSheet: View {
         selectableShortcutSessionKeys(shortcutsAvailable: selectorShortcutsAvailable)
     }
 
-    private var selectorShortcutSlots: [Int] {
-        StreamSelectorShortcutMap.orderedSlots.filter { slot in
-            StreamSelectorShortcutMap.sessionKey(
-                forSlot: slot,
-                selectableSessionKeys: selectableShortcutSessionKeys
-            ) != nil
-        }
-    }
-
     private var filteredPendingCreateRows: [PendingCreateRow] {
         guard !searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return pendingCreateRows

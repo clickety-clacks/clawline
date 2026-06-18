@@ -12,10 +12,6 @@ struct ClawlineAppCommands: Commands {
     @FocusedValue(\.cancelCurrentPromptCommand) private var cancelCurrentPromptCommand
     @FocusedValue(\.crossChatNotificationCommand) private var crossChatNotificationCommand
 
-    private var notificationCommandsActive: Bool {
-        crossChatNotificationCommand?.hasVisibleNotifications == true
-    }
-
     private var selectorPlainNumberShortcutSlots: Set<Int> {
         guard let slots = crossChatNotificationCommand?.keyboardOwnershipStore.chatSelectorShortcutMap.keys else {
             return []
@@ -51,37 +47,47 @@ struct ClawlineAppCommands: Commands {
 
             if numberedShortcutCommandsActive {
                 ForEach(0...9, id: \.self) { index in
-                    Button("Notification \(index) Actions") {
-                        routeNotificationShortcut(.notificationAssignedOpen(index)) {
-                            crossChatNotificationCommand?.openActionMenu(index)
+                    if let owner = ChatAppShortcutCommandDispatch.plainNumberOpenCommandOwner(
+                        index: index,
+                        keyboardOwnershipStore: routerStore()
+                    ) {
+                        Button(owner.menuTitle(forIndex: index)) {
+                            routeNotificationShortcut(.notificationAssignedOpen(index)) {
+                                crossChatNotificationCommand?.openActionMenu(index)
+                            }
                         }
-                    }
-                    .keyboardShortcut(KeyEquivalent(Character("\(index)")), modifiers: .command)
-                    .disabled(
-                        !ClawlineAppNumberShortcutAvailability.isPlainNumberCommandEnabled(
-                            index: index,
-                            notificationVisibleCount: crossChatNotificationCommand?.visibleCount ?? 0,
-                            selectorShortcutSlots: selectorPlainNumberShortcutSlots
+                        .keyboardShortcut(KeyEquivalent(Character("\(index)")), modifiers: .command)
+                        .disabled(
+                            !ClawlineAppNumberShortcutAvailability.isPlainNumberCommandEnabled(
+                                index: index,
+                                notificationVisibleCount: crossChatNotificationCommand?.visibleCount ?? 0,
+                                selectorShortcutSlots: selectorPlainNumberShortcutSlots
+                            )
                         )
-                    )
-
-                    Button("Reply to Notification \(index)") {
-                        routeNotificationShortcut(.notificationAssignedReply(index)) {
-                            crossChatNotificationCommand?.reply(index)
-                        }
                     }
-                    .keyboardShortcut(KeyEquivalent(Character("\(index)")), modifiers: [.command, .option])
-                    .disabled((crossChatNotificationCommand?.visibleCount ?? 0) <= index)
 
-                    Button("Dismiss Notification \(index)") {
-                        routeNotificationShortcut(.notificationAssignedDismiss(index)) {
-                            crossChatNotificationCommand?.dismiss(index)
+                    if (crossChatNotificationCommand?.visibleCount ?? 0) > index {
+                        Button("Reply to Notification \(index)") {
+                            routeNotificationShortcut(.notificationAssignedReply(index)) {
+                                crossChatNotificationCommand?.reply(index)
+                            }
                         }
+                        .keyboardShortcut(KeyEquivalent(Character("\(index)")), modifiers: [.command, .option])
+
+                        Button("Dismiss Notification \(index)") {
+                            routeNotificationShortcut(.notificationAssignedDismiss(index)) {
+                                crossChatNotificationCommand?.dismiss(index)
+                            }
+                        }
+                        .keyboardShortcut(KeyEquivalent(Character("\(index)")), modifiers: [.command, .shift, .option])
                     }
-                    .keyboardShortcut(KeyEquivalent(Character("\(index)")), modifiers: [.command, .shift, .option])
-                    .disabled((crossChatNotificationCommand?.visibleCount ?? 0) <= index)
                 }
-            } else {
+            }
+
+            if !ChatAppShortcutCommandDispatch.plainNumberOpenCommandIsOwned(
+                index: 0,
+                keyboardOwnershipStore: routerStore()
+            ) {
                 Button("Reset Font Size") {
                     settingsManager.resetFontScale()
                 }
@@ -205,6 +211,20 @@ enum ChatAppShortcutCommandDispatch {
         case scrollNotificationUp
     }
 
+    enum PlainNumberOpenOwner: Equatable {
+        case notification
+        case chatSelector
+
+        func menuTitle(forIndex index: Int) -> String {
+            switch self {
+            case .notification:
+                return "Notification \(index) Actions"
+            case .chatSelector:
+                return "Select Chat \(index)"
+            }
+        }
+    }
+
     static func action(
         for intent: KeyboardCommandIntent,
         keyboardOwnershipStore: KeyboardOwnershipStore
@@ -221,6 +241,33 @@ enum ChatAppShortcutCommandDispatch {
             return .scrollNotificationUp
         default:
             return .postKeyboardIntent
+        }
+    }
+
+    static func plainNumberOpenCommandIsOwned(
+        index: Int,
+        keyboardOwnershipStore: KeyboardOwnershipStore
+    ) -> Bool {
+        plainNumberOpenCommandOwner(
+            index: index,
+            keyboardOwnershipStore: keyboardOwnershipStore
+        ) != nil
+    }
+
+    static func plainNumberOpenCommandOwner(
+        index: Int,
+        keyboardOwnershipStore: KeyboardOwnershipStore
+    ) -> PlainNumberOpenOwner? {
+        switch KeyboardCommandRouter.route(
+            intent: .notificationAssignedOpen(index),
+            store: keyboardOwnershipStore
+        ).outcome {
+        case .handled(.notificationBubble(_)):
+            return .notification
+        case .handled(.chatSelectorRow(_)):
+            return .chatSelector
+        default:
+            return nil
         }
     }
 }

@@ -20,6 +20,8 @@ struct CrossChatAssistantNotificationEntry: Identifiable, Equatable {
     let id: String
     var content: String
     var timestamp: Date
+    var streaming: Bool = false
+    var notificationSequence: UInt64 = 0
     var appendSeparatorTimestamp: Date? = nil
 }
 
@@ -34,6 +36,157 @@ struct CrossChatNotificationBubble: Identifiable, Equatable {
 }
 
 typealias CrossChatNotificationDismissAnimator = (_ updates: @escaping () -> Void) -> Void
+
+struct NotificationBatchCommitCoordinator {
+    struct Candidate {
+        let messageId: String
+        let sourceChatId: String
+        let role: Message.Role?
+        let content: String
+        let timestamp: Date
+        let streaming: Bool
+        let sourceTitle: String
+        let notificationSequence: UInt64?
+    }
+
+    private struct PendingBatch {
+        var bubblesBySourceChatId: [String: CrossChatNotificationBubble]
+        var dismissalSequenceBySourceChatId: [String: UInt64] = [:]
+        let scope: Set<String>?
+        let waitsForTruncationBoundary: Bool
+    }
+
+    private var pendingBatchByEpoch: [Int: PendingBatch] = [:]
+    private var mutationSequence: UInt64 = 0
+
+    mutating func begin(epoch: Int, scope: Set<String>? = nil, waitsForTruncationBoundary: Bool) {
+        pendingBatchByEpoch[epoch] = PendingBatch(
+            bubblesBySourceChatId: [:],
+            scope: scope,
+            waitsForTruncationBoundary: waitsForTruncationBoundary
+        )
+    }
+
+    func contains(epoch: Int, sourceChatId: String? = nil) -> Bool {
+        guard let batch = pendingBatchByEpoch[epoch] else { return false }
+        guard let sourceChatId, let scope = batch.scope else { return true }
+        return scope.contains(sourceChatId)
+    }
+
+    mutating func reserveNotificationSequence() -> UInt64 {
+        mutationSequence &+= 1
+        return mutationSequence
+    }
+
+    mutating func applyLiveCandidate(
+        _ candidate: Candidate,
+        to committedSnapshot: inout [String: CrossChatNotificationBubble]
+    ) {
+        apply(candidate, into: &committedSnapshot)
+    }
+
+    mutating func collectPendingCandidate(_ candidate: Candidate, epoch: Int) {
+        guard var batch = pendingBatchByEpoch[epoch] else { return }
+        guard batch.scope?.contains(candidate.sourceChatId) ?? true else { return }
+        apply(candidate, into: &batch.bubblesBySourceChatId)
+        pendingBatchByEpoch[epoch] = batch
+    }
+
+    mutating func recordDismissal(sourceChatIds: [String]) {
+        guard !sourceChatIds.isEmpty else { return }
+        for epoch in pendingBatchByEpoch.keys {
+            for sourceChatId in sourceChatIds {
+                pendingBatchByEpoch[epoch]?.dismissalSequenceBySourceChatId[sourceChatId] = mutationSequence
+            }
+        }
+    }
+
+    mutating func commitIfReady(
+        epoch: Int,
+        reachedTruncationBoundary: Bool,
+        committedSnapshot: [String: CrossChatNotificationBubble],
+        isEligible: (String) -> Bool
+    ) -> [String: CrossChatNotificationBubble]? {
+        guard let batch = pendingBatchByEpoch[epoch] else { return nil }
+        guard reachedTruncationBoundary || !batch.waitsForTruncationBoundary else { return nil }
+        pendingBatchByEpoch.removeValue(forKey: epoch)
+
+        var reconciledBySourceChatId = committedSnapshot
+        for bubble in batch.bubblesBySourceChatId.values {
+            guard isEligible(bubble.sourceChatId) else { continue }
+            let dismissalSequence = batch.dismissalSequenceBySourceChatId[bubble.sourceChatId] ?? 0
+            let finalEntries = bubble.entries.filter {
+                !$0.streaming && $0.notificationSequence > dismissalSequence
+            }
+            guard !finalEntries.isEmpty else { continue }
+
+            var reconciled = bubble
+            reconciled.entries = finalEntries
+            reconciled.lastAssistantActivityAt = finalEntries.map(\.timestamp).max() ?? reconciled.lastAssistantActivityAt
+            if let committed = committedSnapshot[bubble.sourceChatId] {
+                reconciled.isReplying = committed.isReplying
+                reconciled.replyDraft = committed.replyDraft
+                let pendingEntryIds = Set(reconciled.entries.map(\.id))
+                reconciled.entries.append(contentsOf: committed.entries.filter { !pendingEntryIds.contains($0.id) })
+            }
+            reconciledBySourceChatId[bubble.sourceChatId] = reconciled
+        }
+        return reconciledBySourceChatId
+    }
+
+    mutating func discard(epoch: Int) {
+        pendingBatchByEpoch.removeValue(forKey: epoch)
+    }
+
+    mutating func discardAll(except epoch: Int? = nil) {
+        if let epoch {
+            pendingBatchByEpoch = pendingBatchByEpoch.filter { $0.key == epoch }
+        } else {
+            pendingBatchByEpoch.removeAll()
+        }
+    }
+
+    private mutating func apply(
+        _ candidate: Candidate,
+        into bubblesBySourceChatId: inout [String: CrossChatNotificationBubble]
+    ) {
+        guard candidate.role == .assistant else { return }
+        let sequence: UInt64
+        if let candidateSequence = candidate.notificationSequence {
+            sequence = candidateSequence
+            mutationSequence = max(mutationSequence, candidateSequence)
+        } else {
+            mutationSequence &+= 1
+            sequence = mutationSequence
+        }
+        var bubble = bubblesBySourceChatId[candidate.sourceChatId] ?? CrossChatNotificationBubble(
+            sourceChatId: candidate.sourceChatId,
+            sourceTitle: candidate.sourceTitle,
+            entries: [],
+            lastAssistantActivityAt: candidate.timestamp
+        )
+        bubble.sourceTitle = candidate.sourceTitle
+        let existingSeparatorTimestamp = bubble.entries.first {
+            $0.id == candidate.messageId
+        }?.appendSeparatorTimestamp
+        let appendSeparatorTimestamp = existingSeparatorTimestamp
+            ?? (bubble.entries.contains { $0.id != candidate.messageId } ? candidate.timestamp : nil)
+        let entry = CrossChatAssistantNotificationEntry(
+            id: candidate.messageId,
+            content: candidate.content,
+            timestamp: candidate.timestamp,
+            streaming: candidate.streaming,
+            notificationSequence: sequence,
+            appendSeparatorTimestamp: appendSeparatorTimestamp
+        )
+        if let existingIndex = bubble.entries.firstIndex(where: { $0.id == candidate.messageId }) {
+            bubble.entries.remove(at: existingIndex)
+        }
+        bubble.entries.insert(entry, at: 0)
+        bubble.lastAssistantActivityAt = candidate.timestamp
+        bubblesBySourceChatId[candidate.sourceChatId] = bubble
+    }
+}
 
 enum MessageSendIndicatorState: Equatable, Hashable {
     case pending
@@ -207,6 +360,7 @@ final class ChatViewModel: ChatViewModelHosting {
     private(set) var lastReadMessageIdBySession: [String: String] = [:]
     private(set) var streamTailStateBySession: [String: StreamTailState] = [:]
     private(set) var crossChatNotificationBubblesBySourceChatId: [String: CrossChatNotificationBubble] = [:]
+    private var notificationBatchCommitCoordinator = NotificationBatchCommitCoordinator()
     var crossChatNotificationDismissAnimator: CrossChatNotificationDismissAnimator?
     private var unavailableCrossChatNotificationSourceIds: Set<String> = []
     private var syntheticSessionKeys: Set<String> = []
@@ -705,6 +859,7 @@ final class ChatViewModel: ChatViewModelHosting {
         let epoch: Int
         let cursorBackedSessionKeys: Set<String>
         var messagesBySessionKey: [String: [Message]] = [:]
+        var notificationSequenceByMessageId: [String: UInt64] = [:]
     }
 
     private struct MessageSourceFlags {
@@ -1174,6 +1329,7 @@ final class ChatViewModel: ChatViewModelHosting {
         isRetired = true
         hasActivatedLifecycleOwnership = false
         clearSessionStatusRefreshes()
+        discardCrossChatNotificationBatches()
         stopObservingLifecycle(origin: "prepareForReplacement")
         cancelSendForTeardown()
         guard isConnectionOwner else { return }
@@ -1436,15 +1592,20 @@ final class ChatViewModel: ChatViewModelHosting {
         if markSourceRead {
             markSessionRead(sourceChatId, preferServerTail: true)
         }
+        if crossChatNotificationBubblesBySourceChatId[sourceChatId] != nil {
+            notificationBatchCommitCoordinator.recordDismissal(sourceChatIds: [sourceChatId])
+        }
         animateCrossChatNotificationDismissal {
             self.crossChatNotificationBubblesBySourceChatId.removeValue(forKey: sourceChatId)
         }
     }
 
     func dismissAllCrossChatNotifications() {
-        for sourceChatId in crossChatNotificationBubblesBySourceChatId.keys {
+        let committedSourceChatIds = Array(crossChatNotificationBubblesBySourceChatId.keys)
+        for sourceChatId in committedSourceChatIds {
             markSessionRead(sourceChatId, preferServerTail: true)
         }
+        notificationBatchCommitCoordinator.recordDismissal(sourceChatIds: committedSourceChatIds)
         animateCrossChatNotificationDismissal {
             self.crossChatNotificationBubblesBySourceChatId.removeAll()
         }
@@ -2307,7 +2468,7 @@ final class ChatViewModel: ChatViewModelHosting {
         "req_\(UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased())"
     }
 
-    private func handleIncoming(_ message: Message) {
+    private func handleIncoming(_ message: Message, notificationBatchEpoch: Int? = nil) {
         let snippet = String(message.content.prefix(80))
         logger.info(
             "incoming id=\(message.id, privacy: .public) sessionKey=\(message.sessionKey, privacy: .public) stream=\(message.stream.rawValue, privacy: .public) role=\(String(describing: message.role), privacy: .public) streaming=\(message.streaming, privacy: .public) deviceId=\(message.deviceId ?? "nil", privacy: .public) snippet=\"\(snippet, privacy: .public)\""
@@ -2382,46 +2543,79 @@ final class ChatViewModel: ChatViewModelHosting {
            resolvedMessage.id.hasPrefix("s_") {
             markSessionRead(resolvedMessage.sessionKey)
         }
-        applyCrossChatAssistantNotificationIfNeeded(for: resolvedMessage)
+        applyCrossChatAssistantNotificationIfNeeded(for: resolvedMessage, batchEpoch: notificationBatchEpoch)
         maybeTriggerAssistantIncomingHaptic(for: resolvedMessage, didAppendNewMessage: didAppendNewMessage)
 
         resolveAssetAttachmentsIfNeeded(for: resolvedMessage)
     }
 
-    private func applyCrossChatAssistantNotificationIfNeeded(for message: Message) {
-        guard message.role == .assistant else { return }
-        guard streamsBySessionKey[message.sessionKey] != nil else { return }
-        guard !unavailableCrossChatNotificationSourceIds.contains(message.sessionKey) else { return }
-        guard !hasReceivedSessionProvisioning || isLocallySendableSessionKey(message.sessionKey) else { return }
-        let visibleSessionKey = uiSelectedSessionKey.isEmpty ? engineActiveSessionKey : uiSelectedSessionKey
-        guard message.sessionKey != visibleSessionKey else { return }
-
+    private func applyCrossChatAssistantNotificationIfNeeded(
+        for message: Message,
+        batchEpoch: Int?,
+        notificationSequence: UInt64? = nil
+    ) {
         let title = stream(for: message.sessionKey)?.displayName
             ?? message.sender
             ?? message.sessionKey
-        var bubble = crossChatNotificationBubblesBySourceChatId[message.sessionKey] ?? CrossChatNotificationBubble(
+        let candidate = NotificationBatchCommitCoordinator.Candidate(
+            messageId: message.id,
             sourceChatId: message.sessionKey,
-            sourceTitle: title,
-            entries: [],
-            lastAssistantActivityAt: message.timestamp
-        )
-        bubble.sourceTitle = title
-        let existingSeparatorTimestamp = bubble.entries.first(where: { $0.id == message.id })?.appendSeparatorTimestamp
-        let appendSeparatorTimestamp = existingSeparatorTimestamp
-            ?? (bubble.entries.contains { $0.id != message.id } ? message.timestamp : nil)
-        let entry = CrossChatAssistantNotificationEntry(
-            id: message.id,
+            role: message.role,
             content: message.content,
             timestamp: message.timestamp,
-            appendSeparatorTimestamp: appendSeparatorTimestamp
+            streaming: message.streaming,
+            sourceTitle: title,
+            notificationSequence: notificationSequence
         )
-        if let existingIndex = bubble.entries.firstIndex(where: { $0.id == message.id }) {
-            bubble.entries.remove(at: existingIndex)
+        if let batchEpoch {
+            notificationBatchCommitCoordinator.collectPendingCandidate(candidate, epoch: batchEpoch)
+            return
         }
-        bubble.entries.insert(entry, at: 0)
-        bubble.lastAssistantActivityAt = message.timestamp
-        crossChatNotificationBubblesBySourceChatId[message.sessionKey] = bubble
+        guard isEligibleForCrossChatAssistantNotification(sourceChatId: message.sessionKey) else { return }
+        notificationBatchCommitCoordinator.applyLiveCandidate(
+            candidate,
+            to: &crossChatNotificationBubblesBySourceChatId
+        )
         closeOverflowingCrossChatNotificationReplies()
+    }
+
+    private func beginCrossChatNotificationBatch(epoch: Int, waitsForTruncationBoundary: Bool) {
+        notificationBatchCommitCoordinator.begin(
+            epoch: epoch,
+            waitsForTruncationBoundary: waitsForTruncationBoundary
+        )
+    }
+
+    private func commitCrossChatNotificationBatchIfReady(epoch: Int, reachedTruncationBoundary: Bool) {
+        guard let committedSnapshot = notificationBatchCommitCoordinator.commitIfReady(
+            epoch: epoch,
+            reachedTruncationBoundary: reachedTruncationBoundary,
+            committedSnapshot: crossChatNotificationBubblesBySourceChatId,
+            isEligible: { [weak self] sourceChatId in
+                self?.isEligibleForCrossChatAssistantNotification(sourceChatId: sourceChatId) ?? false
+            }
+        ) else {
+            return
+        }
+        crossChatNotificationBubblesBySourceChatId = committedSnapshot
+        closeOverflowingCrossChatNotificationReplies()
+    }
+
+    private func isEligibleForCrossChatAssistantNotification(sourceChatId: String) -> Bool {
+        guard streamsBySessionKey[sourceChatId] != nil else { return false }
+        guard !unavailableCrossChatNotificationSourceIds.contains(sourceChatId) else { return false }
+        guard !hasReceivedSessionProvisioning || isLocallySendableSessionKey(sourceChatId) else { return false }
+        let visibleSessionKey = uiSelectedSessionKey.isEmpty ? engineActiveSessionKey : uiSelectedSessionKey
+        guard sourceChatId != visibleSessionKey else { return false }
+        return true
+    }
+
+    private func discardCrossChatNotificationBatch(epoch: Int) {
+        notificationBatchCommitCoordinator.discard(epoch: epoch)
+    }
+
+    private func discardCrossChatNotificationBatches(except epoch: Int? = nil) {
+        notificationBatchCommitCoordinator.discardAll(except: epoch)
     }
 
     func closeOverflowingCrossChatNotificationReplies(visibleCapacity: Int = 10) {
@@ -2471,9 +2665,15 @@ final class ChatViewModel: ChatViewModelHosting {
         let message = Message(payload: serverPayload, sessionKey: sessionKey)
         if pendingHistoryResetReplay?.epoch == epoch {
             pendingHistoryResetReplay?.messagesBySessionKey[sessionKey, default: []].append(message)
+            pendingHistoryResetReplay?.notificationSequenceByMessageId[message.id] =
+                notificationBatchCommitCoordinator.reserveNotificationSequence()
             return
         }
-        handleIncoming(message)
+        if notificationBatchCommitCoordinator.contains(epoch: epoch, sourceChatId: message.sessionKey) {
+            handleIncoming(message, notificationBatchEpoch: epoch)
+        } else {
+            handleIncoming(message)
+        }
         if isReplayCursorEvent(message) {
             chatService.setReplayCursor(message.id, for: sessionKey)
             Task { await lifecycleCoordinator.updateCanonicalCursor(message.id) }
@@ -2520,6 +2720,13 @@ final class ChatViewModel: ChatViewModelHosting {
             }
             replayMessages.forEach { upsert(sessionKey: sessionKey, message: $0, sourceFlags: .server) }
             applyReplayMessageSideEffects(replayMessages, sessionKey: sessionKey)
+            replayMessages.forEach {
+                applyCrossChatAssistantNotificationIfNeeded(
+                    for: $0,
+                    batchEpoch: pending.epoch,
+                    notificationSequence: pending.notificationSequenceByMessageId[$0.id]
+                )
+            }
 
             if let replayCursor = lastServerMessageId(from: replayMessages) {
                 chatService.setReplayCursor(replayCursor, for: sessionKey)
@@ -2812,6 +3019,7 @@ final class ChatViewModel: ChatViewModelHosting {
         lastReadMessageIdBySession.removeAll()
         streamTailStateBySession.removeAll()
         streamDotStateBySession.removeAll()
+        discardCrossChatNotificationBatches()
         messageFailures.removeAll()
         pendingLocalMessages.removeAll()
         ackedPendingLocalMessageIDs.removeAll()
@@ -2853,6 +3061,7 @@ final class ChatViewModel: ChatViewModelHosting {
                 firstReplayAppliedEpoch = nil
                 restoreTaskBySessionKey.values.forEach { $0.cancel() }
                 restoreTaskBySessionKey.removeAll()
+                discardCrossChatNotificationBatches(except: epoch)
                 if pendingHistoryResetReplay?.epoch != epoch {
                     pendingHistoryResetReplay = nil
                 }
@@ -2872,6 +3081,12 @@ final class ChatViewModel: ChatViewModelHosting {
             case .failed:
                 mapped = .failed(ProviderChatService.Error.notConnected)
             }
+            switch to {
+            case .idle, .failed, .recovering:
+                discardCrossChatNotificationBatch(epoch: epoch)
+            case .connecting, .authenticating, .replaying, .live:
+                break
+            }
             transitionConnectionState(mapped, source: .lifecycleCoordinator)
             // Auth-invalid failures: clear credentials so RootView routes to pairing recovery.
             // Transport/provider-down failures stay in failed state for manual retry.
@@ -2886,15 +3101,17 @@ final class ChatViewModel: ChatViewModelHosting {
             }
         case .historyResetRequired(let epoch):
             handleHistoryResetRequired(epoch: epoch)
-        case .replayStarted:
-            break
+        case .replayStarted(let epoch, _, let replayTruncated, _):
+            beginCrossChatNotificationBatch(epoch: epoch, waitsForTruncationBoundary: replayTruncated)
         case .serverMessage(let epoch, let payload):
             handleLifecycleServerMessage(epoch: epoch, payload: payload)
-        case .replayCompleted:
+        case .replayCompleted(let epoch):
             applyPendingHistoryResetReplayIfNeeded()
             markMissingFinalsAfterReplay()
+            commitCrossChatNotificationBatchIfReady(epoch: epoch, reachedTruncationBoundary: false)
         case .historyTruncated(let epoch):
             logger.info("history truncated for epoch=\(epoch, privacy: .public)")
+            commitCrossChatNotificationBatchIfReady(epoch: epoch, reachedTruncationBoundary: true)
         }
     }
 

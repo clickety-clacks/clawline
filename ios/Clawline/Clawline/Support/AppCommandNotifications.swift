@@ -41,6 +41,15 @@ struct CrossChatNotificationCommand {
     let dismissAll: @MainActor () -> Void
 }
 
+enum CrossChatNotificationCommandAvailability {
+    static func shouldInstallCommand(
+        visibleNotificationCount: Int,
+        selectorShortcutSlots: Set<Int>
+    ) -> Bool {
+        visibleNotificationCount > 0 || !selectorShortcutSlots.isEmpty
+    }
+}
+
 private struct CancelCurrentPromptCommandKey: FocusedValueKey {
     typealias Value = CancelCurrentPromptCommand
 }

@@ -5,6 +5,7 @@ struct SelectableAttributedText: UIViewRepresentable {
     var attributedString: NSAttributedString
     var alignment: NSTextAlignment
     var colorScheme: ColorScheme
+    var selectionResetToken: Int = 0
     var onSelectionChange: (Bool) -> Void
     var onLinkTap: (URL) -> Void
 
@@ -40,6 +41,13 @@ struct SelectableAttributedText: UIViewRepresentable {
             uiView.attributedText = attributedString
         }
         uiView.textAlignment = alignment
+        if context.coordinator.consumeSelectionResetToken(selectionResetToken) {
+            context.coordinator.invalidateDeferredSelectionChanges()
+            if uiView.selectedRange.length > 0 {
+                uiView.selectedRange = NSRange(location: uiView.selectedRange.location, length: 0)
+            }
+            context.coordinator.emitSelectionChange(false)
+        }
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITextView, context: Context) -> CGSize? {
@@ -92,6 +100,8 @@ struct SelectableAttributedText: UIViewRepresentable {
         private let onLinkTap: (URL) -> Void
         var isUpdatingFromSwiftUI = false
         private var lastHasSelection: Bool?
+        private var lastSelectionResetToken: Int?
+        private var deferredSelectionChangeGeneration = 0
 
         init(onSelectionChange: @escaping (Bool) -> Void, onLinkTap: @escaping (URL) -> Void) {
             self.onSelectionChange = onSelectionChange
@@ -101,8 +111,11 @@ struct SelectableAttributedText: UIViewRepresentable {
         func textViewDidChangeSelection(_ textView: UITextView) {
             let hasSelection = textView.selectedRange.length > 0
             if isUpdatingFromSwiftUI {
+                guard !hasSelection else { return }
+                let generation = deferredSelectionChangeGeneration
                 DispatchQueue.main.async { [weak self] in
-                    self?.emitSelectionChange(hasSelection)
+                    guard let self, generation == deferredSelectionChangeGeneration else { return }
+                    emitSelectionChange(hasSelection)
                 }
                 return
             }
@@ -163,10 +176,20 @@ struct SelectableAttributedText: UIViewRepresentable {
             )
         }
 
-        private func emitSelectionChange(_ hasSelection: Bool) {
+        func consumeSelectionResetToken(_ token: Int) -> Bool {
+            defer { lastSelectionResetToken = token }
+            guard let lastSelectionResetToken else { return token != 0 }
+            return lastSelectionResetToken != token
+        }
+
+        func emitSelectionChange(_ hasSelection: Bool) {
             guard lastHasSelection != hasSelection else { return }
             lastHasSelection = hasSelection
             onSelectionChange(hasSelection)
+        }
+
+        func invalidateDeferredSelectionChanges() {
+            deferredSelectionChangeGeneration += 1
         }
     }
 }

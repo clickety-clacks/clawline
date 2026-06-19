@@ -2001,8 +2001,12 @@ struct ChatView: View {
             replyPinSlotsBySourceChatId: replyPinSlotsBySourceChatId,
             measuredHeightsBySourceChatId: measuredHeightsBySourceChatId
         )
-        let hasActiveChatSelectorShortcuts = !keyboardOwnershipStore.chatSelectorShortcutMap.isEmpty
-        guard !bubbles.isEmpty || hasActiveChatSelectorShortcuts else { return nil }
+        let selectorShortcutSlots = Set(keyboardOwnershipStore.chatSelectorShortcutMap.keys)
+        let hasActiveChatSelectorShortcuts = !selectorShortcutSlots.isEmpty
+        guard CrossChatNotificationCommandAvailability.shouldInstallCommand(
+            visibleNotificationCount: bubbles.count,
+            selectorShortcutSlots: selectorShortcutSlots
+        ) else { return nil }
         return CrossChatNotificationCommand(
             hasVisibleNotifications: !bubbles.isEmpty,
             visibleCount: bubbles.count,
@@ -4244,6 +4248,7 @@ private struct PromptFocusShortcutHost: UIViewRepresentable {
         view.hasStreams = hasStreams
         view.notificationVisibleCount = notificationVisibleCount
         view.keyboardOwnershipStore = keyboardOwnershipStore
+        view.refreshKeyCommandsIfNeeded()
         if isEnabled {
             view.activateWhenReady()
         } else if view.isFirstResponder {
@@ -4260,6 +4265,10 @@ private final class PromptFocusShortcutView: UIView {
     var hasStreams = false
     var notificationVisibleCount = 0
     var keyboardOwnershipStore = KeyboardOwnershipStore()
+    private var keyCommandSignature = ChatAppCommandShortcut.keyCommandSignature(
+        notificationVisibleCount: 0,
+        selectorShortcutSlots: []
+    )
     private var hasPendingActivationRetry = false
     private static let keyboardSuppressingInputView = PromptFocusShortcutSuppressedInputView()
 
@@ -4285,7 +4294,10 @@ private final class PromptFocusShortcutView: UIView {
             )
         }
         let appCommandShortcuts = ChatAppCommandShortcut
-            .keyCommandSpecs(notificationVisibleCount: notificationVisibleCount)
+            .keyCommandSpecs(
+                notificationVisibleCount: notificationVisibleCount,
+                selectorShortcutSlots: Set(keyboardOwnershipStore.chatSelectorShortcutMap.keys)
+            )
             .map { spec in
             UIKeyCommand(
                 input: spec.input,
@@ -4294,6 +4306,19 @@ private final class PromptFocusShortcutView: UIView {
             )
         }
         return noTextCommands + appCommandShortcuts
+    }
+
+    func refreshKeyCommandsIfNeeded() {
+        let nextSignature = ChatAppCommandShortcut.keyCommandSignature(
+            notificationVisibleCount: notificationVisibleCount,
+            selectorShortcutSlots: Set(keyboardOwnershipStore.chatSelectorShortcutMap.keys)
+        )
+        guard nextSignature != keyCommandSignature else { return }
+        keyCommandSignature = nextSignature
+        reloadInputViews()
+        guard isFirstResponder else { return }
+        resignFirstResponder()
+        becomeFirstResponder()
     }
 
     private func selector(for action: PromptFocusShortcutConfiguration.Action) -> Selector {
@@ -4456,8 +4481,27 @@ enum ChatAppCommandShortcut {
 
     static let keyCommandSpecs = keyCommandSpecs(notificationVisibleCount: 0)
 
-    static func keyCommandSpecs(notificationVisibleCount: Int) -> [KeyCommandSpec] {
-        convert(KeyboardCommandBridge.appSpecs(notificationVisibleCount: notificationVisibleCount))
+    static func keyCommandSpecs(
+        notificationVisibleCount: Int,
+        selectorShortcutSlots: Set<Int> = []
+    ) -> [KeyCommandSpec] {
+        convert(KeyboardCommandBridge.appSpecs(
+            notificationVisibleCount: notificationVisibleCount,
+            selectorShortcutSlots: selectorShortcutSlots
+        ))
+    }
+
+    static func keyCommandSignature(
+        notificationVisibleCount: Int,
+        selectorShortcutSlots: Set<Int>
+    ) -> [String] {
+        keyCommandSpecs(
+            notificationVisibleCount: notificationVisibleCount,
+            selectorShortcutSlots: selectorShortcutSlots
+        )
+        .map { spec in
+            "\(spec.input)|\(spec.modifierFlags.rawValue)|\(spec.action)"
+        }
     }
 
     static func scrollKeyCommandSpecs(notificationVisibleCount: Int) -> [KeyCommandSpec] {
@@ -6321,7 +6365,7 @@ enum CrossChatNotificationEntrySurfaceGeometry {
 }
 
 enum CrossChatNotificationScrollCommand {
-    static let lineIncrement: CGFloat = 224
+    static let lineIncrement: CGFloat = ChatVisibleBubbleContentScroll.commandIncrement
 
     @discardableResult
     static func scroll(_ scrollView: UIScrollView?, direction: ChatScrollPageDirection) -> Bool {
@@ -6344,6 +6388,19 @@ enum CrossChatNotificationScrollCommand {
         scrollView.setContentOffset(CGPoint(x: scrollView.contentOffset.x, y: clampedY), animated: true)
         return true
     }
+
+    @discardableResult
+    static func scroll(
+        sourceChatIds: [String],
+        scrollViewsBySourceChatId: [String: UIScrollView],
+        direction: ChatScrollPageDirection
+    ) -> Bool {
+        var didScroll = false
+        for sourceChatId in sourceChatIds {
+            didScroll = scroll(scrollViewsBySourceChatId[sourceChatId], direction: direction) || didScroll
+        }
+        return didScroll
+    }
 }
 
 enum CrossChatNotificationScrollTargetSelection {
@@ -6351,8 +6408,20 @@ enum CrossChatNotificationScrollTargetSelection {
         visibleSourceChatIds: [String],
         routedSourceChatId: String?
     ) -> String? {
-        guard routedSourceChatId != nil else { return nil }
-        return visibleSourceChatIds.first
+        guard let routedSourceChatId,
+              visibleSourceChatIds.contains(routedSourceChatId) else { return nil }
+        return routedSourceChatId
+    }
+
+    static func sourceChatIds(
+        visibleSourceChatIds: [String],
+        routedSourceChatId: String?
+    ) -> [String] {
+        guard sourceChatId(
+            visibleSourceChatIds: visibleSourceChatIds,
+            routedSourceChatId: routedSourceChatId
+        ) != nil else { return [] }
+        return visibleSourceChatIds
     }
 }
 
@@ -6832,12 +6901,10 @@ private struct CrossChatNotificationOverlay: View {
             }
 #endif
             .onReceive(NotificationCenter.default.publisher(for: .clawlineScrollNotificationDownCommand)) { _ in
-                guard let sourceChatId = routedNotificationSourceChatId(for: .notificationScrollForward) else { return }
-                scrollNotification(sourceChatId: sourceChatId, direction: .down)
+                scrollVisibleNotifications(direction: .down, intent: .notificationScrollForward)
             }
             .onReceive(NotificationCenter.default.publisher(for: .clawlineScrollNotificationUpCommand)) { _ in
-                guard let sourceChatId = routedNotificationSourceChatId(for: .notificationScrollBackward) else { return }
-                scrollNotification(sourceChatId: sourceChatId, direction: .up)
+                scrollVisibleNotifications(direction: .up, intent: .notificationScrollBackward)
             }
             .onReceive(NotificationCenter.default.publisher(for: .clawlineToggleNotificationDockCommand)) { _ in
                 guard routedNotificationSourceChatId(for: .notificationToggleDock) != nil else { return }
@@ -7207,6 +7274,22 @@ private struct CrossChatNotificationOverlay: View {
         )
     }
 
+    private func scrollVisibleNotifications(direction: ChatScrollPageDirection, intent: KeyboardCommandIntent) {
+        guard case .handled(.notificationBubble(let routedSourceChatId)) = KeyboardCommandRouter
+            .route(intent: intent, store: keyboardOwnershipStore)
+            .outcome else { return }
+        let sourceChatIds = CrossChatNotificationScrollTargetSelection.sourceChatIds(
+            visibleSourceChatIds: visibleBubbles.map(\.sourceChatId),
+            routedSourceChatId: routedSourceChatId
+        )
+        for sourceChatId in sourceChatIds {
+            CrossChatNotificationScrollCommand.scroll(
+                scrollViewsBySourceChatId[sourceChatId]?.scrollView,
+                direction: direction
+            )
+        }
+    }
+
     private func routedNotificationSourceChatId(for intent: KeyboardCommandIntent) -> String? {
         if case .handled(.notificationBubble(let sourceChatId)) = KeyboardCommandRouter
             .route(intent: intent, store: keyboardOwnershipStore)
@@ -7267,11 +7350,9 @@ private struct CrossChatNotificationOverlay: View {
             guard case .handled(.notificationBubble(_)) = route.outcome else { return }
             toggleDock()
         case .notificationScrollForward:
-            guard case .handled(.notificationBubble(let sourceChatId)) = route.outcome else { return }
-            scrollNotification(sourceChatId: sourceChatId, direction: .down)
+            scrollVisibleNotifications(direction: .down, intent: intent)
         case .notificationScrollBackward:
-            guard case .handled(.notificationBubble(let sourceChatId)) = route.outcome else { return }
-            scrollNotification(sourceChatId: sourceChatId, direction: .up)
+            scrollVisibleNotifications(direction: .up, intent: intent)
         default:
             break
         }
@@ -8079,7 +8160,7 @@ struct CrossChatNotificationBubbleView: View {
                 .frame(maxHeight: contentMaxHeight, alignment: .top)
                 .contentShape(Rectangle())
                 .simultaneousGesture(
-                    TapGesture().onEnded(onNavigate)
+                    TapGesture().onEnded(handleNotificationBodyTap)
                 )
                 .gesture(
                     notificationSurfaceDragShield,
@@ -8194,7 +8275,7 @@ struct CrossChatNotificationBubbleView: View {
             publishTextSelectionState()
         }
         .contentShape(RoundedRectangle(cornerRadius: bubbleCornerRadius, style: .continuous))
-        .onTapGesture(perform: onNavigate)
+        .onTapGesture(perform: handleNotificationBodyTap)
         .background(alignment: .leading) {
             Rectangle()
                 .fill(notificationAccentColor.opacity(notificationAccentOpacity))
@@ -8303,6 +8384,7 @@ struct CrossChatNotificationBubbleView: View {
                 attributedString: attributed,
                 alignment: .left,
                 colorScheme: colorScheme,
+                selectionResetToken: contentSelectionResetToken,
                 onSelectionChange: { isSelectionActive in
                     setContentSelectionActive(isSelectionActive, selectionKey: selectionKey)
                 },

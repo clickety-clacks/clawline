@@ -360,6 +360,80 @@ struct TextLinkURLTemplateRulesTests {
         #expect(openedGeneratedURL == generatedURL)
     }
 
+    @Test("T1250: selectable notification text reset clears selection and allows fresh selections")
+    @MainActor
+    func selectableNotificationTextResetClearsSelectionAndAllowsFreshSelections() throws {
+        let rendered = NSAttributedString(string: "Selectable notification text")
+        var firstSelectionStates: [Bool] = []
+        var secondSelectionStates: [Bool] = []
+        let firstHost = UIHostingController(
+            rootView: SelectableAttributedText(
+                attributedString: rendered,
+                alignment: .left,
+                colorScheme: .light,
+                selectionResetToken: 0,
+                onSelectionChange: { firstSelectionStates.append($0) },
+                onLinkTap: { _ in }
+            )
+            .frame(width: 280)
+        )
+        let secondHost = UIHostingController(
+            rootView: SelectableAttributedText(
+                attributedString: rendered,
+                alignment: .left,
+                colorScheme: .light,
+                selectionResetToken: 0,
+                onSelectionChange: { secondSelectionStates.append($0) },
+                onLinkTap: { _ in }
+            )
+            .frame(width: 280)
+        )
+        let stack = UIStackView(arrangedSubviews: [firstHost.view, secondHost.view])
+        stack.axis = .vertical
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 220))
+        let container = UIViewController()
+        container.view.addSubview(stack)
+        window.rootViewController = container
+        window.makeKeyAndVisible()
+        stack.frame = window.bounds
+        firstHost.view.frame = CGRect(x: 0, y: 0, width: 320, height: 100)
+        secondHost.view.frame = CGRect(x: 0, y: 110, width: 320, height: 100)
+        firstHost.view.setNeedsLayout()
+        secondHost.view.setNeedsLayout()
+        firstHost.view.layoutIfNeeded()
+        secondHost.view.layoutIfNeeded()
+
+        let firstTextView = try #require(textViews(in: firstHost.view).first)
+        let secondTextView = try #require(textViews(in: secondHost.view).first)
+
+        firstTextView.selectedRange = NSRange(location: 0, length: 10)
+        firstTextView.delegate?.textViewDidChangeSelection?(firstTextView)
+        #expect(firstSelectionStates.last == true)
+
+        firstHost.rootView = SelectableAttributedText(
+            attributedString: rendered,
+            alignment: .left,
+            colorScheme: .light,
+            selectionResetToken: 1,
+            onSelectionChange: { firstSelectionStates.append($0) },
+            onLinkTap: { _ in }
+        )
+        .frame(width: 280)
+        firstHost.view.setNeedsLayout()
+        firstHost.view.layoutIfNeeded()
+
+        #expect(firstTextView.selectedRange.length == 0)
+        #expect(firstSelectionStates.last == false)
+
+        firstTextView.selectedRange = NSRange(location: 11, length: 12)
+        firstTextView.delegate?.textViewDidChangeSelection?(firstTextView)
+        secondTextView.selectedRange = NSRange(location: 0, length: 10)
+        secondTextView.delegate?.textViewDidChangeSelection?(secondTextView)
+
+        #expect(firstSelectionStates.last == true)
+        #expect(secondSelectionStates.last == true)
+    }
+
     @Test("T1192: chat generated link taps honor direct and modal display modes")
     @MainActor
     func chatGeneratedLinkTapsHonorDirectAndModalDisplayModes() throws {

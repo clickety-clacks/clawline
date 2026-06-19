@@ -12,10 +12,18 @@ struct ClawlineAppCommands: Commands {
     @FocusedValue(\.cancelCurrentPromptCommand) private var cancelCurrentPromptCommand
     @FocusedValue(\.crossChatNotificationCommand) private var crossChatNotificationCommand
 
-    private var plainNumberCommandsActive: Bool {
-        guard let crossChatNotificationCommand else { return false }
-        return crossChatNotificationCommand.hasVisibleNotifications
-            || crossChatNotificationCommand.hasActiveChatSelectorShortcuts
+    private var selectorPlainNumberShortcutSlots: Set<Int> {
+        guard let slots = crossChatNotificationCommand?.keyboardOwnershipStore.chatSelectorShortcutMap.keys else {
+            return []
+        }
+        return Set(slots)
+    }
+
+    private var numberedShortcutCommandsActive: Bool {
+        ClawlineAppNumberShortcutAvailability.hasCommands(
+            notificationVisibleCount: crossChatNotificationCommand?.visibleCount ?? 0,
+            selectorShortcutSlots: selectorPlainNumberShortcutSlots
+        )
     }
 
     var body: some Commands {
@@ -37,7 +45,7 @@ struct ClawlineAppCommands: Commands {
             }
             .keyboardShortcut("-", modifiers: .command)
 
-            if plainNumberCommandsActive {
+            if numberedShortcutCommandsActive {
                 ForEach(0...9, id: \.self) { index in
                     if let owner = ChatAppShortcutCommandDispatch.plainNumberOpenCommandOwner(
                         index: index,
@@ -49,6 +57,13 @@ struct ClawlineAppCommands: Commands {
                             }
                         }
                         .keyboardShortcut(KeyEquivalent(Character("\(index)")), modifiers: .command)
+                        .disabled(
+                            !ClawlineAppNumberShortcutAvailability.isPlainNumberCommandEnabled(
+                                index: index,
+                                notificationVisibleCount: crossChatNotificationCommand?.visibleCount ?? 0,
+                                selectorShortcutSlots: selectorPlainNumberShortcutSlots
+                            )
+                        )
                     }
 
                     if (crossChatNotificationCommand?.visibleCount ?? 0) > index {
@@ -169,6 +184,23 @@ struct ClawlineAppCommands: Commands {
         case .scrollNotificationUp:
             crossChatNotificationCommand?.scrollUp()
         }
+    }
+}
+
+enum ClawlineAppNumberShortcutAvailability {
+    static func hasCommands(
+        notificationVisibleCount: Int,
+        selectorShortcutSlots: Set<Int>
+    ) -> Bool {
+        notificationVisibleCount > 0 || !selectorShortcutSlots.isEmpty
+    }
+
+    static func isPlainNumberCommandEnabled(
+        index: Int,
+        notificationVisibleCount: Int,
+        selectorShortcutSlots: Set<Int>
+    ) -> Bool {
+        notificationVisibleCount > index || selectorShortcutSlots.contains(index)
     }
 }
 

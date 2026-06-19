@@ -604,7 +604,7 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
         }
 
     override var keyCommands: [UIKeyCommand]? {
-        let base = super.keyCommands ?? []
+        let base = Self.appFontScalePassthroughCommands(from: super.keyCommands ?? [])
         let emacsCommands: [UIKeyCommand] = [
             UIKeyCommand(input: "a", modifierFlags: [.control], action: #selector(didPressCtrlA)),
             UIKeyCommand(input: "e", modifierFlags: [.control], action: #selector(didPressCtrlE)),
@@ -660,6 +660,12 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
             + modifiedReturnCommands
             + base
             + emacsCommands
+    }
+
+    static func appFontScalePassthroughCommands(from commands: [UIKeyCommand]) -> [UIKeyCommand] {
+        commands.filter { command in
+            !(command.modifierFlags == [.command] && (command.input == "-" || command.input == "="))
+        }
     }
 
     private func mentionPickerSelector(for intent: KeyboardCommandIntent) -> Selector? {

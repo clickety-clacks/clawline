@@ -850,6 +850,23 @@ struct PromptFocusShortcutActivationTests {
         #expect(firstControlSemicolon?.action == #selector(UIResponder.clawlineOpenStreamPopupCommand(_:)))
     }
 
+    @Test("T1357 prompt text input releases app font scale shortcuts")
+    @MainActor
+    func promptTextInputReleasesAppFontScaleShortcuts() {
+        let commands = [
+            UIKeyCommand(input: "-", modifierFlags: [.command], action: #selector(UIResponder.copy(_:))),
+            UIKeyCommand(input: "=", modifierFlags: [.command], action: #selector(UIResponder.copy(_:))),
+            UIKeyCommand(input: "+", modifierFlags: [.command], action: #selector(UIResponder.copy(_:))),
+            UIKeyCommand(input: "j", modifierFlags: [.command], action: #selector(UIResponder.copy(_:))),
+            UIKeyCommand(input: "-", modifierFlags: [.command, .shift], action: #selector(UIResponder.copy(_:)))
+        ]
+
+        let filtered = PastableTextView.appFontScalePassthroughCommands(from: commands)
+
+        #expect(filtered.map(\.input) == ["+", "j", "-"])
+        #expect(filtered.map(\.modifierFlags) == [[.command], [.command], [.command, .shift]])
+    }
+
     @Test("Text input bridge exposure follows router notification ownership")
     @MainActor
     func textInputBridgeExposureFollowsRouterNotificationOwnership() {

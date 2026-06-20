@@ -392,7 +392,8 @@ struct StreamManagerSheet: View {
 
     private var selectorShortcutKeyCommandBridge: some View {
         StreamSelectorShortcutKeyCommandBridge(
-            selectableSessionKeys: selectorShortcutsAvailable ? selectableShortcutSessionKeys : []
+            selectableSessionKeys: selectorShortcutsAvailable ? selectableShortcutSessionKeys : [],
+            isSearchFieldFocused: isSearchFieldFocused
         )
         .frame(width: 1, height: 1)
         .opacity(0.001)
@@ -902,23 +903,25 @@ enum StreamSelectorShortcutKeyCommands {
 
 private struct StreamSelectorShortcutKeyCommandBridge: UIViewRepresentable {
     let selectableSessionKeys: [String]
+    let isSearchFieldFocused: Bool
 
     func makeUIView(context: Context) -> KeyCommandView {
         let view = KeyCommandView()
         view.selectableSessionKeys = selectableSessionKeys
+        view.isSearchFieldFocused = isSearchFieldFocused
         return view
     }
 
     func updateUIView(_ uiView: KeyCommandView, context: Context) {
         uiView.selectableSessionKeys = selectableSessionKeys
+        uiView.isSearchFieldFocused = isSearchFieldFocused
         uiView.refreshKeyCommandsIfNeeded()
-        DispatchQueue.main.async { [weak uiView] in
-            uiView?.becomeFirstResponder()
-        }
+        uiView.activateIfSearchFieldInactive()
     }
 
     final class KeyCommandView: UIView {
         var selectableSessionKeys: [String] = []
+        var isSearchFieldFocused = false
         private var keyCommandSignature: [String] = []
 
         override var canBecomeFirstResponder: Bool { true }
@@ -937,8 +940,14 @@ private struct StreamSelectorShortcutKeyCommandBridge: UIViewRepresentable {
 
         override func didMoveToWindow() {
             super.didMoveToWindow()
+            activateIfSearchFieldInactive()
+        }
+
+        func activateIfSearchFieldInactive() {
+            guard !isSearchFieldFocused else { return }
             DispatchQueue.main.async { [weak self] in
-                self?.becomeFirstResponder()
+                guard let self, !self.isSearchFieldFocused else { return }
+                self.becomeFirstResponder()
             }
         }
 

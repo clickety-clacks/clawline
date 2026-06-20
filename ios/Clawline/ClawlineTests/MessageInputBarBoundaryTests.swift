@@ -541,9 +541,17 @@ struct MessageInputBarBoundaryTests {
         #expect(layoutHostHeight == topMargin + availableHeightAboveComposer + 12)
     }
 
-    @Test("Docked notification hit target stays inside visible peek strip")
-    func dockedNotificationHitTargetStaysInsideVisiblePeekStrip() {
-        #expect(CrossChatNotificationGeometry.collapsedHitTargetWidth == CrossChatNotificationGeometry.collapsedPeekWidth)
+    @Test("Docked notification hit target stays generous")
+    func dockedNotificationHitTargetStaysGenerous() {
+        #expect(CrossChatNotificationGeometry.collapsedHitTargetWidth > CrossChatNotificationGeometry.collapsedPeekWidth)
+        #expect(CrossChatNotificationGeometry.collapsedHitTargetWidth == 96)
+    }
+
+    @Test("Docked notification pan arbitration preserves transcript scroll")
+    func dockedNotificationPanArbitrationPreservesTranscriptScroll() {
+        #expect(CrossChatNotificationDockedGestureArbitration.intent(translation: CGSize(width: 4, height: -32)) == .verticalScroll)
+        #expect(CrossChatNotificationDockedGestureArbitration.intent(translation: CGSize(width: -48, height: 8)) == .leftSwipe)
+        #expect(CrossChatNotificationDockedGestureArbitration.intent(translation: CGSize(width: 48, height: 8)) == .ignored)
     }
 
     @Test("Spatial notification layout host includes motion overflow")

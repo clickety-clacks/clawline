@@ -186,6 +186,11 @@ final class ChatLayoutCoordinator {
         listViews[sessionKey]?.value?.scrollByPage(direction: direction, animated: animated)
     }
 
+    func scrollByDelta(sessionKey: String, deltaY: CGFloat) {
+        dispatchPrecondition(condition: .onQueue(.main))
+        listViews[sessionKey]?.value?.scrollByDelta(deltaY)
+    }
+
     func scrollVisibleBubbleContents(sessionKey: String, direction: ChatScrollPageDirection, animated: Bool) {
         dispatchPrecondition(condition: .onQueue(.main))
         listViews[sessionKey]?.value?.scrollVisibleBubbleContents(direction: direction, animated: animated)

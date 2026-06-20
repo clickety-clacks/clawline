@@ -1408,6 +1408,13 @@ struct ChatView: View {
                             withAnimation(CrossChatNotificationOverlay.revealAnimation) {
                                 isCrossChatNotificationStackDocked = false
                             }
+                        },
+                        onVerticalScroll: { deltaY in
+                            let sessionKey = viewModel.uiSelectedSessionKey.isEmpty
+                                ? viewModel.engineActiveSessionKey
+                                : viewModel.uiSelectedSessionKey
+                            guard !sessionKey.isEmpty else { return }
+                            layoutCoordinator.scrollByDelta(sessionKey: sessionKey, deltaY: deltaY)
                         }
                     )
                     .frame(width: CrossChatNotificationGeometry.collapsedHitTargetWidth)
@@ -6198,7 +6205,7 @@ private struct NotificationRenderedEntriesKey: Hashable {
 
 enum CrossChatNotificationGeometry {
     static let collapsedPeekWidth: CGFloat = 18
-    static let collapsedHitTargetWidth: CGFloat = collapsedPeekWidth
+    static let collapsedHitTargetWidth: CGFloat = 96
     static let swipeCompletionThreshold: CGFloat = 44
     static let compactBubbleMaxHeight: CGFloat = 164
 
@@ -6336,6 +6343,29 @@ enum CrossChatNotificationGeometry {
         trailingSafeAreaInset: CGFloat
     ) -> CGFloat {
         max(0, stackWidth - collapsedPeekWidth + max(0, trailingSafeAreaInset))
+    }
+}
+
+nonisolated enum CrossChatNotificationDockedPanIntent: Equatable {
+    case verticalScroll
+    case leftSwipe
+    case ignored
+}
+
+nonisolated enum CrossChatNotificationDockedGestureArbitration {
+    static func intent(
+        translation: CGSize,
+        minimumDistance: CGFloat = 20,
+        swipeThreshold: CGFloat = 44
+    ) -> CrossChatNotificationDockedPanIntent {
+        let horizontal = abs(translation.width)
+        let vertical = abs(translation.height)
+        guard max(horizontal, vertical) >= minimumDistance else { return .ignored }
+        if vertical > horizontal {
+            return .verticalScroll
+        }
+        guard translation.width < 0, horizontal >= swipeThreshold else { return .ignored }
+        return .leftSwipe
     }
 }
 
@@ -7004,6 +7034,8 @@ private struct CrossChatNotificationOverlay: View {
             },
             onLeftSwipe: {
                 restoreDock()
+            },
+            onVerticalScroll: { _ in
             }
         )
             .frame(width: Self.collapsedPeekWidth)
@@ -9608,6 +9640,7 @@ private struct NotificationPeekingHitTargetView: UIViewRepresentable {
 private struct NotificationDockedHitTargetView: UIViewRepresentable {
     let onTap: () -> Void
     let onLeftSwipe: () -> Void
+    let onVerticalScroll: (CGFloat) -> Void
 
     func makeUIView(context: Context) -> UIView {
         let view = UIView(frame: .zero)
@@ -9621,6 +9654,8 @@ private struct NotificationDockedHitTargetView: UIViewRepresentable {
         view.addGestureRecognizer(tap)
 
         let pan = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handlePan(_:)))
+        pan.delegate = context.coordinator
+        pan.cancelsTouchesInView = false
         view.addGestureRecognizer(pan)
 
         return view
@@ -9629,19 +9664,27 @@ private struct NotificationDockedHitTargetView: UIViewRepresentable {
     func updateUIView(_ uiView: UIView, context: Context) {
         context.coordinator.onTap = onTap
         context.coordinator.onLeftSwipe = onLeftSwipe
+        context.coordinator.onVerticalScroll = onVerticalScroll
     }
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(onTap: onTap, onLeftSwipe: onLeftSwipe)
+        Coordinator(onTap: onTap, onLeftSwipe: onLeftSwipe, onVerticalScroll: onVerticalScroll)
     }
 
-    final class Coordinator: NSObject {
+    final class Coordinator: NSObject, UIGestureRecognizerDelegate {
         var onTap: () -> Void
         var onLeftSwipe: () -> Void
+        var onVerticalScroll: (CGFloat) -> Void
+        private var lastPanTranslationY: CGFloat = 0
 
-        init(onTap: @escaping () -> Void, onLeftSwipe: @escaping () -> Void) {
+        init(
+            onTap: @escaping () -> Void,
+            onLeftSwipe: @escaping () -> Void,
+            onVerticalScroll: @escaping (CGFloat) -> Void
+        ) {
             self.onTap = onTap
             self.onLeftSwipe = onLeftSwipe
+            self.onVerticalScroll = onVerticalScroll
         }
 
         @objc func handleTap() {
@@ -9649,12 +9692,38 @@ private struct NotificationDockedHitTargetView: UIViewRepresentable {
         }
 
         @objc func handlePan(_ recognizer: UIPanGestureRecognizer) {
-            guard recognizer.state == .ended else { return }
-            let translation = recognizer.translation(in: recognizer.view)
-            guard translation.x < 0,
-                  abs(translation.x) > abs(translation.y),
-                  abs(translation.x) >= CrossChatNotificationGeometry.swipeCompletionThreshold else { return }
-            onLeftSwipe()
+            let point = recognizer.translation(in: recognizer.view)
+            let translation = CGSize(width: point.x, height: point.y)
+            let intent = CrossChatNotificationDockedGestureArbitration.intent(translation: translation)
+            switch recognizer.state {
+            case .began:
+                lastPanTranslationY = translation.height
+            case .changed:
+                guard intent == .verticalScroll else { return }
+                let deltaY = lastPanTranslationY - translation.height
+                lastPanTranslationY = translation.height
+                onVerticalScroll(deltaY)
+            case .ended:
+                defer { lastPanTranslationY = 0 }
+                if intent == .leftSwipe {
+                    onLeftSwipe()
+                }
+            case .cancelled, .failed:
+                lastPanTranslationY = 0
+            default:
+                break
+            }
+        }
+
+        func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+            guard let pan = gestureRecognizer as? UIPanGestureRecognizer else { return true }
+            let point = pan.velocity(in: pan.view)
+            let velocity = CGSize(width: point.x, height: point.y)
+            return CrossChatNotificationDockedGestureArbitration.intent(
+                translation: velocity,
+                minimumDistance: 1,
+                swipeThreshold: 1
+            ) != .ignored
         }
     }
 }

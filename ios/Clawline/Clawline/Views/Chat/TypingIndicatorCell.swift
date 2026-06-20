@@ -13,13 +13,15 @@ final class TypingIndicatorCell: UICollectionViewCell {
     static let reuseIdentifier = "TypingIndicatorCell"
     /// Fixed ID used in the diffable data source for the typing indicator item.
     static let itemId = "__typing_indicator__"
-    static let bubbleWidth: CGFloat = 96
-    static let bubbleHeight: CGFloat = 90
+    static let bubbleWidth: CGFloat = 240
+    static let bubbleHeight: CGFloat = 86
     static let bubblePaddingScale: CGFloat = 0.2
 
     private static let indicatorText = ""
     private let containerView = MessageBubbleUIKitContainerView()
     private let dotsView = TypingDotsView()
+    private let progressStack = UIStackView()
+    private let progressLabel = UILabel()
 #if os(visionOS)
     private let spatialTapButton = UIButton(type: .custom)
 #endif
@@ -34,6 +36,20 @@ final class TypingIndicatorCell: UICollectionViewCell {
         contentView.backgroundColor = .clear
         backgroundColor = .clear
         contentView.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(handleTap)))
+
+        progressStack.axis = .vertical
+        progressStack.alignment = .center
+        progressStack.spacing = 9
+        progressStack.isUserInteractionEnabled = false
+        progressStack.addArrangedSubview(dotsView)
+
+        progressLabel.font = .preferredFont(forTextStyle: .caption1)
+        progressLabel.adjustsFontForContentSizeCategory = true
+        progressLabel.textAlignment = .center
+        progressLabel.numberOfLines = 2
+        progressLabel.lineBreakMode = .byTruncatingTail
+        progressLabel.setContentCompressionResistancePriority(.required, for: .vertical)
+        progressStack.addArrangedSubview(progressLabel)
 
         containerView.translatesAutoresizingMaskIntoConstraints = false
         containerView.isUserInteractionEnabled = false
@@ -70,6 +86,7 @@ final class TypingIndicatorCell: UICollectionViewCell {
                    isCompact: Bool,
                    maxWidth: CGFloat,
                    isDark: Bool? = nil,
+                   progressSummary: String? = nil,
                    onTap: (() -> Void)? = nil) {
         self.onTap = onTap
         let diagnosticMessage = "T217DIAG cell_configure build=\(Self.diagnosticBuild) session=\(message.sessionKey) hasCallback=\(onTap != nil) bounds=\(String(describing: self.bounds)) frame=\(String(describing: self.frame)) maxWidth=\(maxWidth)"
@@ -79,7 +96,12 @@ final class TypingIndicatorCell: UICollectionViewCell {
         )
         currentMetrics = ChatFlowTheme.Metrics(isCompact: isCompact)
         let effectiveIsDark = isDark ?? (traitCollection.userInterfaceStyle == .dark)
-        dotsView.updateColor(ChatFlowUIKitTheme.palette(isDark: effectiveIsDark).ink)
+        let palette = ChatFlowUIKitTheme.palette(isDark: effectiveIsDark)
+        dotsView.updateColor(palette.ink)
+        let trimmedProgress = progressSummary?.trimmingCharacters(in: .whitespacesAndNewlines)
+        progressLabel.text = trimmedProgress
+        progressLabel.isHidden = trimmedProgress?.isEmpty ?? true
+        progressLabel.textColor = palette.ink.withAlphaComponent(0.82)
         containerView.configure(
             message: message,
             presentation: presentation,
@@ -98,7 +120,13 @@ final class TypingIndicatorCell: UICollectionViewCell {
             onReferenceMessage: nil,
             onResend: nil
         )
-        containerView.setCenteredOverlayView(dotsView)
+        containerView.setCenteredOverlayView(progressStack)
+        if let trimmedProgress, !trimmedProgress.isEmpty {
+            accessibilityLabel = trimmedProgress
+        } else {
+            accessibilityLabel = "Assistant is working"
+        }
+        accessibilityTraits = onTap == nil ? .staticText : .button
         setNeedsLayout()
     }
 
@@ -106,6 +134,8 @@ final class TypingIndicatorCell: UICollectionViewCell {
         super.prepareForReuse()
         stopAnimating()
         containerView.setCenteredOverlayView(nil)
+        progressLabel.text = nil
+        progressLabel.isHidden = true
         onTap = nil
     }
 

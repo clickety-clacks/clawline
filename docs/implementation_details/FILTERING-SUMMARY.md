@@ -24,6 +24,15 @@ Kept: root cause of reconnect loop (no epoch token + late cache restores), coord
 ## connection-state-ui
 Kept: intentional no "unresponsive" state decision and rationale, errorBanner removal, `.failed` mapping to disconnected presentation, resend as new bubble (not retry), terminal ping loop is separate. Stripped: code findings description, state mapping tables, animation specs.
 
+## dictation-architecture
+Kept: `.finalizing` is internal and never published, `surfaceTarget` published immediately before finalization completes, two-faces architecture rationale, `originSessionKey` ownership, commands as only mutation seam, `walkieOrigin` internality. Stripped: all command and data structure descriptions readable from code.
+
+## dictation-motion-model
+Kept: unlock on ALL exit paths invariant, inset commit forbidden during drag/animation, `settledSurface` as single source of truth, inactivity timer resets on token receipt (not audio), `originSessionKey` restore on resume, pull-to-send as same gesture continuum, walkie origin captured once, all stop paths must enter finalization hold, phone sleep lock/unlock centralization, waveform period vs amplitude different curves, pager indicator rigid coupling, first-attempt vs walkie disambiguation. Stripped: all enumerated invariants that describe what the code does rather than why.
+
+## dictation-ux-v2
+Kept: send does NOT close surface (keeps open for rapid-fire), keyboard state preserved on activation, waveform is always amplitude-reactive even when paused, timing parameters unchanged, velocity + displacement both matter for gesture threshold, inbound call vs background different interrupt behaviors. Stripped: layout and design specs, edge case tables, visionOS platform notes.
+
 ## efficient-flow-layout
 Kept: hard gate (no optimization before seam consolidation), bottom inset → NO immediate layout recalc (counterintuitive), dark mode = zero sizing work, session switch is not a geometry event, width stability invariant (y-shift depends on it), single-message append must be fast path, targeted handler incompleteness, multiple height changes single forward pass, capped bubble recalculation timing (visible AND scrolling stopped). Stripped: problem statement, current architecture description, proposed data structures, implementation approach details.
 
@@ -81,8 +90,11 @@ Kept: MarkdownRenderPlan built once and shared, block ordering is strict source 
 ## unread-indicators
 Kept: three specific mutation call sites, stream switch clears unread to tail ID, APNS/cross-device sync explicitly out of scope. Stripped: state model description, UI change specs (derivable from code).
 
+## voice-dictation
+Kept: client-direct Soniox (no provider), real network validation required, mic icon visibility decoupled from key presence, both regular and temp keys accepted, legacy UX is a clean break (full replacement). Stripped: UX interaction contract, settings UI specs, architecture conformance statement.
+
 ## watch-app
-Kept: two independent connection categories, route indicator is hard invariant, TTS unavailable in BT-only relay mode, API keys via WatchConnectivity (not provider), audio never through provider or relay. Stripped: connectivity diagram, implementation details.
+Kept: two independent connection categories, route indicator is hard invariant, STT/TTS unavailable in BT-only relay mode, API keys via WatchConnectivity (not provider), audio never through provider or relay. Stripped: connectivity diagram, implementation details.
 
 ## watch-ios-support
-Kept: Cartesia key storage doesn't exist yet (Phase 0 prerequisite), relay is transparent proxy, token refresh relay requirement, background task for relay continuity, no iOS UI required. Stripped: implementation scope lists, code structure details.
+Kept: Soniox/Cartesia key storage doesn't exist yet (Phase 0 prerequisite), relay is transparent proxy, token refresh relay requirement, background task for relay continuity, no iOS UI required. Stripped: implementation scope lists, code structure details.

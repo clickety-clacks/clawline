@@ -313,6 +313,125 @@ struct TextLinkURLTemplateRulesTests {
         #expect(constrainedRegular.contentWidth == 584)
     }
 
+    @Test("T1369: full content sheet renders presentation text when selected message content is blank")
+    func fullContentSheetRendersPresentationTextForBlankSelectedMessageContent() {
+        let message = Message(
+            id: "t1369-empty-detail-modal",
+            role: .assistant,
+            content: "   \n",
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: "server:personal",
+            sender: "CLU"
+        )
+        let presentation = MessagePresentation(
+            parts: [.markdown("Recovered detail content")],
+            copyableReadableText: "Recovered detail content",
+            wordCount: 3,
+            hasTextualContent: true,
+            isEmojiOnly: false,
+            hasMediaOnly: false,
+            detectedURLs: [],
+            detectedURLCount: 0,
+            hasSingleURL: false
+        )
+        let blocks = ExpandedMessageSheet.renderedBlocks(
+            message: message,
+            presentation: presentation,
+            baseFont: UIFont.clawline(.bodyText),
+            inkColor: .label,
+            isDark: false
+        )
+
+        #expect(blocks.contains { block in
+            if case .attributedText(let attributed) = block {
+                return attributed.string.contains("Recovered detail content")
+            }
+            return false
+        })
+    }
+
+    @Test("T1369: full content sheet renders presentation table when selected message content is blank")
+    func fullContentSheetRendersPresentationTableForBlankSelectedMessageContent() {
+        let table = TableModel(
+            columns: [
+                TableModel.Column(alignment: .leading),
+                TableModel.Column(alignment: .trailing)
+            ],
+            header: [
+                makeT1369TableCell("Name"),
+                makeT1369TableCell("Count")
+            ],
+            rows: [
+                TableModel.Row(
+                    id: TableModel.makeRowIdentifier(messageID: "t1369-empty-table-modal", rowIndex: 0, cells: ["Alpha", "1"]),
+                    cells: [
+                        makeT1369TableCell("Alpha"),
+                        makeT1369TableCell("1")
+                    ]
+                ),
+                TableModel.Row(
+                    id: TableModel.makeRowIdentifier(messageID: "t1369-empty-table-modal", rowIndex: 1, cells: ["Beta", "2"]),
+                    cells: [
+                        makeT1369TableCell("Beta"),
+                        makeT1369TableCell("2")
+                    ]
+                )
+            ],
+            messageID: "t1369-empty-table-modal",
+            rowOffset: 0
+        )
+        let message = Message(
+            id: "t1369-empty-table-modal",
+            role: .assistant,
+            content: "",
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: "server:personal",
+            sender: "CLU"
+        )
+        let presentation = MessagePresentation(
+            parts: [.table(table)],
+            copyableReadableText: "Name\tCount\nAlpha\t1\nBeta\t2",
+            wordCount: 6,
+            hasTextualContent: true,
+            isEmojiOnly: false,
+            hasMediaOnly: false,
+            detectedURLs: [],
+            detectedURLCount: 0,
+            hasSingleURL: false
+        )
+        let blocks = ExpandedMessageSheet.renderedBlocks(
+            message: message,
+            presentation: presentation,
+            baseFont: UIFont.clawline(.bodyText),
+            inkColor: .label,
+            isDark: false
+        )
+
+        #expect(blocks.contains { block in
+            if case .table(let renderedTable) = block {
+                return renderedTable.messageID == table.messageID
+                    && renderedTable.rows.count == 2
+                    && renderedTable.rows.first?.cells.first?.plainText == "Alpha"
+            }
+            return false
+        })
+    }
+
+    private func makeT1369TableCell(_ value: String) -> TableModel.Cell {
+        TableModel.Cell(
+            attributed: AttributedString(value),
+            intrinsicWidth: 80,
+            plainText: value,
+            isEmpty: value.isEmpty
+        )
+    }
+
     @Test("T1182: selectable notification and full content text activates generated links internally")
     @MainActor
     func selectableTextActivatesGeneratedLinksInternally() throws {

@@ -88,6 +88,72 @@ describe("chatDomainStore", () => {
     ]);
   });
 
+  it("preserves optimistic attachments when the echoed user replacement omits them", () => {
+    const store = createChatDomainStore({
+      persistence: createMemoryChatPersistence()
+    });
+
+    store.enqueueOptimisticMessage({
+      attachments: [
+        {
+          type: "asset",
+          assetId: "a_upload_1",
+          metadata: {
+            filename: "clip.png",
+            mimeType: "image/png",
+            size: 7
+          }
+        }
+      ],
+      content: "",
+      deviceId: "browser-device-1",
+      id: "c_1",
+      sessionKey: "agent:main:clawline:user_1:main",
+      timestamp: 100,
+      wireAttachments: [
+        {
+          type: "asset",
+          assetId: "a_upload_1"
+        }
+      ]
+    });
+    store.markMessageAcked("c_1");
+    store.applyIncomingMessage({
+      localDeviceId: "browser-device-1",
+      message: {
+        type: "message",
+        id: "s_1",
+        role: "user",
+        content: "",
+        timestamp: 101,
+        streaming: false,
+        deviceId: "browser-device-1",
+        sessionKey: "agent:main:clawline:user_1:main",
+        attachments: []
+      },
+      selectedSessionKey: "agent:main:clawline:user_1:main",
+      source: "live"
+    });
+
+    const messages =
+      store.getState().messagesBySessionKey["agent:main:clawline:user_1:main"];
+
+    expect(messages).toHaveLength(1);
+    expect(messages[0].id).toBe("s_1");
+    expect(messages[0].delivery).toBe("server");
+    expect(messages[0].attachments).toEqual([
+      {
+        type: "asset",
+        assetId: "a_upload_1",
+        metadata: {
+          filename: "clip.png",
+          mimeType: "image/png",
+          size: 7
+        }
+      }
+    ]);
+  });
+
   it("updates streaming assistant replies in place", () => {
     const store = createChatDomainStore({
       persistence: createMemoryChatPersistence()

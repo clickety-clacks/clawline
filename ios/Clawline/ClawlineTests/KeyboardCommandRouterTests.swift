@@ -25,6 +25,7 @@ struct KeyboardCommandRouterTests {
         #expect(KeyboardCommandBridge.intent(input: "-", modifierFlags: [.command, .shift, .alternate]) == .notificationDismissAll)
         #expect(KeyboardCommandBridge.intent(input: "_", modifierFlags: [.command, .shift, .alternate]) == .notificationDismissAll)
         #expect(KeyboardCommandBridge.intent(input: "\\", modifierFlags: [.command]) == .notificationToggleDock)
+        #expect(KeyboardCommandBridge.intent(input: "`", modifierFlags: [.command]) == .toggleShowOnlyUserMessages)
         #expect(KeyboardCommandBridge.intent(input: "/", modifierFlags: [.command]) == nil)
         #expect(KeyboardCommandBridge.intent(input: ";", modifierFlags: [.command]) == .openStreamPopup)
         #expect(KeyboardCommandBridge.intent(input: ";", modifierFlags: [.control]) == .openStreamPopup)
@@ -714,6 +715,12 @@ struct KeyboardCommandRouterTests {
                 in: store,
                 posts: [.clawlineScrollChatUpCommand]
             )
+            assertPhysicalShortcut(
+                input: "`",
+                modifiers: [.command],
+                in: store,
+                posts: [.clawlineToggleShowOnlyUserMessagesCommand]
+            )
         }
     }
 
@@ -821,6 +828,8 @@ struct KeyboardCommandRouterTests {
                         return .navigatePreviousStream
                     case .navigateNextStream:
                         return .navigateNextStream
+                    case .toggleShowOnlyUserMessages:
+                        return .toggleShowOnlyUserMessages
                     case .transcriptBubbleScrollForward:
                         return .scrollDown
                     case .transcriptBubbleScrollBackward:
@@ -840,6 +849,7 @@ struct KeyboardCommandRouterTests {
             ChatAppCommandShortcut.prioritizedTextInputKeyCommandSpecs(notificationVisibleCount: 0).map(\.action) == [
                 .openStreamPopup,
                 .openStreamPopup,
+                .toggleShowOnlyUserMessages,
                 .scrollDown,
                 .scrollUp,
                 .scrollChatDown,
@@ -850,6 +860,7 @@ struct KeyboardCommandRouterTests {
             ChatAppCommandShortcut.prioritizedTextInputKeyCommandSpecs(notificationVisibleCount: 2).map(\.action) == [
                 .openStreamPopup,
                 .openStreamPopup,
+                .toggleShowOnlyUserMessages,
                 .scrollDown,
                 .scrollUp,
                 .scrollChatDown,

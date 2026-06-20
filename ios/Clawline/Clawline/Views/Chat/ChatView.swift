@@ -8471,7 +8471,7 @@ struct CrossChatNotificationBubbleView: View {
         if interval < 86_400, calendar.isDate(timestamp, inSameDayAs: now) {
             return timeFormatter.string(from: timestamp)
         }
-        if calendar.isDateInYesterday(timestamp) {
+        if ChatDateLabelCalendar.isYesterday(timestamp, now: now, calendar: calendar) {
             return "\(relativeDayFormatter.string(from: timestamp)), \(timeFormatter.string(from: timestamp))"
         }
         if calendar.component(.year, from: timestamp) != calendar.component(.year, from: now) {

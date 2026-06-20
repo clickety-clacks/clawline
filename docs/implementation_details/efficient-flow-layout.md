@@ -3,7 +3,7 @@
 ## Why optimization work cannot start before mutation seam is consolidated (hard gate)
 All six separate size caches must be routed through the seam before ANY optimization work (y-shift path, etc.) begins. The spec is explicit: "No optimization work may begin until the mutation seam is fully consolidated and verified." Skipping ahead recreates the split-mutation problem that causes defensive full-rebuild invalidation. The seam steps 1-3 gate step 4.
 
-## Bottom inset changes during typing: NO immediate layout recalc
+## Bottom inset changes during dictation/typing: NO immediate layout recalc
 The action for bottom inset change is **no immediate layout recalculation**. Do not invalidate layout, do not reconfigure bubbles, do not recompute height caps during the change. This is counterintuitive — you'd expect inset changes to update heights. The rationale: the change is ephemeral and high-frequency, producing ~950ms stalls that break interaction. Deferred recalc fires when scrolling stops and viewport settles.
 
 ## Dark mode toggle: ZERO sizing or layout work (colors only)

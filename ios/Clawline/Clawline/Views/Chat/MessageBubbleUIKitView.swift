@@ -589,6 +589,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
     private var currentMessage: Message?
     private var currentCopyableReadableText: String?
     private var currentReplyReference: PendingMessageReference?
+    private var dynamicContentReuseKey: DynamicContentReuseKey?
 
     // Salient highlights are applied asynchronously and must be cancelable on cell reuse.
     private var salientTask: Task<Void, Never>?
@@ -627,6 +628,30 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
     private var timestampRefreshTimer: Timer?
 
     private var traitObservation: (any NSObjectProtocol)?
+
+    private struct DynamicContentReuseKey: Equatable {
+        let sessionKey: String
+        let messageId: String
+        let content: String
+        let role: Message.Role
+        let deliveryState: Message.DeliveryState
+        let displayName: String
+        let timestamp: Date
+        let copyableReadableText: String?
+        let bodyFontSize: CGFloat
+        let bubblePaddingHorizontal: CGFloat
+        let bubblePaddingTop: CGFloat
+        let bubblePaddingBottom: CGFloat
+        let sizeClass: MessageSizeClass
+        let maxWidth: CGFloat
+        let truncationHeight: CGFloat
+        let showsHeader: Bool
+        let paddingScale: CGFloat
+        let minWidth: CGFloat
+        let isDark: Bool
+        let replyReferenceId: UUID?
+        let replyReferencePreview: String?
+    }
 
     private static func gradientBottomColor(for role: Message.Role, palette: ChatFlowUIKitTheme.Palette) -> UIColor {
         let gradient = role == .user ? palette.bubbleSelfGradient : palette.bubbleOtherGradient
@@ -1117,13 +1142,6 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         contentPaddingScale = paddingScale
         self.useContinuousCorners = useContinuousCorners
 
-        salientTask?.cancel()
-        salientTask = nil
-        salientToken &+= 1
-        salientMessageId = message.id
-        salientBaseAttributedText = nil
-        currentSalientHighlights = nil
-
         let hasLinkPreview = Self.presentationHasLinkPreview(presentation)
         let isSingleLinkPreview = Self.presentationIsSingleLinkPreview(presentation)
         let rawMaxWidth = maxWidthOverride ?? maxWidth
@@ -1137,6 +1155,21 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
             ? min(rawTruncationHeight, metrics.truncationHeight)
             : rawTruncationHeight
         let effectiveMinWidth = bubbleSizingV2?.plan.minWidth ?? minWidthOverride ?? 120
+        // Use explicit isDark if provided, otherwise fall back to trait collection
+        let effectiveIsDark = isDark ?? (traitCollection.userInterfaceStyle == .dark)
+        let nextDynamicContentReuseKey = dynamicContentReuseKeyForTextualBubble(
+            message: message,
+            presentation: presentation,
+            metrics: metrics,
+            sizeClass: sizeClass,
+            effectiveMaxWidth: effectiveMaxWidth,
+            effectiveTruncationHeight: effectiveTruncationHeight,
+            showsHeader: showsHeader,
+            paddingScale: paddingScale,
+            effectiveMinWidth: effectiveMinWidth,
+            isDark: effectiveIsDark,
+            replyReference: replyReference
+        )
 
         // Reset width constraints per size class.
         currentMetrics = metrics
@@ -1153,8 +1186,6 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         updateReplyIndicator()
         headerMenuButton.menu = messageContextMenu()
 
-        // Use explicit isDark if provided, otherwise fall back to trait collection
-        let effectiveIsDark = isDark ?? (traitCollection.userInterfaceStyle == .dark)
         Self.logger.debug("configure: isDark=\(isDark.map { String($0) } ?? "nil", privacy: .public) effectiveIsDark=\(effectiveIsDark, privacy: .public) role=\(String(describing: message.role), privacy: .public)")
         let palette = ChatFlowUIKitTheme.palette(isDark: effectiveIsDark)
         let isCanceled = message.deliveryState == .canceled
@@ -1181,6 +1212,31 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         ]
 
         avatarView.configure(role: message.role, isDark: palette.isDark)
+
+        if let nextDynamicContentReuseKey,
+           nextDynamicContentReuseKey == dynamicContentReuseKey {
+            applyReusedDynamicContentChrome(
+                message: message,
+                sizeClass: sizeClass,
+                effectiveMaxWidth: effectiveMaxWidth,
+                effectiveMinWidth: effectiveMinWidth,
+                effectiveTruncationHeight: effectiveTruncationHeight,
+                contentColor: contentColor,
+                palette: palette,
+                isCanceled: isCanceled,
+                isDark: effectiveIsDark,
+                bubbleSizingV2: bubbleSizingV2
+            )
+            return
+        }
+        dynamicContentReuseKey = nextDynamicContentReuseKey
+
+        salientTask?.cancel()
+        salientTask = nil
+        salientToken &+= 1
+        salientMessageId = message.id
+        salientBaseAttributedText = nil
+        currentSalientHighlights = nil
 
         // Remove old dynamic content views
         for view in dynamicContentViews {
@@ -1680,6 +1736,134 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         setNeedsLayout()
     }
 
+    private func dynamicContentReuseKeyForTextualBubble(
+        message: Message,
+        presentation: MessagePresentation,
+        metrics: ChatFlowTheme.Metrics,
+        sizeClass: MessageSizeClass,
+        effectiveMaxWidth: CGFloat,
+        effectiveTruncationHeight: CGFloat,
+        showsHeader: Bool,
+        paddingScale: CGFloat,
+        effectiveMinWidth: CGFloat,
+        isDark: Bool,
+        replyReference: PendingMessageReference?
+    ) -> DynamicContentReuseKey? {
+        guard presentation.parts.allSatisfy(Self.canReuseTextViewDynamicContent),
+              !presentation.hasMediaOnly,
+              !presentation.isChromeless else {
+            return nil
+        }
+        return DynamicContentReuseKey(
+            sessionKey: message.sessionKey,
+            messageId: message.id,
+            content: message.content,
+            role: message.role,
+            deliveryState: message.deliveryState,
+            displayName: message.displayName,
+            timestamp: message.timestamp,
+            copyableReadableText: presentation.copyableReadableText,
+            bodyFontSize: metrics.bodyFontSize,
+            bubblePaddingHorizontal: metrics.bubblePaddingHorizontal,
+            bubblePaddingTop: metrics.bubblePaddingTop,
+            bubblePaddingBottom: metrics.bubblePaddingBottom,
+            sizeClass: sizeClass,
+            maxWidth: effectiveMaxWidth,
+            truncationHeight: effectiveTruncationHeight,
+            showsHeader: showsHeader,
+            paddingScale: paddingScale,
+            minWidth: effectiveMinWidth,
+            isDark: isDark,
+            replyReferenceId: replyReference?.id,
+            replyReferencePreview: replyReference?.preview
+        )
+    }
+
+    nonisolated private static func canReuseTextViewDynamicContent(_ part: MessagePart) -> Bool {
+        switch part {
+        case .text, .markdown, .inlineEmoji:
+            return true
+        case .table, .code, .linkPreview, .remoteImage, .image, .gallery, .file, .terminalSession, .interactiveHTML:
+            return false
+        }
+    }
+
+    private func applyReusedDynamicContentChrome(
+        message: Message,
+        sizeClass: MessageSizeClass,
+        effectiveMaxWidth: CGFloat,
+        effectiveMinWidth: CGFloat,
+        effectiveTruncationHeight: CGFloat,
+        contentColor: UIColor,
+        palette: ChatFlowUIKitTheme.Palette,
+        isCanceled: Bool,
+        isDark: Bool,
+        bubbleSizingV2: BubbleSizingV2.LayoutState?
+    ) {
+        switch sizeClass {
+        case .short, .medium:
+            bodyMaxWidthConstraint?.isActive = false
+            fixedWidthConstraint?.isActive = false
+            fixedWidthConstraint = makeFixedBubbleWidthConstraint(effectiveMaxWidth)
+            fixedWidthConstraint?.isActive = true
+        case .long:
+            bodyMaxWidthConstraint?.isActive = false
+            let maxLineWidth = ChatFlowTheme.maxLineWidth(bodyFontSize: currentMetrics.bodyFontSize)
+            let constraint = bodyLabel.widthAnchor.constraint(lessThanOrEqualToConstant: maxLineWidth)
+            constraint.isActive = true
+            bodyMaxWidthConstraint = constraint
+            fixedWidthConstraint?.isActive = false
+            fixedWidthConstraint = makeFixedBubbleWidthConstraint(effectiveMaxWidth)
+            fixedWidthConstraint?.isActive = true
+        }
+
+        minWidthConstraint.constant = effectiveMinWidth
+        maxWidthConstraint.constant = effectiveMaxWidth
+        bodyLabel.linkTextAttributes = [
+            .foregroundColor: contentColor,
+            .underlineStyle: NSUnderlineStyle.single.rawValue
+        ]
+        prepareOuterScrollStateForConfigure(isMessageReuse: false)
+        if let bubbleSizingV2 {
+            applyBubbleSizingV2(bubbleSizingV2)
+        } else {
+            dynamicContentHeightConstraint?.constant = max(44, effectiveTruncationHeight)
+        }
+
+        let gradientColors = isCanceled
+            ? ChatFlowUIKitTheme.canceledBubbleGradient(isDark: isDark)
+            : (message.role == .user ? palette.bubbleSelfGradient : palette.bubbleOtherGradient)
+        gradientLayer.colors = gradientColors.map { $0.cgColor }
+        gradientLayer.startPoint = message.role == .user ? CGPoint(x: 0.0, y: 0.0) : CGPoint(x: 0.5, y: 0.0)
+        gradientLayer.endPoint = message.role == .user ? CGPoint(x: 1.0, y: 1.0) : CGPoint(x: 0.5, y: 1.0)
+
+        let bottomColor = gradientColors.last ?? Self.gradientBottomColor(for: message.role, palette: palette)
+        fadeView.updateColors(
+            top: bottomColor.withAlphaComponent(0),
+            bottom: bottomColor
+        )
+#if os(visionOS)
+        fadeView.setFadeStartLocation(0.95)
+#else
+        fadeView.setFadeStartLocation(nil)
+#endif
+
+        shadowContainerView.layer.shadowColor = UIColor.black.cgColor
+        shadowContainerView.layer.shadowRadius = MessageBubbleShadowStyle.radius
+        shadowContainerView.layer.shadowOffset = MessageBubbleShadowStyle.offset
+        let shadowOpacity = MessageBubbleShadowStyle.opacity(isDark: palette.isDark)
+        shadowContainerView.layer.shadowOpacity = shadowOpacity
+
+        isChromeless = false
+        hasTerminalSessionsForLayout = false
+        gradientLayer.isHidden = false
+        borderGradientLayer.isHidden = false
+        topHighlightLayer.isHidden = false
+        shadowContainerView.isHidden = false
+        updateBorderColors(isDark: palette.isDark)
+        setNeedsLayout()
+    }
+
     func prepareForReuse() {
         currentMessage = nil
         currentMessageId = nil
@@ -1704,6 +1888,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         salientBaseAttributedText = nil
         salientMessageId = nil
         currentSalientHighlights = nil
+        dynamicContentReuseKey = nil
     }
 
     private func applySalientHighlightsIfNeeded(

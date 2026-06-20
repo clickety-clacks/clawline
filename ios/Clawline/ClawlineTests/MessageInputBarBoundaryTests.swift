@@ -148,6 +148,48 @@ struct MessageInputBarBoundaryTests {
         )
     }
 
+    @Test("T1361 invalid-width height retries coalesce until layout has a real width")
+    @MainActor
+    func invalidWidthHeightRetriesCoalesceUntilLayoutHasRealWidth() async {
+        var attributedText = NSAttributedString(string: "one\ntwo\nthree\nfour\nfive")
+        var calculatedHeight: CGFloat = 44
+        var selectionRange = NSRange(location: 0, length: 0)
+        var pendingInsertions: [PendingAttachment] = []
+        let editor = RichTextEditor(
+            attributedText: Binding(get: { attributedText }, set: { attributedText = $0 }),
+            calculatedHeight: Binding(get: { calculatedHeight }, set: { calculatedHeight = $0 }),
+            selectionRange: Binding(get: { selectionRange }, set: { selectionRange = $0 }),
+            pendingInsertions: Binding(get: { pendingInsertions }, set: { pendingInsertions = $0 }),
+            fontScaleChangeSequence: 0,
+            resetToken: 0,
+            focusTrigger: 0,
+            dismissTrigger: 0,
+            isEditable: true,
+            isKeyboardVisible: false,
+            tintColor: .systemBlue,
+            onFocusChange: { _ in }
+        )
+        let coordinator = RichTextEditor.Coordinator(parent: editor)
+        let textView = HeightProbeTextView(frame: .zero, textContainer: nil)
+        textView.font = UIFont.clawline(.bodyText)
+        textView.textContainerInset = UIEdgeInsets(top: 12, left: 20, bottom: 12, right: 20)
+        textView.text = attributedText.string
+
+        coordinator.updateHeight(for: textView, allowAutoScroll: false)
+        coordinator.updateHeight(for: textView, allowAutoScroll: false)
+        coordinator.updateHeight(for: textView, allowAutoScroll: false)
+        await Task.yield()
+
+        #expect(textView.sizeThatFitsCallCount == 0)
+        #expect(calculatedHeight == 44)
+
+        textView.frame = CGRect(x: 0, y: 0, width: 240, height: 44)
+        coordinator.updateHeight(for: textView, allowAutoScroll: false)
+
+        #expect(textView.sizeThatFitsCallCount == 1)
+        #expect(calculatedHeight > 44)
+    }
+
     @Test("T1315 Return delegates to active mention picker instead of composer submit")
     @MainActor
     func returnDelegatesToMentionPickerInsteadOfSubmit() {
@@ -847,5 +889,14 @@ struct MessageInputBarBoundaryTests {
             collapsedPeekWidth: peekWidth,
             trailingSafeAreaInset: 0
         ) == stackWidth - peekWidth)
+    }
+}
+
+private final class HeightProbeTextView: UITextView {
+    private(set) var sizeThatFitsCallCount = 0
+
+    override func sizeThatFits(_ size: CGSize) -> CGSize {
+        sizeThatFitsCallCount += 1
+        return super.sizeThatFits(size)
     }
 }

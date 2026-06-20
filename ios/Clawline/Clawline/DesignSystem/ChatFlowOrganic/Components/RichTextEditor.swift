@@ -237,6 +237,7 @@ struct RichTextEditor: UIViewRepresentable {
         private var lastBaseTextColor: UIColor?
         private var lastBaseFontPointSize: CGFloat?
         private var lastFontScaleChangeSequence: Int?
+        private var heightRetryPending = false
 
         init(parent: RichTextEditor) {
             self.parent = parent
@@ -355,12 +356,15 @@ struct RichTextEditor: UIViewRepresentable {
         func updateHeight(for textView: UITextView, allowAutoScroll: Bool) {
             let targetWidth = textView.bounds.width
             guard targetWidth > 1 else {
+                guard !heightRetryPending else { return }
+                heightRetryPending = true
                 DispatchQueue.main.async { [weak self, weak textView] in
                     guard let self, let textView else { return }
                     self.updateHeight(for: textView, allowAutoScroll: allowAutoScroll)
                 }
                 return
             }
+            heightRetryPending = false
             let referenceWidth = targetWidth
             let fittingSize = CGSize(width: referenceWidth,
                                      height: .greatestFiniteMagnitude)

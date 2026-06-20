@@ -209,8 +209,20 @@ enum CrossChatNotificationOverlayLifecycle {
         false
     }
 
+    static func shouldClearCollapsedPreviewsOnDisappear(visibleBubbleCount: Int) -> Bool {
+        visibleBubbleCount == 0
+    }
+
     static func shouldResetCollapsedStateOnBubbleCountChange(visibleBubbleCount: Int) -> Bool {
         visibleBubbleCount == 0
+    }
+
+    static func sourceChatIdsNeedingCollapsedPreview(
+        previousVisibleSourceChatIds: [String],
+        currentVisibleSourceChatIds: [String]
+    ) -> [String] {
+        let previous = Set(previousVisibleSourceChatIds)
+        return currentVisibleSourceChatIds.filter { !previous.contains($0) }
     }
 }
 
@@ -6883,7 +6895,11 @@ private struct CrossChatNotificationOverlay: View {
                 }
             }
             .onDisappear {
-                clearAllCollapsedPreviews()
+                if CrossChatNotificationOverlayLifecycle.shouldClearCollapsedPreviewsOnDisappear(
+                    visibleBubbleCount: viewModel.crossChatNotificationBubbles.count
+                ) {
+                    clearAllCollapsedPreviews()
+                }
                 if CrossChatNotificationOverlayLifecycle.shouldResetCollapsedStateOnDisappear() {
                     isCollapsed = false
                 }
@@ -6954,7 +6970,7 @@ private struct CrossChatNotificationOverlay: View {
             .onChange(of: visibleCapacity) { _, newCapacity in
                 viewModel.closeOverflowingCrossChatNotificationReplies(visibleSourceChatIds: Set(visibleBubbles.map(\.sourceChatId)))
             }
-            .onChange(of: visibleSourceChatIds) { _, sourceChatIds in
+            .onChange(of: visibleSourceChatIds) { previousSourceChatIds, sourceChatIds in
                 let sourceChatIdSet = Set(sourceChatIds)
                 if let actionMenuSourceChatId, !sourceChatIdSet.contains(actionMenuSourceChatId) {
                     closeActionMenu()
@@ -6968,12 +6984,16 @@ private struct CrossChatNotificationOverlay: View {
                 pruneGestureAxisLocks(visibleSourceChatIds: sourceChatIdSet)
                 pruneTextSelectionState(visibleSourceChatIds: sourceChatIdSet)
                 if isCollapsed && !isDebugSkippingCollapsedPreview {
-                    let missingPreviewSourceChatIds = sourceChatIds.filter {
-                        !previewingCollapsedSourceChatIds.contains($0)
-                            && !dockedCollapsedPreviewSourceChatIds.contains($0)
-                    }
-                    startCollapsedPreview(sourceChatIds: missingPreviewSourceChatIds)
-                    scheduleCollapsedPreviewForVisibleBubbles()
+                    let addedSourceChatIds = CrossChatNotificationOverlayLifecycle
+                        .sourceChatIdsNeedingCollapsedPreview(
+                            previousVisibleSourceChatIds: previousSourceChatIds,
+                            currentVisibleSourceChatIds: sourceChatIds
+                        )
+                        .filter {
+                            !previewingCollapsedSourceChatIds.contains($0)
+                                && !dockedCollapsedPreviewSourceChatIds.contains($0)
+                        }
+                    startCollapsedPreview(sourceChatIds: addedSourceChatIds)
                 }
             }
             .onChange(of: visibleReplySignature) { _, _ in

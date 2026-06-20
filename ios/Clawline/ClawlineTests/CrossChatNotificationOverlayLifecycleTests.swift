@@ -11,11 +11,24 @@ struct CrossChatNotificationOverlayLifecycleTests {
         #expect(
             !CrossChatNotificationOverlayLifecycle.shouldResetCollapsedStateOnDisappear()
         )
+        #expect(
+            !CrossChatNotificationOverlayLifecycle.shouldClearCollapsedPreviewsOnDisappear(
+                visibleBubbleCount: 1
+            )
+        )
     }
 
     @Test func browserSurfaceDisappearPreservesCollapsedStateDuringTransientEmptyOverlay() {
         #expect(
             !CrossChatNotificationOverlayLifecycle.shouldResetCollapsedStateOnDisappear()
+        )
+    }
+
+    @Test func emptyOverlayDisappearClearsCollapsedPreviews() {
+        #expect(
+            CrossChatNotificationOverlayLifecycle.shouldClearCollapsedPreviewsOnDisappear(
+                visibleBubbleCount: 0
+            )
         )
     }
 
@@ -63,6 +76,25 @@ struct CrossChatNotificationOverlayLifecycleTests {
                 isSwitchingChats: true,
                 hasNotifications: false
             )
+        )
+    }
+
+    @Test func ordinaryChatSwitchSourceDismissalDoesNotPreviewUnrelatedNotifications() {
+        #expect(
+            CrossChatNotificationOverlayLifecycle.sourceChatIdsNeedingCollapsedPreview(
+                previousVisibleSourceChatIds: ["source", "unrelated"],
+                currentVisibleSourceChatIds: ["unrelated"]
+            )
+            .isEmpty
+        )
+    }
+
+    @Test func newlyVisibleNotificationsMayStartCollapsedPreview() {
+        #expect(
+            CrossChatNotificationOverlayLifecycle.sourceChatIdsNeedingCollapsedPreview(
+                previousVisibleSourceChatIds: ["source"],
+                currentVisibleSourceChatIds: ["new", "source"]
+            ) == ["new"]
         )
     }
 }

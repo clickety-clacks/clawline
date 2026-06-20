@@ -31,9 +31,7 @@ enum TypingIndicatorMorph {
 }
 
 enum ChatVisibleBubbleContentScroll {
-    static var lineIncrement: CGFloat {
-        ceil(UIFont.clawline(.bodyText).lineHeight + 4)
-    }
+    static let commandIncrement: CGFloat = 224
 
     @discardableResult
     static func scrollVisibleScrollableContent(
@@ -93,7 +91,8 @@ enum ChatVisibleBubbleContentScroll {
         let visibleHeight = scrollView.bounds.height - inset.top - inset.bottom
         guard visibleHeight > 1, maxY > minY else { return false }
 
-        let increment = lineIncrement
+        let pageIncrement = max(80, visibleHeight * 0.82)
+        let increment = min(commandIncrement, max(1, pageIncrement - 1))
         let delta = direction == .down ? increment : -increment
         let targetY = min(max(scrollView.contentOffset.y + delta, minY), maxY)
         guard abs(targetY - scrollView.contentOffset.y) > 0.5 else { return false }

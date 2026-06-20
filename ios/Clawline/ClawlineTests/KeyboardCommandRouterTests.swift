@@ -31,6 +31,9 @@ struct KeyboardCommandRouterTests {
         #expect(KeyboardCommandBridge.intent(input: "\r", modifierFlags: [.control]) == .textModifiedNewline)
         #expect(KeyboardCommandBridge.intent(input: UIKeyCommand.inputUpArrow, modifierFlags: []) == .menuNavigateUp)
         #expect(KeyboardCommandBridge.intent(input: "\t", modifierFlags: []) == .pickerAccept)
+        #expect(KeyboardCommandBridge.intent(input: "a", modifierFlags: []) == nil)
+        #expect(KeyboardCommandBridge.intent(input: "4", modifierFlags: []) == nil)
+        #expect(KeyboardCommandBridge.intent(input: " ", modifierFlags: [.shift]) == nil)
     }
 
     @Test("T343 VG-02 router priority matrix chooses one owner for conflicting states")
@@ -100,6 +103,65 @@ struct KeyboardCommandRouterTests {
         assertRoute(.notificationAssignedReply(1), in: store, isHandledBy: .notificationBubble("n1"), rule: "PR-03")
     }
 
+    @Test("T1344 selector Cmd-number remains centrally routed without converting filter typing into commands")
+    func selectorNumberShortcutStaysCentralWhileFilterTypingFallsThrough() {
+        let store = KeyboardOwnershipSceneFactory.chatScene(
+            visibleNotificationSourceChatIds: [],
+            visibleChatSelectorSessionKeys: ["s_first", "s_second"],
+            mentionPickerVisible: false,
+            composerFocused: false,
+            notificationReplyFocusedSourceChatId: nil,
+            actionMenuSourceChatId: nil
+        )
+
+        #expect(KeyboardCommandBridge.intent(input: "f", modifierFlags: []) == nil)
+        #expect(KeyboardCommandBridge.intent(input: "i", modifierFlags: []) == nil)
+        #expect(KeyboardCommandBridge.intent(input: "l", modifierFlags: []) == nil)
+        #expect(KeyboardCommandBridge.intent(input: "1", modifierFlags: []) == nil)
+        #expect(KeyboardCommandBridge.intent(input: "1", modifierFlags: [.command]) == .notificationAssignedOpen(1))
+        assertRoute(.notificationAssignedOpen(1), in: store, isHandledBy: .chatSelectorRow("s_first"), rule: "PR-00")
+        #expect(
+            ChatAppShortcutCommandDispatch.action(
+                for: .notificationAssignedOpen(1),
+                keyboardOwnershipStore: store
+            ) == .postKeyboardIntent
+        )
+        #expect(
+            ChatAppShortcutCommandDispatch.plainNumberOpenCommandIsOwned(
+                index: 1,
+                keyboardOwnershipStore: store
+            )
+        )
+        #expect(
+            ChatAppShortcutCommandDispatch.plainNumberOpenCommandOwner(
+                index: 1,
+                keyboardOwnershipStore: store
+            ) == .chatSelector
+        )
+        #expect(ChatAppShortcutCommandDispatch.PlainNumberOpenOwner.chatSelector.menuTitle(forIndex: 1) == "Select Chat 1")
+        #expect(
+            !ChatAppShortcutCommandDispatch.plainNumberOpenCommandIsOwned(
+                index: 0,
+                keyboardOwnershipStore: store
+            )
+        )
+
+        let tenRowStore = KeyboardOwnershipSceneFactory.chatScene(
+            visibleNotificationSourceChatIds: [],
+            visibleChatSelectorSessionKeys: (0..<10).map { "s_\($0)" },
+            mentionPickerVisible: false,
+            composerFocused: false,
+            notificationReplyFocusedSourceChatId: nil,
+            actionMenuSourceChatId: nil
+        )
+        #expect(
+            ChatAppShortcutCommandDispatch.plainNumberOpenCommandIsOwned(
+                index: 0,
+                keyboardOwnershipStore: tenRowStore
+            )
+        )
+    }
+
     @Test("T1210 selector map follows filtered visible ordering and maps tenth row to slot zero")
     func selectorMapFollowsFilteredVisibleOrderingAndMapsTenthRowToZero() {
         let filteredKeys = (0..<12).map { "filtered_\($0)" }
@@ -112,6 +174,240 @@ struct KeyboardCommandRouterTests {
         #expect(map.values.contains(.chatSelectorRow("filtered_10")) == false)
         assertRoute(.notificationAssignedOpen(0), in: store, isHandledBy: .chatSelectorRow("filtered_9"), rule: "PR-00")
         #expect(KeyboardCommandRouter.route(intent: .notificationAssignedOpen(4), store: StreamSelectorShortcutMap.store(selectableSessionKeys: [])).outcome == .fallthroughToDefault)
+    }
+
+    @Test("T1210 selector shortcut ownership follows visible filtered rows")
+    func selectorShortcutOwnershipFollowsVisibleFilteredRows() {
+        let filteredKeys = (0..<5).map { "filtered_\($0)" }
+
+        let selectableKeys = StreamSelectorShortcutMap.selectableSessionKeys(
+            filteredSessionKeys: filteredKeys,
+            shortcutsAvailable: true,
+            isWorking: false,
+            removingSessionKeys: ["filtered_1"],
+            renamingSessionKey: "filtered_3"
+        )
+        let store = KeyboardOwnershipSceneFactory.chatScene(
+            visibleNotificationSourceChatIds: ["n0", "n1", "n2"],
+            visibleChatSelectorSessionKeys: selectableKeys,
+            mentionPickerVisible: false,
+            composerFocused: true,
+            notificationReplyFocusedSourceChatId: nil,
+            actionMenuSourceChatId: nil
+        )
+
+        #expect(selectableKeys == ["filtered_0", "filtered_2", "filtered_4"])
+        assertRoute(.notificationAssignedOpen(1), in: store, isHandledBy: .chatSelectorRow("filtered_0"), rule: "PR-00")
+        assertRoute(.notificationAssignedOpen(2), in: store, isHandledBy: .chatSelectorRow("filtered_2"), rule: "PR-00")
+        assertRoute(.notificationAssignedOpen(3), in: store, isHandledBy: .chatSelectorRow("filtered_4"), rule: "PR-00")
+        #expect(StreamSelectorShortcutMap.sessionKey(forSlot: 4, selectableSessionKeys: selectableKeys) == nil)
+    }
+
+    @Test("T1210 selector shortcut ownership clears when labels are unavailable")
+    func selectorShortcutOwnershipClearsWhenLabelsAreUnavailable() {
+        let filteredKeys = ["filtered_0", "filtered_1"]
+
+        #expect(
+            StreamSelectorShortcutMap.selectableSessionKeys(
+                filteredSessionKeys: filteredKeys,
+                shortcutsAvailable: false,
+                isWorking: false,
+                removingSessionKeys: [],
+                renamingSessionKey: nil
+            ).isEmpty
+        )
+        #expect(
+            StreamSelectorShortcutMap.selectableSessionKeys(
+                filteredSessionKeys: filteredKeys,
+                shortcutsAvailable: true,
+                isWorking: true,
+                removingSessionKeys: [],
+                renamingSessionKey: nil
+            ).isEmpty
+        )
+    }
+
+    @Test("T1210 app command number slots stay enabled for selector-owned rows")
+    func appCommandNumberSlotsStayEnabledForSelectorOwnedRows() {
+        #expect(
+            ClawlineAppNumberShortcutAvailability.hasCommands(
+                notificationVisibleCount: 0,
+                selectorShortcutSlots: [1, 2, 0]
+            )
+        )
+        #expect(
+            ClawlineAppNumberShortcutAvailability.isPlainNumberCommandEnabled(
+                index: 1,
+                notificationVisibleCount: 0,
+                selectorShortcutSlots: [1, 2, 0]
+            )
+        )
+        #expect(
+            ClawlineAppNumberShortcutAvailability.isPlainNumberCommandEnabled(
+                index: 0,
+                notificationVisibleCount: 0,
+                selectorShortcutSlots: [1, 2, 0]
+            )
+        )
+        #expect(
+            ClawlineAppNumberShortcutAvailability.isPlainNumberCommandEnabled(
+                index: 4,
+                notificationVisibleCount: 0,
+                selectorShortcutSlots: [1, 2, 0]
+            ) == false
+        )
+    }
+
+    @Test("T1210 app key command bridge exposes selector-only plain number slots")
+    func appKeyCommandBridgeExposesSelectorOnlyPlainNumberSlots() {
+        let specs = KeyboardCommandBridge.appSpecs(
+            notificationVisibleCount: 0,
+            selectorShortcutSlots: [1, 2, 0]
+        )
+
+        #expect(specs.contains {
+            $0.input == "1"
+                && $0.modifierFlags == [.command]
+                && $0.intent == .notificationAssignedOpen(1)
+        })
+        #expect(specs.contains {
+            $0.input == "2"
+                && $0.modifierFlags == [.command]
+                && $0.intent == .notificationAssignedOpen(2)
+        })
+        #expect(specs.contains {
+            $0.input == "0"
+                && $0.modifierFlags == [.command]
+                && $0.intent == .notificationAssignedOpen(0)
+        })
+        #expect(specs.contains {
+            $0.input == "1"
+                && $0.modifierFlags == [.command, .alternate]
+                && $0.intent == .notificationAssignedReply(1)
+        } == false)
+        #expect(
+            ChatAppCommandShortcut.keyCommandSpecs(
+                notificationVisibleCount: 0,
+                selectorShortcutSlots: [1, 2, 0]
+            )
+            .filter { $0.action == .notificationNumber }
+            .map(\.input) == ["1", "2", "0"]
+        )
+        #expect(
+            ChatAppCommandShortcut.keyCommandSignature(
+                notificationVisibleCount: 0,
+                selectorShortcutSlots: []
+            )
+            != ChatAppCommandShortcut.keyCommandSignature(
+                notificationVisibleCount: 0,
+                selectorShortcutSlots: [1, 2, 0]
+            )
+        )
+    }
+
+    @Test("T1210 focused command source installs for selector-only ownership")
+    func focusedCommandSourceInstallsForSelectorOnlyOwnership() {
+        #expect(
+            CrossChatNotificationCommandAvailability.shouldInstallCommand(
+                visibleNotificationCount: 0,
+                selectorShortcutSlots: [1, 2, 0]
+            )
+        )
+        #expect(
+            CrossChatNotificationCommandAvailability.shouldInstallCommand(
+                visibleNotificationCount: 0,
+                selectorShortcutSlots: []
+            ) == false
+        )
+    }
+
+    @Test("T1210 app command notification slots remain independently enabled")
+    func appCommandNotificationSlotsRemainIndependentlyEnabled() {
+        #expect(
+            ClawlineAppNumberShortcutAvailability.hasCommands(
+                notificationVisibleCount: 2,
+                selectorShortcutSlots: []
+            )
+        )
+        #expect(
+            ClawlineAppNumberShortcutAvailability.isPlainNumberCommandEnabled(
+                index: 1,
+                notificationVisibleCount: 2,
+                selectorShortcutSlots: []
+            )
+        )
+        #expect(
+            ClawlineAppNumberShortcutAvailability.isPlainNumberCommandEnabled(
+                index: 2,
+                notificationVisibleCount: 2,
+                selectorShortcutSlots: []
+            ) == false
+        )
+    }
+
+    @Test("T1210 popup key press activation posts router-owned selector intent")
+    func popupKeyPressActivationPostsRouterOwnedSelectorIntent() {
+        #expect(
+            StreamSelectorShortcutActivation.intent(
+                characters: "1",
+                modifiers: .command
+            ) == .notificationAssignedOpen(1)
+        )
+        #expect(
+            StreamSelectorShortcutActivation.intent(
+                characters: "0",
+                modifiers: .command
+            ) == .notificationAssignedOpen(0)
+        )
+        #expect(
+            StreamSelectorShortcutActivation.intent(
+                characters: "1",
+                modifiers: [.command, .option]
+            ) == nil
+        )
+        #expect(
+            StreamSelectorShortcutActivation.intent(
+                characters: "11",
+                modifiers: .command
+            ) == nil
+        )
+    }
+
+    @Test("T1210 visible popup key command bridge exposes selector Cmd-number slots")
+    func visiblePopupKeyCommandBridgeExposesSelectorCommandNumberSlots() {
+        let specs = StreamSelectorShortcutKeyCommands.keyCommandSpecs(
+            selectableSessionKeys: ["s_first", "s_second", "s_third"]
+        )
+
+        #expect(specs.map(\.input) == ["1", "2", "3"])
+        #expect(specs.allSatisfy { $0.modifierFlags == .command })
+        #expect(specs.map(\.intent) == [
+            .notificationAssignedOpen(1),
+            .notificationAssignedOpen(2),
+            .notificationAssignedOpen(3),
+        ])
+        #expect(
+            KeyboardCommandBridge.intent(input: specs[0].input, modifierFlags: specs[0].modifierFlags)
+            == .notificationAssignedOpen(1)
+        )
+        assertRoute(
+            specs[0].intent,
+            in: StreamSelectorShortcutMap.store(selectableSessionKeys: ["s_first", "s_second", "s_third"]),
+            isHandledBy: .chatSelectorRow("s_first"),
+            rule: "PR-00"
+        )
+    }
+
+    @Test("T1210 visible popup shortcut hints render command symbol")
+    func visiblePopupShortcutHintsRenderCommandSymbol() {
+        #expect(StreamSelectorShortcutMap.shortcutLabel(forSlot: 1) == "⌘ 1")
+        #expect(StreamSelectorShortcutMap.shortcutLabel(forSlot: 0) == "⌘ 0")
+        #expect(StreamSelectorShortcutMap.shortcutLabel(forSlot: 1).contains("-") == false)
+        #expect(
+            StreamSelectorShortcutMap.accessibilityLabel(
+                forShortcutLabel: StreamSelectorShortcutMap.shortcutLabel(forSlot: 2)
+            ) == "Command 2"
+        )
     }
 
     @Test("T343 VG-03 mention picker open close cannot poison notification scroll ownership")

@@ -922,6 +922,629 @@ struct ChatViewModelTests {
         #expect(cursor == "s_replay_final")
     }
 
+    @Test("T1213 lifecycle replay commits notification snapshot only at terminal boundary")
+    @MainActor
+    func lifecycleReplayCommitsNotificationsOnlyAtTerminalBoundary() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let sourceA = "agent:main:clawline:user:s_replay_a"
+        let sourceB = "agent:main:clawline:user:s_replay_b"
+        let streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: sourceA, displayName: "Replay A", kind: "custom", orderIndex: 1, isBuiltIn: false),
+            makeStreamSession(sessionKey: sourceB, displayName: "Replay B", kind: "custom", orderIndex: 2, isBuiltIn: false),
+        ]
+        let chatService = TestChatService()
+        chatService.streams = streams
+        chatService.startReplayCount = 3
+        chatService.emitSyncCompleteOnStart = false
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.prepareForReplacement() }
+
+        await viewModel.activate(origin: "test.t1213.replayBatch")
+        chatService.emitServiceEvent(.streamSnapshot(streams))
+        for _ in 0..<50 {
+            if viewModel.stream(for: sourceA) != nil, viewModel.stream(for: sourceB) != nil { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+
+        let first = #"{"type":"message","id":"s_replay_a_1","role":"assistant","content":"Replay A 1","timestamp":1700000000000,"streaming":false,"sessionKey":"\#(sourceA)","attachments":[]}"#
+        let second = #"{"type":"message","id":"s_replay_b_1","role":"assistant","content":"Replay B 1","timestamp":1700000000001,"streaming":false,"sessionKey":"\#(sourceB)","attachments":[]}"#
+        let third = #"{"type":"message","id":"s_replay_a_2","role":"assistant","content":"Replay A 2","timestamp":1700000000002,"streaming":false,"sessionKey":"\#(sourceA)","attachments":[]}"#
+        chatService.emitLifecycleEvent(.init(epoch: 1, payload: .serverMessage(data: Data(first.utf8))))
+        chatService.emitLifecycleEvent(.init(epoch: 1, payload: .serverMessage(data: Data(second.utf8))))
+        chatService.emitLifecycleEvent(.init(epoch: 1, payload: .serverMessage(data: Data(third.utf8))))
+        try await Task.sleep(forDuration: .milliseconds(50))
+
+        #expect(viewModel.crossChatNotificationBubbles.isEmpty)
+        #expect(viewModel.messages(for: sourceA).map(\.id) == ["s_replay_a_1", "s_replay_a_2"])
+        #expect(viewModel.messages(for: sourceB).map(\.id) == ["s_replay_b_1"])
+
+        chatService.emitLifecycleEvent(.init(epoch: 1, payload: .syncComplete))
+        for _ in 0..<50 {
+            if viewModel.crossChatNotificationBubbles.count == 2 { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+
+        #expect(viewModel.crossChatNotificationBubbles.map(\.sourceChatId) == [sourceA, sourceB])
+        #expect(viewModel.crossChatNotificationBubblesBySourceChatId[sourceA]?.entries.map(\.content) == ["Replay A 2", "Replay A 1"])
+        #expect(viewModel.crossChatNotificationBubblesBySourceChatId[sourceB]?.entries.map(\.content) == ["Replay B 1"])
+    }
+
+    @Test("T1213 replay failure discards pending notification snapshot")
+    @MainActor
+    func replayFailureDiscardsPendingNotifications() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let source = "agent:main:clawline:user:s_replay_failed"
+        let streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: source, displayName: "Replay Failed", kind: "custom", orderIndex: 1, isBuiltIn: false),
+        ]
+        let chatService = TestChatService()
+        chatService.streams = streams
+        chatService.startReplayCount = 2
+        chatService.emitSyncCompleteOnStart = false
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.prepareForReplacement() }
+
+        await viewModel.activate(origin: "test.t1213.replayFailure")
+        chatService.emitServiceEvent(.streamSnapshot(streams))
+        for _ in 0..<50 {
+            if viewModel.stream(for: source) != nil { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+        let payload = #"{"type":"message","id":"s_replay_failed_1","role":"assistant","content":"Pending only","timestamp":1700000000000,"streaming":false,"sessionKey":"\#(source)","attachments":[]}"#
+        chatService.emitLifecycleEvent(.init(epoch: 1, payload: .serverMessage(data: Data(payload.utf8))))
+        try await Task.sleep(forDuration: .milliseconds(40))
+        #expect(viewModel.crossChatNotificationBubbles.isEmpty)
+
+        chatService.emitLifecycleEvent(.init(epoch: 1, payload: .transportClosed(reason: .error)))
+        try await Task.sleep(forDuration: .milliseconds(40))
+        chatService.emitLifecycleEvent(.init(epoch: 1, payload: .syncComplete))
+        try await Task.sleep(forDuration: .milliseconds(40))
+
+        #expect(viewModel.crossChatNotificationBubbles.isEmpty)
+    }
+
+    @Test("T1213 pending source can notify when no longer current at terminal boundary")
+    @MainActor
+    func replayCommitAllowsSourceNoLongerCurrentAtTerminalBoundary() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let source = "agent:main:clawline:user:s_replay_visible_then_hidden"
+        let streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: source, displayName: "Replay Source", kind: "custom", orderIndex: 1, isBuiltIn: false),
+        ]
+        let chatService = TestChatService()
+        chatService.streams = streams
+        chatService.startReplayCount = 1
+        chatService.emitSyncCompleteOnStart = false
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.prepareForReplacement() }
+
+        await viewModel.activate(origin: "test.t1213.commitEligibility")
+        chatService.emitServiceEvent(.streamSnapshot(streams))
+        for _ in 0..<50 {
+            if viewModel.stream(for: source) != nil { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+        viewModel.requestStreamSwitch(to: source, source: .programmatic)
+        #expect(viewModel.uiSelectedSessionKey == source)
+
+        let payload = #"{"type":"message","id":"s_replay_terminal_current","role":"assistant","content":"Eligible at commit","timestamp":1700000000000,"streaming":false,"sessionKey":"\#(source)","attachments":[]}"#
+        chatService.emitLifecycleEvent(.init(epoch: 1, payload: .serverMessage(data: Data(payload.utf8))))
+        try await Task.sleep(forDuration: .milliseconds(40))
+        #expect(viewModel.crossChatNotificationBubbles.isEmpty)
+
+        viewModel.requestStreamSwitch(to: personalSessionKey, source: .programmatic)
+        chatService.emitLifecycleEvent(.init(epoch: 1, payload: .syncComplete))
+        for _ in 0..<50 {
+            if viewModel.crossChatNotificationBubblesBySourceChatId[source]?.entries.map(\.content) == ["Eligible at commit"] { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+
+        #expect(viewModel.crossChatNotificationBubblesBySourceChatId[source]?.entries.map(\.content) == ["Eligible at commit"])
+    }
+
+    @Test("T1213 commit suppresses pending source that is current at terminal boundary")
+    @MainActor
+    func replayCommitSuppressesSourceCurrentAtTerminalBoundary() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let source = "agent:main:clawline:user:s_replay_hidden_then_visible"
+        let streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: source, displayName: "Replay Source", kind: "custom", orderIndex: 1, isBuiltIn: false),
+        ]
+        let chatService = TestChatService()
+        chatService.streams = streams
+        chatService.startReplayCount = 1
+        chatService.emitSyncCompleteOnStart = false
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.prepareForReplacement() }
+
+        await viewModel.activate(origin: "test.t1213.commitSuppressesCurrent")
+        chatService.emitServiceEvent(.streamSnapshot(streams))
+        for _ in 0..<50 {
+            if viewModel.stream(for: source) != nil { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+
+        let payload = #"{"type":"message","id":"s_replay_terminal_suppressed","role":"assistant","content":"Suppress at commit","timestamp":1700000000000,"streaming":false,"sessionKey":"\#(source)","attachments":[]}"#
+        chatService.emitLifecycleEvent(.init(epoch: 1, payload: .serverMessage(data: Data(payload.utf8))))
+        try await Task.sleep(forDuration: .milliseconds(40))
+        #expect(viewModel.crossChatNotificationBubbles.isEmpty)
+
+        viewModel.requestStreamSwitch(to: source, source: .programmatic)
+        chatService.emitLifecycleEvent(.init(epoch: 1, payload: .syncComplete))
+        try await Task.sleep(forDuration: .milliseconds(40))
+
+        #expect(viewModel.crossChatNotificationBubblesBySourceChatId[source] == nil)
+    }
+
+    @Test("T1213 navigation during pending replay does not drop terminal eligible notification")
+    @MainActor
+    func replayNavigationDuringPendingDoesNotDropTerminalEligibleNotification() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let source = "agent:main:clawline:user:s_replay_pending_navigation"
+        let streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: source, displayName: "Replay Nav", kind: "custom", orderIndex: 1, isBuiltIn: false),
+        ]
+        let chatService = TestChatService()
+        chatService.streams = streams
+        chatService.startReplayCount = 1
+        chatService.emitSyncCompleteOnStart = false
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.prepareForReplacement() }
+
+        await viewModel.activate(origin: "test.t1213.pendingNavigation")
+        chatService.emitServiceEvent(.streamSnapshot(streams))
+        for _ in 0..<50 {
+            if viewModel.stream(for: source) != nil { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+
+        let payload = #"{"type":"message","id":"s_replay_pending_navigation","role":"assistant","content":"Survives navigation","timestamp":1700000000000,"streaming":false,"sessionKey":"\#(source)","attachments":[]}"#
+        chatService.emitLifecycleEvent(.init(epoch: 1, payload: .serverMessage(data: Data(payload.utf8))))
+        try await Task.sleep(forDuration: .milliseconds(40))
+        #expect(viewModel.crossChatNotificationBubbles.isEmpty)
+
+        viewModel.requestStreamSwitch(to: source, source: .programmatic)
+        viewModel.requestStreamSwitch(to: personalSessionKey, source: .programmatic)
+        chatService.emitLifecycleEvent(.init(epoch: 1, payload: .syncComplete))
+        for _ in 0..<50 {
+            if viewModel.crossChatNotificationBubblesBySourceChatId[source]?.entries.map(\.content) == ["Survives navigation"] { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+
+        #expect(viewModel.crossChatNotificationBubblesBySourceChatId[source]?.entries.map(\.content) == ["Survives navigation"])
+    }
+
+    @Test("T1213 navigation into pending source suppresses stale replay notification")
+    @MainActor
+    func replayNavigationIntoPendingSourceSuppressesStaleNotification() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let source = "agent:main:clawline:user:s_replay_navigation_into"
+        let streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: source, displayName: "Replay Nav In", kind: "custom", orderIndex: 1, isBuiltIn: false),
+        ]
+        let chatService = TestChatService()
+        chatService.streams = streams
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.prepareForReplacement() }
+
+        await viewModel.activate(origin: "test.t1213.navigationIntoPending")
+        chatService.emitServiceEvent(.streamSnapshot(streams))
+        for _ in 0..<50 {
+            if viewModel.stream(for: source) != nil { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+
+        let committedPayload = #"{"type":"message","id":"s_nav_into_committed","role":"assistant","content":"Committed before replay","timestamp":1700000000000,"streaming":false,"sessionKey":"\#(source)","attachments":[]}"#
+        chatService.emitLifecycleEvent(.init(epoch: 1, payload: .serverMessage(data: Data(committedPayload.utf8))))
+        for _ in 0..<50 {
+            if viewModel.crossChatNotificationBubblesBySourceChatId[source]?.entries.map(\.content) == ["Committed before replay"] { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+        #expect(viewModel.crossChatNotificationBubblesBySourceChatId[source]?.entries.map(\.content) == ["Committed before replay"])
+
+        chatService.startReplayCount = 1
+        chatService.emitSyncCompleteOnStart = false
+        NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
+        try await Task.sleep(forDuration: .milliseconds(2100))
+        viewModel.handleSceneActiveStateChanged(isActive: true)
+        for _ in 0..<50 {
+            if chatService.connectCallCount >= 2 { break }
+            try await Task.sleep(forDuration: .milliseconds(20))
+        }
+
+        let replayPayload = #"{"type":"message","id":"s_nav_into_replay","role":"assistant","content":"Buffered before navigation","timestamp":1700000000001,"streaming":false,"sessionKey":"\#(source)","attachments":[]}"#
+        chatService.emitLifecycleEvent(.init(epoch: 2, payload: .serverMessage(data: Data(replayPayload.utf8))))
+        try await Task.sleep(forDuration: .milliseconds(30))
+        viewModel.requestStreamSwitch(to: source, source: .programmatic)
+        #expect(viewModel.crossChatNotificationBubblesBySourceChatId[source] == nil)
+
+        chatService.emitLifecycleEvent(.init(epoch: 2, payload: .syncComplete))
+        try await Task.sleep(forDuration: .milliseconds(40))
+
+        #expect(viewModel.messages(for: source).map(\.id).contains("s_nav_into_replay"))
+        #expect(viewModel.crossChatNotificationBubblesBySourceChatId[source] == nil)
+    }
+
+    @Test("T1213 navigation dismissal during replay survives leaving source before commit")
+    @MainActor
+    func replayNavigationDismissalSurvivesLeavingSourceBeforeCommit() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let source = "agent:main:clawline:user:s_replay_navigation_leave"
+        let streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: source, displayName: "Replay Nav Leave", kind: "custom", orderIndex: 1, isBuiltIn: false),
+        ]
+        let chatService = TestChatService()
+        chatService.streams = streams
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.prepareForReplacement() }
+
+        await viewModel.activate(origin: "test.t1213.navigationDismissalLeaveBeforeCommit")
+        chatService.emitServiceEvent(.streamSnapshot(streams))
+        for _ in 0..<50 {
+            if viewModel.stream(for: source) != nil { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+
+        let committedPayload = #"{"type":"message","id":"s_nav_leave_committed","role":"assistant","content":"Committed before replay","timestamp":1700000000000,"streaming":false,"sessionKey":"\#(source)","attachments":[]}"#
+        chatService.emitLifecycleEvent(.init(epoch: 1, payload: .serverMessage(data: Data(committedPayload.utf8))))
+        for _ in 0..<50 {
+            if viewModel.crossChatNotificationBubblesBySourceChatId[source]?.entries.map(\.content) == ["Committed before replay"] { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+        #expect(viewModel.crossChatNotificationBubblesBySourceChatId[source]?.entries.map(\.content) == ["Committed before replay"])
+
+        chatService.startReplayCount = 1
+        chatService.emitSyncCompleteOnStart = false
+        NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
+        try await Task.sleep(forDuration: .milliseconds(2100))
+        viewModel.handleSceneActiveStateChanged(isActive: true)
+        for _ in 0..<50 {
+            if chatService.connectCallCount >= 2 { break }
+            try await Task.sleep(forDuration: .milliseconds(20))
+        }
+
+        let replayPayload = #"{"type":"message","id":"s_nav_leave_replay","role":"assistant","content":"Buffered before navigation","timestamp":1700000000001,"streaming":false,"sessionKey":"\#(source)","attachments":[]}"#
+        chatService.emitLifecycleEvent(.init(epoch: 2, payload: .serverMessage(data: Data(replayPayload.utf8))))
+        try await Task.sleep(forDuration: .milliseconds(30))
+        #expect(viewModel.crossChatNotificationBubblesBySourceChatId[source]?.entries.map(\.content) == ["Committed before replay"])
+
+        viewModel.requestStreamSwitch(to: source, source: .programmatic)
+        #expect(viewModel.crossChatNotificationBubblesBySourceChatId[source] == nil)
+        viewModel.requestStreamSwitch(to: personalSessionKey, source: .programmatic)
+
+        chatService.emitLifecycleEvent(.init(epoch: 2, payload: .syncComplete))
+        try await Task.sleep(forDuration: .milliseconds(40))
+
+        #expect(viewModel.messages(for: source).map(\.id).contains("s_nav_leave_replay"))
+        #expect(viewModel.crossChatNotificationBubblesBySourceChatId[source] == nil)
+    }
+
+    @Test("T1213 replayed streaming partial does not commit as notification")
+    @MainActor
+    func replayedStreamingPartialDoesNotCommitNotification() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let source = "agent:main:clawline:user:s_replay_partial"
+        let streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: source, displayName: "Replay Partial", kind: "custom", orderIndex: 1, isBuiltIn: false),
+        ]
+        let chatService = TestChatService()
+        chatService.streams = streams
+        chatService.startReplayCount = 1
+        chatService.emitSyncCompleteOnStart = false
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.prepareForReplacement() }
+
+        await viewModel.activate(origin: "test.t1213.streamingPartial")
+        chatService.emitServiceEvent(.streamSnapshot(streams))
+        for _ in 0..<50 {
+            if viewModel.stream(for: source) != nil { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+
+        let payload = #"{"type":"message","id":"s_replay_partial","role":"assistant","content":"Partial only","timestamp":1700000000000,"streaming":true,"sessionKey":"\#(source)","attachments":[],"replyToMessageId":"s_prompt"}"#
+        chatService.emitLifecycleEvent(.init(epoch: 1, payload: .serverMessage(data: Data(payload.utf8))))
+        try await Task.sleep(forDuration: .milliseconds(40))
+        #expect(viewModel.crossChatNotificationBubbles.isEmpty)
+
+        chatService.emitLifecycleEvent(.init(epoch: 1, payload: .syncComplete))
+        try await Task.sleep(forDuration: .milliseconds(40))
+
+        #expect(viewModel.messages(for: source).isEmpty)
+        #expect(viewModel.crossChatNotificationBubblesBySourceChatId[source] == nil)
+    }
+
+    @Test("T1213 duplicate replay message updates one pending notification entry")
+    @MainActor
+    func duplicateReplayMessageUpdatesOnePendingNotificationEntry() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let source = "agent:main:clawline:user:s_replay_duplicate"
+        let streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: source, displayName: "Replay Duplicate", kind: "custom", orderIndex: 1, isBuiltIn: false),
+        ]
+        let chatService = TestChatService()
+        chatService.streams = streams
+        chatService.startReplayCount = 2
+        chatService.emitSyncCompleteOnStart = false
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.prepareForReplacement() }
+
+        await viewModel.activate(origin: "test.t1213.duplicateReplay")
+        chatService.emitServiceEvent(.streamSnapshot(streams))
+        for _ in 0..<50 {
+            if viewModel.stream(for: source) != nil { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+
+        let first = #"{"type":"message","id":"s_replay_duplicate","role":"assistant","content":"First content","timestamp":1700000000000,"streaming":false,"sessionKey":"\#(source)","attachments":[]}"#
+        let second = #"{"type":"message","id":"s_replay_duplicate","role":"assistant","content":"Updated content","timestamp":1700000000001,"streaming":false,"sessionKey":"\#(source)","attachments":[]}"#
+        chatService.emitLifecycleEvent(.init(epoch: 1, payload: .serverMessage(data: Data(first.utf8))))
+        chatService.emitLifecycleEvent(.init(epoch: 1, payload: .serverMessage(data: Data(second.utf8))))
+        try await Task.sleep(forDuration: .milliseconds(40))
+        #expect(viewModel.crossChatNotificationBubbles.isEmpty)
+
+        chatService.emitLifecycleEvent(.init(epoch: 1, payload: .syncComplete))
+        for _ in 0..<50 {
+            if viewModel.crossChatNotificationBubblesBySourceChatId[source]?.entries.map(\.content) == ["Updated content"] { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+
+        #expect(viewModel.crossChatNotificationBubblesBySourceChatId[source]?.entries.map(\.id) == ["s_replay_duplicate"])
+        #expect(viewModel.crossChatNotificationBubblesBySourceChatId[source]?.entries.map(\.content) == ["Updated content"])
+    }
+
+    @Test("T1213 coordinator waits for explicit truncation terminal boundary")
+    func notificationCoordinatorWaitsForTruncationBoundary() {
+        var coordinator = NotificationBatchCommitCoordinator()
+        let source = "agent:main:clawline:user:s_truncation_unit"
+        let timestamp = Date(timeIntervalSince1970: 1_700_000_000)
+        coordinator.begin(epoch: 9, waitsForTruncationBoundary: true)
+        coordinator.collectPendingCandidate(
+            NotificationBatchCommitCoordinator.Candidate(
+                messageId: "s_truncation_unit",
+                sourceChatId: source,
+                role: .assistant,
+                content: "Commit only after truncation",
+                timestamp: timestamp,
+                streaming: false,
+                sourceTitle: "Truncation Unit",
+                notificationSequence: nil
+            ),
+            epoch: 9
+        )
+
+        let completedOnly = coordinator.commitIfReady(
+            epoch: 9,
+            reachedTruncationBoundary: false,
+            committedSnapshot: [:],
+            isEligible: { _ in true }
+        )
+        #expect(completedOnly == nil)
+
+        let truncated = coordinator.commitIfReady(
+            epoch: 9,
+            reachedTruncationBoundary: true,
+            committedSnapshot: [:],
+            isEligible: { _ in true }
+        )
+        #expect(truncated?[source]?.entries.map(\.content) == ["Commit only after truncation"])
+    }
+
+    @Test("T1213 coordinator scoped batch ignores unrelated sources")
+    func notificationCoordinatorScopedBatchIgnoresUnrelatedSources() {
+        var coordinator = NotificationBatchCommitCoordinator()
+        let scoped = "agent:main:clawline:user:s_scoped"
+        let unrelated = "agent:main:clawline:user:s_unrelated"
+        let timestamp = Date(timeIntervalSince1970: 1_700_000_000)
+        coordinator.begin(epoch: 11, scope: [scoped], waitsForTruncationBoundary: false)
+        #expect(coordinator.contains(epoch: 11, sourceChatId: scoped))
+        #expect(!coordinator.contains(epoch: 11, sourceChatId: unrelated))
+
+        coordinator.collectPendingCandidate(
+            NotificationBatchCommitCoordinator.Candidate(
+                messageId: "s_scoped",
+                sourceChatId: scoped,
+                role: .assistant,
+                content: "Scoped",
+                timestamp: timestamp,
+                streaming: false,
+                sourceTitle: "Scoped",
+                notificationSequence: nil
+            ),
+            epoch: 11
+        )
+        coordinator.collectPendingCandidate(
+            NotificationBatchCommitCoordinator.Candidate(
+                messageId: "s_unrelated",
+                sourceChatId: unrelated,
+                role: .assistant,
+                content: "Unrelated",
+                timestamp: timestamp,
+                streaming: false,
+                sourceTitle: "Unrelated",
+                notificationSequence: nil
+            ),
+            epoch: 11
+        )
+
+        let committed = coordinator.commitIfReady(
+            epoch: 11,
+            reachedTruncationBoundary: false,
+            committedSnapshot: [:],
+            isEligible: { _ in true }
+        )
+        #expect(committed?[scoped]?.entries.map(\.content) == ["Scoped"])
+        #expect(committed?[unrelated] == nil)
+    }
+
+    @Test("T1213 history reset dismissal keeps only later replay notifications")
+    @MainActor
+    func historyResetDismissalKeepsOnlyLaterReplayNotifications() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let source = "agent:main:clawline:user:s_reset_notification_dismiss"
+        let streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: source, displayName: "Reset Source", kind: "custom", orderIndex: 1, isBuiltIn: false),
+        ]
+        let chatService = TestChatService()
+        chatService.streams = streams
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.prepareForReplacement() }
+
+        await viewModel.activate(origin: "test.t1213.historyResetDismissal")
+        chatService.emitServiceEvent(.streamSnapshot(streams))
+        for _ in 0..<50 {
+            if viewModel.stream(for: source) != nil { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+
+        let committedPayload = #"{"type":"message","id":"s_reset_committed","role":"assistant","content":"Committed before reset","timestamp":1700000000000,"streaming":false,"sessionKey":"\#(source)","attachments":[]}"#
+        chatService.emitLifecycleEvent(.init(epoch: 1, payload: .serverMessage(data: Data(committedPayload.utf8))))
+        for _ in 0..<50 {
+            if viewModel.crossChatNotificationBubblesBySourceChatId[source]?.entries.map(\.content) == ["Committed before reset"] { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+        #expect(viewModel.crossChatNotificationBubblesBySourceChatId[source]?.entries.map(\.content) == ["Committed before reset"])
+
+        chatService.startHistoryReset = true
+        chatService.startReplayCount = 2
+        chatService.emitSyncCompleteOnStart = false
+        NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
+        try await Task.sleep(forDuration: .milliseconds(2100))
+        viewModel.handleSceneActiveStateChanged(isActive: true)
+        for _ in 0..<50 {
+            if chatService.connectCallCount >= 2 { break }
+            try await Task.sleep(forDuration: .milliseconds(20))
+        }
+
+        let dismissedReplayPayload = #"{"type":"message","id":"s_reset_replay_dismissed","role":"assistant","content":"Buffered before dismiss","timestamp":1700000000001,"streaming":false,"sessionKey":"\#(source)","attachments":[]}"#
+        chatService.emitLifecycleEvent(.init(epoch: 2, payload: .serverMessage(data: Data(dismissedReplayPayload.utf8))))
+        try await Task.sleep(forDuration: .milliseconds(30))
+        #expect(viewModel.crossChatNotificationBubblesBySourceChatId[source]?.entries.map(\.content) == ["Committed before reset"])
+
+        viewModel.dismissCrossChatNotification(sourceChatId: source)
+        #expect(viewModel.crossChatNotificationBubblesBySourceChatId[source] == nil)
+
+        let survivingReplayPayload = #"{"type":"message","id":"s_reset_replay_survives","role":"assistant","content":"Buffered after dismiss","timestamp":1700000000002,"streaming":false,"sessionKey":"\#(source)","attachments":[]}"#
+        chatService.emitLifecycleEvent(.init(epoch: 2, payload: .serverMessage(data: Data(survivingReplayPayload.utf8))))
+        chatService.emitLifecycleEvent(.init(epoch: 2, payload: .syncComplete))
+        for _ in 0..<50 {
+            if viewModel.crossChatNotificationBubblesBySourceChatId[source]?.entries.map(\.content) == ["Buffered after dismiss"] { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+
+        #expect(viewModel.messages(for: source).map(\.id) == ["s_reset_replay_dismissed", "s_reset_replay_survives"])
+        #expect(viewModel.crossChatNotificationBubblesBySourceChatId[source]?.entries.map(\.content) == ["Buffered after dismiss"])
+    }
+
     @Test("History reset preserves cursor-backed active stream with empty replay window")
     @MainActor
     func historyResetPreservesCursorBackedActiveStreamWithEmptyReplayWindow() async throws {
@@ -6122,6 +6745,7 @@ final class TestChatService: ChatServicing {
     var adoptStreamReturnedTrackingMode: StreamSession.TrackingMode = .adopted
     var renameReturnedTrackingMode: StreamSession.TrackingMode?
     var startReplayCount: Int = 0
+    var startReplayTruncated = false
     var startHistoryReset = false
     var emitSyncCompleteOnStart: Bool = true
 
@@ -6172,7 +6796,7 @@ final class TestChatService: ChatServicing {
                 payload: .authResult(
                     success: true,
                     replayCount: startReplayCount,
-                    replayTruncated: false,
+                    replayTruncated: startReplayTruncated,
                     historyReset: startHistoryReset,
                     failureReason: nil
                 )

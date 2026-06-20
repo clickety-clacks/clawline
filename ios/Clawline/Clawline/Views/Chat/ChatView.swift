@@ -6198,7 +6198,7 @@ private struct NotificationRenderedEntriesKey: Hashable {
 
 enum CrossChatNotificationGeometry {
     static let collapsedPeekWidth: CGFloat = 18
-    static let collapsedHitTargetWidth: CGFloat = 96
+    static let collapsedHitTargetWidth: CGFloat = collapsedPeekWidth
     static let swipeCompletionThreshold: CGFloat = 44
     static let compactBubbleMaxHeight: CGFloat = 164
 

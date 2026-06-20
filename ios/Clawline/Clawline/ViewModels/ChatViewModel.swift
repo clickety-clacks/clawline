@@ -105,7 +105,8 @@ struct NotificationBatchCommitCoordinator {
         epoch: Int,
         reachedTruncationBoundary: Bool,
         committedSnapshot: [String: CrossChatNotificationBubble],
-        isEligible: (String) -> Bool
+        isEligible: (String) -> Bool,
+        onSuppressedEntries: (String, [CrossChatAssistantNotificationEntry]) -> Void = { _, _ in }
     ) -> [String: CrossChatNotificationBubble]? {
         guard let batch = pendingBatchByEpoch[epoch] else { return nil }
         guard reachedTruncationBoundary || !batch.waitsForTruncationBoundary else { return nil }
@@ -113,10 +114,20 @@ struct NotificationBatchCommitCoordinator {
 
         var reconciledBySourceChatId = committedSnapshot
         for bubble in batch.bubblesBySourceChatId.values {
-            guard isEligible(bubble.sourceChatId) else { continue }
+            let completedEntries = bubble.entries.filter { !$0.streaming }
+            guard isEligible(bubble.sourceChatId) else {
+                onSuppressedEntries(bubble.sourceChatId, completedEntries)
+                continue
+            }
             let dismissalSequence = batch.dismissalSequenceBySourceChatId[bubble.sourceChatId] ?? 0
-            let finalEntries = bubble.entries.filter {
-                !$0.streaming && $0.notificationSequence > dismissalSequence
+            let suppressedEntries = completedEntries.filter {
+                $0.notificationSequence <= dismissalSequence
+            }
+            if !suppressedEntries.isEmpty {
+                onSuppressedEntries(bubble.sourceChatId, suppressedEntries)
+            }
+            let finalEntries = completedEntries.filter {
+                $0.notificationSequence > dismissalSequence
             }
             guard !finalEntries.isEmpty else { continue }
 
@@ -361,6 +372,7 @@ final class ChatViewModel: ChatViewModelHosting {
     private(set) var streamTailStateBySession: [String: StreamTailState] = [:]
     private(set) var crossChatNotificationBubblesBySourceChatId: [String: CrossChatNotificationBubble] = [:]
     private var notificationBatchCommitCoordinator = NotificationBatchCommitCoordinator()
+    private var suppressedCrossChatNotificationEntryKeysBySourceChatId: [String: Set<String>] = [:]
     var crossChatNotificationDismissAnimator: CrossChatNotificationDismissAnimator?
     private var unavailableCrossChatNotificationSourceIds: Set<String> = []
     private var syntheticSessionKeys: Set<String> = []
@@ -1592,7 +1604,8 @@ final class ChatViewModel: ChatViewModelHosting {
         if markSourceRead {
             markSessionRead(sourceChatId, preferServerTail: true)
         }
-        if crossChatNotificationBubblesBySourceChatId[sourceChatId] != nil {
+        if let bubble = crossChatNotificationBubblesBySourceChatId[sourceChatId] {
+            recordSuppressedCrossChatNotificationEntries(bubble.entries, sourceChatId: sourceChatId)
             notificationBatchCommitCoordinator.recordDismissal(sourceChatIds: [sourceChatId])
         }
         animateCrossChatNotificationDismissal {
@@ -1605,10 +1618,39 @@ final class ChatViewModel: ChatViewModelHosting {
         for sourceChatId in committedSourceChatIds {
             markSessionRead(sourceChatId, preferServerTail: true)
         }
+        for bubble in crossChatNotificationBubblesBySourceChatId.values {
+            recordSuppressedCrossChatNotificationEntries(bubble.entries, sourceChatId: bubble.sourceChatId)
+        }
         notificationBatchCommitCoordinator.recordDismissal(sourceChatIds: committedSourceChatIds)
         animateCrossChatNotificationDismissal {
             self.crossChatNotificationBubblesBySourceChatId.removeAll()
         }
+    }
+
+    private func recordSuppressedCrossChatNotificationEntries(
+        _ entries: [CrossChatAssistantNotificationEntry],
+        sourceChatId: String
+    ) {
+        let keys = entries
+            .filter { !$0.id.isEmpty }
+            .map { suppressedCrossChatNotificationEntryKey(id: $0.id, content: $0.content) }
+        guard !keys.isEmpty else { return }
+        suppressedCrossChatNotificationEntryKeysBySourceChatId[sourceChatId, default: []].formUnion(keys)
+    }
+
+    private func recordSuppressedCrossChatNotificationEntry(_ message: Message) {
+        guard !message.id.isEmpty else { return }
+        let key = suppressedCrossChatNotificationEntryKey(id: message.id, content: message.content)
+        suppressedCrossChatNotificationEntryKeysBySourceChatId[message.sessionKey, default: []].insert(key)
+    }
+
+    private func hasSuppressedCrossChatNotificationEntry(_ message: Message) -> Bool {
+        let key = suppressedCrossChatNotificationEntryKey(id: message.id, content: message.content)
+        return suppressedCrossChatNotificationEntryKeysBySourceChatId[message.sessionKey]?.contains(key) == true
+    }
+
+    private func suppressedCrossChatNotificationEntryKey(id: String, content: String) -> String {
+        "\(id.count):\(id)\(content)"
     }
 
 #if DEBUG
@@ -2282,6 +2324,7 @@ final class ChatViewModel: ChatViewModelHosting {
         forceReReadGenerationBySession.removeAll()
         restoredStreamMetadataForUserId = nil
         crossChatNotificationBubblesBySourceChatId.removeAll()
+        suppressedCrossChatNotificationEntryKeysBySourceChatId.removeAll()
         unavailableCrossChatNotificationSourceIds.removeAll()
         resetSessionProvisioningState(clearPendingSend: true)
         clearMessageCache()
@@ -2554,6 +2597,8 @@ final class ChatViewModel: ChatViewModelHosting {
         batchEpoch: Int?,
         notificationSequence: UInt64? = nil
     ) {
+        guard message.role == .assistant else { return }
+        guard !hasSuppressedCrossChatNotificationEntry(message) else { return }
         let title = stream(for: message.sessionKey)?.displayName
             ?? message.sender
             ?? message.sessionKey
@@ -2571,7 +2616,12 @@ final class ChatViewModel: ChatViewModelHosting {
             notificationBatchCommitCoordinator.collectPendingCandidate(candidate, epoch: batchEpoch)
             return
         }
-        guard isEligibleForCrossChatAssistantNotification(sourceChatId: message.sessionKey) else { return }
+        guard isEligibleForCrossChatAssistantNotification(sourceChatId: message.sessionKey) else {
+            if !message.streaming {
+                recordSuppressedCrossChatNotificationEntry(message)
+            }
+            return
+        }
         notificationBatchCommitCoordinator.applyLiveCandidate(
             candidate,
             to: &crossChatNotificationBubblesBySourceChatId
@@ -2593,6 +2643,9 @@ final class ChatViewModel: ChatViewModelHosting {
             committedSnapshot: crossChatNotificationBubblesBySourceChatId,
             isEligible: { [weak self] sourceChatId in
                 self?.isEligibleForCrossChatAssistantNotification(sourceChatId: sourceChatId) ?? false
+            },
+            onSuppressedEntries: { [weak self] sourceChatId, entryIds in
+                self?.recordSuppressedCrossChatNotificationEntries(entryIds, sourceChatId: sourceChatId)
             }
         ) else {
             return

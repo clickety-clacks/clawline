@@ -1545,6 +1545,257 @@ struct ChatViewModelTests {
         #expect(viewModel.crossChatNotificationBubblesBySourceChatId[source]?.entries.map(\.content) == ["Buffered after dismiss"])
     }
 
+    @Test("T1171 dismissed notification identity does not reappear during later replay")
+    @MainActor
+    func dismissedNotificationIdentityDoesNotReappearDuringLaterReplay() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let source = "agent:main:clawline:user:s_t1171_replay"
+        let streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: source, displayName: "Replay Source", kind: "custom", orderIndex: 1, isBuiltIn: false),
+        ]
+        let chatService = TestChatService()
+        chatService.streams = streams
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.prepareForReplacement() }
+
+        await viewModel.activate(origin: "test.t1171.dismissedReplay")
+        chatService.emitServiceEvent(.streamSnapshot(streams))
+        for _ in 0..<50 {
+            if viewModel.stream(for: source) != nil { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+
+        let dismissedPayload = #"{"type":"message","id":"s_t1171_dismissed","role":"assistant","content":"Dismissed content","timestamp":1700000000000,"streaming":false,"sessionKey":"\#(source)","attachments":[]}"#
+        chatService.emitLifecycleEvent(.init(epoch: 1, payload: .serverMessage(data: Data(dismissedPayload.utf8))))
+        for _ in 0..<50 {
+            if viewModel.crossChatNotificationBubblesBySourceChatId[source]?.entries.map(\.id) == ["s_t1171_dismissed"] { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+        #expect(viewModel.crossChatNotificationBubblesBySourceChatId[source]?.entries.map(\.id) == ["s_t1171_dismissed"])
+
+        viewModel.dismissCrossChatNotification(sourceChatId: source)
+        #expect(viewModel.crossChatNotificationBubblesBySourceChatId[source] == nil)
+
+        chatService.startReplayCount = 2
+        chatService.emitSyncCompleteOnStart = false
+        NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
+        try await Task.sleep(forDuration: .milliseconds(2100))
+        viewModel.handleSceneActiveStateChanged(isActive: true)
+        for _ in 0..<50 {
+            if chatService.connectCallCount >= 2 { break }
+            try await Task.sleep(forDuration: .milliseconds(20))
+        }
+
+        let freshPayload = #"{"type":"message","id":"s_t1171_fresh","role":"assistant","content":"Fresh content","timestamp":1700000000001,"streaming":false,"sessionKey":"\#(source)","attachments":[]}"#
+        chatService.emitLifecycleEvent(.init(epoch: 2, payload: .serverMessage(data: Data(dismissedPayload.utf8))))
+        chatService.emitLifecycleEvent(.init(epoch: 2, payload: .serverMessage(data: Data(freshPayload.utf8))))
+        chatService.emitLifecycleEvent(.init(epoch: 2, payload: .syncComplete))
+        for _ in 0..<50 {
+            if viewModel.crossChatNotificationBubblesBySourceChatId[source]?.entries.map(\.id) == ["s_t1171_fresh"] { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+
+        #expect(viewModel.messages(for: source).map(\.id).contains("s_t1171_dismissed"))
+        #expect(viewModel.messages(for: source).map(\.id).contains("s_t1171_fresh"))
+        #expect(viewModel.crossChatNotificationBubblesBySourceChatId[source]?.entries.map(\.id) == ["s_t1171_fresh"])
+    }
+
+    @Test("T1171 same message id can notify when replay content changes after dismissal")
+    @MainActor
+    func sameMessageIdCanNotifyWhenReplayContentChangesAfterDismissal() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let source = "agent:main:clawline:user:s_t1171_changed_content"
+        let streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: source, displayName: "Changed Content Source", kind: "custom", orderIndex: 1, isBuiltIn: false),
+        ]
+        let chatService = TestChatService()
+        chatService.streams = streams
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.prepareForReplacement() }
+
+        await viewModel.activate(origin: "test.t1171.changedContent")
+        chatService.emitServiceEvent(.streamSnapshot(streams))
+        for _ in 0..<50 {
+            if viewModel.stream(for: source) != nil { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+
+        let dismissedPayload = #"{"type":"message","id":"s_t1171_changed","role":"assistant","content":"Original content","timestamp":1700000000000,"streaming":false,"sessionKey":"\#(source)","attachments":[]}"#
+        chatService.emitLifecycleEvent(.init(epoch: 1, payload: .serverMessage(data: Data(dismissedPayload.utf8))))
+        for _ in 0..<50 {
+            if viewModel.crossChatNotificationBubblesBySourceChatId[source]?.entries.map(\.content) == ["Original content"] { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+        #expect(viewModel.crossChatNotificationBubblesBySourceChatId[source]?.entries.map(\.content) == ["Original content"])
+
+        viewModel.dismissCrossChatNotification(sourceChatId: source)
+        #expect(viewModel.crossChatNotificationBubblesBySourceChatId[source] == nil)
+
+        chatService.startReplayCount = 1
+        chatService.emitSyncCompleteOnStart = false
+        NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
+        try await Task.sleep(forDuration: .milliseconds(2100))
+        viewModel.handleSceneActiveStateChanged(isActive: true)
+        for _ in 0..<50 {
+            if chatService.connectCallCount >= 2 { break }
+            try await Task.sleep(forDuration: .milliseconds(20))
+        }
+
+        let changedPayload = #"{"type":"message","id":"s_t1171_changed","role":"assistant","content":"Changed content","timestamp":1700000000001,"streaming":false,"sessionKey":"\#(source)","attachments":[]}"#
+        chatService.emitLifecycleEvent(.init(epoch: 2, payload: .serverMessage(data: Data(changedPayload.utf8))))
+        chatService.emitLifecycleEvent(.init(epoch: 2, payload: .syncComplete))
+        for _ in 0..<50 {
+            if viewModel.crossChatNotificationBubblesBySourceChatId[source]?.entries.map(\.content) == ["Changed content"] { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+
+        #expect(viewModel.crossChatNotificationBubblesBySourceChatId[source]?.entries.map(\.id) == ["s_t1171_changed"])
+        #expect(viewModel.crossChatNotificationBubblesBySourceChatId[source]?.entries.map(\.content) == ["Changed content"])
+    }
+
+    @Test("T1171 dismissed notification identity does not reappear during history reset replay")
+    @MainActor
+    func dismissedNotificationIdentityDoesNotReappearDuringHistoryResetReplay() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let source = "agent:main:clawline:user:s_t1171_reset_replay"
+        let streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: source, displayName: "Reset Replay Source", kind: "custom", orderIndex: 1, isBuiltIn: false),
+        ]
+        let chatService = TestChatService()
+        chatService.streams = streams
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.prepareForReplacement() }
+
+        await viewModel.activate(origin: "test.t1171.dismissedHistoryResetReplay")
+        chatService.emitServiceEvent(.streamSnapshot(streams))
+        for _ in 0..<50 {
+            if viewModel.stream(for: source) != nil { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+
+        let dismissedPayload = #"{"type":"message","id":"s_t1171_reset_dismissed","role":"assistant","content":"Reset dismissed content","timestamp":1700000000000,"streaming":false,"sessionKey":"\#(source)","attachments":[]}"#
+        chatService.emitLifecycleEvent(.init(epoch: 1, payload: .serverMessage(data: Data(dismissedPayload.utf8))))
+        for _ in 0..<50 {
+            if viewModel.crossChatNotificationBubblesBySourceChatId[source]?.entries.map(\.id) == ["s_t1171_reset_dismissed"] { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+        #expect(viewModel.crossChatNotificationBubblesBySourceChatId[source]?.entries.map(\.id) == ["s_t1171_reset_dismissed"])
+
+        viewModel.dismissCrossChatNotification(sourceChatId: source)
+        #expect(viewModel.crossChatNotificationBubblesBySourceChatId[source] == nil)
+
+        chatService.startHistoryReset = true
+        chatService.startReplayCount = 1
+        chatService.emitSyncCompleteOnStart = false
+        NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
+        try await Task.sleep(forDuration: .milliseconds(2100))
+        viewModel.handleSceneActiveStateChanged(isActive: true)
+        for _ in 0..<50 {
+            if chatService.connectCallCount >= 2 { break }
+            try await Task.sleep(forDuration: .milliseconds(20))
+        }
+
+        chatService.emitLifecycleEvent(.init(epoch: 2, payload: .serverMessage(data: Data(dismissedPayload.utf8))))
+        chatService.emitLifecycleEvent(.init(epoch: 2, payload: .syncComplete))
+        try await Task.sleep(forDuration: .milliseconds(40))
+
+        #expect(viewModel.messages(for: source).map(\.id) == ["s_t1171_reset_dismissed"])
+        #expect(viewModel.crossChatNotificationBubblesBySourceChatId[source] == nil)
+    }
+
+    @Test("T1171 missed notification identity does not reappear during later replay")
+    @MainActor
+    func missedNotificationIdentityDoesNotReappearDuringLaterReplay() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let source = "agent:main:clawline:user:s_t1171_missed_replay"
+        let streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: source, displayName: "Missed Replay Source", kind: "custom", orderIndex: 1, isBuiltIn: false),
+        ]
+        let chatService = TestChatService()
+        chatService.streams = streams
+        chatService.startReplayCount = 1
+        chatService.emitSyncCompleteOnStart = false
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.prepareForReplacement() }
+
+        await viewModel.activate(origin: "test.t1171.missedReplay")
+        chatService.emitServiceEvent(.streamSnapshot(streams))
+        for _ in 0..<50 {
+            if viewModel.stream(for: source) != nil { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+        viewModel.requestStreamSwitch(to: source, source: .programmatic)
+        #expect(viewModel.uiSelectedSessionKey == source)
+
+        let missedPayload = #"{"type":"message","id":"s_t1171_missed","role":"assistant","content":"Missed content","timestamp":1700000000000,"streaming":false,"sessionKey":"\#(source)","attachments":[]}"#
+        chatService.emitLifecycleEvent(.init(epoch: 1, payload: .serverMessage(data: Data(missedPayload.utf8))))
+        chatService.emitLifecycleEvent(.init(epoch: 1, payload: .syncComplete))
+        try await Task.sleep(forDuration: .milliseconds(40))
+        #expect(viewModel.crossChatNotificationBubblesBySourceChatId[source] == nil)
+
+        viewModel.requestStreamSwitch(to: personalSessionKey, source: .programmatic)
+        chatService.startReplayCount = 1
+        chatService.emitSyncCompleteOnStart = false
+        NotificationCenter.default.post(name: UIApplication.didEnterBackgroundNotification, object: nil)
+        try await Task.sleep(forDuration: .milliseconds(2100))
+        viewModel.handleSceneActiveStateChanged(isActive: true)
+        for _ in 0..<50 {
+            if chatService.connectCallCount >= 2 { break }
+            try await Task.sleep(forDuration: .milliseconds(20))
+        }
+
+        chatService.emitLifecycleEvent(.init(epoch: 2, payload: .serverMessage(data: Data(missedPayload.utf8))))
+        chatService.emitLifecycleEvent(.init(epoch: 2, payload: .syncComplete))
+        try await Task.sleep(forDuration: .milliseconds(40))
+
+        #expect(viewModel.messages(for: source).map(\.id) == ["s_t1171_missed"])
+        #expect(viewModel.crossChatNotificationBubblesBySourceChatId[source] == nil)
+    }
+
     @Test("History reset preserves cursor-backed active stream with empty replay window")
     @MainActor
     func historyResetPreservesCursorBackedActiveStreamWithEmptyReplayWindow() async throws {

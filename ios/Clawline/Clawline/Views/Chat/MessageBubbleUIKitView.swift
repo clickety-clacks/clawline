@@ -2426,7 +2426,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
             }
         }
         let calendar = Calendar.autoupdatingCurrent
-        if calendar.isDateInYesterday(timestamp) {
+        if ChatDateLabelCalendar.isYesterday(timestamp, now: now, calendar: calendar) {
             return "\(relativeDayFormatter.string(from: timestamp)), \(timeFormatter.string(from: timestamp))"
         }
         if calendar.component(.year, from: timestamp) != calendar.component(.year, from: now) {

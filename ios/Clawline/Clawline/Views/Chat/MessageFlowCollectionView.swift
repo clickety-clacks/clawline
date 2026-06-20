@@ -30,6 +30,23 @@ enum TypingIndicatorMorph {
     }
 }
 
+enum ChatDateLabelCalendar {
+    static func startOfDay(for date: Date, calendar: Calendar = .autoupdatingCurrent) -> Date {
+        calendar.startOfDay(for: date)
+    }
+
+    static func isSameDay(_ left: Date, _ right: Date, calendar: Calendar = .autoupdatingCurrent) -> Bool {
+        calendar.isDate(left, inSameDayAs: right)
+    }
+
+    static func isYesterday(_ date: Date, now: Date, calendar: Calendar = .autoupdatingCurrent) -> Bool {
+        guard let yesterday = calendar.date(byAdding: .day, value: -1, to: calendar.startOfDay(for: now)) else {
+            return false
+        }
+        return calendar.isDate(date, inSameDayAs: yesterday)
+    }
+}
+
 enum ChatVisibleBubbleContentScroll {
     static var lineIncrement: CGFloat {
         ceil(UIFont.clawline(.bodyText).lineHeight + 4)
@@ -2890,8 +2907,8 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         let now = Date()
 
         for message in messages {
-            let dayStart = calendar.startOfDay(for: message.timestamp)
-            if let previousDayStart, !calendar.isDate(dayStart, inSameDayAs: previousDayStart) {
+            let dayStart = ChatDateLabelCalendar.startOfDay(for: message.timestamp, calendar: calendar)
+            if let previousDayStart, !ChatDateLabelCalendar.isSameDay(dayStart, previousDayStart, calendar: calendar) {
                 let separatorID = DateSeparatorCell.itemID(before: message.id)
                 items.append(separatorID)
                 separatorTextByItemID[separatorID] = Self.dateSeparatorText(for: dayStart, now: now)
@@ -2906,10 +2923,10 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
 
     private static func dateSeparatorText(for day: Date, now: Date) -> String {
         let calendar = Calendar.autoupdatingCurrent
-        if calendar.isDateInToday(day) {
+        if ChatDateLabelCalendar.isSameDay(day, now, calendar: calendar) {
             return relativeDayFormatter.string(from: day)
         }
-        if calendar.isDateInYesterday(day) {
+        if ChatDateLabelCalendar.isYesterday(day, now: now, calendar: calendar) {
             return relativeDayFormatter.string(from: day)
         }
         if calendar.isDate(day, equalTo: now, toGranularity: .weekOfYear) {

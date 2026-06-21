@@ -399,21 +399,81 @@ struct BubbleScrollTests {
             Issue.record("Expected rendered text view inside production bubble")
             return
         }
-        textView.layoutManager.ensureLayout(for: textView.textContainer)
-        let usedRect = textView.layoutManager.usedRect(for: textView.textContainer)
-        let glyphFrame = CGRect(
-            x: usedRect.minX + textView.textContainerInset.left,
-            y: usedRect.minY + textView.textContainerInset.top,
-            width: usedRect.width,
-            height: usedRect.height
-        )
-        let textFrame = textView.convert(glyphFrame, to: bubble)
+        let textFrame = renderedGlyphFrame(for: textView, in: bubble)
         let topChrome = textFrame.minY
         let bottomChrome = bubble.bounds.maxY - textFrame.maxY
 
         #expect(topChrome >= metrics.bubblePaddingTop)
         #expect(bottomChrome >= metrics.bubblePaddingBottom)
+        #expect(bottomChrome <= metrics.bubblePaddingBottom + 1)
         #expect(bottomChrome < topChrome)
+    }
+
+    @Test("T1193 RSR: Reply quote bottom chrome stays compact inside bubble")
+    @MainActor
+    func replyQuoteBottomChromeStaysCompactInsideBubble() {
+        let metrics = ChatFlowTheme.Metrics(isCompact: false)
+        let referenced = Message(
+            id: "t1193-referenced-message",
+            role: .assistant,
+            content: "Referenced reply quote text should not leave a loose pad under the final line.",
+            timestamp: Date(),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: "agent:main:clawline:flynn:s_111df227"
+        )
+        let message = Message(
+            id: "t1193-reply-quote-bottom-chrome",
+            role: .user,
+            content: "Replying with a compact prompt.",
+            timestamp: Date(),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: "agent:main:clawline:flynn:s_111df227"
+        )
+        let presentation = buildPresentation(message, metrics: metrics, enableLinkPreviews: false)
+        let bubble = MessageBubbleUIKitView(frame: CGRect(x: 0, y: 0, width: 360, height: 1))
+
+        bubble.configure(
+            message: message,
+            presentation: presentation,
+            sizeClass: MessageFlowRules.sizeClass(for: presentation),
+            metrics: metrics,
+            maxWidth: 360,
+            truncationHeightOverride: 1000,
+            bubbleSizingV2: nil,
+            showsHeader: false,
+            paddingScale: 1,
+            minWidthOverride: nil,
+            maxWidthOverride: nil,
+            useContinuousCorners: true,
+            isDark: false,
+            onRequestExpand: nil,
+            onRequestLayout: nil,
+            onInteractiveCallback: nil,
+            replyReference: PendingMessageReference(message: referenced)
+        )
+        let measured = bubble.systemLayoutSizeFitting(
+            CGSize(width: 360, height: UIView.layoutFittingCompressedSize.height),
+            withHorizontalFittingPriority: .required,
+            verticalFittingPriority: .fittingSizeLevel
+        )
+        bubble.frame = CGRect(origin: .zero, size: measured)
+        bubble.layoutIfNeeded()
+
+        guard let quoteTextView = textViews(in: bubble).first(where: {
+            $0.attributedText.string.contains("Referenced reply quote text")
+        }) else {
+            Issue.record("Expected rendered reply quote text view inside production bubble")
+            return
+        }
+        let quoteFrame = renderedGlyphFrame(for: quoteTextView, in: bubble)
+        let quoteBottomChrome = quoteTextView.convert(quoteTextView.bounds, to: bubble).maxY - quoteFrame.maxY
+
+        #expect(quoteBottomChrome >= 0)
+        #expect(quoteBottomChrome <= 1)
     }
 
     @Test("BubbleSizingV2 live short-bubble remeasure keeps plan min width below legacy floor")
@@ -1355,6 +1415,18 @@ struct BubbleScrollTests {
             result.append(contentsOf: textViews(in: sub))
         }
         return result
+    }
+
+    private func renderedGlyphFrame(for textView: UITextView, in view: UIView) -> CGRect {
+        textView.layoutManager.ensureLayout(for: textView.textContainer)
+        let usedRect = textView.layoutManager.usedRect(for: textView.textContainer)
+        let glyphFrame = CGRect(
+            x: usedRect.minX + textView.textContainerInset.left,
+            y: usedRect.minY + textView.textContainerInset.top,
+            width: usedRect.width,
+            height: usedRect.height
+        )
+        return textView.convert(glyphFrame, to: view)
     }
 
     private func isBold(_ substring: String, in attributed: NSAttributedString) -> Bool {

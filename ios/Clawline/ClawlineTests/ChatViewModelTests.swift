@@ -6815,6 +6815,66 @@ struct ChatViewModelTests {
         #expect(messages.first?.content == "live")
     }
 
+    @Test("T1379: late older messages stay before current-day transcript messages")
+    @MainActor
+    func messageStreamSeamOrdersLateOlderMessagesByTimestamp() async throws {
+        resetChatPersistence()
+        let viewModel = makeSeamTestViewModel()
+        defer { viewModel.onDisappear() }
+
+        let june19 = Date(timeIntervalSince1970: 1_750_395_600)
+        let today0008 = Date(timeIntervalSince1970: 1_750_562_880)
+        let today0009 = Date(timeIntervalSince1970: 1_750_562_940)
+        viewModel.debugUpsertMessage(
+            makeTestMessage(id: "s_today_0008", content: "today 12:08", sessionKey: personalSessionKey, timestamp: today0008),
+            isServer: true
+        )
+        viewModel.debugUpsertMessage(
+            makeTestMessage(id: "s_today_0009", content: "today 12:09", sessionKey: personalSessionKey, timestamp: today0009),
+            isServer: true
+        )
+        viewModel.debugUpsertMessage(
+            makeTestMessage(id: "s_june_19", content: "June 19", sessionKey: personalSessionKey, timestamp: june19),
+            isServer: true
+        )
+
+        #expect(viewModel.messages(for: personalSessionKey).map(\.id) == [
+            "s_june_19",
+            "s_today_0008",
+            "s_today_0009"
+        ])
+    }
+
+    @Test("T1379: date separators stay attached to chronologically ordered day groups")
+    func dateSeparatorsAttachToChronologicallyOrderedDayGroups() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0)!
+        let now = Date(timeIntervalSince1970: 1_750_600_000)
+        let june19 = Date(timeIntervalSince1970: 1_750_395_600)
+        let today0008 = Date(timeIntervalSince1970: 1_750_562_880)
+        let today0009 = Date(timeIntervalSince1970: 1_750_562_940)
+        let messages = [
+            makeTestMessage(id: "s_june_19", content: "June 19", sessionKey: personalSessionKey, timestamp: june19),
+            makeTestMessage(id: "s_today_0008", content: "today 12:08", sessionKey: personalSessionKey, timestamp: today0008),
+            makeTestMessage(id: "s_today_0009", content: "today 12:09", sessionKey: personalSessionKey, timestamp: today0009)
+        ]
+
+        let result = MessageFlowCollectionViewController.snapshotDateSeparatorItems(
+            from: messages,
+            now: now,
+            calendar: calendar
+        )
+        let todaySeparator = DateSeparatorCell.itemID(before: "s_today_0008")
+
+        #expect(result.items == [
+            "s_june_19",
+            todaySeparator,
+            "s_today_0008",
+            "s_today_0009"
+        ])
+        #expect(result.separatorTextByItemID[todaySeparator] != nil)
+    }
+
     @Test("T105: duplicate ids are scoped per session")
     @MainActor
     func messageStreamSeamDuplicateIdsAreSessionScoped() async throws {
@@ -7292,12 +7352,12 @@ private func makeSeamTestViewModel(chatService: TestChatService = TestChatServic
     )
 }
 
-private func makeTestMessage(id: String, content: String, sessionKey: String) -> Message {
+private func makeTestMessage(id: String, content: String, sessionKey: String, timestamp: Date = Date()) -> Message {
     Message(
         id: id,
         role: .assistant,
         content: content,
-        timestamp: Date(),
+        timestamp: timestamp,
         streaming: false,
         attachments: [],
         deviceId: nil,

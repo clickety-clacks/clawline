@@ -3047,23 +3047,33 @@ final class ChatViewModel: ChatViewModelHosting {
     }
 
     private func applyMessagesWrite(_ newMessages: [Message], for sessionKey: String) {
+        let orderedMessages = Self.chronologicallyOrderedMessages(newMessages)
         let oldCount = sessionMessages[sessionKey]?.count ?? 0
-        sessionMessages[sessionKey] = newMessages
-        let newCount = newMessages.count
+        sessionMessages[sessionKey] = orderedMessages
+        let newCount = orderedMessages.count
         if oldCount > 0, newCount == 0 {
             StreamSwitchTiming.log("stream_messages_unloaded oldCount=\(oldCount) newCount=0", sessionKey: sessionKey)
         } else if oldCount == 0, newCount > 0 {
             StreamSwitchTiming.log("stream_messages_reloaded oldCount=0 newCount=\(newCount)", sessionKey: sessionKey)
         }
-        persistMessages(newMessages, for: sessionKey)
+        persistMessages(orderedMessages, for: sessionKey)
         if sessionKey == engineActiveSessionKey {
-            messages = newMessages
-            let total = newMessages.count
-            let uniqueCount = Set(newMessages.map(\.id)).count
+            messages = orderedMessages
+            let total = orderedMessages.count
+            let uniqueCount = Set(orderedMessages.map(\.id)).count
             if uniqueCount != total {
                 logger.info("message list duplicate ids detected sessionKey=\(sessionKey, privacy: .public) total=\(total, privacy: .public) unique=\(uniqueCount, privacy: .public)")
             }
         }
+    }
+
+    private static func chronologicallyOrderedMessages(_ messages: [Message]) -> [Message] {
+        messages.enumerated().sorted { lhs, rhs in
+            if lhs.element.timestamp != rhs.element.timestamp {
+                return lhs.element.timestamp < rhs.element.timestamp
+            }
+            return lhs.offset < rhs.offset
+        }.map(\.element)
     }
 
     private func handleLifecycleOutput(_ output: ConnectionLifecycleOutput) {

@@ -3058,9 +3058,22 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     }
 
     private func snapshotItemsWithDateSeparators(from messages: [Message]) -> [String] {
+        let (items, separatorTextByItemID) = Self.snapshotDateSeparatorItems(
+            from: messages,
+            now: Date(),
+            calendar: .autoupdatingCurrent
+        )
+        dateSeparatorTextByItemId = separatorTextByItemID
+        return items
+    }
+
+    static func snapshotDateSeparatorItems(
+        from messages: [Message],
+        now: Date,
+        calendar: Calendar
+    ) -> (items: [String], separatorTextByItemID: [String: String]) {
         guard !messages.isEmpty else {
-            dateSeparatorTextByItemId = [:]
-            return []
+            return ([], [:])
         }
 
         var items: [String] = []
@@ -3068,26 +3081,22 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
 
         var separatorTextByItemID: [String: String] = [:]
         var previousDayStart: Date?
-        let calendar = Calendar.autoupdatingCurrent
-        let now = Date()
 
         for message in messages {
             let dayStart = ChatDateLabelCalendar.startOfDay(for: message.timestamp, calendar: calendar)
             if let previousDayStart, !ChatDateLabelCalendar.isSameDay(dayStart, previousDayStart, calendar: calendar) {
                 let separatorID = DateSeparatorCell.itemID(before: message.id)
                 items.append(separatorID)
-                separatorTextByItemID[separatorID] = Self.dateSeparatorText(for: dayStart, now: now)
+                separatorTextByItemID[separatorID] = Self.dateSeparatorText(for: dayStart, now: now, calendar: calendar)
             }
             previousDayStart = dayStart
             items.append(message.id)
         }
 
-        dateSeparatorTextByItemId = separatorTextByItemID
-        return items
+        return (items, separatorTextByItemID)
     }
 
-    private static func dateSeparatorText(for day: Date, now: Date) -> String {
-        let calendar = Calendar.autoupdatingCurrent
+    private static func dateSeparatorText(for day: Date, now: Date, calendar: Calendar = .autoupdatingCurrent) -> String {
         if ChatDateLabelCalendar.isSameDay(day, now, calendar: calendar) {
             return relativeDayFormatter.string(from: day)
         }

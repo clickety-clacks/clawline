@@ -555,6 +555,22 @@ struct StreamPageDotsViewTests {
         #expect(StreamPopupFocusHandoff.shouldFocusSearchOnOpen(isSoftwareKeyboardVisible: false) == false)
     }
 
+    @Test("T1136 software keyboard visibility is safe-area compensated")
+    func softwareKeyboardVisibilityIsSafeAreaCompensated() {
+        #expect(
+            StreamPopupFocusHandoff.isSoftwareKeyboardVisible(
+                keyboardHeight: 336,
+                safeAreaBottom: 34
+            )
+        )
+        #expect(
+            StreamPopupFocusHandoff.isSoftwareKeyboardVisible(
+                keyboardHeight: 34,
+                safeAreaBottom: 34
+            ) == false
+        )
+    }
+
     @Test("T1136 keyboard-down popup presentation keeps filter out of initial focus")
     func keyboardDownPopupPresentationKeepsFilterOutOfInitialFocus() {
         #expect(
@@ -593,12 +609,20 @@ struct StreamPageDotsViewTests {
     func streamPopupTrackedCloseRestoresComposerFromPresentationFlag() {
         #expect(
             StreamPopupFocusHandoff.shouldRestoreComposerOnCloseAfterTrackedKeyboardState(
-                didDisplaceComposerFocus: true
+                didDisplaceComposerFocus: true,
+                isSoftwareKeyboardVisible: true
             )
         )
         #expect(
             StreamPopupFocusHandoff.shouldRestoreComposerOnCloseAfterTrackedKeyboardState(
-                didDisplaceComposerFocus: false
+                didDisplaceComposerFocus: false,
+                isSoftwareKeyboardVisible: true
+            ) == false
+        )
+        #expect(
+            StreamPopupFocusHandoff.shouldRestoreComposerOnCloseAfterTrackedKeyboardState(
+                didDisplaceComposerFocus: true,
+                isSoftwareKeyboardVisible: false
             ) == false
         )
     }
@@ -640,8 +664,7 @@ struct StreamPageDotsViewTests {
                 preserveComposerFocusDuringDismissal: true
             ) == [
                 .requestComposerFocusBeforeDismissal,
-                .closePopup,
-                .requestComposerFocusAfterDismissal
+                .closePopup
             ]
         )
         #expect(

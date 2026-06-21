@@ -342,6 +342,45 @@ struct StreamSelectorLayoutTests {
         #expect(width == CGFloat(480))
     }
 
+    @Test("T1374 popup width reserves the status dot when shortcut labels are present")
+    func popupWidthReservesStatusDotWithShortcutLabels() {
+        let reserveWithShortcuts = StreamSelectorLayout.popupTrailingAccessoryReserve(
+            baseAccessoryReserve: CGFloat(28),
+            shortcutLabelReservedWidth: CGFloat(58),
+            showsShortcutLabels: true
+        )
+        let reserveWithoutShortcuts = StreamSelectorLayout.popupTrailingAccessoryReserve(
+            baseAccessoryReserve: CGFloat(28),
+            shortcutLabelReservedWidth: CGFloat(58),
+            showsShortcutLabels: false
+        )
+        let width = StreamSelectorLayout.popupWidth(
+            longestItemWidth: CGFloat(270),
+            minimumPopoverWidth: CGFloat(280),
+            baselineIdealPopoverWidth: CGFloat(320),
+            maximumPopoverWidth: CGFloat(480),
+            rowHorizontalInset: CGFloat(12),
+            rowContentSpacing: CGFloat(10),
+            leadingDotDiameter: CGFloat(8),
+            trailingAccessoryReserve: reserveWithShortcuts
+        )
+        let widthWithoutShortcuts = StreamSelectorLayout.popupWidth(
+            longestItemWidth: CGFloat(270),
+            minimumPopoverWidth: CGFloat(280),
+            baselineIdealPopoverWidth: CGFloat(320),
+            maximumPopoverWidth: CGFloat(480),
+            rowHorizontalInset: CGFloat(12),
+            rowContentSpacing: CGFloat(10),
+            leadingDotDiameter: CGFloat(8),
+            trailingAccessoryReserve: reserveWithoutShortcuts
+        )
+
+        #expect(reserveWithShortcuts == CGFloat(86))
+        #expect(reserveWithoutShortcuts == CGFloat(28))
+        #expect(width == CGFloat(398))
+        #expect(widthWithoutShortcuts == CGFloat(340))
+    }
+
     @Test("Stream manager popup width does not exceed the maximum cap")
     func streamManagerPopupWidthRespectsMaximumCap() {
         let width = StreamSelectorLayout.popupWidth(

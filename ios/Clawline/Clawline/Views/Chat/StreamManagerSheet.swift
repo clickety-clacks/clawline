@@ -91,7 +91,11 @@ struct StreamManagerSheet: View {
             rowHorizontalInset: listRowHorizontalInset,
             rowContentSpacing: rowContentSpacing,
             leadingDotDiameter: rowDotDiameter,
-            trailingAccessoryReserve: rowTrailingAccessoryReserve
+            trailingAccessoryReserve: StreamSelectorLayout.popupTrailingAccessoryReserve(
+                baseAccessoryReserve: rowTrailingAccessoryReserve,
+                shortcutLabelReservedWidth: shortcutLabelReservedWidth,
+                showsShortcutLabels: !selectableShortcutSessionKeys.isEmpty
+            )
         )
     }
 
@@ -1527,6 +1531,14 @@ enum StreamSelectorLayout {
         let contentDrivenWidth = longestItemWidth + chromeWidth
         let idealWidth = max(baselineIdealPopoverWidth, contentDrivenWidth)
         return min(maximumPopoverWidth, max(minimumPopoverWidth, idealWidth))
+    }
+
+    static func popupTrailingAccessoryReserve(
+        baseAccessoryReserve: CGFloat,
+        shortcutLabelReservedWidth: CGFloat,
+        showsShortcutLabels: Bool
+    ) -> CGFloat {
+        baseAccessoryReserve + (showsShortcutLabels ? shortcutLabelReservedWidth : 0)
     }
 
     static func filter(streams: [StreamSession], query: String) -> [StreamSession] {

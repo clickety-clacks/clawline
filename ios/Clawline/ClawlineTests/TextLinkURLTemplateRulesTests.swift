@@ -621,6 +621,54 @@ struct TextLinkURLTemplateRulesTests {
         #expect(MessageBubbleUIKitView.generatedTextLinkURL(in: textView, at: CGPoint(x: generatedPoint.x, y: generatedPoint.y + 24)) == nil)
     }
 
+    @Test("T1370: popup hover presents content from larger generated-link target")
+    @MainActor
+    func generatedTextLinkHoverPresentsPopupFromLargerTarget() throws {
+        let popupRule = TextLinkURLTemplateRule(
+            id: "popup",
+            enabled: true,
+            pattern: #"T([0-9]+)"#,
+            urlTemplate: "https://example.com/popup/{match}",
+            displayMode: .popup
+        )
+        let rendered = try withConfiguredRules([popupRule]) {
+            try #require(makeRendered("See T1370."))
+        }
+        let textView = UITextView(frame: CGRect(x: 0, y: 0, width: 280, height: 44))
+        UnifiedMarkdownRenderer.configureTextView(textView, delegate: nil)
+        textView.attributedText = rendered
+        textView.layoutIfNeeded()
+
+        let characterRange = range("T1370", in: rendered)
+        let glyphRange = textView.layoutManager.glyphRange(forCharacterRange: characterRange, actualCharacterRange: nil)
+        let rect = textView.layoutManager.boundingRect(forGlyphRange: glyphRange, in: textView.textContainer)
+        let hoverPoint = CGPoint(
+            x: rect.maxX + textView.textContainerInset.left + 6,
+            y: rect.midY + textView.textContainerInset.top
+        )
+        let expectedURL = try #require(linkTarget("T1370", in: rendered))
+        let presenter = UIViewController()
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        window.rootViewController = presenter
+        window.isHidden = false
+        presenter.view.addSubview(textView)
+        let animationsWereEnabled = UIView.areAnimationsEnabled
+        UIView.setAnimationsEnabled(false)
+        defer {
+            UIView.setAnimationsEnabled(animationsWereEnabled)
+            window.isHidden = true
+        }
+
+        #expect(MessageBubbleUIKitView.generatedTextLinkURL(in: textView, at: hoverPoint) == nil)
+        #expect(MessageBubbleUIKitView.presentGeneratedTextLinkPopupForHover(in: textView, at: hoverPoint))
+        let popup = try #require(presenter.presentedViewController as? TextLinkResolvedURLContentViewController)
+        popup.loadViewIfNeeded()
+        popup.view.frame = presenter.view.bounds
+        popup.view.setNeedsLayout()
+        popup.view.layoutIfNeeded()
+        #expect(webViews(in: popup.view).first?.url == expectedURL)
+    }
+
     @Test("V1135-01: settings can add many rules and delete exactly one after confirmation")
     @MainActor
     func settingsCanManageTextLinkRules() {

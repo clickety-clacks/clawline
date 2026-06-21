@@ -458,6 +458,7 @@ final class MessageBubbleUIKitContainerView: UIView {
                    showOnlyUserMessagesMenuLabel: String? = nil,
                    onToggleShowOnlyUserMessages: (() -> Void)? = nil,
                    onShowOnlyUserMessagesReveal: ((Message) -> Void)? = nil,
+                   isCollapsedUserOnlyMode: Bool = false,
                    replyReference: PendingMessageReference? = nil,
                    onResend: (() -> Void)?) {
         let metrics = ChatFlowTheme.Metrics(isCompact: isCompact)
@@ -487,6 +488,7 @@ final class MessageBubbleUIKitContainerView: UIView {
             showOnlyUserMessagesMenuLabel: showOnlyUserMessagesMenuLabel,
             onToggleShowOnlyUserMessages: onToggleShowOnlyUserMessages,
             onShowOnlyUserMessagesReveal: onShowOnlyUserMessagesReveal,
+            isCollapsedUserOnlyMode: isCollapsedUserOnlyMode,
             replyReference: replyReference,
             salientHighlightService: salientHighlightService
         )
@@ -595,6 +597,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
     private var showOnlyUserMessagesMenuLabel: String?
     private var onToggleShowOnlyUserMessages: (() -> Void)?
     private var onShowOnlyUserMessagesReveal: ((Message) -> Void)?
+    private var isCollapsedUserOnlyMode = false
     private var currentMessage: Message?
     private var currentCopyableReadableText: String?
     private var currentReplyReference: PendingMessageReference?
@@ -658,6 +661,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         let paddingScale: CGFloat
         let minWidth: CGFloat
         let isDark: Bool
+        let isCollapsedUserOnlyMode: Bool
         let replyReferenceId: UUID?
         let replyReferencePreview: String?
     }
@@ -668,6 +672,22 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
             return bottom
         }
         return role == .user ? palette.sage : palette.cream
+    }
+
+    private func bubbleGradientColors(for role: Message.Role, palette: ChatFlowUIKitTheme.Palette) -> [UIColor] {
+        if isCollapsedUserOnlyMode, role == .user {
+            return [palette.collapsedUserBubbleGold, palette.collapsedUserBubbleGold]
+        }
+        return role == .user ? palette.bubbleSelfGradient : palette.bubbleOtherGradient
+    }
+
+    private func applyCollapsedUserOnlyInteractionMode() {
+        headerMenuButton.menu = isCollapsedUserOnlyMode ? nil : messageContextMenu()
+        headerMenuButton.isUserInteractionEnabled = !isCollapsedUserOnlyMode
+        bodyLabel.isSelectable = !isCollapsedUserOnlyMode
+        bodyLabel.dataDetectorTypes = isCollapsedUserOnlyMode || !enableDataDetectors ? [] : [.link]
+        dynamicContentStack.isUserInteractionEnabled = !isCollapsedUserOnlyMode
+        allowSwipeUpExpandForSingleLink = isCollapsedUserOnlyMode ? false : allowSwipeUpExpandForSingleLink
     }
 
     override init(frame: CGRect) {
@@ -1132,6 +1152,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
                    showOnlyUserMessagesMenuLabel: String? = nil,
                    onToggleShowOnlyUserMessages: (() -> Void)? = nil,
                    onShowOnlyUserMessagesReveal: ((Message) -> Void)? = nil,
+                   isCollapsedUserOnlyMode: Bool = false,
                    replyReference: PendingMessageReference? = nil,
                    salientHighlightService: (any SalientHighlightServicing)? = nil) {
         assert(Thread.isMainThread)
@@ -1180,6 +1201,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
             paddingScale: paddingScale,
             effectiveMinWidth: effectiveMinWidth,
             isDark: effectiveIsDark,
+            isCollapsedUserOnlyMode: isCollapsedUserOnlyMode,
             replyReference: replyReference
         )
 
@@ -1198,8 +1220,9 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         self.showOnlyUserMessagesMenuLabel = showOnlyUserMessagesMenuLabel
         self.onToggleShowOnlyUserMessages = onToggleShowOnlyUserMessages
         self.onShowOnlyUserMessagesReveal = onShowOnlyUserMessagesReveal
+        self.isCollapsedUserOnlyMode = isCollapsedUserOnlyMode
         updateReplyIndicator()
-        headerMenuButton.menu = messageContextMenu()
+        applyCollapsedUserOnlyInteractionMode()
 
         Self.logger.debug("configure: isDark=\(isDark.map { String($0) } ?? "nil", privacy: .public) effectiveIsDark=\(effectiveIsDark, privacy: .public) role=\(String(describing: message.role), privacy: .public)")
         let palette = ChatFlowUIKitTheme.palette(isDark: effectiveIsDark)
@@ -1269,6 +1292,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         }
         dynamicContentViews.removeAll()
         fileTapHandlers.removeAll()
+        applyCollapsedUserOnlyInteractionMode()
 
         let markdownStyle = Self.markdownStyle(for: sizeClass, metrics: metrics)
         let markdownContent = UnifiedMarkdownRenderer.makeContent(
@@ -1354,6 +1378,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         }).first
         let shouldShowInlineReloadButton = isSingleLinkPreview && linkPreviewURL != nil
         allowSwipeUpExpandForSingleLink = isSingleLinkPreview
+        applyCollapsedUserOnlyInteractionMode()
 
         // Flynn: URLs should render as tappable cards per the design-system, independent of embedded preview success.
         // For multi-URL messages, cards render for each unique URL; for single-URL messages, card renders above preview.
@@ -1714,7 +1739,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
 
         let gradientColors = isCanceled
             ? ChatFlowUIKitTheme.canceledBubbleGradient(isDark: effectiveIsDark)
-            : (message.role == .user ? palette.bubbleSelfGradient : palette.bubbleOtherGradient)
+            : bubbleGradientColors(for: message.role, palette: palette)
         gradientLayer.colors = gradientColors.map { $0.cgColor }
         gradientLayer.startPoint = message.role == .user ? CGPoint(x: 0.0, y: 0.0) : CGPoint(x: 0.5, y: 0.0)
         gradientLayer.endPoint = message.role == .user ? CGPoint(x: 1.0, y: 1.0) : CGPoint(x: 0.5, y: 1.0)
@@ -1762,6 +1787,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         paddingScale: CGFloat,
         effectiveMinWidth: CGFloat,
         isDark: Bool,
+        isCollapsedUserOnlyMode: Bool,
         replyReference: PendingMessageReference?
     ) -> DynamicContentReuseKey? {
         guard presentation.parts.allSatisfy(Self.canReuseTextViewDynamicContent),
@@ -1789,6 +1815,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
             paddingScale: paddingScale,
             minWidth: effectiveMinWidth,
             isDark: isDark,
+            isCollapsedUserOnlyMode: isCollapsedUserOnlyMode,
             replyReferenceId: replyReference?.id,
             replyReferencePreview: replyReference?.preview
         )
@@ -1847,7 +1874,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
 
         let gradientColors = isCanceled
             ? ChatFlowUIKitTheme.canceledBubbleGradient(isDark: isDark)
-            : (message.role == .user ? palette.bubbleSelfGradient : palette.bubbleOtherGradient)
+            : bubbleGradientColors(for: message.role, palette: palette)
         gradientLayer.colors = gradientColors.map { $0.cgColor }
         gradientLayer.startPoint = message.role == .user ? CGPoint(x: 0.0, y: 0.0) : CGPoint(x: 0.5, y: 0.0)
         gradientLayer.endPoint = message.role == .user ? CGPoint(x: 1.0, y: 1.0) : CGPoint(x: 0.5, y: 1.0)
@@ -1875,6 +1902,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         borderGradientLayer.isHidden = false
         topHighlightLayer.isHidden = false
         shadowContainerView.isHidden = false
+        applyCollapsedUserOnlyInteractionMode()
         updateBorderColors(isDark: palette.isDark)
         setNeedsLayout()
     }
@@ -1890,8 +1918,9 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         showOnlyUserMessagesMenuLabel = nil
         onToggleShowOnlyUserMessages = nil
         onShowOnlyUserMessagesReveal = nil
+        isCollapsedUserOnlyMode = false
         updateReplyIndicator()
-        headerMenuButton.menu = nil
+        applyCollapsedUserOnlyInteractionMode()
         suppressExpandTapForLinkCards = false
         allowSwipeUpExpandForSingleLink = false
         timestampDate = nil
@@ -1979,6 +2008,11 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
     }
 
     private func updateOuterScrollState() {
+        guard !isCollapsedUserOnlyMode else {
+            applyOuterScrollState(isOverflowing: false, forceResetOffset: true)
+            return
+        }
+
         // Design-system: only large (.long) bubbles can scroll/truncate. Short/medium bubbles never
         // show outer scroll chrome (fade mask / "squircle bar"), even under Dynamic Type.
         //
@@ -2125,7 +2159,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         CATransaction.setDisableActions(true)
         let gradientColors = isCanceled
             ? ChatFlowUIKitTheme.canceledBubbleGradient(isDark: isDark)
-            : (currentMessageRole == .user ? palette.bubbleSelfGradient : palette.bubbleOtherGradient)
+            : bubbleGradientColors(for: currentMessageRole, palette: palette)
         gradientLayer.colors = gradientColors.map { $0.cgColor }
         CATransaction.commit()
 
@@ -2142,7 +2176,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
 
         // Update fade view - use bubble gradient end colors
         // Top color must match bottom color (just transparent) to avoid haze
-        let bottomColor = Self.gradientBottomColor(for: currentMessageRole, palette: palette)
+        let bottomColor = gradientColors.last ?? Self.gradientBottomColor(for: currentMessageRole, palette: palette)
         fadeView.updateColors(
             top: bottomColor.withAlphaComponent(0),
             bottom: bottomColor
@@ -2362,6 +2396,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
     }
 
     private func messageContextMenu() -> UIMenu? {
+        guard !isCollapsedUserOnlyMode else { return nil }
         guard let currentMessage else { return nil }
         var actions: [UIMenuElement] = []
         if let copyableReadableText = currentCopyableReadableText {
@@ -3329,6 +3364,7 @@ enum ChatFlowUIKitTheme {
         let warmBrown: UIColor
         let adminAccent: UIColor
         let ink: UIColor
+        let collapsedUserBubbleGold: UIColor
         let bubbleSelfGradient: [UIColor]
         let bubbleOtherGradient: [UIColor]
         let avatarGradient: [UIColor]
@@ -3350,6 +3386,7 @@ enum ChatFlowUIKitTheme {
                 warmBrown: UIColor(red: 0.831, green: 0.769, blue: 0.690, alpha: 1),
                 adminAccent: UIColor(red: 0.549, green: 0.756, blue: 0.996, alpha: 1),
                 ink: UIColor(red: 0.910, green: 0.894, blue: 0.878, alpha: 1),
+                collapsedUserBubbleGold: UIColor(ChatFlowTheme.collapsedUserBubbleGold(.dark)),
                 bubbleSelfGradient: [
                     UIColor(red: 0.161, green: 0.214, blue: 0.149, alpha: 1),
                     UIColor(red: 0.125, green: 0.182, blue: 0.117, alpha: 1)
@@ -3378,6 +3415,7 @@ enum ChatFlowUIKitTheme {
             warmBrown: UIColor(red: 0.361, green: 0.290, blue: 0.239, alpha: 1),
             adminAccent: UIColor(red: 0.141, green: 0.420, blue: 0.831, alpha: 1),
             ink: UIColor(red: 0.239, green: 0.204, blue: 0.161, alpha: 1),
+            collapsedUserBubbleGold: UIColor(ChatFlowTheme.collapsedUserBubbleGold(.light)),
             bubbleSelfGradient: [
                 UIColor(red: 0.834, green: 0.930, blue: 0.789, alpha: 1),
                 UIColor(red: 0.834, green: 0.930, blue: 0.789, alpha: 1)
@@ -3554,6 +3592,7 @@ final class MessageBubbleUIKitCell: UICollectionViewCell {
                    showOnlyUserMessagesMenuLabel: String? = nil,
                    onToggleShowOnlyUserMessages: (() -> Void)? = nil,
                    onShowOnlyUserMessagesReveal: ((Message) -> Void)? = nil,
+                   isCollapsedUserOnlyMode: Bool = false,
                    replyReference: PendingMessageReference? = nil,
                    onResend: (() -> Void)?) {
         messageId = message.id
@@ -3585,6 +3624,7 @@ final class MessageBubbleUIKitCell: UICollectionViewCell {
             showOnlyUserMessagesMenuLabel: showOnlyUserMessagesMenuLabel,
             onToggleShowOnlyUserMessages: onToggleShowOnlyUserMessages,
             onShowOnlyUserMessagesReveal: onShowOnlyUserMessagesReveal,
+            isCollapsedUserOnlyMode: isCollapsedUserOnlyMode,
             replyReference: replyReference,
             onResend: onResend
         )

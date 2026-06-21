@@ -1,5 +1,6 @@
 import XCTest
 import UIKit
+import SwiftUI
 @testable import Clawline
 
 @MainActor
@@ -95,12 +96,93 @@ final class T1277ShowOnlyUserMessagesChatCollapseTests: XCTestCase {
             message: message,
             menuLabel: ShowOnlyUserMessagesChatCollapse.menuLabel(isCollapsed: true),
             onToggle: {},
+            isCollapsedUserOnlyMode: true,
             onReveal: { revealedMessageId = $0.id }
         )
 
         _ = bubble.perform(NSSelectorFromString("handleBubbleTap"))
 
         XCTAssertEqual(revealedMessageId, "u_reveal_identity")
+    }
+
+    func testCollapsedUserOnlyBubbleIsTapOnlyWithoutSelectionOrMenus() throws {
+        let message = t1277Message(id: "u_tap_only", role: .user, content: "tap only")
+        var toggled = 0
+        var revealedMessageId: String?
+        let bubble = t1277ConfiguredBubble(
+            message: message,
+            menuLabel: ShowOnlyUserMessagesChatCollapse.menuLabel(isCollapsed: true),
+            onToggle: { toggled += 1 },
+            isCollapsedUserOnlyMode: true,
+            onReveal: { revealedMessageId = $0.id }
+        )
+
+        XCTAssertFalse(try XCTUnwrap(t1277BodyTextView(in: bubble, containing: "tap only")).isSelectable)
+        XCTAssertEqual(t1277HeaderMenuTitles(in: bubble), [])
+        XCTAssertNil(bubble.contextMenuInteraction(
+            UIContextMenuInteraction(delegate: bubble),
+            configurationForMenuAtLocation: .zero
+        ))
+
+        _ = bubble.perform(NSSelectorFromString("handleBubbleTap"))
+
+        XCTAssertEqual(revealedMessageId, "u_tap_only")
+        XCTAssertEqual(toggled, 0)
+    }
+
+    func testFullTranscriptBubbleKeepsSelectionAndBubbleMenu() throws {
+        let bubble = t1277ConfiguredBubble(
+            message: t1277Message(id: "u_full_interactions", role: .user, content: "full"),
+            menuLabel: ShowOnlyUserMessagesChatCollapse.menuLabel(isCollapsed: false),
+            onToggle: {}
+        )
+
+        XCTAssertTrue(try XCTUnwrap(t1277BodyTextView(in: bubble, containing: "full")).isSelectable)
+        XCTAssertTrue(t1277HeaderMenuTitles(in: bubble).contains("Hide Assistant Messages"))
+        XCTAssertNotNil(bubble.contextMenuInteraction(
+            UIContextMenuInteraction(delegate: bubble),
+            configurationForMenuAtLocation: .zero
+        ))
+    }
+
+    func testCollapsedUserOnlyLongBubbleDisablesOuterScrollInteraction() {
+        let message = t1277Message(
+            id: "u_long_tap_only",
+            role: .user,
+            content: Array(repeating: "Long collapsed bubble remains tap only.", count: 80).joined(separator: "\n")
+        )
+        let bubble = t1277ConfiguredBubble(
+            message: message,
+            menuLabel: ShowOnlyUserMessagesChatCollapse.menuLabel(isCollapsed: true),
+            onToggle: {},
+            sizeClass: .long,
+            isCollapsedUserOnlyMode: true,
+            onReveal: { _ in }
+        )
+
+        XCTAssertFalse(t1277ScrollViews(in: bubble).contains { $0.isScrollEnabled })
+    }
+
+    func testCollapsedUserOnlyBubbleUsesDesignSystemGoldInLightAndDark() {
+        let lightBubble = t1277ConfiguredBubble(
+            message: t1277Message(id: "u_gold_light", role: .user, content: "gold"),
+            menuLabel: ShowOnlyUserMessagesChatCollapse.menuLabel(isCollapsed: true),
+            onToggle: {},
+            isCollapsedUserOnlyMode: true,
+            isDark: false,
+            onReveal: { _ in }
+        )
+        let darkBubble = t1277ConfiguredBubble(
+            message: t1277Message(id: "u_gold_dark", role: .user, content: "gold"),
+            menuLabel: ShowOnlyUserMessagesChatCollapse.menuLabel(isCollapsed: true),
+            onToggle: {},
+            isCollapsedUserOnlyMode: true,
+            isDark: true,
+            onReveal: { _ in }
+        )
+
+        XCTAssertTrue(t1277BubbleGradient(in: lightBubble, contains: UIColor(ChatFlowTheme.collapsedUserBubbleGold(.light))))
+        XCTAssertTrue(t1277BubbleGradient(in: darkBubble, contains: UIColor(ChatFlowTheme.collapsedUserBubbleGold(.dark))))
     }
 
     func testCollapsedUserMessageWithLinkCardStillRevealsOnNonLinkBubbleTap() {
@@ -114,6 +196,7 @@ final class T1277ShowOnlyUserMessagesChatCollapseTests: XCTestCase {
             message: message,
             menuLabel: ShowOnlyUserMessagesChatCollapse.menuLabel(isCollapsed: true),
             onToggle: {},
+            isCollapsedUserOnlyMode: true,
             onReveal: { revealedMessageId = $0.id }
         )
 
@@ -143,6 +226,9 @@ private func t1277ConfiguredBubble(
     message: Message,
     menuLabel: String,
     onToggle: @escaping () -> Void,
+    sizeClass: MessageSizeClass = .short,
+    isCollapsedUserOnlyMode: Bool = false,
+    isDark: Bool = false,
     onReveal: ((Message) -> Void)? = nil
 ) -> MessageBubbleUIKitView {
     let metrics = ChatFlowTheme.Metrics(isCompact: true)
@@ -156,7 +242,7 @@ private func t1277ConfiguredBubble(
     bubble.configure(
         message: message,
         presentation: presentation,
-        sizeClass: .short,
+        sizeClass: sizeClass,
         metrics: metrics,
         maxWidth: 320,
         bubbleSizingV2: nil,
@@ -165,7 +251,7 @@ private func t1277ConfiguredBubble(
         minWidthOverride: 120,
         maxWidthOverride: 320,
         useContinuousCorners: true,
-        isDark: false,
+        isDark: isDark,
         onRequestExpand: nil,
         onRequestLayout: nil,
         onInteractiveCallback: nil,
@@ -174,6 +260,7 @@ private func t1277ConfiguredBubble(
         showOnlyUserMessagesMenuLabel: menuLabel,
         onToggleShowOnlyUserMessages: onToggle,
         onShowOnlyUserMessagesReveal: onReveal,
+        isCollapsedUserOnlyMode: isCollapsedUserOnlyMode,
         replyReference: nil,
         salientHighlightService: nil
     )
@@ -198,4 +285,61 @@ private func t1277FindSubview(in root: UIView, where predicate: (UIView) -> Bool
         }
     }
     return nil
+}
+
+@MainActor
+private func t1277BodyTextView(in root: UIView, containing text: String) -> UITextView? {
+    t1277FindSubview(in: root) { view in
+        guard let textView = view as? UITextView else { return false }
+        return textView.attributedText?.string.contains(text) == true
+    } as? UITextView
+}
+
+@MainActor
+private func t1277HeaderMenuTitles(in root: UIView) -> [String] {
+    let menuButton = t1277FindSubview(in: root) {
+        $0.accessibilityIdentifier == "message_bubble_header_menu_button"
+    } as? UIButton
+    return menuButton?.menu?.children.map(\.title) ?? []
+}
+
+@MainActor
+private func t1277ScrollViews(in root: UIView) -> [UIScrollView] {
+    let local = (root as? UIScrollView).map { [$0] } ?? []
+    return local + root.subviews.flatMap { t1277ScrollViews(in: $0) }
+}
+
+@MainActor
+private func t1277BubbleGradient(in root: UIView, contains expected: UIColor) -> Bool {
+    t1277GradientLayers(in: root).contains { layer in
+        (layer.colors as? [CGColor] ?? []).contains { color in
+            t1277Color(UIColor(cgColor: color), matches: expected)
+        }
+    }
+}
+
+@MainActor
+private func t1277GradientLayers(in root: UIView) -> [CAGradientLayer] {
+    let local = root.layer.sublayers?.compactMap { $0 as? CAGradientLayer } ?? []
+    return local + root.subviews.flatMap { t1277GradientLayers(in: $0) }
+}
+
+private func t1277Color(_ actual: UIColor?, matches expected: UIColor, tolerance: CGFloat = 0.001) -> Bool {
+    guard let actual else { return false }
+    var actualRed: CGFloat = 0
+    var actualGreen: CGFloat = 0
+    var actualBlue: CGFloat = 0
+    var actualAlpha: CGFloat = 0
+    var expectedRed: CGFloat = 0
+    var expectedGreen: CGFloat = 0
+    var expectedBlue: CGFloat = 0
+    var expectedAlpha: CGFloat = 0
+    guard actual.getRed(&actualRed, green: &actualGreen, blue: &actualBlue, alpha: &actualAlpha),
+          expected.getRed(&expectedRed, green: &expectedGreen, blue: &expectedBlue, alpha: &expectedAlpha) else {
+        return false
+    }
+    return abs(actualRed - expectedRed) <= tolerance
+        && abs(actualGreen - expectedGreen) <= tolerance
+        && abs(actualBlue - expectedBlue) <= tolerance
+        && abs(actualAlpha - expectedAlpha) <= tolerance
 }

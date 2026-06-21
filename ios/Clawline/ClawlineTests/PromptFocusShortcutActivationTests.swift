@@ -1400,11 +1400,11 @@ struct PromptFocusShortcutActivationTests {
 
     @Test("T373 Spatial notification material uses adaptive tint and stronger accent")
     func spatialNotificationMaterialUsesAdaptiveTintAndAccent() {
-        #expect(CrossChatNotificationMaterialStyle.backgroundOpacity == 0.95)
-        #expect(CrossChatNotificationMaterialStyle.accentOpacity(isSpatial: true) == 0.60)
+        #expect(CrossChatNotificationMaterialStyle.backgroundOpacity == 1.0)
+        #expect(CrossChatNotificationMaterialStyle.accentOpacity(isSpatial: true) >= 0.88)
         #expect(CrossChatNotificationMaterialStyle.accentOpacity(isSpatial: false) == 0.40)
-        #expect(CrossChatNotificationMaterialStyle.spatialTintOpacity(for: .light) >= 0.68)
-        #expect(CrossChatNotificationMaterialStyle.spatialTintOpacity(for: .dark) >= 0.52)
+        #expect(CrossChatNotificationMaterialStyle.spatialTintOpacity(for: .light) >= 0.88)
+        #expect(CrossChatNotificationMaterialStyle.spatialTintOpacity(for: .dark) >= 0.78)
         #expect(CrossChatNotificationMaterialStyle.spatialTintOpacity(for: .light) > CrossChatNotificationMaterialStyle.spatialTintOpacity(for: .dark))
         #expect(CrossChatNotificationMaterialStyle.spatialBorderOpacity(for: .light) > CrossChatNotificationMaterialStyle.spatialBorderOpacity(for: .dark))
     }

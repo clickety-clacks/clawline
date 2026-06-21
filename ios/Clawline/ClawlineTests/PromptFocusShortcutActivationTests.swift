@@ -1534,8 +1534,12 @@ struct PromptFocusShortcutActivationTests {
         #expect(source.contains(".glassBackgroundEffect(\n            in: RoundedRectangle(cornerRadius: bubbleCornerRadius"))
         #expect(source.contains(".glassEffect(.regular, in: RoundedRectangle(cornerRadius: bubbleCornerRadius"))
         #expect(!source.contains("spatialNotificationTintColor"))
-        #expect(CrossChatNotificationMaterialStyle.accentOpacity(isSpatial: true) == 0.60)
+        #expect(CrossChatNotificationMaterialStyle.backgroundOpacity == 1.0)
+        #expect(CrossChatNotificationMaterialStyle.accentOpacity(isSpatial: true) >= 0.88)
         #expect(CrossChatNotificationMaterialStyle.accentOpacity(isSpatial: false) == 0.40)
+        #expect(CrossChatNotificationMaterialStyle.spatialTintOpacity(for: .light) >= 0.88)
+        #expect(CrossChatNotificationMaterialStyle.spatialTintOpacity(for: .dark) >= 0.78)
+        #expect(CrossChatNotificationMaterialStyle.spatialTintOpacity(for: .light) > CrossChatNotificationMaterialStyle.spatialTintOpacity(for: .dark))
         #expect(CrossChatNotificationMaterialStyle.spatialBorderOpacity(for: .light) > CrossChatNotificationMaterialStyle.spatialBorderOpacity(for: .dark))
     }
 

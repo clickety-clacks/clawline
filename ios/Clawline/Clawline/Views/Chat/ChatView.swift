@@ -7817,12 +7817,18 @@ private struct CrossChatNotificationBubbleHeightPreferenceKey: PreferenceKey {
 }
 
 enum CrossChatNotificationMaterialStyle {
+    static let backgroundOpacity = 1.0
+
     static func accentOpacity(isSpatial: Bool) -> Double {
-        isSpatial ? 0.60 : 0.40
+        isSpatial ? 0.88 : 0.40
+    }
+
+    static func spatialTintOpacity(for colorScheme: ColorScheme) -> Double {
+        colorScheme == .dark ? 0.78 : 0.88
     }
 
     static func spatialBorderOpacity(for colorScheme: ColorScheme) -> Double {
-        colorScheme == .dark ? 0.28 : 0.42
+        colorScheme == .dark ? 0.40 : 0.52
     }
 }
 

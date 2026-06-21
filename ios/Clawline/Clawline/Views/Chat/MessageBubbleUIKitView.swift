@@ -2381,12 +2381,21 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
             self.onReferenceMessage?(message)
         })
         if let showOnlyUserMessagesMenuLabel,
-           let onToggleShowOnlyUserMessages {
-            actions.append(UIAction(title: showOnlyUserMessagesMenuLabel, image: UIImage(systemName: "line.3.horizontal.decrease.circle")) { _ in
-                onToggleShowOnlyUserMessages()
-            })
+           onToggleShowOnlyUserMessages != nil {
+            let command = UIKeyCommand(
+                title: showOnlyUserMessagesMenuLabel,
+                image: UIImage(systemName: "line.3.horizontal.decrease.circle"),
+                action: #selector(handleToggleShowOnlyUserMessagesCommand(_:)),
+                input: "`",
+                modifierFlags: .command
+            )
+            actions.append(command)
         }
         return actions.isEmpty ? nil : UIMenu(children: actions)
+    }
+
+    @objc private func handleToggleShowOnlyUserMessagesCommand(_ sender: UICommand) {
+        onToggleShowOnlyUserMessages?()
     }
 
     @available(iOS 17.0, macCatalyst 17.0, visionOS 1.0, *)

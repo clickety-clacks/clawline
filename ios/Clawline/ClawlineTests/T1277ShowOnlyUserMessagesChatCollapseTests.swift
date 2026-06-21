@@ -46,11 +46,11 @@ final class T1277ShowOnlyUserMessagesChatCollapseTests: XCTestCase {
         let menuButton = try XCTUnwrap(t1277FindSubview(in: bubble) {
             $0.accessibilityIdentifier == "message_bubble_header_menu_button"
         } as? UIButton)
-        let action = try XCTUnwrap(menuButton.menu?.children.compactMap { $0 as? UIAction }.first {
+        let action = try XCTUnwrap(menuButton.menu?.children.compactMap { $0 as? UIKeyCommand }.first {
             $0.title == "Hide Assistant Messages"
         })
 
-        action.performWithSender(nil, target: nil)
+        _ = bubble.perform(action.action, with: action)
 
         XCTAssertTrue(menuButton.showsMenuAsPrimaryAction)
         XCTAssertEqual(toggled, 1)
@@ -65,10 +65,27 @@ final class T1277ShowOnlyUserMessagesChatCollapseTests: XCTestCase {
         let menuButton = try XCTUnwrap(t1277FindSubview(in: bubble) {
             $0.accessibilityIdentifier == "message_bubble_header_menu_button"
         } as? UIButton)
-        let titles = menuButton.menu?.children.compactMap { ($0 as? UIAction)?.title } ?? []
+        let titles = menuButton.menu?.children.map(\.title) ?? []
 
         XCTAssertTrue(titles.contains("Show Only User Messages"))
         XCTAssertFalse(titles.contains("Show Assistant Messages"))
+    }
+
+    func testExistingMessageMenuShowsCommandBacktickShortcut() throws {
+        let bubble = t1277ConfiguredBubble(
+            message: t1277Message(id: "u_menu_shortcut", role: .user, content: "menu"),
+            menuLabel: ShowOnlyUserMessagesChatCollapse.menuLabel(isCollapsed: false),
+            onToggle: {}
+        )
+        let menuButton = try XCTUnwrap(t1277FindSubview(in: bubble) {
+            $0.accessibilityIdentifier == "message_bubble_header_menu_button"
+        } as? UIButton)
+        let command = try XCTUnwrap(menuButton.menu?.children.compactMap { $0 as? UIKeyCommand }.first {
+            $0.title == "Hide Assistant Messages"
+        })
+
+        XCTAssertEqual(command.input, "`")
+        XCTAssertEqual(command.modifierFlags.intersection([.command, .shift, .alternate, .control]), [.command])
     }
 
     func testCollapsedUserMessageTapUsesMessageIdentityForReveal() {

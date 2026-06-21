@@ -1523,14 +1523,19 @@ struct PromptFocusShortcutActivationTests {
         )
     }
 
-    @Test("T373 Spatial notification material uses adaptive tint and stronger accent")
-    func spatialNotificationMaterialUsesAdaptiveTintAndAccent() {
-        #expect(CrossChatNotificationMaterialStyle.backgroundOpacity == 0.95)
+    @Test("T1185 Spatial notification material uses platform glass and stronger accent")
+    func spatialNotificationMaterialUsesPlatformGlassAndStrongerAccent() throws {
+        let chatViewPath = URL(filePath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appending(path: "Clawline/Views/Chat/ChatView.swift")
+        let source = try String(contentsOf: chatViewPath, encoding: .utf8)
+
+        #expect(source.contains(".glassBackgroundEffect(\n            in: RoundedRectangle(cornerRadius: bubbleCornerRadius"))
+        #expect(source.contains(".glassEffect(.regular, in: RoundedRectangle(cornerRadius: bubbleCornerRadius"))
+        #expect(!source.contains("spatialNotificationTintColor"))
         #expect(CrossChatNotificationMaterialStyle.accentOpacity(isSpatial: true) == 0.60)
         #expect(CrossChatNotificationMaterialStyle.accentOpacity(isSpatial: false) == 0.40)
-        #expect(CrossChatNotificationMaterialStyle.spatialTintOpacity(for: .light) >= 0.68)
-        #expect(CrossChatNotificationMaterialStyle.spatialTintOpacity(for: .dark) >= 0.52)
-        #expect(CrossChatNotificationMaterialStyle.spatialTintOpacity(for: .light) > CrossChatNotificationMaterialStyle.spatialTintOpacity(for: .dark))
         #expect(CrossChatNotificationMaterialStyle.spatialBorderOpacity(for: .light) > CrossChatNotificationMaterialStyle.spatialBorderOpacity(for: .dark))
     }
 

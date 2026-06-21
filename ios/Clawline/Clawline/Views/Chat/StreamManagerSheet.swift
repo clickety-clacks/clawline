@@ -91,11 +91,7 @@ struct StreamManagerSheet: View {
             rowHorizontalInset: listRowHorizontalInset,
             rowContentSpacing: rowContentSpacing,
             leadingDotDiameter: rowDotDiameter,
-            trailingAccessoryReserve: StreamSelectorLayout.popupTrailingAccessoryReserve(
-                baseAccessoryReserve: rowTrailingAccessoryReserve,
-                shortcutLabelReservedWidth: shortcutLabelReservedWidth,
-                showsShortcutLabels: !selectableShortcutSessionKeys.isEmpty
-            )
+            trailingAccessoryReserve: rowTrailingAccessoryReserve
         )
     }
 
@@ -156,7 +152,7 @@ struct StreamManagerSheet: View {
 
     var body: some View {
         let _ = settings.fontScaleChangeSequence
-        let verticalLayout = StreamSelectorLayout.popupVerticalLayout(
+        let idealVerticalLayout = StreamSelectorLayout.popupVerticalLayout(
             itemCount: listItemCount,
             showsCreateInlineRow: false,
             rowHeight: listRowHeight,
@@ -166,55 +162,50 @@ struct StreamManagerSheet: View {
             maxAvailableHeight: maxAvailableHeight,
             minimumPopoverHeight: minimumPopoverHeight
         )
-        let containerHeight = verticalLayout.containerHeight
+        let heightFrame = StreamSelectorLayout.popupHeightFrame(
+            idealContainerHeight: idealVerticalLayout.containerHeight,
+            minimumPopoverHeight: minimumPopoverHeight,
+            isSpatial: Self.isSpatialPlatform
+        )
         let rowDotStates = StreamSelectorLayout.dotStatesBySession(
             streams: filteredStreams,
             lookup: dotStateLookup
         )
-        VStack(spacing: 0) {
-            List {
-                ForEach(filteredStreams) { stream in
-                    streamRow(
-                        for: stream,
-                        dotState: rowDotStates[stream.sessionKey] ?? .inactive
-                    )
-                }
-
-                ForEach(filteredPendingCreateRows) { pendingRow in
-                    HStack(spacing: 10) {
-                        Circle()
-                            .fill(Color.primary.opacity(0.18))
-                            .frame(width: 8, height: 8)
-                        Text(pendingRow.displayName)
-                            .font(.clawline(.subsectionHeader).weight(.regular))
-                            .foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        ProgressView()
-                            .controlSize(.small)
-                            .tint(.secondary)
-                    }
-                    .listRowSeparator(.hidden)
-                    .listRowBackground(Color.clear)
-                    .frame(height: listRowHeight, alignment: .center)
-                    .listRowInsets(
-                        EdgeInsets(
-                            top: 0,
-                            leading: listRowHorizontalInset,
-                            bottom: 0,
-                            trailing: listRowHorizontalInset
+        GeometryReader { geometry in
+            let containerHeight = StreamSelectorLayout.popupContainerHeight(
+                idealContainerHeight: idealVerticalLayout.containerHeight,
+                allocatedContainerHeight: geometry.size.height,
+                isSpatial: Self.isSpatialPlatform
+            )
+            let listViewportHeight = StreamSelectorLayout.listViewportHeight(
+                containerHeight: containerHeight,
+                actionBarReservedHeight: actionBarReservedHeight
+            )
+            VStack(spacing: 0) {
+                List {
+                    ForEach(filteredStreams) { stream in
+                        streamRow(
+                            for: stream,
+                            dotState: rowDotStates[stream.sessionKey] ?? .inactive
                         )
-                    )
-                    .contentShape(Rectangle())
-                }
+                    }
 
-                if filteredStreams.isEmpty && filteredPendingCreateRows.isEmpty {
-                    Text("No streams found")
-                        .font(.clawline(.secondaryLabel))
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .center)
-                        .frame(height: listRowHeight, alignment: .center)
+                    ForEach(filteredPendingCreateRows) { pendingRow in
+                        HStack(spacing: 10) {
+                            Circle()
+                                .fill(Color.primary.opacity(0.18))
+                                .frame(width: 8, height: 8)
+                            Text(pendingRow.displayName)
+                                .font(.clawline(.subsectionHeader).weight(.regular))
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            ProgressView()
+                                .controlSize(.small)
+                                .tint(.secondary)
+                        }
                         .listRowSeparator(.hidden)
                         .listRowBackground(Color.clear)
+                        .frame(height: listRowHeight, alignment: .center)
                         .listRowInsets(
                             EdgeInsets(
                                 top: 0,
@@ -223,23 +214,44 @@ struct StreamManagerSheet: View {
                                 trailing: listRowHorizontalInset
                             )
                         )
-                }
-            }
-            .listStyle(.plain)
-            .environment(\.defaultMinListRowHeight, listRowHeight)
-            .listRowSpacing(listRowSpacing)
-            .scrollBounceBehavior(.always)
-            .contentMargins(.top, listOuterVerticalPadding, for: .scrollContent)
-            .contentMargins(.bottom, listOuterVerticalPadding, for: .scrollContent)
-            .scrollContentBackground(.hidden)
-            .background(Color.clear)
-            .frame(height: verticalLayout.listViewportHeight)
-            .clipShape(Rectangle())
-            .disabled(isWorking)
+                        .contentShape(Rectangle())
+                    }
 
-            bottomActionBar
+                    if filteredStreams.isEmpty && filteredPendingCreateRows.isEmpty {
+                        Text("No streams found")
+                            .font(.clawline(.secondaryLabel))
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .center)
+                            .frame(height: listRowHeight, alignment: .center)
+                            .listRowSeparator(.hidden)
+                            .listRowBackground(Color.clear)
+                            .listRowInsets(
+                                EdgeInsets(
+                                    top: 0,
+                                    leading: listRowHorizontalInset,
+                                    bottom: 0,
+                                    trailing: listRowHorizontalInset
+                                )
+                            )
+                    }
+                }
+                .listStyle(.plain)
+                .environment(\.defaultMinListRowHeight, listRowHeight)
+                .listRowSpacing(listRowSpacing)
+                .scrollBounceBehavior(.always)
+                .contentMargins(.top, listOuterVerticalPadding, for: .scrollContent)
+                .contentMargins(.bottom, listOuterVerticalPadding, for: .scrollContent)
+                .scrollContentBackground(.hidden)
+                .background(Color.clear)
+                .frame(height: listViewportHeight)
+                .clipShape(Rectangle())
+                .disabled(isWorking)
+
+                bottomActionBar
+            }
+            .frame(width: geometry.size.width, height: containerHeight, alignment: .top)
         }
-        .frame(height: containerHeight, alignment: .top)
+        .frame(height: heightFrame.fixedHeight, alignment: .top)
         .frame(
             minWidth: minimumPopoverWidth,
             idealWidth: idealPopoverWidth,
@@ -248,9 +260,9 @@ struct StreamManagerSheet: View {
         .frame(
             // Clamp the floor to the capped height so we never produce an inconsistent
             // (minHeight > maxHeight) frame when the window is shorter than our preferred minimum.
-            minHeight: min(minimumPopoverHeight, containerHeight),
-            idealHeight: containerHeight,
-            maxHeight: containerHeight,
+            minHeight: heightFrame.minHeight,
+            idealHeight: heightFrame.idealHeight,
+            maxHeight: heightFrame.maxHeight,
             alignment: .top
         )
         .background(Color.clear)
@@ -1491,6 +1503,13 @@ enum StreamSelectorLayout {
         let actionBarHeight: CGFloat
     }
 
+    struct PopupHeightFrame: Equatable {
+        let fixedHeight: CGFloat?
+        let minHeight: CGFloat?
+        let idealHeight: CGFloat?
+        let maxHeight: CGFloat?
+    }
+
     static func dotStatesBySession(
         streams: [StreamSession],
         lookup: StreamDotStateLookup
@@ -1533,12 +1552,33 @@ enum StreamSelectorLayout {
         return min(maximumPopoverWidth, max(minimumPopoverWidth, idealWidth))
     }
 
-    static func popupTrailingAccessoryReserve(
-        baseAccessoryReserve: CGFloat,
-        shortcutLabelReservedWidth: CGFloat,
-        showsShortcutLabels: Bool
+    static func popupContainerHeight(
+        idealContainerHeight: CGFloat,
+        allocatedContainerHeight: CGFloat,
+        isSpatial: Bool
     ) -> CGFloat {
-        baseAccessoryReserve + (showsShortcutLabels ? shortcutLabelReservedWidth : 0)
+        isSpatial ? allocatedContainerHeight : idealContainerHeight
+    }
+
+    static func popupHeightFrame(
+        idealContainerHeight: CGFloat,
+        minimumPopoverHeight: CGFloat,
+        isSpatial: Bool
+    ) -> PopupHeightFrame {
+        guard !isSpatial else {
+            return PopupHeightFrame(
+                fixedHeight: nil,
+                minHeight: nil,
+                idealHeight: nil,
+                maxHeight: nil
+            )
+        }
+        return PopupHeightFrame(
+            fixedHeight: idealContainerHeight,
+            minHeight: min(minimumPopoverHeight, idealContainerHeight),
+            idealHeight: idealContainerHeight,
+            maxHeight: idealContainerHeight
+        )
     }
 
     static func filter(streams: [StreamSession], query: String) -> [StreamSession] {
@@ -1678,8 +1718,8 @@ enum StreamSelectorLayout {
     /// Adaptive height for the stream list viewport given an actual allocated container height.
     ///
     /// This is used by the popup to shrink the scrollable list viewport when the popover
-    /// system allocates less vertical space than the popup's ideal height, so list content
-    /// never overflows into the popup chrome or past the visible popup bounds.
+    /// system allocates less vertical space than the popup's ideal height, so list rows and
+    /// the bottom toolbar stay inside the visible popup bounds.
     static func listViewportHeight(
         containerHeight: CGFloat,
         actionBarReservedHeight: CGFloat

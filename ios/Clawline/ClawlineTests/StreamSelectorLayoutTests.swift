@@ -342,45 +342,6 @@ struct StreamSelectorLayoutTests {
         #expect(width == CGFloat(480))
     }
 
-    @Test("T1374 popup width reserves the status dot when shortcut labels are present")
-    func popupWidthReservesStatusDotWithShortcutLabels() {
-        let reserveWithShortcuts = StreamSelectorLayout.popupTrailingAccessoryReserve(
-            baseAccessoryReserve: CGFloat(28),
-            shortcutLabelReservedWidth: CGFloat(58),
-            showsShortcutLabels: true
-        )
-        let reserveWithoutShortcuts = StreamSelectorLayout.popupTrailingAccessoryReserve(
-            baseAccessoryReserve: CGFloat(28),
-            shortcutLabelReservedWidth: CGFloat(58),
-            showsShortcutLabels: false
-        )
-        let width = StreamSelectorLayout.popupWidth(
-            longestItemWidth: CGFloat(270),
-            minimumPopoverWidth: CGFloat(280),
-            baselineIdealPopoverWidth: CGFloat(320),
-            maximumPopoverWidth: CGFloat(480),
-            rowHorizontalInset: CGFloat(12),
-            rowContentSpacing: CGFloat(10),
-            leadingDotDiameter: CGFloat(8),
-            trailingAccessoryReserve: reserveWithShortcuts
-        )
-        let widthWithoutShortcuts = StreamSelectorLayout.popupWidth(
-            longestItemWidth: CGFloat(270),
-            minimumPopoverWidth: CGFloat(280),
-            baselineIdealPopoverWidth: CGFloat(320),
-            maximumPopoverWidth: CGFloat(480),
-            rowHorizontalInset: CGFloat(12),
-            rowContentSpacing: CGFloat(10),
-            leadingDotDiameter: CGFloat(8),
-            trailingAccessoryReserve: reserveWithoutShortcuts
-        )
-
-        #expect(reserveWithShortcuts == CGFloat(86))
-        #expect(reserveWithoutShortcuts == CGFloat(28))
-        #expect(width == CGFloat(398))
-        #expect(widthWithoutShortcuts == CGFloat(340))
-    }
-
     @Test("Stream manager popup width does not exceed the maximum cap")
     func streamManagerPopupWidthRespectsMaximumCap() {
         let width = StreamSelectorLayout.popupWidth(
@@ -526,6 +487,61 @@ struct StreamSelectorLayoutTests {
         )
 
         #expect(viewport == CGFloat(0))
+    }
+
+    @Test("T1374 Spatial popup uses allocated height so rows and toolbar stay visible")
+    func spatialPopupUsesAllocatedHeightForVisibleRowsAndToolbar() {
+        let idealHeight = CGFloat(542)
+        let allocatedHeight = CGFloat(320)
+        let actionBarHeight = CGFloat(72)
+        let spatialHeight = StreamSelectorLayout.popupContainerHeight(
+            idealContainerHeight: idealHeight,
+            allocatedContainerHeight: allocatedHeight,
+            isSpatial: true
+        )
+        let nonSpatialHeight = StreamSelectorLayout.popupContainerHeight(
+            idealContainerHeight: idealHeight,
+            allocatedContainerHeight: allocatedHeight,
+            isSpatial: false
+        )
+
+        #expect(spatialHeight == allocatedHeight)
+        #expect(nonSpatialHeight == idealHeight)
+        #expect(
+            StreamSelectorLayout.listViewportHeight(
+                containerHeight: spatialHeight,
+                actionBarReservedHeight: actionBarHeight
+            ) == CGFloat(248)
+        )
+        #expect(
+            StreamSelectorLayout.listViewportHeight(
+                containerHeight: spatialHeight,
+                actionBarReservedHeight: actionBarHeight
+            ) + actionBarHeight == allocatedHeight
+        )
+    }
+
+    @Test("T1374 Spatial popup does not force ideal height before reading allocated geometry")
+    func spatialPopupHeightFrameDoesNotForceIdealHeight() {
+        let spatialFrame = StreamSelectorLayout.popupHeightFrame(
+            idealContainerHeight: CGFloat(542),
+            minimumPopoverHeight: CGFloat(140),
+            isSpatial: true
+        )
+        let nonSpatialFrame = StreamSelectorLayout.popupHeightFrame(
+            idealContainerHeight: CGFloat(542),
+            minimumPopoverHeight: CGFloat(140),
+            isSpatial: false
+        )
+
+        #expect(spatialFrame.fixedHeight == nil)
+        #expect(spatialFrame.minHeight == nil)
+        #expect(spatialFrame.idealHeight == nil)
+        #expect(spatialFrame.maxHeight == nil)
+        #expect(nonSpatialFrame.fixedHeight == CGFloat(542))
+        #expect(nonSpatialFrame.minHeight == CGFloat(140))
+        #expect(nonSpatialFrame.idealHeight == CGFloat(542))
+        #expect(nonSpatialFrame.maxHeight == CGFloat(542))
     }
 
     @Test("T1210 filtering resizes popup height while preserving action bar height")

@@ -199,6 +199,324 @@ struct BubbleScrollTests {
         #expect(abs(measured.width - preferred) < 0.5)
     }
 
+    @Test("T1377: BubbleSizingV2 measurement key ignores raw viewport motion when resolved cap is unchanged")
+    @MainActor
+    func bubbleSizingV2MeasurementKeyIgnoresEquivalentViewportMotion() {
+        let metrics = ChatFlowTheme.Metrics(isCompact: true)
+        let metricsFingerprint = BubbleSizingV2.metricsFingerprint(metrics: metrics, traitCollection: UITraitCollection())
+        let baseEnv = BubbleSizingV2.Environment(
+            containerWidth: 396,
+            containerHeight: 760,
+            singleLinkContainerHeight: 760,
+            topInset: 20,
+            bottomInset: 236,
+            truncationBottomInset: 236,
+            isVisionOS: false,
+            metricsFingerprint: metricsFingerprint
+        )
+        let shiftedEnv = BubbleSizingV2.Environment(
+            containerWidth: 396,
+            containerHeight: 720,
+            singleLinkContainerHeight: 720,
+            topInset: 20,
+            bottomInset: 196,
+            truncationBottomInset: 196,
+            isVisionOS: false,
+            metricsFingerprint: metricsFingerprint
+        )
+        let basePolicy = BubbleSizingV2.BubbleHeightPolicy.resolve(
+            metrics: metrics,
+            env: baseEnv,
+            isSingleLinkPreview: false,
+            prefersScreenAwareHeightCap: true,
+            allowsOuterScroll: true
+        )
+        let shiftedPolicy = BubbleSizingV2.BubbleHeightPolicy.resolve(
+            metrics: metrics,
+            env: shiftedEnv,
+            isSingleLinkPreview: false,
+            prefersScreenAwareHeightCap: true,
+            allowsOuterScroll: true
+        )
+
+        let first = basePolicy.measurementCacheKey(
+            sessionKey: "s",
+            messageId: "m",
+            presentationFingerprint: 1,
+            layoutFingerprintSeed: 2,
+            env: baseEnv,
+            linkPreviewStateVersion: 0
+        )
+        let second = shiftedPolicy.measurementCacheKey(
+            sessionKey: "s",
+            messageId: "m",
+            presentationFingerprint: 1,
+            layoutFingerprintSeed: 2,
+            env: shiftedEnv,
+            linkPreviewStateVersion: 0
+        )
+
+        #expect(basePolicy.heightCap == shiftedPolicy.heightCap)
+        #expect(first == second)
+    }
+
+    @Test("T1377: BubbleSizingV2 measurement key changes when resolved height cap changes")
+    @MainActor
+    func bubbleSizingV2MeasurementKeyTracksResolvedHeightCap() {
+        let env = BubbleSizingV2.Environment(
+            containerWidth: 396,
+            containerHeight: 760,
+            singleLinkContainerHeight: 760,
+            topInset: 20,
+            bottomInset: 120,
+            truncationBottomInset: 120,
+            isVisionOS: false,
+            metricsFingerprint: 11
+        )
+        let firstPolicy = BubbleSizingV2.BubbleHeightPolicy(
+            isSingleLinkPreview: false,
+            heightCapMode: .screenAware,
+            heightCap: 480,
+            v1TruncationHeightOverride: 480,
+            linkPreviewViewportMaxHeight: 432,
+            cacheFingerprint: BubbleSizingV2.heightPolicyFingerprint(
+                isSingleLinkPreview: false,
+                heightCapMode: .screenAware,
+                heightCap: 480,
+                v1TruncationHeightOverride: 480,
+                linkPreviewViewportMaxHeight: 432
+            )
+        )
+        let secondPolicy = BubbleSizingV2.BubbleHeightPolicy(
+            isSingleLinkPreview: false,
+            heightCapMode: .screenAware,
+            heightCap: 520,
+            v1TruncationHeightOverride: 520,
+            linkPreviewViewportMaxHeight: 472,
+            cacheFingerprint: BubbleSizingV2.heightPolicyFingerprint(
+                isSingleLinkPreview: false,
+                heightCapMode: .screenAware,
+                heightCap: 520,
+                v1TruncationHeightOverride: 520,
+                linkPreviewViewportMaxHeight: 472
+            )
+        )
+
+        let first = firstPolicy.measurementCacheKey(
+            sessionKey: "s",
+            messageId: "m",
+            presentationFingerprint: 1,
+            layoutFingerprintSeed: 2,
+            env: env,
+            linkPreviewStateVersion: 0
+        )
+        let second = secondPolicy.measurementCacheKey(
+            sessionKey: "s",
+            messageId: "m",
+            presentationFingerprint: 1,
+            layoutFingerprintSeed: 2,
+            env: env,
+            linkPreviewStateVersion: 0
+        )
+
+        #expect(first != second)
+    }
+
+    @Test("T1377: BubbleSizingV2 measurement key keeps width platform and metrics identity")
+    @MainActor
+    func bubbleSizingV2MeasurementKeyKeepsMeasurementIdentityFields() {
+        let policy = BubbleSizingV2.BubbleHeightPolicy(
+            isSingleLinkPreview: false,
+            heightCapMode: .designSystem,
+            heightCap: 2_000,
+            v1TruncationHeightOverride: nil,
+            linkPreviewViewportMaxHeight: 1_952,
+            cacheFingerprint: BubbleSizingV2.heightPolicyFingerprint(
+                isSingleLinkPreview: false,
+                heightCapMode: .designSystem,
+                heightCap: 2_000,
+                v1TruncationHeightOverride: nil,
+                linkPreviewViewportMaxHeight: 1_952
+            )
+        )
+        let baseEnv = BubbleSizingV2.Environment(
+            containerWidth: 396,
+            containerHeight: 760,
+            singleLinkContainerHeight: 760,
+            topInset: 20,
+            bottomInset: 120,
+            truncationBottomInset: 120,
+            isVisionOS: false,
+            metricsFingerprint: 11
+        )
+        let widerEnv = BubbleSizingV2.Environment(
+            containerWidth: 430,
+            containerHeight: 760,
+            singleLinkContainerHeight: 760,
+            topInset: 20,
+            bottomInset: 120,
+            truncationBottomInset: 120,
+            isVisionOS: false,
+            metricsFingerprint: 11
+        )
+        let visionEnv = BubbleSizingV2.Environment(
+            containerWidth: 396,
+            containerHeight: 760,
+            singleLinkContainerHeight: 760,
+            topInset: 20,
+            bottomInset: 120,
+            truncationBottomInset: 120,
+            isVisionOS: true,
+            metricsFingerprint: 11
+        )
+        let dynamicTypeEnv = BubbleSizingV2.Environment(
+            containerWidth: 396,
+            containerHeight: 760,
+            singleLinkContainerHeight: 760,
+            topInset: 20,
+            bottomInset: 120,
+            truncationBottomInset: 120,
+            isVisionOS: false,
+            metricsFingerprint: 12
+        )
+
+        let base = policy.measurementCacheKey(
+            sessionKey: "s",
+            messageId: "m",
+            presentationFingerprint: 1,
+            layoutFingerprintSeed: 2,
+            env: baseEnv,
+            linkPreviewStateVersion: 0
+        )
+
+        #expect(base != policy.measurementCacheKey(
+            sessionKey: "s",
+            messageId: "m",
+            presentationFingerprint: 1,
+            layoutFingerprintSeed: 2,
+            env: widerEnv,
+            linkPreviewStateVersion: 0
+        ))
+        #expect(base != policy.measurementCacheKey(
+            sessionKey: "s",
+            messageId: "m",
+            presentationFingerprint: 1,
+            layoutFingerprintSeed: 2,
+            env: visionEnv,
+            linkPreviewStateVersion: 0
+        ))
+        #expect(base != policy.measurementCacheKey(
+            sessionKey: "s",
+            messageId: "m",
+            presentationFingerprint: 1,
+            layoutFingerprintSeed: 2,
+            env: dynamicTypeEnv,
+            linkPreviewStateVersion: 0
+        ))
+    }
+
+    @Test("T1377: resolved height policy fingerprint invalidates measurements when cap changes")
+    @MainActor
+    func resolvedHeightPolicyFingerprintInvalidatesMeasurementKeyWhenCapChanges() {
+        let metrics = ChatFlowTheme.Metrics(isCompact: true)
+        let baseEnv = BubbleSizingV2.Environment(
+            containerWidth: 396,
+            containerHeight: 760,
+            singleLinkContainerHeight: 760,
+            topInset: 20,
+            bottomInset: 120,
+            truncationBottomInset: 120,
+            isVisionOS: false,
+            metricsFingerprint: BubbleSizingV2.metricsFingerprint(metrics: metrics, traitCollection: UITraitCollection())
+        )
+        let compactEnv = BubbleSizingV2.Environment(
+            containerWidth: 396,
+            containerHeight: 720,
+            singleLinkContainerHeight: 720,
+            topInset: 20,
+            bottomInset: 120,
+            truncationBottomInset: 120,
+            isVisionOS: false,
+            metricsFingerprint: baseEnv.metricsFingerprint
+        )
+        let basePolicy = BubbleSizingV2.BubbleHeightPolicy.resolve(
+            metrics: metrics,
+            env: baseEnv,
+            isSingleLinkPreview: false,
+            prefersScreenAwareHeightCap: true,
+            allowsOuterScroll: true
+        )
+        let compactPolicy = BubbleSizingV2.BubbleHeightPolicy.resolve(
+            metrics: metrics,
+            env: compactEnv,
+            isSingleLinkPreview: false,
+            prefersScreenAwareHeightCap: true,
+            allowsOuterScroll: true
+        )
+
+        let base = basePolicy.measurementCacheKey(
+            sessionKey: "s",
+            messageId: "m",
+            presentationFingerprint: 1,
+            layoutFingerprintSeed: 2,
+            env: baseEnv,
+            linkPreviewStateVersion: 0
+        )
+        let compact = compactPolicy.measurementCacheKey(
+            sessionKey: "s",
+            messageId: "m",
+            presentationFingerprint: 1,
+            layoutFingerprintSeed: 2,
+            env: compactEnv,
+            linkPreviewStateVersion: 0
+        )
+
+        #expect(basePolicy.heightCap != compactPolicy.heightCap)
+        #expect(base != compact)
+    }
+
+    @Test("T1377: BubbleSizingV2 measurement key tracks link preview state version")
+    @MainActor
+    func bubbleSizingV2MeasurementKeyTracksLinkPreviewStateVersion() {
+        let metrics = ChatFlowTheme.Metrics(isCompact: true)
+        let env = BubbleSizingV2.Environment(
+            containerWidth: 396,
+            containerHeight: 760,
+            singleLinkContainerHeight: 760,
+            topInset: 20,
+            bottomInset: 120,
+            truncationBottomInset: 120,
+            isVisionOS: false,
+            metricsFingerprint: BubbleSizingV2.metricsFingerprint(metrics: metrics, traitCollection: UITraitCollection())
+        )
+        let policy = BubbleSizingV2.BubbleHeightPolicy.resolve(
+            metrics: metrics,
+            env: env,
+            isSingleLinkPreview: true,
+            prefersScreenAwareHeightCap: true,
+            allowsOuterScroll: false
+        )
+
+        let initial = policy.measurementCacheKey(
+            sessionKey: "s",
+            messageId: "m",
+            presentationFingerprint: 1,
+            layoutFingerprintSeed: 2,
+            env: env,
+            linkPreviewStateVersion: 0
+        )
+        let loadedPreview = policy.measurementCacheKey(
+            sessionKey: "s",
+            messageId: "m",
+            presentationFingerprint: 1,
+            layoutFingerprintSeed: 2,
+            env: env,
+            linkPreviewStateVersion: 1
+        )
+
+        #expect(initial != loadedPreview)
+    }
+
     @Test("T1193/T149: Same message id in a different session resets stale inner bubble offset")
     @MainActor
     func sessionAwareReuseResetsOffsetForSameMessageId() {

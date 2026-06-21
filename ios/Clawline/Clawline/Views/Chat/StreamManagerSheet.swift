@@ -164,8 +164,7 @@ struct StreamManagerSheet: View {
         )
         let heightFrame = StreamSelectorLayout.popupHeightFrame(
             idealContainerHeight: idealVerticalLayout.containerHeight,
-            minimumPopoverHeight: minimumPopoverHeight,
-            isSpatial: Self.isSpatialPlatform
+            minimumPopoverHeight: minimumPopoverHeight
         )
         let rowDotStates = StreamSelectorLayout.dotStatesBySession(
             streams: filteredStreams,
@@ -173,9 +172,7 @@ struct StreamManagerSheet: View {
         )
         GeometryReader { geometry in
             let containerHeight = StreamSelectorLayout.popupContainerHeight(
-                idealContainerHeight: idealVerticalLayout.containerHeight,
-                allocatedContainerHeight: geometry.size.height,
-                isSpatial: Self.isSpatialPlatform
+                allocatedContainerHeight: geometry.size.height
             )
             let listViewportHeight = StreamSelectorLayout.listViewportHeight(
                 containerHeight: containerHeight,
@@ -1552,29 +1549,16 @@ enum StreamSelectorLayout {
         return min(maximumPopoverWidth, max(minimumPopoverWidth, idealWidth))
     }
 
-    static func popupContainerHeight(
-        idealContainerHeight: CGFloat,
-        allocatedContainerHeight: CGFloat,
-        isSpatial: Bool
-    ) -> CGFloat {
-        isSpatial ? allocatedContainerHeight : idealContainerHeight
+    static func popupContainerHeight(allocatedContainerHeight: CGFloat) -> CGFloat {
+        allocatedContainerHeight
     }
 
     static func popupHeightFrame(
         idealContainerHeight: CGFloat,
-        minimumPopoverHeight: CGFloat,
-        isSpatial: Bool
+        minimumPopoverHeight: CGFloat
     ) -> PopupHeightFrame {
-        guard !isSpatial else {
-            return PopupHeightFrame(
-                fixedHeight: nil,
-                minHeight: nil,
-                idealHeight: nil,
-                maxHeight: nil
-            )
-        }
         return PopupHeightFrame(
-            fixedHeight: idealContainerHeight,
+            fixedHeight: nil,
             minHeight: min(minimumPopoverHeight, idealContainerHeight),
             idealHeight: idealContainerHeight,
             maxHeight: idealContainerHeight

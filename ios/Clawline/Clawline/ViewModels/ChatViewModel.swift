@@ -3659,6 +3659,12 @@ final class ChatViewModel: ChatViewModelHosting {
             shouldShowTypingIndicator(in: normalizedSessionKey)
     }
 
+    func promptStageIndicatorAnchorMessageId(in sessionKey: String) -> String? {
+        let normalizedSessionKey = sessionKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedSessionKey.isEmpty else { return nil }
+        return liveProgressBySessionKey[normalizedSessionKey]?.messageId
+    }
+
     func sendIndicatorState(for messageId: String) -> MessageSendIndicatorState? {
         if let failure = failureMessage(for: messageId) {
             return .failed(failure)

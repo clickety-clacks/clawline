@@ -2683,7 +2683,6 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         )
         var snapshot = NSDiffableDataSourceSnapshot<Int, String>()
         snapshot.appendSections([0])
-        snapshot.appendItems(snapshotItemIds)
         let oldItemIds = Set(dataSource.snapshot().itemIdentifiers)
 
         // Add typing indicator when assistant is typing (server-controlled)
@@ -2697,7 +2696,14 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         }
         wasShowingTypingIndicator = showTypingIndicator
         if showTypingIndicator {
-            snapshot.appendItems([TypingIndicatorCell.itemId])
+            snapshot.appendItems(TranscriptTypingIndicatorOrdering.itemIds(
+                messageItems: snapshotItemIds,
+                messages: snapshotMessages,
+                typingIndicatorItemId: TypingIndicatorCell.itemId,
+                activePromptMessageId: viewModel.promptStageIndicatorAnchorMessageId(in: effectiveSessionKey)
+            ))
+        } else {
+            snapshot.appendItems(snapshotItemIds)
         }
         if !isShowingOnlyUserMessages,
            SessionMetadataFooterCell.shouldAppendFooter(after: snapshotItemIds, status: sessionStatus) {
@@ -5965,9 +5971,15 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         )
         snapshot.deleteAllItems()
         snapshot.appendSections([0])
-        snapshot.appendItems(desiredItemIds)
         if viewModel.shouldShowPromptStageIndicator(in: effectiveSessionKey) {
-            snapshot.appendItems([TypingIndicatorCell.itemId])
+            snapshot.appendItems(TranscriptTypingIndicatorOrdering.itemIds(
+                messageItems: desiredItemIds,
+                messages: snapshotMessages,
+                typingIndicatorItemId: TypingIndicatorCell.itemId,
+                activePromptMessageId: viewModel.promptStageIndicatorAnchorMessageId(in: effectiveSessionKey)
+            ))
+        } else {
+            snapshot.appendItems(desiredItemIds)
         }
         if SessionMetadataFooterCell.shouldAppendFooter(after: desiredItemIds, status: sessionStatus) {
             snapshot.appendItems([SessionMetadataFooterCell.itemId])

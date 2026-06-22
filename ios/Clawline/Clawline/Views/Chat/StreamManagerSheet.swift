@@ -191,7 +191,12 @@ struct StreamManagerSheet: View {
                         HStack(spacing: 10) {
                             Circle()
                                 .fill(Color.primary.opacity(0.18))
-                                .frame(width: 8, height: 8)
+                                .frame(width: rowDotDiameter, height: rowDotDiameter)
+                                .frame(
+                                    width: StreamSelectorLayout.popupStatusDotSlotWidth(dotDiameter: rowDotDiameter),
+                                    height: listRowHeight,
+                                    alignment: .center
+                                )
                             Text(pendingRow.displayName)
                                 .font(.clawline(.subsectionHeader).weight(.regular))
                                 .foregroundStyle(.secondary)
@@ -533,6 +538,11 @@ struct StreamManagerSheet: View {
                         colorScheme: colorScheme
                     )
                     .id(dotIdentity)
+                    .frame(
+                        width: StreamSelectorLayout.popupStatusDotSlotWidth(dotDiameter: rowDotDiameter),
+                        height: listRowHeight,
+                        alignment: .center
+                    )
                     Text(stream.displayName)
                         .font(.clawline(.subsectionHeader).weight(isActive ? .semibold : .regular))
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -1547,6 +1557,10 @@ enum StreamSelectorLayout {
         let contentDrivenWidth = longestItemWidth + chromeWidth
         let idealWidth = max(baselineIdealPopoverWidth, contentDrivenWidth)
         return min(maximumPopoverWidth, max(minimumPopoverWidth, idealWidth))
+    }
+
+    static func popupStatusDotSlotWidth(dotDiameter: CGFloat) -> CGFloat {
+        dotDiameter
     }
 
     static func popupContainerHeight(allocatedContainerHeight: CGFloat) -> CGFloat {

@@ -325,6 +325,30 @@ struct StreamSelectorLayoutTests {
         #expect(width == CGFloat(320))
     }
 
+    @Test("T1374 Spatial popup reserves a rendered status-dot slot")
+    func spatialPopupReservesRenderedStatusDotSlot() {
+        let dotDiameter = CGFloat(8)
+        let rowContentSpacing = CGFloat(10)
+        let rowHorizontalInset = CGFloat(12)
+        let trailingAccessoryReserve = CGFloat(28)
+        let titleWidth = CGFloat(310)
+        let statusDotSlotWidth = StreamSelectorLayout.popupStatusDotSlotWidth(dotDiameter: dotDiameter)
+
+        let width = StreamSelectorLayout.popupWidth(
+            longestItemWidth: titleWidth,
+            minimumPopoverWidth: CGFloat(280),
+            baselineIdealPopoverWidth: CGFloat(320),
+            maximumPopoverWidth: CGFloat(480),
+            rowHorizontalInset: rowHorizontalInset,
+            rowContentSpacing: rowContentSpacing,
+            leadingDotDiameter: statusDotSlotWidth,
+            trailingAccessoryReserve: trailingAccessoryReserve
+        )
+
+        #expect(statusDotSlotWidth == dotDiameter)
+        #expect(width == titleWidth + (rowHorizontalInset * 2) + statusDotSlotWidth + rowContentSpacing + trailingAccessoryReserve)
+    }
+
     @Test("Stream manager popup grows for longer titles but respects the cap")
     func streamManagerPopupWidthTracksContentWithinCap() {
         let contentWidth = CGFloat(410)

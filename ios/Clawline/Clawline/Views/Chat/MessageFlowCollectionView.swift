@@ -2683,7 +2683,6 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         )
         var snapshot = NSDiffableDataSourceSnapshot<Int, String>()
         snapshot.appendSections([0])
-        snapshot.appendItems(snapshotItemIds)
         let oldItemIds = Set(dataSource.snapshot().itemIdentifiers)
 
         // Add typing indicator when assistant is typing (server-controlled)
@@ -2697,13 +2696,14 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         }
         wasShowingTypingIndicator = showTypingIndicator
         if showTypingIndicator {
-            snapshot.deleteItems(snapshotItemIds)
             snapshot.appendItems(TranscriptTypingIndicatorOrdering.itemIds(
                 messageItems: snapshotItemIds,
                 messages: snapshotMessages,
                 typingIndicatorItemId: TypingIndicatorCell.itemId,
                 activePromptMessageId: viewModel.promptStageIndicatorAnchorMessageId(in: effectiveSessionKey)
             ))
+        } else {
+            snapshot.appendItems(snapshotItemIds)
         }
         if !isShowingOnlyUserMessages,
            SessionMetadataFooterCell.shouldAppendFooter(after: snapshotItemIds, status: sessionStatus) {

@@ -489,6 +489,42 @@ struct StreamSelectorLayoutTests {
         #expect(viewport == CGFloat(0))
     }
 
+    @Test("T1374 popup uses allocated height so rows and toolbar stay visible")
+    func popupUsesAllocatedHeightForVisibleRowsAndToolbar() {
+        let allocatedHeight = CGFloat(320)
+        let actionBarHeight = CGFloat(72)
+        let containerHeight = StreamSelectorLayout.popupContainerHeight(
+            allocatedContainerHeight: allocatedHeight
+        )
+
+        #expect(containerHeight == allocatedHeight)
+        #expect(
+            StreamSelectorLayout.listViewportHeight(
+                containerHeight: containerHeight,
+                actionBarReservedHeight: actionBarHeight
+            ) == CGFloat(248)
+        )
+        #expect(
+            StreamSelectorLayout.listViewportHeight(
+                containerHeight: containerHeight,
+                actionBarReservedHeight: actionBarHeight
+            ) + actionBarHeight == allocatedHeight
+        )
+    }
+
+    @Test("T1374 popup does not force ideal height before reading allocated geometry")
+    func popupHeightFrameDoesNotForceIdealHeight() {
+        let frame = StreamSelectorLayout.popupHeightFrame(
+            idealContainerHeight: CGFloat(542),
+            minimumPopoverHeight: CGFloat(140)
+        )
+
+        #expect(frame.fixedHeight == nil)
+        #expect(frame.minHeight == CGFloat(140))
+        #expect(frame.idealHeight == CGFloat(542))
+        #expect(frame.maxHeight == CGFloat(542))
+    }
+
     @Test("T1210 filtering resizes popup height while preserving action bar height")
     func filteringResizesPopupHeightWhilePreservingActionBarHeight() {
         let unfiltered = StreamSelectorLayout.popupVerticalLayout(

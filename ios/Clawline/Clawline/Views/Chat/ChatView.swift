@@ -5155,6 +5155,7 @@ final class KeyboardPinnedContainerView<Content: View>: UIView, KeyboardPinnedCo
         }
         hostingController.view.backgroundColor = .clear
         hostingController.view.isOpaque = false
+        hostingController.view.clipsToBounds = false
 
 #if !os(visionOS)
         // When keyboard is hidden the layout guide defaults to the safe-area

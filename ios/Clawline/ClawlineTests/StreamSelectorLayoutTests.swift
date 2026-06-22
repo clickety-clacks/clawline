@@ -349,6 +349,46 @@ struct StreamSelectorLayoutTests {
         #expect(width == titleWidth + (rowHorizontalInset * 2) + statusDotSlotWidth + rowContentSpacing + trailingAccessoryReserve)
     }
 
+    @Test("T1374 Spatial popup budgets toolbar dots and shortcut hints together")
+    func spatialPopupBudgetsToolbarDotsAndShortcutHintsTogether() {
+        let dotDiameter = CGFloat(8)
+        let rowContentSpacing = CGFloat(10)
+        let rowHorizontalInset = CGFloat(12)
+        let baseTrailingReserve = CGFloat(28)
+        let shortcutLabelWidth = CGFloat(58)
+        let titleWidth = CGFloat(300)
+        let actionBarHeight = CGFloat(72)
+        let allocatedHeight = CGFloat(320)
+
+        let statusDotSlotWidth = StreamSelectorLayout.popupStatusDotSlotWidth(dotDiameter: dotDiameter)
+        let trailingReserve = StreamSelectorLayout.popupTrailingAccessoryReserve(
+            baseReserve: baseTrailingReserve,
+            shortcutLabelWidth: shortcutLabelWidth,
+            showsShortcutLabels: true
+        )
+        let width = StreamSelectorLayout.popupWidth(
+            longestItemWidth: titleWidth,
+            minimumPopoverWidth: CGFloat(280),
+            baselineIdealPopoverWidth: CGFloat(320),
+            maximumPopoverWidth: CGFloat(480),
+            rowHorizontalInset: rowHorizontalInset,
+            rowContentSpacing: rowContentSpacing,
+            leadingDotDiameter: statusDotSlotWidth,
+            trailingAccessoryReserve: trailingReserve
+        )
+        let containerHeight = StreamSelectorLayout.popupContainerHeight(
+            allocatedContainerHeight: allocatedHeight
+        )
+        let listViewportHeight = StreamSelectorLayout.listViewportHeight(
+            containerHeight: containerHeight,
+            actionBarReservedHeight: actionBarHeight
+        )
+
+        #expect(trailingReserve == baseTrailingReserve + shortcutLabelWidth)
+        #expect(width == titleWidth + (rowHorizontalInset * 2) + statusDotSlotWidth + rowContentSpacing + trailingReserve)
+        #expect(listViewportHeight + actionBarHeight == allocatedHeight)
+    }
+
     @Test("Stream manager popup grows for longer titles but respects the cap")
     func streamManagerPopupWidthTracksContentWithinCap() {
         let contentWidth = CGFloat(410)

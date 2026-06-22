@@ -22,8 +22,18 @@ enum CrossChatShortcutLabelAvailability {
     static var current: Bool {
 #if targetEnvironment(macCatalyst)
         true
-#elseif os(iOS) && canImport(GameController)
-        GCKeyboard.coalesced != nil
+#elseif (os(iOS) || os(visionOS)) && canImport(GameController)
+        current(coalescedKeyboardPresent: GCKeyboard.coalesced != nil)
+#else
+        false
+#endif
+    }
+
+    static func current(coalescedKeyboardPresent: Bool) -> Bool {
+#if targetEnvironment(macCatalyst)
+        true
+#elseif (os(iOS) || os(visionOS)) && canImport(GameController)
+        coalescedKeyboardPresent
 #else
         false
 #endif

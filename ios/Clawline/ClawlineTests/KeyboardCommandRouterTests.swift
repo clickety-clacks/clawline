@@ -411,6 +411,16 @@ struct KeyboardCommandRouterTests {
         )
     }
 
+    @Test("T1374 popup shortcut hints follow hardware keyboard availability")
+    func popupShortcutHintsFollowHardwareKeyboardAvailability() {
+        #expect(CrossChatShortcutLabelAvailability.current(coalescedKeyboardPresent: true) == true)
+#if targetEnvironment(macCatalyst)
+        #expect(CrossChatShortcutLabelAvailability.current(coalescedKeyboardPresent: false) == true)
+#else
+        #expect(CrossChatShortcutLabelAvailability.current(coalescedKeyboardPresent: false) == false)
+#endif
+    }
+
     @Test("T343 VG-03 mention picker open close cannot poison notification scroll ownership")
     func mentionPickerOpenCloseCannotPoisonNotificationScrollOwnership() {
         let openStore = KeyboardOwnershipSceneFactory.chatScene(

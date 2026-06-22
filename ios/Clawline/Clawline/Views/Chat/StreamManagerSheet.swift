@@ -91,7 +91,11 @@ struct StreamManagerSheet: View {
             rowHorizontalInset: listRowHorizontalInset,
             rowContentSpacing: rowContentSpacing,
             leadingDotDiameter: rowDotDiameter,
-            trailingAccessoryReserve: rowTrailingAccessoryReserve
+            trailingAccessoryReserve: StreamSelectorLayout.popupTrailingAccessoryReserve(
+                baseReserve: rowTrailingAccessoryReserve,
+                shortcutLabelWidth: shortcutLabelReservedWidth,
+                showsShortcutLabels: selectorShortcutsAvailable
+            )
         )
     }
 
@@ -310,7 +314,7 @@ struct StreamManagerSheet: View {
         .onKeyPress(characters: .decimalDigits) { keyPress in
             handleSelectorShortcutKeyPress(keyPress)
         }
-#if os(iOS) && !targetEnvironment(macCatalyst) && canImport(GameController)
+#if (os(iOS) || os(visionOS)) && !targetEnvironment(macCatalyst) && canImport(GameController)
         .onReceive(NotificationCenter.default.publisher(for: .GCKeyboardDidConnect)) { _ in
             refreshShortcutAvailabilityAndPublish()
         }
@@ -1561,6 +1565,14 @@ enum StreamSelectorLayout {
 
     static func popupStatusDotSlotWidth(dotDiameter: CGFloat) -> CGFloat {
         dotDiameter
+    }
+
+    static func popupTrailingAccessoryReserve(
+        baseReserve: CGFloat,
+        shortcutLabelWidth: CGFloat,
+        showsShortcutLabels: Bool
+    ) -> CGFloat {
+        showsShortcutLabels ? baseReserve + shortcutLabelWidth : baseReserve
     }
 
     static func popupContainerHeight(allocatedContainerHeight: CGFloat) -> CGFloat {

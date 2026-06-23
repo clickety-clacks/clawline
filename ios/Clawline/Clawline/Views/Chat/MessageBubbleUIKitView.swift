@@ -1731,6 +1731,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
             fixedWidthConstraint = makeFixedBubbleWidthConstraint(effectiveMaxWidth)
             fixedWidthConstraint?.isActive = true
         }
+        updateDynamicContentHeightPreference(for: sizeClass)
 
         // Every bubble uses an outer scroll container. Bubble height is capped; if content overflows,
         // scrolling is enabled (inert when content fits).
@@ -1861,6 +1862,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
             fixedWidthConstraint = makeFixedBubbleWidthConstraint(effectiveMaxWidth)
             fixedWidthConstraint?.isActive = true
         }
+        updateDynamicContentHeightPreference(for: sizeClass)
 
         minWidthConstraint.constant = effectiveMinWidth
         maxWidthConstraint.constant = effectiveMaxWidth
@@ -1996,7 +1998,15 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
     }
 
     private func applyBubbleSizingV2(_ state: BubbleSizingV2.LayoutState) {
+        guard state.plan.sizeClass == .long else {
+            dynamicContentHeightConstraint?.constant = 2000
+            return
+        }
         dynamicContentHeightConstraint?.constant = max(44, state.measurement.outerScrollViewportHeight)
+    }
+
+    private func updateDynamicContentHeightPreference(for sizeClass: MessageSizeClass) {
+        wrapperPrefersContentHeightConstraint?.priority = (sizeClass == .long) ? .defaultLow : .required
     }
 
     private var currentIdentityKey: String? {

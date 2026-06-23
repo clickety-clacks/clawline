@@ -394,11 +394,32 @@ private final class RemoteMessageImageView: MessageImageThumbnailView {
 }
 
 private final class BubbleTextView: UITextView {
+    override init(frame: CGRect, textContainer: NSTextContainer?) {
+        super.init(frame: frame, textContainer: textContainer)
+        setContentHuggingPriority(.required, for: .vertical)
+        setContentCompressionResistancePriority(.required, for: .vertical)
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        setContentHuggingPriority(.required, for: .vertical)
+        setContentCompressionResistancePriority(.required, for: .vertical)
+    }
+
     override var intrinsicContentSize: CGSize {
-        guard bounds.width > 1 else {
+        let fittingWidth = bounds.width > 1 ? bounds.width : textContainer.size.width
+        guard fittingWidth > 1 else {
             return super.intrinsicContentSize
         }
-        return tightFittingSize(for: bounds.width)
+        return tightFittingSize(for: fittingWidth)
+    }
+
+    override var attributedText: NSAttributedString! {
+        didSet { invalidateIntrinsicContentSize() }
+    }
+
+    override var text: String! {
+        didSet { invalidateIntrinsicContentSize() }
     }
 
     override func sizeThatFits(_ size: CGSize) -> CGSize {
@@ -417,7 +438,7 @@ private final class BubbleTextView: UITextView {
         layoutManager.ensureLayout(for: textContainer)
         let usedRect = layoutManager.usedRect(for: textContainer)
         return CGSize(
-            width: width,
+            width: ceil(usedRect.width + textContainerInset.left + textContainerInset.right),
             height: ceil(usedRect.height + textContainerInset.top + textContainerInset.bottom)
         )
     }

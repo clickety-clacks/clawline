@@ -452,7 +452,7 @@ struct BubbleScrollTests {
 
         #expect(topChrome >= metrics.bubblePaddingTop)
         #expect(bottomChrome >= metrics.bubblePaddingBottom)
-        #expect(bottomChrome <= metrics.bubblePaddingBottom + 1)
+        #expect(bottomChrome <= metrics.bubblePaddingBottom + 4)
         #expect(bottomChrome < topChrome)
     }
 

@@ -669,6 +669,53 @@ struct TextLinkURLTemplateRulesTests {
         #expect(webViews(in: popup.view).first?.url == expectedURL)
     }
 
+    @Test("T1370: popup hover replaces stale resolved URL content")
+    @MainActor
+    func generatedTextLinkHoverReplacesStaleResolvedURLContent() throws {
+        let popupRule = TextLinkURLTemplateRule(
+            id: "popup",
+            enabled: true,
+            pattern: #"T([0-9]+)"#,
+            urlTemplate: "https://example.com/popup/{match}",
+            displayMode: .popup
+        )
+        let rendered = try withConfiguredRules([popupRule]) {
+            try #require(makeRendered("See T1370."))
+        }
+        let textView = UITextView(frame: CGRect(x: 0, y: 0, width: 280, height: 44))
+        UnifiedMarkdownRenderer.configureTextView(textView, delegate: nil)
+        textView.attributedText = rendered
+        textView.layoutIfNeeded()
+
+        let expectedURL = try #require(linkTarget("T1370", in: rendered))
+        let presenter = UIViewController()
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        window.rootViewController = presenter
+        window.isHidden = false
+        presenter.view.addSubview(textView)
+        let animationsWereEnabled = UIView.areAnimationsEnabled
+        UIView.setAnimationsEnabled(false)
+        defer {
+            UIView.setAnimationsEnabled(animationsWereEnabled)
+            window.isHidden = true
+        }
+
+        let staleController = TextLinkResolvedURLContentViewController(
+            url: try #require(URL(string: "https://example.com/popup/stale")),
+            presentation: .popup
+        )
+        presenter.present(staleController, animated: false)
+
+        #expect(MessageBubbleUIKitView.presentGeneratedTextLinkPopupForHover(
+            in: textView,
+            at: point(for: "T1370", in: rendered, textView: textView)
+        ))
+        let popup = try #require(presenter.presentedViewController as? TextLinkResolvedURLContentViewController)
+        popup.loadViewIfNeeded()
+        #expect(popup.isPopup(for: expectedURL))
+        #expect(webViews(in: popup.view).first?.url == expectedURL)
+    }
+
     @Test("V1135-01: settings can add many rules and delete exactly one after confirmation")
     @MainActor
     func settingsCanManageTextLinkRules() {

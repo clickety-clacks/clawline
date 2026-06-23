@@ -319,6 +319,10 @@ enum StreamPopupFocusHandoff {
             ? [.requestComposerFocusBeforeDismissal, .closePopup]
             : [.closePopup, .requestComposerFocusAfterDismissal]
     }
+
+    static func shouldClosePopupForComposerFocusRequest(isStreamPopupPresented: Bool) -> Bool {
+        isStreamPopupPresented
+    }
 }
 
 enum StreamSwitchKeyboardFocusPolicy {
@@ -2345,7 +2349,11 @@ struct ChatView: View {
                     scheduleInputFocusChange(focused)
                 },
                 onRequestFocus: {
-                    focusRequestID &+= 1
+                    if StreamPopupFocusHandoff.shouldClosePopupForComposerFocusRequest(isStreamPopupPresented: streamPopupRouteController.isPopupPresented) {
+                        closeStreamPopup(preserveComposerFocusDuringDismissal: true)
+                    } else {
+                        focusRequestID &+= 1
+                    }
                 },
                 onTextEditActivity: {
                     reconcileResolvedMentionAttachment()

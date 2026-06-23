@@ -677,6 +677,16 @@ struct StreamPageDotsViewTests {
         )
     }
 
+    @Test("T1136 composer focus request closes popup before focusing composer")
+    func composerFocusRequestClosesOpenStreamPopup() {
+        #expect(
+            StreamPopupFocusHandoff.shouldClosePopupForComposerFocusRequest(isStreamPopupPresented: true)
+        )
+        #expect(
+            StreamPopupFocusHandoff.shouldClosePopupForComposerFocusRequest(isStreamPopupPresented: false) == false
+        )
+    }
+
     @Test("T1146 stream pager does not dismiss the software keyboard")
     @MainActor
     func streamPagerDoesNotDismissSoftwareKeyboard() {

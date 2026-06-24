@@ -4123,6 +4123,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             let bubbleHeightPolicyForConfigure: BubbleSizingV2.BubbleHeightPolicy
             let sendIndicatorState = viewModel.sendIndicatorState(for: message.id)
             let replyReference = viewModel.replyReference(for: message)
+            let isShowingOnlyUserMessages = self.readState(for: message.sessionKey).isShowingOnlyUserMessages
             if self.bubbleSizingV2Enabled {
                 let plan = self.bubbleSizingV2Plan(
                     message: message,
@@ -4186,16 +4187,17 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                     self?.onReferenceMessageInPrompt?(message)
                 },
                 showOnlyUserMessagesMenuLabel: ShowOnlyUserMessagesChatCollapse.menuLabel(
-                    isCollapsed: self.readState(for: message.sessionKey).isShowingOnlyUserMessages
+                    isCollapsed: isShowingOnlyUserMessages
                 ),
                 onToggleShowOnlyUserMessages: { [weak self] in
                     self?.toggleShowOnlyUserMessagesMode()
                 },
-                onShowOnlyUserMessagesReveal: self.readState(for: message.sessionKey).isShowingOnlyUserMessages && message.role == .user
+                onShowOnlyUserMessagesReveal: isShowingOnlyUserMessages && message.role == .user
                     ? { [weak self] message in
                         self?.revealUserMessageFromShowOnlyUserMessagesMode(message)
                     }
                     : nil,
+                isCollapsedUserOnlyMode: isShowingOnlyUserMessages && message.role == .user,
                 replyReference: replyReference,
                 onResend: { [weak self] in
                     self?.viewModel?.resendFailedMessage(messageId: message.id)

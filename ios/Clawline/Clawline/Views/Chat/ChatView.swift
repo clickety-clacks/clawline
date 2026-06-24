@@ -398,6 +398,7 @@ struct ChatView: View {
     @State private var scrollButtonSettleAnimationToken: Int = 0
     @State private var scrollButtonSettleTask: Task<Void, Never>?
     @State private var scrollButtonTapSuppressionTask: Task<Void, Never>?
+    @State private var showOnlyUserMessagesCollapsedBySessionKey: [String: Bool] = [:]
     @AppStorage("chat.scrollButton.horizontalDetent") private var scrollButtonDetentRawValue = ScrollButtonHorizontalDetent.center.rawValue
 #if DEBUG
     @State private var didSeedCrossChatNotificationDockProof = false
@@ -1480,11 +1481,22 @@ struct ChatView: View {
             measuredHeightsBySourceChatId: crossChatNotificationMeasuredHeightsBySourceChatId,
             keyboardOwnershipStore: keyboardOwnershipStore
         )
+        let showOnlyUserMessagesCommand = ShowOnlyUserMessagesCommand(
+            menuTitle: ShowOnlyUserMessagesChatCollapse.menuLabel(
+                isCollapsed: keyboardNavigationSessionKey.flatMap {
+                    showOnlyUserMessagesCollapsedBySessionKey[$0]
+                } ?? false
+            ),
+            toggle: {
+                toggleShowOnlyUserMessagesMode()
+            }
+        )
 
         let commandFocusedRootLayer: AnyView = AnyView(keyboardRoutedRootLayer.focusedSceneValue(
             \.crossChatNotificationCommand,
             notificationCommand
-        ))
+        )
+        .focusedSceneValue(\.showOnlyUserMessagesCommand, showOnlyUserMessagesCommand))
 
         let lifecycleRootLayer: AnyView = AnyView(commandFocusedRootLayer
         .onReceive(NotificationCenter.default.publisher(for: .clawlineKeyboardCommandIntent)) { notification in
@@ -2585,6 +2597,7 @@ struct ChatView: View {
                 referenceMessageInPrompt(message)
             },
             onShowOnlyUserMessagesModeChanged: { sessionKey, isCollapsed in
+                showOnlyUserMessagesCollapsedBySessionKey[sessionKey] = isCollapsed
                 viewModel.setShowOnlyUserMessagesMode(isCollapsed, for: sessionKey)
             },
             onKeyboardDismissModeChanged: { summary in

@@ -11,6 +11,7 @@ struct ClawlineAppCommands: Commands {
     let settingsManager: SettingsManager
     @FocusedValue(\.cancelCurrentPromptCommand) private var cancelCurrentPromptCommand
     @FocusedValue(\.crossChatNotificationCommand) private var crossChatNotificationCommand
+    @FocusedValue(\.showOnlyUserMessagesCommand) private var showOnlyUserMessagesCommand
 
     private var selectorPlainNumberShortcutSlots: Set<Int> {
         guard let slots = crossChatNotificationCommand?.keyboardOwnershipStore.chatSelectorShortcutMap.keys else {
@@ -115,6 +116,15 @@ struct ClawlineAppCommands: Commands {
                 routeAppShortcut(.navigateNextStream)
             }
             .keyboardShortcut("l", modifiers: [.command, .shift])
+
+            Button(showOnlyUserMessagesCommand?.menuTitle ?? ShowOnlyUserMessagesChatCollapse.normalMenuLabel) {
+                if let showOnlyUserMessagesCommand {
+                    showOnlyUserMessagesCommand.toggle()
+                } else {
+                    routeAppShortcut(.toggleShowOnlyUserMessages)
+                }
+            }
+            .keyboardShortcut("`", modifiers: .command)
 
             Button("Cancel Current Prompt") {
                 cancelCurrentPromptCommand?.presentConfirmation()

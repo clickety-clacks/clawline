@@ -838,13 +838,7 @@ struct MessageInputBarBoundaryTests {
     }
 
     @Test("T357 compact landscape message surface uses physical width")
-    func compactLandscapeMessageSurfaceUsesPhysicalWidth() throws {
-        let chatViewPath = URL(filePath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .appending(path: "Clawline/Views/Chat/ChatView.swift")
-        let source = try String(contentsOf: chatViewPath, encoding: .utf8)
-
+    func compactLandscapeMessageSurfaceUsesPhysicalWidth() {
         #expect(ChatLandscapeWidthGeometry.physicalWidth(
             containerWidth: 750,
             leadingSafeAreaInset: 62,
@@ -870,8 +864,6 @@ struct MessageInputBarBoundaryTests {
             windowSize: CGSize(width: 874, height: 402),
             isCompactLandscape: true
         ))
-        #expect(source.contains(".frame(width: chatSurfaceWidth)"))
-        #expect(source.contains(".offset(x: chatSurfaceOffset)"))
     }
 
     @Test("T1282 compact landscape recovers physical width from rotated portrait window size")

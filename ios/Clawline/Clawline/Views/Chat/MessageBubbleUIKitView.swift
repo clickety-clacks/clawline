@@ -2251,7 +2251,10 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
                 markdown: MessageReferenceMarkdownDisplay.renderableMarkdown(label),
                 baseFont: font,
                 inkColor: UIColor.label,
-                lineSpacing: 1
+                lineSpacing: 1,
+                markHighlightColor: SalientHighlightApplier.highlightColor(
+                    isDark: explicitIsDarkOverride ?? (traitCollection.userInterfaceStyle == .dark)
+                )
             ) ?? NSAttributedString(
                 string: label,
                 attributes: [

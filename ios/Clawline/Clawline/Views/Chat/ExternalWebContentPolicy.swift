@@ -167,7 +167,7 @@ enum GeneratedTextLinkActivationRouter {
         case .modal:
             return presentResolvedURLModal(url, view)
         case .popup:
-            return false
+            return presentResolvedURLPopup(url, view)
         }
     }
 }

@@ -434,9 +434,9 @@ struct TextLinkURLTemplateRulesTests {
         #expect(secondSelectionStates.last == true)
     }
 
-    @Test("T1192: chat generated link taps honor direct and modal display modes")
+    @Test("T1192/T1370: chat generated link taps honor direct, modal, and popup display modes")
     @MainActor
-    func chatGeneratedLinkTapsHonorDirectAndModalDisplayModes() throws {
+    func chatGeneratedLinkTapsHonorDisplayModes() throws {
         let cases: [(TextLinkResolvedURLDisplayMode, String)] = [
             (.direct, "D1192"),
             (.modal, "M1192"),
@@ -457,6 +457,7 @@ struct TextLinkURLTemplateRulesTests {
 
         var directURLs: [URL] = []
         var modalURLs: [URL] = []
+        var popupURLs: [URL] = []
         let originalGeneratedLinkOpener = GeneratedTextLinkActivationRouter.openGeneratedLink
         let originalModalPresenter = GeneratedTextLinkActivationRouter.presentResolvedURLModal
         let originalPopupPresenter = GeneratedTextLinkActivationRouter.presentResolvedURLPopup
@@ -469,8 +470,8 @@ struct TextLinkURLTemplateRulesTests {
             return true
         }
         GeneratedTextLinkActivationRouter.presentResolvedURLPopup = { url, _ in
-            Issue.record("Popup display mode should be hover-driven, not tap-driven: \(url)")
-            return false
+            popupURLs.append(url)
+            return true
         }
         defer {
             GeneratedTextLinkActivationRouter.openGeneratedLink = originalGeneratedLinkOpener
@@ -491,6 +492,51 @@ struct TextLinkURLTemplateRulesTests {
 
         #expect(directURLs.map(\.absoluteString) == ["https://example.com/direct/D1192"])
         #expect(modalURLs.map(\.absoluteString) == ["https://example.com/modal/M1192"])
+        #expect(popupURLs.map(\.absoluteString) == ["https://example.com/popup/P1192"])
+    }
+
+    @Test("T1370: popup display mode tap opens resolved URL content")
+    @MainActor
+    func popupDisplayModeTapOpensResolvedURLContent() throws {
+        let popupRule = TextLinkURLTemplateRule(
+            id: "popup",
+            enabled: true,
+            pattern: #"T([0-9]+)"#,
+            urlTemplate: "https://example.com/popup/{match}",
+            displayMode: .popup
+        )
+        let rendered = try withConfiguredRules([popupRule]) {
+            try #require(makeRendered("Open T1370."))
+        }
+        let textView = UITextView(frame: CGRect(x: 0, y: 0, width: 280, height: 44))
+        UnifiedMarkdownRenderer.configureTextView(textView, delegate: nil)
+        textView.attributedText = rendered
+        textView.layoutIfNeeded()
+
+        let presenter = UIViewController()
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        window.rootViewController = presenter
+        window.isHidden = false
+        presenter.view.addSubview(textView)
+        let animationsWereEnabled = UIView.areAnimationsEnabled
+        UIView.setAnimationsEnabled(false)
+        defer {
+            UIView.setAnimationsEnabled(animationsWereEnabled)
+            window.isHidden = true
+        }
+
+        let expectedURL = try #require(linkTarget("T1370", in: rendered))
+        let bubble = MessageBubbleUIKitView()
+        #expect(!bubble.textView(
+            textView,
+            shouldInteractWith: expectedURL,
+            in: range("T1370", in: rendered),
+            interaction: .invokeDefaultAction
+        ))
+        let popup = try #require(presenter.presentedViewController as? TextLinkResolvedURLContentViewController)
+        popup.loadViewIfNeeded()
+        #expect(popup.isPopup(for: expectedURL))
+        #expect(webViews(in: popup.view).first?.url == expectedURL)
     }
 
     @Test("T1192: popup display mode is presented by hover route")
@@ -542,8 +588,13 @@ struct TextLinkURLTemplateRulesTests {
             presentation: .popup,
             anchorPoint: CGPoint(x: 80, y: 90)
         )
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        window.rootViewController = controller
+        window.isHidden = false
+        defer { window.isHidden = true }
+
         controller.loadViewIfNeeded()
-        controller.view.frame = CGRect(x: 0, y: 0, width: 800, height: 600)
+        controller.view.frame = window.bounds
         controller.view.setNeedsLayout()
         controller.view.layoutIfNeeded()
 
@@ -564,14 +615,19 @@ struct TextLinkURLTemplateRulesTests {
             presentation: .popup,
             anchorPoint: anchor
         )
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        window.rootViewController = controller
+        window.isHidden = false
+        defer { window.isHidden = true }
+
         controller.loadViewIfNeeded()
-        controller.view.frame = CGRect(x: 0, y: 0, width: 800, height: 600)
+        controller.view.frame = window.bounds
         controller.view.setNeedsLayout()
         controller.view.layoutIfNeeded()
 
         let webView = try #require(webViews(in: controller.view).first)
         let contentFrame = webView.convert(webView.bounds, to: controller.view)
-        #expect(contentFrame.contains(CGPoint(x: 782, y: 582)))
+        #expect(contentFrame.contains(CGPoint(x: 781, y: 581)))
     }
 
     @Test("V1135-01: generated text links suppress external text-view activation")
@@ -619,6 +675,101 @@ struct TextLinkURLTemplateRulesTests {
         #expect(MessageBubbleUIKitView.generatedTextLinkURL(in: textView, at: generatedPoint) == generatedURL)
         #expect(MessageBubbleUIKitView.generatedTextLinkURL(in: textView, at: explicitPoint) == nil)
         #expect(MessageBubbleUIKitView.generatedTextLinkURL(in: textView, at: CGPoint(x: generatedPoint.x, y: generatedPoint.y + 24)) == nil)
+    }
+
+    @Test("T1370: popup hover presents content from larger generated-link target")
+    @MainActor
+    func generatedTextLinkHoverPresentsPopupFromLargerTarget() throws {
+        let popupRule = TextLinkURLTemplateRule(
+            id: "popup",
+            enabled: true,
+            pattern: #"T([0-9]+)"#,
+            urlTemplate: "https://example.com/popup/{match}",
+            displayMode: .popup
+        )
+        let rendered = try withConfiguredRules([popupRule]) {
+            try #require(makeRendered("See T1370."))
+        }
+        let textView = UITextView(frame: CGRect(x: 0, y: 0, width: 280, height: 44))
+        UnifiedMarkdownRenderer.configureTextView(textView, delegate: nil)
+        textView.attributedText = rendered
+        textView.layoutIfNeeded()
+
+        let characterRange = range("T1370", in: rendered)
+        let glyphRange = textView.layoutManager.glyphRange(forCharacterRange: characterRange, actualCharacterRange: nil)
+        let rect = textView.layoutManager.boundingRect(forGlyphRange: glyphRange, in: textView.textContainer)
+        let hoverPoint = CGPoint(
+            x: rect.maxX + textView.textContainerInset.left + 6,
+            y: rect.midY + textView.textContainerInset.top
+        )
+        let expectedURL = try #require(linkTarget("T1370", in: rendered))
+        let presenter = UIViewController()
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        window.rootViewController = presenter
+        window.isHidden = false
+        presenter.view.addSubview(textView)
+        let animationsWereEnabled = UIView.areAnimationsEnabled
+        UIView.setAnimationsEnabled(false)
+        defer {
+            UIView.setAnimationsEnabled(animationsWereEnabled)
+            window.isHidden = true
+        }
+
+        #expect(MessageBubbleUIKitView.generatedTextLinkURL(in: textView, at: hoverPoint) == nil)
+        #expect(MessageBubbleUIKitView.presentGeneratedTextLinkPopupForHover(in: textView, at: hoverPoint))
+        let popup = try #require(presenter.presentedViewController as? TextLinkResolvedURLContentViewController)
+        popup.loadViewIfNeeded()
+        popup.view.frame = presenter.view.bounds
+        popup.view.setNeedsLayout()
+        popup.view.layoutIfNeeded()
+        #expect(webViews(in: popup.view).first?.url == expectedURL)
+    }
+
+    @Test("T1370: popup hover replaces stale resolved URL content")
+    @MainActor
+    func generatedTextLinkHoverReplacesStaleResolvedURLContent() throws {
+        let popupRule = TextLinkURLTemplateRule(
+            id: "popup",
+            enabled: true,
+            pattern: #"T([0-9]+)"#,
+            urlTemplate: "https://example.com/popup/{match}",
+            displayMode: .popup
+        )
+        let rendered = try withConfiguredRules([popupRule]) {
+            try #require(makeRendered("See T1370."))
+        }
+        let textView = UITextView(frame: CGRect(x: 0, y: 0, width: 280, height: 44))
+        UnifiedMarkdownRenderer.configureTextView(textView, delegate: nil)
+        textView.attributedText = rendered
+        textView.layoutIfNeeded()
+
+        let expectedURL = try #require(linkTarget("T1370", in: rendered))
+        let presenter = UIViewController()
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+        window.rootViewController = presenter
+        window.isHidden = false
+        presenter.view.addSubview(textView)
+        let animationsWereEnabled = UIView.areAnimationsEnabled
+        UIView.setAnimationsEnabled(false)
+        defer {
+            UIView.setAnimationsEnabled(animationsWereEnabled)
+            window.isHidden = true
+        }
+
+        let staleController = TextLinkResolvedURLContentViewController(
+            url: try #require(URL(string: "https://example.com/popup/stale")),
+            presentation: .popup
+        )
+        presenter.present(staleController, animated: false)
+
+        #expect(MessageBubbleUIKitView.presentGeneratedTextLinkPopupForHover(
+            in: textView,
+            at: point(for: "T1370", in: rendered, textView: textView)
+        ))
+        let popup = try #require(presenter.presentedViewController as? TextLinkResolvedURLContentViewController)
+        popup.loadViewIfNeeded()
+        #expect(popup.isPopup(for: expectedURL))
+        #expect(webViews(in: popup.view).first?.url == expectedURL)
     }
 
     @Test("V1135-01: settings can add many rules and delete exactly one after confirmation")

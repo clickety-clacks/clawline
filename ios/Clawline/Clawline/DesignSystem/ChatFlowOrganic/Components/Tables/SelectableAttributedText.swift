@@ -164,16 +164,10 @@ struct SelectableAttributedText: UIViewRepresentable {
 
         @objc func handleTextHover(_ recognizer: UIHoverGestureRecognizer) {
             guard recognizer.state == .began || recognizer.state == .changed,
-                  let textView = recognizer.view as? UITextView,
-                  let generatedLink = MessageBubbleUIKitView.generatedTextLink(in: textView, at: recognizer.location(in: textView)),
-                  generatedLink.displayMode == .popup else {
+                  let textView = recognizer.view as? UITextView else {
                 return
             }
-            _ = GeneratedTextLinkActivationRouter.presentResolvedURLPopupAnchored(
-                generatedLink.url,
-                textView,
-                recognizer.location(in: textView)
-            )
+            _ = MessageBubbleUIKitView.presentGeneratedTextLinkPopupForHover(in: textView, at: recognizer.location(in: textView))
         }
 
         func consumeSelectionResetToken(_ token: Int) -> Bool {

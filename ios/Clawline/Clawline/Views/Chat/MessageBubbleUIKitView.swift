@@ -2268,16 +2268,10 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
     }
 
     @objc private func handleBodyHover(_ recognizer: UIHoverGestureRecognizer) {
-        guard recognizer.state == .began || recognizer.state == .changed,
-              let generatedLink = Self.generatedTextLink(in: bodyLabel, at: recognizer.location(in: bodyLabel)),
-              generatedLink.displayMode == .popup else {
+        guard recognizer.state == .began || recognizer.state == .changed else {
             return
         }
-        _ = GeneratedTextLinkActivationRouter.presentResolvedURLPopupAnchored(
-            generatedLink.url,
-            bodyLabel,
-            recognizer.location(in: bodyLabel)
-        )
+        _ = Self.presentGeneratedTextLinkPopupForHover(in: bodyLabel, at: recognizer.location(in: bodyLabel))
     }
 
     @objc private func handleBubbleTap() {
@@ -2301,6 +2295,35 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
     }
 
     static func generatedTextLink(in textView: UITextView, at point: CGPoint) -> (url: URL, displayMode: TextLinkResolvedURLDisplayMode)? {
+        generatedTextLink(in: textView, at: point, glyphHitOutset: CGSize(width: 2, height: 4))
+    }
+
+    static func generatedTextLinkForHover(in textView: UITextView, at point: CGPoint) -> (url: URL, displayMode: TextLinkResolvedURLDisplayMode)? {
+        generatedTextLink(in: textView, at: point, glyphHitOutset: CGSize(width: 10, height: 8), allowOutsetOnlyHit: true)
+    }
+
+    static func presentGeneratedTextLinkPopupForHover(in textView: UITextView, at point: CGPoint) -> Bool {
+        guard let generatedLink = generatedTextLinkForHover(in: textView, at: point),
+              generatedLink.displayMode == .popup else {
+            return false
+        }
+        return GeneratedTextLinkActivationRouter.presentResolvedURLPopupAnchored(
+            generatedLink.url,
+            textView,
+            point
+        )
+    }
+
+    private static func generatedTextLink(in textView: UITextView, at point: CGPoint, glyphHitOutset: CGSize) -> (url: URL, displayMode: TextLinkResolvedURLDisplayMode)? {
+        generatedTextLink(in: textView, at: point, glyphHitOutset: glyphHitOutset, allowOutsetOnlyHit: false)
+    }
+
+    private static func generatedTextLink(
+        in textView: UITextView,
+        at point: CGPoint,
+        glyphHitOutset: CGSize,
+        allowOutsetOnlyHit: Bool
+    ) -> (url: URL, displayMode: TextLinkResolvedURLDisplayMode)? {
         guard let attributedText = textView.attributedText, attributedText.length > 0 else {
             return nil
         }
@@ -2326,23 +2349,61 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         guard let url = attributedText.attribute(.link, at: characterIndex, effectiveRange: &effectiveRange) as? URL,
               effectiveRange.length > 0,
               TextLinkURLTemplateRules.isGeneratedLink(in: attributedText, characterRange: effectiveRange) else {
-            return nil
+            guard allowOutsetOnlyHit else {
+                return nil
+            }
+            return generatedTextLinkByOutsetGlyphRect(
+                in: attributedText,
+                textView: textView,
+                location: location,
+                glyphHitOutset: glyphHitOutset
+            )
         }
-        let glyphRange = textView.layoutManager.glyphRange(
-            forCharacterRange: effectiveRange,
-            actualCharacterRange: nil
-        )
-        let glyphRect = textView.layoutManager.boundingRect(
-            forGlyphRange: glyphRange,
-            in: textView.textContainer
-        ).insetBy(dx: -2, dy: -4)
-        guard glyphRect.contains(location) else {
+        guard generatedLinkGlyphRect(effectiveRange, in: textView, glyphHitOutset: glyphHitOutset).contains(location) else {
             return nil
         }
         return (
             url,
             TextLinkURLTemplateRules.displayMode(in: attributedText, characterRange: effectiveRange)
         )
+    }
+
+    private static func generatedTextLinkByOutsetGlyphRect(
+        in attributedText: NSAttributedString,
+        textView: UITextView,
+        location: CGPoint,
+        glyphHitOutset: CGSize
+    ) -> (url: URL, displayMode: TextLinkResolvedURLDisplayMode)? {
+        let fullRange = NSRange(location: 0, length: attributedText.length)
+        var result: (url: URL, displayMode: TextLinkResolvedURLDisplayMode)?
+        attributedText.enumerateAttribute(.link, in: fullRange) { value, range, stop in
+            guard let url = value as? URL,
+                  TextLinkURLTemplateRules.isGeneratedLink(in: attributedText, characterRange: range),
+                  generatedLinkGlyphRect(range, in: textView, glyphHitOutset: glyphHitOutset).contains(location) else {
+                return
+            }
+            result = (
+                url,
+                TextLinkURLTemplateRules.displayMode(in: attributedText, characterRange: range)
+            )
+            stop.pointee = true
+        }
+        return result
+    }
+
+    private static func generatedLinkGlyphRect(
+        _ characterRange: NSRange,
+        in textView: UITextView,
+        glyphHitOutset: CGSize
+    ) -> CGRect {
+        let glyphRange = textView.layoutManager.glyphRange(
+            forCharacterRange: characterRange,
+            actualCharacterRange: nil
+        )
+        return textView.layoutManager.boundingRect(
+            forGlyphRange: glyphRange,
+            in: textView.textContainer
+        ).insetBy(dx: -glyphHitOutset.width, dy: -glyphHitOutset.height)
     }
 
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {

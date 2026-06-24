@@ -125,8 +125,16 @@ enum GeneratedTextLinkActivationRouter {
     @MainActor
     static func presentResolvedURLPopupAtAnchor(_ url: URL, from view: UIView?, anchorPoint: CGPoint?) -> Bool {
         guard let presenter = view?.clawlineParentViewController else { return false }
-        if presenter.presentedViewController is TextLinkResolvedURLContentViewController {
-            return true
+        if let presented = presenter.presentedViewController as? TextLinkResolvedURLContentViewController {
+            if presented.isPopup(for: url) {
+                return true
+            } else if presented.isPopupPresentation {
+                let presenterAnchor = anchorPoint.map { view?.convert($0, to: presenter.view) ?? $0 }
+                presented.updatePopup(url: url, anchorPoint: presenterAnchor)
+                return true
+            } else {
+                return false
+            }
         }
         let presenterAnchor = anchorPoint.map { view?.convert($0, to: presenter.view) ?? $0 }
         let controller = TextLinkResolvedURLContentViewController(
@@ -159,7 +167,7 @@ enum GeneratedTextLinkActivationRouter {
         case .modal:
             return presentResolvedURLModal(url, view)
         case .popup:
-            return false
+            return presentResolvedURLPopup(url, view)
         }
     }
 }
@@ -183,9 +191,9 @@ final class TextLinkResolvedURLContentViewController: UIViewController {
         case popup
     }
 
-    private let url: URL
-    private let presentation: Presentation
-    private let anchorPoint: CGPoint?
+    private var url: URL
+    private var presentation: Presentation
+    private var anchorPoint: CGPoint?
     private let contentView = UIView()
     private let webView: WKWebView = {
         let configuration = WKWebViewConfiguration()
@@ -195,6 +203,26 @@ final class TextLinkResolvedURLContentViewController: UIViewController {
         return WKWebView(frame: .zero, configuration: configuration)
     }()
     private let closeButton = UIButton(type: .system)
+    private var popupHoverRecognizersInstalled = false
+
+    var isPopupPresentation: Bool {
+        presentation == .popup
+    }
+
+    func isPopup(for url: URL) -> Bool {
+        presentation == .popup && self.url == url
+    }
+
+    func updatePopup(url: URL, anchorPoint: CGPoint?) {
+        self.url = url
+        self.presentation = .popup
+        self.anchorPoint = anchorPoint
+        guard isViewLoaded else { return }
+        applyPresentationStyle()
+        installPopupHoverRecognizers()
+        webView.load(URLRequest(url: url))
+        view.setNeedsLayout()
+    }
 
     init(url: URL, presentation: Presentation, anchorPoint: CGPoint? = nil) {
         self.url = url
@@ -213,9 +241,6 @@ final class TextLinkResolvedURLContentViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
 
-        view.backgroundColor = presentation == .modal ? UIColor.black.withAlphaComponent(0.36) : .clear
-
-        contentView.backgroundColor = presentation == .modal ? .systemBackground : .clear
         contentView.layer.cornerRadius = presentation == .modal ? 12 : 10
         contentView.layer.cornerCurve = .continuous
         contentView.layer.shadowColor = UIColor.black.cgColor
@@ -240,7 +265,7 @@ final class TextLinkResolvedURLContentViewController: UIViewController {
         closeButton.layer.cornerCurve = .continuous
         closeButton.accessibilityLabel = "Close resolved URL"
         closeButton.addTarget(self, action: #selector(close), for: .touchUpInside)
-        closeButton.isHidden = presentation == .popup
+        applyPresentationStyle()
 
         contentView.addSubview(webView)
         contentView.addSubview(closeButton)
@@ -250,11 +275,23 @@ final class TextLinkResolvedURLContentViewController: UIViewController {
             outsideTap.cancelsTouchesInView = false
             view.addGestureRecognizer(outsideTap)
         } else {
-            let rootHover = UIHoverGestureRecognizer(target: self, action: #selector(handlePopupHover(_:)))
-            view.addGestureRecognizer(rootHover)
-            let contentHover = UIHoverGestureRecognizer(target: self, action: #selector(handlePopupHover(_:)))
-            contentView.addGestureRecognizer(contentHover)
+            installPopupHoverRecognizers()
         }
+    }
+
+    private func applyPresentationStyle() {
+        view.backgroundColor = presentation == .modal ? UIColor.black.withAlphaComponent(0.36) : .clear
+        contentView.backgroundColor = presentation == .modal ? .systemBackground : .clear
+        closeButton.isHidden = presentation == .popup
+    }
+
+    private func installPopupHoverRecognizers() {
+        guard !popupHoverRecognizersInstalled else { return }
+        let rootHover = UIHoverGestureRecognizer(target: self, action: #selector(handlePopupHover(_:)))
+        view.addGestureRecognizer(rootHover)
+        let contentHover = UIHoverGestureRecognizer(target: self, action: #selector(handlePopupHover(_:)))
+        contentView.addGestureRecognizer(contentHover)
+        popupHoverRecognizersInstalled = true
     }
 
     override func viewDidLayoutSubviews() {

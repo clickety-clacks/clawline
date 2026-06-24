@@ -245,6 +245,32 @@ final class T1150NotificationDockUITests: XCTestCase {
     }
 
     @MainActor
+    func testDockedNotificationHitTargetVerticalDragScrollsChat() throws {
+        let app = launchDockedNotificationProofApp(skipCollapsedPreview: true)
+
+        let scrollToBottomButton = app.buttons["scroll_to_bottom_button"]
+        if scrollToBottomButton.waitForExistence(timeout: 1) {
+            scrollToBottomButton.tap()
+        }
+        XCTAssertFalse(
+            scrollToBottomButton.waitForExistence(timeout: 1),
+            "Expected seeded main chat to start at bottom before docked hit-target vertical drag"
+        )
+
+        let dockedHitTarget = dockedHitTarget(in: app)
+        let start = app.coordinate(withNormalizedOffset: .zero)
+            .withOffset(CGVector(dx: dockedHitTarget.frame.midX, dy: dockedHitTarget.frame.midY))
+        let end = start.withOffset(CGVector(dx: 0, dy: 420))
+        start.press(forDuration: 0.15, thenDragTo: end)
+
+        XCTAssertTrue(
+            scrollToBottomButton.waitForExistence(timeout: 2),
+            "Vertical drag on the docked notification hit target should scroll the chat transcript"
+        )
+        XCTAssertTrue(dockedHitTarget.exists, "Docked notification hit target should remain available after vertical chat scroll")
+    }
+
+    @MainActor
     func testSameChatPeekingNotificationIsNotVisibleWhenAlreadyActiveChat() throws {
         let app = launchDockedNotificationProofApp(extendCollapsedPreview: true, startOnAlpha: true)
         XCTAssertTrue(app.staticTexts["T1174 Beta"].waitForExistence(timeout: 4), "Expected unrelated notification to be peeking")

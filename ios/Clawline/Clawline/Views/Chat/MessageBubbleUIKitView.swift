@@ -676,7 +676,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
 
     private func bubbleGradientColors(for role: Message.Role, palette: ChatFlowUIKitTheme.Palette) -> [UIColor] {
         if isCollapsedUserOnlyMode, role == .user {
-            return [palette.collapsedUserBubbleGold, palette.collapsedUserBubbleGold]
+            return [palette.collapsedUserBubbleGreenTint, palette.collapsedUserBubbleGreenTint]
         }
         return role == .user ? palette.bubbleSelfGradient : palette.bubbleOtherGradient
     }
@@ -3364,7 +3364,7 @@ enum ChatFlowUIKitTheme {
         let warmBrown: UIColor
         let adminAccent: UIColor
         let ink: UIColor
-        let collapsedUserBubbleGold: UIColor
+        let collapsedUserBubbleGreenTint: UIColor
         let bubbleSelfGradient: [UIColor]
         let bubbleOtherGradient: [UIColor]
         let avatarGradient: [UIColor]
@@ -3386,7 +3386,7 @@ enum ChatFlowUIKitTheme {
                 warmBrown: UIColor(red: 0.831, green: 0.769, blue: 0.690, alpha: 1),
                 adminAccent: UIColor(red: 0.549, green: 0.756, blue: 0.996, alpha: 1),
                 ink: UIColor(red: 0.910, green: 0.894, blue: 0.878, alpha: 1),
-                collapsedUserBubbleGold: UIColor(ChatFlowTheme.collapsedUserBubbleGold(.dark)),
+                collapsedUserBubbleGreenTint: UIColor(ChatFlowTheme.collapsedUserBubbleGreenTint(.dark)),
                 bubbleSelfGradient: [
                     UIColor(red: 0.161, green: 0.214, blue: 0.149, alpha: 1),
                     UIColor(red: 0.125, green: 0.182, blue: 0.117, alpha: 1)
@@ -3415,7 +3415,7 @@ enum ChatFlowUIKitTheme {
             warmBrown: UIColor(red: 0.361, green: 0.290, blue: 0.239, alpha: 1),
             adminAccent: UIColor(red: 0.141, green: 0.420, blue: 0.831, alpha: 1),
             ink: UIColor(red: 0.239, green: 0.204, blue: 0.161, alpha: 1),
-            collapsedUserBubbleGold: UIColor(ChatFlowTheme.collapsedUserBubbleGold(.light)),
+            collapsedUserBubbleGreenTint: UIColor(ChatFlowTheme.collapsedUserBubbleGreenTint(.light)),
             bubbleSelfGradient: [
                 UIColor(red: 0.834, green: 0.930, blue: 0.789, alpha: 1),
                 UIColor(red: 0.834, green: 0.930, blue: 0.789, alpha: 1)

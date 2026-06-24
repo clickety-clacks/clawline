@@ -38,8 +38,8 @@ enum ChatFlowTheme {
         scheme == .dark ? Color(red: 0.92, green: 0.76, blue: 0.30) : Color(red: 0.89, green: 0.67, blue: 0.08)
     }
 
-    static func collapsedUserBubbleGold(_ scheme: ColorScheme) -> Color {
-        scheme == .dark ? Color(red: 0.63, green: 0.46, blue: 0.13) : Color(red: 0.93, green: 0.72, blue: 0.22)
+    static func collapsedUserBubbleGreenTint(_ scheme: ColorScheme) -> Color {
+        scheme == .dark ? Color(red: 0.108, green: 0.132, blue: 0.104) : Color(red: 0.945, green: 0.976, blue: 0.928)
     }
 
     static func connectionDisconnected(_ scheme: ColorScheme) -> Color {

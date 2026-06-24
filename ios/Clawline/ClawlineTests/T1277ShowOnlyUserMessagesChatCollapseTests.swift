@@ -163,9 +163,9 @@ final class T1277ShowOnlyUserMessagesChatCollapseTests: XCTestCase {
         XCTAssertFalse(t1277ScrollViews(in: bubble).contains { $0.isScrollEnabled })
     }
 
-    func testCollapsedUserOnlyBubbleUsesDesignSystemGoldInLightAndDark() {
+    func testCollapsedUserOnlyBubbleUsesDesignSystemGreenTintInLightAndDark() {
         let lightBubble = t1277ConfiguredBubble(
-            message: t1277Message(id: "u_gold_light", role: .user, content: "gold"),
+            message: t1277Message(id: "u_green_tint_light", role: .user, content: "collapsed"),
             menuLabel: ShowOnlyUserMessagesChatCollapse.menuLabel(isCollapsed: true),
             onToggle: {},
             isCollapsedUserOnlyMode: true,
@@ -173,7 +173,7 @@ final class T1277ShowOnlyUserMessagesChatCollapseTests: XCTestCase {
             onReveal: { _ in }
         )
         let darkBubble = t1277ConfiguredBubble(
-            message: t1277Message(id: "u_gold_dark", role: .user, content: "gold"),
+            message: t1277Message(id: "u_green_tint_dark", role: .user, content: "collapsed"),
             menuLabel: ShowOnlyUserMessagesChatCollapse.menuLabel(isCollapsed: true),
             onToggle: {},
             isCollapsedUserOnlyMode: true,
@@ -181,8 +181,10 @@ final class T1277ShowOnlyUserMessagesChatCollapseTests: XCTestCase {
             onReveal: { _ in }
         )
 
-        XCTAssertTrue(t1277BubbleGradient(in: lightBubble, contains: UIColor(ChatFlowTheme.collapsedUserBubbleGold(.light))))
-        XCTAssertTrue(t1277BubbleGradient(in: darkBubble, contains: UIColor(ChatFlowTheme.collapsedUserBubbleGold(.dark))))
+        XCTAssertTrue(t1277BubbleGradient(in: lightBubble, contains: UIColor(ChatFlowTheme.collapsedUserBubbleGreenTint(.light))))
+        XCTAssertTrue(t1277BubbleGradient(in: darkBubble, contains: UIColor(ChatFlowTheme.collapsedUserBubbleGreenTint(.dark))))
+        XCTAssertFalse(t1277BubbleGradient(in: lightBubble, contains: ChatFlowUIKitTheme.palette(isDark: false).bubbleSelfGradient[0]))
+        XCTAssertFalse(t1277BubbleGradient(in: darkBubble, contains: ChatFlowUIKitTheme.palette(isDark: true).bubbleSelfGradient[0]))
     }
 
     func testCollapsedUserMessageWithLinkCardStillRevealsOnNonLinkBubbleTap() {

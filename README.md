@@ -121,6 +121,9 @@ npm run build
 npm run preview -- --host 0.0.0.0 --port 4173
 ```
 
+The TARS Surf Ace/browser URL is `https://tars.tail4105e8.ts.net:19444/`.
+The `4173` listener is the HTTP backend and is not the canonical pane URL.
+
 The web client is a separate browser app service. It should not be installed under OpenClaw or served from the Clawline provider `/www` route on port `18800`; it connects to the provider API/WebSocket instead. See [docs/sop/clawline-web-hosting.md](docs/sop/clawline-web-hosting.md).
 
 ## Development

@@ -331,7 +331,7 @@ struct StreamSelectorLayoutTests {
 
     @Test("T1374 Spatial popup reserves a rendered status-dot slot")
     func spatialPopupReservesRenderedStatusDotSlot() {
-        let dotDiameter = CGFloat(8)
+        let dotDiameter = StreamPopupRowStatusDot.slotDiameter
         let rowContentSpacing = CGFloat(10)
         let rowHorizontalInset = CGFloat(12)
         let trailingAccessoryReserve = CGFloat(28)
@@ -349,13 +349,13 @@ struct StreamSelectorLayoutTests {
             trailingAccessoryReserve: trailingAccessoryReserve
         )
 
-        #expect(statusDotSlotWidth == dotDiameter)
+        #expect(statusDotSlotWidth == StreamPopupRowStatusDot.slotDiameter)
         #expect(width == titleWidth + (rowHorizontalInset * 2) + statusDotSlotWidth + rowContentSpacing + trailingAccessoryReserve)
     }
 
     @Test("T1374 Spatial popup budgets toolbar dots and shortcut hints together")
     func spatialPopupBudgetsToolbarDotsAndShortcutHintsTogether() {
-        let dotDiameter = CGFloat(8)
+        let dotDiameter = StreamPopupRowStatusDot.slotDiameter
         let rowContentSpacing = CGFloat(10)
         let rowHorizontalInset = CGFloat(12)
         let baseTrailingReserve = CGFloat(28)
@@ -395,22 +395,31 @@ struct StreamSelectorLayoutTests {
 
 #if canImport(UIKit)
     @MainActor
-    @Test("T1374 popup row status dot renders visible pixels")
-    func popupRowStatusDotRendersVisiblePixels() throws {
-        let renderer = ImageRenderer(
-            content: StreamPopupRowStatusDot(
-                isActive: true,
-                dotState: .unread,
-                colorScheme: .dark
+    @Test("T1374 popup row status dot renders visible pixels for every row state")
+    func popupRowStatusDotRendersVisiblePixelsForEveryRowState() throws {
+        let cases: [(isActive: Bool, dotState: StreamDotState, colorScheme: ColorScheme)] = [
+            (true, .inactive, .dark),
+            (false, .unread, .dark),
+            (false, .inactive, .dark),
+            (false, .inactive, .light)
+        ]
+
+        for testCase in cases {
+            let renderer = ImageRenderer(
+                content: StreamPopupRowStatusDot(
+                    isActive: testCase.isActive,
+                    dotState: testCase.dotState,
+                    colorScheme: testCase.colorScheme
+                )
+                .frame(width: 32, height: 32)
             )
-            .frame(width: 32, height: 32)
-        )
-        renderer.scale = CGFloat(2)
+            renderer.scale = CGFloat(2)
 
-        let image = try #require(renderer.uiImage)
-        let visiblePixels = Self.nonTransparentPixelCount(in: image)
+            let image = try #require(renderer.uiImage)
+            let visiblePixels = Self.nonTransparentPixelCount(in: image)
 
-        #expect(visiblePixels > 0)
+            #expect(visiblePixels >= 500)
+        }
     }
 #endif
 

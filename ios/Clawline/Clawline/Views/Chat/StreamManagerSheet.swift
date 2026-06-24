@@ -68,7 +68,7 @@ struct StreamManagerSheet: View {
     private let baselineMaximumPopoverWidth: CGFloat = 360
     private let popupCornerRadius: CGFloat = 20
     private let actionBarSeparatorInset: CGFloat = 12
-    private let rowDotDiameter: CGFloat = 8
+    private let rowDotDiameter: CGFloat = 14
     private let rowContentSpacing: CGFloat = 10
     private let rowTrailingAccessoryReserve: CGFloat = 28
     private let shortcutLabelReservedWidth: CGFloat = 58
@@ -193,9 +193,7 @@ struct StreamManagerSheet: View {
 
                     ForEach(filteredPendingCreateRows) { pendingRow in
                         HStack(spacing: 10) {
-                            Circle()
-                                .fill(Color.primary.opacity(0.18))
-                                .frame(width: rowDotDiameter, height: rowDotDiameter)
+                            StreamPopupRowPendingStatusDot(colorScheme: colorScheme)
                                 .frame(
                                     width: StreamSelectorLayout.popupStatusDotSlotWidth(dotDiameter: rowDotDiameter),
                                     height: listRowHeight,
@@ -1003,31 +1001,67 @@ private struct StreamSelectorShortcutKeyCommandBridge: UIViewRepresentable {
 }
 
 struct StreamPopupRowStatusDot: View {
+    static let slotDiameter: CGFloat = 14
+    static let markDiameter: CGFloat = 10
+
     let isActive: Bool
     let dotState: StreamDotState
     let colorScheme: ColorScheme
 
     var body: some View {
-        Image(systemName: "circle.fill")
-            .resizable()
-            .scaledToFit()
-            .foregroundStyle(
-                StreamDotColor.resolve(
-                    isActive: isActive,
-                    dotState: dotState,
-                    colorScheme: colorScheme
+        let color = StreamDotColor.resolve(
+            isActive: isActive,
+            dotState: dotState,
+            colorScheme: colorScheme
+        )
+        ZStack {
+            Circle()
+                .fill(Color.primary.opacity(colorScheme == .dark ? 0.18 : 0.12))
+                .frame(width: Self.slotDiameter, height: Self.slotDiameter)
+            Circle()
+                .fill(color)
+                .frame(width: Self.markDiameter, height: Self.markDiameter)
+                .overlay {
+                    Circle()
+                        .stroke(Color.primary.opacity(colorScheme == .dark ? 0.45 : 0.28), lineWidth: 1)
+                }
+                .shadow(
+                    color: isActive ? StreamDotColor.activeGlow(colorScheme: colorScheme) : .clear,
+                    radius: isActive ? StreamDotColor.activeOuterGlowRadius(colorScheme: colorScheme) : 0
                 )
-            )
-            .frame(width: 8, height: 8)
-            .fixedSize()
-            .shadow(
-                color: isActive ? StreamDotColor.activeGlow(colorScheme: colorScheme) : .clear,
-                radius: isActive ? StreamDotColor.activeOuterGlowRadius(colorScheme: colorScheme) : 0
-            )
-            .shadow(
-                color: isActive ? StreamDotColor.activeGlow(colorScheme: colorScheme) : .clear,
-                radius: isActive ? StreamDotColor.activeInnerGlowRadius(colorScheme: colorScheme) : 0
-            )
+                .shadow(
+                    color: isActive ? StreamDotColor.activeGlow(colorScheme: colorScheme) : .clear,
+                    radius: isActive ? StreamDotColor.activeInnerGlowRadius(colorScheme: colorScheme) : 0
+                )
+        }
+        .frame(width: Self.slotDiameter, height: Self.slotDiameter)
+        .fixedSize()
+    }
+}
+
+private struct StreamPopupRowPendingStatusDot: View {
+    let colorScheme: ColorScheme
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(Color.primary.opacity(colorScheme == .dark ? 0.14 : 0.1))
+                .frame(
+                    width: StreamPopupRowStatusDot.slotDiameter,
+                    height: StreamPopupRowStatusDot.slotDiameter
+                )
+            Circle()
+                .fill(Color.primary.opacity(0.2))
+                .frame(
+                    width: StreamPopupRowStatusDot.markDiameter,
+                    height: StreamPopupRowStatusDot.markDiameter
+                )
+        }
+        .frame(
+            width: StreamPopupRowStatusDot.slotDiameter,
+            height: StreamPopupRowStatusDot.slotDiameter
+        )
+        .fixedSize()
     }
 }
 

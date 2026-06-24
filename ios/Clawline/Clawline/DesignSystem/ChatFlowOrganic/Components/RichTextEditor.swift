@@ -12,6 +12,190 @@ import UniformTypeIdentifiers
 
 private let logger = Logger(subsystem: "co.clicketyclacks.Clawline", category: "RichTextEditor")
 
+enum PromptEditorSelectionPolicy: Equatable {
+    case preserve
+    case moveToInsertedEnd
+    case selectReplacement
+    case restoreSnapshotSelection
+    case documentEnd
+}
+
+enum PromptEditorIntent {
+    case focus(reason: String)
+    case blur(reason: String)
+    case replaceDraft(content: NSAttributedString, selectionPolicy: PromptEditorSelectionPolicy, reason: String)
+    case insertText(text: String, selectionPolicy: PromptEditorSelectionPolicy, reason: String)
+    case insertAttachment(payload: PendingAttachment, selectionPolicy: PromptEditorSelectionPolicy)
+    case insertResolvedMention(mention: String, selectionPolicy: PromptEditorSelectionPolicy)
+    case requestSnapshot(reason: String)
+    case setEditable(Bool)
+    case performEditorCommand(PromptEditorCommand)
+}
+
+enum PromptEditorEvent {
+    case draftChanged(revision: Int, content: NSAttributedString, editKind: PromptEditorEditKind)
+    case focusChanged(isFocused: Bool)
+    case heightChanged(value: CGFloat)
+    case submitRequested
+    case modifiedNewlineRequested
+    case cancelRequested
+    case pasteImagesRequested(images: [UIImage])
+    case compositionChanged(isActive: Bool)
+    case snapshotReady(snapshot: PromptEditorSnapshot, reason: String)
+}
+
+enum PromptEditorCommand: Equatable {
+    case submit
+    case modifiedNewline
+    case cancel
+    case mentionPickerAccept
+    case mentionPickerMoveUp
+    case mentionPickerMoveDown
+}
+
+enum PromptEditorEditKind: Equatable {
+    case user
+    case programmatic
+}
+
+struct PromptEditorSnapshot: Equatable {
+    var revision: Int
+    var contentLength: Int
+    var selectedRange: NSRange
+    var isComposing: Bool
+    var isFocused: Bool
+}
+
+struct PromptEditorMutationSource: Equatable {
+    enum Origin: Equatable {
+        case parent
+        case editor
+    }
+
+    var revision: Int
+    var origin: Origin
+    var reason: String
+}
+
+final class PromptEditorController {
+    private(set) var revision: Int = 0
+    private var lastParentMutation: PromptEditorMutationSource?
+
+    func recordParentMutation(reason: String) -> PromptEditorMutationSource {
+        revision += 1
+        let source = PromptEditorMutationSource(revision: revision, origin: .parent, reason: reason)
+        lastParentMutation = source
+        return source
+    }
+
+    func recordEditorDraftChange(content: NSAttributedString, editKind: PromptEditorEditKind) -> PromptEditorEvent {
+        revision += 1
+        return .draftChanged(revision: revision, content: content, editKind: editKind)
+    }
+
+    func snapshot(contentLength: Int, selectedRange: NSRange, isComposing: Bool, isFocused: Bool) -> PromptEditorSnapshot {
+        PromptEditorSnapshot(
+            revision: revision,
+            contentLength: contentLength,
+            selectedRange: selectedRange,
+            isComposing: isComposing,
+            isFocused: isFocused
+        )
+    }
+
+    func shouldSuppressEcho(from source: PromptEditorMutationSource) -> Bool {
+        source.origin == .parent && source == lastParentMutation && source.revision == revision
+    }
+
+    func selectionRange(
+        policy: PromptEditorSelectionPolicy,
+        replacementRange: NSRange,
+        replacementLength: Int,
+        documentLengthAfterReplacement: Int,
+        currentSelection: NSRange,
+        snapshot: PromptEditorSnapshot? = nil
+    ) -> NSRange {
+        Self.selectionRange(
+            policy: policy,
+            replacementRange: replacementRange,
+            replacementLength: replacementLength,
+            documentLengthAfterReplacement: documentLengthAfterReplacement,
+            currentSelection: currentSelection,
+            snapshot: snapshot,
+            currentRevision: revision
+        )
+    }
+
+    static func selectionRange(
+        policy: PromptEditorSelectionPolicy,
+        replacementRange: NSRange,
+        replacementLength: Int,
+        documentLengthAfterReplacement: Int,
+        currentSelection: NSRange,
+        snapshot: PromptEditorSnapshot? = nil,
+        currentRevision: Int
+    ) -> NSRange {
+        let clampedReplacement = clamp(replacementRange, length: documentLengthAfterReplacement)
+        switch policy {
+        case .preserve:
+            return clamp(currentSelection, length: documentLengthAfterReplacement)
+        case .moveToInsertedEnd:
+            let location = min(clampedReplacement.location + max(0, replacementLength), documentLengthAfterReplacement)
+            return NSRange(location: location, length: 0)
+        case .selectReplacement:
+            let length = min(max(0, replacementLength), max(0, documentLengthAfterReplacement - clampedReplacement.location))
+            return NSRange(location: clampedReplacement.location, length: length)
+        case .restoreSnapshotSelection:
+            guard let snapshot, snapshot.revision == currentRevision else {
+                return clamp(currentSelection, length: documentLengthAfterReplacement)
+            }
+            return clamp(snapshot.selectedRange, length: documentLengthAfterReplacement)
+        case .documentEnd:
+            return NSRange(location: documentLengthAfterReplacement, length: 0)
+        }
+    }
+
+    private static func clamp(_ range: NSRange, length: Int) -> NSRange {
+        guard range.location != NSNotFound else {
+            return NSRange(location: length, length: 0)
+        }
+        let safeLocation = min(max(range.location, 0), length)
+        let safeLength = max(0, min(range.length, length - safeLocation))
+        return NSRange(location: safeLocation, length: safeLength)
+    }
+}
+
+enum PromptEditorTelemetryEvent: String {
+    case bridgeUpdateUIView = "bridge.updateUIView"
+    case editorTextDidChange = "editor.textDidChange"
+    case editorSelectionDidChange = "editor.selectionDidChange"
+    case editorHeightMeasured = "editor.heightMeasured"
+    case editorHeightEmitted = "editor.heightEmitted"
+    case focusIntent = "focus.intent"
+    case focusAck = "focus.ack"
+    case commandCapture = "command.capture"
+    case commandRoute = "command.route"
+    case compositionActive = "composition.active"
+    case legacyBindingWrite = "legacy.bindingWrite"
+}
+
+enum PromptEditorBridgeTelemetry {
+    static let launchArgument = "--debug-prompt-editor-bridge"
+
+    static var isEnabled: Bool {
+        ProcessInfo.processInfo.arguments.contains(launchArgument)
+    }
+
+    static func record(_ event: PromptEditorTelemetryEvent, _ fields: [String: CustomStringConvertible] = [:]) {
+        guard isEnabled else { return }
+        let details = fields
+            .sorted { $0.key < $1.key }
+            .map { "\($0.key)=\($0.value)" }
+            .joined(separator: " ")
+        logger.debug("[prompt-editor-bridge] \(event.rawValue, privacy: .public) \(details, privacy: .public)")
+    }
+}
+
 private extension UIKey {
     var hasNoCommandModifiers: Bool {
         modifierFlags.intersection([.command, .shift, .alternate, .control]).isEmpty
@@ -54,6 +238,10 @@ struct RichTextEditor: UIViewRepresentable {
         textView.delegate = context.coordinator
         let coordinator = context.coordinator
         textView.onPasteImages = { images in
+            PromptEditorBridgeTelemetry.record(.commandCapture, [
+                "route": "pasteImages",
+                "count": images.count
+            ])
             coordinator.parent.onPasteImages?(images)
         }
         textView.onEscape = {
@@ -66,6 +254,7 @@ struct RichTextEditor: UIViewRepresentable {
             coordinator.updateHeight(for: textView, allowAutoScroll: false)
         }
         textView.onResponderFocusChange = { isFocused in
+            PromptEditorBridgeTelemetry.record(.focusAck, ["isFocused": isFocused, "reason": "responder"])
             coordinator.parent.onFocusChange(isFocused)
         }
         textView.onDirectUserTextReplacement = { range, replacementText in
@@ -112,10 +301,24 @@ struct RichTextEditor: UIViewRepresentable {
         context.coordinator.parent = self
         context.coordinator.isUpdatingFromSwiftUI = true
         defer { context.coordinator.isUpdatingFromSwiftUI = false }
+        PromptEditorBridgeTelemetry.record(.bridgeUpdateUIView, [
+            "contentLength": attributedText.length,
+            "dismissTrigger": dismissTrigger,
+            "focusTrigger": focusTrigger,
+            "isEditable": isEditable,
+            "pendingInsertions": pendingInsertions.count,
+            "resetToken": resetToken,
+            "selectionLocation": selectionRange.location,
+            "selectionLength": selectionRange.length
+        ])
 
         // Update paste callback
         let coordinator = context.coordinator
         textView.onPasteImages = { images in
+            PromptEditorBridgeTelemetry.record(.commandCapture, [
+                "route": "pasteImages",
+                "count": images.count
+            ])
             coordinator.parent.onPasteImages?(images)
         }
         textView.onEscape = {
@@ -129,6 +332,7 @@ struct RichTextEditor: UIViewRepresentable {
         }
         onTextViewReady?(textView)
         textView.onResponderFocusChange = { isFocused in
+            PromptEditorBridgeTelemetry.record(.focusAck, ["isFocused": isFocused, "reason": "responder"])
             coordinator.parent.onFocusChange(isFocused)
         }
         textView.onDirectUserTextReplacement = { range, replacementText in
@@ -142,11 +346,17 @@ struct RichTextEditor: UIViewRepresentable {
         textView.onMentionPickerMoveDown = { coordinator.parent.onMentionPickerMoveDown?() }
 
         let isComposing = textView.markedTextRange != nil
+        if isComposing {
+            PromptEditorBridgeTelemetry.record(.compositionActive, ["isActive": true])
+        }
         let resetRequested = resetToken != context.coordinator.lastResetToken
         let parentContentChangedWhileInactive = !textView.isFirstResponder
             && !textView.attributedText.isEqual(to: attributedText)
         if (resetRequested || parentContentChangedWhileInactive), !isComposing {
             context.coordinator.lastResetToken = resetToken
+            _ = context.coordinator.controller.recordParentMutation(
+                reason: resetRequested ? "resetToken" : "inactiveParentContent"
+            )
             textView.attributedText = attributedText
             context.coordinator.enforceBaseAttributes(on: textView)
             if selectionRange.location != NSNotFound, textView.selectedRange != selectionRange {
@@ -160,6 +370,7 @@ struct RichTextEditor: UIViewRepresentable {
         if !isComposing,
            !context.coordinator.isApplyingLocalEdit,
            !((textView.attributedText?.isEqual(attributedText)) ?? false) {
+            _ = context.coordinator.controller.recordParentMutation(reason: "externalBinding")
             textView.attributedText = attributedText
             context.coordinator.enforceBaseAttributes(on: textView)
             context.coordinator.ensureTypingAttributes(on: textView)
@@ -215,6 +426,10 @@ struct RichTextEditor: UIViewRepresentable {
             let attachments = pendingInsertions
             context.coordinator.insertAttachments(attachments, into: textView)
             DispatchQueue.main.async {
+                PromptEditorBridgeTelemetry.record(.legacyBindingWrite, [
+                    "binding": "pendingInsertions",
+                    "count": 0
+                ])
                 self.pendingInsertions = []
                 context.coordinator.isInsertingAttachments = false
             }
@@ -227,6 +442,7 @@ struct RichTextEditor: UIViewRepresentable {
 
     final class Coordinator: NSObject, UITextViewDelegate, UIGestureRecognizerDelegate {
         var parent: RichTextEditor
+        let controller: PromptEditorController
         private var lastFocusTrigger: Int = 0
         private var lastDismissTrigger: Int = 0
         var isApplyingLocalEdit = false
@@ -241,15 +457,21 @@ struct RichTextEditor: UIViewRepresentable {
 
         init(parent: RichTextEditor) {
             self.parent = parent
+            self.controller = PromptEditorController()
         }
 
         @objc func handleEditorTap(_ gesture: UITapGestureRecognizer) {
             guard let textView = gesture.view as? UITextView else { return }
-            requestEditorFocus(on: textView, isKeyboardVisible: parent.isKeyboardVisible)
+            requestEditorFocus(on: textView, isKeyboardVisible: parent.isKeyboardVisible, reason: "tap")
         }
 
-        private func requestEditorFocus(on textView: UITextView, isKeyboardVisible: Bool) {
+        private func requestEditorFocus(on textView: UITextView, isKeyboardVisible: Bool, reason: String) {
             guard parent.isEditable else { return }
+            PromptEditorBridgeTelemetry.record(.focusIntent, [
+                "isFirstResponder": textView.isFirstResponder,
+                "isKeyboardVisible": isKeyboardVisible,
+                "reason": reason
+            ])
             if let textView = textView as? PastableTextView {
                 textView.isInputEnabled = true
             }
@@ -264,15 +486,18 @@ struct RichTextEditor: UIViewRepresentable {
                     guard let self, let textView else { return }
                     let becameFirstResponder = textView.becomeFirstResponder()
                     if becameFirstResponder || textView.isFirstResponder {
+                        PromptEditorBridgeTelemetry.record(.focusAck, ["isFocused": true, "reason": reason])
                         self.parent.onFocusChange(true)
                     }
                 }
             } else if !textView.isFirstResponder {
                 let becameFirstResponder = textView.becomeFirstResponder()
                 if becameFirstResponder || textView.isFirstResponder {
+                    PromptEditorBridgeTelemetry.record(.focusAck, ["isFocused": true, "reason": reason])
                     parent.onFocusChange(true)
                 }
             } else {
+                PromptEditorBridgeTelemetry.record(.focusAck, ["isFocused": true, "reason": reason])
                 parent.onFocusChange(true)
             }
         }
@@ -285,20 +510,37 @@ struct RichTextEditor: UIViewRepresentable {
         }
 
         func textViewDidBeginEditing(_ textView: UITextView) {
+            PromptEditorBridgeTelemetry.record(.focusAck, ["isFocused": true, "reason": "delegate"])
             parent.onFocusChange(true)
         }
 
         func textViewDidEndEditing(_ textView: UITextView) {
+            PromptEditorBridgeTelemetry.record(.focusAck, ["isFocused": false, "reason": "delegate"])
             parent.onFocusChange(false)
         }
 
         func textViewDidChange(_ textView: UITextView) {
             guard !isUpdatingFromSwiftUI else { return }
             let isProgrammaticEdit = (textView as? PastableTextView)?.programmaticEditInFlight == true
+            let draftEvent = controller.recordEditorDraftChange(
+                content: textView.attributedText,
+                editKind: isProgrammaticEdit ? .programmatic : .user
+            )
+            if case let .draftChanged(revision, content, editKind) = draftEvent {
+                PromptEditorBridgeTelemetry.record(.editorTextDidChange, [
+                    "contentLength": content.length,
+                    "editKind": String(describing: editKind),
+                    "revision": revision
+                ])
+            }
             isApplyingLocalEdit = true
             if !isProgrammaticEdit {
                 parent.onTextEditActivity?()
             }
+            PromptEditorBridgeTelemetry.record(.legacyBindingWrite, [
+                "binding": "attributedText",
+                "length": textView.attributedText.length
+            ])
             parent.attributedText = textView.attributedText
             if !isProgrammaticEdit {
                 setSelectionRange(textView.selectedRange)
@@ -322,6 +564,10 @@ struct RichTextEditor: UIViewRepresentable {
             let selectedRange = textView.selectedRange
             guard selectedRange.location != NSNotFound else { return }
             guard !isApplyingParentSelection else { return }
+            PromptEditorBridgeTelemetry.record(.editorSelectionDidChange, [
+                "location": selectedRange.location,
+                "length": selectedRange.length
+            ])
             setSelectionRange(selectedRange)
             if isApplyingLocalEdit {
                 ensureCaretVisible(in: textView)
@@ -340,7 +586,13 @@ struct RichTextEditor: UIViewRepresentable {
                 parent.onUserEdit?(range, text.utf16.count)
             }
             if text == "\n" {
-                switch KeyboardCommandRouter.route(intent: .textSubmit, store: parent.keyboardOwnershipStore).outcome {
+                PromptEditorBridgeTelemetry.record(.commandCapture, ["route": "textSubmit"])
+                let route = KeyboardCommandRouter.route(intent: .textSubmit, store: parent.keyboardOwnershipStore).outcome
+                PromptEditorBridgeTelemetry.record(.commandRoute, [
+                    "intent": "textSubmit",
+                    "outcome": String(describing: route)
+                ])
+                switch route {
                 case .handled(.mentionPicker):
                     parent.onMentionPickerTab?()
                 case .handled(.composer):
@@ -379,14 +631,28 @@ struct RichTextEditor: UIViewRepresentable {
             } else {
                 clamped = min(max(size.height, minHeight), maxHeight)
             }
+            PromptEditorBridgeTelemetry.record(.editorHeightMeasured, [
+                "clamped": clamped,
+                "measured": size.height,
+                "width": targetWidth
+            ])
             if abs(parent.calculatedHeight - clamped) > 0.5 {
+                PromptEditorBridgeTelemetry.record(.editorHeightEmitted, ["value": clamped])
                 if isUpdatingFromSwiftUI {
                     DispatchQueue.main.async { [weak self] in
                         guard let self else { return }
                         guard abs(self.parent.calculatedHeight - clamped) > 0.5 else { return }
+                        PromptEditorBridgeTelemetry.record(.legacyBindingWrite, [
+                            "binding": "calculatedHeight",
+                            "value": clamped
+                        ])
                         self.parent.calculatedHeight = clamped
                     }
                 } else {
+                    PromptEditorBridgeTelemetry.record(.legacyBindingWrite, [
+                        "binding": "calculatedHeight",
+                        "value": clamped
+                    ])
                     parent.calculatedHeight = clamped
                 }
             }
@@ -410,7 +676,7 @@ struct RichTextEditor: UIViewRepresentable {
             lastFocusTrigger = trigger
             guard trigger > 0 else { return }
             guard parent.isEditable else { return }
-            requestEditorFocus(on: textView, isKeyboardVisible: isKeyboardVisible)
+            requestEditorFocus(on: textView, isKeyboardVisible: isKeyboardVisible, reason: "trigger")
         }
 
         func applyDismissIfNeeded(on textView: UITextView, trigger: Int) {
@@ -418,8 +684,14 @@ struct RichTextEditor: UIViewRepresentable {
             lastDismissTrigger = trigger
             guard trigger > 0 else { return }
             guard textView.isFirstResponder || parent.isKeyboardVisible else { return }
+            PromptEditorBridgeTelemetry.record(.focusIntent, [
+                "isFirstResponder": textView.isFirstResponder,
+                "isKeyboardVisible": parent.isKeyboardVisible,
+                "reason": "dismissTrigger"
+            ])
             textView.resignFirstResponder()
             textView.window?.endEditing(true)
+            PromptEditorBridgeTelemetry.record(.focusAck, ["isFocused": false, "reason": "dismissTrigger"])
             parent.onFocusChange(false)
         }
 
@@ -437,9 +709,19 @@ struct RichTextEditor: UIViewRepresentable {
                 DispatchQueue.main.async { [weak self] in
                     guard let self else { return }
                     guard self.parent.selectionRange != selectedRange else { return }
+                    PromptEditorBridgeTelemetry.record(.legacyBindingWrite, [
+                        "binding": "selectionRange",
+                        "location": selectedRange.location,
+                        "length": selectedRange.length
+                    ])
                     self.parent.selectionRange = selectedRange
                 }
             } else {
+                PromptEditorBridgeTelemetry.record(.legacyBindingWrite, [
+                    "binding": "selectionRange",
+                    "location": selectedRange.location,
+                    "length": selectedRange.length
+                ])
                 parent.selectionRange = selectedRange
             }
         }
@@ -495,7 +777,17 @@ struct RichTextEditor: UIViewRepresentable {
             textView.attributedText = mutable
             let newRange = NSRange(location: insertionLocation, length: 0)
             textView.selectedRange = newRange
+            _ = controller.recordParentMutation(reason: "legacyPendingInsertions")
+            PromptEditorBridgeTelemetry.record(.legacyBindingWrite, [
+                "binding": "attributedText",
+                "length": mutable.length
+            ])
             parent.attributedText = mutable
+            PromptEditorBridgeTelemetry.record(.legacyBindingWrite, [
+                "binding": "selectionRange",
+                "location": newRange.location,
+                "length": newRange.length
+            ])
             parent.selectionRange = newRange
             updateHeight(for: textView, allowAutoScroll: false)
         }
@@ -686,38 +978,50 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
     }
 
     @objc private func didPressMentionPickerTab(_ sender: UIKeyCommand) {
+        PromptEditorBridgeTelemetry.record(.commandCapture, ["route": "pickerAccept"])
         guard canHandleInputShortcut, routes(.pickerAccept) else { return }
         onMentionPickerTab?()
     }
 
     @objc private func didPressMentionPickerUp(_ sender: UIKeyCommand) {
+        PromptEditorBridgeTelemetry.record(.commandCapture, ["route": "pickerNavigateUp"])
         guard canHandleInputShortcut, routes(.pickerNavigateUp) else { return }
         onMentionPickerMoveUp?()
     }
 
     @objc private func didPressMentionPickerDown(_ sender: UIKeyCommand) {
+        PromptEditorBridgeTelemetry.record(.commandCapture, ["route": "pickerNavigateDown"])
         guard canHandleInputShortcut, routes(.pickerNavigateDown) else { return }
         onMentionPickerMoveDown?()
     }
 
     @objc private func didPressModifiedReturn(_ sender: UIKeyCommand) {
+        PromptEditorBridgeTelemetry.record(.commandCapture, ["route": "textModifiedNewline"])
         guard canHandleInputShortcut,
               case .handled(.composer) = KeyboardCommandRouter
                 .route(intent: .textModifiedNewline, store: keyboardOwnershipStore)
                 .outcome else { return }
+        PromptEditorBridgeTelemetry.record(.commandRoute, [
+            "intent": "textModifiedNewline",
+            "outcome": "composer"
+        ])
         insertPlainText("\n")
     }
 
     @objc private func didPressEscape(_ sender: UIKeyCommand) {
+        PromptEditorBridgeTelemetry.record(.commandCapture, ["route": "escape"])
         guard canHandleInputShortcut else { return }
         onEscape?()
     }
 
     private func routes(_ intent: KeyboardCommandIntent) -> Bool {
-        guard handlesMentionPickerKeyCommands,
-              case .handled(.mentionPicker) = KeyboardCommandRouter
-                .route(intent: intent, store: keyboardOwnershipStore)
-                .outcome else { return false }
+        guard handlesMentionPickerKeyCommands else { return false }
+        let outcome = KeyboardCommandRouter.route(intent: intent, store: keyboardOwnershipStore).outcome
+        PromptEditorBridgeTelemetry.record(.commandRoute, [
+            "intent": String(describing: intent),
+            "outcome": String(describing: outcome)
+        ])
+        guard case .handled(.mentionPicker) = outcome else { return false }
         return true
     }
 
@@ -801,10 +1105,12 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
                 guard let key = press.key, key.hasNoCommandModifiers else { continue }
                 switch key.keyCode {
                 case .keyboardUpArrow:
+                    PromptEditorBridgeTelemetry.record(.commandCapture, ["route": "arrowUp"])
                     guard routes(.pickerNavigateUp) else { break }
                     onMentionPickerMoveUp?()
                     return
                 case .keyboardDownArrow:
+                    PromptEditorBridgeTelemetry.record(.commandCapture, ["route": "arrowDown"])
                     guard routes(.pickerNavigateDown) else { break }
                     onMentionPickerMoveDown?()
                     return
@@ -817,6 +1123,7 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
         }
         guard canHandleInputShortcut else { return }
         guard !isEscapePressed else { return }
+        PromptEditorBridgeTelemetry.record(.commandCapture, ["route": "escapePress"])
         isEscapePressed = true
         didFireEscapeLongPress = false
         escapeLongPressTask?.cancel()
@@ -845,6 +1152,10 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
         escapeLongPressTask?.cancel()
         escapeLongPressTask = nil
         if !didFireEscapeLongPress {
+            PromptEditorBridgeTelemetry.record(.commandRoute, [
+                "intent": "escape",
+                "outcome": "cancel"
+            ])
             onEscape?()
         }
         isEscapePressed = false
@@ -884,6 +1195,10 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
     override func paste(_ sender: Any?) {
         let pasteboard = UIPasteboard.general
         let imageProviders = pasteboard.itemProviders.filter { Self.providerHasImage($0) }
+        PromptEditorBridgeTelemetry.record(.commandCapture, [
+            "route": "paste",
+            "imageProviders": imageProviders.count
+        ])
         logger.info("[paste] paste(_:) hasImages=\(pasteboard.hasImages) imageProviders=\(imageProviders.count)")
         guard !imageProviders.isEmpty else {
             // Strip rich formatting — insert only plain text with default typing attributes.
@@ -897,6 +1212,11 @@ final class PastableTextView: UITextView, UITextPasteDelegate {
 
     override func paste(itemProviders: [NSItemProvider]) {
         let imageProviders = itemProviders.filter { Self.providerHasImage($0) }
+        PromptEditorBridgeTelemetry.record(.commandCapture, [
+            "route": "pasteItemProviders",
+            "imageProviders": imageProviders.count,
+            "total": itemProviders.count
+        ])
         logger.info("[paste] paste(itemProviders:) total=\(itemProviders.count) images=\(imageProviders.count)")
         guard !imageProviders.isEmpty else {
             handleTextProviders(itemProviders)

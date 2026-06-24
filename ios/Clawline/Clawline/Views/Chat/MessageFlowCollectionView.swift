@@ -30,6 +30,25 @@ enum TypingIndicatorMorph {
     }
 }
 
+enum ShowOnlyUserMessagesChatCollapse {
+    static let animationDuration: TimeInterval = 0.3
+    static let normalMenuLabel = "Hide Assistant Messages"
+    static let collapsedMenuLabel = "Show Only User Messages"
+
+    static func menuLabel(isCollapsed: Bool) -> String {
+        isCollapsed ? collapsedMenuLabel : normalMenuLabel
+    }
+
+    static func visibleMessages(from messages: [Message], isCollapsed: Bool) -> [Message] {
+        guard isCollapsed else { return messages }
+        return messages.filter { $0.role == .user }
+    }
+
+    static func doubledCount(_ count: Int, isCollapsed: Bool) -> Int {
+        isCollapsed ? count * 2 : count
+    }
+}
+
 enum ChatDateLabelCalendar {
     static func startOfDay(for date: Date, calendar: Calendar = .autoupdatingCurrent) -> Date {
         calendar.startOfDay(for: date)
@@ -48,6 +67,10 @@ enum ChatDateLabelCalendar {
 }
 
 enum ChatVisibleBubbleContentScroll {
+    static var lineIncrement: CGFloat {
+        ceil(UIFont.clawline(.bodyText).lineHeight + 4)
+    }
+
     static let commandIncrement: CGFloat = 224
 
     @discardableResult
@@ -164,6 +187,7 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
     var onFooterTestMenuSelected: (@MainActor (FooterTestMenuAction) -> Void)?
     var onInsertMessageIntoPrompt: (@MainActor (Message) -> Void)?
     var onReferenceMessageInPrompt: (@MainActor (Message) -> Void)?
+    var onShowOnlyUserMessagesModeChanged: (@MainActor (String, Bool) -> Void)?
     var onKeyboardDismissModeChanged: (@MainActor (String) -> Void)? = nil
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.allowsTransparentWindowBackground) private var allowsTransparentWindowBackground
@@ -212,6 +236,7 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
             onFooterTestMenuSelected: onFooterTestMenuSelected,
             onInsertMessageIntoPrompt: onInsertMessageIntoPrompt,
             onReferenceMessageInPrompt: onReferenceMessageInPrompt,
+            onShowOnlyUserMessagesModeChanged: onShowOnlyUserMessagesModeChanged,
             onKeyboardDismissModeChanged: onKeyboardDismissModeChanged,
             isDark: isDark,
             allowsTransparentWindowBackground: allowsTransparentWindowBackground
@@ -250,6 +275,7 @@ struct MessageFlowCollectionView: UIViewControllerRepresentable {
             onFooterTestMenuSelected: onFooterTestMenuSelected,
             onInsertMessageIntoPrompt: onInsertMessageIntoPrompt,
             onReferenceMessageInPrompt: onReferenceMessageInPrompt,
+            onShowOnlyUserMessagesModeChanged: onShowOnlyUserMessagesModeChanged,
             onKeyboardDismissModeChanged: onKeyboardDismissModeChanged,
             isDark: isDark,
             allowsTransparentWindowBackground: allowsTransparentWindowBackground
@@ -292,6 +318,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         let onFooterTestMenuSelected: (@MainActor (FooterTestMenuAction) -> Void)?
         let onInsertMessageIntoPrompt: (@MainActor (Message) -> Void)?
         let onReferenceMessageInPrompt: (@MainActor (Message) -> Void)?
+        let onShowOnlyUserMessagesModeChanged: (@MainActor (String, Bool) -> Void)?
         let onKeyboardDismissModeChanged: (@MainActor (String) -> Void)?
         let isDark: Bool?
         let allowsTransparentWindowBackground: Bool
@@ -438,6 +465,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         var didCrossAndClearFirstUnreadId: String?
         var pendingFlashMessageId: String?
         var pendingFlashIsUnreadTap: Bool = false
+        var isShowingOnlyUserMessages: Bool = false
 
         var pendingScrollRestoreState: PersistedScrollState?
         var restorePhase: RestorePhase = .none
@@ -518,14 +546,24 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     private var onFooterTestMenuSelected: (@MainActor (FooterTestMenuAction) -> Void)?
     private var onInsertMessageIntoPrompt: (@MainActor (Message) -> Void)?
     private var onReferenceMessageInPrompt: (@MainActor (Message) -> Void)?
+    private var onShowOnlyUserMessagesModeChanged: (@MainActor (String, Bool) -> Void)?
     private var onKeyboardDismissModeChanged: (@MainActor (String) -> Void)?
     private let webBubbleCoordinator = WebBubbleCoordinator()
     private var lastMessages: [Message] = []
     private var lastEffectiveStream: ChatStream?
+    private var showOnlyUserMessagesTransitionSessionKeys: Set<String> = []
+    private var pendingShowOnlyUserMessagesRevealTargetBySessionKey: [String: String] = [:]
     // Staged stream materialization (approved spec: tail window -> full history).
     // WHY N=50: device measurements showed 500-item first apply taking 1.4-2.7s.
     // A 50-item first paint targets ~10% of that cost while still showing meaningful recent context.
-    private static let stagedMaterializationTailWindowCount = 50
+    static let stagedMaterializationTailWindowCount = 50
+
+    static func stagedMaterializationTailWindowCount(isShowingOnlyUserMessages: Bool) -> Int {
+        ShowOnlyUserMessagesChatCollapse.doubledCount(
+            stagedMaterializationTailWindowCount,
+            isCollapsed: isShowingOnlyUserMessages
+        )
+    }
 
     private enum MaterializationStage: String {
         // WHY only two stages: spec intentionally limits complexity to one fast first paint
@@ -1893,10 +1931,85 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         return !persistedState.atBottom
     }
 
+    func toggleShowOnlyUserMessagesMode() {
+        guard let sessionKey = callbackSessionKey() else { return }
+        setShowOnlyUserMessagesMode(!readState(for: sessionKey).isShowingOnlyUserMessages)
+    }
+
+    private func revealUserMessageFromShowOnlyUserMessagesMode(_ message: Message) {
+        setShowOnlyUserMessagesMode(false, revealMessageId: message.id)
+    }
+
+    private func setShowOnlyUserMessagesMode(_ isShowingOnlyUserMessages: Bool,
+                                             revealMessageId: String? = nil) {
+        guard let sessionKey = callbackSessionKey(), let viewModel else { return }
+        if isUpdatePassInFlight || isSnapshotApplyInFlight {
+            DispatchQueue.main.async { [weak self] in
+                self?.setShowOnlyUserMessagesMode(
+                    isShowingOnlyUserMessages,
+                    revealMessageId: revealMessageId
+                )
+            }
+            return
+        }
+
+        let previousValue = readState(for: sessionKey).isShowingOnlyUserMessages
+        guard previousValue != isShowingOnlyUserMessages || revealMessageId != nil else { return }
+        mutateState(for: sessionKey) { state in
+            state.isShowingOnlyUserMessages = isShowingOnlyUserMessages
+        }
+        onShowOnlyUserMessagesModeChanged?(sessionKey, isShowingOnlyUserMessages)
+        showOnlyUserMessagesTransitionSessionKeys.insert(sessionKey)
+        if let revealMessageId {
+            pendingShowOnlyUserMessagesRevealTargetBySessionKey[sessionKey] = revealMessageId
+            materializationStateBySessionKey[sessionKey] = MaterializationState(
+                stage: .full,
+                windowBounds: WindowBounds(lowerBound: 0, upperBound: lastMessages.count),
+                expansionState: .idle,
+                unreadOutsideTailWindow: false
+            )
+        }
+        forceReconfigureAll = true
+        update(
+            viewModel: viewModel,
+            isCompact: isCompact,
+            isActiveSession: isActiveSession,
+            isRenderPolicyFrozen: isRenderPolicyFrozen,
+            isInputActive: isInputActive,
+            keepsKeyboardPinned: keepsKeyboardPinned,
+            isTypingActive: isTypingActive,
+            topInset: topInset,
+            truncationBottomInset: truncationBottomInset,
+            trailingContentInset: trailingContentInset,
+            firstUnreadMessageId: firstUnreadMessageId,
+            unreadCount: unreadCount,
+            onExpand: onExpand,
+            sessionKey: channelOverride,
+            sessionStatus: sessionStatus,
+            forceReReadGeneration: readState(for: sessionKey).lastSeenForceReReadGeneration,
+            sendIndicatorRevision: currentSendIndicatorRevision,
+            fontScaleChangeSequence: currentFontScaleChangeSequence,
+            onScrollEvent: onScrollEvent,
+            onTypingIndicatorTap: onTypingIndicatorTap,
+            onTypingIndicatorAnchorFrameChanged: onTypingIndicatorAnchorFrameChanged,
+            onSessionControlSelected: onSessionControlSelected,
+            onFooterTestMenuSelected: onFooterTestMenuSelected,
+            onInsertMessageIntoPrompt: onInsertMessageIntoPrompt,
+            onReferenceMessageInPrompt: onReferenceMessageInPrompt,
+            onShowOnlyUserMessagesModeChanged: onShowOnlyUserMessagesModeChanged,
+            onKeyboardDismissModeChanged: onKeyboardDismissModeChanged,
+            isDark: currentIsDark,
+            allowsTransparentWindowBackground: allowsTransparentWindowBackground
+        )
+    }
+
     private func advanceMaterialization(sessionKey: String,
                                         event: MaterializationEvent) -> MaterializationPlan
     {
         let previousMaterializationState = materializationStateBySessionKey[sessionKey]
+        let tailWindowCount = Self.stagedMaterializationTailWindowCount(
+            isShowingOnlyUserMessages: readState(for: sessionKey).isShowingOnlyUserMessages
+        )
         let totalCount: Int
         let firstUnreadId: String?
         let fullMessageIds: [String]
@@ -1936,7 +2049,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             )
         }
 
-        if totalCount <= Self.stagedMaterializationTailWindowCount {
+        if totalCount <= tailWindowCount {
             // WHY bypass staging for small streams: adding tail->full churn would be overhead
             // without meaningful latency reduction when full history is already short.
             let fullBounds = WindowBounds(lowerBound: 0, upperBound: totalCount)
@@ -1964,7 +2077,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         var state = materializationStateBySessionKey[sessionKey]
         if state == nil {
             if allowTailStage {
-                let tailBounds = tailWindowBounds(totalCount: totalCount)
+                let tailBounds = tailWindowBounds(totalCount: totalCount, count: tailWindowCount)
                 state = MaterializationState(
                     stage: .tail,
                     windowBounds: tailBounds,
@@ -2001,7 +2114,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         switch event {
         case .messagesUpdated:
             if state.stage == .tail {
-                let tailBounds = tailWindowBounds(totalCount: totalCount)
+                let tailBounds = tailWindowBounds(totalCount: totalCount, count: tailWindowCount)
                 state.windowBounds = tailBounds
                 state.unreadOutsideTailWindow = isUnreadOutsideTailWindow(
                     firstUnreadMessageId: firstUnreadId,
@@ -2095,8 +2208,8 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         }
     }
 
-    private func tailWindowBounds(totalCount: Int) -> WindowBounds {
-        let lower = max(0, totalCount - Self.stagedMaterializationTailWindowCount)
+    private func tailWindowBounds(totalCount: Int, count: Int) -> WindowBounds {
+        let lower = max(0, totalCount - count)
         return WindowBounds(lowerBound: lower, upperBound: totalCount)
     }
 
@@ -2173,6 +2286,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             onFooterTestMenuSelected: onFooterTestMenuSelected,
             onInsertMessageIntoPrompt: onInsertMessageIntoPrompt,
             onReferenceMessageInPrompt: onReferenceMessageInPrompt,
+            onShowOnlyUserMessagesModeChanged: onShowOnlyUserMessagesModeChanged,
             onKeyboardDismissModeChanged: onKeyboardDismissModeChanged,
             isDark: currentIsDark,
             allowsTransparentWindowBackground: allowsTransparentWindowBackground
@@ -2223,6 +2337,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 onFooterTestMenuSelected: request.onFooterTestMenuSelected,
                 onInsertMessageIntoPrompt: request.onInsertMessageIntoPrompt,
                 onReferenceMessageInPrompt: request.onReferenceMessageInPrompt,
+                onShowOnlyUserMessagesModeChanged: request.onShowOnlyUserMessagesModeChanged,
                 onKeyboardDismissModeChanged: request.onKeyboardDismissModeChanged,
                 isDark: request.isDark,
                 allowsTransparentWindowBackground: request.allowsTransparentWindowBackground
@@ -2239,6 +2354,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         _ snapshot: NSDiffableDataSourceSnapshot<Int, String>,
         animatingDifferences: Bool,
         sessionKey: String? = nil,
+        animationDuration: TimeInterval? = nil,
         completion: (() -> Void)? = nil
     ) {
         // Diffable data sources trap on reentrant snapshot applies. Keep every
@@ -2250,6 +2366,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                     snapshot,
                     animatingDifferences: animatingDifferences,
                     sessionKey: sessionKey,
+                    animationDuration: animationDuration,
                     completion: completion
                 )
             }
@@ -2259,12 +2376,25 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         if let sessionKey {
             StreamSwitchTiming.log("dataSource_apply_start", sessionKey: sessionKey)
         }
-        dataSource.apply(snapshot, animatingDifferences: animatingDifferences) { [weak self] in
-            completion?()
-            if let sessionKey {
-                StreamSwitchTiming.log("dataSource_apply_end", sessionKey: sessionKey)
+        let applySnapshot = { [weak self] in
+            guard let self else { return }
+            self.dataSource.apply(snapshot, animatingDifferences: animatingDifferences) { [weak self] in
+                completion?()
+                if let sessionKey {
+                    StreamSwitchTiming.log("dataSource_apply_end", sessionKey: sessionKey)
+                }
+                self?.markSnapshotApplyCompleted()
             }
-            self?.markSnapshotApplyCompleted()
+        }
+        if let animationDuration {
+            UIView.transition(
+                with: collectionView,
+                duration: animationDuration,
+                options: [.transitionCrossDissolve, .allowUserInteraction],
+                animations: applySnapshot
+            )
+        } else {
+            applySnapshot()
         }
     }
 
@@ -2329,6 +2459,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         onFooterTestMenuSelected: (@MainActor (FooterTestMenuAction) -> Void)? = nil,
         onInsertMessageIntoPrompt: (@MainActor (Message) -> Void)? = nil,
         onReferenceMessageInPrompt: (@MainActor (Message) -> Void)? = nil,
+        onShowOnlyUserMessagesModeChanged: (@MainActor (String, Bool) -> Void)? = nil,
         onKeyboardDismissModeChanged: (@MainActor (String) -> Void)? = nil,
         isDark: Bool? = nil,
         allowsTransparentWindowBackground: Bool = false
@@ -2359,6 +2490,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             onFooterTestMenuSelected: onFooterTestMenuSelected,
             onInsertMessageIntoPrompt: onInsertMessageIntoPrompt,
             onReferenceMessageInPrompt: onReferenceMessageInPrompt,
+            onShowOnlyUserMessagesModeChanged: onShowOnlyUserMessagesModeChanged,
             onKeyboardDismissModeChanged: onKeyboardDismissModeChanged,
             isDark: isDark,
             allowsTransparentWindowBackground: allowsTransparentWindowBackground
@@ -2407,6 +2539,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         self.onFooterTestMenuSelected = onFooterTestMenuSelected
         self.onInsertMessageIntoPrompt = onInsertMessageIntoPrompt
         self.onReferenceMessageInPrompt = onReferenceMessageInPrompt
+        self.onShowOnlyUserMessagesModeChanged = onShowOnlyUserMessagesModeChanged
         self.onKeyboardDismissModeChanged = onKeyboardDismissModeChanged
         self.allowsTransparentWindowBackground = allowsTransparentWindowBackground
 #if !os(visionOS)
@@ -2507,6 +2640,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 restorePhase = .pendingFullConfirmation
             }
         }
+        let isShowingOnlyUserMessages = readState(for: effectiveSessionKey).isShowingOnlyUserMessages
         let materializationPlan = enqueueMaterializationEvent(
             sessionKey: effectiveSessionKey,
             event: .messagesUpdated(
@@ -2516,24 +2650,30 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 allowTailStage: isFirstActivationForSession
             )
         )
-        let snapshotMessages: [Message]
+        let materializedMessages: [Message]
         switch materializationPlan.stage {
         case .tail:
             let lower = max(0, min(materializationPlan.windowBounds.lowerBound, messages.count))
             let upper = max(lower, min(materializationPlan.windowBounds.upperBound, messages.count))
-            snapshotMessages = Array(messages[lower ..< upper])
+            materializedMessages = Array(messages[lower ..< upper])
         case .full:
-            snapshotMessages = messages
+            materializedMessages = messages
         }
+        let snapshotMessages = ShowOnlyUserMessagesChatCollapse.visibleMessages(
+            from: materializedMessages,
+            isCollapsed: isShowingOnlyUserMessages
+        )
         lastMessages = messages
         let effectiveStream = SessionKey.stream(for: effectiveSessionKey)
         lastEffectiveStream = effectiveStream
         webBubbleCoordinator.currentStream = effectiveStream
         let snapshotMessageIds = snapshotMessages.map(\.id)
-        let snapshotItemIds = snapshotItemsWithWebBubbles(
-            from: snapshotItemsWithDateSeparators(from: snapshotMessages),
-            stream: effectiveStream
-        )
+        let snapshotItemIds = isShowingOnlyUserMessages
+            ? snapshotMessageIds
+            : snapshotItemsWithWebBubbles(
+                from: snapshotItemsWithDateSeparators(from: snapshotMessages),
+                stream: effectiveStream
+            )
         logScrollRestore(
             "materializationStage.start sessionKey=\(effectiveSessionKey) stage=\(materializationPlan.stage.rawValue) firstActivation=\(isFirstActivationForSession) snapshotMessages=\(snapshotMessageIds.count) totalMessages=\(messageCount) pendingRestore={\(describePersistedScrollState(readState(for: effectiveSessionKey).pendingScrollRestoreState))}"
         )
@@ -2543,13 +2683,12 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         )
         var snapshot = NSDiffableDataSourceSnapshot<Int, String>()
         snapshot.appendSections([0])
-        snapshot.appendItems(snapshotItemIds)
         let oldItemIds = Set(dataSource.snapshot().itemIdentifiers)
 
         // Add typing indicator when assistant is typing (server-controlled)
         // Only show on the matching channel page (for paged TabView)
         let wasShowingTypingIndicatorBeforeUpdate = wasShowingTypingIndicator
-        let showTypingIndicator = viewModel.shouldShowPromptStageIndicator(in: effectiveSessionKey)
+        let showTypingIndicator = !isShowingOnlyUserMessages && viewModel.shouldShowPromptStageIndicator(in: effectiveSessionKey)
         let typingIndicatorJustAppeared = showTypingIndicator && !wasShowingTypingIndicatorBeforeUpdate
         if showTypingIndicator != wasShowingTypingIndicator {
             let wasShowingTypingIndicator = wasShowingTypingIndicator
@@ -2557,9 +2696,17 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         }
         wasShowingTypingIndicator = showTypingIndicator
         if showTypingIndicator {
-            snapshot.appendItems([TypingIndicatorCell.itemId])
+            snapshot.appendItems(TranscriptTypingIndicatorOrdering.itemIds(
+                messageItems: snapshotItemIds,
+                messages: snapshotMessages,
+                typingIndicatorItemId: TypingIndicatorCell.itemId,
+                activePromptMessageId: viewModel.promptStageIndicatorAnchorMessageId(in: effectiveSessionKey)
+            ))
+        } else {
+            snapshot.appendItems(snapshotItemIds)
         }
-        if SessionMetadataFooterCell.shouldAppendFooter(after: snapshotItemIds, status: sessionStatus) {
+        if !isShowingOnlyUserMessages,
+           SessionMetadataFooterCell.shouldAppendFooter(after: snapshotItemIds, status: sessionStatus) {
             snapshot.appendItems([SessionMetadataFooterCell.itemId])
         }
         StreamSwitchTiming.log("snapshot_build_end", sessionKey: effectiveSessionKey)
@@ -2573,6 +2720,10 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             targetMessageId: morphTargetMessageId,
             insertedIds: insertedIds
         )
+        let showOnlyUserMessagesAnimationDuration = showOnlyUserMessagesTransitionSessionKeys.remove(effectiveSessionKey) == nil
+            ? nil
+            : ShowOnlyUserMessagesChatCollapse.animationDuration
+        let shouldApplyTypingMorph = shouldMorph && showOnlyUserMessagesAnimationDuration == nil
         if let morphTargetMessageId,
            messages.contains(where: { $0.id == morphTargetMessageId }) {
             viewModel.consumeTypingIndicatorMorphTargetMessageId(morphTargetMessageId, in: effectiveSessionKey)
@@ -2583,7 +2734,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
            insertedIds.contains(newestMessageId),
            insertedIds.count <= 2,
            isNearBottom(extraMargin: 200),
-           !shouldMorph,
+           !shouldApplyTypingMorph,
            !needsFullLayout
         {
             pendingEntranceAnimationIds.insert(newestMessageId)
@@ -2624,8 +2775,9 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             && isIncrementalAppend
             && wasPinnedToBottomIntent
             && !wasUserInteracting
-            && !shouldMorph
+            && !shouldApplyTypingMorph
 
+        let revealTargetMessageId = pendingShowOnlyUserMessagesRevealTargetBySessionKey.removeValue(forKey: effectiveSessionKey)
         let afterSnapshotApplied: (() -> Void) = { [weak self] in
             guard let self else { return }
             guard self.callbackSessionKey() == effectiveSessionKey else { return }
@@ -2672,6 +2824,10 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             }
             self.updateVisibleFooterAlpha()
             self.notifyTypingIndicatorAnchorFrameIfNeeded()
+            if let revealTargetMessageId {
+                self.scrollToMessageCentered(messageId: revealTargetMessageId, animated: true)
+                self.requestFlashMessage(messageId: revealTargetMessageId, isUnreadTap: false)
+            }
         }
         // Spec requires explicit contentOffset compensation for tail->full prepend.
         // This anchor path captures (messageId, oldFrameMinY, oldContentOffsetY), then applies:
@@ -2680,7 +2836,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             ? captureBubbleSizingV2ViewportAnchor()
             : nil
 
-        if shouldMorph {
+        if shouldApplyTypingMorph {
             applySnapshotWithTypingMorphIfPossible(
                 snapshot: snapshot,
                 targetMessageId: morphTargetMessageId,
@@ -2691,7 +2847,12 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 onAppliedSessionKey: effectiveSessionKey
             )
         } else {
-            applyDiffableSnapshot(snapshot, animatingDifferences: false, sessionKey: effectiveSessionKey) { [weak self] in
+            applyDiffableSnapshot(
+                snapshot,
+                animatingDifferences: showOnlyUserMessagesAnimationDuration != nil,
+                sessionKey: effectiveSessionKey,
+                animationDuration: showOnlyUserMessagesAnimationDuration
+            ) { [weak self] in
                 afterSnapshotApplied()
                 self?.scheduleBubbleSizingV2ViewportAnchorCompensation(expansionAnchor)
             }
@@ -3962,6 +4123,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
             let bubbleHeightPolicyForConfigure: BubbleSizingV2.BubbleHeightPolicy
             let sendIndicatorState = viewModel.sendIndicatorState(for: message.id)
             let replyReference = viewModel.replyReference(for: message)
+            let isShowingOnlyUserMessages = self.readState(for: message.sessionKey).isShowingOnlyUserMessages
             if self.bubbleSizingV2Enabled {
                 let plan = self.bubbleSizingV2Plan(
                     message: message,
@@ -4024,6 +4186,18 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 onReferenceMessage: { [weak self] message in
                     self?.onReferenceMessageInPrompt?(message)
                 },
+                showOnlyUserMessagesMenuLabel: ShowOnlyUserMessagesChatCollapse.menuLabel(
+                    isCollapsed: isShowingOnlyUserMessages
+                ),
+                onToggleShowOnlyUserMessages: { [weak self] in
+                    self?.toggleShowOnlyUserMessagesMode()
+                },
+                onShowOnlyUserMessagesReveal: isShowingOnlyUserMessages && message.role == .user
+                    ? { [weak self] message in
+                        self?.revealUserMessageFromShowOnlyUserMessagesMode(message)
+                    }
+                    : nil,
+                isCollapsedUserOnlyMode: isShowingOnlyUserMessages && message.role == .user,
                 replyReference: replyReference,
                 onResend: { [weak self] in
                     self?.viewModel?.resendFailedMessage(messageId: message.id)
@@ -5773,6 +5947,22 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         }
 
         var snapshot = dataSource.snapshot()
+        guard !readState(for: effectiveSessionKey).isShowingOnlyUserMessages else {
+            snapshot.deleteAllItems()
+            snapshot.appendSections([0])
+            snapshot.appendItems(ShowOnlyUserMessagesChatCollapse.visibleMessages(
+                from: materializeMessagesForActiveStage(
+                    allMessages: lastMessages,
+                    sessionKey: effectiveSessionKey
+                ),
+                isCollapsed: true
+            ).map(\.id))
+            applyDiffableSnapshot(snapshot, animatingDifferences: false) { [weak self] in
+                self?.updateVisibleFooterAlpha()
+                self?.notifyTypingIndicatorAnchorFrameIfNeeded()
+            }
+            return
+        }
         let snapshotMessages = materializeMessagesForActiveStage(
             allMessages: lastMessages,
             sessionKey: effectiveSessionKey
@@ -5783,9 +5973,15 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         )
         snapshot.deleteAllItems()
         snapshot.appendSections([0])
-        snapshot.appendItems(desiredItemIds)
         if viewModel.shouldShowPromptStageIndicator(in: effectiveSessionKey) {
-            snapshot.appendItems([TypingIndicatorCell.itemId])
+            snapshot.appendItems(TranscriptTypingIndicatorOrdering.itemIds(
+                messageItems: desiredItemIds,
+                messages: snapshotMessages,
+                typingIndicatorItemId: TypingIndicatorCell.itemId,
+                activePromptMessageId: viewModel.promptStageIndicatorAnchorMessageId(in: effectiveSessionKey)
+            ))
+        } else {
+            snapshot.appendItems(desiredItemIds)
         }
         if SessionMetadataFooterCell.shouldAppendFooter(after: desiredItemIds, status: sessionStatus) {
             snapshot.appendItems([SessionMetadataFooterCell.itemId])

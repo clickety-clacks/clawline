@@ -325,6 +325,70 @@ struct StreamSelectorLayoutTests {
         #expect(width == CGFloat(320))
     }
 
+    @Test("T1374 Spatial popup reserves a rendered status-dot slot")
+    func spatialPopupReservesRenderedStatusDotSlot() {
+        let dotDiameter = CGFloat(8)
+        let rowContentSpacing = CGFloat(10)
+        let rowHorizontalInset = CGFloat(12)
+        let trailingAccessoryReserve = CGFloat(28)
+        let titleWidth = CGFloat(310)
+        let statusDotSlotWidth = StreamSelectorLayout.popupStatusDotSlotWidth(dotDiameter: dotDiameter)
+
+        let width = StreamSelectorLayout.popupWidth(
+            longestItemWidth: titleWidth,
+            minimumPopoverWidth: CGFloat(280),
+            baselineIdealPopoverWidth: CGFloat(320),
+            maximumPopoverWidth: CGFloat(480),
+            rowHorizontalInset: rowHorizontalInset,
+            rowContentSpacing: rowContentSpacing,
+            leadingDotDiameter: statusDotSlotWidth,
+            trailingAccessoryReserve: trailingAccessoryReserve
+        )
+
+        #expect(statusDotSlotWidth == dotDiameter)
+        #expect(width == titleWidth + (rowHorizontalInset * 2) + statusDotSlotWidth + rowContentSpacing + trailingAccessoryReserve)
+    }
+
+    @Test("T1374 Spatial popup budgets toolbar dots and shortcut hints together")
+    func spatialPopupBudgetsToolbarDotsAndShortcutHintsTogether() {
+        let dotDiameter = CGFloat(8)
+        let rowContentSpacing = CGFloat(10)
+        let rowHorizontalInset = CGFloat(12)
+        let baseTrailingReserve = CGFloat(28)
+        let shortcutLabelWidth = CGFloat(58)
+        let titleWidth = CGFloat(300)
+        let actionBarHeight = CGFloat(72)
+        let allocatedHeight = CGFloat(320)
+
+        let statusDotSlotWidth = StreamSelectorLayout.popupStatusDotSlotWidth(dotDiameter: dotDiameter)
+        let trailingReserve = StreamSelectorLayout.popupTrailingAccessoryReserve(
+            baseReserve: baseTrailingReserve,
+            shortcutLabelWidth: shortcutLabelWidth,
+            showsShortcutLabels: true
+        )
+        let width = StreamSelectorLayout.popupWidth(
+            longestItemWidth: titleWidth,
+            minimumPopoverWidth: CGFloat(280),
+            baselineIdealPopoverWidth: CGFloat(320),
+            maximumPopoverWidth: CGFloat(480),
+            rowHorizontalInset: rowHorizontalInset,
+            rowContentSpacing: rowContentSpacing,
+            leadingDotDiameter: statusDotSlotWidth,
+            trailingAccessoryReserve: trailingReserve
+        )
+        let containerHeight = StreamSelectorLayout.popupContainerHeight(
+            allocatedContainerHeight: allocatedHeight
+        )
+        let listViewportHeight = StreamSelectorLayout.listViewportHeight(
+            containerHeight: containerHeight,
+            actionBarReservedHeight: actionBarHeight
+        )
+
+        #expect(trailingReserve == baseTrailingReserve + shortcutLabelWidth)
+        #expect(width == titleWidth + (rowHorizontalInset * 2) + statusDotSlotWidth + rowContentSpacing + trailingReserve)
+        #expect(listViewportHeight + actionBarHeight == allocatedHeight)
+    }
+
     @Test("Stream manager popup grows for longer titles but respects the cap")
     func streamManagerPopupWidthTracksContentWithinCap() {
         let contentWidth = CGFloat(410)
@@ -487,6 +551,42 @@ struct StreamSelectorLayoutTests {
         )
 
         #expect(viewport == CGFloat(0))
+    }
+
+    @Test("T1374 popup uses allocated height so rows and toolbar stay visible")
+    func popupUsesAllocatedHeightForVisibleRowsAndToolbar() {
+        let allocatedHeight = CGFloat(320)
+        let actionBarHeight = CGFloat(72)
+        let containerHeight = StreamSelectorLayout.popupContainerHeight(
+            allocatedContainerHeight: allocatedHeight
+        )
+
+        #expect(containerHeight == allocatedHeight)
+        #expect(
+            StreamSelectorLayout.listViewportHeight(
+                containerHeight: containerHeight,
+                actionBarReservedHeight: actionBarHeight
+            ) == CGFloat(248)
+        )
+        #expect(
+            StreamSelectorLayout.listViewportHeight(
+                containerHeight: containerHeight,
+                actionBarReservedHeight: actionBarHeight
+            ) + actionBarHeight == allocatedHeight
+        )
+    }
+
+    @Test("T1374 popup does not force ideal height before reading allocated geometry")
+    func popupHeightFrameDoesNotForceIdealHeight() {
+        let frame = StreamSelectorLayout.popupHeightFrame(
+            idealContainerHeight: CGFloat(542),
+            minimumPopoverHeight: CGFloat(140)
+        )
+
+        #expect(frame.fixedHeight == nil)
+        #expect(frame.minHeight == CGFloat(140))
+        #expect(frame.idealHeight == CGFloat(542))
+        #expect(frame.maxHeight == CGFloat(542))
     }
 
     @Test("T1210 filtering resizes popup height while preserving action bar height")

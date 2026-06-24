@@ -22,8 +22,18 @@ enum CrossChatShortcutLabelAvailability {
     static var current: Bool {
 #if targetEnvironment(macCatalyst)
         true
-#elseif os(iOS) && canImport(GameController)
-        GCKeyboard.coalesced != nil
+#elseif (os(iOS) || os(visionOS)) && canImport(GameController)
+        current(coalescedKeyboardPresent: GCKeyboard.coalesced != nil)
+#else
+        false
+#endif
+    }
+
+    static func current(coalescedKeyboardPresent: Bool) -> Bool {
+#if targetEnvironment(macCatalyst)
+        true
+#elseif (os(iOS) || os(visionOS)) && canImport(GameController)
+        coalescedKeyboardPresent
 #else
         false
 #endif
@@ -388,6 +398,7 @@ struct ChatView: View {
     @State private var scrollButtonSettleAnimationToken: Int = 0
     @State private var scrollButtonSettleTask: Task<Void, Never>?
     @State private var scrollButtonTapSuppressionTask: Task<Void, Never>?
+    @State private var showOnlyUserMessagesCollapsedBySessionKey: [String: Bool] = [:]
     @AppStorage("chat.scrollButton.horizontalDetent") private var scrollButtonDetentRawValue = ScrollButtonHorizontalDetent.center.rawValue
 #if DEBUG
     @State private var didSeedCrossChatNotificationDockProof = false
@@ -1470,16 +1481,30 @@ struct ChatView: View {
             measuredHeightsBySourceChatId: crossChatNotificationMeasuredHeightsBySourceChatId,
             keyboardOwnershipStore: keyboardOwnershipStore
         )
+        let showOnlyUserMessagesCommand = ShowOnlyUserMessagesCommand(
+            menuTitle: ShowOnlyUserMessagesChatCollapse.menuLabel(
+                isCollapsed: keyboardNavigationSessionKey.flatMap {
+                    showOnlyUserMessagesCollapsedBySessionKey[$0]
+                } ?? false
+            ),
+            toggle: {
+                toggleShowOnlyUserMessagesMode()
+            }
+        )
 
         let commandFocusedRootLayer: AnyView = AnyView(keyboardRoutedRootLayer.focusedSceneValue(
             \.crossChatNotificationCommand,
             notificationCommand
-        ))
+        )
+        .focusedSceneValue(\.showOnlyUserMessagesCommand, showOnlyUserMessagesCommand))
 
         let lifecycleRootLayer: AnyView = AnyView(commandFocusedRootLayer
         .onReceive(NotificationCenter.default.publisher(for: .clawlineKeyboardCommandIntent)) { notification in
             guard let intent = notification.object as? KeyboardCommandIntent else { return }
             handleRootKeyboardCommandIntent(intent, keyboardOwnershipStore: keyboardOwnershipStore)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .clawlineToggleShowOnlyUserMessagesCommand)) { _ in
+            toggleShowOnlyUserMessagesMode()
         }
         .onChange(of: layoutInputs) { _, _ in
             layoutCoordinator.updateInputs(layoutInputs, metrics: layoutMetrics)
@@ -2571,6 +2596,10 @@ struct ChatView: View {
             onReferenceMessageInPrompt: { message in
                 referenceMessageInPrompt(message)
             },
+            onShowOnlyUserMessagesModeChanged: { sessionKey, isCollapsed in
+                showOnlyUserMessagesCollapsedBySessionKey[sessionKey] = isCollapsed
+                viewModel.setShowOnlyUserMessagesMode(isCollapsed, for: sessionKey)
+            },
             onKeyboardDismissModeChanged: { summary in
                 messageListDismissModeSummary = summary
             }
@@ -2922,6 +2951,11 @@ struct ChatView: View {
     private func scrollChatSurface(_ direction: ChatScrollPageDirection) {
         guard let sessionKey = keyboardNavigationSessionKey else { return }
         layoutCoordinator.scrollByPage(sessionKey: sessionKey, direction: direction, animated: true)
+    }
+
+    private func toggleShowOnlyUserMessagesMode() {
+        guard let sessionKey = keyboardNavigationSessionKey else { return }
+        layoutCoordinator.toggleShowOnlyUserMessages(sessionKey: sessionKey)
     }
 
     private func navigateStreamByShortcut(step: Int, sessionKeys: [String]) {
@@ -4435,6 +4469,7 @@ enum ChatAppCommandShortcut {
         case openStreamPopup
         case navigatePreviousStream
         case navigateNextStream
+        case toggleShowOnlyUserMessages
         case scrollDown
         case scrollUp
         case scrollChatDown
@@ -4453,6 +4488,8 @@ enum ChatAppCommandShortcut {
                 return #selector(UIResponder.clawlineNavigateToPreviousStreamCommand(_:))
             case .navigateNextStream:
                 return #selector(UIResponder.clawlineNavigateToNextStreamCommand(_:))
+            case .toggleShowOnlyUserMessages:
+                return #selector(UIResponder.clawlineToggleShowOnlyUserMessagesCommand(_:))
             case .scrollDown:
                 return #selector(UIResponder.clawlineScrollDownCommand(_:))
             case .scrollUp:
@@ -4541,6 +4578,8 @@ enum ChatAppCommandShortcut {
             return .navigatePreviousStream
         case .navigateNextStream:
             return .navigateNextStream
+        case .toggleShowOnlyUserMessages:
+            return .toggleShowOnlyUserMessages
         case .transcriptBubbleScrollForward:
             return .scrollDown
         case .transcriptBubbleScrollBackward:
@@ -4610,6 +4649,8 @@ enum ChatRootKeyboardCommandDispatch {
             return .clawlineNavigateToPreviousStreamCommand
         case .navigateNextStream:
             return .clawlineNavigateToNextStreamCommand
+        case .toggleShowOnlyUserMessages:
+            return .clawlineToggleShowOnlyUserMessagesCommand
         case .transcriptBubbleScrollForward:
             return .clawlineScrollDownCommand
         case .transcriptBubbleScrollBackward:
@@ -4649,6 +4690,10 @@ extension UIResponder {
     }
 
     @objc func clawlineNavigateToNextStreamCommand(_ sender: UIKeyCommand) {
+        NotificationCenter.default.post(name: .clawlineKeyboardCommandIntent, object: KeyboardCommandBridge.intent(input: sender.input, modifierFlags: sender.modifierFlags))
+    }
+
+    @objc func clawlineToggleShowOnlyUserMessagesCommand(_ sender: UIKeyCommand) {
         NotificationCenter.default.post(name: .clawlineKeyboardCommandIntent, object: KeyboardCommandBridge.intent(input: sender.input, modifierFlags: sender.modifierFlags))
     }
 
@@ -5133,6 +5178,7 @@ final class KeyboardPinnedContainerView<Content: View>: UIView, KeyboardPinnedCo
         }
         hostingController.view.backgroundColor = .clear
         hostingController.view.isOpaque = false
+        hostingController.view.clipsToBounds = false
 
 #if !os(visionOS)
         // When keyboard is hidden the layout guide defaults to the safe-area
@@ -6326,8 +6372,7 @@ enum CrossChatNotificationGeometry {
         visibleNotificationCount: Int,
         isSpatial: Bool
     ) -> CGFloat? {
-        guard isSpatial, visibleNotificationCount == 1 else { return nil }
-        return max(0, maxBubbleWidth)
+        nil
     }
 
     static func collapsedOffset(
@@ -6611,7 +6656,11 @@ private struct CrossChatNotificationOverlay: View {
         Self.applyReplyPins(
             to: viewModel.crossChatNotificationBubbles,
             replyPinSlotsBySourceChatId: replyPinSlotsBySourceChatId,
-            visibleCapacity: Self.visibleCapacity(maxContainerHeight: maxContainerHeight)
+            visibleCapacity: Self.visibleCapacity(
+                maxContainerHeight: maxContainerHeight,
+                bubbles: viewModel.crossChatNotificationBubbles,
+                measuredHeightsBySourceChatId: measuredBubbleHeightsBySourceChatId
+            )
         )
     }
 
@@ -7791,18 +7840,18 @@ private struct CrossChatNotificationBubbleHeightPreferenceKey: PreferenceKey {
 }
 
 enum CrossChatNotificationMaterialStyle {
-    static let backgroundOpacity = 0.95
+    static let backgroundOpacity = 1.0
 
     static func accentOpacity(isSpatial: Bool) -> Double {
-        isSpatial ? 0.60 : 0.40
+        isSpatial ? 0.88 : 0.40
     }
 
     static func spatialTintOpacity(for colorScheme: ColorScheme) -> Double {
-        colorScheme == .dark ? 0.52 : 0.68
+        colorScheme == .dark ? 0.78 : 0.88
     }
 
     static func spatialBorderOpacity(for colorScheme: ColorScheme) -> Double {
-        colorScheme == .dark ? 0.28 : 0.42
+        colorScheme == .dark ? 0.40 : 0.52
     }
 }
 
@@ -7915,11 +7964,6 @@ struct CrossChatNotificationBubbleView: View {
 #else
         Color.primary.opacity(0.08)
 #endif
-    }
-
-    private var spatialNotificationTintColor: Color {
-        (colorScheme == .dark ? Color.black : Color.white)
-            .opacity(CrossChatNotificationMaterialStyle.spatialTintOpacity(for: colorScheme))
     }
 
     private var notificationDismissActiveColor: Color {
@@ -8283,13 +8327,9 @@ struct CrossChatNotificationBubbleView: View {
                 .allowsHitTesting(false)
         }
 #if os(visionOS)
-        .background {
-            let shape = RoundedRectangle(cornerRadius: bubbleCornerRadius, style: .continuous)
-            shape
-                .fill(spatialNotificationTintColor)
-                .background(.regularMaterial, in: shape)
-                .opacity(CrossChatNotificationMaterialStyle.backgroundOpacity)
-        }
+        .glassBackgroundEffect(
+            in: RoundedRectangle(cornerRadius: bubbleCornerRadius, style: .continuous)
+        )
 #else
         .glassEffect(.regular, in: RoundedRectangle(cornerRadius: bubbleCornerRadius, style: .continuous))
 #endif

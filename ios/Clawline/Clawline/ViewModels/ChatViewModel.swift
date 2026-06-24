@@ -821,7 +821,9 @@ final class ChatViewModel: ChatViewModelHosting {
     private(set) var imageSendLastTransportSnapshot: String = "-"
     private(set) var lifecycleDebugSequence: Int = 0
 #endif
-    private let messageCacheLimit = 500
+    static let messageCacheLimit = 500
+    static let showOnlyUserMessagesMessageCacheLimit = 1_000
+    private var showOnlyUserMessagesSessionKeys: Set<String> = []
     private var restoredSessionKeys: Set<String> = []
     private var restoredStreamMetadataForUserId: String?
     private var supportsSessionProvisioning = false
@@ -3657,6 +3659,12 @@ final class ChatViewModel: ChatViewModelHosting {
             shouldShowTypingIndicator(in: normalizedSessionKey)
     }
 
+    func promptStageIndicatorAnchorMessageId(in sessionKey: String) -> String? {
+        let normalizedSessionKey = sessionKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedSessionKey.isEmpty else { return nil }
+        return liveProgressBySessionKey[normalizedSessionKey]?.messageId
+    }
+
     func sendIndicatorState(for messageId: String) -> MessageSendIndicatorState? {
         if let failure = failureMessage(for: messageId) {
             return .failed(failure)
@@ -4483,10 +4491,10 @@ final class ChatViewModel: ChatViewModelHosting {
         return sanitized.isEmpty ? "session" : sanitized
     }
 
-    private func restoreCachedMessagesIfNeeded(for sessionKey: String, epoch: Int? = nil) {
+    private func restoreCachedMessagesIfNeeded(for sessionKey: String, epoch: Int? = nil, force: Bool = false) {
         StreamSwitchTiming.log("restoreCachedMessagesIfNeeded_start", sessionKey: sessionKey)
         if epoch == nil {
-            guard restoredSessionKeys.contains(sessionKey) == false else { return }
+            guard force || restoredSessionKeys.contains(sessionKey) == false else { return }
             restoredSessionKeys.insert(sessionKey)
         }
         if let epoch {
@@ -4554,7 +4562,7 @@ final class ChatViewModel: ChatViewModelHosting {
 
     private func persistMessages(_ messages: [Message], for sessionKey: String) {
         guard let url = messageCacheURL(for: sessionKey) else { return }
-        let payload = trimMessagesForCache(messages)
+        let payload = trimMessagesForCache(messages, for: sessionKey)
         pendingPersistPayloads[sessionKey] = payload
         persistDebounceTasks[sessionKey]?.cancel()
         persistDebounceTasks[sessionKey] = Task { [weak self] in
@@ -4576,9 +4584,28 @@ final class ChatViewModel: ChatViewModelHosting {
         }
     }
 
-    private func trimMessagesForCache(_ messages: [Message]) -> [Message] {
-        guard messages.count > messageCacheLimit else { return messages }
-        return Array(messages.suffix(messageCacheLimit))
+    func setShowOnlyUserMessagesMode(_ isCollapsed: Bool, for sessionKey: String) {
+        if isCollapsed {
+            showOnlyUserMessagesSessionKeys.insert(sessionKey)
+            restoreCachedMessagesIfNeeded(for: sessionKey, force: true)
+        } else {
+            showOnlyUserMessagesSessionKeys.remove(sessionKey)
+            if let messages = sessionMessages[sessionKey] {
+                persistMessages(messages, for: sessionKey)
+            }
+        }
+    }
+
+    private func messageCacheLimit(for sessionKey: String) -> Int {
+        showOnlyUserMessagesSessionKeys.contains(sessionKey)
+            ? Self.showOnlyUserMessagesMessageCacheLimit
+            : Self.messageCacheLimit
+    }
+
+    private func trimMessagesForCache(_ messages: [Message], for sessionKey: String) -> [Message] {
+        let limit = messageCacheLimit(for: sessionKey)
+        guard messages.count > limit else { return messages }
+        return Array(messages.suffix(limit))
     }
 
     private func lastServerMessageId(from messages: [Message]) -> String? {

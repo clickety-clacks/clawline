@@ -1009,6 +1009,36 @@ describe("MessageList rich rendering", () => {
     expect(screen.getByRole("button", { name: "Download report.pdf" })).toBeInTheDocument();
   });
 
+  it("renders an attachment affordance for empty user messages with uploaded image attachments", () => {
+    renderMessageList([
+      {
+        id: "s_user_attachment_only",
+        role: "user",
+        content: "",
+        timestamp: 1_764_201_200_101,
+        streaming: false,
+        sessionKey: "agent:main:clawline:flynn:main",
+        attachments: [
+          {
+            type: "asset",
+            assetId: "a_upload_1",
+            metadata: {
+              filename: "clip.png",
+              mimeType: "image/png",
+              size: 7
+            }
+          }
+        ],
+        delivery: "server"
+      }
+    ]);
+
+    const bubble = screen.getByTestId("message-s_user_attachment_only");
+    expect(bubble).toHaveClass("message-bubble--user");
+    expect(within(bubble).getByText("Loading attachment…")).toBeInTheDocument();
+    expect(within(bubble).getByText("clip.png")).toBeInTheDocument();
+  });
+
   it("renders link cards for visible message links but not code-block URLs", async () => {
     vi.stubGlobal(
       "fetch",

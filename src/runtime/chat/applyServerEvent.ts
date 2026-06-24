@@ -83,7 +83,7 @@ export function applyServerMessage(
         entry.delivery !== "server" &&
         entry.role === "user" &&
         entry.content === message.content &&
-        attachmentsMatch(entry.attachments, message.attachments)
+        attachmentsMatchOrCanPreserve(entry, message.attachments)
     );
 
     if (optimisticIndex >= 0) {
@@ -229,10 +229,24 @@ function attachmentsMatch(
   });
 }
 
+function attachmentsMatchOrCanPreserve(
+  current: ChatMessageRecord,
+  incoming: ServerMessagePayload["attachments"]
+) {
+  return (
+    attachmentsMatch(current.attachments, incoming) ||
+    (current.delivery === "acked" && current.attachments.length > 0 && incoming.length === 0)
+  );
+}
+
 function mergeServerAttachments(
   incoming: ServerMessagePayload["attachments"],
   existing: ChatMessageRecord["attachments"]
 ) {
+  if (incoming.length === 0 && existing.length > 0) {
+    return existing;
+  }
+
   return incoming.map((attachment, index) => {
     const prior = existing[index];
     if (!prior) {

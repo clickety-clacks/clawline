@@ -21,6 +21,21 @@ enum BubbleSizingV2 {
         let truncationBottomInset: CGFloat
         let isVisionOS: Bool
         let metricsFingerprint: Int
+
+        var measurementEnvironment: MeasurementEnvironment {
+            MeasurementEnvironment(
+                containerWidth: containerWidth,
+                isVisionOS: isVisionOS,
+                metricsFingerprint: metricsFingerprint
+            )
+        }
+    }
+
+    // Measurement-only identity; live viewport fields are represented through BubbleHeightPolicy.cacheFingerprint.
+    struct MeasurementEnvironment: Hashable {
+        let containerWidth: CGFloat
+        let isVisionOS: Bool
+        let metricsFingerprint: Int
     }
 
     struct Plan: Hashable {
@@ -65,7 +80,7 @@ enum BubbleSizingV2 {
         let messageId: String
         let presentationFingerprint: Int
         let layoutFingerprint: Int
-        let env: Environment
+        let measurementEnvironment: MeasurementEnvironment
         let linkPreviewStateVersion: Int
     }
 
@@ -121,13 +136,13 @@ enum BubbleSizingV2 {
                 return nil
             }()
             let linkPreviewViewportMaxHeight = max(44, heightCap - max(0, metrics.bubblePaddingTop + metrics.bubblePaddingBottom))
-            var hasher = Hasher()
-            hasher.combine(isSingleLinkPreview)
-            hasher.combine(heightCapMode)
-            hasher.combine(heightCap)
-            hasher.combine(v1TruncationHeightOverride)
-            hasher.combine(linkPreviewViewportMaxHeight)
-            let cacheFingerprint = hasher.finalize()
+            let cacheFingerprint = BubbleSizingV2.heightPolicyFingerprint(
+                isSingleLinkPreview: isSingleLinkPreview,
+                heightCapMode: heightCapMode,
+                heightCap: heightCap,
+                v1TruncationHeightOverride: v1TruncationHeightOverride,
+                linkPreviewViewportMaxHeight: linkPreviewViewportMaxHeight
+            )
             return BubbleHeightPolicy(
                 isSingleLinkPreview: isSingleLinkPreview,
                 heightCapMode: heightCapMode,
@@ -154,10 +169,26 @@ enum BubbleSizingV2 {
                 messageId: messageId,
                 presentationFingerprint: presentationFingerprint,
                 layoutFingerprint: hasher.finalize(),
-                env: env,
+                measurementEnvironment: env.measurementEnvironment,
                 linkPreviewStateVersion: linkPreviewStateVersion
             )
         }
+    }
+
+    static func heightPolicyFingerprint(
+        isSingleLinkPreview: Bool,
+        heightCapMode: HeightCapMode,
+        heightCap: CGFloat,
+        v1TruncationHeightOverride: CGFloat?,
+        linkPreviewViewportMaxHeight: CGFloat
+    ) -> Int {
+        var hasher = Hasher()
+        hasher.combine(isSingleLinkPreview)
+        hasher.combine(heightCapMode)
+        hasher.combine(heightCap)
+        hasher.combine(v1TruncationHeightOverride)
+        hasher.combine(linkPreviewViewportMaxHeight)
+        return hasher.finalize()
     }
 
     static func finalOuterScrollViewportHeight(

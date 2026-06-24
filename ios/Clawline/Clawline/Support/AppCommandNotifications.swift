@@ -11,6 +11,7 @@ extension Notification.Name {
     static let clawlineOpenStreamPopupCommand = Notification.Name("clawline.openStreamPopupCommand")
     static let clawlineNavigateToPreviousStreamCommand = Notification.Name("clawline.navigateToPreviousStreamCommand")
     static let clawlineNavigateToNextStreamCommand = Notification.Name("clawline.navigateToNextStreamCommand")
+    static let clawlineToggleShowOnlyUserMessagesCommand = Notification.Name("clawline.toggleShowOnlyUserMessagesCommand")
     static let clawlineScrollDownCommand = Notification.Name("clawline.scrollDownCommand")
     static let clawlineScrollUpCommand = Notification.Name("clawline.scrollUpCommand")
     static let clawlineScrollChatDownCommand = Notification.Name("clawline.scrollChatDownCommand")
@@ -41,6 +42,11 @@ struct CrossChatNotificationCommand {
     let dismissAll: @MainActor () -> Void
 }
 
+struct ShowOnlyUserMessagesCommand {
+    let menuTitle: String
+    let toggle: @MainActor () -> Void
+}
+
 enum CrossChatNotificationCommandAvailability {
     static func shouldInstallCommand(
         visibleNotificationCount: Int,
@@ -58,6 +64,10 @@ private struct CrossChatNotificationCommandKey: FocusedValueKey {
     typealias Value = CrossChatNotificationCommand
 }
 
+private struct ShowOnlyUserMessagesCommandKey: FocusedValueKey {
+    typealias Value = ShowOnlyUserMessagesCommand
+}
+
 extension FocusedValues {
     var cancelCurrentPromptCommand: CancelCurrentPromptCommand? {
         get { self[CancelCurrentPromptCommandKey.self] }
@@ -67,5 +77,10 @@ extension FocusedValues {
     var crossChatNotificationCommand: CrossChatNotificationCommand? {
         get { self[CrossChatNotificationCommandKey.self] }
         set { self[CrossChatNotificationCommandKey.self] = newValue }
+    }
+
+    var showOnlyUserMessagesCommand: ShowOnlyUserMessagesCommand? {
+        get { self[ShowOnlyUserMessagesCommandKey.self] }
+        set { self[ShowOnlyUserMessagesCommandKey.self] = newValue }
     }
 }

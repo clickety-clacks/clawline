@@ -49,6 +49,35 @@ final class ClawlineUITests: XCTestCase {
     }
 
     @MainActor
+    func testT1202ProductionLandscapeTranscriptAndComposerStayWithinScreen() throws {
+        let app = XCUIApplication()
+        app.launchArguments += [
+            "-auth.token", "debug-token",
+            "-auth.userId", "debug-user",
+            "-auth.isAdmin", "YES",
+            "-provider.baseURL", "ws://127.0.0.1:8080",
+        ]
+        app.launch()
+        XCTAssertTrue(app.wait(for: .runningForeground, timeout: 8))
+
+        XCUIDevice.shared.orientation = .landscapeLeft
+        sleep(2)
+
+        XCTAssertGreaterThan(app.frame.width, app.frame.height, "Expected the app to be in iPhone landscape")
+
+        let composer = waitForComposer(in: app)
+        assertElementStaysWithinScreen(composer, in: app, label: "composer")
+
+        let visibleTranscriptText = waitForVisibleTranscriptText(in: app)
+        assertElementStaysWithinScreen(visibleTranscriptText, in: app, label: "visible transcript text")
+
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = "T1202 Production Landscape Transcript Composer"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
+    @MainActor
     func testLaunchPerformance() throws {
         let app = XCUIApplication()
         app.launchArguments += [
@@ -60,6 +89,44 @@ final class ClawlineUITests: XCTestCase {
         app.launch()
         XCTAssertTrue(app.wait(for: .runningForeground, timeout: 10), "App should launch successfully")
         app.terminate()
+    }
+
+    private func waitForComposer(in app: XCUIApplication) -> XCUIElement {
+        let deadline = Date().addingTimeInterval(8)
+        while Date() < deadline {
+            let composer = app.textViews["compose-text-view"]
+            if composer.exists && composer.frame.width > 40 && composer.frame.height > 20 {
+                return composer
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        }
+        XCTFail("Expected production composer to render")
+        return app.textViews["compose-text-view"]
+    }
+
+    private func waitForVisibleTranscriptText(in app: XCUIApplication) -> XCUIElement {
+        let deadline = Date().addingTimeInterval(8)
+        while Date() < deadline {
+            if let text = app.textViews.allElementsBoundByIndex.first(where: { element in
+                guard element.exists else { return false }
+                guard element.identifier != "compose-text-view" else { return false }
+                guard element.label != "Compose message" else { return false }
+                guard element.frame.width > 40, element.frame.height > 10 else { return false }
+                return app.frame.intersects(element.frame)
+            }) {
+                return text
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        }
+        XCTFail("Expected at least one production transcript text element to render")
+        return app.textViews.firstMatch
+    }
+
+    private func assertElementStaysWithinScreen(_ element: XCUIElement, in app: XCUIApplication, label: String) {
+        XCTAssertGreaterThan(element.frame.width, 0, "\(label) should have positive width")
+        XCTAssertGreaterThan(element.frame.height, 0, "\(label) should have positive height")
+        XCTAssertGreaterThanOrEqual(element.frame.minX, app.frame.minX, "\(label) should not clip past the left screen edge")
+        XCTAssertLessThanOrEqual(element.frame.maxX, app.frame.maxX, "\(label) should not clip past the right screen edge")
     }
 
     @MainActor

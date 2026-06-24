@@ -25,6 +25,7 @@ struct KeyboardCommandRouterTests {
         #expect(KeyboardCommandBridge.intent(input: "-", modifierFlags: [.command, .shift, .alternate]) == .notificationDismissAll)
         #expect(KeyboardCommandBridge.intent(input: "_", modifierFlags: [.command, .shift, .alternate]) == .notificationDismissAll)
         #expect(KeyboardCommandBridge.intent(input: "\\", modifierFlags: [.command]) == .notificationToggleDock)
+        #expect(KeyboardCommandBridge.intent(input: "`", modifierFlags: [.command]) == .toggleShowOnlyUserMessages)
         #expect(KeyboardCommandBridge.intent(input: "/", modifierFlags: [.command]) == nil)
         #expect(KeyboardCommandBridge.intent(input: ";", modifierFlags: [.command]) == .openStreamPopup)
         #expect(KeyboardCommandBridge.intent(input: ";", modifierFlags: [.control]) == .openStreamPopup)
@@ -410,6 +411,16 @@ struct KeyboardCommandRouterTests {
         )
     }
 
+    @Test("T1374 popup shortcut hints follow hardware keyboard availability")
+    func popupShortcutHintsFollowHardwareKeyboardAvailability() {
+        #expect(CrossChatShortcutLabelAvailability.current(coalescedKeyboardPresent: true) == true)
+#if targetEnvironment(macCatalyst)
+        #expect(CrossChatShortcutLabelAvailability.current(coalescedKeyboardPresent: false) == true)
+#else
+        #expect(CrossChatShortcutLabelAvailability.current(coalescedKeyboardPresent: false) == false)
+#endif
+    }
+
     @Test("T343 VG-03 mention picker open close cannot poison notification scroll ownership")
     func mentionPickerOpenCloseCannotPoisonNotificationScrollOwnership() {
         let openStore = KeyboardOwnershipSceneFactory.chatScene(
@@ -714,6 +725,12 @@ struct KeyboardCommandRouterTests {
                 in: store,
                 posts: [.clawlineScrollChatUpCommand]
             )
+            assertPhysicalShortcut(
+                input: "`",
+                modifiers: [.command],
+                in: store,
+                posts: [.clawlineToggleShowOnlyUserMessagesCommand]
+            )
         }
     }
 
@@ -821,6 +838,8 @@ struct KeyboardCommandRouterTests {
                         return .navigatePreviousStream
                     case .navigateNextStream:
                         return .navigateNextStream
+                    case .toggleShowOnlyUserMessages:
+                        return .toggleShowOnlyUserMessages
                     case .transcriptBubbleScrollForward:
                         return .scrollDown
                     case .transcriptBubbleScrollBackward:
@@ -840,6 +859,7 @@ struct KeyboardCommandRouterTests {
             ChatAppCommandShortcut.prioritizedTextInputKeyCommandSpecs(notificationVisibleCount: 0).map(\.action) == [
                 .openStreamPopup,
                 .openStreamPopup,
+                .toggleShowOnlyUserMessages,
                 .scrollDown,
                 .scrollUp,
                 .scrollChatDown,
@@ -850,6 +870,7 @@ struct KeyboardCommandRouterTests {
             ChatAppCommandShortcut.prioritizedTextInputKeyCommandSpecs(notificationVisibleCount: 2).map(\.action) == [
                 .openStreamPopup,
                 .openStreamPopup,
+                .toggleShowOnlyUserMessages,
                 .scrollDown,
                 .scrollUp,
                 .scrollChatDown,

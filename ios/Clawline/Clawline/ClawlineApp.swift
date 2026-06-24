@@ -30,6 +30,7 @@ struct ClawlineApp: App {
             UIScrollView.appearance(whenContainedInInstancesOf: [UIHostingController<AnyView>.self]).backgroundColor = .clear
             UIScrollView.appearance().backgroundColor = .clear
         }
+        UIWindow.appearance().backgroundColor = UIColor { Self.rootBackgroundColor(for: $0) }
 #if DEBUG
         logViewHierarchyOnce()
 #endif
@@ -67,6 +68,7 @@ struct ClawlineApp: App {
                     .environment(\.deviceIdentifier, deviceIdentifier)
                     .environment(\.chatService, chatService)
                     .environment(\.settingsManager, settingsManager)
+                    .modifier(HostingBackgroundSync())
                     .sheet(isPresented: $settingsManager.isSettingsPresented) {
                         SettingsView(settings: settingsManager)
                     }
@@ -91,6 +93,18 @@ struct ClawlineApp: App {
     }
 }
 
+private struct HostingBackgroundSync: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .onAppear(perform: clearHostingBackgrounds)
+            .onReceive(NotificationCenter.default.publisher(for: UIDevice.orientationDidChangeNotification)) { _ in
+                clearHostingBackgrounds()
+            }
+            .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+                clearHostingBackgrounds()
+            }
+    }
+}
 
 #if DEBUG
 private extension ClawlineApp {
@@ -155,18 +169,40 @@ private func clearHostingBackgrounds() {
             .compactMap { $0 as? UIWindowScene }
         for scene in scenes {
             for window in scene.windows {
-                setHostingBackgroundsClear(in: window)
+                let backgroundColor = ClawlineApp.rootBackgroundColor(for: window.traitCollection)
+                window.backgroundColor = backgroundColor
+                setHostingBackgroundsClear(
+                    in: window,
+                    rootBounds: window.bounds,
+                    rootBackgroundColor: backgroundColor
+                )
             }
         }
     }
 }
 
-private func setHostingBackgroundsClear(in view: UIView) {
+private extension ClawlineApp {
+    static func rootBackgroundColor(for traitCollection: UITraitCollection) -> UIColor {
+        traitCollection.userInterfaceStyle == .dark
+            ? UIColor(red: 0.1, green: 0.12, blue: 0.15, alpha: 1)
+            : .systemGray6
+    }
+}
+
+private func setHostingBackgroundsClear(
+    in view: UIView,
+    rootBounds: CGRect,
+    rootBackgroundColor: UIColor
+) {
     if String(describing: type(of: view)).contains("UIHostingView") {
-        view.backgroundColor = .clear
+        view.backgroundColor = view.bounds.equalTo(rootBounds) ? rootBackgroundColor : .clear
     }
     for subview in view.subviews {
-        setHostingBackgroundsClear(in: subview)
+        setHostingBackgroundsClear(
+            in: subview,
+            rootBounds: rootBounds,
+            rootBackgroundColor: rootBackgroundColor
+        )
     }
 }
 #endif

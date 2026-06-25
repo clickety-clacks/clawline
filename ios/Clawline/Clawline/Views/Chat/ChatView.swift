@@ -398,6 +398,7 @@ struct ChatView: View {
     @State private var scrollButtonSettleAnimationToken: Int = 0
     @State private var scrollButtonSettleTask: Task<Void, Never>?
     @State private var scrollButtonTapSuppressionTask: Task<Void, Never>?
+    @State private var isTranscriptScrolling = false
     @State private var showOnlyUserMessagesCollapsedBySessionKey: [String: Bool] = [:]
     @AppStorage("chat.scrollButton.horizontalDetent") private var scrollButtonDetentRawValue = ScrollButtonHorizontalDetent.center.rawValue
 #if DEBUG
@@ -666,6 +667,10 @@ struct ChatView: View {
     }
 
     private func handleMessageFlowScrollEvent(_ event: MessageFlowScrollEvent) {
+        if case .transcriptScrollActiveChanged(_, let isActive) = event {
+            isTranscriptScrolling = isActive
+            return
+        }
         guard !streamPopupRouteController.isPopupPresented else { return }
         switch event {
         case .isAtBottomChanged(let sessionKey, let isAtBottom):
@@ -696,6 +701,8 @@ struct ChatView: View {
                 state.unreadCount = 0
                 state.firstUnreadMessageId = nil
             }
+        case .transcriptScrollActiveChanged:
+            break
         }
     }
 
@@ -1632,6 +1639,7 @@ struct ChatView: View {
             PromptFocusShortcutModifier(
                 isEnabled: promptFocusShortcutEnabled,
                 hasStreams: !effectiveSessionKeys.isEmpty,
+                isTranscriptScrolling: isTranscriptScrolling,
                 onOpenStreamPopup: {
                     openStreamPopupFromKeyboardCommand()
                 },
@@ -4230,6 +4238,7 @@ private struct CancelCurrentPromptBubbleShape: Shape {
 private struct PromptFocusShortcutModifier: ViewModifier {
     let isEnabled: Bool
     let hasStreams: Bool
+    let isTranscriptScrolling: Bool
     let onOpenStreamPopup: () -> Void
     let onFocusRequested: () -> Void
     let onTextInserted: (String) -> Void
@@ -4241,6 +4250,7 @@ private struct PromptFocusShortcutModifier: ViewModifier {
             PromptFocusShortcutHost(
                 isEnabled: isEnabled,
                 hasStreams: hasStreams,
+                isTranscriptScrolling: isTranscriptScrolling,
                 onOpenStreamPopup: onOpenStreamPopup,
                 onFocusRequested: onFocusRequested,
                 onTextInserted: onTextInserted,
@@ -4256,6 +4266,7 @@ private struct PromptFocusShortcutModifier: ViewModifier {
 private struct PromptFocusShortcutHost: UIViewRepresentable {
     let isEnabled: Bool
     let hasStreams: Bool
+    let isTranscriptScrolling: Bool
     let onOpenStreamPopup: () -> Void
     let onFocusRequested: () -> Void
     let onTextInserted: (String) -> Void
@@ -4269,6 +4280,7 @@ private struct PromptFocusShortcutHost: UIViewRepresentable {
         view.onTextInserted = onTextInserted
         view.isShortcutEnabled = isEnabled
         view.hasStreams = hasStreams
+        view.defersKeyCommandFirstResponderRecycle = isTranscriptScrolling
         view.notificationVisibleCount = notificationVisibleCount
         view.keyboardOwnershipStore = keyboardOwnershipStore
         return view
@@ -4280,6 +4292,7 @@ private struct PromptFocusShortcutHost: UIViewRepresentable {
         view.onTextInserted = onTextInserted
         view.isShortcutEnabled = isEnabled
         view.hasStreams = hasStreams
+        view.defersKeyCommandFirstResponderRecycle = isTranscriptScrolling
         view.notificationVisibleCount = notificationVisibleCount
         view.keyboardOwnershipStore = keyboardOwnershipStore
         view.refreshKeyCommandsIfNeeded()
@@ -4297,6 +4310,7 @@ private final class PromptFocusShortcutView: UIView {
     var onTextInserted: ((String) -> Void)?
     var isShortcutEnabled = false
     var hasStreams = false
+    var defersKeyCommandFirstResponderRecycle = false
     var notificationVisibleCount = 0
     var keyboardOwnershipStore = KeyboardOwnershipStore()
     private var keyCommandSignature = ChatAppCommandShortcut.keyCommandSignature(
@@ -4304,6 +4318,7 @@ private final class PromptFocusShortcutView: UIView {
         selectorShortcutSlots: []
     )
     private var hasPendingActivationRetry = false
+    private var hasDeferredKeyCommandFirstResponderRecycle = false
     private static let keyboardSuppressingInputView = PromptFocusShortcutSuppressedInputView()
 
     // T221: This hidden responder is the no-text-owner input-intent router. The chat
@@ -4347,10 +4362,18 @@ private final class PromptFocusShortcutView: UIView {
             notificationVisibleCount: notificationVisibleCount,
             selectorShortcutSlots: Set(keyboardOwnershipStore.chatSelectorShortcutMap.keys)
         )
-        guard nextSignature != keyCommandSignature else { return }
-        keyCommandSignature = nextSignature
-        reloadInputViews()
+        let didChangeSignature = nextSignature != keyCommandSignature
+        if didChangeSignature {
+            keyCommandSignature = nextSignature
+            reloadInputViews()
+        }
         guard isFirstResponder else { return }
+        guard didChangeSignature || hasDeferredKeyCommandFirstResponderRecycle else { return }
+        guard !defersKeyCommandFirstResponderRecycle else {
+            hasDeferredKeyCommandFirstResponderRecycle = true
+            return
+        }
+        hasDeferredKeyCommandFirstResponderRecycle = false
         resignFirstResponder()
         becomeFirstResponder()
     }

@@ -2554,7 +2554,7 @@ final class ChatViewModel: ChatViewModelHosting {
         }
         if resolvedMessage.sessionKey == engineActiveSessionKey,
            resolvedMessage.id.hasPrefix("s_") {
-            markSessionRead(resolvedMessage.sessionKey)
+            markSessionRead(resolvedMessage.sessionKey, messageId: resolvedMessage.id)
         }
         applyCrossChatAssistantNotificationIfNeeded(for: resolvedMessage, batchEpoch: notificationBatchEpoch)
         maybeTriggerAssistantIncomingHaptic(for: resolvedMessage, didAppendNewMessage: didAppendNewMessage)
@@ -2741,7 +2741,7 @@ final class ChatViewModel: ChatViewModelHosting {
                 )
             }
 
-            if let replayCursor = lastServerMessageId(from: replayMessages) {
+            if let replayCursor = latestServerMessageId(from: replayMessages) {
                 chatService.setReplayCursor(replayCursor, for: sessionKey)
                 Task { await lifecycleCoordinator.updateCanonicalCursor(replayCursor) }
             } else if !pending.cursorBackedSessionKeys.contains(sessionKey) {
@@ -2949,7 +2949,9 @@ final class ChatViewModel: ChatViewModelHosting {
             messageList[existingIndex] = message
             didAppendNewMessage = false
         } else {
-            messageList.append(message)
+            let insertionIndex = TranscriptReplyAdjacencyOrdering.insertionIndex(for: message, in: messageList)
+                ?? messageList.endIndex
+            messageList.insert(message, at: insertionIndex)
             didAppendNewMessage = true
         }
         applyMessagesWrite(messageList, for: sessionKey)
@@ -4528,7 +4530,7 @@ final class ChatViewModel: ChatViewModelHosting {
                         guard self.firstReplayAppliedEpoch != epoch else { return }
                     }
                     filtered.forEach { self.upsert(sessionKey: sessionKey, message: $0, sourceFlags: .cache) }
-                    let cachedLast = self.lastServerMessageId(from: filtered)
+                    let cachedLast = self.latestServerMessageId(from: filtered)
                     self.chatService.seedReplayCursorIfMissing(cachedLast, for: sessionKey)
                     if let cachedLast,
                        self.chatService.replayCursorSnapshot()[sessionKey] == cachedLast {
@@ -4608,11 +4610,8 @@ final class ChatViewModel: ChatViewModelHosting {
         return Array(messages.suffix(limit))
     }
 
-    private func lastServerMessageId(from messages: [Message]) -> String? {
-        for message in messages.reversed() where isReplayCursorEvent(message) {
-            return message.id
-        }
-        return nil
+    private func latestServerMessageId(from messages: [Message]) -> String? {
+        TranscriptServerTailOrdering.latestServerMessageId(from: messages)
     }
 
     private func markMissingFinalsAfterReplay() {
@@ -5274,7 +5273,7 @@ final class ChatViewModel: ChatViewModelHosting {
     }
 
     private func markSessionRead(_ sessionKey: String, preferServerTail: Bool = false) {
-        let localTailMessageId = lastServerMessageId(from: sessionMessages[sessionKey] ?? [])
+        let localTailMessageId = latestServerMessageId(from: sessionMessages[sessionKey] ?? [])
         let serverTailMessageId = streamTailStateBySession[sessionKey]?.lastMessageId
         let tailMessageId =
             preferServerTail
@@ -5286,6 +5285,13 @@ final class ChatViewModel: ChatViewModelHosting {
             publishReadStateIfPossible(sessionKey: sessionKey, lastReadMessageId: tailMessageId)
             recomputeStreamDotState(for: sessionKey)
         }
+    }
+
+    private func markSessionRead(_ sessionKey: String, messageId: String) {
+        lastReadMessageIdBySession[sessionKey] = messageId
+        persistLastReadMessageId(messageId, for: sessionKey)
+        publishReadStateIfPossible(sessionKey: sessionKey, lastReadMessageId: messageId)
+        recomputeStreamDotState(for: sessionKey)
     }
 
     private func applyStreamReadStateSnapshot(_ snapshot: [String: String]) {

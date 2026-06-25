@@ -172,6 +172,17 @@ struct ClawlineTests {
         #expect(regex.firstMatch(in: source, range: range) != nil)
     }
 
+    @Test("T1429: typing indicator status text wraps inside bubble width")
+    func typingIndicatorStatusTextWrapsInsideBubbleWidth() {
+        #expect(TypingIndicatorCell.progressLabelWidth < TypingIndicatorCell.bubbleWidth)
+
+        let singleLineHeight = TypingIndicatorCell.height(progressSummary: "Reading files")
+        let wrappedHeight = TypingIndicatorCell.height(progressSummary: "Reading a very long status update from the current provider while scanning repository context")
+
+        #expect(singleLineHeight == TypingIndicatorCell.bubbleHeight)
+        #expect(wrappedHeight > TypingIndicatorCell.bubbleHeight)
+    }
+
     @Test("T127: Spatial chat viewport keeps 25 percent top and bottom insets")
     func spatialChatViewportKeepsQuarterWindowInsets() throws {
         let sourcePath = URL(filePath: #filePath)

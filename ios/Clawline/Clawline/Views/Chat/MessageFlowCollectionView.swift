@@ -4621,7 +4621,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 paddingScale: TypingIndicatorCell.bubblePaddingScale,
                 minWidthOverride: TypingIndicatorCell.bubbleWidth,
                 maxWidthOverride: TypingIndicatorCell.bubbleWidth,
-                minHeightOverride: TypingIndicatorCell.bubbleHeight
+                minHeightOverride: TypingIndicatorCell.height(progressSummary: liveProgress?.summary)
             )
         }
 

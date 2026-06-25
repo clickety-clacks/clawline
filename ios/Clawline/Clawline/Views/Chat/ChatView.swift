@@ -6597,6 +6597,18 @@ private struct CrossChatNotificationOverlay: View {
     static let revealAnimation = CrossChatNotificationMotion.reveal
     static let hideAnimation = CrossChatNotificationMotion.hide
     static let resizeAnimation = CrossChatNotificationMotion.resize
+#if os(visionOS)
+    private static let notificationTransition = AnyTransition.asymmetric(
+        insertion: .move(edge: .trailing)
+            .combined(with: .scale(scale: 0))
+            .combined(with: .opacity)
+            .animation(revealAnimation),
+        removal: .move(edge: .trailing)
+            .combined(with: .scale(scale: 0))
+            .combined(with: .opacity)
+            .animation(hideAnimation)
+    )
+#else
     private static let notificationTransition = AnyTransition.asymmetric(
         insertion: .move(edge: .trailing)
             .combined(with: .opacity)
@@ -6605,6 +6617,7 @@ private struct CrossChatNotificationOverlay: View {
             .combined(with: .opacity)
             .animation(hideAnimation)
     )
+#endif
 
     static func visibleCapacity(maxContainerHeight: CGFloat) -> Int {
         let slotHeight = minVisibleBubbleHeight + bubbleSpacing

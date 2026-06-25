@@ -201,6 +201,20 @@ struct ClawlineTests {
         #expect(source.contains("spatialFooterBottomInset") == false)
     }
 
+    @Test("T1422: Spatial notification transition scales and fades during trailing slide")
+    func spatialNotificationTransitionAddsScaleWithoutChangingNativeTransition() throws {
+        let sourcePath = URL(filePath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appending(path: "Clawline/Views/Chat/ChatView.swift")
+        let source = try String(contentsOf: sourcePath, encoding: .utf8)
+        let range = NSRange(source.startIndex..<source.endIndex, in: source)
+        let spatialTransitionPattern = #"(?s)#if os\(visionOS\)\s*private static let notificationTransition = AnyTransition\.asymmetric\(\s*insertion: \.move\(edge: \.trailing\)\s*\.combined\(with: \.scale\(scale: 0\)\)\s*\.combined\(with: \.opacity\)\s*\.animation\(revealAnimation\),\s*removal: \.move\(edge: \.trailing\)\s*\.combined\(with: \.scale\(scale: 0\)\)\s*\.combined\(with: \.opacity\)\s*\.animation\(hideAnimation\)\s*\)\s*#else\s*private static let notificationTransition = AnyTransition\.asymmetric\(\s*insertion: \.move\(edge: \.trailing\)\s*\.combined\(with: \.opacity\)\s*\.animation\(revealAnimation\),\s*removal: \.move\(edge: \.trailing\)\s*\.combined\(with: \.opacity\)\s*\.animation\(hideAnimation\)\s*\)\s*#endif"#
+        let regex = try NSRegularExpression(pattern: spatialTransitionPattern)
+
+        #expect(regex.firstMatch(in: source, range: range) != nil)
+    }
+
     @Test("T219: pairing shader is active only while pairing route is visible")
     func rootBackgroundShaderLifecycleFollowsPairingRoute() {
         #expect(RootBackgroundShaderLifecycle.isShaderActive(

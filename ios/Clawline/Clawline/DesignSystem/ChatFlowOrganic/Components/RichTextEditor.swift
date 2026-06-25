@@ -170,6 +170,7 @@ enum PromptEditorTelemetryEvent: String {
     case editorTextDidChange = "editor.textDidChange"
     case editorSelectionDidChange = "editor.selectionDidChange"
     case editorHeightMeasured = "editor.heightMeasured"
+    case editorHeightMeasurementSkipped = "editor.heightMeasurementSkipped"
     case editorHeightEmitted = "editor.heightEmitted"
     case focusIntent = "focus.intent"
     case focusAck = "focus.ack"
@@ -357,6 +358,7 @@ struct RichTextEditor: UIViewRepresentable {
             _ = context.coordinator.controller.recordParentMutation(
                 reason: resetRequested ? "resetToken" : "inactiveParentContent"
             )
+            context.coordinator.invalidateHeightMeasurementFastPath()
             textView.attributedText = attributedText
             context.coordinator.enforceBaseAttributes(on: textView)
             if selectionRange.location != NSNotFound, textView.selectedRange != selectionRange {
@@ -371,6 +373,7 @@ struct RichTextEditor: UIViewRepresentable {
            !context.coordinator.isApplyingLocalEdit,
            !((textView.attributedText?.isEqual(attributedText)) ?? false) {
             _ = context.coordinator.controller.recordParentMutation(reason: "externalBinding")
+            context.coordinator.invalidateHeightMeasurementFastPath()
             textView.attributedText = attributedText
             context.coordinator.enforceBaseAttributes(on: textView)
             context.coordinator.ensureTypingAttributes(on: textView)
@@ -454,6 +457,14 @@ struct RichTextEditor: UIViewRepresentable {
         private var lastBaseFontPointSize: CGFloat?
         private var lastFontScaleChangeSequence: Int?
         private var heightRetryPending = false
+        private var lastHeightMeasurement: HeightMeasurement?
+        private var lastSkippedHeightTextLength: Int?
+
+        private struct HeightMeasurement {
+            var width: CGFloat
+            var textLength: Int
+            var isScrollEnabled: Bool
+        }
 
         init(parent: RichTextEditor) {
             self.parent = parent
@@ -618,11 +629,47 @@ struct RichTextEditor: UIViewRepresentable {
             }
             heightRetryPending = false
             let referenceWidth = targetWidth
+            let minHeight: CGFloat = 44
+            let maxHeight: CGFloat = 120
+            let textLength = textView.textStorage.length
+            let selectedRange = textView.selectedRange
+            let isEndInsertionGrowth = allowAutoScroll && textLength > (lastHeightMeasurement?.textLength ?? textLength)
+            let isFollowUpForSkippedText = !allowAutoScroll && lastSkippedHeightTextLength == textLength
+            if let lastHeightMeasurement,
+               lastHeightMeasurement.isScrollEnabled,
+               abs(lastHeightMeasurement.width - referenceWidth) <= 0.5,
+               textView.markedTextRange == nil,
+               selectedRange.length == 0,
+               selectedRange.location == textLength,
+               (isEndInsertionGrowth || isFollowUpForSkippedText) {
+                let clamped = maxHeight
+                PromptEditorBridgeTelemetry.record(.editorHeightMeasurementSkipped, [
+                    "clamped": clamped,
+                    "length": textLength,
+                    "previousLength": lastHeightMeasurement.textLength,
+                    "reason": "maxHeightGrowth",
+                    "width": targetWidth
+                ])
+                if abs(parent.calculatedHeight - clamped) > 0.5 {
+                    emitHeight(clamped)
+                }
+                if !textView.isScrollEnabled {
+                    textView.isScrollEnabled = true
+                }
+                if allowAutoScroll {
+                    ensureCaretVisible(in: textView)
+                }
+                self.lastHeightMeasurement = HeightMeasurement(
+                    width: referenceWidth,
+                    textLength: textLength,
+                    isScrollEnabled: true
+                )
+                lastSkippedHeightTextLength = textLength
+                return
+            }
             let fittingSize = CGSize(width: referenceWidth,
                                      height: .greatestFiniteMagnitude)
             let size = textView.sizeThatFits(fittingSize)
-            let minHeight: CGFloat = 44
-            let maxHeight: CGFloat = 120
             let lineHeight = textView.font?.lineHeight ?? 17
             let singleLineHeight = lineHeight + textView.textContainerInset.top + textView.textContainerInset.bottom
             let clamped: CGFloat
@@ -638,30 +685,44 @@ struct RichTextEditor: UIViewRepresentable {
             ])
             if abs(parent.calculatedHeight - clamped) > 0.5 {
                 PromptEditorBridgeTelemetry.record(.editorHeightEmitted, ["value": clamped])
-                if isUpdatingFromSwiftUI {
-                    DispatchQueue.main.async { [weak self] in
-                        guard let self else { return }
-                        guard abs(self.parent.calculatedHeight - clamped) > 0.5 else { return }
-                        PromptEditorBridgeTelemetry.record(.legacyBindingWrite, [
-                            "binding": "calculatedHeight",
-                            "value": clamped
-                        ])
-                        self.parent.calculatedHeight = clamped
-                    }
-                } else {
-                    PromptEditorBridgeTelemetry.record(.legacyBindingWrite, [
-                        "binding": "calculatedHeight",
-                        "value": clamped
-                    ])
-                    parent.calculatedHeight = clamped
-                }
+                emitHeight(clamped)
             }
             textView.isScrollEnabled = size.height > maxHeight
+            lastHeightMeasurement = HeightMeasurement(
+                width: referenceWidth,
+                textLength: textLength,
+                isScrollEnabled: textView.isScrollEnabled
+            )
+            lastSkippedHeightTextLength = nil
             if textView.isScrollEnabled {
                 if allowAutoScroll {
                     ensureCaretVisible(in: textView)
                 }
             }
+        }
+
+        private func emitHeight(_ clamped: CGFloat) {
+            if isUpdatingFromSwiftUI {
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    guard abs(self.parent.calculatedHeight - clamped) > 0.5 else { return }
+                    PromptEditorBridgeTelemetry.record(.legacyBindingWrite, [
+                        "binding": "calculatedHeight",
+                        "value": clamped
+                    ])
+                    self.parent.calculatedHeight = clamped
+                }
+            } else {
+                PromptEditorBridgeTelemetry.record(.legacyBindingWrite, [
+                    "binding": "calculatedHeight",
+                    "value": clamped
+                ])
+                parent.calculatedHeight = clamped
+            }
+        }
+
+        func invalidateHeightMeasurementFastPath() {
+            lastSkippedHeightTextLength = nil
         }
 
         static func shouldCycleFirstResponder(

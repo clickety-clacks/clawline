@@ -2147,16 +2147,18 @@ struct ChatView: View {
     private func bottomToastView(inputBarTopFromScreenBottom: CGFloat,
                                  toastManager: ToastManager) -> some View {
         if let toast = toastManager.toast {
-            ToastBanner(
-                message: toast.message,
+            StreamToast(
+                displayName: toast.message,
+                isBusy: false,
                 actionTitle: toast.actionTitle,
                 action: toast.actionTitle == nil ? nil : {
                     toastManager.performAction()
-                }
-            ) {
-                toastManager.dismiss()
-            }
-            .padding(.horizontal, 24)
+                },
+                dismiss: {
+                    toastManager.dismiss()
+                },
+                announcesOnAppear: true
+            )
             .padding(.bottom, inputBarTopFromScreenBottom + 50)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
             .ignoresSafeArea(.container, edges: .bottom)
@@ -3482,56 +3484,6 @@ struct ChatView: View {
             return mime
         }
         return "application/octet-stream"
-    }
-
-    private struct ToastBanner: View {
-        let message: String
-        let actionTitle: String?
-        let action: (() -> Void)?
-        let dismiss: () -> Void
-
-        var body: some View {
-            HStack(spacing: 12) {
-                Text(message)
-                    .font(.clawline(.uiLabel).weight(.medium))
-                    .foregroundColor(.primary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-
-                if let actionTitle, let action {
-                    Button(actionTitle, action: action)
-                        .font(.clawline(.uiLabel).weight(.semibold))
-                        .buttonStyle(.plain)
-                        .foregroundStyle(.primary)
-                }
-            }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 12)
-#if os(visionOS)
-            .background(
-                Capsule()
-                    .fill(Color.white.opacity(0.3))
-            )
-#else
-            .glassEffect(.regular, in: Capsule())
-#endif
-            .onTapGesture(perform: dismiss)
-            .gesture(
-                DragGesture(minimumDistance: 8)
-                    .onEnded { value in
-                        if value.translation.height > 10 {
-                            dismiss()
-                        }
-                    }
-            )
-            .accessibilityLabel(message)
-            .accessibilityHint(actionTitle == nil ? "Dismiss with tap or swipe down." : "Tap Undo to restore or tap elsewhere to dismiss.")
-            .accessibilityAddTraits(.isStaticText)
-            .onAppear {
-                UIAccessibility.post(notification: .announcement, argument: message)
-            }
-        }
     }
 
 }

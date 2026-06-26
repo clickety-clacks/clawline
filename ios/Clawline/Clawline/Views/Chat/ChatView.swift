@@ -1372,17 +1372,23 @@ struct ChatView: View {
         } ?? viewModel.canCancelCurrentPrompt
 
         let messageLayer: AnyView = AnyView(
-            pagedStreamView(
-                topInset: messageListTopInset,
-                truncationBottomInset: truncationBottomInset,
-                trailingContentInset: transcriptTrailingNotificationClearance,
-                effectiveSessionKeys: effectiveSessionKeys
-            )
-                .frame(width: chatSurfaceWidth)
-                .offset(x: chatSurfaceOffset)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .ignoresSafeArea(.container, edges: [.top, .bottom])
-                .softTopScrollEdgeEffect()
+            Group {
+                if effectiveSessionKeys.isEmpty {
+                    emptyStreamStartupView()
+                } else {
+                    pagedStreamView(
+                        topInset: messageListTopInset,
+                        truncationBottomInset: truncationBottomInset,
+                        trailingContentInset: transcriptTrailingNotificationClearance,
+                        effectiveSessionKeys: effectiveSessionKeys
+                    )
+                    .softTopScrollEdgeEffect()
+                }
+            }
+            .frame(width: chatSurfaceWidth)
+            .offset(x: chatSurfaceOffset)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .ignoresSafeArea(.container, edges: [.top, .bottom])
         )
 
         let notificationBaseLayer: AnyView = AnyView(ZStack(alignment: .top) {
@@ -1610,19 +1616,21 @@ struct ChatView: View {
 #endif
         }
         .overlay(alignment: .bottom) {
-            inputBarOverlay(
-                geometry: geometry,
-                viewModel: viewModel,
-                effectiveStreams: effectiveStreams,
-                mentionPickerStreams: mentionPickerStreams,
-                isMentionPickerVisible: isMentionPickerVisible,
-                notificationVisibleCount: notificationShortcutVisibleCount,
-                belowBarGap: belowBarGap,
-                isKeyboardVisible: isKeyboardVisible,
-                layoutKey: layoutKey,
-                streamSelectorMaxHeight: streamSelectorMaxHeight,
-                keyboardOwnershipStore: keyboardOwnershipStore
-            )
+            if !effectiveSessionKeys.isEmpty {
+                inputBarOverlay(
+                    geometry: geometry,
+                    viewModel: viewModel,
+                    effectiveStreams: effectiveStreams,
+                    mentionPickerStreams: mentionPickerStreams,
+                    isMentionPickerVisible: isMentionPickerVisible,
+                    notificationVisibleCount: notificationShortcutVisibleCount,
+                    belowBarGap: belowBarGap,
+                    isKeyboardVisible: isKeyboardVisible,
+                    layoutKey: layoutKey,
+                    streamSelectorMaxHeight: streamSelectorMaxHeight,
+                    keyboardOwnershipStore: keyboardOwnershipStore
+                )
+            }
         }
         .overlay(alignment: .bottom) {
             floatingScrollButtonOverlay(
@@ -1673,6 +1681,30 @@ struct ChatView: View {
 #else
         decoratedRootLayer
 #endif
+    }
+
+    private func emptyStreamStartupView() -> some View {
+        VStack(spacing: 12) {
+            ProgressView()
+                .controlSize(.regular)
+                .tint(ChatFlowTheme.sage(colorScheme))
+
+            Text("Loading chats...")
+                .font(.clawline(.uiLabel, weight: .semibold))
+                .foregroundStyle(ChatFlowTheme.ink(colorScheme))
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background {
+#if os(visionOS)
+            Color.clear
+#else
+            ChatFlowTheme.pageBackground(colorScheme)
+                .ignoresSafeArea()
+                .overlay(NoiseOverlayView().ignoresSafeArea())
+#endif
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Loading chats")
     }
 
 #if os(iOS) && !targetEnvironment(macCatalyst)

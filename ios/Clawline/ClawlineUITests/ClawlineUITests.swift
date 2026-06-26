@@ -50,7 +50,7 @@ final class ClawlineUITests: XCTestCase {
     }
 
     @MainActor
-    func testT1202ProductionLandscapeTranscriptAndComposerStayWithinScreen() throws {
+    func testT1202ProductionLandscapeNoStreamStartupStaysWithinScreen() throws {
         XCUIDevice.shared.orientation = .portrait
         sleep(1)
 
@@ -69,15 +69,15 @@ final class ClawlineUITests: XCTestCase {
 
         XCTAssertGreaterThan(app.frame.width, app.frame.height, "Expected the app to be in iPhone landscape")
 
-        let composer = waitForComposer(in: app)
-        assertElementStaysWithinScreen(composer, in: app, label: "composer")
+        let loadingState = waitForLoadingChats(in: app)
+        assertElementStaysWithinScreen(loadingState, in: app, label: "loading state")
 
         let image = normalizedLandscapeImage(from: XCUIScreen.main.screenshot())
         writeImage(image, name: "t1202-landscape-edge-to-edge.png")
         assertLandscapeImageHasNoBlackSideGutters(image)
 
         let attachment = XCTAttachment(image: image)
-        attachment.name = "T1202 Production Landscape Edge To Edge"
+        attachment.name = "T1202 Production Landscape No Stream Startup Edge To Edge"
         attachment.lifetime = .keepAlways
         add(attachment)
     }
@@ -96,17 +96,21 @@ final class ClawlineUITests: XCTestCase {
         app.terminate()
     }
 
-    private func waitForComposer(in app: XCUIApplication) -> XCUIElement {
+    private func waitForLoadingChats(in app: XCUIApplication) -> XCUIElement {
         let deadline = Date().addingTimeInterval(8)
         while Date() < deadline {
-            let composer = app.textViews["compose-text-view"]
-            if composer.exists && composer.frame.width > 40 && composer.frame.height > 20 {
-                return composer
+            let label = app.staticTexts["Loading chats..."]
+            if label.exists && label.frame.width > 40 && label.frame.height > 10 {
+                return label
+            }
+            let indicator = app.activityIndicators["Loading chats"]
+            if indicator.exists && indicator.frame.width > 0 && indicator.frame.height > 0 {
+                return indicator
             }
             RunLoop.current.run(until: Date().addingTimeInterval(0.1))
         }
-        XCTFail("Expected production composer to render")
-        return app.textViews["compose-text-view"]
+        XCTFail("Expected loading chats startup state to render")
+        return app.staticTexts["Loading chats..."]
     }
 
     private func assertElementStaysWithinScreen(_ element: XCUIElement, in app: XCUIApplication, label: String) {
@@ -117,10 +121,7 @@ final class ClawlineUITests: XCTestCase {
     }
 
     private func writeImage(_ image: UIImage, name: String) {
-        let outputPath = ProcessInfo.processInfo.environment["TEST_RUNNER_T1202_VISUAL_PROOF_DIR"]
-            ?? ProcessInfo.processInfo.environment["T1202_VISUAL_PROOF_DIR"]
-            ?? "/Users/mike/src/worktrees/clawline-t1202-landscape-crop-rsr/scratch/t1202-landscape-safezone"
-        let outputURL = URL(fileURLWithPath: outputPath)
+        let outputURL = visualProofDirectory()
             .appendingPathComponent(name)
         do {
             try FileManager.default.createDirectory(
@@ -135,6 +136,15 @@ final class ClawlineUITests: XCTestCase {
         } catch {
             XCTFail("Unable to write visual proof screenshot: \(error)")
         }
+    }
+
+    private func visualProofDirectory() -> URL {
+        if let path = ProcessInfo.processInfo.environment["TEST_RUNNER_T1202_VISUAL_PROOF_DIR"]
+            ?? ProcessInfo.processInfo.environment["T1202_VISUAL_PROOF_DIR"] {
+            return URL(fileURLWithPath: path)
+        }
+        return FileManager.default.temporaryDirectory
+            .appendingPathComponent("clawline-t1202-landscape-safezone", isDirectory: true)
     }
 
     private func normalizedLandscapeImage(from screenshot: XCUIScreenshot) -> UIImage {

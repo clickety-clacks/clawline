@@ -11,6 +11,7 @@ import UIKit
 
 enum MessageFlowScrollEvent: Equatable {
     case isAtBottomChanged(sessionKey: String, isAtBottom: Bool)
+    case transcriptScrollActiveChanged(sessionKey: String, isActive: Bool)
     case didReceiveNewMessagesWhileScrolledUp(sessionKey: String, newMessageIDs: [String])
     case didCrossFirstUnreadCenter(sessionKey: String, messageId: String)
     case didInvalidateFirstUnreadAnchor(sessionKey: String)
@@ -1371,6 +1372,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         if !decelerate {
             flushDeferredPreviewRemeasuresIfPossible()
             guard let sessionKey = callbackSessionKey() else { return }
+            emit(.transcriptScrollActiveChanged(sessionKey: sessionKey, isActive: false))
             handleUserScrollSettled(sessionKey: sessionKey)
             checkFirstUnreadCrossingIfNeeded(sessionKey: sessionKey)
             performPendingFlashIfPossible()
@@ -1386,6 +1388,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         flushDeferredPreviewRemeasuresIfPossible()
         setSalientHighlightIsScrolling(false)
         guard let sessionKey = callbackSessionKey() else { return }
+        emit(.transcriptScrollActiveChanged(sessionKey: sessionKey, isActive: false))
         handleUserScrollSettled(sessionKey: sessionKey)
         checkFirstUnreadCrossingIfNeeded(sessionKey: sessionKey)
         performPendingFlashIfPossible()
@@ -1399,6 +1402,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
     func scrollViewDidEndScrollingAnimation(_: UIScrollView) {
         flushDeferredPreviewRemeasuresIfPossible()
         guard let sessionKey = callbackSessionKey() else { return }
+        emit(.transcriptScrollActiveChanged(sessionKey: sessionKey, isActive: false))
         handleProgrammaticScrollEnded(sessionKey: sessionKey)
         checkFirstUnreadCrossingIfNeeded(sessionKey: sessionKey)
         performPendingFlashIfPossible()
@@ -1413,6 +1417,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         // Spec: interaction = scroll view dragging/tracking. Enter a pinned-but-defer state.
         setSalientHighlightIsScrolling(true)
         guard let sessionKey = callbackSessionKey() else { return }
+        emit(.transcriptScrollActiveChanged(sessionKey: sessionKey, isActive: true))
         if readState(for: sessionKey).sbbState == .atBottom {
             setSBBState(.atBottomDragging, sessionKey: sessionKey)
         }
@@ -4616,7 +4621,7 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 paddingScale: TypingIndicatorCell.bubblePaddingScale,
                 minWidthOverride: TypingIndicatorCell.bubbleWidth,
                 maxWidthOverride: TypingIndicatorCell.bubbleWidth,
-                minHeightOverride: TypingIndicatorCell.bubbleHeight
+                minHeightOverride: TypingIndicatorCell.height(progressSummary: liveProgress?.summary)
             )
         }
 

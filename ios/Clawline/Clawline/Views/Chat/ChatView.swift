@@ -398,6 +398,7 @@ struct ChatView: View {
     @State private var scrollButtonSettleAnimationToken: Int = 0
     @State private var scrollButtonSettleTask: Task<Void, Never>?
     @State private var scrollButtonTapSuppressionTask: Task<Void, Never>?
+    @State private var isTranscriptScrolling = false
     @State private var showOnlyUserMessagesCollapsedBySessionKey: [String: Bool] = [:]
     @AppStorage("chat.scrollButton.horizontalDetent") private var scrollButtonDetentRawValue = ScrollButtonHorizontalDetent.center.rawValue
 #if DEBUG
@@ -666,6 +667,10 @@ struct ChatView: View {
     }
 
     private func handleMessageFlowScrollEvent(_ event: MessageFlowScrollEvent) {
+        if case .transcriptScrollActiveChanged(_, let isActive) = event {
+            isTranscriptScrolling = isActive
+            return
+        }
         guard !streamPopupRouteController.isPopupPresented else { return }
         switch event {
         case .isAtBottomChanged(let sessionKey, let isAtBottom):
@@ -696,6 +701,8 @@ struct ChatView: View {
                 state.unreadCount = 0
                 state.firstUnreadMessageId = nil
             }
+        case .transcriptScrollActiveChanged:
+            break
         }
     }
 
@@ -1390,8 +1397,6 @@ struct ChatView: View {
                 .mask(messageViewportFadeMask(topInset: statusBarTopInset, horizontalGutter: metrics.containerPadding))
 
             topChatSoftFade(topInset: geometry.safeAreaInsets.top)
-
-            toastBannerView(geometry: geometry, toastManager: toastManager)
         })
 
         let notificationLayer: AnyView = AnyView(notificationBaseLayer
@@ -1454,8 +1459,9 @@ struct ChatView: View {
         let rootLayer: AnyView = AnyView(ZStack(alignment: .top) {
             notificationLayer
 
-            streamToastView(
-                inputBarTopFromScreenBottom: inputBarTopFromScreenBottom
+            bottomToastView(
+                inputBarTopFromScreenBottom: inputBarTopFromScreenBottom,
+                toastManager: toastManager
             )
             .zIndex(30)
             mentionPickerOverlay(
@@ -1640,6 +1646,7 @@ struct ChatView: View {
             PromptFocusShortcutModifier(
                 isEnabled: promptFocusShortcutEnabled,
                 hasStreams: !effectiveSessionKeys.isEmpty,
+                isTranscriptScrolling: isTranscriptScrolling,
                 onOpenStreamPopup: {
                     openStreamPopupFromKeyboardCommand()
                 },
@@ -2169,8 +2176,26 @@ struct ChatView: View {
     }
 
     @ViewBuilder
-    private func streamToastView(inputBarTopFromScreenBottom: CGFloat) -> some View {
-        if streamToastManager.isVisible {
+    private func bottomToastView(inputBarTopFromScreenBottom: CGFloat,
+                                 toastManager: ToastManager) -> some View {
+        if let toast = toastManager.toast {
+            StreamToast(
+                displayName: toast.message,
+                isBusy: false,
+                actionTitle: toast.actionTitle,
+                action: toast.actionTitle == nil ? nil : {
+                    toastManager.performAction()
+                },
+                dismiss: {
+                    toastManager.dismiss()
+                },
+                announcesOnAppear: true
+            )
+            .padding(.bottom, inputBarTopFromScreenBottom + 50)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+            .ignoresSafeArea(.container, edges: .bottom)
+            .transition(.opacity.combined(with: .scale(scale: 0.9)))
+        } else if streamToastManager.isVisible {
             StreamToast(
                 displayName: streamToastManager.displayName,
                 sessionKey: streamToastManager.sessionKey,
@@ -2180,25 +2205,6 @@ struct ChatView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
                 .ignoresSafeArea(.container, edges: .bottom)
                 .transition(.opacity.combined(with: .scale(scale: 0.9)))
-        }
-    }
-
-    @ViewBuilder
-    private func toastBannerView(geometry: GeometryProxy,
-                                 toastManager: ToastManager) -> some View {
-        if let toast = toastManager.toast {
-            ToastBanner(
-                message: toast.message,
-                actionTitle: toast.actionTitle,
-                action: toast.actionTitle == nil ? nil : {
-                    toastManager.performAction()
-                }
-            ) {
-                toastManager.dismiss()
-            }
-            .padding(.top, geometry.safeAreaInsets.top + 12)
-            .padding(.horizontal, 24)
-            .transition(.move(edge: .top).combined(with: .opacity))
         }
     }
 
@@ -3512,56 +3518,6 @@ struct ChatView: View {
         return "application/octet-stream"
     }
 
-    private struct ToastBanner: View {
-        let message: String
-        let actionTitle: String?
-        let action: (() -> Void)?
-        let dismiss: () -> Void
-
-        var body: some View {
-            HStack(spacing: 12) {
-                Text(message)
-                    .font(.clawline(.uiLabel).weight(.medium))
-                    .foregroundColor(.primary)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-
-                if let actionTitle, let action {
-                    Button(actionTitle, action: action)
-                        .font(.clawline(.uiLabel).weight(.semibold))
-                        .buttonStyle(.plain)
-                        .foregroundStyle(.primary)
-                }
-            }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 12)
-#if os(visionOS)
-            .background(
-                Capsule()
-                    .fill(Color.white.opacity(0.3))
-            )
-#else
-            .glassEffect(.regular, in: Capsule())
-#endif
-            .onTapGesture(perform: dismiss)
-            .gesture(
-                DragGesture(minimumDistance: 8)
-                    .onEnded { value in
-                        if value.translation.height < -10 {
-                            dismiss()
-                        }
-                    }
-            )
-            .accessibilityLabel(message)
-            .accessibilityHint(actionTitle == nil ? "Dismiss with tap or swipe up." : "Tap Undo to restore or tap elsewhere to dismiss.")
-            .accessibilityAddTraits(.isStaticText)
-            .onAppear {
-                UIAccessibility.post(notification: .announcement, argument: message)
-            }
-        }
-    }
-
 }
 
 private extension View {
@@ -4262,6 +4218,7 @@ private struct CancelCurrentPromptBubbleShape: Shape {
 private struct PromptFocusShortcutModifier: ViewModifier {
     let isEnabled: Bool
     let hasStreams: Bool
+    let isTranscriptScrolling: Bool
     let onOpenStreamPopup: () -> Void
     let onFocusRequested: () -> Void
     let onTextInserted: (String) -> Void
@@ -4273,6 +4230,7 @@ private struct PromptFocusShortcutModifier: ViewModifier {
             PromptFocusShortcutHost(
                 isEnabled: isEnabled,
                 hasStreams: hasStreams,
+                isTranscriptScrolling: isTranscriptScrolling,
                 onOpenStreamPopup: onOpenStreamPopup,
                 onFocusRequested: onFocusRequested,
                 onTextInserted: onTextInserted,
@@ -4288,6 +4246,7 @@ private struct PromptFocusShortcutModifier: ViewModifier {
 private struct PromptFocusShortcutHost: UIViewRepresentable {
     let isEnabled: Bool
     let hasStreams: Bool
+    let isTranscriptScrolling: Bool
     let onOpenStreamPopup: () -> Void
     let onFocusRequested: () -> Void
     let onTextInserted: (String) -> Void
@@ -4301,6 +4260,7 @@ private struct PromptFocusShortcutHost: UIViewRepresentable {
         view.onTextInserted = onTextInserted
         view.isShortcutEnabled = isEnabled
         view.hasStreams = hasStreams
+        view.defersKeyCommandFirstResponderRecycle = isTranscriptScrolling
         view.notificationVisibleCount = notificationVisibleCount
         view.keyboardOwnershipStore = keyboardOwnershipStore
         return view
@@ -4312,6 +4272,7 @@ private struct PromptFocusShortcutHost: UIViewRepresentable {
         view.onTextInserted = onTextInserted
         view.isShortcutEnabled = isEnabled
         view.hasStreams = hasStreams
+        view.defersKeyCommandFirstResponderRecycle = isTranscriptScrolling
         view.notificationVisibleCount = notificationVisibleCount
         view.keyboardOwnershipStore = keyboardOwnershipStore
         view.refreshKeyCommandsIfNeeded()
@@ -4329,6 +4290,7 @@ private final class PromptFocusShortcutView: UIView {
     var onTextInserted: ((String) -> Void)?
     var isShortcutEnabled = false
     var hasStreams = false
+    var defersKeyCommandFirstResponderRecycle = false
     var notificationVisibleCount = 0
     var keyboardOwnershipStore = KeyboardOwnershipStore()
     private var keyCommandSignature = ChatAppCommandShortcut.keyCommandSignature(
@@ -4336,6 +4298,7 @@ private final class PromptFocusShortcutView: UIView {
         selectorShortcutSlots: []
     )
     private var hasPendingActivationRetry = false
+    private var hasDeferredKeyCommandFirstResponderRecycle = false
     private static let keyboardSuppressingInputView = PromptFocusShortcutSuppressedInputView()
 
     // T221: This hidden responder is the no-text-owner input-intent router. The chat
@@ -4379,10 +4342,18 @@ private final class PromptFocusShortcutView: UIView {
             notificationVisibleCount: notificationVisibleCount,
             selectorShortcutSlots: Set(keyboardOwnershipStore.chatSelectorShortcutMap.keys)
         )
-        guard nextSignature != keyCommandSignature else { return }
-        keyCommandSignature = nextSignature
-        reloadInputViews()
+        let didChangeSignature = nextSignature != keyCommandSignature
+        if didChangeSignature {
+            keyCommandSignature = nextSignature
+            reloadInputViews()
+        }
         guard isFirstResponder else { return }
+        guard didChangeSignature || hasDeferredKeyCommandFirstResponderRecycle else { return }
+        guard !defersKeyCommandFirstResponderRecycle else {
+            hasDeferredKeyCommandFirstResponderRecycle = true
+            return
+        }
+        hasDeferredKeyCommandFirstResponderRecycle = false
         resignFirstResponder()
         becomeFirstResponder()
     }
@@ -6606,6 +6577,18 @@ private struct CrossChatNotificationOverlay: View {
     static let revealAnimation = CrossChatNotificationMotion.reveal
     static let hideAnimation = CrossChatNotificationMotion.hide
     static let resizeAnimation = CrossChatNotificationMotion.resize
+#if os(visionOS)
+    private static let notificationTransition = AnyTransition.asymmetric(
+        insertion: .move(edge: .trailing)
+            .combined(with: .scale(scale: 0))
+            .combined(with: .opacity)
+            .animation(revealAnimation),
+        removal: .move(edge: .trailing)
+            .combined(with: .scale(scale: 0))
+            .combined(with: .opacity)
+            .animation(hideAnimation)
+    )
+#else
     private static let notificationTransition = AnyTransition.asymmetric(
         insertion: .move(edge: .trailing)
             .combined(with: .opacity)
@@ -6614,6 +6597,7 @@ private struct CrossChatNotificationOverlay: View {
             .combined(with: .opacity)
             .animation(hideAnimation)
     )
+#endif
 
     static func visibleCapacity(maxContainerHeight: CGFloat) -> Int {
         let slotHeight = minVisibleBubbleHeight + bubbleSpacing
@@ -8021,8 +8005,10 @@ struct CrossChatNotificationBubbleView: View {
             .withAlphaComponent(colorScheme == .dark ? 0.82 : 0.74)
     }
 
+    private static let notificationTypographyPointBump: CGFloat = 2
+
     private func notificationFont(_ role: ClawlineTextRole, weight: Font.Weight? = nil) -> Font {
-        let pointSize = UIFont.clawline(role).pointSize + 2
+        let pointSize = UIFont.clawline(role).pointSize + Self.notificationTypographyPointBump
         if let weight {
             return .system(size: pointSize, weight: weight)
         }
@@ -8030,7 +8016,7 @@ struct CrossChatNotificationBubbleView: View {
     }
 
     private func notificationUIFont(_ role: ClawlineTextRole) -> UIFont {
-        UIFont.systemFont(ofSize: UIFont.clawline(role).pointSize + 2)
+        UIFont.systemFont(ofSize: UIFont.clawline(role).pointSize + Self.notificationTypographyPointBump)
     }
 
     private var replyFieldFont: UIFont {
@@ -9106,8 +9092,10 @@ private struct CrossChatNotificationActionMenu: View {
     let onActivate: (CrossChatNotificationActionMenuItem) -> Void
     let onCancel: () -> Void
 
+    private static let notificationTypographyPointBump: CGFloat = 2
+
     private func notificationFont(_ role: ClawlineTextRole, weight: Font.Weight? = nil) -> Font {
-        let pointSize = UIFont.clawline(role).pointSize + 2
+        let pointSize = UIFont.clawline(role).pointSize + Self.notificationTypographyPointBump
         if let weight {
             return .system(size: pointSize, weight: weight)
         }

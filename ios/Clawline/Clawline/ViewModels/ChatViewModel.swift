@@ -105,7 +105,8 @@ struct NotificationBatchCommitCoordinator {
         epoch: Int,
         reachedTruncationBoundary: Bool,
         committedSnapshot: [String: CrossChatNotificationBubble],
-        isEligible: (String) -> Bool
+        isEligible: (String) -> Bool,
+        isEntryUnread: (String, CrossChatAssistantNotificationEntry) -> Bool = { _, _ in true }
     ) -> [String: CrossChatNotificationBubble]? {
         guard let batch = pendingBatchByEpoch[epoch] else { return nil }
         guard reachedTruncationBoundary || !batch.waitsForTruncationBoundary else { return nil }
@@ -116,7 +117,9 @@ struct NotificationBatchCommitCoordinator {
             guard isEligible(bubble.sourceChatId) else { continue }
             let dismissalSequence = batch.dismissalSequenceBySourceChatId[bubble.sourceChatId] ?? 0
             let finalEntries = bubble.entries.filter {
-                !$0.streaming && $0.notificationSequence > dismissalSequence
+                !$0.streaming
+                    && $0.notificationSequence > dismissalSequence
+                    && isEntryUnread(bubble.sourceChatId, $0)
             }
             guard !finalEntries.isEmpty else { continue }
 
@@ -2554,7 +2557,7 @@ final class ChatViewModel: ChatViewModelHosting {
         }
         if resolvedMessage.sessionKey == engineActiveSessionKey,
            resolvedMessage.id.hasPrefix("s_") {
-            markSessionRead(resolvedMessage.sessionKey)
+            markSessionRead(resolvedMessage.sessionKey, messageId: resolvedMessage.id)
         }
         applyCrossChatAssistantNotificationIfNeeded(for: resolvedMessage, batchEpoch: notificationBatchEpoch)
         maybeTriggerAssistantIncomingHaptic(for: resolvedMessage, didAppendNewMessage: didAppendNewMessage)
@@ -2584,6 +2587,7 @@ final class ChatViewModel: ChatViewModelHosting {
             notificationBatchCommitCoordinator.collectPendingCandidate(candidate, epoch: batchEpoch)
             return
         }
+        guard isUnreadCrossChatAssistantNotificationCandidate(candidate) else { return }
         guard isEligibleForCrossChatAssistantNotification(sourceChatId: message.sessionKey) else { return }
         notificationBatchCommitCoordinator.applyLiveCandidate(
             candidate,
@@ -2606,6 +2610,9 @@ final class ChatViewModel: ChatViewModelHosting {
             committedSnapshot: crossChatNotificationBubblesBySourceChatId,
             isEligible: { [weak self] sourceChatId in
                 self?.isEligibleForCrossChatAssistantNotification(sourceChatId: sourceChatId) ?? false
+            },
+            isEntryUnread: { [weak self] sourceChatId, entry in
+                self?.isUnreadCrossChatAssistantNotificationEntry(entry, sourceChatId: sourceChatId) ?? false
             }
         ) else {
             return
@@ -2621,6 +2628,45 @@ final class ChatViewModel: ChatViewModelHosting {
         let visibleSessionKey = uiSelectedSessionKey.isEmpty ? engineActiveSessionKey : uiSelectedSessionKey
         guard sourceChatId != visibleSessionKey else { return false }
         return true
+    }
+
+    private func isUnreadCrossChatAssistantNotificationEntry(
+        _ entry: CrossChatAssistantNotificationEntry,
+        sourceChatId: String
+    ) -> Bool {
+        isUnreadCrossChatAssistantNotificationMessage(messageId: entry.id, sourceChatId: sourceChatId)
+    }
+
+    private func isUnreadCrossChatAssistantNotificationCandidate(
+        _ candidate: NotificationBatchCommitCoordinator.Candidate
+    ) -> Bool {
+        guard candidate.role == .assistant, !candidate.streaming else { return false }
+        return isUnreadCrossChatAssistantNotificationMessage(
+            messageId: candidate.messageId,
+            sourceChatId: candidate.sourceChatId
+        )
+    }
+
+    private func isUnreadCrossChatAssistantNotificationMessage(messageId: String, sourceChatId: String) -> Bool {
+        if let tailState = streamTailStateBySession[sourceChatId] {
+            if tailState.lastMessageId == messageId {
+                guard tailState.lastMessageRole == .assistant else { return false }
+                guard lastReadMessageIdBySession[sourceChatId] != tailState.lastMessageId else { return false }
+            }
+        }
+        guard let lastReadMessageId = lastReadMessageIdBySession[sourceChatId],
+              !lastReadMessageId.isEmpty else {
+            return true
+        }
+        guard messageId != lastReadMessageId else { return false }
+        let messages = sessionMessages[sourceChatId] ?? []
+        guard let candidateIndex = messages.firstIndex(where: { $0.id == messageId }) else {
+            return true
+        }
+        guard let lastReadIndex = messages.firstIndex(where: { $0.id == lastReadMessageId }) else {
+            return true
+        }
+        return candidateIndex > lastReadIndex
     }
 
     private func discardCrossChatNotificationBatch(epoch: Int) {
@@ -2741,7 +2787,7 @@ final class ChatViewModel: ChatViewModelHosting {
                 )
             }
 
-            if let replayCursor = lastServerMessageId(from: replayMessages) {
+            if let replayCursor = latestServerMessageId(from: replayMessages) {
                 chatService.setReplayCursor(replayCursor, for: sessionKey)
                 Task { await lifecycleCoordinator.updateCanonicalCursor(replayCursor) }
             } else if !pending.cursorBackedSessionKeys.contains(sessionKey) {
@@ -2949,7 +2995,9 @@ final class ChatViewModel: ChatViewModelHosting {
             messageList[existingIndex] = message
             didAppendNewMessage = false
         } else {
-            messageList.append(message)
+            let insertionIndex = TranscriptReplyAdjacencyOrdering.insertionIndex(for: message, in: messageList)
+                ?? messageList.endIndex
+            messageList.insert(message, at: insertionIndex)
             didAppendNewMessage = true
         }
         applyMessagesWrite(messageList, for: sessionKey)
@@ -4528,7 +4576,7 @@ final class ChatViewModel: ChatViewModelHosting {
                         guard self.firstReplayAppliedEpoch != epoch else { return }
                     }
                     filtered.forEach { self.upsert(sessionKey: sessionKey, message: $0, sourceFlags: .cache) }
-                    let cachedLast = self.lastServerMessageId(from: filtered)
+                    let cachedLast = self.latestServerMessageId(from: filtered)
                     self.chatService.seedReplayCursorIfMissing(cachedLast, for: sessionKey)
                     if let cachedLast,
                        self.chatService.replayCursorSnapshot()[sessionKey] == cachedLast {
@@ -4608,11 +4656,8 @@ final class ChatViewModel: ChatViewModelHosting {
         return Array(messages.suffix(limit))
     }
 
-    private func lastServerMessageId(from messages: [Message]) -> String? {
-        for message in messages.reversed() where isReplayCursorEvent(message) {
-            return message.id
-        }
-        return nil
+    private func latestServerMessageId(from messages: [Message]) -> String? {
+        TranscriptServerTailOrdering.latestServerMessageId(from: messages)
     }
 
     private func markMissingFinalsAfterReplay() {
@@ -5274,7 +5319,7 @@ final class ChatViewModel: ChatViewModelHosting {
     }
 
     private func markSessionRead(_ sessionKey: String, preferServerTail: Bool = false) {
-        let localTailMessageId = lastServerMessageId(from: sessionMessages[sessionKey] ?? [])
+        let localTailMessageId = latestServerMessageId(from: sessionMessages[sessionKey] ?? [])
         let serverTailMessageId = streamTailStateBySession[sessionKey]?.lastMessageId
         let tailMessageId =
             preferServerTail
@@ -5286,6 +5331,13 @@ final class ChatViewModel: ChatViewModelHosting {
             publishReadStateIfPossible(sessionKey: sessionKey, lastReadMessageId: tailMessageId)
             recomputeStreamDotState(for: sessionKey)
         }
+    }
+
+    private func markSessionRead(_ sessionKey: String, messageId: String) {
+        lastReadMessageIdBySession[sessionKey] = messageId
+        persistLastReadMessageId(messageId, for: sessionKey)
+        publishReadStateIfPossible(sessionKey: sessionKey, lastReadMessageId: messageId)
+        recomputeStreamDotState(for: sessionKey)
     }
 
     private func applyStreamReadStateSnapshot(_ snapshot: [String: String]) {

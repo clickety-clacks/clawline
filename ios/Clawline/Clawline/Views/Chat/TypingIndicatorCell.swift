@@ -16,6 +16,7 @@ final class TypingIndicatorCell: UICollectionViewCell {
     static let bubbleWidth: CGFloat = 240
     static let bubbleHeight: CGFloat = 86
     static let bubblePaddingScale: CGFloat = 0.2
+    static let progressLabelWidth: CGFloat = 192
 
     private static let indicatorText = ""
     private let containerView = MessageBubbleUIKitContainerView()
@@ -46,10 +47,11 @@ final class TypingIndicatorCell: UICollectionViewCell {
         progressLabel.font = .preferredFont(forTextStyle: .caption1)
         progressLabel.adjustsFontForContentSizeCategory = true
         progressLabel.textAlignment = .center
-        progressLabel.numberOfLines = 2
-        progressLabel.lineBreakMode = .byTruncatingTail
+        progressLabel.numberOfLines = 0
+        progressLabel.lineBreakMode = .byWordWrapping
         progressLabel.setContentCompressionResistancePriority(.required, for: .vertical)
         progressStack.addArrangedSubview(progressLabel)
+        progressLabel.widthAnchor.constraint(equalToConstant: Self.progressLabelWidth).isActive = true
 
         containerView.translatesAutoresizingMaskIntoConstraints = false
         containerView.isUserInteractionEnabled = false
@@ -189,6 +191,22 @@ final class TypingIndicatorCell: UICollectionViewCell {
             detectedURLCount: 0,
             hasSingleURL: false
         )
+    }
+
+    static func height(progressSummary: String?, font: UIFont = .preferredFont(forTextStyle: .caption1)) -> CGFloat {
+        let trimmedProgress = progressSummary?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let trimmedProgress, !trimmedProgress.isEmpty else { return bubbleHeight }
+
+        let labelHeight = ceil((trimmedProgress as NSString).boundingRect(
+            with: CGSize(width: progressLabelWidth, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: [.font: font],
+            context: nil
+        ).height)
+        let dotsHeight: CGFloat = 7
+        let overlaySpacing: CGFloat = 9
+        let verticalChrome = bubbleHeight - dotsHeight - overlaySpacing - ceil(font.lineHeight * 2)
+        return max(bubbleHeight, ceil(dotsHeight + overlaySpacing + labelHeight + verticalChrome))
     }
 }
 

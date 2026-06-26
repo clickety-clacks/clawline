@@ -322,6 +322,43 @@ struct KeyboardCommandRouterTests {
         )
     }
 
+    @Test("T1427 prompt shortcut command signature ignores route-only store churn")
+    func promptShortcutCommandSignatureIgnoresRouteOnlyStoreChurn() {
+        let firstStore = KeyboardOwnershipSceneFactory.chatScene(
+            visibleNotificationSourceChatIds: [],
+            visibleChatSelectorSessionKeys: ["agent:main:a", "agent:main:b"],
+            mentionPickerVisible: false,
+            composerFocused: false,
+            notificationReplyFocusedSourceChatId: nil,
+            actionMenuSourceChatId: nil
+        )
+        var secondStore = firstStore
+        secondStore.update(
+            surfaceId: .transcript,
+            lifecycleToken: "transcript",
+            focusedHint: true
+        )
+
+        let firstSignature = ChatAppCommandShortcut.keyCommandSignature(
+            notificationVisibleCount: 0,
+            selectorShortcutSlots: Set(firstStore.chatSelectorShortcutMap.keys)
+        )
+        let secondSignature = ChatAppCommandShortcut.keyCommandSignature(
+            notificationVisibleCount: 0,
+            selectorShortcutSlots: Set(secondStore.chatSelectorShortcutMap.keys)
+        )
+
+        #expect(firstSignature == secondSignature)
+        #expect(
+            ChatAppCommandShortcut.keyCommandSpecs(
+                notificationVisibleCount: 0,
+                selectorShortcutSlots: Set(firstStore.chatSelectorShortcutMap.keys)
+            )
+            .filter { $0.action == .notificationNumber }
+            .map(\.input) == ["1", "2"]
+        )
+    }
+
     @Test("T1210 app command notification slots remain independently enabled")
     func appCommandNotificationSlotsRemainIndependentlyEnabled() {
         #expect(

@@ -8025,8 +8025,10 @@ struct CrossChatNotificationBubbleView: View {
             .withAlphaComponent(colorScheme == .dark ? 0.82 : 0.74)
     }
 
+    private static let notificationTypographyPointBump: CGFloat = 2
+
     private func notificationFont(_ role: ClawlineTextRole, weight: Font.Weight? = nil) -> Font {
-        let pointSize = UIFont.clawline(role).pointSize + 2
+        let pointSize = UIFont.clawline(role).pointSize + Self.notificationTypographyPointBump
         if let weight {
             return .system(size: pointSize, weight: weight)
         }
@@ -8034,7 +8036,7 @@ struct CrossChatNotificationBubbleView: View {
     }
 
     private func notificationUIFont(_ role: ClawlineTextRole) -> UIFont {
-        UIFont.systemFont(ofSize: UIFont.clawline(role).pointSize + 2)
+        UIFont.systemFont(ofSize: UIFont.clawline(role).pointSize + Self.notificationTypographyPointBump)
     }
 
     private var replyFieldFont: UIFont {
@@ -9110,8 +9112,10 @@ private struct CrossChatNotificationActionMenu: View {
     let onActivate: (CrossChatNotificationActionMenuItem) -> Void
     let onCancel: () -> Void
 
+    private static let notificationTypographyPointBump: CGFloat = 2
+
     private func notificationFont(_ role: ClawlineTextRole, weight: Font.Weight? = nil) -> Font {
-        let pointSize = UIFont.clawline(role).pointSize + 2
+        let pointSize = UIFont.clawline(role).pointSize + Self.notificationTypographyPointBump
         if let weight {
             return .system(size: pointSize, weight: weight)
         }

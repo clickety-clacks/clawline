@@ -105,7 +105,8 @@ struct NotificationBatchCommitCoordinator {
         epoch: Int,
         reachedTruncationBoundary: Bool,
         committedSnapshot: [String: CrossChatNotificationBubble],
-        isEligible: (String) -> Bool
+        isEligible: (String) -> Bool,
+        isEntryUnread: (String, CrossChatAssistantNotificationEntry) -> Bool = { _, _ in true }
     ) -> [String: CrossChatNotificationBubble]? {
         guard let batch = pendingBatchByEpoch[epoch] else { return nil }
         guard reachedTruncationBoundary || !batch.waitsForTruncationBoundary else { return nil }
@@ -116,7 +117,9 @@ struct NotificationBatchCommitCoordinator {
             guard isEligible(bubble.sourceChatId) else { continue }
             let dismissalSequence = batch.dismissalSequenceBySourceChatId[bubble.sourceChatId] ?? 0
             let finalEntries = bubble.entries.filter {
-                !$0.streaming && $0.notificationSequence > dismissalSequence
+                !$0.streaming
+                    && $0.notificationSequence > dismissalSequence
+                    && isEntryUnread(bubble.sourceChatId, $0)
             }
             guard !finalEntries.isEmpty else { continue }
 
@@ -2584,6 +2587,7 @@ final class ChatViewModel: ChatViewModelHosting {
             notificationBatchCommitCoordinator.collectPendingCandidate(candidate, epoch: batchEpoch)
             return
         }
+        guard isUnreadCrossChatAssistantNotificationCandidate(candidate) else { return }
         guard isEligibleForCrossChatAssistantNotification(sourceChatId: message.sessionKey) else { return }
         notificationBatchCommitCoordinator.applyLiveCandidate(
             candidate,
@@ -2606,6 +2610,9 @@ final class ChatViewModel: ChatViewModelHosting {
             committedSnapshot: crossChatNotificationBubblesBySourceChatId,
             isEligible: { [weak self] sourceChatId in
                 self?.isEligibleForCrossChatAssistantNotification(sourceChatId: sourceChatId) ?? false
+            },
+            isEntryUnread: { [weak self] sourceChatId, entry in
+                self?.isUnreadCrossChatAssistantNotificationEntry(entry, sourceChatId: sourceChatId) ?? false
             }
         ) else {
             return
@@ -2621,6 +2628,45 @@ final class ChatViewModel: ChatViewModelHosting {
         let visibleSessionKey = uiSelectedSessionKey.isEmpty ? engineActiveSessionKey : uiSelectedSessionKey
         guard sourceChatId != visibleSessionKey else { return false }
         return true
+    }
+
+    private func isUnreadCrossChatAssistantNotificationEntry(
+        _ entry: CrossChatAssistantNotificationEntry,
+        sourceChatId: String
+    ) -> Bool {
+        isUnreadCrossChatAssistantNotificationMessage(messageId: entry.id, sourceChatId: sourceChatId)
+    }
+
+    private func isUnreadCrossChatAssistantNotificationCandidate(
+        _ candidate: NotificationBatchCommitCoordinator.Candidate
+    ) -> Bool {
+        guard candidate.role == .assistant, !candidate.streaming else { return false }
+        return isUnreadCrossChatAssistantNotificationMessage(
+            messageId: candidate.messageId,
+            sourceChatId: candidate.sourceChatId
+        )
+    }
+
+    private func isUnreadCrossChatAssistantNotificationMessage(messageId: String, sourceChatId: String) -> Bool {
+        if let tailState = streamTailStateBySession[sourceChatId] {
+            if tailState.lastMessageId == messageId {
+                guard tailState.lastMessageRole == .assistant else { return false }
+                guard lastReadMessageIdBySession[sourceChatId] != tailState.lastMessageId else { return false }
+            }
+        }
+        guard let lastReadMessageId = lastReadMessageIdBySession[sourceChatId],
+              !lastReadMessageId.isEmpty else {
+            return true
+        }
+        guard messageId != lastReadMessageId else { return false }
+        let messages = sessionMessages[sourceChatId] ?? []
+        guard let candidateIndex = messages.firstIndex(where: { $0.id == messageId }) else {
+            return true
+        }
+        guard let lastReadIndex = messages.firstIndex(where: { $0.id == lastReadMessageId }) else {
+            return true
+        }
+        return candidateIndex > lastReadIndex
     }
 
     private func discardCrossChatNotificationBatch(epoch: Int) {

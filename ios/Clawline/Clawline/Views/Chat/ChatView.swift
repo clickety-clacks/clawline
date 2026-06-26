@@ -1205,6 +1205,20 @@ struct ChatView: View {
             isCompactLandscape: isCompactLandscape,
             nativeWindowWidth: nativeWindowWidth
         )
+        let _ = {
+            T1202LandscapeDiagnostics.logChatSurface(
+                context: "transcript",
+                sessionKey: viewModel.uiSelectedSessionKey,
+                geometrySize: geometry.size,
+                safeAreaInsets: geometry.safeAreaInsets,
+                nativeWindowSize: nativeWindowSize,
+                surfaceWidth: chatSurfaceWidth,
+                surfaceOffset: chatSurfaceOffset,
+                maskHorizontalGutter: metrics.containerPadding,
+                isCompactLayout: isCompactLayout,
+                isCompactLandscape: isCompactLandscape
+            )
+        }()
         let estimatedKeyboardHeight: CGFloat = {
             if horizontalSizeClass == .regular {
                 return isLandscape ? 300 : 360
@@ -2209,6 +2223,20 @@ struct ChatView: View {
             isCompactLandscape: isCompactLandscape,
             nativeWindowWidth: nativeWindowWidth
         )
+        let _ = {
+            T1202LandscapeDiagnostics.logChatSurface(
+                context: "composer",
+                sessionKey: sessionKey,
+                geometrySize: geometry.size,
+                safeAreaInsets: geometry.safeAreaInsets,
+                nativeWindowSize: nativeWindowSize,
+                surfaceWidth: pinnedSurfaceWidth,
+                surfaceOffset: pinnedSurfaceOffset,
+                maskHorizontalGutter: 0,
+                isCompactLayout: isCompactLayout,
+                isCompactLandscape: isCompactLandscape
+            )
+        }()
 
 #if os(visionOS)
         let pinnedScrollButtonView: AnyView? = nil
@@ -6497,6 +6525,111 @@ enum ChatLandscapeWidthGeometry {
             return safeAreaOffset
         }
         return safeAreaOffset + ((windowDelta - safeAreaDelta) / 2)
+    }
+}
+
+enum T1202LandscapeDiagnostics {
+    static var isEnabled: Bool {
+        ProcessInfo.processInfo.environment["CLAWLINE_T1202_LANDSCAPE_DIAG"] == "1"
+    }
+
+    static func logChatSurface(
+        context: String,
+        sessionKey: String?,
+        geometrySize: CGSize,
+        safeAreaInsets: EdgeInsets,
+        nativeWindowSize: CGSize?,
+        surfaceWidth: CGFloat,
+        surfaceOffset: CGFloat,
+        maskHorizontalGutter: CGFloat,
+        isCompactLayout: Bool,
+        isCompactLandscape: Bool
+    ) {
+        guard isEnabled else { return }
+        print(
+            "[T1202_GEOM] ts=\(timestamp()) build=\(build) context=\(context) session=\(sessionKey ?? "nil") "
+                + "geometry=\(format(geometrySize)) safe=\(format(safeAreaInsets)) nativeWindow=\(format(nativeWindowSize)) "
+                + "screen=\(screenDescription()) surfaceWidth=\(format(surfaceWidth)) surfaceOffset=\(format(surfaceOffset)) "
+                + "maskHorizontalGutter=\(format(maskHorizontalGutter)) compactLayout=\(isCompactLayout) compactLandscape=\(isCompactLandscape)"
+        )
+    }
+
+    static func logCollectionView(
+        sessionKey: String?,
+        viewBounds: CGRect,
+        windowBounds: CGRect?,
+        viewOriginInWindow: CGPoint?,
+        targetFrame: CGRect,
+        currentFrame: CGRect,
+        collectionBounds: CGRect,
+        contentInset: UIEdgeInsets,
+        sectionInset: UIEdgeInsets,
+        availableContentWidth: CGFloat,
+        effectiveContentWidth: CGFloat,
+        fillsHorizontallyConstrainedHostToWindow: Bool
+    ) {
+        guard isEnabled else { return }
+        print(
+            "[T1202_GEOM] ts=\(timestamp()) build=\(build) context=collection session=\(sessionKey ?? "nil") "
+                + "viewBounds=\(format(viewBounds)) windowBounds=\(format(windowBounds)) originInWindow=\(format(viewOriginInWindow)) "
+                + "targetFrame=\(format(targetFrame)) currentFrame=\(format(currentFrame)) collectionBounds=\(format(collectionBounds)) "
+                + "contentInset=\(format(contentInset)) sectionInset=\(format(sectionInset)) "
+                + "availableContentWidth=\(format(availableContentWidth)) effectiveContentWidth=\(format(effectiveContentWidth)) "
+                + "fillHostToWindow=\(fillsHorizontallyConstrainedHostToWindow) screen=\(screenDescription())"
+        )
+    }
+
+    private static var build: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"
+    }
+
+    private static func timestamp() -> String {
+        ISO8601DateFormatter().string(from: Date())
+    }
+
+    private static func screenDescription() -> String {
+        let screenSize = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first(where: { $0.activationState == .foregroundActive })?
+            .screen
+            .bounds
+            .size
+        return format(screenSize)
+    }
+
+    private static func format(_ value: CGFloat) -> String {
+        String(format: "%.2f", Double(value))
+    }
+
+    private static func format(_ value: CGSize?) -> String {
+        guard let value else { return "nil" }
+        return format(value)
+    }
+
+    private static func format(_ value: CGSize) -> String {
+        "\(format(value.width))x\(format(value.height))"
+    }
+
+    private static func format(_ value: CGPoint?) -> String {
+        guard let value else { return "nil" }
+        return "(\(format(value.x)),\(format(value.y)))"
+    }
+
+    private static func format(_ value: CGRect?) -> String {
+        guard let value else { return "nil" }
+        return format(value)
+    }
+
+    private static func format(_ value: CGRect) -> String {
+        "(x:\(format(value.minX)),y:\(format(value.minY)),w:\(format(value.width)),h:\(format(value.height)))"
+    }
+
+    private static func format(_ value: EdgeInsets) -> String {
+        "(top:\(format(value.top)),leading:\(format(value.leading)),bottom:\(format(value.bottom)),trailing:\(format(value.trailing)))"
+    }
+
+    private static func format(_ value: UIEdgeInsets) -> String {
+        "(top:\(format(value.top)),left:\(format(value.left)),bottom:\(format(value.bottom)),right:\(format(value.right)))"
     }
 }
 

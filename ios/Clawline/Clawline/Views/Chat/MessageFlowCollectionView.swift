@@ -1285,17 +1285,33 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
                 collectionView.frame = targetFrame
             }
         #else
+            let fillsHorizontallyConstrainedHostToWindow = ChatLandscapeWidthGeometry.shouldFillWindowWidth(
+                viewSize: view.bounds.size,
+                windowSize: view.window?.bounds.size,
+                isCompactLandscape: traitCollection.horizontalSizeClass == .compact
+                    && (view.bounds.width > view.bounds.height
+                        || (view.window?.bounds.width ?? 0) > (view.window?.bounds.height ?? 0))
+            )
             let targetFrame = Self.targetCollectionFrame(
                 viewBounds: view.bounds,
                 windowBounds: view.window?.bounds,
                 viewOriginInWindow: view.window.map { view.convert(CGPoint.zero, to: $0) },
-                fillsHorizontallyConstrainedHostToWindow: ChatLandscapeWidthGeometry.shouldFillWindowWidth(
-                    viewSize: view.bounds.size,
-                    windowSize: view.window?.bounds.size,
-                    isCompactLandscape: traitCollection.horizontalSizeClass == .compact
-                        && (view.bounds.width > view.bounds.height
-                            || (view.window?.bounds.width ?? 0) > (view.window?.bounds.height ?? 0))
-                )
+                fillsHorizontallyConstrainedHostToWindow: fillsHorizontallyConstrainedHostToWindow
+            )
+            let metrics = ChatFlowTheme.Metrics(isCompact: isCompact)
+            T1202LandscapeDiagnostics.logCollectionView(
+                sessionKey: lastAppliedEffectiveSessionKey,
+                viewBounds: view.bounds,
+                windowBounds: view.window?.bounds,
+                viewOriginInWindow: view.window.map { view.convert(CGPoint.zero, to: $0) },
+                targetFrame: targetFrame,
+                currentFrame: collectionView.frame,
+                collectionBounds: collectionView.bounds,
+                contentInset: collectionView.contentInset,
+                sectionInset: flowLayout.sectionInset,
+                availableContentWidth: availableContentWidth(),
+                effectiveContentWidth: effectiveContentWidth(metrics: metrics),
+                fillsHorizontallyConstrainedHostToWindow: fillsHorizontallyConstrainedHostToWindow
             )
 
             // Only update if significantly different to avoid layout loops

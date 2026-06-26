@@ -1166,6 +1166,148 @@ struct ChatViewModelTests {
         #expect(viewModel.crossChatNotificationBubblesBySourceChatId[sourceB]?.entries.map(\.content) == ["Replay B 1"])
     }
 
+    @Test("Read replayed assistant content does not resurrect cross-chat notification")
+    @MainActor
+    func readReplayedAssistantContentDoesNotResurrectCrossChatNotification() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let source = "agent:main:clawline:user:s_replay_read_boundary"
+        let streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: source, displayName: "Replay Read", kind: "custom", orderIndex: 1, isBuiltIn: false),
+        ]
+        let chatService = TestChatService()
+        chatService.streams = streams
+        chatService.startReplayCount = 2
+        chatService.emitSyncCompleteOnStart = false
+        let viewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { viewModel.prepareForReplacement() }
+
+        await viewModel.activate(origin: "test.readReplayNoResurrect")
+        chatService.emitServiceEvent(.streamSnapshot(streams))
+        chatService.emitServiceEvent(.streamReadStateUpdated(sessionKey: source, lastReadMessageId: "s_replay_read_2"))
+        chatService.emitServiceEvent(
+            .streamTailStateUpdated(
+                sessionKey: source,
+                tailState: StreamTailState(lastMessageId: "s_replay_read_2", lastMessageRole: .assistant)
+            )
+        )
+        for _ in 0..<50 {
+            if viewModel.lastReadMessageIdBySession[source] == "s_replay_read_2" { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+
+        let first = #"{"type":"message","id":"s_replay_read_1","role":"assistant","content":"Already read first","timestamp":1700000000000,"streaming":false,"sessionKey":"\#(source)","attachments":[]}"#
+        let second = #"{"type":"message","id":"s_replay_read_2","role":"assistant","content":"Already read second","timestamp":1700000000001,"streaming":false,"sessionKey":"\#(source)","attachments":[]}"#
+        chatService.emitLifecycleEvent(.init(epoch: 1, payload: .serverMessage(data: Data(first.utf8))))
+        chatService.emitLifecycleEvent(.init(epoch: 1, payload: .serverMessage(data: Data(second.utf8))))
+        chatService.emitLifecycleEvent(.init(epoch: 1, payload: .syncComplete))
+        try await Task.sleep(forDuration: .milliseconds(50))
+
+        #expect(viewModel.messages(for: source).map(\.id) == ["s_replay_read_1", "s_replay_read_2"])
+        #expect(viewModel.streamDotStateBySession[source] == .inactive)
+        #expect(viewModel.crossChatNotificationBubblesBySourceChatId[source] == nil)
+    }
+
+    @Test("Dismissed replayed assistant content stays dismissed until newer assistant content")
+    @MainActor
+    func dismissedReplayedAssistantContentStaysDismissedUntilNewerAssistantContent() async throws {
+        resetChatPersistence()
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        let source = "agent:main:clawline:user:s_replay_dismiss_boundary"
+        let streams = [
+            makeStreamSession(sessionKey: personalSessionKey, displayName: "Personal", kind: "main", orderIndex: 0, isBuiltIn: true),
+            makeStreamSession(sessionKey: source, displayName: "Replay Dismiss", kind: "custom", orderIndex: 1, isBuiltIn: false),
+        ]
+        let chatService = TestChatService()
+        chatService.streams = streams
+        let firstViewModel = ChatViewModel(
+            auth: auth,
+            chatService: chatService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+
+        await firstViewModel.activate(origin: "test.dismissReplayBoundary.first")
+        chatService.emitServiceEvent(.streamSnapshot(streams))
+        let dismissed = #"{"type":"message","id":"s_replay_dismissed","role":"assistant","content":"Dismissed before restart","timestamp":1700000000000,"streaming":false,"sessionKey":"\#(source)","attachments":[]}"#
+        chatService.emitLifecycleEvent(.init(epoch: 1, payload: .serverMessage(data: Data(dismissed.utf8))))
+        for _ in 0..<50 {
+            if firstViewModel.crossChatNotificationBubblesBySourceChatId[source] != nil { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+        firstViewModel.dismissCrossChatNotification(sourceChatId: source)
+        for _ in 0..<50 {
+            if firstViewModel.lastReadMessageIdBySession[source] == "s_replay_dismissed" { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+        #expect(firstViewModel.crossChatNotificationBubblesBySourceChatId[source] == nil)
+        firstViewModel.prepareForReplacement()
+
+        let replayService = TestChatService()
+        replayService.streams = streams
+        replayService.startReplayCount = 2
+        replayService.emitSyncCompleteOnStart = false
+        let secondViewModel = ChatViewModel(
+            auth: auth,
+            chatService: replayService,
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: TestUploadService(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+        defer { secondViewModel.prepareForReplacement() }
+
+        await secondViewModel.activate(origin: "test.dismissReplayBoundary.second")
+        replayService.emitServiceEvent(.streamSnapshot(streams))
+        replayService.emitServiceEvent(
+            .streamTailStateUpdated(
+                sessionKey: source,
+                tailState: StreamTailState(lastMessageId: "s_replay_dismissed", lastMessageRole: .assistant)
+            )
+        )
+        for _ in 0..<50 {
+            if secondViewModel.lastReadMessageIdBySession[source] == "s_replay_dismissed" { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+        replayService.emitLifecycleEvent(.init(epoch: 1, payload: .serverMessage(data: Data(dismissed.utf8))))
+        try await Task.sleep(forDuration: .milliseconds(30))
+        #expect(secondViewModel.streamDotStateBySession[source] == .inactive)
+        #expect(secondViewModel.crossChatNotificationBubblesBySourceChatId[source] == nil)
+
+        let newer = #"{"type":"message","id":"s_replay_newer","role":"assistant","content":"New after dismiss","timestamp":1700000000001,"streaming":false,"sessionKey":"\#(source)","attachments":[]}"#
+        replayService.emitLifecycleEvent(.init(epoch: 1, payload: .serverMessage(data: Data(newer.utf8))))
+        replayService.emitLifecycleEvent(.init(epoch: 1, payload: .syncComplete))
+        replayService.emitServiceEvent(
+            .streamTailStateUpdated(
+                sessionKey: source,
+                tailState: StreamTailState(lastMessageId: "s_replay_newer", lastMessageRole: .assistant)
+            )
+        )
+        for _ in 0..<50 {
+            if secondViewModel.crossChatNotificationBubblesBySourceChatId[source]?.entries.map(\.content) == ["New after dismiss"] { break }
+            try await Task.sleep(forDuration: .milliseconds(10))
+        }
+
+        #expect(secondViewModel.messages(for: source).map(\.id) == ["s_replay_dismissed", "s_replay_newer"])
+        #expect(secondViewModel.streamDotStateBySession[source] == .unread)
+        #expect(secondViewModel.crossChatNotificationBubblesBySourceChatId[source]?.entries.map(\.content) == ["New after dismiss"])
+    }
+
     @Test("T1213 replay failure discards pending notification snapshot")
     @MainActor
     func replayFailureDiscardsPendingNotifications() async throws {

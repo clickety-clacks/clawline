@@ -6,16 +6,37 @@
 //
 
 import SwiftUI
+import UIKit
 
 /// A Liquid Glass toast that displays the current channel name.
 /// Designed for debounced display during swipe-to-switch gestures.
 struct StreamToast: View {
     let displayName: String
-    let sessionKey: String
+    let sessionKey: String?
     let isBusy: Bool
+    let actionTitle: String?
+    let action: (() -> Void)?
+    let dismiss: (() -> Void)?
+    let announcesOnAppear: Bool
 
     @Environment(\.colorScheme) private var colorScheme
     private var isDarkMode: Bool { colorScheme == .dark }
+
+    init(displayName: String,
+         sessionKey: String? = nil,
+         isBusy: Bool,
+         actionTitle: String? = nil,
+         action: (() -> Void)? = nil,
+         dismiss: (() -> Void)? = nil,
+         announcesOnAppear: Bool = false) {
+        self.displayName = displayName
+        self.sessionKey = sessionKey
+        self.isBusy = isBusy
+        self.actionTitle = actionTitle
+        self.action = action
+        self.dismiss = dismiss
+        self.announcesOnAppear = announcesOnAppear
+    }
 
     private var toastTextColor: Color {
 #if os(visionOS)
@@ -33,7 +54,7 @@ struct StreamToast: View {
 
     var body: some View {
         VStack(spacing: 8) {
-            HStack(spacing: 10) {
+            HStack(spacing: 12) {
                 if isBusy {
                     ProgressView()
                         .controlSize(.small)
@@ -42,19 +63,28 @@ struct StreamToast: View {
                 Text(displayName)
                     .font(.clawline(.sectionHeader))
                     .foregroundStyle(toastTextColor)
-                    .lineLimit(1)
+                    .lineLimit(sessionKey == nil ? 2 : 1)
                     .minimumScaleFactor(0.6)
                     .truncationMode(.tail)
                     .multilineTextAlignment(.center)
+
+                if let actionTitle, let action {
+                    Button(actionTitle, action: action)
+                        .font(.clawline(.uiLabel).weight(.semibold))
+                        .buttonStyle(.plain)
+                        .foregroundStyle(toastTextColor)
+                }
             }
 
-            Text(sessionKey)
-                .font(.clawline(.secondaryLabel))
-                .foregroundStyle(toastTextColor.opacity(0.7))
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-                .truncationMode(.middle)
-                .multilineTextAlignment(.center)
+            if let sessionKey {
+                Text(sessionKey)
+                    .font(.clawline(.secondaryLabel))
+                    .foregroundStyle(toastTextColor.opacity(0.7))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                    .truncationMode(.middle)
+                    .multilineTextAlignment(.center)
+            }
         }
         .padding(.horizontal, 32)
         .padding(.vertical, 20)
@@ -67,6 +97,37 @@ struct StreamToast: View {
         .glassEffect(.regular.interactive(), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
 #endif
         .shadow(color: .black.opacity(0.15), radius: 20, x: 0, y: 10)
+        .onTapGesture {
+            dismiss?()
+        }
+        .gesture(
+            DragGesture(minimumDistance: 8)
+                .onEnded { value in
+                    if value.translation.height > 10 {
+                        dismiss?()
+                    }
+                }
+        )
+        .accessibilityLabel(accessibilityLabel)
+        .accessibilityHint(accessibilityHint)
+        .accessibilityAddTraits(.isStaticText)
+        .onAppear {
+            if announcesOnAppear {
+                UIAccessibility.post(notification: .announcement, argument: displayName)
+            }
+        }
+    }
+
+    private var accessibilityHint: String {
+        if actionTitle != nil {
+            return "Tap Undo to restore or tap elsewhere to dismiss."
+        }
+        return dismiss == nil ? "" : "Dismiss with tap or swipe down."
+    }
+
+    private var accessibilityLabel: String {
+        guard let sessionKey else { return displayName }
+        return "\(displayName), \(sessionKey)"
     }
 }
 

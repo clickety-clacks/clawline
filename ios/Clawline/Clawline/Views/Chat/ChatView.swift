@@ -1391,8 +1391,6 @@ struct ChatView: View {
                 .mask(messageViewportFadeMask(topInset: statusBarTopInset, horizontalGutter: metrics.containerPadding))
 
             topChatSoftFade(topInset: geometry.safeAreaInsets.top)
-
-            toastBannerView(geometry: geometry, toastManager: toastManager)
         })
 
         let notificationLayer: AnyView = AnyView(notificationBaseLayer
@@ -1455,8 +1453,9 @@ struct ChatView: View {
         let rootLayer: AnyView = AnyView(ZStack(alignment: .top) {
             notificationLayer
 
-            streamToastView(
-                inputBarTopFromScreenBottom: inputBarTopFromScreenBottom
+            bottomToastView(
+                inputBarTopFromScreenBottom: inputBarTopFromScreenBottom,
+                toastManager: toastManager
             )
             .zIndex(30)
             mentionPickerOverlay(
@@ -2145,22 +2144,7 @@ struct ChatView: View {
     }
 
     @ViewBuilder
-    private func streamToastView(inputBarTopFromScreenBottom: CGFloat) -> some View {
-        if streamToastManager.isVisible {
-            StreamToast(
-                displayName: streamToastManager.displayName,
-                sessionKey: streamToastManager.sessionKey,
-                isBusy: streamToastManager.isBusy
-            )
-                .padding(.bottom, inputBarTopFromScreenBottom + 50)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
-                .ignoresSafeArea(.container, edges: .bottom)
-                .transition(.opacity.combined(with: .scale(scale: 0.9)))
-        }
-    }
-
-    @ViewBuilder
-    private func toastBannerView(geometry: GeometryProxy,
+    private func bottomToastView(inputBarTopFromScreenBottom: CGFloat,
                                  toastManager: ToastManager) -> some View {
         if let toast = toastManager.toast {
             ToastBanner(
@@ -2172,9 +2156,21 @@ struct ChatView: View {
             ) {
                 toastManager.dismiss()
             }
-            .padding(.top, geometry.safeAreaInsets.top + 12)
             .padding(.horizontal, 24)
-            .transition(.move(edge: .top).combined(with: .opacity))
+            .padding(.bottom, inputBarTopFromScreenBottom + 50)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+            .ignoresSafeArea(.container, edges: .bottom)
+            .transition(.opacity.combined(with: .scale(scale: 0.9)))
+        } else if streamToastManager.isVisible {
+            StreamToast(
+                displayName: streamToastManager.displayName,
+                sessionKey: streamToastManager.sessionKey,
+                isBusy: streamToastManager.isBusy
+            )
+                .padding(.bottom, inputBarTopFromScreenBottom + 50)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
+                .ignoresSafeArea(.container, edges: .bottom)
+                .transition(.opacity.combined(with: .scale(scale: 0.9)))
         }
     }
 
@@ -3524,13 +3520,13 @@ struct ChatView: View {
             .gesture(
                 DragGesture(minimumDistance: 8)
                     .onEnded { value in
-                        if value.translation.height < -10 {
+                        if value.translation.height > 10 {
                             dismiss()
                         }
                     }
             )
             .accessibilityLabel(message)
-            .accessibilityHint(actionTitle == nil ? "Dismiss with tap or swipe up." : "Tap Undo to restore or tap elsewhere to dismiss.")
+            .accessibilityHint(actionTitle == nil ? "Dismiss with tap or swipe down." : "Tap Undo to restore or tap elsewhere to dismiss.")
             .accessibilityAddTraits(.isStaticText)
             .onAppear {
                 UIAccessibility.post(notification: .announcement, argument: message)

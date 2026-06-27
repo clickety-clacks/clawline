@@ -2056,7 +2056,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
     }
 
     private func updateDynamicContentHeightPreference(for sizeClass: MessageSizeClass) {
-        wrapperPrefersContentHeightConstraint?.priority = (sizeClass == .long) ? .defaultLow : .required
+        wrapperPrefersContentHeightConstraint?.priority = (sizeClass == .long) ? .defaultLow : UILayoutPriority(999)
     }
 
     private var currentIdentityKey: String? {

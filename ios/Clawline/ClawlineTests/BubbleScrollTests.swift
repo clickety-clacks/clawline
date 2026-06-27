@@ -717,21 +717,61 @@ struct BubbleScrollTests {
             Issue.record("Expected rendered text view inside production bubble")
             return
         }
-        textView.layoutManager.ensureLayout(for: textView.textContainer)
-        let usedRect = textView.layoutManager.usedRect(for: textView.textContainer)
-        let glyphFrame = CGRect(
-            x: usedRect.minX + textView.textContainerInset.left,
-            y: usedRect.minY + textView.textContainerInset.top,
-            width: usedRect.width,
-            height: usedRect.height
-        )
-        let textFrame = textView.convert(glyphFrame, to: bubble)
+        let textFrame = renderedGlyphFrame(for: textView, in: bubble)
         let topChrome = textFrame.minY
         let bottomChrome = bubble.bounds.maxY - textFrame.maxY
 
         #expect(topChrome >= metrics.bubblePaddingTop)
         #expect(bottomChrome >= metrics.bubblePaddingBottom)
+        #expect(bottomChrome <= metrics.bubblePaddingBottom + 4)
         #expect(bottomChrome < topChrome)
+    }
+
+    @Test("T1390: short user BubbleSizingV2 bubble ignores oversized viewport height")
+    @MainActor
+    func shortUserBubbleSizingV2SizesToContentHeight() {
+        let metrics = ChatFlowTheme.Metrics(isCompact: false)
+        let message = Message(
+            id: "t1390-short-user",
+            role: .user,
+            content: "OK",
+            timestamp: Date(),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: "agent:main:clawline:flynn:s_111df227"
+        )
+        let measured = measuredUserBubble(
+            message: message,
+            metrics: metrics,
+            injectedViewportHeight: 260
+        )
+
+        #expect(measured.height < 80)
+    }
+
+    @Test("T1390: multi-line user BubbleSizingV2 bubble still grows to text")
+    @MainActor
+    func multilineUserBubbleSizingV2SizesToContentHeight() {
+        let metrics = ChatFlowTheme.Metrics(isCompact: false)
+        let message = Message(
+            id: "t1390-multiline-user",
+            role: .user,
+            content: "First line for Ansible.\nSecond line stays visible.\nThird line keeps natural height.",
+            timestamp: Date(),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: "agent:main:clawline:flynn:s_111df227"
+        )
+        let measured = measuredUserBubble(
+            message: message,
+            metrics: metrics,
+            injectedViewportHeight: 260
+        )
+
+        #expect(measured.height > 80)
+        #expect(measured.height < 150)
     }
 
     @Test("BubbleSizingV2 live short-bubble remeasure keeps plan min width below legacy floor")
@@ -1673,6 +1713,97 @@ struct BubbleScrollTests {
             result.append(contentsOf: textViews(in: sub))
         }
         return result
+    }
+
+    private func renderedGlyphFrame(for textView: UITextView, in targetView: UIView) -> CGRect {
+        textView.layoutManager.ensureLayout(for: textView.textContainer)
+        let usedRect = textView.layoutManager.usedRect(for: textView.textContainer)
+        let glyphFrame = CGRect(
+            x: usedRect.minX + textView.textContainerInset.left,
+            y: usedRect.minY + textView.textContainerInset.top,
+            width: usedRect.width,
+            height: usedRect.height
+        )
+        return textView.convert(glyphFrame, to: targetView)
+    }
+
+    @MainActor
+    private func measuredUserBubble(
+        message: Message,
+        metrics: ChatFlowTheme.Metrics,
+        injectedViewportHeight: CGFloat
+    ) -> CGSize {
+        let presentation = buildPresentation(message, metrics: metrics, enableLinkPreviews: false)
+        let sizeClass = MessageFlowRules.sizeClass(for: presentation)
+        let env = BubbleSizingV2.Environment(
+            containerWidth: 320,
+            containerHeight: 640,
+            singleLinkContainerHeight: 640,
+            topInset: 0,
+            bottomInset: 0,
+            truncationBottomInset: 0,
+            isVisionOS: false,
+            metricsFingerprint: BubbleSizingV2.metricsFingerprint(metrics: metrics, traitCollection: UITraitCollection())
+        )
+        let heightPolicy = BubbleSizingV2.BubbleHeightPolicy.resolve(
+            metrics: metrics,
+            env: env,
+            isSingleLinkPreview: false,
+            prefersScreenAwareHeightCap: false,
+            allowsOuterScroll: false
+        )
+        let plan = BubbleSizingV2.Plan(
+            messageId: message.id,
+            presentationFingerprint: 1,
+            sizeClass: sizeClass,
+            isSingleLinkPreview: false,
+            isWide: false,
+            maxWidth: 320,
+            minWidth: 40,
+            heightPolicy: heightPolicy,
+            allowsOuterScroll: false,
+            linkPreviewURL: nil
+        )
+        let layoutState = BubbleSizingV2.LayoutState(
+            plan: plan,
+            measurement: BubbleSizingV2.Measurement(
+                measuredCellSize: CGSize(width: 320, height: injectedViewportHeight),
+                measuredBubbleWidth: 320,
+                contentHeight: 24,
+                chromeHeight: 20,
+                outerScrollEnabled: false,
+                outerScrollViewportHeight: injectedViewportHeight,
+                isFinal: true
+            ),
+            linkPreviewCacheKey: nil,
+            linkPreviewEstimatedHeight: nil,
+            linkPreviewMinHeight: 40,
+            linkPreviewMaxHeight: heightPolicy.heightCap
+        )
+        let bubble = MessageBubbleUIKitView(frame: CGRect(x: 0, y: 0, width: 320, height: 1))
+        bubble.configure(
+            message: message,
+            presentation: presentation,
+            sizeClass: sizeClass,
+            metrics: metrics,
+            maxWidth: 320,
+            bubbleHeightPolicy: heightPolicy,
+            bubbleSizingV2: layoutState,
+            showsHeader: false,
+            paddingScale: 1,
+            minWidthOverride: nil,
+            maxWidthOverride: nil,
+            useContinuousCorners: true,
+            isDark: false,
+            onRequestExpand: nil,
+            onRequestLayout: nil,
+            onInteractiveCallback: nil
+        )
+        return bubble.systemLayoutSizeFitting(
+            CGSize(width: 320, height: UIView.layoutFittingCompressedSize.height),
+            withHorizontalFittingPriority: .required,
+            verticalFittingPriority: .fittingSizeLevel
+        )
     }
 
     private func isBold(_ substring: String, in attributed: NSAttributedString) -> Bool {

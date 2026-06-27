@@ -393,6 +393,57 @@ private final class RemoteMessageImageView: MessageImageThumbnailView {
     }
 }
 
+private final class BubbleTextView: UITextView {
+    override init(frame: CGRect, textContainer: NSTextContainer?) {
+        super.init(frame: frame, textContainer: textContainer)
+        setContentHuggingPriority(.required, for: .vertical)
+        setContentCompressionResistancePriority(.required, for: .vertical)
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        setContentHuggingPriority(.required, for: .vertical)
+        setContentCompressionResistancePriority(.required, for: .vertical)
+    }
+
+    override var intrinsicContentSize: CGSize {
+        let fittingWidth = bounds.width > 1 ? bounds.width : textContainer.size.width
+        guard fittingWidth > 1 else {
+            return super.intrinsicContentSize
+        }
+        return tightFittingSize(for: fittingWidth)
+    }
+
+    override var attributedText: NSAttributedString! {
+        didSet { invalidateIntrinsicContentSize() }
+    }
+
+    override var text: String! {
+        didSet { invalidateIntrinsicContentSize() }
+    }
+
+    override func sizeThatFits(_ size: CGSize) -> CGSize {
+        guard size.width > 1 else {
+            return super.sizeThatFits(size)
+        }
+        return tightFittingSize(for: size.width)
+    }
+
+    private func tightFittingSize(for width: CGFloat) -> CGSize {
+        let targetSize = CGSize(
+            width: max(1, width - textContainerInset.left - textContainerInset.right),
+            height: .greatestFiniteMagnitude
+        )
+        textContainer.size = targetSize
+        layoutManager.ensureLayout(for: textContainer)
+        let usedRect = layoutManager.usedRect(for: textContainer)
+        return CGSize(
+            width: ceil(usedRect.width + textContainerInset.left + textContainerInset.right),
+            height: ceil(usedRect.height + textContainerInset.top + textContainerInset.bottom)
+        )
+    }
+}
+
 final class MessageBubbleUIKitContainerView: UIView {
     private let bubbleView: MessageBubbleUIKitView
     private let badgeView = MessageFailureBadgeView()
@@ -564,10 +615,10 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
     private let replyIndicatorChipView = UIView()
     private let replyIndicatorStack = UIStackView()
     private let replyIndicatorIconView = UIImageView()
-    private let replyIndicatorTextView = UITextView()
+    private let replyIndicatorTextView = BubbleTextView()
     private var replyIndicatorTextHeightConstraint: NSLayoutConstraint?
     private let headerMenuButton = UIButton(type: .custom)
-    private let bodyLabel = UITextView()
+    private let bodyLabel = BubbleTextView()
     private let bodyTextContainer = UIView()
     private let fadeView = TruncationFadeView()
     private static let bubbleScrollFadeHeight: CGFloat = 25
@@ -1726,6 +1777,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
             fixedWidthConstraint = makeFixedBubbleWidthConstraint(effectiveMaxWidth)
             fixedWidthConstraint?.isActive = true
         }
+        updateDynamicContentHeightPreference(for: sizeClass)
 
         // Every bubble uses an outer scroll container. Bubble height is capped; if content overflows,
         // scrolling is enabled (inert when content fits).
@@ -1858,6 +1910,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
             fixedWidthConstraint = makeFixedBubbleWidthConstraint(effectiveMaxWidth)
             fixedWidthConstraint?.isActive = true
         }
+        updateDynamicContentHeightPreference(for: sizeClass)
 
         minWidthConstraint.constant = effectiveMinWidth
         maxWidthConstraint.constant = effectiveMaxWidth
@@ -1995,7 +2048,15 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
     }
 
     private func applyBubbleSizingV2(_ state: BubbleSizingV2.LayoutState) {
+        guard state.plan.sizeClass == .long else {
+            dynamicContentHeightConstraint?.constant = 2000
+            return
+        }
         dynamicContentHeightConstraint?.constant = max(44, state.measurement.outerScrollViewportHeight)
+    }
+
+    private func updateDynamicContentHeightPreference(for sizeClass: MessageSizeClass) {
+        wrapperPrefersContentHeightConstraint?.priority = (sizeClass == .long) ? .defaultLow : .required
     }
 
     private var currentIdentityKey: String? {
@@ -2846,7 +2907,7 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         container.translatesAutoresizingMaskIntoConstraints = false
         container.backgroundColor = .clear
 
-        let textView = UITextView()
+        let textView = BubbleTextView()
         textView.translatesAutoresizingMaskIntoConstraints = false
         UnifiedMarkdownRenderer.configureTextView(
             textView,

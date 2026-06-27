@@ -17,18 +17,20 @@ Branch/worktree: `clawline-t1460-siri-schema-proof` at `/Users/mike/src/worktree
 - `xcrun --sdk iphonesimulator --show-sdk-version`: 26.4.
 - XcodeBuildMCP build/run gate observed in-session: Clawline app built and launched on iPhone 17 Pro iOS Simulator 26.4.1. No durable result bundle/log path was produced in this worktree.
 - Focused source proof observed in-session: `ClawlineTests/ClawlineSiriSessionResolverTests` passed 4/4 on iPhone 17 Pro iOS Simulator 26.4.1. No durable result bundle/log path was produced in this worktree; later rerun was blocked by CoreSimulatorService access from the review sandbox.
+- Serenity topology correction: `/Users/mike/shared-workspace/environment/environments.md` and `topology/network-topology.yaml` identify Serenity as the Xcode 27 host for Cyberbrain deploys/proofs. `ssh serenity` works as `mike`.
+- Serenity active default Xcode is 26.6, but `/Applications/Xcode-beta.app` is Xcode 27.0 build 27A5209h with iOS SDK 27.0, iOS Simulator SDK 27.0, visionOS SDK 27.0, and visionOS Simulator SDK 27.0.
 
-This environment cannot compile or run iOS 27 Messages App Schema APIs. T1460 cannot honestly prove A1 or A3 on this machine; the clean result is a device/SDK blocker, not a schema feasibility pass.
+Eezo cannot compile or run iOS 27 Messages App Schema APIs. Serenity can attempt the Xcode 27 compile leg by setting `DEVELOPER_DIR=/Applications/Xcode-beta.app/Contents/Developer`.
 
 ## Acceptance Matrix
 
 | ID | Result | Evidence |
 | --- | --- | --- |
-| A1 | Blocked/cleanly rejected in current environment | Xcode 26.4.1 and iOS SDK 26.4 are installed; no iOS 27 `AppSchema.MessagesIntent.sendMessage` surface is available to compile. |
+| A1 | Cleanly rejected for the finite conversation-first proof slice | Serenity/Xcode 27 exposes the Messages schema symbols, but app metadata export rejects a small `@AppIntent(schema: .messages.sendMessage)` proof using a Clawline conversation destination. Xcode requires destination to be `MessagePerson`/Person, requires full send-message parameters (`attachments`, `links`, `locations`, `audioMessage`, `subject`, `scheduledDate`), and requires the result to return `[Schema<MessageEntity>]`. A follow-up `MessagePerson` probe still failed metadata export because `messages.messagePerson` requires `person`, `messages.message` requires the full message property set, attachments/links/locations must be nonoptional, and file parameters require UTType constraints. Building that honestly is full Messages-domain implementation, outside T1460. Build logs: Serenity `~/Library/Developer/XcodeBuildMCP/workspaces/clawline-t1460-proof-5b3818aadc2e/logs/build_sim_2026-06-27T06-41-08-978Z_pid85957_b832f7ad.log` and `build_sim_2026-06-27T06-43-28-134Z_pid86508_a8607bd0.log`. |
 | A2 | Source proof added for fail-closed session resolution | `ClawlineSiriSessionResolver` resolves only exact session keys or one unambiguous display name; duplicate display names and unknown/empty destinations fail closed. Tests cover exact key, one display-name match, duplicates, and unknown input. |
-| A3 | Blocked in current environment | No iOS 27 SDK/device proof surface is available here; Siri phrase/device behavior remains untested. |
+| A3 | Blocked by compile/product-scope boundary | Serenity has Xcode 27, but no Siri phrase/device test can be product-faithfully run until Clawline has a compileable Messages-domain implementation. The finite proof slice stopped before full Messages-domain implementation. |
 | A4 | Static product-path proof only | Existing normal path is `ProviderChatService.send(id:content:attachments:sessionKey:references:)`, which encodes `ClientMessagePayload` with `sessionKey` and waits for normal ack events. T1414/T1454 require future schema intent to call this path with an explicit resolved session key. This slice does not add a Siri-only provider endpoint. |
-| A5 | Bounded by existing fallback timeouts, not measured for iOS 27 schema | Existing Siri sender uses 6s connect, 3s send, 3s ack timeouts. Actual App Schema runtime budget cannot be measured without iOS 27 Siri/App Intents runtime. |
+| A5 | Bounded by existing fallback timeouts, not measured for iOS 27 schema | Existing Siri sender uses 6s connect, 3s send, 3s ack timeouts. The proof-slice schema intent deliberately does not send; actual App Schema runtime budget still requires a Siri/App Intents runtime proof after full-send authorization. |
 | A6 | Source proof added for wrong-chat risk | Resolver returns `.ambiguous` instead of selecting among duplicate display names and `.notFound` for empty/unknown destinations. No fallback to Main is added. |
 | A7 | Preserved | Existing iOS 17 App Shortcut remains unchanged and is not promoted to the primary architecture. |
 
@@ -47,7 +49,7 @@ Owner review result: implementation-owned GPT-5.5 review cycle returned no block
 
 T1460 remains in Code Review because no protected transition proof rows were created for `Code Review -> Code Review Done`.
 
-T1460 remains blocked from full iOS 27 proof by missing Xcode 27/iOS 27 Siri runtime.
+T1460 is no longer blocked by local eezo Xcode. Serenity/Xcode 27 proved the local spec assumption was too narrow: the send-message schema cannot be compiled as a small conversation-first send proof. Proceeding requires a product decision to model Clawline sessions as `messages.messagePerson`/Person destinations and implement the required Messages message/entity/parameter surface honestly, or to reject the Messages App Schema path for Clawline.
 
 ## Engram
 

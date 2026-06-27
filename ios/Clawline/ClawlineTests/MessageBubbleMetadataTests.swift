@@ -71,6 +71,67 @@ struct MessageBubbleMetadataTests {
         #expect(MessageBubbleUIKitView.timestampTextAlpha(isDark: true) > 0.4)
     }
 
+    @Test("T1465: message header stays compact inside an overallocated bubble")
+    func messageHeaderStaysCompactInsideOverallocatedBubble() {
+        let message = Message(
+            id: "t1465-header-expansion",
+            role: .assistant,
+            content: "Cron job \"led-ticker-art\" failed:\nshow << -> run python3 # failed",
+            timestamp: Date(timeIntervalSince1970: 1_772_496_480),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: "server:personal",
+            sender: "CLU"
+        )
+        let metrics = ChatFlowTheme.Metrics(isCompact: false)
+        var streamingState = StreamingTableParseState()
+        let presentation = MessagePresentationBuilder.build(
+            from: message,
+            metrics: metrics,
+            streamingState: &streamingState
+        )
+        let bubble = MessageBubbleUIKitView(frame: CGRect(x: 0, y: 0, width: 560, height: 1))
+
+        bubble.configure(
+            message: message,
+            presentation: presentation,
+            sizeClass: .short,
+            metrics: metrics,
+            maxWidth: 560,
+            truncationHeightOverride: nil,
+            bubbleSizingV2: nil,
+            showsHeader: true,
+            paddingScale: 1,
+            minWidthOverride: 120,
+            maxWidthOverride: 560,
+            useContinuousCorners: true,
+            isDark: false,
+            onRequestExpand: nil,
+            onRequestLayout: nil,
+            onInteractiveCallback: nil
+        )
+
+        bubble.frame = CGRect(x: 0, y: 0, width: 560, height: 520)
+        bubble.layoutIfNeeded()
+
+        let avatar = findSubview(in: bubble) { $0 is AvatarCircleView }
+        let body = findSubview(in: bubble) { view in
+            guard let textView = view as? UITextView else { return false }
+            return textView.text.contains("Cron job")
+        }
+        #expect(avatar != nil)
+        #expect(body != nil)
+
+        if let avatar, let body {
+            let avatarFrame = avatar.convert(avatar.bounds, to: bubble)
+            let bodyFrame = body.convert(body.bounds, to: bubble)
+
+            #expect(avatarFrame.minY < 80)
+            #expect(bodyFrame.minY - avatarFrame.maxY < 40)
+        }
+    }
+
     @Test("T320: bubble title bar menu button is wired on iOS/iPadOS")
     func titleBarMenuButtonIsWiredForTitleTap() {
         let message = Message(

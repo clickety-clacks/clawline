@@ -825,6 +825,10 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         headerStack.addArrangedSubview(senderTimestampSpacer)
         headerStack.addArrangedSubview(timestampLabel)
         senderLabel.firstBaselineAnchor.constraint(equalTo: timestampLabel.firstBaselineAnchor).isActive = true
+        let compactHeaderHeight = headerStack.heightAnchor.constraint(equalTo: avatarView.heightAnchor)
+        compactHeaderHeight.priority = UILayoutPriority(999)
+        compactHeaderHeight.identifier = "MessageBubbleUIKitView.compactHeaderHeight"
+        compactHeaderHeight.isActive = true
 
         replyIndicatorContainer.translatesAutoresizingMaskIntoConstraints = false
         replyIndicatorContainer.backgroundColor = .clear

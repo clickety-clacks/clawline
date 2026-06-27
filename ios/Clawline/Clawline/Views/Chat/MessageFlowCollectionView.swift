@@ -5389,6 +5389,32 @@ final class MessageFlowCollectionViewController: UIViewController, UICollectionV
         }
     }
 
+    func scrollByGestureDelta(_ deltaY: CGFloat) {
+        guard abs(deltaY) > 0.5 else { return }
+        collectionView.layoutIfNeeded()
+        let contentInset = collectionView.contentInset
+        let minY = -contentInset.top
+        let maxY = max(minY, collectionView.contentSize.height - collectionView.bounds.height + contentInset.bottom)
+        guard maxY > minY else { return }
+
+        let targetY = collectionView.contentOffset.y - deltaY
+        let clampedY = max(minY, min(targetY, maxY))
+        guard abs(collectionView.contentOffset.y - clampedY) > 0.5 else { return }
+
+        logScrollCall(
+            "scrollByGestureDelta",
+            sessionKey: callbackSessionKey(),
+            currentY: collectionView.contentOffset.y,
+            targetY: clampedY,
+            animated: false,
+            reason: "deltaY=\(formatScrollRestore(deltaY))"
+        )
+        collectionView.setContentOffset(CGPoint(x: collectionView.contentOffset.x, y: clampedY), animated: false)
+        if let sessionKey = callbackSessionKey() {
+            refreshLastKnownScrollSnapshot(sessionKey: sessionKey)
+        }
+    }
+
     @discardableResult
     func scrollVisibleBubbleContents(direction: ChatScrollPageDirection, animated: Bool) -> Int {
         collectionView.layoutIfNeeded()

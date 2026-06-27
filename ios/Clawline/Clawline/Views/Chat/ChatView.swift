@@ -1430,6 +1430,9 @@ struct ChatView: View {
                             withAnimation(CrossChatNotificationOverlay.revealAnimation) {
                                 isCrossChatNotificationStackDocked = false
                             }
+                        },
+                        onVerticalDragDelta: { deltaY in
+                            scrollChatSurfaceFromDockDrag(deltaY: deltaY)
                         }
                     )
                     .frame(width: CrossChatNotificationGeometry.collapsedHitTargetWidth)
@@ -2017,6 +2020,9 @@ struct ChatView: View {
                     keyboardOwnershipStore: keyboardOwnershipStore,
                     disabledPlainNumberShortcutSlots: disabledPlainNumberShortcutSlots,
                     showsDockedHitTarget: false,
+                    onVerticalDockDragDelta: { deltaY in
+                        scrollChatSurfaceFromDockDrag(deltaY: deltaY)
+                    },
                     onNavigateToSource: { sourceChatId in
                         navigateToCrossChatNotificationSource(sourceChatId)
                     }
@@ -2989,6 +2995,10 @@ struct ChatView: View {
     private func scrollChatSurface(_ direction: ChatScrollPageDirection) {
         guard let sessionKey = keyboardNavigationSessionKey else { return }
         layoutCoordinator.scrollByPage(sessionKey: sessionKey, direction: direction, animated: true)
+    }
+
+    private func scrollChatSurfaceFromDockDrag(deltaY: CGFloat) {
+        layoutCoordinator.scrollActiveByGestureDelta(deltaY: deltaY)
     }
 
     private func toggleShowOnlyUserMessagesMode() {
@@ -6544,6 +6554,7 @@ private struct CrossChatNotificationOverlay: View {
     var keyboardOwnershipStore = KeyboardOwnershipStore()
     let disabledPlainNumberShortcutSlots: Set<Int>
     let showsDockedHitTarget: Bool
+    let onVerticalDockDragDelta: (CGFloat) -> Void
     let onNavigateToSource: (String) -> Void
     @State private var showShortcutLabels = CrossChatShortcutLabelAvailability.current
     @State private var actionMenuSelection: CrossChatNotificationActionMenuItem = .goToChat
@@ -7069,6 +7080,9 @@ private struct CrossChatNotificationOverlay: View {
             },
             onLeftSwipe: {
                 restoreDock()
+            },
+            onVerticalDragDelta: { deltaY in
+                onVerticalDockDragDelta(deltaY)
             }
         )
             .frame(width: Self.collapsedPeekWidth)
@@ -9668,53 +9682,107 @@ private struct NotificationPeekingHitTargetView: UIViewRepresentable {
 private struct NotificationDockedHitTargetView: UIViewRepresentable {
     let onTap: () -> Void
     let onLeftSwipe: () -> Void
+    let onVerticalDragDelta: (CGFloat) -> Void
 
-    func makeUIView(context: Context) -> UIView {
-        let view = UIView(frame: .zero)
+    func makeUIView(context: Context) -> DockedHitTargetControl {
+        let view = DockedHitTargetControl(frame: .zero)
         view.backgroundColor = .clear
         view.isUserInteractionEnabled = true
         view.isAccessibilityElement = true
         view.accessibilityLabel = "Show notifications"
         view.accessibilityIdentifier = "cross_chat_notification_docked_hit_target"
-
-        let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handleTap))
-        view.addGestureRecognizer(tap)
-
-        let pan = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.handlePan(_:)))
-        view.addGestureRecognizer(pan)
+        view.onTap = onTap
+        view.onLeftSwipe = onLeftSwipe
+        view.onVerticalDragDelta = onVerticalDragDelta
 
         return view
     }
 
-    func updateUIView(_ uiView: UIView, context: Context) {
-        context.coordinator.onTap = onTap
-        context.coordinator.onLeftSwipe = onLeftSwipe
+    func updateUIView(_ uiView: DockedHitTargetControl, context: Context) {
+        uiView.onTap = onTap
+        uiView.onLeftSwipe = onLeftSwipe
+        uiView.onVerticalDragDelta = onVerticalDragDelta
     }
 
-    func makeCoordinator() -> Coordinator {
-        Coordinator(onTap: onTap, onLeftSwipe: onLeftSwipe)
-    }
-
-    final class Coordinator: NSObject {
+    final class DockedHitTargetControl: UIView {
         var onTap: () -> Void
         var onLeftSwipe: () -> Void
+        var onVerticalDragDelta: (CGFloat) -> Void
+        private var startPoint: CGPoint?
+        private var lastPoint: CGPoint?
+        private var lockedAxis: CrossChatNotificationGestureAxisLock?
 
-        init(onTap: @escaping () -> Void, onLeftSwipe: @escaping () -> Void) {
-            self.onTap = onTap
-            self.onLeftSwipe = onLeftSwipe
+        override init(frame: CGRect) {
+            self.onTap = {}
+            self.onLeftSwipe = {}
+            self.onVerticalDragDelta = { _ in }
+            super.init(frame: frame)
+            isMultipleTouchEnabled = false
         }
 
-        @objc func handleTap() {
-            onTap()
+        required init?(coder: NSCoder) {
+            self.onTap = {}
+            self.onLeftSwipe = {}
+            self.onVerticalDragDelta = { _ in }
+            super.init(coder: coder)
+            isMultipleTouchEnabled = false
         }
 
-        @objc func handlePan(_ recognizer: UIPanGestureRecognizer) {
-            guard recognizer.state == .ended else { return }
-            let translation = recognizer.translation(in: recognizer.view)
-            guard translation.x < 0,
-                  abs(translation.x) > abs(translation.y),
-                  abs(translation.x) >= CrossChatNotificationGeometry.swipeCompletionThreshold else { return }
+        override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+            super.touchesBegan(touches, with: event)
+            guard let touch = touches.first else { return }
+            let point = touch.location(in: self)
+            startPoint = point
+            lastPoint = point
+            lockedAxis = nil
+        }
+
+        override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
+            super.touchesMoved(touches, with: event)
+            guard let touch = touches.first,
+                  let startPoint,
+                  let lastPoint else { return }
+            let point = touch.location(in: self)
+            let translation = CGSize(width: point.x - startPoint.x, height: point.y - startPoint.y)
+            if lockedAxis == nil {
+                let ownership = CrossChatNotificationGestureAxisLock.ownership(for: translation)
+                if ownership != .none {
+                    lockedAxis = ownership
+                }
+            }
+            if lockedAxis == .verticalScroll {
+                onVerticalDragDelta(point.y - lastPoint.y)
+            }
+            self.lastPoint = point
+        }
+
+        override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+            super.touchesEnded(touches, with: event)
+            defer { resetTouchState() }
+            guard let touch = touches.first,
+                  let startPoint else { return }
+            let point = touch.location(in: self)
+            let translation = CGSize(width: point.x - startPoint.x, height: point.y - startPoint.y)
+            if abs(translation.width) < CrossChatNotificationGestureAxisLock.minimumDistance
+                && abs(translation.height) < CrossChatNotificationGestureAxisLock.minimumDistance {
+                onTap()
+                return
+            }
+            guard translation.width < 0,
+                  abs(translation.width) > abs(translation.height),
+                  abs(translation.width) >= CrossChatNotificationGeometry.swipeCompletionThreshold else { return }
             onLeftSwipe()
+        }
+
+        override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+            super.touchesCancelled(touches, with: event)
+            resetTouchState()
+        }
+
+        private func resetTouchState() {
+            startPoint = nil
+            lastPoint = nil
+            lockedAxis = nil
         }
     }
 }

@@ -1995,7 +1995,16 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
     }
 
     private func applyBubbleSizingV2(_ state: BubbleSizingV2.LayoutState) {
-        dynamicContentHeightConstraint?.constant = max(44, state.measurement.outerScrollViewportHeight)
+        let viewportHeight = if state.measurement.contentHeight > 0 {
+            BubbleSizingV2.finalOuterScrollViewportHeight(
+                plan: state.plan,
+                measuredContentHeight: state.measurement.contentHeight,
+                provisionalViewportHeight: state.measurement.outerScrollViewportHeight
+            )
+        } else {
+            state.measurement.outerScrollViewportHeight
+        }
+        dynamicContentHeightConstraint?.constant = max(44, viewportHeight)
     }
 
     private var currentIdentityKey: String? {

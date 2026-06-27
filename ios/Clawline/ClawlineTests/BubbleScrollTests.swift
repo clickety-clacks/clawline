@@ -199,6 +199,122 @@ struct BubbleScrollTests {
         #expect(abs(measured.width - preferred) < 0.5)
     }
 
+    @Test("T1465: BubbleSizingV2 dynamic-content reuse ignores stale viewport height")
+    @MainActor
+    func bubbleSizingV2DynamicContentReuseIgnoresStaleViewportHeight() {
+        let metrics = ChatFlowTheme.Metrics(isCompact: true)
+        let message = Message(
+            id: "t1465-stale-short-user-bubble",
+            role: .user,
+            content: "That was the ticket history. Not a single mention of what shaped the development of that ticket.",
+            timestamp: Date(),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: "agent:main:clawline:flynn:s_111df227"
+        )
+        let presentation = buildPresentation(message, metrics: metrics, enableLinkPreviews: false)
+        let sizeClass = MessageFlowRules.sizeClass(for: presentation)
+        let maxWidth = CGFloat(360)
+        let env = BubbleSizingV2.Environment(
+            containerWidth: maxWidth,
+            containerHeight: 721,
+            singleLinkContainerHeight: 721,
+            topInset: 0,
+            bottomInset: 260,
+            truncationBottomInset: 260,
+            isVisionOS: false,
+            metricsFingerprint: BubbleSizingV2.metricsFingerprint(metrics: metrics, traitCollection: UITraitCollection())
+        )
+        let heightPolicy = BubbleSizingV2.BubbleHeightPolicy.resolve(
+            metrics: metrics,
+            env: env,
+            isSingleLinkPreview: false,
+            prefersScreenAwareHeightCap: false,
+            allowsOuterScroll: false
+        )
+        let plan = BubbleSizingV2.Plan(
+            messageId: message.id,
+            presentationFingerprint: 1465,
+            sizeClass: sizeClass,
+            isSingleLinkPreview: false,
+            isWide: false,
+            maxWidth: maxWidth,
+            minWidth: 120,
+            heightPolicy: heightPolicy,
+            allowsOuterScroll: false,
+            linkPreviewURL: nil
+        )
+        let contentHeight = CGFloat(58)
+        let staleViewportHeight = CGFloat(560)
+        func layoutState(viewportHeight: CGFloat) -> BubbleSizingV2.LayoutState {
+            BubbleSizingV2.LayoutState(
+                plan: plan,
+                measurement: BubbleSizingV2.Measurement(
+                    measuredCellSize: CGSize(width: maxWidth, height: contentHeight + metrics.bubblePaddingTop + metrics.bubblePaddingBottom),
+                    measuredBubbleWidth: maxWidth,
+                    contentHeight: contentHeight,
+                    chromeHeight: metrics.bubblePaddingTop + metrics.bubblePaddingBottom,
+                    outerScrollEnabled: false,
+                    outerScrollViewportHeight: viewportHeight,
+                    isFinal: false
+                ),
+                linkPreviewCacheKey: nil,
+                linkPreviewEstimatedHeight: nil,
+                linkPreviewMinHeight: 40,
+                linkPreviewMaxHeight: heightPolicy.heightCap
+            )
+        }
+        let bubble = MessageBubbleUIKitView(frame: CGRect(x: 0, y: 0, width: maxWidth, height: 1))
+
+        bubble.configure(
+            message: message,
+            presentation: presentation,
+            sizeClass: sizeClass,
+            metrics: metrics,
+            maxWidth: maxWidth,
+            bubbleHeightPolicy: heightPolicy,
+            bubbleSizingV2: layoutState(viewportHeight: contentHeight),
+            showsHeader: true,
+            paddingScale: 1,
+            minWidthOverride: nil,
+            maxWidthOverride: nil,
+            useContinuousCorners: true,
+            isDark: false,
+            onRequestExpand: nil,
+            onRequestLayout: nil,
+            onInteractiveCallback: nil
+        )
+        bubble.configure(
+            message: message,
+            presentation: presentation,
+            sizeClass: sizeClass,
+            metrics: metrics,
+            maxWidth: maxWidth,
+            bubbleHeightPolicy: heightPolicy,
+            bubbleSizingV2: layoutState(viewportHeight: staleViewportHeight),
+            showsHeader: true,
+            paddingScale: 1,
+            minWidthOverride: nil,
+            maxWidthOverride: nil,
+            useContinuousCorners: true,
+            isDark: false,
+            onRequestExpand: nil,
+            onRequestLayout: nil,
+            onInteractiveCallback: nil
+        )
+        let measured = bubble.systemLayoutSizeFitting(
+            CGSize(width: maxWidth, height: UIView.layoutFittingCompressedSize.height),
+            withHorizontalFittingPriority: .required,
+            verticalFittingPriority: .fittingSizeLevel
+        )
+        bubble.frame = CGRect(origin: .zero, size: measured)
+        bubble.layoutIfNeeded()
+
+        #expect(measured.height < 180)
+        #expect(measured.height < staleViewportHeight / 2)
+    }
+
     @Test("T1377: BubbleSizingV2 measurement key ignores raw viewport motion when resolved cap is unchanged")
     @MainActor
     func bubbleSizingV2MeasurementKeyIgnoresEquivalentViewportMotion() {

@@ -876,6 +876,10 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
         headerStack.addArrangedSubview(senderTimestampSpacer)
         headerStack.addArrangedSubview(timestampLabel)
         senderLabel.firstBaselineAnchor.constraint(equalTo: timestampLabel.firstBaselineAnchor).isActive = true
+        let compactHeaderHeight = headerStack.heightAnchor.constraint(equalTo: avatarView.heightAnchor)
+        compactHeaderHeight.priority = UILayoutPriority(999)
+        compactHeaderHeight.identifier = "MessageBubbleUIKitView.compactHeaderHeight"
+        compactHeaderHeight.isActive = true
 
         replyIndicatorContainer.translatesAutoresizingMaskIntoConstraints = false
         replyIndicatorContainer.backgroundColor = .clear
@@ -2048,11 +2052,20 @@ final class MessageBubbleUIKitView: UIView, UITextViewDelegate, UIGestureRecogni
     }
 
     private func applyBubbleSizingV2(_ state: BubbleSizingV2.LayoutState) {
-        guard state.plan.sizeClass == .long else {
+        guard state.plan.sizeClass == .short else {
             dynamicContentHeightConstraint?.constant = 2000
             return
         }
-        dynamicContentHeightConstraint?.constant = max(44, state.measurement.outerScrollViewportHeight)
+        let viewportHeight = if state.measurement.contentHeight > 0 {
+            BubbleSizingV2.finalOuterScrollViewportHeight(
+                plan: state.plan,
+                measuredContentHeight: state.measurement.contentHeight,
+                provisionalViewportHeight: state.measurement.outerScrollViewportHeight
+            )
+        } else {
+            state.measurement.outerScrollViewportHeight
+        }
+        dynamicContentHeightConstraint?.constant = max(44, viewportHeight)
     }
 
     private func updateDynamicContentHeightPreference(for sizeClass: MessageSizeClass) {

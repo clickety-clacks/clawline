@@ -136,17 +136,11 @@ struct ExpandedMessageSheet: View {
     }
 
     private var content: some View {
-        let markdownContent = UnifiedMarkdownRenderer.makeContent(
-            messageText: message.content,
-            context: MarkdownMessageRenderContext(
-                role: message.role,
-                messageID: message.id,
-                metrics: ChatFlowTheme.Metrics(isCompact: false)
-            ),
+        let renderedBlocks = Self.renderedBlocks(
+            message: message,
+            presentation: presentation,
             baseFont: UIFont.clawline(.bodyText),
             inkColor: UIColor(ChatFlowTheme.ink(effectiveColorScheme)),
-            lineSpacing: 4,
-            stripDetectedURLs: false,
             isDark: effectiveColorScheme == .dark
         )
         return VStack(alignment: .leading, spacing: 12) {
@@ -158,11 +152,11 @@ struct ExpandedMessageSheet: View {
                 )
             }
 
-            if presentation.isEmojiOnly, let emojiOnlyText = markdownContent.joinedInlineEmojiValues {
+            if presentation.isEmojiOnly, let emojiOnlyText = Self.emojiOnlyText(from: presentation) {
                 Text(emojiOnlyText)
                     .font(.clawline(.sectionHeader))
             } else {
-                ForEach(Array(markdownContent.renderedBlocks.enumerated()), id: \.offset) { item in
+                ForEach(Array(renderedBlocks.enumerated()), id: \.offset) { item in
                     switch item.element {
                     case .attributedText(let attributed):
                         SelectableAttributedText(
@@ -222,6 +216,75 @@ struct ExpandedMessageSheet: View {
         .font(.clawline(.bodyText))
         .foregroundColor(ChatFlowTheme.ink(effectiveColorScheme))
         .lineSpacing(4)
+    }
+
+    static func renderedBlocks(
+        message: Message,
+        presentation: MessagePresentation,
+        baseFont: UIFont,
+        inkColor: UIColor,
+        isDark: Bool
+    ) -> [RenderedMarkdownBlock] {
+        let context = MarkdownMessageRenderContext(
+            role: message.role,
+            messageID: message.id,
+            metrics: ChatFlowTheme.Metrics(isCompact: false)
+        )
+        var blocks: [RenderedMarkdownBlock] = []
+        for part in presentation.parts {
+            switch part {
+            case .text(let value), .markdown(let value), .inlineEmoji(let value):
+                let content = UnifiedMarkdownRenderer.makeContent(
+                    messageText: value,
+                    context: context,
+                    baseFont: baseFont,
+                    inkColor: inkColor,
+                    lineSpacing: 4,
+                    stripDetectedURLs: false,
+                    isDark: isDark
+                )
+                blocks.append(contentsOf: content.renderedBlocks)
+            case .code(let language, let code):
+                blocks.append(.code(language: language, code: code))
+            case .table(let model):
+                blocks.append(.table(model))
+            case .linkPreview, .remoteImage, .image, .gallery, .file, .terminalSession, .interactiveHTML:
+                continue
+            }
+        }
+        if !blocks.isEmpty {
+            return blocks
+        }
+
+        let fallback = UnifiedMarkdownRenderer.makeContent(
+            messageText: markdownSource(message: message, presentation: presentation),
+            context: context,
+            baseFont: baseFont,
+            inkColor: inkColor,
+            lineSpacing: 4,
+            stripDetectedURLs: false,
+            isDark: isDark
+        )
+        return fallback.renderedBlocks
+    }
+
+    static func emojiOnlyText(from presentation: MessagePresentation) -> String? {
+        let values = presentation.parts.compactMap { part -> String? in
+            if case .inlineEmoji(let value) = part {
+                return value
+            }
+            return nil
+        }
+        guard !values.isEmpty else { return nil }
+        return values.joined(separator: "\n\n")
+    }
+
+    static func markdownSource(message: Message, presentation: MessagePresentation) -> String {
+        let rawContent = message.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !rawContent.isEmpty {
+            return message.content
+        }
+        return presentation.copyableReadableText ?? message.content
     }
 
     private var fileAttachments: [Attachment] {

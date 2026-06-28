@@ -340,6 +340,8 @@ enum StreamPagerKeyboardDismissPolicy {
 }
 
 struct ChatView: View {
+    private static let spatialPromptFocusShortcutTargetLeaseDuration: TimeInterval = 10
+
     private static var t217DiagnosticBuild: String {
         let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"
         return "T217-typing-cancel-\(build)"
@@ -383,6 +385,9 @@ struct ChatView: View {
     @State private var latestTypingIndicatorAnchorFrameBySessionKey: [String: CGRect] = [:]
     @State private var photoPickerItems: [PhotosPickerItem] = []
     @State private var focusRequestID = 0
+#if os(visionOS)
+    @State private var spatialPromptFocusShortcutTargetLeaseExpiresAt: Date?
+#endif
     @State private var shouldRestoreFocusAfterPicker = false
     @State private var shouldRestoreFocusAfterStreamPopup = false
     @State private var streamPopupKeyboardDismissalTask: Task<Void, Never>?
@@ -1026,17 +1031,22 @@ struct ChatView: View {
         }
         .onChange(of: scenePhase) { _, phase in
             viewModel.handleSceneActiveStateChanged(isActive: phase == .active)
+            if phase != .active {
+                clearSpatialPromptFocusShortcutTargetLease()
+            }
             guard phase == .active else { return }
             keyboardRefreshToken &+= 1
         }
         .handlePromptFocusCommand(
             onFocusRequested: {
+                grantSpatialPromptFocusShortcutTargetLease()
                 focusRequestID &+= 1
             }
         )
         .handleStreamPopupCommand(
             hasStreams: !viewModel.orderedStreams.isEmpty,
             onOpen: {
+                grantSpatialPromptFocusShortcutTargetLease()
                 openStreamPopupFromKeyboardCommand()
             }
         )
@@ -1045,6 +1055,11 @@ struct ChatView: View {
             onNavigatePrevious: { navigateStreamByShortcut(step: -1, sessionKeys: viewModel.orderedStreams.map(\.sessionKey)) },
             onNavigateNext: { navigateStreamByShortcut(step: 1, sessionKeys: viewModel.orderedStreams.map(\.sessionKey)) }
         )
+#if os(visionOS)
+        .simultaneousGesture(TapGesture().onEnded {
+            grantSpatialPromptFocusShortcutTargetLease()
+        })
+#endif
 #if DEBUG
         .onChange(of: viewModel.lifecycleDebugSequence) { _, _ in
             showLifecycleDebugOverlay()
@@ -1263,6 +1278,11 @@ struct ChatView: View {
             && !isAttachmentMenuPresented
             && !isPhotosPickerPresented
             && !isFileImporterPresented
+#if os(visionOS)
+        let promptFocusShortcutHasTargetOwnership = spatialPromptFocusShortcutTargetLeaseIsValid
+#else
+        let promptFocusShortcutHasTargetOwnership = true
+#endif
         let mentionQuery = CrossChatMentionPickerLogic.query(
             inputText: viewModel.inputContent.string,
             resolvedMention: resolvedCrossChatMention
@@ -1651,16 +1671,19 @@ struct ChatView: View {
                 hasStreams: !effectiveSessionKeys.isEmpty,
                 isTranscriptScrolling: isTranscriptScrolling,
                 onOpenStreamPopup: {
+                    grantSpatialPromptFocusShortcutTargetLease()
                     openStreamPopupFromKeyboardCommand()
                 },
                 onFocusRequested: {
+                    grantSpatialPromptFocusShortcutTargetLease()
                     focusRequestID &+= 1
                 },
                 onTextInserted: { text in
                     insertPromptTextFromNoTextOwner(text)
                 },
                 notificationVisibleCount: notificationShortcutVisibleCount,
-                keyboardOwnershipStore: keyboardOwnershipStore
+                keyboardOwnershipStore: keyboardOwnershipStore,
+                hasTargetOwnership: promptFocusShortcutHasTargetOwnership
             )
         ))
 
@@ -2136,6 +2159,7 @@ struct ChatView: View {
         _ intent: KeyboardCommandIntent,
         keyboardOwnershipStore: KeyboardOwnershipStore
     ) {
+        grantSpatialPromptFocusShortcutTargetLease()
         if case .handled(.chatSelectorRow(let sessionKey)) = KeyboardCommandRouter
             .route(intent: intent, store: keyboardOwnershipStore)
             .outcome {
@@ -2380,9 +2404,13 @@ struct ChatView: View {
                 // ⚠️ This callback is how focus state survives view recreation.
                 // DO NOT replace with @Binding or try to use @FocusState directly.
                 onFocusChange: { focused in
+                    if focused {
+                        grantSpatialPromptFocusShortcutTargetLease()
+                    }
                     scheduleInputFocusChange(focused)
                 },
                 onRequestFocus: {
+                    grantSpatialPromptFocusShortcutTargetLease()
                     focusRequestID &+= 1
                 },
                 onTextEditActivity: {
@@ -3124,6 +3152,34 @@ struct ChatView: View {
         selectionRange = NSRange(location: insertionRange.location + (insertedText as NSString).length, length: 0)
         recordTypingActivity()
         focusRequestID &+= 1
+    }
+
+#if os(visionOS)
+    private var spatialPromptFocusShortcutTargetLeaseIsValid: Bool {
+        guard let expiresAt = spatialPromptFocusShortcutTargetLeaseExpiresAt else { return false }
+        return expiresAt > Date()
+    }
+#else
+    private var spatialPromptFocusShortcutTargetLeaseIsValid: Bool {
+        true
+    }
+#endif
+
+    private func grantSpatialPromptFocusShortcutTargetLease() {
+#if os(visionOS)
+        let expiresAt = Date().addingTimeInterval(Self.spatialPromptFocusShortcutTargetLeaseDuration)
+        spatialPromptFocusShortcutTargetLeaseExpiresAt = expiresAt
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.spatialPromptFocusShortcutTargetLeaseDuration) {
+            guard spatialPromptFocusShortcutTargetLeaseExpiresAt == expiresAt else { return }
+            spatialPromptFocusShortcutTargetLeaseExpiresAt = nil
+        }
+#endif
+    }
+
+    private func clearSpatialPromptFocusShortcutTargetLease() {
+#if os(visionOS)
+        spatialPromptFocusShortcutTargetLeaseExpiresAt = nil
+#endif
     }
 
     private func clampedPromptSelectionRange(length: Int) -> NSRange {
@@ -4234,6 +4290,7 @@ private struct PromptFocusShortcutModifier: ViewModifier {
     let onTextInserted: (String) -> Void
     let notificationVisibleCount: Int
     let keyboardOwnershipStore: KeyboardOwnershipStore
+    let hasTargetOwnership: Bool
 
     func body(content: Content) -> some View {
         content.background {
@@ -4245,7 +4302,8 @@ private struct PromptFocusShortcutModifier: ViewModifier {
                 onFocusRequested: onFocusRequested,
                 onTextInserted: onTextInserted,
                 notificationVisibleCount: notificationVisibleCount,
-                keyboardOwnershipStore: keyboardOwnershipStore
+                keyboardOwnershipStore: keyboardOwnershipStore,
+                hasTargetOwnership: hasTargetOwnership
             )
             .frame(width: 0, height: 0)
             .allowsHitTesting(false)
@@ -4262,6 +4320,7 @@ private struct PromptFocusShortcutHost: UIViewRepresentable {
     let onTextInserted: (String) -> Void
     let notificationVisibleCount: Int
     let keyboardOwnershipStore: KeyboardOwnershipStore
+    let hasTargetOwnership: Bool
 
     func makeUIView(context: Context) -> PromptFocusShortcutView {
         let view = PromptFocusShortcutView()
@@ -4273,6 +4332,7 @@ private struct PromptFocusShortcutHost: UIViewRepresentable {
         view.defersKeyCommandFirstResponderRecycle = isTranscriptScrolling
         view.notificationVisibleCount = notificationVisibleCount
         view.keyboardOwnershipStore = keyboardOwnershipStore
+        view.hasTargetOwnership = hasTargetOwnership
         return view
     }
 
@@ -4285,7 +4345,19 @@ private struct PromptFocusShortcutHost: UIViewRepresentable {
         view.defersKeyCommandFirstResponderRecycle = isTranscriptScrolling
         view.notificationVisibleCount = notificationVisibleCount
         view.keyboardOwnershipStore = keyboardOwnershipStore
+        view.hasTargetOwnership = hasTargetOwnership
         view.refreshKeyCommandsIfNeeded()
+#if os(visionOS)
+        // Spatial-only: visionOS can keep Clawline visible while another app owns typing focus.
+        // Passive SwiftUI updates may refresh shortcuts, but must not activate or retain the
+        // hidden no-text responder unless local Clawline UI explicitly targeted this scene.
+        guard hasTargetOwnership else {
+            if view.isFirstResponder {
+                view.resignFirstResponder()
+            }
+            return
+        }
+#endif
         if isEnabled {
             view.activateWhenReady()
         } else if view.isFirstResponder {
@@ -4303,6 +4375,7 @@ private final class PromptFocusShortcutView: UIView {
     var defersKeyCommandFirstResponderRecycle = false
     var notificationVisibleCount = 0
     var keyboardOwnershipStore = KeyboardOwnershipStore()
+    var hasTargetOwnership = true
     private var keyCommandSignature = ChatAppCommandShortcut.keyCommandSignature(
         notificationVisibleCount: 0,
         selectorShortcutSlots: []
@@ -4387,6 +4460,8 @@ private final class PromptFocusShortcutView: UIView {
         switch PromptFocusShortcutActivation.action(
             isShortcutEnabled: isShortcutEnabled,
             isAlreadyFirstResponder: isFirstResponder,
+            requiresExplicitTargetOwnership: Self.requiresExplicitTargetOwnership,
+            hasExplicitTargetOwnership: hasTargetOwnership,
             currentFirstResponderIsTextInput: window?.clawlineFirstResponder?.isClawlineTextInputResponder == true,
             currentFirstResponderOwnsTerminalInput: window?.clawlineFirstResponder?.ownsClawlineTerminalInput == true,
             currentFirstResponderOwnsEmbeddedScroll: window?.clawlineFirstResponder?.ownsClawlineEmbeddedScrollInput == true,
@@ -4400,6 +4475,14 @@ private final class PromptFocusShortcutView: UIView {
         case .skip:
             hasPendingActivationRetry = false
         }
+    }
+
+    private static var requiresExplicitTargetOwnership: Bool {
+#if os(visionOS)
+        true
+#else
+        false
+#endif
     }
 
     private func scheduleActivationRetry(textInputRetryCount: Int) {
@@ -4772,12 +4855,15 @@ enum PromptFocusShortcutActivation {
     static func action(
         isShortcutEnabled: Bool,
         isAlreadyFirstResponder: Bool,
+        requiresExplicitTargetOwnership: Bool = false,
+        hasExplicitTargetOwnership: Bool = true,
         currentFirstResponderIsTextInput: Bool,
         currentFirstResponderOwnsTerminalInput: Bool,
         currentFirstResponderOwnsEmbeddedScroll: Bool,
         canRetryAfterTextInput: Bool
     ) -> Action {
         guard isShortcutEnabled, !isAlreadyFirstResponder else { return .skip }
+        guard !requiresExplicitTargetOwnership || hasExplicitTargetOwnership else { return .skip }
         guard !currentFirstResponderOwnsTerminalInput else { return .skip }
         guard !currentFirstResponderOwnsEmbeddedScroll else { return .skip }
         guard !currentFirstResponderIsTextInput else {

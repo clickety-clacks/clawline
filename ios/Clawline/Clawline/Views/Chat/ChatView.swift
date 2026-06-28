@@ -2658,7 +2658,8 @@ struct ChatView: View {
     @ViewBuilder
     private func sheetView(_ sheet: ChatSheet) -> some View {
         switch sheet {
-        case .expandedMessage(let message):
+        case .expandedMessage(let selectedMessage):
+            let message = viewModel.expandedDetailMessage(for: selectedMessage)
             let metrics = ChatFlowTheme.Metrics(isCompact: horizontalSizeClass == .compact)
             let presentation = viewModel.presentation(for: message, metrics: metrics)
             ExpandedMessageSheet(

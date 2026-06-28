@@ -353,6 +353,55 @@ struct TextLinkURLTemplateRulesTests {
         })
     }
 
+    @Test("T1369: expanded detail resolves selected snapshot to canonical message text")
+    @MainActor
+    func expandedDetailResolvesSelectedSnapshotToCanonicalMessageText() {
+        let viewModel = makeT1369ChatViewModel()
+        defer { viewModel.onDisappear(origin: "T1369TextDetailTest") }
+        let canonical = Message(
+            id: "t1369-canonical-detail",
+            role: .assistant,
+            content: "Canonical detail body survives the selected snapshot.",
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: "server:personal",
+            sender: "CLU"
+        )
+        let selectedSnapshot = Message(
+            id: canonical.id,
+            role: .assistant,
+            content: "",
+            timestamp: canonical.timestamp,
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: canonical.sessionKey,
+            sender: "CLU"
+        )
+        viewModel.debugUpsertMessage(canonical, isServer: true)
+
+        let resolved = viewModel.expandedDetailMessage(for: selectedSnapshot)
+        let metrics = ChatFlowTheme.Metrics(isCompact: false)
+        let presentation = viewModel.presentation(for: resolved, metrics: metrics)
+        let blocks = ExpandedMessageSheet.renderedBlocks(
+            message: resolved,
+            presentation: presentation,
+            baseFont: UIFont.clawline(.bodyText),
+            inkColor: .label,
+            isDark: false
+        )
+
+        #expect(resolved.content == canonical.content)
+        #expect(blocks.contains { block in
+            if case .attributedText(let attributed) = block {
+                return attributed.string.contains("Canonical detail body")
+            }
+            return false
+        })
+    }
+
     @Test("T1369: full content sheet renders presentation table when selected message content is blank")
     func fullContentSheetRendersPresentationTableForBlankSelectedMessageContent() {
         let table = TableModel(
@@ -421,6 +470,92 @@ struct TextLinkURLTemplateRulesTests {
             }
             return false
         })
+    }
+
+    @Test("T1369: expanded detail resolves selected snapshot to canonical markdown table")
+    @MainActor
+    func expandedDetailResolvesSelectedSnapshotToCanonicalMarkdownTable() {
+        let viewModel = makeT1369ChatViewModel()
+        defer { viewModel.onDisappear(origin: "T1369TableDetailTest") }
+        let content = """
+        | Name | Count |
+        | --- | ---: |
+        | Alpha | 1 |
+        | Beta | 2 |
+        """
+        let canonical = Message(
+            id: "t1369-canonical-table-detail",
+            role: .assistant,
+            content: content,
+            timestamp: Date(timeIntervalSince1970: 1_700_000_000),
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: "server:personal",
+            sender: "CLU"
+        )
+        let selectedSnapshot = Message(
+            id: canonical.id,
+            role: .assistant,
+            content: "",
+            timestamp: canonical.timestamp,
+            streaming: false,
+            attachments: [],
+            deviceId: nil,
+            sessionKey: canonical.sessionKey,
+            sender: "CLU"
+        )
+        viewModel.debugUpsertMessage(canonical, isServer: true)
+
+        let resolved = viewModel.expandedDetailMessage(for: selectedSnapshot)
+        let metrics = ChatFlowTheme.Metrics(isCompact: false)
+        let presentation = viewModel.presentation(for: resolved, metrics: metrics)
+        let blocks = ExpandedMessageSheet.renderedBlocks(
+            message: resolved,
+            presentation: presentation,
+            baseFont: UIFont.clawline(.bodyText),
+            inkColor: .label,
+            isDark: false
+        )
+
+        #expect(resolved.content == content)
+        #expect(blocks.contains { block in
+            if case .table(let table) = block {
+                return table.rows.count == 2
+                    && table.rows.first?.cells.first?.plainText == "Alpha"
+                    && table.rows.last?.cells.first?.plainText == "Beta"
+            }
+            return false
+        })
+    }
+
+    @MainActor
+    private func makeT1369ChatViewModel() -> ChatViewModel {
+        let auth = TestAuthManager()
+        auth.storeCredentials(token: "jwt", userId: "user")
+        return ChatViewModel(
+            auth: auth,
+            chatService: TestChatService(),
+            settings: SettingsManager(),
+            device: TestDevice(),
+            uploadService: T1369UploadStub(),
+            toastManager: ToastManager(),
+            salientHighlightService: SalientHighlightService()
+        )
+    }
+
+    private struct T1369UploadStub: UploadServicing {
+        func upload(data: Data, mimeType: String, filename: String?) async throws -> String {
+            _ = data
+            _ = mimeType
+            _ = filename
+            return "asset"
+        }
+
+        func download(assetId: String) async throws -> Data {
+            _ = assetId
+            return Data()
+        }
     }
 
     private func makeT1369TableCell(_ value: String) -> TableModel.Cell {

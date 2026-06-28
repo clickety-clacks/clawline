@@ -429,6 +429,14 @@ final class ChatViewModel: ChatViewModelHosting {
         sessionMessages[sessionKey] ?? []
     }
 
+    func expandedDetailMessage(for selectedMessage: Message) -> Message {
+        if let sessionMessages = sessionMessages[selectedMessage.sessionKey],
+           let message = sessionMessages.first(where: { $0.id == selectedMessage.id }) {
+            return message
+        }
+        return findMessage(id: selectedMessage.id)?.message ?? selectedMessage
+    }
+
     func streamDotState(for sessionKey: String) -> StreamDotState {
         streamDotStateBySession[sessionKey] ?? .inactive
     }
